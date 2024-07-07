@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { ChargePoint } from "../cp/ChargePoint.ts";
+import React, {useState, useEffect} from "react";
+import {ChargePoint} from "../cp/ChargePoint.ts";
 import * as ocpp from "../cp/OcppTypes";
 
 interface ConnectorProps {
@@ -7,7 +7,7 @@ interface ConnectorProps {
   cp: ChargePoint | null;
 }
 
-const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
+const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
   const [cpTransactionID, setCpTransactionID] = useState<number | null>(0);
   const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(
     ocpp.OCPPStatus.Unavailable
@@ -16,7 +16,7 @@ const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
     ocpp.OCPPAvailability.Operative
   );
   const [meterValue, setMeterValue] = useState<number>(0);
-  const [idTag] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
+  const [idTag, setIdTag] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
 
   useEffect(() => {
     if (cp) {
@@ -72,7 +72,7 @@ const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
             <label className="text-gray-700 text-sm font-bold mb-2">
               Connector Status:{" "}
             </label>
-            <ConnectorStatus status={connectorStatus} />
+            <ConnectorStatus status={connectorStatus}/>
           </div>
           {connectorStatus === ocpp.OCPPStatus.Charging && (
             <div className="mb-6">
@@ -89,7 +89,7 @@ const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
             onChange={(e) =>
               setConnectorStatus(e.target.value as ocpp.OCPPStatus)
             }
-            style={{ maxWidth: "16ch", marginRight: "1ch" }}
+            style={{maxWidth: "16ch", marginRight: "1ch"}}
           >
             {Object.keys(ocpp.OCPPStatus).map((status) =>
               status === ocpp.OCPPStatus.Charging ? null : (
@@ -117,7 +117,7 @@ const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
               >
                 Connector Availability:
               </label>
-              <ConnectorAvailability availability={availability} />
+              <ConnectorAvailability availability={availability}/>
               {/*<select
                 <select
                   id={`AVAILABILITY_CON${connector_id}`}
@@ -131,6 +131,21 @@ const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
                 </select>
                   */}
             </div>
+          </div>
+        </div>
+        <div className="form-group bg-gray-100 rounded p-4">
+          <div className="mb-1">
+            <label className="text-gray-700 text-sm font-bold mb-2">
+              RFID Tag
+            </label>
+            <input
+              className="shadow appearance-none border rounded w-full py-1 px-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              value={idTag}
+              onChange={(e) => setIdTag(e.target.value)}
+              placeholder="DEADBEEF"
+              style={{maxWidth: "20ch"}}
+            />
           </div>
         </div>
         <button
@@ -189,7 +204,7 @@ const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
   );
 };
 
-const ConnectorStatus: React.FC<{ status: string }> = ({ status }) => {
+const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
   const statusColor = (s: string) => {
     switch (s) {
       case ocpp.OCPPStatus.Unavailable:
@@ -211,8 +226,8 @@ const ConnectorStatus: React.FC<{ status: string }> = ({ status }) => {
 };
 
 const ConnectorAvailability: React.FC<{ availability: string }> = ({
-  availability,
-}) => {
+                                                                     availability,
+                                                                   }) => {
   const availabilityColor = (a: string) => {
     switch (a) {
       case ocpp.OCPPAvailability.Operative:

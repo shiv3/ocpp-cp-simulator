@@ -76,6 +76,7 @@ export class ChargePoint {
         this._messageHandler.sendBootNotification()
         this.updateStatus(OCPPStatus.Available);
         this.updateAllConnectorsStatus(OCPPStatus.Available);
+        this.error = "";
       },
       ( ev: CloseEvent) => {
         this.updateStatus(OCPPStatus.Unavailable);

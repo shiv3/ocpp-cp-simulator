@@ -70,7 +70,7 @@ export class ChargePoint {
       (msg: MessageEvent, ev: CloseEvent) => {
         this.updateStatus(OCPPStatus.Unavailable);
         this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
-        this._logger.error(`WebSocket closed code: ${msg.code} reason: ${ev.reason}`);
+        this._logger.error(`WebSocket closed code: ${msg.code} reason: ${msg.reason}`);
       }
     );
   }

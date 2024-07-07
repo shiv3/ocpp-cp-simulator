@@ -12,7 +12,7 @@ export class ChargePoint {
   private _messageHandler: OCPPMessageHandler;
   private _logger: Logger;
 
-  private _status: OCPPStatus = OCPPStatus.Unavailable;
+  public _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error: string = "";
   public _errorCallback: (error: string) => void = () => {};
 
@@ -74,12 +74,12 @@ export class ChargePoint {
     this._webSocket.connect(
       () => {
         this._messageHandler.sendBootNotification()
-        this.updateStatus(OCPPStatus.Available);
+        this.status = OCPPStatus.Available
         this.updateAllConnectorsStatus(OCPPStatus.Available);
         this.error = "";
       },
       ( ev: CloseEvent) => {
-        this.updateStatus(OCPPStatus.Unavailable);
+        this.status = OCPPStatus.Unavailable
         this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
         this._logger.error(`WebSocket closed code: ${ev.code} reason: ${ev.reason}`);
         this.error = `WebSocket closed code: ${ev.code} reason: ${ev.reason}`;
@@ -89,6 +89,7 @@ export class ChargePoint {
 
   public disconnect(): void {
     this._logger.info("Disconnecting from WebSocket");
+    this._status = OCPPStatus.Unavailable;
     this._webSocket.disconnect();
   }
 
@@ -96,7 +97,7 @@ export class ChargePoint {
     this._messageHandler.authorize(tagId);
   }
 
-  public updateStatus(status: OCPPStatus): void {
+  set status(status: OCPPStatus): void {
     this._status = status;
     this.triggerStatusChangeCallback(status);
   }
@@ -114,7 +115,7 @@ export class ChargePoint {
       }
       connector.transaction = transaction;
       this._messageHandler.startTransaction(transaction, connectorId);
-      this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
+      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
@@ -126,7 +127,7 @@ export class ChargePoint {
       connector.transaction.stopTime = new Date();
       connector.transaction.meterStop = connector.meterValue;
       this._messageHandler.stopTransaction(connector.transaction, connector.id);
-      this.updateConnectorStatus(connector.id, OCPPStatus.Available);
+      this.updateConnectorStatus(connector.id, OCPPStatus.Finishing);
     } else {
       this._logger.error(`Transaction for tag ${tagId} not found`);
     }

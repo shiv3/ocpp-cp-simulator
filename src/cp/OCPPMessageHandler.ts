@@ -271,6 +271,7 @@ export class OCPPMessageHandler {
       if (tagId === "") {
         throw new Error("Tag ID not found");
       }
+      this._chargePoint.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE)
       this._chargePoint.stopTransaction(tagId);
       return {status: "Accepted"};
     } else {
@@ -297,7 +298,7 @@ export class OCPPMessageHandler {
     this._logger.log("Boot notification successful");
     if (payload.status === "Accepted") {
       this._chargePoint.updateAllConnectorsStatus(OCPPStatus.Available)
-      this._chargePoint.updateStatus(OCPPStatus.Available);
+      this._chargePoint.status = OCPPStatus.Available;
     } else {
       this._logger.error("Boot notification failed");
     }
@@ -318,6 +319,7 @@ export class OCPPMessageHandler {
       const connector = this._chargePoint.getConnector(connectorId);
       if (connector) {
         connector.transactionId = transactionId;
+        connector.status = OCPPStatus.Charging;
       }
     } else {
       this._logger.log("Failed to start transaction");
@@ -329,6 +331,7 @@ export class OCPPMessageHandler {
     if (connector) {
       connector.transaction = null;
       connector.transactionId = null;
+      connector.status = OCPPStatus.Available;
     }
   }
 

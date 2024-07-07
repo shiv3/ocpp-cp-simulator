@@ -109,7 +109,7 @@ export class ChargePoint {
         this._logger.error(
           `WebSocket closed code: ${ev.code} reason: ${ev.reason}`
         );
-        if(ev.code !== 1005) {
+        if (ev.code !== 1005) {
           this.error = `WebSocket closed code: ${ev.code} reason: ${ev.reason}`;
         }
       }
@@ -128,7 +128,9 @@ export class ChargePoint {
 
   set status(status: OCPPStatus) {
     this._status = status;
-    this.triggerStatusChangeCallback(status);
+    if (this._statusChangeCallback) {
+      this._statusChangeCallback(status);
+    }
   }
 
   public startTransaction(tagId: string, connectorId: number): void {
@@ -229,7 +231,11 @@ export class ChargePoint {
     if (connector) {
       connector.status = newStatus;
       this._messageHandler.sendStatusNotification(connectorId, newStatus);
-      this.triggerConnectorStatusChangeCallback(connectorId, newStatus);
+      const callback =
+        this.connectors.get(connectorId)?.triggerStatusChangeCallback;
+      if (callback) {
+        callback(newStatus);
+      }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
@@ -247,7 +253,10 @@ export class ChargePoint {
       } else if (newAvailability === OCPPAvailability.Operative) {
         this.updateConnectorStatus(connectorId, OCPPStatus.Available);
       }
-      this.triggerAvailabilityChangeCallback(connectorId, newAvailability);
+      const callback = this._availabilityChangeCallbacks.get(connectorId);
+      if (callback) {
+        callback(newAvailability);
+      }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
@@ -257,50 +266,13 @@ export class ChargePoint {
     const connector = this.getConnector(connectorId);
     if (connector) {
       connector.transactionId = transactionId;
-      this.triggerConnectorTransactionIDChangeCallback(
-        connectorId,
-        transactionId
-      );
+      const callback =
+        this.connectors.get(connectorId)?.triggerTransactionIDChangeCallback;
+      if (callback) {
+        callback(transactionId);
+      }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
-    }
-  }
-
-  private triggerStatusChangeCallback(status: string, message?: string): void {
-    if (this._statusChangeCallback) {
-      this._statusChangeCallback(status, message);
-    }
-  }
-
-  private triggerConnectorTransactionIDChangeCallback(
-    connectorId: number,
-    transactionId: number
-  ): void {
-    const callback =
-      this.connectors.get(connectorId)?.triggerTransactionIDChangeCallback;
-    if (callback) {
-      callback(transactionId);
-    }
-  }
-
-  private triggerConnectorStatusChangeCallback(
-    connectorId: number,
-    status: string
-  ): void {
-    const callback =
-      this.connectors.get(connectorId)?.triggerStatusChangeCallback;
-    if (callback) {
-      callback(status);
-    }
-  }
-
-  private triggerAvailabilityChangeCallback(
-    connectorId: number,
-    availability: string
-  ): void {
-    const callback = this._availabilityChangeCallbacks.get(connectorId);
-    if (callback) {
-      callback(availability);
     }
   }
 }

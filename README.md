@@ -1,5 +1,5 @@
-# OCPP ChargePoint Simulator React
+# OCPP Simulator
 
 rewrited with react
 
-https://shiv3.github.io/OCPP-ChargePoint-Simulator-React
+https://shiv3.github.io/ocpp-cp-simulator

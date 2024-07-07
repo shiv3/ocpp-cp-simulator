@@ -27,27 +27,16 @@ export enum OCPPMessageType {
   CALL_ERROR = 4,
 }
 
+
 export enum OCPPAction {
   REMOTE_START_TRANSACTION = 'RemoteStartTransaction',
   REMOTE_STOP_TRANSACTION = 'RemoteStopTransaction',
+  StartTransaction = 'StartTransaction',
+  StopTransaction = 'StopTransaction',
   GET_DIAGNOSTICS = 'GetDiagnostics',
   TRIGGER_MESSAGE = 'TriggerMessage',
 }
 
-export type OCPPStartTransactionRequest = {
-  connectorId: number;
-  idTag: string;
-  meterStart: number;
-  timestamp: string;
-}
-
-export type OCPPStartTransactionResponse = {
-  idTagInfo: {
-    status: string;
-    expiryDate: string;
-    parentIdTag: string;
-  }
-}
 
 export type OCPPStopTransactionRequest = {
   transactionId: number;
@@ -92,3 +81,4 @@ export type OCPPTriggerMessageRequest = {
 export type OCPPTriggerMessageResponse = {
   status: string;
 }
+

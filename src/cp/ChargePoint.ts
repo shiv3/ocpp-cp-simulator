@@ -109,7 +109,9 @@ export class ChargePoint {
         this._logger.error(
           `WebSocket closed code: ${ev.code} reason: ${ev.reason}`
         );
-        this.error = `WebSocket closed code: ${ev.code} reason: ${ev.reason}`;
+        if(ev.code !== 1005) {
+          this.error = `WebSocket closed code: ${ev.code} reason: ${ev.reason}`;
+        }
       }
     );
   }

@@ -1,10 +1,14 @@
-import {Logger} from './Logger';
-import {OCPPAction, OCPPMessageType} from './OcppTypes';
+import { Logger } from "./Logger";
+import { OCPPAction, OCPPMessageType } from "./OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 
-
 export type OcppMessagePayload = any;
-type MessageHandler = (messageType: OCPPMessageType, messageId: string, action: OCPPAction, payload: OcppMessagePayload) => void;
+type MessageHandler = (
+  messageType: OCPPMessageType,
+  messageId: string,
+  action: OCPPAction,
+  payload: OcppMessagePayload
+) => void;
 
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
@@ -27,13 +31,16 @@ export class OCPPWebSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null
   ): void {
-    this._ws = new WebSocket(`${this._url}${this._chargePointId}`, ['ocpp1.6', 'ocpp1.5']);
+    this._ws = new WebSocket(`${this._url}${this._chargePointId}`, [
+      "ocpp1.6",
+      "ocpp1.5",
+    ]);
     this._ws.onopen = () => {
       if (onopen) {
         onopen();
       }
       this.handleOpen.bind(this);
-    }
+    };
     this._ws.onmessage = this.handleMessage.bind(this);
     this._ws.onerror = this.handleError.bind(this);
     this._ws.onclose = (ev: CloseEvent) => {
@@ -41,7 +48,7 @@ export class OCPPWebSocket {
         onclose(ev);
       }
       this.handleClose.bind(this);
-    }
+    };
   }
 
   public disconnect(): void {
@@ -59,14 +66,23 @@ export class OCPPWebSocket {
     messageType: OCPPMessageType,
     messageId: string,
     action: OCPPAction,
-    payload: request.StartTransactionRequest | request.StopTransactionRequest | request.AuthorizeRequest | request.HeartbeatRequest | request.MeterValuesRequest | request.StatusNotificationRequest | request.GetDiagnosticsRequest | request.TriggerMessageRequest | request.ResetRequest
+    payload:
+      | request.StartTransactionRequest
+      | request.StopTransactionRequest
+      | request.AuthorizeRequest
+      | request.HeartbeatRequest
+      | request.MeterValuesRequest
+      | request.StatusNotificationRequest
+      | request.GetDiagnosticsRequest
+      | request.TriggerMessageRequest
+      | request.ResetRequest
   ): void {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       const message = JSON.stringify([messageType, messageId, action, payload]);
       this._ws.send(message);
       this._logger.log(`Sent: ${message}`);
     } else {
-      this._logger.log('WebSocket is not connected');
+      this._logger.log("WebSocket is not connected");
     }
   }
 
@@ -75,7 +91,7 @@ export class OCPPWebSocket {
   }
 
   private handleOpen(): void {
-    this._logger.log('WebSocket connected');
+    this._logger.log("WebSocket connected");
     this._reconnectAttempts = 0;
 
     // this.startPingInterval();
@@ -85,22 +101,27 @@ export class OCPPWebSocket {
     this._logger.log(`Received: ${JSON.stringify(ev)}`);
     try {
       const messageArray = JSON.parse(ev.data.toString());
-      const len = messageArray.length
+      const len = messageArray.length;
       if (!(!Array.isArray(messageArray) || len !== 3 || len !== 4)) {
-        this._logger.error('Invalid message format: ' + messageArray);
+        this._logger.error("Invalid message format: " + messageArray);
         return;
       }
       if (this._messageHandler) {
         if (len == 3) {
           const [messageType, messageId, payload] = messageArray;
-          this._messageHandler(messageType, messageId,OCPPAction.CallResult, payload);
+          this._messageHandler(
+            messageType,
+            messageId,
+            OCPPAction.CallResult,
+            payload
+          );
         }
         if (len == 4) {
           const [messageType, messageId, action, payload] = messageArray;
           this._messageHandler(messageType, messageId, action, payload);
         }
       } else {
-        this._logger.log('No message handler set');
+        this._logger.log("No message handler set");
       }
     } catch (error) {
       this._logger.log(`Error parsing message: ${error}`);
@@ -108,7 +129,7 @@ export class OCPPWebSocket {
   }
 
   private handleError(evt: Event): void {
-    this._logger.log(`WebSocket error type: ${evt.type}` );
+    this._logger.log(`WebSocket error type: ${evt.type}`);
   }
 
   private handleClose(msg: MessageEvent): void {
@@ -135,10 +156,14 @@ export class OCPPWebSocket {
   private attemptReconnect(): void {
     if (this._reconnectAttempts < this._maxReconnectAttempts) {
       this._reconnectAttempts++;
-      this._logger.log(`Attempting to reconnect (${this._reconnectAttempts}/${this._maxReconnectAttempts})...`);
+      this._logger.log(
+        `Attempting to reconnect (${this._reconnectAttempts}/${this._maxReconnectAttempts})...`
+      );
       setTimeout(() => this.connect(), this._reconnectDelay);
     } else {
-      this._logger.log('Max reconnect attempts reached. Please check your connection and try again.');
+      this._logger.log(
+        "Max reconnect attempts reached. Please check your connection and try again."
+      );
     }
   }
 }

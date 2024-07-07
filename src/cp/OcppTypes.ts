@@ -7,11 +7,11 @@ export enum OCPPStatus {
   Finishing = "Finishing",
   Reserved = "Reserved",
   Unavailable = "Unavailable",
-  Faulted = "Faulted"
+  Faulted = "Faulted",
 }
 
-export enum OCPPAvailability  {
-  Operative =  "Operative",
+export enum OCPPAvailability {
+  Operative = "Operative",
   Inoperative = "Inoperative",
 }
 
@@ -21,22 +21,20 @@ export enum OCPPMessageType {
   CALL_ERROR = 4,
 }
 
-
 export enum OCPPAction {
   // Charge Point to Central System
-  CallResult = 'CallResult',
+  CallResult = "CallResult",
 
-  RemoteStartTransaction = 'RemoteStartTransaction',
-  RemoteStopTransaction = 'RemoteStopTransaction',
-  StartTransaction = 'StartTransaction',
-  StopTransaction = 'StopTransaction',
-  GetDiagnostics = 'GetDiagnostics',
-  TriggerMessage = 'TriggerMessage',
-  StatusNotification = 'StatusNotification',
-  MeterValues = 'MeterValues',
-  BootNotification = 'BootNotification',
-  Heartbeat = 'Heartbeat',
-  Authorize = 'Authorize',
-  Reset = 'Reset',
+  RemoteStartTransaction = "RemoteStartTransaction",
+  RemoteStopTransaction = "RemoteStopTransaction",
+  StartTransaction = "StartTransaction",
+  StopTransaction = "StopTransaction",
+  GetDiagnostics = "GetDiagnostics",
+  TriggerMessage = "TriggerMessage",
+  StatusNotification = "StatusNotification",
+  MeterValues = "MeterValues",
+  BootNotification = "BootNotification",
+  Heartbeat = "Heartbeat",
+  Authorize = "Authorize",
+  Reset = "Reset",
 }
-

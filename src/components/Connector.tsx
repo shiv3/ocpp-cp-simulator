@@ -1,5 +1,5 @@
-import React, {useState, useEffect} from "react";
-import {ChargePoint} from "../cp/ChargePoint.ts";
+import React, { useState, useEffect } from "react";
+import { ChargePoint } from "../cp/ChargePoint.ts";
 import * as ocpp from "../cp/OcppTypes";
 
 interface ConnectorProps {
@@ -7,28 +7,34 @@ interface ConnectorProps {
   cp: ChargePoint | null;
 }
 
-const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
+const Connector: React.FC<ConnectorProps> = ({ id: connector_id, cp }) => {
   const [cpTransactionID, setCpTransactionID] = useState<number | null>(0);
-  const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(ocpp.OCPPStatus.Unavailable);
-  const [availability, setAvailability] = useState<string>(ocpp.OCPPAvailability.Operative);
+  const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(
+    ocpp.OCPPStatus.Unavailable
+  );
+  const [availability, setAvailability] = useState<string>(
+    ocpp.OCPPAvailability.Operative
+  );
   const [meterValue, setMeterValue] = useState<number>(0);
-  const [idTag,] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
+  const [idTag] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
 
   useEffect(() => {
     if (cp) {
       cp.setConnectorStatusChangeCallback(connector_id, setConnectorStatus);
-      cp.setConnectorTransactionIDChangeCallback(connector_id, setCpTransactionID);
+      cp.setConnectorTransactionIDChangeCallback(
+        connector_id,
+        setCpTransactionID
+      );
       cp.setAvailabilityChangeCallback(connector_id, setAvailability);
     }
   }, []);
-
 
   // Implement connector logic here...
   const handleStatusNotification = () => {
     if (cp) {
       cp.updateConnectorStatus(connector_id, connectorStatus);
     }
-  }
+  };
 
   const handleStartTransaction = () => {
     if (cp) {
@@ -63,31 +69,35 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
       <div className="d-flex">
         <div className="form-group bg-gray-100 rounded p-4">
           <div className="mb-6">
-            <label className="text-gray-700 text-sm font-bold mb-2">Connector Status: </label>
-            <ConnectorStatus status={connectorStatus}/>
+            <label className="text-gray-700 text-sm font-bold mb-2">
+              Connector Status:{" "}
+            </label>
+            <ConnectorStatus status={connectorStatus} />
           </div>
-          {
-            (connectorStatus === ocpp.OCPPStatus.Charging) && (
-              <div className="mb-6">
-                <label className="text-gray-700 text-sm font-bold mb-2">Transaction ID: </label>
-                <span>{cpTransactionID}</span>
-              </div>
-            )
-          }
+          {connectorStatus === ocpp.OCPPStatus.Charging && (
+            <div className="mb-6">
+              <label className="text-gray-700 text-sm font-bold mb-2">
+                Transaction ID:{" "}
+              </label>
+              <span>{cpTransactionID}</span>
+            </div>
+          )}
           <select
             id={`STATUS_CON${connector_id}`}
             className="bg-white border border-gray-400 rounded px-4 py-2"
             value={connectorStatus}
-            onChange={(e) => setConnectorStatus(e.target.value as ocpp.OCPPStatus)}
-            style={{maxWidth: "16ch", marginRight: "1ch"}}
-          >
-            {
-              Object.keys(ocpp.OCPPStatus).map((status) => (
-                (
-                  status === ocpp.OCPPStatus.Charging) ? null :
-                  <option key={status} value={status}>{status}</option>
-              ))
+            onChange={(e) =>
+              setConnectorStatus(e.target.value as ocpp.OCPPStatus)
             }
+            style={{ maxWidth: "16ch", marginRight: "1ch" }}
+          >
+            {Object.keys(ocpp.OCPPStatus).map((status) =>
+              status === ocpp.OCPPStatus.Charging ? null : (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              )
+            )}
             {/* Add other status options... */}
           </select>
           <button
@@ -96,15 +106,18 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
             disabled:opacity-50
             "
             disabled={connectorStatus === ocpp.OCPPStatus.Unavailable}
-          >Status
-            Notification
+          >
+            Status Notification
           </button>
           <div className="d-flex border-b border-gray-400">
             <div className="form-group">
               <label
-                className="text-gray-700 text-sm font-bold mb-2" htmlFor={`AVAILABILITY_CON${connector_id}`}>Connector
-                Availability:</label>
-              <ConnectorAvailability availability={availability}/>
+                className="text-gray-700 text-sm font-bold mb-2"
+                htmlFor={`AVAILABILITY_CON${connector_id}`}
+              >
+                Connector Availability:
+              </label>
+              <ConnectorAvailability availability={availability} />
               {/*<select
                 <select
                   id={`AVAILABILITY_CON${connector_id}`}
@@ -176,7 +189,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
   );
 };
 
-const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
+const ConnectorStatus: React.FC<{ status: string }> = ({ status }) => {
   const statusColor = (s: string) => {
     switch (s) {
       case ocpp.OCPPStatus.Unavailable:
@@ -194,12 +207,12 @@ const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
     }
   };
 
-  return (
-    <span className={statusColor(status)}>{status}</span>
-  );
-}
+  return <span className={statusColor(status)}>{status}</span>;
+};
 
-const ConnectorAvailability: React.FC<{ availability: string }> = ({availability}) => {
+const ConnectorAvailability: React.FC<{ availability: string }> = ({
+  availability,
+}) => {
   const availabilityColor = (a: string) => {
     switch (a) {
       case ocpp.OCPPAvailability.Operative:
@@ -214,6 +227,6 @@ const ConnectorAvailability: React.FC<{ availability: string }> = ({availability
   return (
     <span className={availabilityColor(availability)}>{availability}</span>
   );
-}
+};
 
 export default Connector;

@@ -2,7 +2,7 @@ enum LogLevel {
   DEBUG = 0,
   INFO = 1,
   WARN = 2,
-  ERROR = 3
+  ERROR = 3,
 }
 
 export class Logger {
@@ -54,7 +54,7 @@ export class Logger {
           break;
         case LogLevel.ERROR:
           console.error(logMessage);
-          break
+          break;
         default:
           console.log(logMessage);
           break;
@@ -75,7 +75,7 @@ export class Logger {
   }
 
   getLogString(): string {
-    return this.logList.join('\n');
+    return this.logList.join("\n");
   }
 
   saveLogsToFile(filename: string): void {

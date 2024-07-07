@@ -31,7 +31,6 @@ const ChargePoint: React.FC = () => {
 
   const statusChangeCb = (s: string, msg?: string) => {
     setCpStatus(s);
-    if (msg) logMsg(msg);
   };
 
   const logMsg = (msg: string) => {

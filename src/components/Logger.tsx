@@ -9,7 +9,6 @@ const Logger: React.FC = () => {
     const oldConsoleLog = console.log;
     console.log = (message: string) => {
       setLogs((prevLogs) => [...prevLogs, message]);
-      oldConsoleLog.apply(console, [message]);
     };
 
     return () => {

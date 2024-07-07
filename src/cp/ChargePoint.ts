@@ -13,7 +13,7 @@ export class ChargePoint {
   private _logger: Logger;
 
   private _status: OCPPStatus = OCPPStatus.Unavailable;
-  private _error:string = "";
+  private _error: string = "";
 
   private _heartbeat: number | null = null;
   private _statusChangeCallback: ((status: string, message?: string) => void) | null = null;
@@ -48,7 +48,7 @@ export class ChargePoint {
     this._logger.loggingCallback = callback;
   }
 
-  setConnectorTransactionIDChangeCallback(connectorId: number, callback: (transactionId: number|null) => void): void {
+  setConnectorTransactionIDChangeCallback(connectorId: number, callback: (transactionId: number | null) => void): void {
     this.connectors.get(connectorId)?.setTransactionIDChangeCallbacks(callback);
   }
 
@@ -67,15 +67,16 @@ export class ChargePoint {
         this.updateStatus(OCPPStatus.Available);
         this.updateAllConnectorsStatus(OCPPStatus.Available);
       },
-      (msg: MessageEvent,ev: CloseEvent) => {
-        this._logger.error(`WebSocket closed code: ${ev.code} reason: ${ev.reason}`);
+      (msg: MessageEvent, ev: CloseEvent) => {
         this.updateStatus(OCPPStatus.Unavailable);
         this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
+        this._logger.error(`WebSocket closed code: ${msg.code} reason: ${ev.reason}`);
       }
     );
   }
 
   public disconnect(): void {
+    this._logger.info("Disconnecting from WebSocket");
     this._webSocket.disconnect();
   }
 
@@ -91,7 +92,7 @@ export class ChargePoint {
   public startTransaction(tagId: string, connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
-      const transaction :Transaction= {
+      const transaction: Transaction = {
         id: 0,
         connectorId: connectorId,
         tagId: tagId,
@@ -107,7 +108,7 @@ export class ChargePoint {
     }
   }
 
-  public stopTransaction(tagId: number,connectorId: number): void {
+  public stopTransaction(tagId: number, connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
       connector.transaction.stopTime = new Date();

@@ -8,10 +8,10 @@ enum LogLevel {
 export class Logger {
   private level: LogLevel;
   private logList: string[] = [];
-  public loggingCallback: ((message: string) => void) | null = null;
+  public _loggingCallback: ((message: string) => void) | null = null;
 
   set loggingCallback(callback: ((message: string) => void) | null) {
-    this.loggingCallback = callback;
+    this._loggingCallback = callback;
   }
 
   constructor(level: LogLevel = LogLevel.DEBUG) {
@@ -60,8 +60,8 @@ export class Logger {
           break;
       }
       this.logList.push(logMessage);
-      if (this.loggingCallback) {
-        this.loggingCallback(logMessage);
+      if (this._loggingCallback) {
+        this._loggingCallback(logMessage);
       }
     }
   }

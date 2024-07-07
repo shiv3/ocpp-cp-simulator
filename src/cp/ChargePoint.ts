@@ -2,8 +2,9 @@ import {Connector} from './Connector';
 import {OCPPWebSocket} from './OCPPWebSocket';
 import {OCPPMessageHandler} from './OCPPMessageHandler';
 import {Logger} from './Logger';
-import {OCPPStatus, AVAILABITY_OPERATIVE, AVAILABITY_INOPERATIVE} from './ocpp_constants';
+import {OCPPStatus,  OCPPAvailability} from './OcppTypes';
 import {Transaction} from "./Transaction.ts";
+import * as ocpp from "./OcppTypes.ts";
 
 export class ChargePoint {
   private _id: string;
@@ -36,6 +37,10 @@ export class ChargePoint {
     return this._id;
   }
 
+  get error(): string {
+    return this._error;
+  }
+
   set error(error: string) {
     this._error = error;
     this._errorCallback(error);
@@ -55,14 +60,14 @@ export class ChargePoint {
   }
 
   set loggingCallback(callback: (message: string) => void) {
-    this._logger.loggingCallback = callback;
+    this._logger._loggingCallback = callback;
   }
 
   setConnectorTransactionIDChangeCallback(connectorId: number, callback: (transactionId: number | null) => void): void {
     this.connectors.get(connectorId)?.setTransactionIDChangeCallbacks(callback);
   }
 
-  setConnectorStatusChangeCallback(connectorId: number, callback: (status: string) => void): void {
+  setConnectorStatusChangeCallback(connectorId: number, callback: (status: ocpp.OCPPStatus) => void): void {
     this.connectors.get(connectorId)?.setStatusChangeCallbacks(callback);
   }
 
@@ -97,7 +102,7 @@ export class ChargePoint {
     this._messageHandler.authorize(tagId);
   }
 
-  set status(status: OCPPStatus): void {
+  set status(status: OCPPStatus) {
     this._status = status;
     this.triggerStatusChangeCallback(status);
   }
@@ -109,9 +114,10 @@ export class ChargePoint {
         id: 0,
         connectorId: connectorId,
         tagId: tagId,
+        meterStart: 0,
+        meterStop: null,
         startTime: new Date(),
         stopTime: null,
-        meterStart: 0,
       }
       connector.transaction = transaction;
       this._messageHandler.startTransaction(transaction, connectorId);
@@ -121,12 +127,12 @@ export class ChargePoint {
     }
   }
 
-  public stopTransaction(tagId: number, connectorId: number): void {
+  public stopTransaction(tagId: string, connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
-      connector.transaction.stopTime = new Date();
-      connector.transaction.meterStop = connector.meterValue;
-      this._messageHandler.stopTransaction(connector.transaction, connector.id);
+      connector.transaction!.stopTime = new Date();
+      connector.transaction!.meterStop = connector.meterValue;
+      this._messageHandler.stopTransaction(connector.transaction!, connector.id);
       this.updateConnectorStatus(connector.id, OCPPStatus.Finishing);
     } else {
       this._logger.error(`Transaction for tag ${tagId} not found`);
@@ -135,6 +141,10 @@ export class ChargePoint {
 
   public sendHeartbeat(): void {
     this._messageHandler.sendHeartbeat();
+  }
+
+  public sendReset(): void {
+    this._messageHandler.sendReset();
   }
 
   public startHeartbeat(period: number): void {
@@ -199,10 +209,10 @@ export class ChargePoint {
   public updateConnectorAvailability(connectorId: number, newAvailability: string): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
-      connector.availability = newAvailability;
-      if (newAvailability === AVAILABITY_INOPERATIVE) {
+      connector.availability! = newAvailability;
+      if (newAvailability === OCPPAvailability.Inoperative) {
         this.updateConnectorStatus(connectorId, OCPPStatus.Unavailable);
-      } else if (newAvailability === AVAILABITY_OPERATIVE) {
+      } else if (newAvailability === OCPPAvailability.Operative) {
         this.updateConnectorStatus(connectorId, OCPPStatus.Available);
       }
       this.triggerAvailabilityChangeCallback(connectorId, newAvailability);
@@ -214,7 +224,7 @@ export class ChargePoint {
   public setTransactionID(connectorId: number, transactionId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
-      connector.setTransactionId(transactionId);
+      connector.transactionId = transactionId;
       this.triggerConnectorTransactionIDChangeCallback(connectorId, transactionId);
     } else {
       this._logger.error(`Connector ${connectorId} not found`);

@@ -1,9 +1,9 @@
-import { v4 as uuidv4 } from "uuid";
-import { OCPPWebSocket } from "./OCPPWebSocket";
-import { ChargePoint } from "./ChargePoint";
-import { Transaction } from "./Transaction";
-import { Logger } from "./Logger";
-import { OCPPMessageType, OCPPAction, OCPPStatus } from "./OcppTypes";
+import {v4 as uuidv4} from "uuid";
+import {OCPPWebSocket} from "./OCPPWebSocket";
+import {ChargePoint} from "./ChargePoint";
+import {Transaction} from "./Transaction";
+import {Logger} from "./Logger";
+import {OCPPMessageType, OCPPAction, OCPPStatus} from "./OcppTypes";
 
 import {
   AuthorizeRequest,
@@ -33,7 +33,8 @@ import {
   GetDiagnosticsResponse,
   TriggerMessageResponse,
 } from "@voltbras/ts-ocpp/dist/messages/json/response";
-import { OcppMessagePayload } from "./OCPPWebSocket";
+import {OcppMessagePayload} from "./OCPPWebSocket";
+import {UploadFile} from "./file_upload.ts";
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -85,7 +86,7 @@ export class OCPPMessageHandler {
 
   public authorize(tagId: string): void {
     const messageId = this.generateMessageId();
-    const payload: AuthorizeRequest = { idTag: tagId };
+    const payload: AuthorizeRequest = {idTag: tagId};
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.Authorize,
@@ -156,7 +157,7 @@ export class OCPPMessageHandler {
 
   public sendReset(): void {
     const messageId = this.generateMessageId();
-    const payload: ResetRequest = { type: "Hard" };
+    const payload: ResetRequest = {type: "Hard"};
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.Reset,
@@ -172,7 +173,7 @@ export class OCPPMessageHandler {
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: [{ value: meterValue.toString() }],
+          sampledValue: [{value: meterValue.toString()}],
         },
       ],
     };
@@ -206,7 +207,7 @@ export class OCPPMessageHandler {
     payload: OcppMessagePayload,
     connectorId?: number
   ): void {
-    this._requests.add({ type, action, id, payload, connectorId });
+    this._requests.add({type, action, id, payload, connectorId});
     this._webSocket.send(type, id, action, payload);
   }
 
@@ -344,21 +345,21 @@ export class OCPPMessageHandler {
   private handleRemoteStartTransaction(
     payload: RemoteStartTransactionRequest
   ): RemoteStartTransactionResponse {
-    const { idTag, connectorId } = payload;
+    const {idTag, connectorId} = payload;
     const connector = this._chargePoint.getConnector(connectorId || 1);
 
     if (connector && connector.availability == "Operative") {
       this._chargePoint.startTransaction(idTag, connectorId || 1);
-      return { status: "Accepted" };
+      return {status: "Accepted"};
     } else {
-      return { status: "Rejected" };
+      return {status: "Rejected"};
     }
   }
 
   private handleRemoteStopTransaction(
     payload: RemoteStopTransactionRequest
   ): RemoteStopTransactionResponse {
-    const { transactionId } = payload;
+    const {transactionId} = payload;
     const connector = Array.from(this._chargePoint.connectors.values()).find(
       (c) => c.transaction && c.transaction.id === transactionId
     );
@@ -373,23 +374,27 @@ export class OCPPMessageHandler {
         OCPPStatus.SuspendedEVSE
       );
       this._chargePoint.stopTransaction(tagId, connector.id);
-      return { status: "Accepted" };
+      return {status: "Accepted"};
     } else {
-      return { status: "Rejected" };
+      return {status: "Rejected"};
     }
   }
 
   private handleReset(payload: ResetRequest): ResetResponse {
     this._logger.log(`Reset request received: ${payload.type}`);
     this._chargePoint.sendReset();
-    return { status: "Accepted" };
+    return {status: "Accepted"};
   }
 
   private handleGetDiagnostics(
     payload: GetDiagnosticsRequest
   ): GetDiagnosticsResponse {
     this._logger.log(`Get diagnostics request received: ${payload.location}`); // e.g. `FTP
-    return { fileName: "diagnostics.txt" };
+    const logs = this._logger.getLogs().join("\n");
+    const blob = new Blob([logs], {type: "text/plain"});
+    const file = new File([blob], "diagnostics.txt");
+    (async () => await UploadFile(payload.location, file))();
+    return {fileName: "diagnostics.txt"};
   }
 
   private handleTriggerMessage(
@@ -398,7 +403,7 @@ export class OCPPMessageHandler {
     this._logger.log(
       `Trigger message request received: ${payload.requestedMessage}`
     ); // e.g. `DiagnosticsStatusNotification`
-    return { status: "Accepted" };
+    return {status: "Accepted"};
   }
 
   private handleBootNotificationResponse(
@@ -414,7 +419,7 @@ export class OCPPMessageHandler {
   }
 
   private handleAuthorizeResponse(payload: AuthorizeResponse): void {
-    const { idTagInfo } = payload;
+    const {idTagInfo} = payload;
     if (idTagInfo.status === "Accepted") {
       this._logger.log("Authorization successful");
     } else {
@@ -426,7 +431,7 @@ export class OCPPMessageHandler {
     connectorId: number,
     payload: StartTransactionResponse
   ): void {
-    const { transactionId, idTagInfo } = payload;
+    const {transactionId, idTagInfo} = payload;
     const connector = this._chargePoint.getConnector(connectorId);
     if (idTagInfo.status === "Accepted") {
       if (connector) {

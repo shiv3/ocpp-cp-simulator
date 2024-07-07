@@ -20,7 +20,7 @@ jobs:
         run: npm install
 
       - name: Build
-        run: VITE_BASE_URL="/OCPP-ChargePoint-Simulator-React" npm run build
+        run: VITE_BASE_URL="/ocpp-cp-simulator" npm run build
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3

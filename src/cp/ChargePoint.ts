@@ -14,6 +14,7 @@ export class ChargePoint {
 
   private _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error: string = "";
+  public _errorCallback: (error: string) => void = () => {};
 
   private _heartbeat: number | null = null;
   private _statusChangeCallback: ((status: string, message?: string) => void) | null = null;
@@ -33,6 +34,15 @@ export class ChargePoint {
   // Getters
   get id(): string {
     return this._id;
+  }
+
+  set error(error: string) {
+    this._error = error;
+    this._errorCallback(error);
+  }
+
+  set errorCallback(callback: (error: string) => void) {
+    this._errorCallback = callback;
   }
 
   get connectors(): Map<number, Connector> {
@@ -71,6 +81,7 @@ export class ChargePoint {
         this.updateStatus(OCPPStatus.Unavailable);
         this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
         this._logger.error(`WebSocket closed code: ${msg.code} reason: ${msg.reason}`);
+        this.error = `WebSocket closed code: ${msg.code} reason: ${msg.reason}`;
       }
     );
   }

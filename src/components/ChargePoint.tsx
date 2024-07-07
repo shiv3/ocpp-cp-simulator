@@ -1,13 +1,13 @@
 import React, {useState, useEffect} from "react";
-import OCPPChargePoint from "../utils/ocpp_chargepoint";
-import * as ocpp from "../utils/ocpp_constants";
+import {ChargePoint as OCPPChargePoint2} from "../cp/ChargePoint";
 import Connector from "./Connector.tsx";
 import {useLocation} from "react-router-dom";
 import Logger from "./Logger.tsx";
+import * as ocpp from "../cp/ocpp_constants";
 
 const ChargePoint: React.FC = () => {
   const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
-  const [cp, setCp] = useState<OCPPChargePoint | null>(null);
+  const [cp, setCp] = useState<OCPPChargePoint2 | null>(null);
 
   const search = useLocation().search;
   const query = new URLSearchParams(search);
@@ -23,9 +23,9 @@ const ChargePoint: React.FC = () => {
     localStorage.setItem("CPID", cpID);
     localStorage.setItem("TAG", tagID);
 
-    const newCp = new OCPPChargePoint(connectorNumber, wsURL, cpID);
-    newCp.setStatusChangeCallback(statusChangeCb);
-    newCp.setLoggingCallback(logMsg);
+    const newCp = new OCPPChargePoint2(cpID,connectorNumber, wsURL);
+    newCp.statusChangeCallback = statusChangeCb;
+    newCp.loggingCallback = logMsg;
     setCp(newCp);
   }, []);
 
@@ -48,7 +48,7 @@ const ChargePoint: React.FC = () => {
           <AuthView cp={cp} cpStatus={cpStatus}/>
           <div className="flex flex-col md:flex-row mt-4">
             {
-              cp?.connectorNumber && Array.from(Array(cp.connectorNumber).keys()).map((i) => (
+              cp?.connectors && Array.from(Array(cp.connectors.size).keys()).map((i) => (
                 <Connector key={i + 1} id={i + 1} cp={cp}/>
               ))
             }
@@ -139,7 +139,7 @@ const AuthView: React.FC<AuthViewProps> = ({cp, cpStatus}) => {
 }
 
 interface ChargePointControlsProps {
-  cp: OCPPChargePoint | null;
+  cp: OCPPChargePoint2 | null;
   cpStatus: string;
 }
 
@@ -148,13 +148,13 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({cp, cpStatus})
 
   const handleConnect = () => {
     if (cp) {
-      cp.wsConnect();
+      cp.connect();
     }
   };
 
   const handleDisconnect = () => {
     if (cp) {
-      cp.wsDisconnect();
+      cp.disconnect();
     }
   };
   const handleHeartbeat = () => {

@@ -29,12 +29,16 @@ export enum OCPPMessageType {
 
 
 export enum OCPPAction {
-  REMOTE_START_TRANSACTION = 'RemoteStartTransaction',
-  REMOTE_STOP_TRANSACTION = 'RemoteStopTransaction',
+  RemoteStartTransaction = 'RemoteStartTransaction',
+  RemoteStopTransaction = 'RemoteStopTransaction',
   StartTransaction = 'StartTransaction',
   StopTransaction = 'StopTransaction',
-  GET_DIAGNOSTICS = 'GetDiagnostics',
-  TRIGGER_MESSAGE = 'TriggerMessage',
+  GetDiagnostics = 'GetDiagnostics',
+  TriggerMessage = 'TriggerMessage',
+  StatusNotification = 'StatusNotification',
+  MeterValues = 'MeterValues',
+  BootNotification = 'BootNotification',
+  Heartbeat = 'Heartbeat',
 }
 
 

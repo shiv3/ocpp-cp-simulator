@@ -1,14 +1,14 @@
 import React, {useState, useEffect} from "react";
-import * as ocpp from "../utils/ocpp_constants.ts";
-import OCPPChargePoint from "../utils/ocpp_chargepoint.ts";
+import {ChargePoint} from "../cp/ChargePoint.ts";
+import * as ocpp from "../cp/ocpp_constants";
 
 interface ConnectorProps {
   id: number;
-  cp: OCPPChargePoint | null;
+  cp: ChargePoint | null;
 }
 
 const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
-  const [cpTransactionID, setCpTransactionID] = useState<number>(0);
+  const [cpTransactionID, setCpTransactionID] = useState<number | null>(0);
   const [connectorStatus, setConnectorStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
   const [availability, setAvailability] = useState<string>(ocpp.AVAILABITY_OPERATIVE);
   const [meterValue, setMeterValue] = useState<number>(0);
@@ -26,7 +26,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
   // Implement connector logic here...
   const handleStatusNotification = () => {
     if (cp) {
-      cp.statusNotification(connector_id, connectorStatus);
+      cp.updateConnectorStatus(connector_id, connectorStatus);
     }
   }
 
@@ -39,7 +39,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
   const handleStopTransaction = () => {
     if (cp) {
       const tagId = localStorage.getItem("TAG") || "DEADBEEF";
-      cp.stopTransaction(tagId);
+      cp.stopTransaction(tagId, connector_id);
     }
   };
 

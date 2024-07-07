@@ -427,14 +427,17 @@ export class OCPPMessageHandler {
     payload: StartTransactionResponse
   ): void {
     const { transactionId, idTagInfo } = payload;
+    const connector = this._chargePoint.getConnector(connectorId);
     if (idTagInfo.status === "Accepted") {
-      const connector = this._chargePoint.getConnector(connectorId);
       if (connector) {
         connector.transactionId = transactionId;
         connector.status = OCPPStatus.Charging;
       }
     } else {
       this._logger.log("Failed to start transaction");
+      if (connector) {
+        connector.status = OCPPStatus.Faulted;
+      }
     }
   }
 

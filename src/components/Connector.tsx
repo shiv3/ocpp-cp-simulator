@@ -1,7 +1,6 @@
 import React, {useState, useEffect} from "react";
 import * as ocpp from "../utils/ocpp_constants.ts";
 import OCPPChargePoint from "../utils/ocpp_chargepoint.ts";
-import {OCPPStatus} from "../utils/ocpp_constants.ts";
 
 interface ConnectorProps {
   id: number;
@@ -13,8 +12,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
   const [connectorStatus, setConnectorStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
   const [availability, setAvailability] = useState<string>(ocpp.AVAILABITY_OPERATIVE);
   const [meterValue, setMeterValue] = useState<number>(0);
-  const [tmpTransacitonId, setTmpTransactionId] = useState<number>(0);
-  const [idTag, setIdTag] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
+  const [idTag,] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
 
   useEffect(() => {
     if (cp) {
@@ -42,12 +40,6 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
     if (cp) {
       const tagId = localStorage.getItem("TAG") || "DEADBEEF";
       cp.stopTransaction(tagId);
-    }
-  };
-
-  const handleTempTransactionId = () => {
-    if (cp) {
-      cp.setTransactionID(connector_id, tmpTransacitonId);
     }
   };
 
@@ -175,7 +167,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
           onClick={handleStopTransaction}
           className="bg-orange-500 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded mb-2 w-full
           disabled:opacity-50"
-          disabled={connectorStatus !== ocpp.OCPPStatus.Charging && tmpTransacitonId === 0}
+          disabled={connectorStatus !== ocpp.OCPPStatus.Charging}
         >
           Stop Transaction
         </button>

@@ -3,9 +3,8 @@ import React from "react";
 import {BrowserRouter as Router, Route, Routes} from "react-router-dom";
 import Navbar from "./components/Navbar.tsx";
 import ChargePoint from "./components/ChargePoint.tsx";
-import Connector from "./components/Connector.tsx";
 import Settings from "./components/Settings.tsx";
-import Logger from "./components/Logger.tsx";
+
 
 const App: React.FC = () => {
   return (

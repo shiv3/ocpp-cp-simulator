@@ -120,7 +120,7 @@ export function getLatestTransaction(): Transaction | null {
 export function getTransactionByTransactionId(transactionId: number): Transaction | null {
   const cp = getChargePoint();
   if (cp) {
-    return cp.connectors.filter(c => c.transaction !== null).map(c => c.transaction).find(t => t.id === transactionId) || null;
+    return cp.connectors.filter(c => c.transaction !== null).map(c => c.transaction).find(t => t?.id === transactionId) || null;
   }
   return null;
 }

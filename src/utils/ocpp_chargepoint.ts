@@ -1,16 +1,11 @@
-import * as ocpp from "./ocpp_constants";
+import * as localocpp from "./ocpp_constants";
 import {
   MessageTrigger,
   OCPPAction,
   OCPPGetDiagnosticsRequest,
-  OCPPGetDiagnosticsResponse,
   OCPPMessageType,
-  OCPPStartTransactionRequest,
-  OCPPStartTransactionResponse,
-  OCPPStopTransactionRequest,
-  OCPPStopTransactionResponse,
   OCPPTriggerMessageRequest,
-  OCPPTriggerMessageResponse
+  OCPPTriggerMessageResponse,
 } from "./ocpp_constants";
 import {
   ChargePoint,
@@ -28,6 +23,23 @@ import {
 } from "./storage";
 import {UploadFile} from "./file_upload";
 
+import {
+  BootNotificationRequest,
+  GetDiagnosticsRequest,
+  RemoteStartTransactionRequest,
+  RemoteStopTransactionRequest, StartTransactionRequest,
+  StopTransactionRequest, TriggerMessageRequest
+} from "@voltbras/ts-ocpp/dist/messages/json/request";
+
+
+import {
+  GetDiagnosticsResponse, MeterValuesResponse,
+  RemoteStartTransactionResponse,
+  RemoteStopTransactionResponse,
+  StartTransactionResponse,
+  StopTransactionResponse,
+  TriggerMessageResponse,
+} from "@voltbras/ts-ocpp/dist/messages/json/response";
 
 export interface OCPPChargePointInterface {
   setStatusChangeCallback: (
@@ -43,8 +55,8 @@ export interface OCPPChargePointInterface {
   authorize: (tagId: string) => void;
   startTransaction: (
     tagId: string,
-    connectorId?: number,
-    reservationId?: number
+    connectorId: number,
+    reservationId: number
   ) => void;
   stopTransaction: (tagId: string) => void;
   sendHeartbeat: () => void;
@@ -61,6 +73,14 @@ export interface OCPPChargePointInterface {
   setMeterValue: (connectorId: number, value: number, updateServer?: boolean) => void;
 }
 
+interface OCPPRequest {
+  type: OCPPMessageType,
+  action: OCPPAction,
+  tagId: string,
+  id: string,
+  payload: StartTransactionRequest | StopTransactionRequest | TriggerMessageRequest
+}
+
 export default class OCPPChargePoint implements OCPPChargePointInterface {
   private _websocket: WebSocket | null = null;
   connectorNumber: number = 2;
@@ -68,14 +88,15 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
   cpid: string = "";
 
   //   private _heartbeat: NodeJS.Timeout | null = null;
+
+  private _lastRequest: OCPPRequest | null = null;
   private _statusChangeCb: ((status: string, message?: string) => void) | null = null;
   private _connectorTransactionIDChangeCbs: Map<number, ((message: number) => void) | null> | null = null;
   private _connectorStatusChangeCbs: Map<number, ((status: string) => void) | null> | null = null;
   private _availabilityChangeCbs: Map<number, ((availability: string) => void)> | null = null;
   private _loggingCb: ((message: string) => void) | null = null;
   private _logList: string[] = [];
-
-  private _heartbeat: window.Timeout | null = null;
+  private _heartbeat: number | null = null;
 
   constructor(
     connectorNumber: number = 2,
@@ -90,8 +111,8 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     for (let i = 1; i <= connectorNumber; i++) {
       connectors.push({
         id: i,
-        status: ocpp.OCPPStatus.Unavailable,
-        availability: ocpp.AVAILABITY_OPERATIVE,
+        status: localocpp.OCPPStatus.Unavailable,
+        availability: localocpp.AVAILABITY_OPERATIVE,
         transaction: null,
         meterValue: 0,
       });
@@ -179,7 +200,7 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     const cpid = this.cpid;
     if (this._websocket) {
       this.setAllConnectorStatus(
-        ocpp.OCPPStatus.Faulted,
+        localocpp.OCPPStatus.Faulted,
         "Socket already opened. Closing it. Retry later"
       );
       this._websocket.close(3001);
@@ -187,19 +208,18 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
       this._websocket = new WebSocket(url + cpid, ["ocpp1.6", "ocpp1.5"]);
 
       this._websocket.onopen = () => {
-        this.setAllConnectorStatus(ocpp.OCPPStatus.Available);
+        this.setAllConnectorStatus(localocpp.OCPPStatus.Available);
         this.sendBootNotification();
-        this.sendAllConnectorsStatusNotification(ocpp.CONN_AVAILABLE);
+        this.sendAllConnectorsStatusNotification(localocpp.CONN_AVAILABLE);
       };
 
       this._websocket.onerror = (evt: Event) => {
-        this.setAllConnectorStatus(ocpp.OCPPStatus.Faulted, "WebSocket error: " + evt.type);
+        this.setAllConnectorStatus(localocpp.OCPPStatus.Faulted, "WebSocket error: " + evt.type);
       };
 
       this._websocket.onmessage = (msg: MessageEvent) => {
         console.log("RECEIVE: " + msg.data);
         const data = JSON.parse(msg.data);
-
         switch (data[0]) {
           case OCPPMessageType.CALL: // CALL
             this.handleCallRequest(data[1], data[2], data[3]);
@@ -215,10 +235,10 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
 
       this._websocket.onclose = (evt: CloseEvent) => {
         if (evt.code === 3001) {
-          this.setAllConnectorStatus(ocpp.OCPPStatus.Unavailable);
+          this.setAllConnectorStatus(localocpp.OCPPStatus.Unavailable);
           this.logMsg("Connection closed");
         } else {
-          this.setAllConnectorStatus(ocpp.OCPPStatus.Faulted, "Connection error: " + evt.code + " (" + evt.reason + ")");
+          this.setAllConnectorStatus(localocpp.OCPPStatus.Faulted, "Connection error: " + evt.code + " (" + evt.reason + ")");
         }
         this._websocket = null;
       };
@@ -229,7 +249,7 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     if (this._websocket) {
       this._websocket.close(3001);
     }
-    this.setAllConnectorStatus(ocpp.OCPPStatus.Unavailable);
+    this.setAllConnectorStatus(localocpp.OCPPStatus.Unavailable);
   }
 
   private wsSendData(data: string): void {
@@ -237,7 +257,7 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     if (this._websocket) {
       this._websocket.send(data);
     } else {
-      this.setAllConnectorStatus(ocpp.OCPPStatus.Faulted, "No connection to OCPP server");
+      this.setAllConnectorStatus(localocpp.OCPPStatus.Faulted, "No connection to OCPP server");
     }
   }
 
@@ -262,7 +282,7 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     reservationId: number = 0
   ): void {
     this.setLastAction("startTransaction");
-    this.setConnectorStatus(connectorId, ocpp.OCPPStatus.Charging);
+    this.setConnectorStatus(connectorId, localocpp.OCPPStatus.Charging);
     const id = this.generateId();
     setTransaction(connectorId, {
       id: null,
@@ -273,17 +293,25 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
       stopTime: null,
     })
     const mv = this.meterValue(connectorId);
-    const strtT = JSON.stringify([
-      2,
-      id,
-      "StartTransaction",
+    this._lastRequest =
       {
-        connectorId: connectorId,
-        idTag: tagId,
-        timestamp: this.formatDate(new Date()),
-        meterStart: Number(mv),
-        reservationId: reservationId,
-      },
+        type: OCPPMessageType.CALL,
+        action: OCPPAction.StartTransaction,
+        tagId: tagId,
+        id: id,
+        payload: {
+          connectorId: connectorId,
+          idTag: tagId,
+          reservationId: reservationId,
+          meterStart: mv,
+          timestamp: this.formatDate(new Date()),
+        } as StartTransactionRequest
+      }
+    const strtT = JSON.stringify([
+      this._lastRequest.type,
+      this._lastRequest.id,
+      this._lastRequest.action,
+      this._lastRequest.payload
     ]);
     this.logMsg(
       "Starting Transaction for tag " +
@@ -295,16 +323,19 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
       ")"
     );
     this.wsSendData(strtT);
-    this.setConnectorStatus(connectorId, ocpp.CONN_CHARGING);
+    this.setConnectorStatus(connectorId, localocpp.CONN_CHARGING);
   }
 
   stopTransaction(tagId: string): void {
     const transactionId = getTransactionByTagId(tagId)?.id || null;
+    if (!transactionId) {
+      throw new Error("Transaction not found");
+    }
     this.stopTransactionWithId(transactionId, tagId);
   }
 
   private stopTransactionWithId(
-    transactionId: number | null,
+    transactionId: number,
     tagId: string = "DEADBEEF"
   ): void {
     this.setLastAction("stopTransaction");
@@ -316,7 +347,6 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     if (!connector) {
       throw new Error("Connector not found");
     }
-    setTransaction(transaction.connectorId, null);
     const mv = this.meterValue(connector.id);
     this.logMsg(
       "Stopping Transaction with id " +
@@ -326,17 +356,26 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
       ")"
     );
     const id = this.generateId();
-    const stopParams: any = {
-      transactionId: Number(transactionId),
-      timestamp: this.formatDate(new Date()),
-      meterStop: Number(mv),
-    };
-    if (tagId) {
-      stopParams["idTag"] = tagId;
+    this._lastRequest = {
+      type: OCPPMessageType.CALL,
+      action: OCPPAction.StopTransaction,
+      tagId: tagId,
+      id: id,
+      payload: {
+        transactionId: Number(transactionId),
+        timestamp: this.formatDate(new Date()),
+        meterStop: Number(mv),
+        idTag: tagId,
+      } as StopTransactionRequest
     }
-    const stpT = JSON.stringify([2, id, "StopTransaction", stopParams]);
+    const stpT = JSON.stringify([
+      this._lastRequest.type,
+      this._lastRequest.id,
+      this._lastRequest.action,
+      this._lastRequest.payload
+    ]);
     this.wsSendData(stpT);
-    this.setConnectorStatus(connector.id, ocpp.CONN_AVAILABLE);
+    this.setConnectorStatus(connector.id, localocpp.CONN_AVAILABLE);
   }
 
   sendHeartbeat(): void {
@@ -399,19 +438,19 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
   }
 
   connectorStatus(connectorId: number): string {
-    return getConnector(connectorId)?.status || ocpp.OCPPStatus.Unavailable;
+    return getConnector(connectorId)?.status || localocpp.OCPPStatus.Unavailable;
   }
 
   availability(connectorId: number = 0): string {
-    return getConnector(connectorId)?.availability || ocpp.AVAILABITY_INOPERATIVE
+    return getConnector(connectorId)?.availability || localocpp.AVAILABITY_INOPERATIVE
   }
 
   setConnectorAvailability(connectorId: number, newAvailability: string): void {
     setConnectorStatus(connectorId, newAvailability);
-    if (newAvailability === ocpp.AVAILABITY_INOPERATIVE) {
-      this.setConnectorStatus(connectorId, ocpp.CONN_UNAVAILABLE, true);
-    } else if (newAvailability === ocpp.AVAILABITY_OPERATIVE) {
-      this.setConnectorStatus(connectorId, ocpp.CONN_AVAILABLE, true);
+    if (newAvailability === localocpp.AVAILABITY_INOPERATIVE) {
+      this.setConnectorStatus(connectorId, localocpp.CONN_UNAVAILABLE, true);
+    } else if (newAvailability === localocpp.AVAILABITY_OPERATIVE) {
+      this.setConnectorStatus(connectorId, localocpp.CONN_AVAILABLE, true);
     }
     if (this._availabilityChangeCbs) {
       this._availabilityChangeCbs.get(connectorId)?.(newAvailability);
@@ -434,35 +473,30 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     }
   }
 
-  private handleRemoteStartTransaction(payload: OCPPStartTransactionRequest): OCPPStartTransactionResponse {
-    this.startTransaction(payload.idTag, payload.connectorId);
-    setTransaction(payload.connectorId, {
+  private handleRemoteStartTransaction(payload: RemoteStartTransactionRequest): RemoteStartTransactionResponse {
+    const connectorId = payload.connectorId ?? 1;
+    this.startTransaction(payload.idTag, connectorId);
+    setTransaction(connectorId, {
       id: null,
       tagId: payload.idTag,
-      connectorId: payload.connectorId,
-      meterStart: payload.meterStart,
-      startTime: payload.timestamp,
+      connectorId: connectorId,
+      meterStart: this.meterValue(connectorId),
+      startTime: this.formatDate(new Date()),
       stopTime: null,
     })
     return {
-      transactionId: 1,
-      idTagInfo: {
-        status: "Accepted",
-      },
+      status: "Accepted"
     };
   }
 
-  private handleRemoteStopTransaction(payload: OCPPStopTransactionRequest): OCPPStopTransactionResponse {
+  private handleRemoteStopTransaction(payload: RemoteStopTransactionRequest): RemoteStopTransactionResponse {
     this.stopTransactionWithId(payload.transactionId);
-    // Implement handleStopTransaction logic
     return {
-      idTagInfo: {
-        status: "Accepted",
-      },
+      status: "Accepted",
     };
   }
 
-  private handleGetDiagnostics(payload: OCPPGetDiagnosticsRequest): OCPPGetDiagnosticsResponse {
+  private handleGetDiagnostics(payload: GetDiagnosticsRequest): GetDiagnosticsResponse {
     console.log("Received GetDiagnostics request:", payload);
     (async () => {
       const logs = this._logList;
@@ -474,12 +508,11 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
 
     return {
       fileName: "diagnostics.zip",
-      fileSize: 1024,
-      status: "Accepted",
     };
   }
 
-  private handleTriggerMessage(payload: OCPPTriggerMessageRequest): OCPPTriggerMessageResponse {
+  private handleTriggerMessage(payload: TriggerMessageRequest): TriggerMessageResponse {
+    const connectorId = payload.connectorId ?? 1;
     switch (payload.requestedMessage) {
       case MessageTrigger.BootNotification:
         this.sendBootNotification();
@@ -488,7 +521,7 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
         this.sendHeartbeat();
         break;
       case MessageTrigger.StatusNotification:
-        this.sendStatusNotification(payload.connectorId, this.connectorStatus(payload.connectorId));
+        this.sendStatusNotification(connectorId, this.connectorStatus(connectorId));
         break;
       default:
         throw new Error("Unsupported message");
@@ -498,63 +531,100 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     };
   }
 
-  private handleCallRequest(id: string, action: string, payload: any): void {
-    try {
-      let responsePayload: OCPPStartTransactionResponse | OCPPStopTransactionResponse | OCPPGetDiagnosticsResponse;
-      console.log("Received action:", action, payload);
-      switch (action) {
-        case OCPPAction.REMOTE_START_TRANSACTION:
-          responsePayload = this.handleRemoteStartTransaction(payload as OCPPStartTransactionRequest);
-          break;
-        case OCPPAction.REMOTE_STOP_TRANSACTION:
-          responsePayload = this.handleRemoteStopTransaction(payload as OCPPStopTransactionRequest);
-          break;
-        case OCPPAction.GET_DIAGNOSTICS:
-          responsePayload = this.handleGetDiagnostics(payload as OCPPGetDiagnosticsRequest);
-          break;
-        case OCPPAction.TRIGGER_MESSAGE:
-          responsePayload = this.handleTriggerMessage(payload as OCPPTriggerMessageRequest);
-          break;
-        default:
-          throw new Error("Unsupported action");
-      }
 
-      const responseMessage = [OCPPMessageType.CALL_RESULT, id, responsePayload];
-      console.log("Send response:", JSON.stringify(responseMessage));
-      // WebSocket send logic goes here
-    } catch (e) {
-      const errorMessage = [OCPPMessageType.CALL_ERROR, id, "InternalError", (e as Error).message];
-      console.log("Send error:", JSON.stringify(errorMessage));
-      // WebSocket send logic goes here
+  private handleCallRequest(
+    id: string,
+    action: string,
+    payload: RemoteStartTransactionRequest | RemoteStopTransactionRequest | GetDiagnosticsRequest | OCPPTriggerMessageRequest
+  ): void {
+    let responsePayload: RemoteStopTransactionResponse | GetDiagnosticsResponse | OCPPTriggerMessageResponse;
+    console.log("Received action:", action, payload);
+    switch (action) {
+      case OCPPAction.REMOTE_START_TRANSACTION:
+        responsePayload = this.handleRemoteStartTransaction(payload as RemoteStartTransactionRequest);
+        break;
+      case OCPPAction.REMOTE_STOP_TRANSACTION:
+        responsePayload = this.handleRemoteStopTransaction(payload as RemoteStopTransactionRequest);
+        break;
+      case OCPPAction.GET_DIAGNOSTICS:
+        responsePayload = this.handleGetDiagnostics(payload as OCPPGetDiagnosticsRequest);
+        break;
+      case OCPPAction.TRIGGER_MESSAGE:
+        responsePayload = this.handleTriggerMessage(payload as OCPPTriggerMessageRequest);
+        break;
+      default:
+        throw new Error("Unsupported action");
+    }
+    const responseMessage = [OCPPMessageType.CALL_RESULT, id, responsePayload];
+    console.log("Send response:", JSON.stringify(responseMessage));
+
+  }
+
+  private handleBlockTag(): void {
+    const t = getLatestTransaction()
+    if (t) {
+      this.setTransactionID(t.connectorId, 0);
+      setTransaction(t.connectorId, null);
+      this.setAllConnectorStatus(localocpp.OCPPStatus.Faulted + " (Tag blocked)");
+    }
+    throw new Error("Tag is blocked");
+  }
+
+  private handleStartTransaction(payload: StartTransactionResponse): void {
+    this.logMsg("Received StartTransaction: " + JSON.stringify(payload));
+    if (payload.idTagInfo && payload.idTagInfo.status === "Blocked") {
+      this.handleBlockTag();
+    }
+    const t = getLatestTransaction()
+    if (t) {
+      this.setTransactionID(t.connectorId, payload.transactionId);
+      setTransaction(t.connectorId, {...t, id: payload.transactionId})
+    } else {
+      throw new Error("Transaction not found")
     }
   }
 
-  private handleCallResult(payload: any): void {
-    this.logMsg("Received CallResult: " + JSON.stringify(payload));
+  private handleStopTransaction(payload: StopTransactionResponse): void {
+    this.logMsg("Received StopTransaction: " + JSON.stringify(payload));
     if (payload.idTagInfo && payload.idTagInfo.status === "Blocked") {
-      const t = getLatestTransaction()
-      if (t) {
-        this.setTransactionID(t.connectorId, 0);
-        setTransaction(t.connectorId, null);
-        this.setAllConnectorStatus(ocpp.OCPPStatus.Faulted + " (Tag blocked)");
-      }
-      throw new Error("Tag is blocked");
+      this.handleBlockTag();
     }
-    if (payload.transactionId) {
-      const t = getLatestTransaction()
-      if (t) {
-        this.setTransactionID(t.connectorId, payload.transactionId);
-        setTransaction(t.connectorId, {...t, id: payload.transactionId})
-      } else {
-        throw new Error("Transaction not found")
-      }
+    const t = getLatestTransaction()
+    if (t) {
+      this.setTransactionID(t.connectorId, 0);
+      setTransaction(t.connectorId, null);
+      this.setAllConnectorStatus(localocpp.OCPPStatus.Available);
+    } else {
+      throw new Error("Transaction not found")
+    }
+  }
+
+  private handleCallResult(
+    payload: StartTransactionResponse | StopTransactionResponse | TriggerMessageResponse | MeterValuesResponse
+  ): void {
+    console.log("Received CallResult: " + JSON.stringify(payload));
+    if(!this._lastRequest) {
+      return;
+    }
+    switch (this._lastRequest?.action) {
+      case OCPPAction.StartTransaction:
+        this.handleStartTransaction(payload as StartTransactionResponse);
+        break;
+      case OCPPAction.StopTransaction:
+        this.handleStopTransaction(payload as StopTransactionResponse);
+        break;
+      case OCPPAction.TRIGGER_MESSAGE:
+        console.log("TriggerMessageResponse:", payload as TriggerMessageResponse);
+        break;
+      default:
+        throw new Error("Unsupported action: "+this._lastRequest?.action);
     }
   }
 
   private handleCallError(errCode: string, errMsg: string): void {
     this.logMsg("Received CallError: " + errCode + " (" + errMsg + ")");
     this.setAllConnectorStatus(
-      ocpp.OCPPStatus.Faulted,
+      localocpp.OCPPStatus.Faulted,
       "ErrorCode: " + errCode + " (" + errMsg + ")"
     );
   }
@@ -563,7 +633,7 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
     this.logMsg("Sending BootNotification");
     this.setLastAction("BootNotification");
     const id = this.generateId();
-    const bn_req = JSON.stringify([
+    const bn_req = [
       2,
       id,
       "BootNotification",
@@ -577,17 +647,13 @@ export default class OCPPChargePoint implements OCPPChargePointInterface {
         imsi: "",
         meterType: "ELM NQC-ACDC",
         meterSerialNumber: "elm.001.13.1.01",
-      },
-    ]);
-    this.wsSendData(bn_req);
+      } as BootNotificationRequest,
+    ]
+    this.wsSendData(JSON.stringify(bn_req));
   }
 
   private setLastAction(action: string): void {
     sessionStorage.setItem("LastAction", action);
-  }
-
-  private getLastAction(): string {
-    return sessionStorage.getItem("LastAction") || "";
   }
 
   private setHeartbeat(period: number): void {

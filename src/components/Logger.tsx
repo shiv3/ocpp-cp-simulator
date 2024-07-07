@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 const Logger: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
@@ -29,18 +29,16 @@ const Logger: React.FC = () => {
 
 export default Logger;
 
-type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement>
+type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement>;
 
 const AutoScrollingTextarea: React.FC<TextareaProps> = (props) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     textareaRef.current?.scrollTo({
       top: textareaRef.current.scrollHeight,
-      behavior: "smooth"
+      behavior: "smooth",
     });
   }, [props.value]);
 
-  return <textarea
-    className="w-full h-auto"
-    ref={textareaRef} {...props}/>;
-}
+  return <textarea className="w-full h-auto" ref={textareaRef} {...props} />;
+};

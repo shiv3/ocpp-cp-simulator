@@ -1,5 +1,5 @@
-import {OCPPStatus, OCPPAvailability} from './OcppTypes';
-import {Transaction} from './Transaction';
+import { OCPPStatus, OCPPAvailability } from "./OcppTypes";
+import { Transaction } from "./Transaction";
 import * as ocpp from "./OcppTypes.ts";
 
 export class Connector {
@@ -9,7 +9,9 @@ export class Connector {
   private _meterValue: number;
   private _transaction: Transaction | null;
 
-  private _transactionIDChangeCallbacks: ((transactionId: number|null) => void) | null;
+  private _transactionIDChangeCallbacks:
+    | ((transactionId: number | null) => void)
+    | null;
   private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void) | null;
 
   constructor(id: number) {
@@ -65,14 +67,16 @@ export class Connector {
     this._transaction = transaction;
   }
 
-  set transactionId(transactionId: number|null) {
+  set transactionId(transactionId: number | null) {
     if (this._transaction) {
       this._transaction.id = transactionId;
       this.triggerTransactionIDChangeCallback(transactionId);
     }
   }
 
-  public setTransactionIDChangeCallbacks(callback: (transactionId: number|null) => void) {
+  public setTransactionIDChangeCallbacks(
+    callback: (transactionId: number | null) => void
+  ) {
     this._transactionIDChangeCallbacks = callback;
   }
 
@@ -80,7 +84,9 @@ export class Connector {
     this._statusChangeCallbacks = callback;
   }
 
-  public triggerTransactionIDChangeCallback(transactionId: number|null): void {
+  public triggerTransactionIDChangeCallback(
+    transactionId: number | null
+  ): void {
     if (this._transactionIDChangeCallbacks) {
       this._transactionIDChangeCallbacks(transactionId);
     }

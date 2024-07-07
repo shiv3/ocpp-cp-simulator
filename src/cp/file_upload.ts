@@ -1,4 +1,4 @@
-export const UploadFile = async (url :string,file: File) => {
+export const UploadFile = async (url: string, file: File) => {
   const formData = new FormData();
   formData.append("file", file);
   const response = await fetch(url, {
@@ -6,5 +6,4 @@ export const UploadFile = async (url :string,file: File) => {
     body: formData,
   });
   return response;
-}
-
+};

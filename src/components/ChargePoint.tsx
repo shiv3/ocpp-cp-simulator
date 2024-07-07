@@ -8,6 +8,7 @@ import * as ocpp from "../cp/ocpp_constants";
 const ChargePoint: React.FC = () => {
   const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
   const [cp, setCp] = useState<OCPPChargePoint2 | null>(null);
+  const [cpError, setCpError] = useState<string>("");
 
   const search = useLocation().search;
   const query = new URLSearchParams(search);
@@ -23,9 +24,10 @@ const ChargePoint: React.FC = () => {
     localStorage.setItem("CPID", cpID);
     localStorage.setItem("TAG", tagID);
 
-    const newCp = new OCPPChargePoint2(cpID,connectorNumber, wsURL);
+    const newCp = new OCPPChargePoint2(cpID, connectorNumber, wsURL);
     newCp.statusChangeCallback = statusChangeCb;
     newCp.loggingCallback = logMsg;
+    newCp.errorCallback = setCpError;
     setCp(newCp);
   }, []);
 
@@ -42,7 +44,7 @@ const ChargePoint: React.FC = () => {
     <div className="bg-white shadow-md rounded px-2 pt-2 pb-1 h-screen">
       <SettingsView/>
       <div className="flex flex-col md:flex-row">
-        <ChargePointControls cp={cp} cpStatus={cpStatus}/>
+        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError}/>
         <div className="flex-1">
           <AuthView cp={cp} cpStatus={cpStatus}/>
           <div className="flex flex-col md:flex-row mt-4">
@@ -140,9 +142,10 @@ const AuthView: React.FC<AuthViewProps> = ({cp, cpStatus}) => {
 interface ChargePointControlsProps {
   cp: OCPPChargePoint2 | null;
   cpStatus: string;
+  cpError: string;
 }
 
-const ChargePointControls: React.FC<ChargePointControlsProps> = ({cp, cpStatus}) => {
+const ChargePointControls: React.FC<ChargePointControlsProps> = ({cp, cpStatus, cpError}) => {
   const [isHeartbeatEnabled, setIsHeartbeatEnabled] = useState<boolean>(false);
 
   const handleConnect = () => {
@@ -176,6 +179,13 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({cp, cpStatus})
     <div className="bg-gray-100 rounded p-4 mr-4">
       <div className="bg-gray-100 rounded p-4 mr-4">
         <CPStatus status={cpStatus}/>
+      </div>
+      <div>
+        {(cpError !== "") && (
+          <div className="bg-red-500 text-white p-2 rounded mb-2">
+            {cpError}
+          </div>
+        )}
       </div>
       <button
         onClick={handleConnect}

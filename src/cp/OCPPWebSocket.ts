@@ -23,7 +23,7 @@ export class OCPPWebSocket {
 
   public connect(
     onopen: (() => void) | null = null,
-    onclose: ((msg: MessageEvent,ev: CloseEvent) => void) | null = null
+    onclose: ((ev: CloseEvent) => void) | null = null
   ): void {
     this._ws = new WebSocket(`${this._url}${this._chargePointId}`, ['ocpp1.6', 'ocpp1.5']);
     this._ws.onopen = () => {
@@ -34,9 +34,9 @@ export class OCPPWebSocket {
     }
     this._ws.onmessage = this.handleMessage.bind(this);
     this._ws.onerror = this.handleError.bind(this);
-    this._ws.onclose = (msg: MessageEvent,ev: CloseEvent) => {
+    this._ws.onclose = (ev: CloseEvent) => {
       if (onclose) {
-        onclose(msg,ev);
+        onclose(ev);
       }
       this.handleClose.bind(this);
     }

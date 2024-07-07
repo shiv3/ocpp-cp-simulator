@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from "react";
-import {ChargePoint as OCPPChargePoint2} from "../cp/ChargePoint";
+import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint";
 import Connector from "./Connector.tsx";
 import {useLocation} from "react-router-dom";
 import Logger from "./Logger.tsx";
@@ -7,7 +7,7 @@ import * as ocpp from "../cp/ocpp_constants";
 
 const ChargePoint: React.FC = () => {
   const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
-  const [cp, setCp] = useState<OCPPChargePoint2 | null>(null);
+  const [cp, setCp] = useState<OCPPChargePoint | null>(null);
   const [cpError, setCpError] = useState<string>("");
 
   const search = useLocation().search;
@@ -24,7 +24,7 @@ const ChargePoint: React.FC = () => {
     localStorage.setItem("CPID", cpID);
     localStorage.setItem("TAG", tagID);
 
-    const newCp = new OCPPChargePoint2(cpID, connectorNumber, wsURL);
+    const newCp = new OCPPChargePoint(cpID, connectorNumber, wsURL);
     newCp.statusChangeCallback = statusChangeCb;
     newCp.loggingCallback = logMsg;
     newCp.errorCallback = setCpError;
@@ -140,7 +140,7 @@ const AuthView: React.FC<AuthViewProps> = ({cp, cpStatus}) => {
 }
 
 interface ChargePointControlsProps {
-  cp: OCPPChargePoint2 | null;
+  cp: OCPPChargePoint | null;
   cpStatus: string;
   cpError: string;
 }
@@ -183,7 +183,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({cp, cpStatus, 
       <div>
         {(cpError !== "") && (
           <div className="bg-red-500 text-white p-2 rounded mb-2">
-            {cpError}
+            Error: {cpError}
           </div>
         )}
       </div>

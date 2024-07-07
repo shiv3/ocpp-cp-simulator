@@ -1,6 +1,6 @@
 import React, {useState, useEffect} from "react";
 import {ChargePoint} from "../cp/ChargePoint.ts";
-import * as ocpp from "../cp/ocpp_constants";
+import * as ocpp from "../cp/OcppTypes";
 
 interface ConnectorProps {
   id: number;
@@ -9,8 +9,8 @@ interface ConnectorProps {
 
 const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
   const [cpTransactionID, setCpTransactionID] = useState<number | null>(0);
-  const [connectorStatus, setConnectorStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
-  const [availability, setAvailability] = useState<string>(ocpp.AVAILABITY_OPERATIVE);
+  const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(ocpp.OCPPStatus.Unavailable);
+  const [availability, setAvailability] = useState<string>(ocpp.OCPPAvailability.Operative);
   const [meterValue, setMeterValue] = useState<number>(0);
   const [idTag,] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
 
@@ -78,7 +78,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
             id={`STATUS_CON${connector_id}`}
             className="bg-white border border-gray-400 rounded px-4 py-2"
             value={connectorStatus}
-            onChange={(e) => setConnectorStatus(e.target.value)}
+            onChange={(e) => setConnectorStatus(e.target.value as ocpp.OCPPStatus)}
             style={{maxWidth: "16ch", marginRight: "1ch"}}
           >
             {
@@ -183,7 +183,7 @@ const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
         return "text-red-500";
       case ocpp.OCPPStatus.Available:
         return "text-yellow-500";
-      case ocpp.OCPPStatus.Authorized:
+      case ocpp.OCPPStatus.Preparing:
         return "text-blue-500";
       case ocpp.OCPPStatus.Charging:
         return "text-purple-500";
@@ -202,9 +202,9 @@ const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
 const ConnectorAvailability: React.FC<{ availability: string }> = ({availability}) => {
   const availabilityColor = (a: string) => {
     switch (a) {
-      case ocpp.AVAILABITY_OPERATIVE:
+      case ocpp.OCPPAvailability.Operative:
         return "text-green-500";
-      case ocpp.AVAILABITY_INOPERATIVE:
+      case ocpp.OCPPAvailability.Inoperative:
         return "text-red-500";
       default:
         return "text-black";

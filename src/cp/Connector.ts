@@ -1,22 +1,26 @@
-import {OCPPStatus, AVAILABITY_OPERATIVE, AVAILABITY_INOPERATIVE} from './ocpp_constants';
+import {OCPPStatus, OCPPAvailability} from './OcppTypes';
 import {Transaction} from './Transaction';
+import * as ocpp from "./OcppTypes.ts";
 
 export class Connector {
   private _id: number;
   private _status: string;
-  private _availability: "Inoperative" | "Operative";
+  private _availability: OCPPAvailability;
   private _meterValue: number;
   private _transaction: Transaction | null;
 
-  private _transactionIDChangeCallbacks: (transactionId: number|null) => void | null;
-  private _statusChangeCallbacks: (status: string) => void | null;
+  private _transactionIDChangeCallbacks: ((transactionId: number|null) => void) | null;
+  private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void) | null;
 
   constructor(id: number) {
     this._id = id;
     this._status = OCPPStatus.Available;
-    this._availability = AVAILABITY_OPERATIVE;
+    this._availability = OCPPAvailability.Operative;
     this._meterValue = 0;
     this._transaction = null;
+
+    this._transactionIDChangeCallbacks = null;
+    this._statusChangeCallbacks = null;
   }
 
   get id(): number {
@@ -32,7 +36,7 @@ export class Connector {
     return this._status;
   }
 
-  set status(newStatus: string) {
+  set status(newStatus: ocpp.OCPPStatus) {
     this._status = newStatus;
     this.triggerStatusChangeCallback(newStatus);
   }
@@ -41,7 +45,7 @@ export class Connector {
     return this._availability;
   }
 
-  set availability(newAvailability: "Inoperative" | "Operative") {
+  set availability(newAvailability: OCPPAvailability) {
     this._availability = newAvailability;
   }
 
@@ -72,7 +76,7 @@ export class Connector {
     this._transactionIDChangeCallbacks = callback;
   }
 
-  public setStatusChangeCallbacks(callback: (status: string) => void) {
+  public setStatusChangeCallbacks(callback: (status: ocpp.OCPPStatus) => void) {
     this._statusChangeCallbacks = callback;
   }
 
@@ -82,7 +86,7 @@ export class Connector {
     }
   }
 
-  public triggerStatusChangeCallback(status: string): void {
+  public triggerStatusChangeCallback(status: ocpp.OCPPStatus): void {
     if (this._statusChangeCallbacks) {
       this._statusChangeCallbacks(status);
     }

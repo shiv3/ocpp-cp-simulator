@@ -1,8 +1,10 @@
 import {Logger} from './Logger';
-import {OCPPAction, OCPPMessageType} from './ocpp_constants';
+import {OCPPAction, OCPPMessageType} from './OcppTypes';
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 
-type MessageHandler = (messageType: OCPPMessageType, messageId: string, action: OCPPAction, payload: any) => void;
+
+export type OcppMessagePayload = any;
+type MessageHandler = (messageType: OCPPMessageType, messageId: string, action: OCPPAction, payload: OcppMessagePayload) => void;
 
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
@@ -10,7 +12,7 @@ export class OCPPWebSocket {
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
-  private _pingInterval: NodeJS.Timeout | null = null;
+  private _pingInterval: number | null = null;
   private _reconnectAttempts: number = 0;
   private _maxReconnectAttempts: number = 5;
   private _reconnectDelay: number = 5000; // 5 seconds
@@ -79,10 +81,10 @@ export class OCPPWebSocket {
     // this.startPingInterval();
   }
 
-  private handleMessage(data: WebSocket.Data): void {
-    this._logger.log(`Received: ${JSON.stringify(data)}`);
+  private handleMessage(ev: MessageEvent): void {
+    this._logger.log(`Received: ${JSON.stringify(ev)}`);
     try {
-      const messageArray = JSON.parse(data.data.toString());
+      const messageArray = JSON.parse(ev.data.toString());
       const len = messageArray.length
       if (!(!Array.isArray(messageArray) || len !== 3 || len !== 4)) {
         this._logger.error('Invalid message format: ' + messageArray);

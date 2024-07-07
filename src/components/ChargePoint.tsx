@@ -3,7 +3,7 @@ import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint";
 import Connector from "./Connector.tsx";
 import {useLocation} from "react-router-dom";
 import Logger from "./Logger.tsx";
-import * as ocpp from "../cp/ocpp_constants";
+import * as ocpp from "../cp/OcppTypes";
 
 const ChargePoint: React.FC = () => {
   const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
@@ -31,7 +31,7 @@ const ChargePoint: React.FC = () => {
     setCp(newCp);
   }, []);
 
-  const statusChangeCb = (s: string, msg?: string) => {
+  const statusChangeCb = (s: string) => {
     setCpStatus(s);
   };
 

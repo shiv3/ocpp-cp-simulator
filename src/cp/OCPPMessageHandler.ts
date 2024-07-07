@@ -7,7 +7,7 @@ import {
   OCPPMessageType,
   OCPPAction,
   OCPPStatus,
-} from './ocpp_constants';
+} from './OcppTypes';
 
 import {
   AuthorizeRequest,
@@ -37,12 +37,14 @@ import {
   GetDiagnosticsResponse,
   TriggerMessageResponse
 } from '@voltbras/ts-ocpp/dist/messages/json/response';
+import {OcppMessagePayload} from './OCPPWebSocket';
+
 
 interface OCPPRequest {
   type: OCPPMessageType;
   action: OCPPAction;
   id: string;
-  payload: any;
+  payload: OcppMessagePayload;
   connectorId?: number | null;
 }
 
@@ -105,7 +107,7 @@ export class OCPPMessageHandler {
       transactionId: transaction.id!,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
-      timestamp: transaction.stopTime?.toISOString()
+      timestamp: transaction.stopTime!.toISOString()
     };
     this.sendRequest(OCPPMessageType.CALL, OCPPAction.StopTransaction, messageId, payload, connectorId);
   }
@@ -120,6 +122,12 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: HeartbeatRequest = {};
     this.sendRequest(OCPPMessageType.CALL, OCPPAction.Heartbeat, messageId, payload);
+  }
+
+  public sendReset(): void {
+    const messageId = this.generateMessageId();
+    const payload: ResetRequest = {type: "Hard"};
+    this.sendRequest(OCPPMessageType.CALL, OCPPAction.Reset, messageId, payload);
   }
 
   public sendMeterValue(connectorId: number, meterValue: number): void {
@@ -144,7 +152,7 @@ export class OCPPMessageHandler {
     this.sendRequest(OCPPMessageType.CALL, OCPPAction.StatusNotification, messageId, payload);
   }
 
-  private sendRequest(type: OCPPMessageType, action: OCPPAction, id: string, payload: any, connectorId?: number): void {
+  private sendRequest(type: OCPPMessageType, action: OCPPAction, id: string, payload: OcppMessagePayload, connectorId?: number): void {
     this._requests.add({type, action, id, payload, connectorId});
     this._webSocket.send(type, id, action, payload);
   }
@@ -153,7 +161,7 @@ export class OCPPMessageHandler {
     messageType: OCPPMessageType,
     messageId: string,
     action: OCPPAction,
-    payload: any
+    payload: OcppMessagePayload
   ): void {
     this._logger.log(`Handling incoming message: ${messageType}, ${messageId}, ${action}`);
     switch (messageType) {
@@ -243,7 +251,7 @@ export class OCPPMessageHandler {
     this._requests.remove(messageId);
   }
 
-  private handleCallError(messageId: string, error: any): void {
+  private handleCallError(messageId: string, error: OcppMessagePayload): void {
     this._logger.log(`Received error for message ${messageId}: ${JSON.stringify(error)}`);
     // Handle the error appropriately
     this._requests.remove(messageId);
@@ -272,7 +280,7 @@ export class OCPPMessageHandler {
         throw new Error("Tag ID not found");
       }
       this._chargePoint.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE)
-      this._chargePoint.stopTransaction(tagId);
+      this._chargePoint.stopTransaction(tagId,connector.id);
       return {status: "Accepted"};
     } else {
       return {status: "Rejected"};
@@ -280,17 +288,18 @@ export class OCPPMessageHandler {
   }
 
   private handleReset(payload: ResetRequest): ResetResponse {
-    // Implement reset logic here
+    this._logger.log(`Reset request received: ${payload.type}`);
+    this._chargePoint.sendReset();
     return {status: "Accepted"};
   }
 
   private handleGetDiagnostics(payload: GetDiagnosticsRequest): GetDiagnosticsResponse {
-    // Implement get diagnostics logic here
-    return {fileName: "diagnostics.zip"};
+    this._logger.log(`Get diagnostics request received: ${payload.location}`); // e.g. `FTP
+    return {fileName: "diagnostics.txt"};
   }
 
   private handleTriggerMessage(payload: TriggerMessageRequest): TriggerMessageResponse {
-    // Implement trigger message logic here
+    this._logger.log(`Trigger message request received: ${payload.requestedMessage}`); // e.g. `DiagnosticsStatusNotification`
     return {status: "Accepted"};
   }
 
@@ -327,6 +336,7 @@ export class OCPPMessageHandler {
   }
 
   private handleStopTransactionResponse(connectorId: number, payload: StopTransactionResponse): void {
+    this._logger.log(`Transaction stopped successfully: ${JSON.stringify(payload)}`);
     const connector = this._chargePoint.getConnector(connectorId);
     if (connector) {
       connector.transaction = null;
@@ -340,14 +350,14 @@ export class OCPPMessageHandler {
   }
 
   private handleMeterValuesResponse(payload: MeterValuesResponse): void {
-    this._logger.log(`Meter values sent successfully`);
+    this._logger.log(`Meter values sent successfully: ${payload}`);
   }
 
   private handleStatusNotificationResponse(payload: StatusNotificationResponse): void {
-    this._logger.log(`Status notification sent successfully`);
+    this._logger.log(`Status notification sent successfully: ${payload}`);
   }
 
-  private sendCallResult(messageId: string, payload: any): void {
+  private sendCallResult(messageId: string, payload: OcppMessagePayload): void {
     this._webSocket.send(OCPPMessageType.CALL_RESULT, messageId, "" as OCPPAction, payload);
   }
 

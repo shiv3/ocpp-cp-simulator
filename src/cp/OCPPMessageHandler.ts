@@ -5,34 +5,9 @@ import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
 import {OCPPMessageType, OCPPAction, OCPPStatus} from "./OcppTypes";
 
-import {
-  AuthorizeRequest,
-  HeartbeatRequest,
-  MeterValuesRequest,
-  StartTransactionRequest,
-  StatusNotificationRequest,
-  StopTransactionRequest,
-  RemoteStartTransactionRequest,
-  RemoteStopTransactionRequest,
-  ResetRequest,
-  GetDiagnosticsRequest,
-  TriggerMessageRequest,
-} from "@voltbras/ts-ocpp/dist/messages/json/request";
+import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
+import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
-import {
-  AuthorizeResponse,
-  BootNotificationResponse,
-  HeartbeatResponse,
-  MeterValuesResponse,
-  StartTransactionResponse,
-  StatusNotificationResponse,
-  StopTransactionResponse,
-  RemoteStartTransactionResponse,
-  RemoteStopTransactionResponse,
-  ResetResponse,
-  GetDiagnosticsResponse,
-  TriggerMessageResponse,
-} from "@voltbras/ts-ocpp/dist/messages/json/response";
 import {OcppMessagePayload} from "./OCPPWebSocket";
 import {UploadFile} from "./file_upload.ts";
 
@@ -86,7 +61,7 @@ export class OCPPMessageHandler {
 
   public authorize(tagId: string): void {
     const messageId = this.generateMessageId();
-    const payload: AuthorizeRequest = {idTag: tagId};
+    const payload: request.AuthorizeRequest = {idTag: tagId};
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.Authorize,
@@ -97,7 +72,7 @@ export class OCPPMessageHandler {
 
   public startTransaction(transaction: Transaction, connectorId: number): void {
     const messageId = this.generateMessageId();
-    const payload: StartTransactionRequest = {
+    const payload: request.StartTransactionRequest = {
       connectorId: connectorId,
       idTag: transaction.tagId,
       meterStart: transaction.meterStart,
@@ -114,7 +89,7 @@ export class OCPPMessageHandler {
 
   public stopTransaction(transaction: Transaction, connectorId: number): void {
     const messageId = this.generateMessageId();
-    const payload: StopTransactionRequest = {
+    const payload: request.StopTransactionRequest = {
       transactionId: transaction.id!,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
@@ -146,7 +121,7 @@ export class OCPPMessageHandler {
 
   public sendHeartbeat(): void {
     const messageId = this.generateMessageId();
-    const payload: HeartbeatRequest = {};
+    const payload: request.HeartbeatRequest = {};
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.Heartbeat,
@@ -157,7 +132,7 @@ export class OCPPMessageHandler {
 
   public sendReset(): void {
     const messageId = this.generateMessageId();
-    const payload: ResetRequest = {type: "Hard"};
+    const payload: request.ResetRequest = {type: "Hard"};
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.Reset,
@@ -168,7 +143,7 @@ export class OCPPMessageHandler {
 
   public sendMeterValue(connectorId: number, meterValue: number): void {
     const messageId = this.generateMessageId();
-    const payload: MeterValuesRequest = {
+    const payload: request.MeterValuesRequest = {
       connectorId: connectorId,
       meterValue: [
         {
@@ -187,7 +162,7 @@ export class OCPPMessageHandler {
 
   public sendStatusNotification(connectorId: number, status: OCPPStatus): void {
     const messageId = this.generateMessageId();
-    const payload: StatusNotificationRequest = {
+    const payload: request.StatusNotificationRequest = {
       connectorId: connectorId,
       errorCode: "NoError",
       status: status,
@@ -239,32 +214,32 @@ export class OCPPMessageHandler {
     messageId: string,
     action: OCPPAction,
     payload:
-      | RemoteStartTransactionRequest
-      | RemoteStopTransactionRequest
-      | ResetRequest
-      | GetDiagnosticsRequest
-      | TriggerMessageRequest
+      | request.RemoteStartTransactionRequest
+      | request.RemoteStopTransactionRequest
+      | request.ResetRequest
+      | request.GetDiagnosticsRequest
+      | request.TriggerMessageRequest
   ): void {
     let response;
     switch (action) {
       case OCPPAction.RemoteStartTransaction:
         response = this.handleRemoteStartTransaction(
-          payload as RemoteStartTransactionRequest
+          payload as request.RemoteStartTransactionRequest
         );
         break;
       case OCPPAction.RemoteStopTransaction:
         response = this.handleRemoteStopTransaction(
-          payload as RemoteStopTransactionRequest
+          payload as request.RemoteStopTransactionRequest
         );
         break;
       case OCPPAction.Reset:
-        response = this.handleReset(payload as ResetRequest);
+        response = this.handleReset(payload as request.ResetRequest);
         break;
       case OCPPAction.GetDiagnostics:
-        response = this.handleGetDiagnostics(payload as GetDiagnosticsRequest);
+        response = this.handleGetDiagnostics(payload as request.GetDiagnosticsRequest);
         break;
       case OCPPAction.TriggerMessage:
-        response = this.handleTriggerMessage(payload as TriggerMessageRequest);
+        response = this.handleTriggerMessage(payload as request.TriggerMessageRequest);
         break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
@@ -281,13 +256,13 @@ export class OCPPMessageHandler {
   private handleCallResult(
     messageId: string,
     payload:
-      | AuthorizeResponse
-      | BootNotificationResponse
-      | HeartbeatResponse
-      | MeterValuesResponse
-      | StartTransactionResponse
-      | StatusNotificationResponse
-      | StopTransactionResponse
+      | response.AuthorizeResponse
+      | response.BootNotificationResponse
+      | response.HeartbeatResponse
+      | response.MeterValuesResponse
+      | response.StartTransactionResponse
+      | response.StatusNotificationResponse
+      | response.StopTransactionResponse
   ): void {
     if (!this._requests || !this._requests.get(messageId)) {
       this._logger.log(`Received unexpected CallResult: ${messageId}`);
@@ -298,33 +273,33 @@ export class OCPPMessageHandler {
     switch (action) {
       case OCPPAction.BootNotification:
         this.handleBootNotificationResponse(
-          payload as BootNotificationResponse
+          payload as response.BootNotificationResponse
         );
         break;
       case OCPPAction.Authorize:
-        this.handleAuthorizeResponse(payload as AuthorizeResponse);
+        this.handleAuthorizeResponse(payload as response.AuthorizeResponse);
         break;
       case OCPPAction.StartTransaction:
         this.handleStartTransactionResponse(
           request?.connectorId || 1,
-          payload as StartTransactionResponse
+          payload as response.StartTransactionResponse
         );
         break;
       case OCPPAction.StopTransaction:
         this.handleStopTransactionResponse(
           request?.connectorId || 1,
-          payload as StopTransactionResponse
+          payload as response.StopTransactionResponse
         );
         break;
       case OCPPAction.Heartbeat:
-        this.handleHeartbeatResponse(payload as HeartbeatResponse);
+        this.handleHeartbeatResponse(payload as response.HeartbeatResponse);
         break;
       case OCPPAction.MeterValues:
-        this.handleMeterValuesResponse(payload as MeterValuesResponse);
+        this.handleMeterValuesResponse(payload as response.MeterValuesResponse);
         break;
       case OCPPAction.StatusNotification:
         this.handleStatusNotificationResponse(
-          payload as StatusNotificationResponse
+          payload as response.StatusNotificationResponse
         );
         break;
       default:
@@ -343,8 +318,8 @@ export class OCPPMessageHandler {
   }
 
   private handleRemoteStartTransaction(
-    payload: RemoteStartTransactionRequest
-  ): RemoteStartTransactionResponse {
+    payload: request.RemoteStartTransactionRequest
+  ): response.RemoteStartTransactionResponse {
     const {idTag, connectorId} = payload;
     const connector = this._chargePoint.getConnector(connectorId || 1);
 
@@ -357,8 +332,8 @@ export class OCPPMessageHandler {
   }
 
   private handleRemoteStopTransaction(
-    payload: RemoteStopTransactionRequest
-  ): RemoteStopTransactionResponse {
+    payload: request.RemoteStopTransactionRequest
+  ): response.RemoteStopTransactionResponse {
     const {transactionId} = payload;
     const connector = Array.from(this._chargePoint.connectors.values()).find(
       (c) => c.transaction && c.transaction.id === transactionId
@@ -380,15 +355,15 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleReset(payload: ResetRequest): ResetResponse {
+  private handleReset(payload: request.ResetRequest): response.ResetResponse {
     this._logger.log(`Reset request received: ${payload.type}`);
     this._chargePoint.sendReset();
     return {status: "Accepted"};
   }
 
   private handleGetDiagnostics(
-    payload: GetDiagnosticsRequest
-  ): GetDiagnosticsResponse {
+    payload: request.GetDiagnosticsRequest
+  ): response.GetDiagnosticsResponse {
     this._logger.log(`Get diagnostics request received: ${payload.location}`); // e.g. `FTP
     const logs = this._logger.getLogs().join("\n");
     const blob = new Blob([logs], {type: "text/plain"});
@@ -398,8 +373,8 @@ export class OCPPMessageHandler {
   }
 
   private handleTriggerMessage(
-    payload: TriggerMessageRequest
-  ): TriggerMessageResponse {
+    payload: request.TriggerMessageRequest
+  ): response.TriggerMessageResponse {
     this._logger.log(
       `Trigger message request received: ${payload.requestedMessage}`
     ); // e.g. `DiagnosticsStatusNotification`
@@ -407,7 +382,7 @@ export class OCPPMessageHandler {
   }
 
   private handleBootNotificationResponse(
-    payload: BootNotificationResponse
+    payload: response.BootNotificationResponse
   ): void {
     this._logger.log("Boot notification successful");
     if (payload.status === "Accepted") {
@@ -418,7 +393,7 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleAuthorizeResponse(payload: AuthorizeResponse): void {
+  private handleAuthorizeResponse(payload: response.AuthorizeResponse): void {
     const {idTagInfo} = payload;
     if (idTagInfo.status === "Accepted") {
       this._logger.log("Authorization successful");
@@ -429,7 +404,7 @@ export class OCPPMessageHandler {
 
   private handleStartTransactionResponse(
     connectorId: number,
-    payload: StartTransactionResponse
+    payload: response.StartTransactionResponse
   ): void {
     const {transactionId, idTagInfo} = payload;
     const connector = this._chargePoint.getConnector(connectorId);
@@ -448,7 +423,7 @@ export class OCPPMessageHandler {
 
   private handleStopTransactionResponse(
     connectorId: number,
-    payload: StopTransactionResponse
+    payload: response.StopTransactionResponse
   ): void {
     this._logger.log(
       `Transaction stopped successfully: ${JSON.stringify(payload)}`
@@ -461,16 +436,16 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleHeartbeatResponse(payload: HeartbeatResponse): void {
+  private handleHeartbeatResponse(payload: response.HeartbeatResponse): void {
     this._logger.log(`Received heartbeat response: ${payload.currentTime}`);
   }
 
-  private handleMeterValuesResponse(payload: MeterValuesResponse): void {
+  private handleMeterValuesResponse(payload: response.MeterValuesResponse): void {
     this._logger.log(`Meter values sent successfully: ${payload}`);
   }
 
   private handleStatusNotificationResponse(
-    payload: StatusNotificationResponse
+    payload: response.StatusNotificationResponse
   ): void {
     this._logger.log(`Status notification sent successfully: ${payload}`);
   }

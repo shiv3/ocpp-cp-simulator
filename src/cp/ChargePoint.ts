@@ -46,6 +46,18 @@ export class ChargePoint {
     return this._id;
   }
 
+  get status(): OCPPStatus {
+    return this._status;
+  }
+
+  get connectorNumber(): number {
+    return this._connectors.size;
+  }
+
+  get wsUrl(): string {
+    return this._webSocket.url;
+  }
+
   get error(): string {
     return this._error;
   }
@@ -231,11 +243,6 @@ export class ChargePoint {
     if (connector) {
       connector.status = newStatus;
       this._messageHandler.sendStatusNotification(connectorId, newStatus);
-      const callback =
-        this.connectors.get(connectorId)?.triggerStatusChangeCallback;
-      if (callback) {
-        callback(newStatus);
-      }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
@@ -266,11 +273,6 @@ export class ChargePoint {
     const connector = this.getConnector(connectorId);
     if (connector) {
       connector.transactionId = transactionId;
-      const callback =
-        this.connectors.get(connectorId)?.triggerTransactionIDChangeCallback;
-      if (callback) {
-        callback(transactionId);
-      }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }

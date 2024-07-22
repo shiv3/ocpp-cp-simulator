@@ -1,21 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef} from "react";
 
-const Logger: React.FC = () => {
-  const [logs, setLogs] = useState<string[]>([]);
+interface LoggerProps {
+  logs: string[];
+}
 
-  useEffect(() => {
-    // You might want to implement a more sophisticated logging system
-    // This is just a basic example
-    const oldConsoleLog = console.log;
-    console.log = (message: string) => {
-      setLogs((prevLogs) => [...prevLogs, message]);
-    };
-
-    return () => {
-      console.log = oldConsoleLog;
-    };
-  }, []);
-
+const Logger: React.FC<LoggerProps> = ({logs}) => {
   return (
     <div className="mt-2 border-0 border-blue-500 h-screen">
       <AutoScrollingTextarea

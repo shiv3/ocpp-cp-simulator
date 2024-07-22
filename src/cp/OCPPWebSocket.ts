@@ -1,8 +1,20 @@
-import { Logger } from "./Logger";
-import { OCPPAction, OCPPMessageType } from "./OcppTypes";
+import {Logger} from "./Logger";
+import {OCPPAction, OCPPMessageType} from "./OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 
-export type OcppMessagePayload = any;
+export type OcppMessagePayload =
+  | request.StartTransactionRequest
+  | request.StopTransactionRequest
+  | request.AuthorizeRequest
+  | request.HeartbeatRequest
+  | request.MeterValuesRequest
+  | request.StatusNotificationRequest
+  | request.GetDiagnosticsRequest
+  | request.TriggerMessageRequest
+  | request.ResetRequest
+  | request.RemoteStartTransactionRequest
+  | request.RemoteStopTransactionRequest
+
 type MessageHandler = (
   messageType: OCPPMessageType,
   messageId: string,
@@ -25,6 +37,10 @@ export class OCPPWebSocket {
     this._url = url;
     this._chargePointId = chargePointId;
     this._logger = logger;
+  }
+
+  get url(): string {
+    return this._url;
   }
 
   public connect(
@@ -66,16 +82,7 @@ export class OCPPWebSocket {
     messageType: OCPPMessageType,
     messageId: string,
     action: OCPPAction,
-    payload:
-      | request.StartTransactionRequest
-      | request.StopTransactionRequest
-      | request.AuthorizeRequest
-      | request.HeartbeatRequest
-      | request.MeterValuesRequest
-      | request.StatusNotificationRequest
-      | request.GetDiagnosticsRequest
-      | request.TriggerMessageRequest
-      | request.ResetRequest
+    payload: OcppMessagePayload
   ): void {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       const message = JSON.stringify([messageType, messageId, action, payload]);

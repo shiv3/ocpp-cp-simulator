@@ -9,6 +9,27 @@ import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
 import {OcppMessagePayload} from "./OCPPWebSocket";
+
+type OcppMessagePayloadCall =
+  | request.RemoteStartTransactionRequest
+  | request.RemoteStopTransactionRequest
+  | request.ResetRequest
+  | request.GetDiagnosticsRequest
+  | request.TriggerMessageRequest;
+
+
+
+type OcppMessagePayloadCallResult =
+  | response.AuthorizeResponse
+  | response.BootNotificationResponse
+  | response.HeartbeatResponse
+  | response.MeterValuesResponse
+  | response.StartTransactionResponse
+  | response.StatusNotificationResponse
+  | response.StopTransactionResponse;
+
+
+
 import {UploadFile} from "./file_upload.ts";
 
 interface OCPPRequest {
@@ -197,10 +218,10 @@ export class OCPPMessageHandler {
     );
     switch (messageType) {
       case OCPPMessageType.CALL:
-        this.handleCall(messageId, action, payload);
+        this.handleCall(messageId, action, payload as OcppMessagePayloadCall);
         break;
       case OCPPMessageType.CALL_RESULT:
-        this.handleCallResult(messageId, payload);
+        this.handleCallResult(messageId, payload as OcppMessagePayloadCallResult);
         break;
       case OCPPMessageType.CALL_ERROR:
         this.handleCallError(messageId, payload);
@@ -213,12 +234,7 @@ export class OCPPMessageHandler {
   private handleCall(
     messageId: string,
     action: OCPPAction,
-    payload:
-      | request.RemoteStartTransactionRequest
-      | request.RemoteStopTransactionRequest
-      | request.ResetRequest
-      | request.GetDiagnosticsRequest
-      | request.TriggerMessageRequest
+    payload: OcppMessagePayloadCall
   ): void {
     let response;
     switch (action) {
@@ -255,14 +271,7 @@ export class OCPPMessageHandler {
 
   private handleCallResult(
     messageId: string,
-    payload:
-      | response.AuthorizeResponse
-      | response.BootNotificationResponse
-      | response.HeartbeatResponse
-      | response.MeterValuesResponse
-      | response.StartTransactionResponse
-      | response.StatusNotificationResponse
-      | response.StopTransactionResponse
+    payload: OcppMessagePayloadCallResult
   ): void {
     if (!this._requests || !this._requests.get(messageId)) {
       this._logger.log(`Received unexpected CallResult: ${messageId}`);

@@ -1,37 +1,27 @@
-import React, { useState, useEffect } from "react";
-import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint";
+import React, {useState, useEffect} from "react";
+import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint";
 import Connector from "./Connector.tsx";
-import { useLocation } from "react-router-dom";
 import Logger from "./Logger.tsx";
 import * as ocpp from "../cp/OcppTypes";
 
-const ChargePoint: React.FC = () => {
-  const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
-  const [cp, setCp] = useState<OCPPChargePoint | null>(null);
-  const [cpError, setCpError] = useState<string>("");
+interface ChargePointProps {
+  cp : OCPPChargePoint;
+  TagID: string;
+}
 
-  const search = useLocation().search;
-  const query = new URLSearchParams(search);
+const ChargePoint: React.FC<ChargePointProps> = (props) => {
+  const [cp, setCp] = useState<OCPPChargePoint | null>(null);
+  const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
+  const [cpError, setCpError] = useState<string>("");
+  const [logs , setLogs] = useState<string[]>([]);
 
   useEffect(() => {
-    const connectorNumber = parseInt(
-      query.get("connectors") || localStorage.getItem("CONNECTORS") || "2"
-    );
-    const wsURL = query.get("wsurl") || localStorage.getItem("WSURL") || "";
-    const cpID = query.get("cpid") || localStorage.getItem("CPID") || "CP-001";
-    const tagID = query.get("tag") || localStorage.getItem("TAG") || "DEADBEEF";
-
-    localStorage.setItem("WSURL", wsURL);
-    localStorage.setItem("CONNECTORS", connectorNumber.toString());
-    localStorage.setItem("CPID", cpID);
-    localStorage.setItem("TAG", tagID);
-
-    const newCp = new OCPPChargePoint(cpID, connectorNumber, wsURL);
-    newCp.statusChangeCallback = statusChangeCb;
-    newCp.loggingCallback = logMsg;
-    newCp.errorCallback = setCpError;
-    setCp(newCp);
-  }, []);
+    console.log("ChargePointProps", props);
+    props.cp.statusChangeCallback = statusChangeCb;
+    props.cp.loggingCallback = logMsg;
+    props.cp.errorCallback = setCpError;
+    setCp(props.cp);
+  }, [props]);
 
   const statusChangeCb = (s: string) => {
     setCpStatus(s);
@@ -39,29 +29,30 @@ const ChargePoint: React.FC = () => {
 
   const logMsg = (msg: string) => {
     console.log(msg);
+    setLogs((prevLogs) => [...prevLogs, msg]);
   };
 
   return (
     <div className="bg-white shadow-md rounded px-2 pt-2 pb-1 h-screen">
-      <SettingsView />
+      <SettingsView {...props}/>
       <div className="flex flex-col md:flex-row">
-        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError} />
+        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError}/>
         <div className="flex-1">
-          <AuthView cp={cp} cpStatus={cpStatus} />
+          <AuthView cp={cp} cpStatus={cpStatus} tagID={props.TagID}/>
           <div className="flex flex-col md:flex-row mt-4">
             {cp?.connectors &&
               Array.from(Array(cp.connectors.size).keys()).map((i) => (
-                <Connector key={i + 1} id={i + 1} cp={cp} />
+                <Connector key={i + 1} id={i + 1} cp={cp}/>
               ))}
           </div>
         </div>
       </div>
-      <Logger />
+      <Logger logs={logs}/>
     </div>
   );
 };
 
-const CPStatus: React.FC<{ status: string }> = ({ status }) => {
+const CPStatus: React.FC<{ status: string }> = ({status}) => {
   const statusColor = (s: string) => {
     switch (s) {
       case ocpp.OCPPStatus.Unavailable:
@@ -87,19 +78,15 @@ const CPStatus: React.FC<{ status: string }> = ({ status }) => {
 interface AuthViewProps {
   cp: OCPPChargePoint | null;
   cpStatus: string;
+  tagID: string;
 }
 
-const AuthView: React.FC<AuthViewProps> = ({ cp, cpStatus }) => {
-  const [tagID, setTagID] = useState<string>("");
-
-  useEffect(() => {
-    setTagID(localStorage.getItem("TAG") || "");
-  }, []);
+const AuthView: React.FC<AuthViewProps> = (props) => {
+  const [tagID, setTagID] = useState<string>(props.tagID);
 
   const handleAuthorize = () => {
-    if (cp) {
-      const tagId = localStorage.getItem("TAG") || "DEADBEEF";
-      cp.authorize(tagId);
+    if (props.cp) {
+      props.cp.authorize(tagID);
     }
   };
 
@@ -120,7 +107,7 @@ const AuthView: React.FC<AuthViewProps> = ({ cp, cpStatus }) => {
           value={tagID}
           onChange={(e) => setTagID(e.target.value)}
           placeholder="DEADBEEF"
-          style={{ maxWidth: "20ch" }}
+          style={{maxWidth: "20ch"}}
         />
         <p className="text-gray-600 text-xs italic mt-1">
           The ID of the simulated RFID tag
@@ -128,10 +115,10 @@ const AuthView: React.FC<AuthViewProps> = ({ cp, cpStatus }) => {
       </div>
       <button
         onClick={handleAuthorize}
-        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded w-full
+        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded
               disabled:bg-green-300
               "
-        disabled={cpStatus !== ocpp.OCPPStatus.Available}
+        disabled={props.cpStatus !== ocpp.OCPPStatus.Available}
       >
         Authorize
       </button>
@@ -146,10 +133,10 @@ interface ChargePointControlsProps {
 }
 
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
-  cp,
-  cpStatus,
-  cpError,
-}) => {
+                                                                   cp,
+                                                                   cpStatus,
+                                                                   cpError,
+                                                                 }) => {
   const [isHeartbeatEnabled, setIsHeartbeatEnabled] = useState<boolean>(false);
 
   const handleConnect = () => {
@@ -182,7 +169,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   return (
     <div className="bg-gray-100 rounded p-4 mr-4">
       <div className="bg-gray-100 rounded p-4 mr-4">
-        <CPStatus status={cpStatus} />
+        <CPStatus status={cpStatus}/>
       </div>
       <div>
         {cpError !== "" && (
@@ -236,22 +223,13 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   );
 };
 
-const SettingsView: React.FC = () => {
-  const [wsURL] = useState<string>(localStorage.getItem("WSURL") || "");
-  const [connectorNumber] = useState<number>(
-    parseInt(localStorage.getItem("CONNECTORS") || "2")
-  );
-  const [cpID] = useState<string>(localStorage.getItem("CPID") || "CP-001");
-  const [ocppVersion] = useState<string>(
-    localStorage.getItem("OCPP") || "OCPP-1.6J"
-  );
+const SettingsView: React.FC<ChargePointProps> = (props) => {
   return (
     <div className="mb-1 bg-gray-100 rounded p-2">
       <p className="text-lg font-semibold">settings</p>
-      <li>WSURL: {wsURL}</li>
-      <li>CONNECTORS: {connectorNumber}</li>
-      <li>CPID: {cpID}</li>
-      <li>OCPP: {ocppVersion}</li>
+      <li>CPID: {props.cp.id}</li>
+      <li>CONNECTORS: {props.cp.connectorNumber}</li>
+      <li>WSURL: {props.cp.wsUrl}</li>
     </div>
   );
 };

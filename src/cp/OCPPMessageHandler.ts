@@ -1,4 +1,3 @@
-import {v4 as uuidv4} from "uuid";
 import {OCPPWebSocket} from "./OCPPWebSocket";
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
@@ -486,6 +485,6 @@ export class OCPPMessageHandler {
   }
 
   private generateMessageId(): string {
-    return uuidv4();
+    return crypto.randomUUID()
   }
 }

@@ -1,51 +1,26 @@
-import {useLocation} from "react-router-dom";
 import React, {useEffect, useState} from "react";
 import ChargePoint from "./ChargePoint.tsx";
 import {Tabs} from "flowbite-react";
 import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint.ts";
 // import {HiStatusOnline, HiStatusOffline} from "react-icons/hi";
+import {useAtom} from 'jotai'
+import {configAtom} from "../store/store.ts";
 
-
-interface ExperimentalChargePoint {
-  ChargePointID: string;
-  ConnectorNumber: number;
-}
-
-interface Experimental {
-  ChargePointIDs: ExperimentalChargePoint[];
-  // TagIDs: string[];
-}
 
 const TopPage: React.FC = () => {
   const [cps, setCps] = useState<OCPPChargePoint[]>([]);
   const [connectorNumber, setConnectorNumber] = useState<number>(2);
-  const [tagID, setTagID] = useState<string>("");
-
-
-  const search = useLocation().search;
-  const query = new URLSearchParams(search);
+  const [config] = useAtom(configAtom);
 
   useEffect(() => {
-    const cn = parseInt(query.get("connectors") || localStorage.getItem("CONNECTORS") || "2");
-    const wsurl = query.get("wsurl") || localStorage.getItem("WSURL") || "";
-    const cpID = query.get("cpid") || localStorage.getItem("CPID") || "CP-001";
-    const tagID = query.get("tag") || localStorage.getItem("TAG") || "DEADBEEF";
-    const ex = query.get("experimental") || localStorage.getItem("EXPERIMENTAL") || null;
-    const experimental = ex ? JSON.parse(atob(ex)) as Experimental : null;
+    console.log(`Connector Number: ${config?.connectorNumber} WSURL: ${config?.wsURL} CPID: ${config?.ChargePointID} TagID: ${config?.tagID}`);
 
-    console.log(`Connector Number: ${cn} WSURL: ${wsurl} CPID: ${cpID} TagID: ${tagID}`);
-    localStorage.setItem("WSURL", wsurl);
-    localStorage.setItem("CONNECTORS", cn.toString());
-    localStorage.setItem("CPID", cpID);
-    localStorage.setItem("TAG", tagID);
-
-    if (experimental === null) {
-      setConnectorNumber(parseInt(localStorage.getItem("CONNECTORS") || "2"));
-      setTagID(localStorage.getItem("TAG") || "");
-      setCps([NewChargePoint(connectorNumber, cpID, wsurl)]);
+    if (config?.Experimental === null) {
+      setConnectorNumber(config?.connectorNumber || 2);
+      setCps([NewChargePoint(connectorNumber, config.ChargePointID, config.wsURL)]);
     } else {
-      const cps = experimental?.ChargePointIDs.map((cp) =>
-        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, wsurl)
+      const cps = config?.Experimental?.ChargePointIDs.map((cp) =>
+        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.wsURL)
       )
       setCps(cps ?? []);
     }
@@ -57,11 +32,11 @@ const TopPage: React.FC = () => {
       {
         cps.length === 1 ? (
           <>
-            <ChargePoint cp={cps[0]} TagID={tagID}/>
+            <ChargePoint cp={cps[0]} TagID={config?.tagID ?? ""}/>
           </>
         ) : (
           <>
-            <ExperimentalView cps={cps} tagID={tagID}/>
+            <ExperimentalView cps={cps} tagID={config?.tagID ?? ""}/>
           </>
         )
       }

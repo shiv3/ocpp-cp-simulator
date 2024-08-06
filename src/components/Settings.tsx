@@ -1,4 +1,6 @@
 import React, {useState, useEffect} from "react";
+import {configAtom} from "../store/store.ts";
+import {useAtom} from "jotai/index";
 
 const Settings: React.FC = () => {
   const [wsURL, setWsURL] = useState<string>("");
@@ -6,26 +8,32 @@ const Settings: React.FC = () => {
   const [cpID, setCpID] = useState<string>("");
   const [tagID, setTagID] = useState<string>("");
   const [ocppVersion, setOcppVersion] = useState<string>("OCPP-1.6J");
-  const [experimental, setExperimental] = useState<string>();
+  const [experimental, setExperimental] = useState<string | null>(null);
+  const [config, setConfig] = useAtom(configAtom);
+
 
   useEffect(() => {
-    setWsURL(localStorage.getItem("WSURL") || "");
-    setConnectorNumber(parseInt(localStorage.getItem("CONNECTORS") || "2"));
-    setCpID(localStorage.getItem("CPID") || "");
-    setTagID(localStorage.getItem("TAG") || "");
-    setOcppVersion(localStorage.getItem("OCPP") || "OCPP-1.6J");
-    setExperimental(localStorage.getItem("EXPERIMENTAL") || "");
-  }, []);
+    if (config) {
+      setWsURL(config.wsURL);
+      setConnectorNumber(config.connectorNumber);
+      setCpID(config.ChargePointID);
+      setTagID(config.tagID);
+      setOcppVersion(config.ocppVersion);
+      setExperimental(config.Experimental ? JSON.stringify(config.Experimental) : null);
+    }
+  }, [config]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("WSURL", wsURL);
-    localStorage.setItem("CONNECTORS", connectorNumber.toString());
-    localStorage.setItem("CPID", cpID);
-    localStorage.setItem("TAG", tagID);
-    localStorage.setItem("OCPP", ocppVersion);
-    localStorage.setItem("EXPERIMENTAL", btoa(experimental ?? "") || "");
-    alert("Settings saved successfully!");
+    setConfig({
+      wsURL,
+      connectorNumber,
+      ChargePointID: cpID,
+      tagID,
+      ocppVersion,
+      Experimental: experimental !== "" ? experimental && JSON.parse(experimental) : null,
+    });
+    // navigate(`/${location.hash}`)
   };
 
   return (
@@ -86,6 +94,25 @@ const Settings: React.FC = () => {
             style={{maxWidth: "20ch"}}
           />
         </div>
+
+        <div className="mb-4">
+          <label
+            className="block text-gray-700 text-sm font-bold mb-2"
+            htmlFor="TagID"
+          >
+            RFID Tag ID
+          </label>
+          <input
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            id="TagID"
+            type="text"
+            value={tagID}
+            onChange={(e) => setTagID(e.target.value)}
+            placeholder="XXX"
+            style={{maxWidth: "20ch"}}
+          />
+        </div>
+
         <div className="mb-4">
           <label
             className="block text-gray-700 text-sm font-bold mb-2"
@@ -115,6 +142,7 @@ const Settings: React.FC = () => {
             id="Experimental"
             placeholder="Experimental features"
             style={{height: "100px"}}
+            value={experimental || ""}
             onChange={(e) => setExperimental(e.target.value)
             }></textarea>
         </div>

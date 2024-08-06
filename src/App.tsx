@@ -14,7 +14,7 @@ const App: React.FC = () => {
         <Navbar />
         <div className="container mx-auto my-auto p-4">
           <Routes>
-            <Route path="/" element={<TopPage />} />
+            <Route path="/" element={<TopPage />}  />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>

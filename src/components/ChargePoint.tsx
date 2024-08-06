@@ -42,7 +42,7 @@ const ChargePoint: React.FC<ChargePointProps> = (props) => {
           <div className="flex flex-col md:flex-row mt-4">
             {cp?.connectors &&
               Array.from(Array(cp.connectors.size).keys()).map((i) => (
-                <Connector key={i + 1} id={i + 1} cp={cp}/>
+                <Connector key={i + 1} id={i + 1} cp={cp} idTag={props.TagID}/>
               ))}
           </div>
         </div>

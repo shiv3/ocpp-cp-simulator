@@ -1,53 +1,31 @@
-import {useLocation} from "react-router-dom";
 import React, {useEffect, useState} from "react";
 import ChargePoint from "./ChargePoint.tsx";
 import {Tabs} from "flowbite-react";
 import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint.ts";
 // import {HiStatusOnline, HiStatusOffline} from "react-icons/hi";
+import {useAtom} from 'jotai'
+import {configAtom} from "../store/store.ts";
 
-
-interface ExperimentalChargePoint {
-  ChargePointID: string;
-  ConnectorNumber: number;
-}
-
-interface Experimental {
-  ChargePointIDs: ExperimentalChargePoint[];
-  // TagIDs: string[];
-}
 
 const TopPage: React.FC = () => {
   const [cps, setCps] = useState<OCPPChargePoint[]>([]);
   const [connectorNumber, setConnectorNumber] = useState<number>(2);
-  const [tagID, setTagID] = useState<string>("");
-
-
-  const search = useLocation().search;
-  const query = new URLSearchParams(search);
+  const [config] = useAtom(configAtom);
+  const [tagIDs, setTagIDs] = useState<string[]>([]);
 
   useEffect(() => {
-    const cn = parseInt(query.get("connectors") || localStorage.getItem("CONNECTORS") || "2");
-    const wsurl = query.get("wsurl") || localStorage.getItem("WSURL") || "";
-    const cpID = query.get("cpid") || localStorage.getItem("CPID") || "CP-001";
-    const tagID = query.get("tag") || localStorage.getItem("TAG") || "DEADBEEF";
-    const ex = query.get("experimental") || localStorage.getItem("EXPERIMENTAL") || null;
-    const experimental = ex ? JSON.parse(atob(ex)) as Experimental : null;
+    console.log(`Connector Number: ${config?.connectorNumber} WSURL: ${config?.wsURL} CPID: ${config?.ChargePointID} TagID: ${config?.tagID}`);
 
-    console.log(`Connector Number: ${cn} WSURL: ${wsurl} CPID: ${cpID} TagID: ${tagID}`);
-    localStorage.setItem("WSURL", wsurl);
-    localStorage.setItem("CONNECTORS", cn.toString());
-    localStorage.setItem("CPID", cpID);
-    localStorage.setItem("TAG", tagID);
-
-    if (experimental === null) {
-      setConnectorNumber(parseInt(localStorage.getItem("CONNECTORS") || "2"));
-      setTagID(localStorage.getItem("TAG") || "");
-      setCps([NewChargePoint(connectorNumber, cpID, wsurl)]);
+    if (config?.Experimental === null) {
+      setConnectorNumber(config?.connectorNumber || 2);
+      setCps([NewChargePoint(connectorNumber, config.ChargePointID, config.wsURL)]);
     } else {
-      const cps = experimental?.ChargePointIDs.map((cp) =>
-        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, wsurl)
+      const cps = config?.Experimental?.ChargePointIDs.map((cp) =>
+        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.wsURL)
       )
       setCps(cps ?? []);
+      const tagIDs = config?.Experimental?.TagIDs;
+      setTagIDs(tagIDs ?? []);
     }
   }, []);
 
@@ -57,11 +35,11 @@ const TopPage: React.FC = () => {
       {
         cps.length === 1 ? (
           <>
-            <ChargePoint cp={cps[0]} TagID={tagID}/>
+            <ChargePoint cp={cps[0]} TagID={config?.tagID ?? ""}/>
           </>
         ) : (
           <>
-            <ExperimentalView cps={cps} tagID={tagID}/>
+            <ExperimentalView cps={cps} tagIDs={tagIDs}/>
           </>
         )
       }
@@ -71,10 +49,17 @@ const TopPage: React.FC = () => {
 
 interface ExperimentalProps {
   cps: OCPPChargePoint[];
-  tagID: string;
+  tagIDs: string[];
 }
 
-const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
+interface transactionInfo {
+  tagID: string;
+  transactionID: number;
+  cpID: string;
+  connectorID: number;
+}
+
+const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
   const handleAllConnect = () => {
     console.log("Connecting all charge points");
     cps.forEach((cp) => {
@@ -109,6 +94,28 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
       });
     }
   };
+
+  const transactions = [] as transactionInfo[];
+  const handleAllStartTransaction = () => {
+    for (let i = 0; i < Math.min(tagIDs.length, cps.length); i++) {
+      cps[i].setConnectorTransactionIDChangeCallback(1, (transactionId) => {
+        transactionId && transactions.push({
+          tagID: tagIDs[i],
+          transactionID: transactionId,
+          cpID: cps[i].id,
+          connectorID: 1
+        } as transactionInfo);
+      })
+      cps[i].startTransaction(tagIDs[i], 1);
+    }
+  }
+
+  const handleAllStopTransaction = () => {
+    transactions.forEach((t) => {
+      cps.find((cp) => cp.id === t.cpID)?.stopTransaction(t.tagID, t.connectorID);
+      // transactions.splice(transactions.indexOf(t), 1);
+    })
+  }
 
   return (
     <>
@@ -149,6 +156,29 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
         >
           {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
         </button>
+        <div className="bg-gray-100 rounded p-4">
+          <label className="block text-gray-700 text-sm font-bold mb-2">Transaction all</label>
+          <label className="block text-gray-700 text-sm font-bold mb-2">
+            <div>Tag IDs: {tagIDs.join(", ")}</div>
+            {/*<div>Transaction IDs: {transactions.map((t) => t.transactionID).join(", ")}</div>*/}
+          </label>
+          <button
+            onClick={handleAllStartTransaction}
+            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mb-2
+                disabled:bg-green-300
+                "
+          >
+            Start Transaction All
+          </button>
+          <button
+            onClick={handleAllStopTransaction}
+            className="bg-orange-500 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded mb-2
+                disabled:bg-orange-300
+                "
+          >
+            Stop Transaction All
+          </button>
+        </div>
       </div>
       <Tabs>
         {
@@ -158,7 +188,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
                 className="bg-gray-100 rounded p-4"
                 // icon={cp.status === "Available" ? HiStatusOnline : HiStatusOffline}
                 key={key} title={cp.id}>
-                <ChargePoint cp={cp} TagID={tagID}/>
+                <ChargePoint cp={cp} TagID={tagIDs[0]}/>
               </Tabs.Item>
             );
           })

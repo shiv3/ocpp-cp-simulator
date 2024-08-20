@@ -5,9 +5,10 @@ import * as ocpp from "../cp/OcppTypes";
 interface ConnectorProps {
   id: number;
   cp: ChargePoint | null;
+  idTag: string;
 }
 
-const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
+const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp,idTag}) => {
   const [cpTransactionID, setCpTransactionID] = useState<number | null>(0);
   const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(
     ocpp.OCPPStatus.Unavailable
@@ -16,7 +17,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
     ocpp.OCPPAvailability.Operative
   );
   const [meterValue, setMeterValue] = useState<number>(0);
-  const [idTag, setIdTag] = useState<string>(localStorage.getItem("TAG") || "DEADBEEF");
+  const [tagId, setIdTag] = useState<string>(idTag);
 
   useEffect(() => {
     if (cp) {
@@ -38,7 +39,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
 
   const handleStartTransaction = () => {
     if (cp) {
-      cp.startTransaction(idTag, connector_id);
+      cp.startTransaction(tagId, connector_id);
     }
   };
 
@@ -141,7 +142,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp}) => {
             <input
               className="shadow appearance-none border rounded w-full py-1 px-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
-              value={idTag}
+              value={tagId}
               onChange={(e) => setIdTag(e.target.value)}
               placeholder="DEADBEEF"
               style={{maxWidth: "20ch"}}

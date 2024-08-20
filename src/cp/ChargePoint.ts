@@ -1,9 +1,9 @@
-import { Connector } from "./Connector";
-import { OCPPWebSocket } from "./OCPPWebSocket";
-import { OCPPMessageHandler } from "./OCPPMessageHandler";
-import { Logger } from "./Logger";
-import { OCPPStatus, OCPPAvailability } from "./OcppTypes";
-import { Transaction } from "./Transaction.ts";
+import {Connector} from "./Connector";
+import {OCPPWebSocket} from "./OCPPWebSocket";
+import {OCPPMessageHandler} from "./OCPPMessageHandler";
+import {Logger} from "./Logger";
+import {OCPPStatus, OCPPAvailability} from "./OcppTypes";
+import {Transaction} from "./Transaction.ts";
 import * as ocpp from "./OcppTypes.ts";
 
 export class ChargePoint {
@@ -15,7 +15,8 @@ export class ChargePoint {
 
   public _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error: string = "";
-  public _errorCallback: (error: string) => void = () => {};
+  public _errorCallback: (error: string) => void = () => {
+  };
 
   private _heartbeat: number | null = null;
   private _statusChangeCallback:

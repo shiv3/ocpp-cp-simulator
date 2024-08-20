@@ -10,8 +10,7 @@ export class Connector {
   private _transaction: Transaction | null;
 
   private _transactionIDChangeCallbacks:
-    | ((transactionId: number | null) => void)
-    | null;
+    | ((transactionId: number | null) => void)[]
   private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void) | null;
 
   constructor(id: number) {
@@ -21,7 +20,7 @@ export class Connector {
     this._meterValue = 0;
     this._transaction = null;
 
-    this._transactionIDChangeCallbacks = null;
+    this._transactionIDChangeCallbacks = [];
     this._statusChangeCallbacks = null;
   }
 
@@ -71,9 +70,10 @@ export class Connector {
   set transactionId(transactionId: number | null) {
     if (this._transaction) {
       this._transaction.id = transactionId;
-      if (this._transactionIDChangeCallbacks) {
-        this._transactionIDChangeCallbacks(transactionId);
-      }
+      this._transactionIDChangeCallbacks && this._transactionIDChangeCallbacks.forEach((callback) => {
+        callback(transactionId);
+      })
+
     }
   }
 
@@ -81,7 +81,7 @@ export class Connector {
   public setTransactionIDChangeCallbacks(
     callback: (transactionId: number | null) => void
   ) {
-    this._transactionIDChangeCallbacks = callback;
+    this._transactionIDChangeCallbacks.push(callback);
   }
 
   public setStatusChangeCallbacks(callback: (status: ocpp.OCPPStatus) => void) {

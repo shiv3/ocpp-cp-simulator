@@ -11,6 +11,7 @@ const TopPage: React.FC = () => {
   const [cps, setCps] = useState<OCPPChargePoint[]>([]);
   const [connectorNumber, setConnectorNumber] = useState<number>(2);
   const [config] = useAtom(configAtom);
+  const [tagIDs, setTagIDs] = useState<string[]>([]);
 
   useEffect(() => {
     console.log(`Connector Number: ${config?.connectorNumber} WSURL: ${config?.wsURL} CPID: ${config?.ChargePointID} TagID: ${config?.tagID}`);
@@ -23,6 +24,8 @@ const TopPage: React.FC = () => {
         NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.wsURL)
       )
       setCps(cps ?? []);
+      const tagIDs = config?.Experimental?.TagIDs;
+      setTagIDs(tagIDs ?? []);
     }
   }, []);
 
@@ -36,7 +39,7 @@ const TopPage: React.FC = () => {
           </>
         ) : (
           <>
-            <ExperimentalView cps={cps} tagID={config?.tagID ?? ""}/>
+            <ExperimentalView cps={cps} tagIDs={tagIDs}/>
           </>
         )
       }
@@ -46,10 +49,19 @@ const TopPage: React.FC = () => {
 
 interface ExperimentalProps {
   cps: OCPPChargePoint[];
-  tagID: string;
+  tagIDs: string[];
 }
 
-const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
+interface transactionInfo {
+  tagID: string;
+  transactionID: number;
+  cpID: string;
+  connectorID: number;
+}
+
+const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
+  const [transactions, setTransactions] = useState<transactionInfo[]>([]);
+
   const handleAllConnect = () => {
     console.log("Connecting all charge points");
     cps.forEach((cp) => {
@@ -84,6 +96,26 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
       });
     }
   };
+
+  const handleAllStartTransaction = () => {
+    for (let i = 0; i < Math.min(tagIDs.length, cps.length); i++) {
+      cps[i].setConnectorTransactionIDChangeCallback(1, (transactionId) => {
+        transactionId && setTransactions([...transactions, {
+          tagID: tagIDs[i],
+          transactionID: transactionId,
+          cpID: cps[i].id,
+          connectorID: 1
+        } as transactionInfo]);
+      })
+      cps[i].startTransaction(tagIDs[i], 1);
+    }
+  }
+
+  const handleAllStopTransaction = () => {
+    transactions.forEach((t) => {
+      cps.find((cp) => cp.id === t.cpID)?.stopTransaction(t.tagID, t.connectorID);
+    })
+  }
 
   return (
     <>
@@ -124,6 +156,29 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
         >
           {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
         </button>
+        <div className="bg-gray-100 rounded p-4">
+          <label className="block text-gray-700 text-sm font-bold mb-2">Transaction all</label>
+          <label className="block text-gray-700 text-sm font-bold mb-2">
+            <div>Tag IDs: {tagIDs.join(", ")}</div>
+            <div>Transaction IDs: {transactions.map((t) => t.transactionID).join(", ")}</div>
+          </label>
+          <button
+            onClick={handleAllStartTransaction}
+            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mb-2
+                disabled:bg-green-300
+                "
+          >
+            Start Transaction All
+          </button>
+          <button
+            onClick={handleAllStopTransaction}
+            className="bg-orange-500 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded mb-2
+                disabled:bg-orange-300
+                "
+          >
+            Stop Transaction All
+          </button>
+        </div>
       </div>
       <Tabs>
         {
@@ -133,7 +188,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagID}) => {
                 className="bg-gray-100 rounded p-4"
                 // icon={cp.status === "Available" ? HiStatusOnline : HiStatusOffline}
                 key={key} title={cp.id}>
-                <ChargePoint cp={cp} TagID={tagID}/>
+                <ChargePoint cp={cp} TagID={tagIDs[0]}/>
               </Tabs.Item>
             );
           })

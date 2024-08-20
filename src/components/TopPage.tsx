@@ -62,9 +62,10 @@ interface transactionInfo {
 const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
   const handleAllConnect = () => {
     console.log("Connecting all charge points");
-    cps.forEach((cp) => {
-      cp.connect();
-    });
+    const chunk = 100;
+    cps.flatMap((_, i, a) => i % chunk ? [] : [a.slice(i, i + chunk)]).forEach((cps) => {
+      Promise.all(cps.map((cp) => cp.connect()))
+    })
   }
 
   const handleAllDisconnect = () => {

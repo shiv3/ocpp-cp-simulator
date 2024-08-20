@@ -14,7 +14,7 @@ interface Config {
 
 interface Experimental {
   ChargePointIDs: ExperimentalChargePoint[];
-  // TagIDs: string[];
+  TagIDs: string[];
 }
 
 interface ExperimentalChargePoint {

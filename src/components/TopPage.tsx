@@ -60,8 +60,6 @@ interface transactionInfo {
 }
 
 const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
-  const [transactions, setTransactions] = useState<transactionInfo[]>([]);
-
   const handleAllConnect = () => {
     console.log("Connecting all charge points");
     cps.forEach((cp) => {
@@ -97,15 +95,16 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
     }
   };
 
+  const transactions = [] as transactionInfo[];
   const handleAllStartTransaction = () => {
     for (let i = 0; i < Math.min(tagIDs.length, cps.length); i++) {
       cps[i].setConnectorTransactionIDChangeCallback(1, (transactionId) => {
-        transactionId && setTransactions([...transactions, {
+        transactionId && transactions.push({
           tagID: tagIDs[i],
           transactionID: transactionId,
           cpID: cps[i].id,
           connectorID: 1
-        } as transactionInfo]);
+        } as transactionInfo);
       })
       cps[i].startTransaction(tagIDs[i], 1);
     }
@@ -114,6 +113,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
   const handleAllStopTransaction = () => {
     transactions.forEach((t) => {
       cps.find((cp) => cp.id === t.cpID)?.stopTransaction(t.tagID, t.connectorID);
+      // transactions.splice(transactions.indexOf(t), 1);
     })
   }
 
@@ -160,7 +160,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
           <label className="block text-gray-700 text-sm font-bold mb-2">Transaction all</label>
           <label className="block text-gray-700 text-sm font-bold mb-2">
             <div>Tag IDs: {tagIDs.join(", ")}</div>
-            <div>Transaction IDs: {transactions.map((t) => t.transactionID).join(", ")}</div>
+            {/*<div>Transaction IDs: {transactions.map((t) => t.transactionID).join(", ")}</div>*/}
           </label>
           <button
             onClick={handleAllStartTransaction}

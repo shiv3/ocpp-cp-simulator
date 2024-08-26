@@ -1,6 +1,7 @@
 import {atom} from 'jotai';
 import {atomWithStorage} from 'jotai/utils'
 import {atomWithHash} from 'jotai-location'
+import {BootNotification} from "../cp/OcppTypes.ts";
 
 
 interface Config {
@@ -9,10 +10,18 @@ interface Config {
   connectorNumber: number;
   tagID: string
   ocppVersion: string;
+  autoMeterValueSetting: AutoMeterValueSetting;
   Experimental: Experimental | null;
+  BootNotification: BootNotification | null;
 }
 
-interface Experimental {
+export interface AutoMeterValueSetting {
+  enabled: boolean;
+  interval: number;
+  value: number;
+}
+
+export interface Experimental {
   ChargePointIDs: ExperimentalChargePoint[];
   TagIDs: string[];
 }

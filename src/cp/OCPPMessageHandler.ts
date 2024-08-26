@@ -2,7 +2,7 @@ import {OCPPWebSocket} from "./OCPPWebSocket";
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
-import {OCPPMessageType, OCPPAction, OCPPStatus} from "./OcppTypes";
+import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification} from "./OcppTypes";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
@@ -124,18 +124,13 @@ export class OCPPMessageHandler {
     );
   }
 
-  public sendBootNotification(): void {
+  public sendBootNotification(bootPayload: BootNotification): void {
     const messageId = this.generateMessageId();
-    const payload = {
-      chargePointVendor: "Vendor",
-      chargePointModel: "Model",
-      chargePointSerialNumber: "12345",
-    };
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.BootNotification,
       messageId,
-      payload
+      bootPayload
     );
   }
 
@@ -449,13 +444,13 @@ export class OCPPMessageHandler {
   }
 
   private handleMeterValuesResponse(payload: response.MeterValuesResponse): void {
-    this._logger.log(`Meter values sent successfully: ${payload}`);
+    this._logger.log(`Meter values sent successfully: ${JSON.stringify(payload)}`);
   }
 
   private handleStatusNotificationResponse(
     payload: response.StatusNotificationResponse
   ): void {
-    this._logger.log(`Status notification sent successfully: ${payload}`);
+    this._logger.log(`Status notification sent successfully: ${JSON.stringify(payload)}`);
   }
 
   private sendCallResult(messageId: string, payload: OcppMessagePayload): void {

@@ -11,7 +11,8 @@ export class Connector {
 
   private _transactionIDChangeCallbacks:
     | ((transactionId: number | null) => void)[]
-  private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void) | null;
+  private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void)[];
+  private _meterValueChangeCallbacks: ((meterValue: number) => void)[];
 
   constructor(id: number) {
     this._id = id;
@@ -21,7 +22,8 @@ export class Connector {
     this._transaction = null;
 
     this._transactionIDChangeCallbacks = [];
-    this._statusChangeCallbacks = null;
+    this._statusChangeCallbacks = [];
+    this._meterValueChangeCallbacks = [];
   }
 
   get id(): number {
@@ -38,9 +40,9 @@ export class Connector {
 
   set status(newStatus: ocpp.OCPPStatus) {
     this._status = newStatus;
-    if (this._statusChangeCallbacks) {
-      this._statusChangeCallbacks(newStatus);
-    }
+    this._statusChangeCallbacks && this._statusChangeCallbacks.forEach((callback) => {
+      callback(newStatus);
+    })
   }
 
   get availability(): string {
@@ -57,6 +59,9 @@ export class Connector {
 
   set meterValue(value: number) {
     this._meterValue = value;
+    this._meterValueChangeCallbacks && this._meterValueChangeCallbacks.forEach((callback) => {
+      callback(value);
+    })
   }
 
   get transaction(): Transaction | null {
@@ -85,7 +90,11 @@ export class Connector {
   }
 
   public setStatusChangeCallbacks(callback: (status: ocpp.OCPPStatus) => void) {
-    this._statusChangeCallbacks = callback;
+    this._statusChangeCallbacks.push(callback);
+  }
+
+  public setMeterValueChangeCallbacks(callback: (meterValue: number) => void) {
+    this._meterValueChangeCallbacks.push(callback);
   }
 
 }

@@ -1,6 +1,7 @@
 import React, {useState, useEffect} from "react";
 import {configAtom} from "../store/store.ts";
 import {useAtom} from "jotai/index";
+import {DefaultBootNotification} from "../cp/OcppTypes.ts";
 
 const Settings: React.FC = () => {
   const [wsURL, setWsURL] = useState<string>("");
@@ -8,7 +9,12 @@ const Settings: React.FC = () => {
   const [cpID, setCpID] = useState<string>("");
   const [tagID, setTagID] = useState<string>("");
   const [ocppVersion, setOcppVersion] = useState<string>("OCPP-1.6J");
+  const [autoMeterValueEnabled, setAutoMeterValueEnabled] = useState<boolean>(false);
+  const [autoMeterValueInterval, setAutoMeterValueInterval] = useState<number>(0);
+  const [autoMeterValue, setAutoMeterValue] = useState<number>(0);
+
   const [experimental, setExperimental] = useState<string | null>(null);
+  const [bootNotification, setBootNotification] = useState<string | null>(JSON.stringify(DefaultBootNotification));
   const [config, setConfig] = useAtom(configAtom);
 
 
@@ -19,7 +25,13 @@ const Settings: React.FC = () => {
       setCpID(config.ChargePointID);
       setTagID(config.tagID);
       setOcppVersion(config.ocppVersion);
+
+      setAutoMeterValueEnabled(config.autoMeterValueSetting?.enabled);
+      setAutoMeterValueInterval(config.autoMeterValueSetting?.interval);
+      setAutoMeterValue(config.autoMeterValueSetting?.value);
+
       setExperimental(config.Experimental ? JSON.stringify(config.Experimental) : null);
+      setBootNotification(config.BootNotification ? JSON.stringify(config.BootNotification) : null);
     }
   }, [config]);
 
@@ -31,7 +43,13 @@ const Settings: React.FC = () => {
       ChargePointID: cpID,
       tagID,
       ocppVersion,
+      autoMeterValueSetting: {
+        enabled: autoMeterValueEnabled,
+        interval: autoMeterValueInterval,
+        value: autoMeterValue
+      },
       Experimental: experimental !== "" ? experimental && JSON.parse(experimental) : null,
+      BootNotification: bootNotification !== "" ? bootNotification && JSON.parse(bootNotification) : null,
     });
     // navigate(`/${location.hash}`)
   };
@@ -131,6 +149,45 @@ const Settings: React.FC = () => {
           </select>
         </div>
         <div className="mb-4">
+          <input
+            className="shadow border rounded w-fit py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            id="AutoMeterValue"
+            type="checkbox"
+            checked={autoMeterValueEnabled}
+            onChange={(e) => setAutoMeterValueEnabled(e.target.checked)}
+          />
+          <label className="text-gray-700 text-sm font-bold ml-2" htmlFor="AutoMeterValue">
+            Auto Meter Value
+          </label>
+          {autoMeterValueEnabled && (
+            <div className="flex items-center">
+              <input
+                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                id="AutoMeterValueInterval"
+                type="number"
+                value={autoMeterValueInterval}
+                onChange={(e) => setAutoMeterValueInterval(parseInt(e.target.value))}
+                placeholder="30"
+                style={{maxWidth: "20ch"}}
+                required
+              />
+              <span className="text-gray-700 text-sm font-bold ml-2">seconds</span>
+
+              <input
+                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                id="AutoMeterValue"
+                type="number"
+                value={autoMeterValue}
+                onChange={(e) => setAutoMeterValue(parseInt(e.target.value))}
+                placeholder="10"
+                style={{maxWidth: "20ch"}}
+                required
+              />
+              <span className="text-gray-700 text-sm font-bold ml-2">kWh</span>
+            </div>
+            )}
+        </div>
+        <div className="mb-4">
           <label
             className="block text-gray-700 text-sm font-bold mb-2"
             htmlFor="Experimental"
@@ -140,12 +197,49 @@ const Settings: React.FC = () => {
           <textarea
             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             id="Experimental"
-            placeholder="Experimental features"
+            placeholder="{
+            &quot;ChargePointIDs&quot;: [
+            {
+            &quot;ChargePointID&quot;: &quot;CP001&quot;,
+            &quot;ConnectorNumber&quot;: 1
+            }
+            ],
+            &quot;TagIDs&quot;: [
+            &quot;123456&quot;
+            ]
+            }"
             style={{height: "100px"}}
             value={experimental || ""}
             onChange={(e) => setExperimental(e.target.value)
             }></textarea>
         </div>
+        <div className="mb-4">
+          <label
+            className="block text-gray-700 text-sm font-bold mb-2"
+            htmlFor="BootNotification"
+          >
+            Boot Notification
+          </label>
+          <textarea
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            id="BootNotification"
+            placeholder="{
+            &quot;ChargeBoxSerialNumber&quot;: &quot;123456&quot;,
+            &quot;ChargePointModel&quot;: &quot;Model 3&quot;,
+            &quot;ChargePointSerialNumber&quot;: &quot;123456&quot;,
+            &quot;ChargePointVendor&quot;: &quot;Vendor&quot;,
+            &quot;FirmwareVersion&quot;: &quot;1.0.0&quot;,
+            &quot;Iccid&quot;: &quot;123456&quot;,
+            &quot;Imsi&quot;: &quot;123456&quot;,
+            &quot;MeterSerialNumber&quot;: &quot;123456&quot;,
+            &quot;MeterType&quot;: &quot;Model 3&quot;
+            }"
+            style={{height: "100px"}}
+            value={bootNotification || ""}
+            onChange={(e) => setBootNotification(e.target.value)
+            }></textarea>
+        </div>
+
         <div className="flex items-center justify-between">
           <button
             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"

@@ -22,10 +22,8 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp,idTag}) => {
   useEffect(() => {
     if (cp) {
       cp.setConnectorStatusChangeCallback(connector_id, setConnectorStatus);
-      cp.setConnectorTransactionIDChangeCallback(
-        connector_id,
-        setCpTransactionID
-      );
+      cp.setConnectorTransactionIDChangeCallback(connector_id, setCpTransactionID);
+      cp.setConnectorMeterValueChangeCallback(connector_id, setMeterValue);
       cp.setAvailabilityChangeCallback(connector_id, setAvailability);
     }
   }, []);
@@ -226,9 +224,7 @@ const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
   return <span className={statusColor(status)}>{status}</span>;
 };
 
-const ConnectorAvailability: React.FC<{ availability: string }> = ({
-                                                                     availability,
-                                                                   }) => {
+const ConnectorAvailability: React.FC<{ availability: string }> = ({availability,}) => {
   const availabilityColor = (a: string) => {
     switch (a) {
       case ocpp.OCPPAvailability.Operative:

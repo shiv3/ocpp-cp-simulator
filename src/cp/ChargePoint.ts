@@ -2,16 +2,18 @@ import {Connector} from "./Connector";
 import {OCPPWebSocket} from "./OCPPWebSocket";
 import {OCPPMessageHandler} from "./OCPPMessageHandler";
 import {Logger} from "./Logger";
-import {OCPPStatus, OCPPAvailability} from "./OcppTypes";
+import {OCPPStatus, OCPPAvailability, BootNotification} from "./OcppTypes";
 import {Transaction} from "./Transaction.ts";
 import * as ocpp from "./OcppTypes.ts";
 
 export class ChargePoint {
   private _id: string;
+  private _bootNotification: ocpp.BootNotification;
   private _connectors: Map<number, Connector>;
   private _webSocket: OCPPWebSocket;
   private _messageHandler: OCPPMessageHandler;
   private _logger: Logger;
+  private _autoMeterValueSetting: { interval: number; value: number } | null;
 
   public _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error: string = "";
@@ -19,6 +21,8 @@ export class ChargePoint {
   };
 
   private _heartbeat: number | null = null;
+  private _autoMeterValueIntervals: Map<number, number> = new Map();
+
   private _statusChangeCallback:
     | ((status: string, message?: string) => void)
     | null = null;
@@ -27,8 +31,10 @@ export class ChargePoint {
     (availability: string) => void
   > = new Map();
 
-  constructor(id: string, connectorCount: number, wsUrl: string) {
+  constructor(id: string, _bootNotification: BootNotification, connectorCount: number, wsUrl: string,
+              autoMeterValueSetting: { interval: number; value: number } | null) {
     this._id = id;
+    this._bootNotification = _bootNotification;
     this._connectors = new Map();
     for (let i = 1; i <= connectorCount; i++) {
       this._connectors.set(i, new Connector(i));
@@ -40,6 +46,7 @@ export class ChargePoint {
       this._webSocket,
       this._logger
     );
+    this._autoMeterValueSetting = autoMeterValueSetting;
   }
 
   // Getters
@@ -101,6 +108,13 @@ export class ChargePoint {
     this.connectors.get(connectorId)?.setStatusChangeCallbacks(callback);
   }
 
+  setConnectorMeterValueChangeCallback(
+    connectorId: number,
+    callback: (meterValue: number) => void
+  ): void {
+    this.connectors.get(connectorId)?.setMeterValueChangeCallbacks(callback);
+  }
+
   setAvailabilityChangeCallback(
     connectorId: number,
     callback: (availability: string) => void
@@ -111,7 +125,7 @@ export class ChargePoint {
   public connect(): void {
     this._webSocket.connect(
       () => {
-        this._messageHandler.sendBootNotification();
+        this._messageHandler.sendBootNotification(this._bootNotification);
         this.status = OCPPStatus.Available;
         this.updateAllConnectorsStatus(OCPPStatus.Available);
         this.error = "";
@@ -161,6 +175,8 @@ export class ChargePoint {
       connector.transaction = transaction;
       this._messageHandler.startTransaction(transaction, connectorId);
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+      this._autoMeterValueSetting && this.startAutoMeterValue(connectorId, this._autoMeterValueSetting.interval, this._autoMeterValueSetting.value);
+
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
@@ -176,6 +192,7 @@ export class ChargePoint {
         connector.id
       );
       this.updateConnectorStatus(connector.id, OCPPStatus.Finishing);
+      this._autoMeterValueSetting && this.stopAutoMeterValue(connectorId);
     } else {
       this._logger.error(`Transaction for tag ${tagId} not found`);
     }
@@ -219,6 +236,22 @@ export class ChargePoint {
       this._messageHandler.sendMeterValue(connectorId, connector.meterValue);
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
+    }
+  }
+
+  public startAutoMeterValue(connectorId: number, intervalSec: number, value: number): void {
+    const intervalNum = setInterval(() => {
+      this.setMeterValue(connectorId, this.getConnector(connectorId)!.meterValue + value);
+      this.sendMeterValue(connectorId);
+    }, intervalSec * 1000);
+    this._autoMeterValueIntervals.set(connectorId, intervalNum);
+  }
+
+  public stopAutoMeterValue(connectorId: number): void {
+    const intervalNum = this._autoMeterValueIntervals.get(connectorId);
+    if (intervalNum) {
+      clearInterval(intervalNum);
+      this._autoMeterValueIntervals.delete(connectorId);
     }
   }
 

@@ -5,6 +5,7 @@ import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint.ts";
 // import {HiStatusOnline, HiStatusOffline} from "react-icons/hi";
 import {useAtom} from 'jotai'
 import {configAtom} from "../store/store.ts";
+import {BootNotification, DefaultBootNotification} from "../cp/OcppTypes.ts";
 
 
 const TopPage: React.FC = () => {
@@ -15,13 +16,14 @@ const TopPage: React.FC = () => {
 
   useEffect(() => {
     console.log(`Connector Number: ${config?.connectorNumber} WSURL: ${config?.wsURL} CPID: ${config?.ChargePointID} TagID: ${config?.tagID}`);
-
     if (config?.Experimental === null) {
       setConnectorNumber(config?.connectorNumber || 2);
-      setCps([NewChargePoint(connectorNumber, config.ChargePointID, config.wsURL)]);
+      setCps([
+        NewChargePoint(connectorNumber, config.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL, config.autoMeterValueSetting)
+      ]);
     } else {
       const cps = config?.Experimental?.ChargePointIDs.map((cp) =>
-        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.wsURL)
+        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL,config.autoMeterValueSetting)
       )
       setCps(cps ?? []);
       const tagIDs = config?.Experimental?.TagIDs;
@@ -200,9 +202,13 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
 }
 
 
-const NewChargePoint = (ConnectorNumber: number, ChargePointID: string, WSURL: string,) => {
+const NewChargePoint = (ConnectorNumber: number, ChargePointID: string, BootNotification: BootNotification, WSURL: string,
+                        autoMeterValueSetting: {
+                          interval: number;
+                          value: number
+                        } | null) => {
   console.log(`Creating new ChargePoint with ID: ${ChargePointID} Connector Number: ${ConnectorNumber} WSURL: ${WSURL}`);
-  return new OCPPChargePoint(ChargePointID, ConnectorNumber, WSURL);
+  return new OCPPChargePoint(ChargePointID, BootNotification, ConnectorNumber, WSURL, autoMeterValueSetting);
 }
 
 export default TopPage;

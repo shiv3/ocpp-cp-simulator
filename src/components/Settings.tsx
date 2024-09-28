@@ -9,6 +9,11 @@ const Settings: React.FC = () => {
   const [cpID, setCpID] = useState<string>("");
   const [tagID, setTagID] = useState<string>("");
   const [ocppVersion, setOcppVersion] = useState<string>("OCPP-1.6J");
+
+  const [basicAuthEnabled, setBasicAuthEnabled] = useState<boolean>(false);
+  const [basicAuthUsername, setBasicAuthUsername] = useState<string>("");
+  const [basicAuthPassword, setBasicAuthPassword] = useState<string>("");
+
   const [autoMeterValueEnabled, setAutoMeterValueEnabled] = useState<boolean>(false);
   const [autoMeterValueInterval, setAutoMeterValueInterval] = useState<number>(0);
   const [autoMeterValue, setAutoMeterValue] = useState<number>(0);
@@ -25,6 +30,10 @@ const Settings: React.FC = () => {
       setCpID(config.ChargePointID);
       setTagID(config.tagID);
       setOcppVersion(config.ocppVersion);
+
+      setBasicAuthEnabled(config.basicAuthSettings?.enabled);
+      setBasicAuthUsername(config.basicAuthSettings?.username);
+      setBasicAuthPassword(config.basicAuthSettings?.password);
 
       setAutoMeterValueEnabled(config.autoMeterValueSetting?.enabled);
       setAutoMeterValueInterval(config.autoMeterValueSetting?.interval);
@@ -43,6 +52,11 @@ const Settings: React.FC = () => {
       ChargePointID: cpID,
       tagID,
       ocppVersion,
+      basicAuthSettings: {
+        enabled: basicAuthEnabled,
+        username: basicAuthUsername,
+        password: basicAuthPassword,
+      },
       autoMeterValueSetting: {
         enabled: autoMeterValueEnabled,
         interval: autoMeterValueInterval,
@@ -148,13 +162,63 @@ const Settings: React.FC = () => {
             <option value="OCPP-1.6J">OCPP-1.6J</option>
           </select>
         </div>
+
+        <div className="mb-4">
+          <input
+            className="shadow border rounded w-fit py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            id="BasicAuth"
+            type="checkbox"
+            checked={basicAuthEnabled}
+            onChange={(e) => {
+              setBasicAuthEnabled(e.target.checked)
+              if(!e.target.checked) {
+                setBasicAuthUsername("")
+                setBasicAuthPassword("")
+              }
+            }}
+          />
+          <label className="text-gray-700 text-sm font-bold ml-2" htmlFor="BasicAuth">
+            BasicAuth Settings
+          </label>
+          {basicAuthEnabled && (
+            <div className="flex items-center">
+              <input
+                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                id="BasicAuthUsername"
+                type="text"
+                value={basicAuthUsername}
+                onChange={(e) => setBasicAuthUsername(e.target.value)}
+                placeholder="username"
+                style={{maxWidth: "20ch"}}
+                required
+              />
+              <input
+                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                id="BasicAuthPassword"
+                type="text"
+                value={basicAuthPassword}
+                onChange={(e) => setBasicAuthPassword(e.target.value)}
+                placeholder="password"
+                style={{maxWidth: "20ch"}}
+                required
+              />
+            </div>
+          )}
+        </div>
+
         <div className="mb-4">
           <input
             className="shadow border rounded w-fit py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             id="AutoMeterValue"
             type="checkbox"
             checked={autoMeterValueEnabled}
-            onChange={(e) => setAutoMeterValueEnabled(e.target.checked)}
+            onChange={(e) => {
+              setAutoMeterValueEnabled(e.target.checked)
+              if(!e.target.checked) {
+                setAutoMeterValueInterval(0)
+                setAutoMeterValue(0)
+              }
+            }}
           />
           <label className="text-gray-700 text-sm font-bold ml-2" htmlFor="AutoMeterValue">
             Auto Meter Value
@@ -185,7 +249,7 @@ const Settings: React.FC = () => {
               />
               <span className="text-gray-700 text-sm font-bold ml-2">kWh</span>
             </div>
-            )}
+          )}
         </div>
         <div className="mb-4">
           <label

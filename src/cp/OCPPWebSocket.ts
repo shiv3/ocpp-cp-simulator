@@ -25,6 +25,7 @@ type MessageHandler = (
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
   private _url: string;
+  private _basicAuth: {username: string; password: string} | null = null;
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
@@ -33,10 +34,17 @@ export class OCPPWebSocket {
   private _maxReconnectAttempts: number = 5;
   private _reconnectDelay: number = 5000; // 5 seconds
 
-  constructor(url: string, chargePointId: string, logger: Logger) {
+  constructor(url: string, chargePointId: string, logger: Logger,
+              basicAuthSettings: { username: string; password: string } | null = null) {
     this._url = url;
     this._chargePointId = chargePointId;
     this._logger = logger;
+    if (basicAuthSettings) {
+      this._basicAuth = {
+        username: basicAuthSettings.username,
+        password: basicAuthSettings.password
+      };
+    }
   }
 
   get url(): string {
@@ -47,7 +55,13 @@ export class OCPPWebSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null
   ): void {
-    this._ws = new WebSocket(`${this._url}${this._chargePointId}`, [
+    const url = new URL(this._url);
+    if (this?._basicAuth) {
+      url.username = this._basicAuth.username;
+      url.password = this._basicAuth.password;
+    }
+    console.log("url", url);
+    this._ws = new WebSocket(`${url.toString()}${this._chargePointId}`, [
       "ocpp1.6",
       "ocpp1.5",
     ]);

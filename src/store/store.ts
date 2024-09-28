@@ -10,9 +10,16 @@ interface Config {
   connectorNumber: number;
   tagID: string
   ocppVersion: string;
+  basicAuthSettings: BasicAuthSettings;
   autoMeterValueSetting: AutoMeterValueSetting;
   Experimental: Experimental | null;
   BootNotification: BootNotification | null;
+}
+
+export interface BasicAuthSettings {
+  enabled: boolean;
+  username: string;
+  password: string;
 }
 
 export interface AutoMeterValueSetting {

@@ -31,7 +31,11 @@ export class ChargePoint {
     (availability: string) => void
   > = new Map();
 
-  constructor(id: string, _bootNotification: BootNotification, connectorCount: number, wsUrl: string,
+  constructor(id: string,
+              _bootNotification: BootNotification,
+              connectorCount: number,
+              wsUrl: string,
+              basicAuthSettings: { username: string; password: string } | null,
               autoMeterValueSetting: { interval: number; value: number } | null) {
     this._id = id;
     this._bootNotification = _bootNotification;
@@ -40,7 +44,7 @@ export class ChargePoint {
       this._connectors.set(i, new Connector(i));
     }
     this._logger = new Logger();
-    this._webSocket = new OCPPWebSocket(wsUrl, this._id, this._logger);
+    this._webSocket = new OCPPWebSocket(wsUrl, this._id, this._logger, basicAuthSettings);
     this._messageHandler = new OCPPMessageHandler(
       this,
       this._webSocket,
@@ -175,8 +179,11 @@ export class ChargePoint {
       connector.transaction = transaction;
       this._messageHandler.startTransaction(transaction, connectorId);
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
-      this._autoMeterValueSetting && this.startAutoMeterValue(connectorId, this._autoMeterValueSetting.interval, this._autoMeterValueSetting.value);
-
+      if (this._autoMeterValueSetting !== null &&
+        this._autoMeterValueSetting.interval !== 0 &&
+        this._autoMeterValueSetting.value !== 0) {
+        this.startAutoMeterValue(connectorId, this._autoMeterValueSetting.interval, this._autoMeterValueSetting.value);
+      }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }

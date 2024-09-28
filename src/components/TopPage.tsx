@@ -19,11 +19,11 @@ const TopPage: React.FC = () => {
     if (config?.Experimental === null) {
       setConnectorNumber(config?.connectorNumber || 2);
       setCps([
-        NewChargePoint(connectorNumber, config.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL, config.autoMeterValueSetting)
+        NewChargePoint(connectorNumber, config.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL, config.basicAuthSettings,config.autoMeterValueSetting)
       ]);
     } else {
       const cps = config?.Experimental?.ChargePointIDs.map((cp) =>
-        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL,config.autoMeterValueSetting)
+        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL,config.basicAuthSettings,config.autoMeterValueSetting)
       )
       setCps(cps ?? []);
       const tagIDs = config?.Experimental?.TagIDs;
@@ -203,12 +203,10 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
 
 
 const NewChargePoint = (ConnectorNumber: number, ChargePointID: string, BootNotification: BootNotification, WSURL: string,
-                        autoMeterValueSetting: {
-                          interval: number;
-                          value: number
-                        } | null) => {
+                        basicAuthSettings: { username: string; password: string } | null,
+                        autoMeterValueSetting: { interval: number; value: number } | null) => {
   console.log(`Creating new ChargePoint with ID: ${ChargePointID} Connector Number: ${ConnectorNumber} WSURL: ${WSURL}`);
-  return new OCPPChargePoint(ChargePointID, BootNotification, ConnectorNumber, WSURL, autoMeterValueSetting);
+  return new OCPPChargePoint(ChargePointID, BootNotification, ConnectorNumber, WSURL,basicAuthSettings, autoMeterValueSetting);
 }
 
 export default TopPage;

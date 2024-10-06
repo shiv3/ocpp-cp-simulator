@@ -240,7 +240,7 @@ export class ChargePoint {
   public sendMeterValue(connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
-      this._messageHandler.sendMeterValue(connectorId, connector.meterValue);
+      this._messageHandler.sendMeterValue(connector.transaction?.id ?? undefined, connectorId, connector.meterValue);
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }

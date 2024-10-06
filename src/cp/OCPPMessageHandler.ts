@@ -156,9 +156,10 @@ export class OCPPMessageHandler {
     );
   }
 
-  public sendMeterValue(connectorId: number, meterValue: number): void {
+  public sendMeterValue(transactionId:number|undefined,connectorId: number, meterValue: number): void {
     const messageId = this.generateMessageId();
     const payload: request.MeterValuesRequest = {
+      transactionId: transactionId,
       connectorId: connectorId,
       meterValue: [
         {

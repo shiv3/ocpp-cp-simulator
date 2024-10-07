@@ -1,4 +1,4 @@
-import {OCPPWebSocket} from "./OCPPWebSocket";
+import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket} from "./OCPPWebSocket";
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
@@ -126,11 +126,22 @@ export class OCPPMessageHandler {
 
   public sendBootNotification(bootPayload: BootNotification): void {
     const messageId = this.generateMessageId();
+    const payload: request.BootNotificationRequest = {
+      chargePointVendor: bootPayload.ChargePointVendor,
+      chargePointModel: bootPayload.ChargePointModel,
+      chargePointSerialNumber: bootPayload.ChargePointSerialNumber,
+      chargeBoxSerialNumber: bootPayload.ChargeBoxSerialNumber,
+      firmwareVersion: bootPayload.FirmwareVersion,
+      iccid: bootPayload.Iccid,
+      imsi: bootPayload.Imsi,
+      meterType: bootPayload.MeterType,
+      meterSerialNumber: bootPayload.MeterSerialNumber,
+    };
     this.sendRequest(
       OCPPMessageType.CALL,
       OCPPAction.BootNotification,
       messageId,
-      bootPayload
+      payload,
     );
   }
 
@@ -195,7 +206,7 @@ export class OCPPMessageHandler {
     type: OCPPMessageType,
     action: OCPPAction,
     id: string,
-    payload: OcppMessagePayload,
+    payload: OcppMessageRequestPayload,
     connectorId?: number
   ): void {
     this._requests.add({type, action, id, payload, connectorId});
@@ -231,7 +242,7 @@ export class OCPPMessageHandler {
     action: OCPPAction,
     payload: OcppMessagePayloadCall
   ): void {
-    let response;
+    let response: OcppMessageResponsePayload;
     switch (action) {
       case OCPPAction.RemoteStartTransaction:
         response = this.handleRemoteStartTransaction(
@@ -454,7 +465,7 @@ export class OCPPMessageHandler {
     this._logger.log(`Status notification sent successfully: ${JSON.stringify(payload)}`);
   }
 
-  private sendCallResult(messageId: string, payload: OcppMessagePayload): void {
+  private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {
     this._webSocket.send(
       OCPPMessageType.CALL_RESULT,
       messageId,

@@ -156,17 +156,6 @@ export class OCPPMessageHandler {
     );
   }
 
-  public sendReset(): void {
-    const messageId = this.generateMessageId();
-    const payload: request.ResetRequest = {type: "Hard"};
-    this.sendRequest(
-      OCPPMessageType.CALL,
-      OCPPAction.Reset,
-      messageId,
-      payload
-    );
-  }
-
   public sendMeterValue(transactionId:number|undefined,connectorId: number, meterValue: number): void {
     const messageId = this.generateMessageId();
     const payload: request.MeterValuesRequest = {
@@ -372,7 +361,6 @@ export class OCPPMessageHandler {
 
   private handleReset(payload: request.ResetRequest): response.ResetResponse {
     this._logger.log(`Reset request received: ${payload.type}`);
-    this._chargePoint.sendReset();
     return {status: "Accepted"};
   }
 

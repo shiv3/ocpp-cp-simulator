@@ -1,3 +1,5 @@
+import {ErrorCode} from "@voltbras/ts-ocpp/dist/ws";
+
 export enum OCPPStatus {
   Available = "Available",
   Preparing = "Preparing",
@@ -38,6 +40,8 @@ export enum OCPPAction {
   Authorize = "Authorize",
   Reset = "Reset",
 }
+
+export type OCPPErrorCode = ErrorCode;
 
 export interface BootNotification {
   ChargeBoxSerialNumber: string;

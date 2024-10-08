@@ -299,7 +299,7 @@ export class OCPPMessageHandler {
         this.handleHeartbeatResponse(payload as response.HeartbeatResponse);
         break;
       case OCPPAction.MeterValues:
-        this.handleMeterValuesResponse(payload as response.MeterValuesResponse);
+        this.handleMeterValuesResponse(payload as response.MeterValuesResponse, request?.payload as request.MeterValuesRequest);
         break;
       case OCPPAction.StatusNotification:
         this.handleStatusNotificationResponse(
@@ -344,15 +344,11 @@ export class OCPPMessageHandler {
     );
 
     if (connector) {
-      const tagId = connector.transaction?.tagId || "";
-      if (tagId === "") {
-        throw new Error("Tag ID not found");
-      }
       this._chargePoint.updateConnectorStatus(
         connector.id,
         OCPPStatus.SuspendedEVSE
       );
-      this._chargePoint.stopTransaction(tagId, connector.id);
+      this._chargePoint.stopTransaction(connector.id);
       return {status: "Accepted"};
     } else {
       return {status: "Rejected"};
@@ -421,6 +417,13 @@ export class OCPPMessageHandler {
       this._logger.log("Failed to start transaction");
       if (connector) {
         connector.status = OCPPStatus.Faulted;
+        if (connector.transaction && connector.transaction.meterSent) {
+          this._chargePoint.stopTransaction(connectorId);
+        } else {
+          this._chargePoint.cleanTransaction(connectorId);
+        }
+      } else {
+        this._chargePoint.cleanTransaction(connectorId);
       }
     }
   }
@@ -444,7 +447,13 @@ export class OCPPMessageHandler {
     this._logger.log(`Received heartbeat response: ${payload.currentTime}`);
   }
 
-  private handleMeterValuesResponse(payload: response.MeterValuesResponse): void {
+  private handleMeterValuesResponse(payload: response.MeterValuesResponse, request?: request.MeterValuesRequest): void {
+    if (request) {
+      const connector = this._chargePoint.getConnector(request.connectorId);
+      if (connector && connector.transaction) {
+        connector.transaction.meterSent = true;
+      }
+    }
     this._logger.log(`Meter values sent successfully: ${JSON.stringify(payload)}`);
   }
 

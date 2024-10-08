@@ -175,6 +175,7 @@ export class ChargePoint {
         meterStop: null,
         startTime: new Date(),
         stopTime: null,
+        meterSent: false,
       };
       connector.transaction = transaction;
       this._messageHandler.startTransaction(transaction, connectorId);
@@ -189,7 +190,7 @@ export class ChargePoint {
     }
   }
 
-  public stopTransaction(tagId: string, connectorId: number): void {
+  public stopTransaction(connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
       connector.transaction!.stopTime = new Date();
@@ -198,11 +199,15 @@ export class ChargePoint {
         connector.transaction!,
         connector.id
       );
-      this.updateConnectorStatus(connector.id, OCPPStatus.Finishing);
-      this._autoMeterValueSetting && this.stopAutoMeterValue(connectorId);
+      this.cleanTransaction(connectorId);
     } else {
-      this._logger.error(`Transaction for tag ${tagId} not found`);
+      this._logger.error(`Connector for id ${connectorId} not found`);
     }
+  }
+
+  public cleanTransaction(connectorId: number): void {
+    this.updateConnectorStatus(connectorId, OCPPStatus.Finishing);
+    this._autoMeterValueSetting && this.stopAutoMeterValue(connectorId);
   }
 
   public sendHeartbeat(): void {

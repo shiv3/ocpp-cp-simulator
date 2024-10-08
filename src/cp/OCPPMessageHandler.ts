@@ -2,7 +2,7 @@ import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket} fr
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
-import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification} from "./OcppTypes";
+import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification, OCPPErrorCode} from "./OcppTypes";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
@@ -464,7 +464,7 @@ export class OCPPMessageHandler {
 
   private sendCallError(
     messageId: string,
-    errorCode: string,
+    errorCode: OCPPErrorCode,
     errorDescription: string
   ): void {
     const errorDetails = {

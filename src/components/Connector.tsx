@@ -43,8 +43,7 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp,idTag}) => {
 
   const handleStopTransaction = () => {
     if (cp) {
-      const tagId = localStorage.getItem("TAG") || "DEADBEEF";
-      cp.stopTransaction(tagId, connector_id);
+      cp.stopTransaction(connector_id);
     }
   };
 

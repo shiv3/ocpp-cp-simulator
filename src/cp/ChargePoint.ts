@@ -209,10 +209,6 @@ export class ChargePoint {
     this._messageHandler.sendHeartbeat();
   }
 
-  public sendReset(): void {
-    this._messageHandler.sendReset();
-  }
-
   public startHeartbeat(period: number): void {
     this._logger.info("Setting heartbeat period to " + period + "s");
     if (this._heartbeat) {

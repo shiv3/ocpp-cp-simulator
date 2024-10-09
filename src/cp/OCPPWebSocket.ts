@@ -1,19 +1,31 @@
 import {Logger} from "./Logger";
-import {OCPPAction, OCPPMessageType} from "./OcppTypes";
+import {OCPPAction, OCPPErrorCode, OCPPMessageType} from "./OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
+import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
-export type OcppMessagePayload =
-  | request.StartTransactionRequest
-  | request.StopTransactionRequest
+export type OcppMessagePayload = OcppMessageRequestPayload | OcppMessageResponsePayload | OcppMessageErrorPayload;
+
+export type OcppMessageRequestPayload =
   | request.AuthorizeRequest
+  | request.BootNotificationRequest
   | request.HeartbeatRequest
   | request.MeterValuesRequest
+  | request.StartTransactionRequest
   | request.StatusNotificationRequest
-  | request.GetDiagnosticsRequest
-  | request.TriggerMessageRequest
-  | request.ResetRequest
-  | request.RemoteStartTransactionRequest
-  | request.RemoteStopTransactionRequest
+  | request.StopTransactionRequest;
+
+export type OcppMessageResponsePayload =
+  | response.GetDiagnosticsResponse
+  | response.RemoteStartTransactionResponse
+  | response.RemoteStopTransactionResponse
+  | response.ResetResponse
+  | response.TriggerMessageResponse;
+
+export type OcppMessageErrorPayload = {
+  readonly errorCode: OCPPErrorCode;
+  readonly errorDescription: string;
+  readonly errorDetails?: object;
+};
 
 type MessageHandler = (
   messageType: OCPPMessageType,

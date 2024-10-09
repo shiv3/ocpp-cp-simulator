@@ -348,7 +348,7 @@ export class OCPPMessageHandler {
         connector.id,
         OCPPStatus.SuspendedEVSE
       );
-      this._chargePoint.stopTransaction(connector.id);
+      this._chargePoint.stopTransaction(connector);
       return {status: "Accepted"};
     } else {
       return {status: "Rejected"};
@@ -417,13 +417,14 @@ export class OCPPMessageHandler {
       if (connector) {
         connector.status = OCPPStatus.Faulted;
         if (connector.transaction && connector.transaction.meterSent) {
-          this._chargePoint.stopTransaction(connectorId);
+          this._chargePoint.stopTransaction(connector);
         } else {
-          this._chargePoint.cleanTransaction(connectorId);
+          this._chargePoint.cleanTransaction(connector);
         }
       } else {
         this._chargePoint.cleanTransaction(connectorId);
       }
+      this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Available);
     }
   }
 

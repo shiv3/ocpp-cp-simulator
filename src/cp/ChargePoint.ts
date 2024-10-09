@@ -190,22 +190,43 @@ export class ChargePoint {
     }
   }
 
-  public stopTransaction(connectorId: number): void {
-    const connector = this.getConnector(connectorId);
+  public stopTransaction(connectorId: number | Connector): void {
+    let connId: number;
+    let connector: Connector | undefined;
+    if (typeof connectorId === 'number') {
+      connId = connectorId;
+      connector = this.getConnector(connectorId);
+    } else {
+      connId = connectorId.id;
+      connector = connectorId;
+    }
     if (connector) {
       connector.transaction!.stopTime = new Date();
       connector.transaction!.meterStop = connector.meterValue;
       this._messageHandler.stopTransaction(
         connector.transaction!,
-        connector.id
+        connId
       );
-      this.cleanTransaction(connectorId);
+      this.cleanTransaction(connector);
     } else {
-      this._logger.error(`Connector for id ${connectorId} not found`);
+      this._logger.error(`Connector for id ${connId} not found`);
     }
+    this.updateConnectorStatus(connId, OCPPStatus.Available);
   }
 
-  public cleanTransaction(connectorId: number): void {
+  public cleanTransaction(connector: Connector | number): void {
+    let connectorId: number;
+    let transaction: Transaction | undefined | null;
+    if (typeof connector === 'number') {
+      connectorId = connector;
+      transaction = this.getConnector(connectorId)?.transaction;
+    } else {
+      connectorId = connector.id;
+      transaction = connector.transaction;
+    }
+    if (transaction) {
+      transaction.meterSent = false;
+    }
     this.updateConnectorStatus(connectorId, OCPPStatus.Finishing);
     this._autoMeterValueSetting && this.stopAutoMeterValue(connectorId);
   }

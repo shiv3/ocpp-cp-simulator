@@ -115,7 +115,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
 
   const handleAllStopTransaction = () => {
     transactions.forEach((t) => {
-      cps.find((cp) => cp.id === t.cpID)?.stopTransaction(t.tagID, t.connectorID);
+      cps.find((cp) => cp.id === t.cpID)?.stopTransaction(t.connectorID);
       // transactions.splice(transactions.indexOf(t), 1);
     })
   }

@@ -6,4 +6,5 @@ export interface Transaction {
   meterStop: number | null;
   startTime: Date;
   stopTime: Date | null;
+  meterSent: boolean;
 }

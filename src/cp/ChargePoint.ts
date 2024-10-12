@@ -21,6 +21,7 @@ export class ChargePoint {
   };
 
   private _heartbeat: number | null = null;
+  private _heartbeatPeriod = 10;
   private _autoMeterValueIntervals: Map<number, number> = new Map();
 
   private _statusChangeCallback:
@@ -68,6 +69,10 @@ export class ChargePoint {
 
   get wsUrl(): string {
     return this._webSocket.url;
+  }
+
+  public set wsUrl(value: string) {
+    this._webSocket.url = value;
   }
 
   get error(): string {
@@ -153,6 +158,11 @@ export class ChargePoint {
     this._webSocket.disconnect();
   }
 
+  public reset(): void {
+    this.disconnect();
+    this.connect();
+  }
+
   public authorize(tagId: string): void {
     this._messageHandler.authorize(tagId);
   }
@@ -214,18 +224,40 @@ export class ChargePoint {
     this._messageHandler.sendHeartbeat();
   }
 
-  public startHeartbeat(period: number): void {
-    this._logger.info("Setting heartbeat period to " + period + "s");
+  public get heartbeatPeriod(): number {
+    return this._heartbeatPeriod;
+  }
+
+  public set heartbeatPeriod(value: number|string) {
+    if (typeof value === 'string') {
+      value = Number(value);
+    }
+    if (value <= 0) {
+      throw new Error("Invalid heartbeat period value");
+    }
+    if (value === this._heartbeat) {
+      return;
+    }
+    this._heartbeatPeriod = value;
+    if (this._heartbeat) {
+      this.stopHeartbeat();
+      this.startHeartbeat();
+    }
+  }
+
+  public startHeartbeat(): void {
+    this._logger.info("Setting heartbeat period to " + this._heartbeatPeriod + "s");
     if (this._heartbeat) {
       clearInterval(this._heartbeat);
     }
-    this._heartbeat = setInterval(() => this.sendHeartbeat(), period * 1000);
+    this._heartbeat = setInterval(() => this.sendHeartbeat(), this._heartbeatPeriod * 1000);
   }
 
   public stopHeartbeat(): void {
     this._logger.info("Stopping heartbeat");
     if (this._heartbeat) {
       clearInterval(this._heartbeat);
+      this._heartbeat = null;
     }
   }
 

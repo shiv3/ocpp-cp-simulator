@@ -1,22 +1,28 @@
-import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket} from "./OCPPWebSocket";
+import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket, OcppMessagePayload} from "./OCPPWebSocket";
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
-import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification, OCPPErrorCode} from "./OcppTypes";
+import {
+  OCPPMessageType,
+  OCPPAction,
+  OCPPStatus,
+  BootNotification,
+  OCPPErrorCode,
+  OcppConfigurationKey
+} from "./OcppTypes";
+import {UploadFile} from "./file_upload.ts";
+import {Configuration, ConfigurationKeys, defaultConfiguration} from "./Configuration.ts";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
-
-import {OcppMessagePayload} from "./OCPPWebSocket";
 
 type OcppMessagePayloadCall =
   | request.RemoteStartTransactionRequest
   | request.RemoteStopTransactionRequest
   | request.ResetRequest
   | request.GetDiagnosticsRequest
-  | request.TriggerMessageRequest;
-
-
+  | request.TriggerMessageRequest
+  | request.ChangeConfigurationRequest;
 
 type OcppMessagePayloadCallResult =
   | response.AuthorizeResponse
@@ -26,10 +32,6 @@ type OcppMessagePayloadCallResult =
   | response.StartTransactionResponse
   | response.StatusNotificationResponse
   | response.StopTransactionResponse;
-
-
-
-import {UploadFile} from "./file_upload.ts";
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -199,7 +201,7 @@ export class OCPPMessageHandler {
     connectorId?: number
   ): void {
     this._requests.add({type, action, id, payload, connectorId});
-    this._webSocket.send(type, id, action, payload);
+    this._webSocket.sendAction(type, id, action, payload);
   }
 
   private handleIncomingMessage(
@@ -251,6 +253,12 @@ export class OCPPMessageHandler {
         break;
       case OCPPAction.TriggerMessage:
         response = this.handleTriggerMessage(payload as request.TriggerMessageRequest);
+        break;
+      case OCPPAction.GetConfiguration:
+        response = this.handleGetConfiguration(payload as request.GetConfigurationRequest);
+        break;
+      case OCPPAction.ChangeConfiguration:
+        response = this.handleChangeConfiguration(payload as request.ChangeConfigurationRequest);
         break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
@@ -357,6 +365,7 @@ export class OCPPMessageHandler {
 
   private handleReset(payload: request.ResetRequest): response.ResetResponse {
     this._logger.log(`Reset request received: ${payload.type}`);
+    // TODO it should be called after sending the answer this._chargePoint.reset();
     return {status: "Accepted"};
   }
 
@@ -369,6 +378,69 @@ export class OCPPMessageHandler {
     const file = new File([blob], "diagnostics.txt");
     (async () => await UploadFile(payload.location, file))();
     return {fileName: "diagnostics.txt"};
+  }
+
+  private handleGetConfiguration(
+    payload: request.GetConfigurationRequest
+  ): response.GetConfigurationResponse {
+    this._logger.log(`Get configuration request received: ${JSON.stringify(payload.key)}`);
+    const configuration = OCPPMessageHandler.mapConfiguration(defaultConfiguration(this._chargePoint));
+    if (!payload.key || payload.key.length === 0) {
+      return {
+        configurationKey: configuration,
+      };
+    }
+    const filteredConfig = configuration.filter((c) => payload.key?.includes(c.key));
+    const configurationKeys = configuration.map((c) => c.key);
+    const unknownKeys = payload.key.filter((c) => !configurationKeys.includes(c));
+    return {
+      configurationKey: filteredConfig,
+      unknownKey: unknownKeys,
+    }
+  }
+
+  private static mapConfiguration(config: Configuration): OcppConfigurationKey[] {
+    return config.map(c => ({
+      key: c.key.name,
+      readonly: c.key.readonly,
+      value: String(c.value),
+    }));
+  }
+
+  private handleChangeConfiguration(
+      payload: request.ChangeConfigurationRequest
+  ): response.ChangeConfigurationResponse {
+    this._logger.log(`Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`);
+    switch (payload.key) {
+      case ConfigurationKeys.Core.HeartbeatInterval.name:
+        try {
+          this._chargePoint.heartbeatPeriod = payload.value;
+          return {
+            status: "Accepted",
+          };
+        } catch (e) {
+          this._logger.log(`Bad heartbeat period: ${e}`);
+          return {
+            status: "Rejected",
+          }
+        }
+      case ConfigurationKeys.Custom.OcppServer.name:
+        try {
+          this._chargePoint.wsUrl = payload.value;
+          return {
+            status: "RebootRequired",
+          };
+        } catch (e) {
+          this._logger.log(`Bad url: ${e}`);
+          return {
+            status: "Rejected",
+          }
+        }
+      default:
+        return {
+          status: "NotSupported",
+        };
+    }
   }
 
   private handleTriggerMessage(
@@ -463,11 +535,10 @@ export class OCPPMessageHandler {
   }
 
   private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {
-    this._webSocket.send(
+    this._webSocket.sendResult(
       OCPPMessageType.CALL_RESULT,
       messageId,
-      "" as OCPPAction,
-      payload
+      payload,
     );
   }
 
@@ -480,11 +551,10 @@ export class OCPPMessageHandler {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.send(
+    this._webSocket.sendResult(
       OCPPMessageType.CALL_ERROR,
       messageId,
-      "" as OCPPAction,
-      errorDetails
+      errorDetails,
     );
   }
 

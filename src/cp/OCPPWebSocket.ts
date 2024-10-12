@@ -16,6 +16,8 @@ export type OcppMessageRequestPayload =
 
 export type OcppMessageResponsePayload =
   | response.GetDiagnosticsResponse
+  | response.GetConfigurationResponse
+  | response.ChangeConfigurationResponse
   | response.RemoteStartTransactionResponse
   | response.RemoteStopTransactionResponse
   | response.ResetResponse
@@ -36,8 +38,7 @@ type MessageHandler = (
 
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
-  private _url: string;
-  private _basicAuth: {username: string; password: string} | null = null;
+  private _url: URL;
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
@@ -48,32 +49,29 @@ export class OCPPWebSocket {
 
   constructor(url: string, chargePointId: string, logger: Logger,
               basicAuthSettings: { username: string; password: string } | null = null) {
-    this._url = url;
+    this._url = new URL(url);
+    if (basicAuthSettings) {
+      this._url.username = basicAuthSettings.username;
+      this._url.password = basicAuthSettings.password;
+    }
     this._chargePointId = chargePointId;
     this._logger = logger;
-    if (basicAuthSettings) {
-      this._basicAuth = {
-        username: basicAuthSettings.username,
-        password: basicAuthSettings.password
-      };
-    }
   }
 
   get url(): string {
-    return this._url;
+    return this._url.toString();
+  }
+
+  set url(url: string) {
+    this._url = new URL(url);
   }
 
   public connect(
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null
   ): void {
-    const url = new URL(this._url);
-    if (this?._basicAuth) {
-      url.username = this._basicAuth.username;
-      url.password = this._basicAuth.password;
-    }
-    console.log("url", url);
-    this._ws = new WebSocket(`${url.toString()}${this._chargePointId}`, [
+    console.log("url", this._url);
+    this._ws = new WebSocket(`${this._url.toString()}${this._chargePointId}`, [
       "ocpp1.6",
       "ocpp1.5",
     ]);
@@ -104,14 +102,25 @@ export class OCPPWebSocket {
     }
   }
 
-  public send(
+  public sendAction(
     messageType: OCPPMessageType,
     messageId: string,
     action: OCPPAction,
     payload: OcppMessagePayload
   ): void {
+    this.send(JSON.stringify([messageType, messageId, action, payload]));
+  }
+
+  public sendResult(
+      messageType: OCPPMessageType,
+      messageId: string,
+      payload: OcppMessagePayload
+  ): void {
+    this.send(JSON.stringify([messageType, messageId, payload]));
+  }
+
+  private send(message: string): void {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      const message = JSON.stringify([messageType, messageId, action, payload]);
       this._ws.send(message);
       this._logger.log(`Sent: ${message}`);
     } else {

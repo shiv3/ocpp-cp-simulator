@@ -89,7 +89,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
     setIsAllHeartbeatEnabled(isEnalbe);
     if (isEnalbe) {
       cps.forEach((cp) => {
-        cp.startHeartbeat(10);
+        cp.startHeartbeat();
       });
     } else {
       cps.forEach((cp) => {

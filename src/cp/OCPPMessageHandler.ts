@@ -365,7 +365,10 @@ export class OCPPMessageHandler {
 
   private handleReset(payload: request.ResetRequest): response.ResetResponse {
     this._logger.log(`Reset request received: ${payload.type}`);
-    // TODO it should be called after sending the answer this._chargePoint.reset();
+    setTimeout(() => {
+      this._logger.log(`Reset chargePoint: ${this._chargePoint.id}`);
+      this._chargePoint.reset();
+    }, 5_000);
     return {status: "Accepted"};
   }
 

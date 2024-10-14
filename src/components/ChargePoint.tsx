@@ -156,11 +156,11 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
     }
   };
 
-  const handleHeartbeatInterval = (isEnalbe: boolean) => {
-    setIsHeartbeatEnabled(isEnalbe);
+  const handleHeartbeatInterval = (isEnable: boolean) => {
+    setIsHeartbeatEnabled(isEnable);
     if (cp) {
-      if (isEnalbe) {
-        cp.startHeartbeat(10);
+      if (isEnable) {
+        cp.startHeartbeat();
       } else {
         cp.stopHeartbeat();
       }

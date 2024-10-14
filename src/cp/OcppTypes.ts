@@ -39,6 +39,21 @@ export enum OCPPAction {
   Heartbeat = "Heartbeat",
   Authorize = "Authorize",
   Reset = "Reset",
+  GetConfiguration = "GetConfiguration",
+  ChangeConfiguration = "ChangeConfiguration",
+}
+
+export type OcppFeatureProfile =
+    | "Core"
+    | "FirmwareManagement"
+    | "LocalAuthListManagement"
+    | "Reservation"
+    | "SmartCharging"
+    | "RemoteTrigger";
+export type OcppConfigurationKey = {
+  key: string;
+  readonly: boolean;
+  value?: string;
 }
 
 export type OCPPErrorCode = ErrorCode;

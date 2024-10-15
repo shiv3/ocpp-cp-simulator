@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from "react";
-import {configAtom} from "../store/store.ts";
+import {Config, configAtom} from "../store/store.ts";
 import {useAtom} from "jotai/index";
 import {DefaultBootNotification} from "../cp/OcppTypes.ts";
 
@@ -63,8 +63,8 @@ const Settings: React.FC = () => {
         value: autoMeterValue
       },
       Experimental: experimental && experimental !== "" ? JSON.parse(experimental) : null,
-      BootNotification: bootNotification !== "" ? bootNotification && JSON.parse(bootNotification) : null,
-    });
+      BootNotification: bootNotification && bootNotification !== "" ? JSON.parse(bootNotification) : null,
+    } as Config);
     // navigate(`/${location.hash}`)
   };
 

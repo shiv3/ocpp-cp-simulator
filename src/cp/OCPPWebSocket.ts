@@ -38,7 +38,7 @@ type MessageHandler = (
 
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
-  private _url: URL;
+  private _url?: URL;
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
@@ -49,8 +49,8 @@ export class OCPPWebSocket {
 
   constructor(url: string, chargePointId: string, logger: Logger,
               basicAuthSettings: { username: string; password: string } | null = null) {
-    this._url = new URL(url);
-    if (basicAuthSettings) {
+    this._url = url ? new URL(url) : undefined;
+    if (this._url && basicAuthSettings) {
       this._url.username = basicAuthSettings.username;
       this._url.password = basicAuthSettings.password;
     }
@@ -59,7 +59,7 @@ export class OCPPWebSocket {
   }
 
   get url(): string {
-    return this._url.toString();
+    return this._url?.toString() ?? "";
   }
 
   set url(url: string) {
@@ -70,6 +70,9 @@ export class OCPPWebSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null
   ): void {
+    if (!this._url) {
+      throw new Error("Could not connect to OCPP WebSocket client");
+    }
     console.log("url", this._url);
     this._ws = new WebSocket(`${this._url.toString()}${this._chargePointId}`, [
       "ocpp1.6",

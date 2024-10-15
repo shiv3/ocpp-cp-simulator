@@ -62,7 +62,7 @@ const Settings: React.FC = () => {
         interval: autoMeterValueInterval,
         value: autoMeterValue
       },
-      Experimental: experimental !== "" ? experimental && JSON.parse(experimental) : null,
+      Experimental: experimental && experimental !== "" ? JSON.parse(experimental) : null,
       BootNotification: bootNotification !== "" ? bootNotification && JSON.parse(bootNotification) : null,
     });
     // navigate(`/${location.hash}`)

@@ -2,6 +2,7 @@ import React, {useState, useEffect} from "react";
 import {configAtom} from "../store/store.ts";
 import {useAtom} from "jotai/index";
 import {DefaultBootNotification} from "../cp/OcppTypes.ts";
+import {useNavigate} from "react-router-dom";
 
 const Settings: React.FC = () => {
   const [wsURL, setWsURL] = useState<string>("");
@@ -21,7 +22,7 @@ const Settings: React.FC = () => {
   const [experimental, setExperimental] = useState<string | null>(null);
   const [bootNotification, setBootNotification] = useState<string | null>(JSON.stringify(DefaultBootNotification));
   const [config, setConfig] = useAtom(configAtom);
-
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (config) {
@@ -62,10 +63,10 @@ const Settings: React.FC = () => {
         interval: autoMeterValueInterval,
         value: autoMeterValue
       },
-      Experimental: experimental !== "" ? experimental && JSON.parse(experimental) : null,
-      BootNotification: bootNotification !== "" ? bootNotification && JSON.parse(bootNotification) : null,
-    });
-    // navigate(`/${location.hash}`)
+      Experimental: experimental && experimental !== "" ? JSON.parse(experimental) : null,
+      BootNotification: bootNotification && bootNotification !== "" ? JSON.parse(bootNotification) : null,
+    } as Config);
+    navigate("/");
   };
 
   return (

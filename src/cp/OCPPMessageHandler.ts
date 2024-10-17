@@ -1,35 +1,47 @@
-import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket} from "./OCPPWebSocket";
+import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket, OcppMessagePayload} from "./OCPPWebSocket";
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
-import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification, OCPPErrorCode} from "./OcppTypes";
+import {
+  OCPPMessageType,
+  OCPPAction,
+  OCPPStatus,
+  BootNotification,
+  OCPPErrorCode,
+  OcppConfigurationKey
+} from "./OcppTypes";
+import {UploadFile} from "./file_upload.ts";
+import {
+  ArrayConfigurationValue, BooleanConfigurationValue,
+  Configuration,
+  ConfigurationValue,
+  defaultConfiguration, IntegerConfigurationValue, StringConfigurationValue
+} from "./Configuration.ts";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
-import {OcppMessagePayload} from "./OCPPWebSocket";
-
 type OcppMessagePayloadCall =
-  | request.RemoteStartTransactionRequest
-  | request.RemoteStopTransactionRequest
-  | request.ResetRequest
-  | request.GetDiagnosticsRequest
-  | request.TriggerMessageRequest;
-
-
+  | request.RemoteStartTransactionRequest // Core
+  | request.RemoteStopTransactionRequest // Core
+  | request.ResetRequest // Core
+  | request.GetDiagnosticsRequest // FirmwareManagement
+  | request.TriggerMessageRequest // RemoteTrigger
+  | request.GetConfigurationRequest // Core
+  | request.ChangeConfigurationRequest // Core
+  | request.ChangeAvailabilityRequest // Core
+  | request.UnlockConnectorRequest // Core
+  | request.DataTransferRequest; // Core
 
 type OcppMessagePayloadCallResult =
-  | response.AuthorizeResponse
-  | response.BootNotificationResponse
-  | response.HeartbeatResponse
-  | response.MeterValuesResponse
-  | response.StartTransactionResponse
-  | response.StatusNotificationResponse
-  | response.StopTransactionResponse;
-
-
-
-import {UploadFile} from "./file_upload.ts";
+  | response.AuthorizeResponse // Core
+  | response.BootNotificationResponse // Core
+  | response.HeartbeatResponse // Core
+  | response.MeterValuesResponse // Core
+  | response.StartTransactionResponse // Core
+  | response.StatusNotificationResponse // Core
+  | response.StopTransactionResponse // Core
+  | response.ClearCacheResponse; // Core
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -244,6 +256,12 @@ export class OCPPMessageHandler {
       case OCPPAction.TriggerMessage:
         response = this.handleTriggerMessage(payload as request.TriggerMessageRequest);
         break;
+      case OCPPAction.GetConfiguration:
+        response = this.handleGetConfiguration(payload as request.GetConfigurationRequest);
+        break;
+      case OCPPAction.ChangeConfiguration:
+        response = this.handleChangeConfiguration(payload as request.ChangeConfigurationRequest);
+        break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
@@ -369,6 +387,58 @@ export class OCPPMessageHandler {
     const file = new File([blob], "diagnostics.txt");
     (async () => await UploadFile(payload.location, file))();
     return {fileName: "diagnostics.txt"};
+  }
+
+  private handleGetConfiguration(
+    payload: request.GetConfigurationRequest
+  ): response.GetConfigurationResponse {
+    this._logger.log(`Get configuration request received: ${JSON.stringify(payload.key)}`);
+    const configuration = OCPPMessageHandler.mapConfiguration(defaultConfiguration(this._chargePoint));
+    if (!payload.key || payload.key.length === 0) {
+      return {
+        configurationKey: configuration,
+      };
+    }
+    const filteredConfig = configuration.filter((c) => payload.key?.includes(c.key));
+    const configurationKeys = configuration.map((c) => c.key);
+    const unknownKeys = payload.key.filter((c) => !configurationKeys.includes(c));
+    return {
+      configurationKey: filteredConfig,
+      unknownKey: unknownKeys,
+    }
+  }
+
+  private static mapConfiguration(config: Configuration): OcppConfigurationKey[] {
+    return config.map(c => ({
+      key: c.key.name,
+      readonly: c.key.readonly,
+      value: OCPPMessageHandler.mapValue(c),
+    }));
+  }
+
+  private static mapValue(value: ConfigurationValue): string {
+    switch (value.key.type) {
+      case "string":
+        return (value as StringConfigurationValue).value;
+      case "boolean":
+        return String((value as BooleanConfigurationValue).value);
+      case "integer":
+        return String((value as IntegerConfigurationValue).value);
+      case "array":
+        return (value as ArrayConfigurationValue).value.join(',');
+    }
+  }
+
+  private handleChangeConfiguration(
+      payload: request.ChangeConfigurationRequest
+  ): response.ChangeConfigurationResponse {
+    this._logger.log(`Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`);
+    switch (payload.key) {
+      default:
+        return {
+          status: "NotSupported",
+        };
+    }
   }
 
   private handleTriggerMessage(

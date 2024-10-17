@@ -19,7 +19,9 @@ export type OcppMessageResponsePayload =
   | response.RemoteStartTransactionResponse
   | response.RemoteStopTransactionResponse
   | response.ResetResponse
-  | response.TriggerMessageResponse;
+  | response.TriggerMessageResponse
+  | response.GetConfigurationResponse
+  | response.ChangeConfigurationResponse;
 
 export type OcppMessageErrorPayload = {
   readonly errorCode: OCPPErrorCode;

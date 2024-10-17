@@ -27,7 +27,7 @@ export enum OCPPAction {
   ChangeAvailability = "ChangeAvailability",
   ChangeConfiguration = "ChangeConfiguration",
   ClearCache = "ClearCache",
-  DataTransfer = "DataTransfer", // TODO
+  DataTransfer = "DataTransfer",
   GetConfiguration = "GetConfiguration",
   Heartbeat = "Heartbeat",
   MeterValues = "MeterValues",

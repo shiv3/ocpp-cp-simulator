@@ -106,20 +106,28 @@ export class OCPPWebSocket {
   }
 
   public sendAction(
-    messageType: OCPPMessageType,
     messageId: string,
     action: OCPPAction,
-    payload: OcppMessagePayload
+    payload: OcppMessageRequestPayload,
   ): void {
-    this.send(JSON.stringify([messageType, messageId, action, payload]));
+    const message = JSON.stringify([OCPPMessageType.CALL, messageId, action, payload]);
+    this.send(message);
   }
 
   public sendResult(
-      messageType: OCPPMessageType,
       messageId: string,
-      payload: OcppMessagePayload
+      payload: OcppMessageResponsePayload,
   ): void {
-    this.send(JSON.stringify([messageType, messageId, payload]));
+    const message = JSON.stringify([OCPPMessageType.CALL_RESULT, messageId, payload]);
+    this.send(message);
+  }
+
+  public sendError(
+      messageId: string,
+      payload: OcppMessageErrorPayload,
+  ): void {
+    const message = JSON.stringify([OCPPMessageType.CALL_ERROR, messageId, payload]);
+    this.send(message);
   }
 
   private send(message: string): void {

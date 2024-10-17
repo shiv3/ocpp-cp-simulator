@@ -85,7 +85,6 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: request.AuthorizeRequest = {idTag: tagId};
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.Authorize,
       messageId,
       payload
@@ -101,7 +100,6 @@ export class OCPPMessageHandler {
       timestamp: transaction.startTime.toISOString(),
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.StartTransaction,
       messageId,
       payload,
@@ -118,7 +116,6 @@ export class OCPPMessageHandler {
       timestamp: transaction.stopTime!.toISOString(),
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.StopTransaction,
       messageId,
       payload,
@@ -140,7 +137,6 @@ export class OCPPMessageHandler {
       meterSerialNumber: bootPayload.MeterSerialNumber,
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.BootNotification,
       messageId,
       payload,
@@ -151,7 +147,6 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: request.HeartbeatRequest = {};
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.Heartbeat,
       messageId,
       payload
@@ -171,7 +166,6 @@ export class OCPPMessageHandler {
       ],
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.MeterValues,
       messageId,
       payload
@@ -186,7 +180,6 @@ export class OCPPMessageHandler {
       status: status,
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.StatusNotification,
       messageId,
       payload
@@ -194,14 +187,13 @@ export class OCPPMessageHandler {
   }
 
   private sendRequest(
-    type: OCPPMessageType,
     action: OCPPAction,
     id: string,
     payload: OcppMessageRequestPayload,
     connectorId?: number
   ): void {
-    this._requests.add({type, action, id, payload, connectorId});
-    this._webSocket.sendAction(type, id, action, payload);
+    this._requests.add({type: OCPPMessageType.CALL, action, id, payload, connectorId});
+    this._webSocket.sendAction(id, action, payload);
   }
 
   private handleIncomingMessage(
@@ -367,7 +359,11 @@ export class OCPPMessageHandler {
     this._logger.log(`Reset request received: ${payload.type}`);
     setTimeout(() => {
       this._logger.log(`Reset chargePoint: ${this._chargePoint.id}`);
-      this._chargePoint.reset();
+      if (payload.type === "Hard") {
+        this._chargePoint.reset();
+      } else {
+        this._chargePoint.boot();
+      }
     }, 5_000);
     return {status: "Accepted"};
   }
@@ -540,7 +536,6 @@ export class OCPPMessageHandler {
 
   private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {
     this._webSocket.sendResult(
-      OCPPMessageType.CALL_RESULT,
       messageId,
       payload,
     );
@@ -555,8 +550,7 @@ export class OCPPMessageHandler {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.sendResult(
-      OCPPMessageType.CALL_ERROR,
+    this._webSocket.sendError(
       messageId,
       errorDetails,
     );

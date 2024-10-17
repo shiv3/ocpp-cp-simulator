@@ -303,6 +303,9 @@ export class OCPPMessageHandler {
       case OCPPAction.ChangeConfiguration:
         response = this.handleChangeConfiguration(payload as request.ChangeConfigurationRequest);
         break;
+      case OCPPAction.ClearCache:
+        response = this.handleClearCache(payload as request.ClearCacheRequest);
+        break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
@@ -504,6 +507,13 @@ export class OCPPMessageHandler {
     } else {
       return {status: "Rejected"};
     }
+  }
+
+  private handleClearCache(
+    payload: request.ClearCacheRequest
+  ): response.ClearCacheResponse {
+    this._logger.log(`Clear cache request received: ${JSON.stringify(payload)}`);
+    return {status: "Accepted"};
   }
 
   private handleBootNotificationResponse(

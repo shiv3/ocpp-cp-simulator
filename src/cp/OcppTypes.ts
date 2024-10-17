@@ -26,7 +26,7 @@ export enum OCPPAction {
   BootNotification = "BootNotification",
   ChangeAvailability = "ChangeAvailability",
   ChangeConfiguration = "ChangeConfiguration",
-  ClearCache = "ClearCache", // TODO
+  ClearCache = "ClearCache",
   DataTransfer = "DataTransfer", // TODO
   GetConfiguration = "GetConfiguration",
   Heartbeat = "Heartbeat",

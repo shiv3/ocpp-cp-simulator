@@ -1,27 +1,30 @@
 import {
+  OcppMessageErrorPayload,
+  OcppMessagePayload,
   OcppMessageRequestPayload,
   OcppMessageResponsePayload,
-  OCPPWebSocket,
-  OcppMessagePayload,
-  OcppMessageErrorPayload
+  OCPPWebSocket
 } from "./OCPPWebSocket";
-import {ChargePoint} from "./ChargePoint";
-import {Transaction} from "./Transaction";
-import {Logger} from "./Logger";
+import { ChargePoint } from "./ChargePoint";
+import { Transaction } from "./Transaction";
+import { Logger } from "./Logger";
 import {
-  OCPPMessageType,
-  OCPPAction,
-  OCPPStatus,
   BootNotification,
-  OCPPErrorCode,
+  OCPPAction,
   OcppConfigurationKey,
+  OCPPErrorCode,
+  OCPPMessageType,
+  OCPPStatus
 } from "./OcppTypes";
-import {UploadFile} from "./file_upload.ts";
+import { UploadFile } from "./file_upload.ts";
 import {
-  ArrayConfigurationValue, BooleanConfigurationValue,
+  ArrayConfigurationValue,
+  BooleanConfigurationValue,
   Configuration,
   ConfigurationValue,
-  defaultConfiguration, IntegerConfigurationValue, StringConfigurationValue
+  defaultConfiguration,
+  IntegerConfigurationValue,
+  StringConfigurationValue
 } from "./Configuration.ts";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
@@ -31,7 +34,6 @@ type CoreOcppMessagePayloadCall =
   | request.ChangeAvailabilityRequest
   | request.ChangeConfigurationRequest
   | request.ClearCacheRequest
-  | request.DataTransferRequest
   | request.GetConfigurationRequest
   | request.RemoteStartTransactionRequest
   | request.RemoteStopTransactionRequest
@@ -70,6 +72,7 @@ type CoreOcppMessagePayloadCallResult =
   | response.AuthorizeResponse
   | response.BootNotificationResponse
   | response.ChangeConfigurationResponse
+  | response.DataTransferResponse
   | response.HeartbeatResponse
   | response.MeterValuesResponse
   | response.StartTransactionResponse
@@ -365,6 +368,9 @@ export class OCPPMessageHandler {
           payload as response.StatusNotificationResponse
         );
         break;
+      case OCPPAction.DataTransfer:
+        this.handleDataTransferResponse(payload as response.DataTransferResponse);
+        break;
       default:
         this._logger.log(`Unsupported action result: ${action}`);
     }
@@ -597,6 +603,12 @@ export class OCPPMessageHandler {
     payload: response.StatusNotificationResponse
   ): void {
     this._logger.log(`Status notification sent successfully: ${JSON.stringify(payload)}`);
+  }
+
+  private handleDataTransferResponse(
+    payload: response.DataTransferResponse
+  ): void {
+    this._logger.log(`Data transfer sent successfully: ${JSON.stringify(payload)}`);
   }
 
   private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {

@@ -1,9 +1,12 @@
-import {Logger} from "./Logger";
-import {OCPPAction, OCPPErrorCode, OCPPMessageType} from "./OcppTypes";
+import { Logger } from "./Logger";
+import { OCPPAction, OCPPErrorCode, OCPPMessageType } from "./OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
-export type OcppMessagePayload = OcppMessageRequestPayload | OcppMessageResponsePayload | OcppMessageErrorPayload;
+export type OcppMessagePayload =
+  | OcppMessageRequestPayload
+  | OcppMessageResponsePayload
+  | OcppMessageErrorPayload;
 
 export type OcppMessageRequestPayload =
   | request.AuthorizeRequest
@@ -31,13 +34,13 @@ type MessageHandler = (
   messageType: OCPPMessageType,
   messageId: string,
   action: OCPPAction,
-  payload: OcppMessagePayload
+  payload: OcppMessagePayload,
 ) => void;
 
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
   private _url: string;
-  private _basicAuth: {username: string; password: string} | null = null;
+  private _basicAuth: { username: string; password: string } | null = null;
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
@@ -46,15 +49,19 @@ export class OCPPWebSocket {
   private _maxReconnectAttempts: number = 5;
   private _reconnectDelay: number = 5000; // 5 seconds
 
-  constructor(url: string, chargePointId: string, logger: Logger,
-              basicAuthSettings: { username: string; password: string } | null = null) {
+  constructor(
+    url: string,
+    chargePointId: string,
+    logger: Logger,
+    basicAuthSettings: { username: string; password: string } | null = null,
+  ) {
     this._url = url;
     this._chargePointId = chargePointId;
     this._logger = logger;
     if (basicAuthSettings) {
       this._basicAuth = {
         username: basicAuthSettings.username,
-        password: basicAuthSettings.password
+        password: basicAuthSettings.password,
       };
     }
   }
@@ -65,7 +72,7 @@ export class OCPPWebSocket {
 
   public connect(
     onopen: (() => void) | null = null,
-    onclose: ((ev: CloseEvent) => void) | null = null
+    onclose: ((ev: CloseEvent) => void) | null = null,
   ): void {
     const url = new URL(this._url);
     if (this?._basicAuth) {
@@ -109,23 +116,33 @@ export class OCPPWebSocket {
     action: OCPPAction,
     payload: OcppMessageRequestPayload,
   ): void {
-    const message = JSON.stringify([OCPPMessageType.CALL, messageId, action, payload]);
+    const message = JSON.stringify([
+      OCPPMessageType.CALL,
+      messageId,
+      action,
+      payload,
+    ]);
     this.send(message);
   }
 
   public sendResult(
-      messageId: string,
-      payload: OcppMessageResponsePayload,
+    messageId: string,
+    payload: OcppMessageResponsePayload,
   ): void {
-    const message = JSON.stringify([OCPPMessageType.CALL_RESULT, messageId, payload]);
+    const message = JSON.stringify([
+      OCPPMessageType.CALL_RESULT,
+      messageId,
+      payload,
+    ]);
     this.send(message);
   }
 
-  public sendError(
-      messageId: string,
-      payload: OcppMessageErrorPayload,
-  ): void {
-    const message = JSON.stringify([OCPPMessageType.CALL_ERROR, messageId, payload]);
+  public sendError(messageId: string, payload: OcppMessageErrorPayload): void {
+    const message = JSON.stringify([
+      OCPPMessageType.CALL_ERROR,
+      messageId,
+      payload,
+    ]);
     this.send(message);
   }
 
@@ -165,7 +182,7 @@ export class OCPPWebSocket {
             messageType,
             messageId,
             OCPPAction.CallResult,
-            payload
+            payload,
           );
         }
         if (len == 4) {
@@ -209,12 +226,12 @@ export class OCPPWebSocket {
     if (this._reconnectAttempts < this._maxReconnectAttempts) {
       this._reconnectAttempts++;
       this._logger.log(
-        `Attempting to reconnect (${this._reconnectAttempts}/${this._maxReconnectAttempts})...`
+        `Attempting to reconnect (${this._reconnectAttempts}/${this._maxReconnectAttempts})...`,
       );
       setTimeout(() => this.connect(), this._reconnectDelay);
     } else {
       this._logger.log(
-        "Max reconnect attempts reached. Please check your connection and try again."
+        "Max reconnect attempts reached. Please check your connection and try again.",
       );
     }
   }

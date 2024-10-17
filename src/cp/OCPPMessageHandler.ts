@@ -309,6 +309,9 @@ export class OCPPMessageHandler {
       case OCPPAction.ClearCache:
         response = this.handleClearCache(payload as request.ClearCacheRequest);
         break;
+      case OCPPAction.UnlockConnector:
+        response = this.handleUnlockConnector(payload as request.UnlockConnectorRequest);
+        break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
@@ -520,6 +523,13 @@ export class OCPPMessageHandler {
   ): response.ClearCacheResponse {
     this._logger.log(`Clear cache request received: ${JSON.stringify(payload)}`);
     return {status: "Accepted"};
+  }
+
+  private handleUnlockConnector(
+    payload: request.UnlockConnectorRequest
+  ): response.UnlockConnectorResponse {
+    this._logger.log(`Unlock connector request received: ${JSON.stringify(payload)}`);
+    return {status: "NotSupported"};
   }
 
   private handleBootNotificationResponse(

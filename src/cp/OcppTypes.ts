@@ -37,7 +37,7 @@ export enum OCPPAction {
   StartTransaction = "StartTransaction",
   StatusNotification = "StatusNotification",
   StopTransaction = "StopTransaction",
-  UnlockConnector = "UnlockConnector", // TODO
+  UnlockConnector = "UnlockConnector",
   // FirmwareManagement actions
   GetDiagnostics = "GetDiagnostics",
   DiagnosticsStatusNotification = "DiagnosticsStatusNotification", // TODO

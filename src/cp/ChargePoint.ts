@@ -128,12 +128,7 @@ export class ChargePoint {
 
   public connect(): void {
     this._webSocket.connect(
-      () => {
-        this._messageHandler.sendBootNotification(this._bootNotification);
-        this.status = OCPPStatus.Available;
-        this.updateAllConnectorsStatus(OCPPStatus.Available);
-        this.error = "";
-      },
+      () => this.boot(),
       (ev: CloseEvent) => {
         this.status = OCPPStatus.Unavailable;
         this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
@@ -147,10 +142,22 @@ export class ChargePoint {
     );
   }
 
+  public boot(): void {
+    this._messageHandler.sendBootNotification(this._bootNotification);
+    this.status = OCPPStatus.Available;
+    this.updateAllConnectorsStatus(OCPPStatus.Available);
+    this.error = "";
+  }
+
   public disconnect(): void {
     this._logger.info("Disconnecting from WebSocket");
     this._status = OCPPStatus.Unavailable;
     this._webSocket.disconnect();
+  }
+
+  public reset(): void {
+    this.disconnect();
+    this.connect();
   }
 
   public authorize(tagId: string): void {

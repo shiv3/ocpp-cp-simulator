@@ -4,7 +4,7 @@ import {atomWithHash} from 'jotai-location'
 import {BootNotification} from "../cp/OcppTypes.ts";
 
 
-interface Config {
+export interface Config {
   wsURL: string;
   ChargePointID: string;
   connectorNumber: number;

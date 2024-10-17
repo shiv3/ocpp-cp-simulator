@@ -6,43 +6,45 @@ import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint.ts";
 import {useAtom} from 'jotai'
 import {configAtom} from "../store/store.ts";
 import {BootNotification, DefaultBootNotification} from "../cp/OcppTypes.ts";
-
+import {useNavigate} from "react-router-dom";
 
 const TopPage: React.FC = () => {
   const [cps, setCps] = useState<OCPPChargePoint[]>([]);
-  const [connectorNumber, setConnectorNumber] = useState<number>(2);
   const [config] = useAtom(configAtom);
   const [tagIDs, setTagIDs] = useState<string[]>([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    console.log(`Connector Number: ${config?.connectorNumber} WSURL: ${config?.wsURL} CPID: ${config?.ChargePointID} TagID: ${config?.tagID}`);
-    if (config?.Experimental === null) {
-      setConnectorNumber(config?.connectorNumber || 2);
-      setCps([
-        NewChargePoint(connectorNumber, config.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL, config.basicAuthSettings,config.autoMeterValueSetting)
-      ]);
-    } else {
-      const cps = config?.Experimental?.ChargePointIDs.map((cp) =>
-        NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL,config.basicAuthSettings,config.autoMeterValueSetting)
+    if (!config) {
+      navigate('/settings');
+      return;
+    }
+    console.log(`Connector Number: ${config.connectorNumber} WSURL: ${config.wsURL} CPID: ${config.ChargePointID} TagID: ${config.tagID}`);
+    if (config.Experimental) {
+      const cps = config.Experimental.ChargePointIDs.map((cp) =>
+          NewChargePoint(cp.ConnectorNumber, cp.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL, config.basicAuthSettings, config.autoMeterValueSetting)
       )
       setCps(cps ?? []);
-      const tagIDs = config?.Experimental?.TagIDs;
+      const tagIDs = config.Experimental.TagIDs;
       setTagIDs(tagIDs ?? []);
+    } else {
+      setCps([
+        NewChargePoint(config.connectorNumber, config.ChargePointID, config.BootNotification ?? DefaultBootNotification, config.wsURL, config.basicAuthSettings, config.autoMeterValueSetting)
+      ]);
     }
-  }, []);
-
+  }, [config, navigate]);
 
   return (
     <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
       {
-        cps.length === 1 ? (
-          <>
-            <ChargePoint cp={cps[0]} TagID={config?.tagID ?? ""}/>
-          </>
+        config?.Experimental || cps.length !== 1 ? (
+            <>
+              <ExperimentalView cps={cps} tagIDs={tagIDs}/>
+            </>
         ) : (
-          <>
-            <ExperimentalView cps={cps} tagIDs={tagIDs}/>
-          </>
+            <>
+              <ChargePoint cp={cps[0]} TagID={config?.tagID ?? ""}/>
+            </>
         )
       }
     </div>
@@ -89,7 +91,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({cps, tagIDs}) => {
     setIsAllHeartbeatEnabled(isEnalbe);
     if (isEnalbe) {
       cps.forEach((cp) => {
-        cp.startHeartbeat(10);
+        cp.startHeartbeat();
       });
     } else {
       cps.forEach((cp) => {

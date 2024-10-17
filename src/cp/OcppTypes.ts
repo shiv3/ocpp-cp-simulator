@@ -24,23 +24,42 @@ export enum OCPPMessageType {
 }
 
 export enum OCPPAction {
-  // Charge Point to Central System
-  CallResult = "CallResult",
-
+  // Core actions
+  Authorize = "Authorize",
+  BootNotification = "BootNotification",
+  ChangeAvailability = "ChangeAvailability", // TODO
+  ChangeConfiguration = "ChangeConfiguration",
+  ClearCache = "ClearCache", // TODO
+  DataTransfer = "DataTransfer", // TODO
+  GetConfiguration = "GetConfiguration",
+  Heartbeat = "Heartbeat",
+  MeterValues = "MeterValues",
   RemoteStartTransaction = "RemoteStartTransaction",
   RemoteStopTransaction = "RemoteStopTransaction",
-  StartTransaction = "StartTransaction",
-  StopTransaction = "StopTransaction",
-  GetDiagnostics = "GetDiagnostics",
-  TriggerMessage = "TriggerMessage",
-  StatusNotification = "StatusNotification",
-  MeterValues = "MeterValues",
-  BootNotification = "BootNotification",
-  Heartbeat = "Heartbeat",
-  Authorize = "Authorize",
   Reset = "Reset",
-  GetConfiguration = "GetConfiguration",
-  ChangeConfiguration = "ChangeConfiguration",
+  StartTransaction = "StartTransaction",
+  StatusNotification = "StatusNotification",
+  StopTransaction = "StopTransaction",
+  UnlockConnector = "UnlockConnector", // TODO
+  // FirmwareManagement actions
+  GetDiagnostics = "GetDiagnostics",
+  DiagnosticsStatusNotification = "DiagnosticsStatusNotification", // TODO
+  FirmwareStatusNotification = "FirmwareStatusNotification", // TODO
+  UpdateFirmware = "UpdateFirmware", // TODO
+  // LocalAuthListManagement actions
+  GetLocalListVersion = "GetLocalListVersion", // TODO
+  SendLocalList = "SendLocalList", // TODO
+  // Reservation actions
+  CancelReservation = "CancelReservation", // TODO
+  ReserveNow = "ReserveNow", // TODO
+  // SmartCharging actions
+  ClearChargingProfile = "ClearChargingProfile", // TODO
+  GetCompositeSchedule = "GetCompositeSchedule", // TODO
+  SetChargingProfile = "SetChargingProfile", // TODO
+  // RemoteTrigger actions
+  TriggerMessage = "TriggerMessage",
+  // Fake actions
+  CallResult = "CallResult",
 }
 
 export enum OcppFeatureProfile {

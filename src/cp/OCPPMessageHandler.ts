@@ -1,4 +1,10 @@
-import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket, OcppMessagePayload} from "./OCPPWebSocket";
+import {
+  OcppMessageRequestPayload,
+  OcppMessageResponsePayload,
+  OCPPWebSocket,
+  OcppMessagePayload,
+  OcppMessageErrorPayload
+} from "./OCPPWebSocket";
 import {ChargePoint} from "./ChargePoint";
 import {Transaction} from "./Transaction";
 import {Logger} from "./Logger";
@@ -21,27 +27,62 @@ import {
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
+type CoreOcppMessagePayloadCall =
+  | request.ChangeAvailabilityRequest
+  | request.ChangeConfigurationRequest
+  | request.ClearCacheRequest
+  | request.DataTransferRequest
+  | request.GetConfigurationRequest
+  | request.RemoteStartTransactionRequest
+  | request.RemoteStopTransactionRequest
+  | request.ResetRequest
+  | request.UnlockConnectorRequest
+
+type FirmwareManagementOcppMessagePayloadCall =
+  | request.GetDiagnosticsRequest
+  | request.UpdateFirmwareRequest
+
+type LocalAuthListManagementOcppMessagePayloadCall =
+  | request.GetLocalListVersionRequest
+  | request.SendLocalListRequest
+
+type ReservationOcppMessagePayloadCall =
+  | request.CancelReservationRequest
+  | request.ReserveNowRequest
+
+type SmartChargingOcppMessagePayloadCall =
+  | request.ClearChargingProfileRequest
+  | request.GetCompositeScheduleRequest
+  | request.SetChargingProfileRequest
+
+type RemoteTriggerOcppMessagePayloadCall =
+  | request.TriggerMessageRequest
+
 type OcppMessagePayloadCall =
-  | request.RemoteStartTransactionRequest // Core
-  | request.RemoteStopTransactionRequest // Core
-  | request.ResetRequest // Core
-  | request.GetDiagnosticsRequest // FirmwareManagement
-  | request.TriggerMessageRequest // RemoteTrigger
-  | request.GetConfigurationRequest // Core
-  | request.ChangeConfigurationRequest // Core
-  | request.ChangeAvailabilityRequest // Core
-  | request.UnlockConnectorRequest // Core
-  | request.DataTransferRequest; // Core
+  | CoreOcppMessagePayloadCall
+  | FirmwareManagementOcppMessagePayloadCall
+  | LocalAuthListManagementOcppMessagePayloadCall
+  | ReservationOcppMessagePayloadCall
+  | SmartChargingOcppMessagePayloadCall
+  | RemoteTriggerOcppMessagePayloadCall
+
+type CoreOcppMessagePayloadCallResult =
+  | response.AuthorizeResponse
+  | response.BootNotificationResponse
+  | response.ChangeConfigurationResponse
+  | response.HeartbeatResponse
+  | response.MeterValuesResponse
+  | response.StartTransactionResponse
+  | response.StatusNotificationResponse
+  | response.StopTransactionResponse
+
+type FirmwareManagementOcppMessagePayloadCallResult =
+  | response.DiagnosticsStatusNotificationResponse
+  | response.FirmwareStatusNotificationResponse
 
 type OcppMessagePayloadCallResult =
-  | response.AuthorizeResponse // Core
-  | response.BootNotificationResponse // Core
-  | response.HeartbeatResponse // Core
-  | response.MeterValuesResponse // Core
-  | response.StartTransactionResponse // Core
-  | response.StatusNotificationResponse // Core
-  | response.StopTransactionResponse // Core
-  | response.ClearCacheResponse; // Core
+  | CoreOcppMessagePayloadCallResult
+  | FirmwareManagementOcppMessagePayloadCallResult
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -223,7 +264,7 @@ export class OCPPMessageHandler {
         this.handleCallResult(messageId, payload as OcppMessagePayloadCallResult);
         break;
       case OCPPMessageType.CALL_ERROR:
-        this.handleCallError(messageId, payload);
+        this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:
         this._logger.error(`Unknown message type: ${messageType}`);
@@ -323,7 +364,7 @@ export class OCPPMessageHandler {
     this._requests.remove(messageId);
   }
 
-  private handleCallError(messageId: string, error: OcppMessagePayload): void {
+  private handleCallError(messageId: string, error: OcppMessageErrorPayload): void {
     this._logger.log(
       `Received error for message ${messageId}: ${JSON.stringify(error)}`
     );

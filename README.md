@@ -6,7 +6,6 @@ https://shiv3.github.io/ocpp-cp-simulator/#config=%7B"wsURL"%3A"wss%3A%2F%2Floca
 
 <img width="1532" alt="image" src="https://github.com/user-attachments/assets/480f6e76-a426-4f0c-b133-a62a03f0847e">
 
-
 ### Experimental feature
 
 experimental feature support e.g. simultaneous use of multiple chargers

@@ -1,10 +1,10 @@
-import React, { useEffect, useRef} from "react";
+import React, { useEffect, useRef } from "react";
 
 interface LoggerProps {
   logs: string[];
 }
 
-const Logger: React.FC<LoggerProps> = ({logs}) => {
+const Logger: React.FC<LoggerProps> = ({ logs }) => {
   return (
     <div className="mt-2 border-0 border-blue-500 h-screen">
       <AutoScrollingTextarea

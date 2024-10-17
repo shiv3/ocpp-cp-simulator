@@ -1,13 +1,23 @@
-import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket} from "./OCPPWebSocket";
-import {ChargePoint} from "./ChargePoint";
-import {Transaction} from "./Transaction";
-import {Logger} from "./Logger";
-import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification, OCPPErrorCode} from "./OcppTypes";
+import {
+  OcppMessageRequestPayload,
+  OcppMessageResponsePayload,
+  OCPPWebSocket,
+} from "./OCPPWebSocket";
+import { ChargePoint } from "./ChargePoint";
+import { Transaction } from "./Transaction";
+import { Logger } from "./Logger";
+import {
+  OCPPMessageType,
+  OCPPAction,
+  OCPPStatus,
+  BootNotification,
+  OCPPErrorCode,
+} from "./OcppTypes";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
-import {OcppMessagePayload} from "./OCPPWebSocket";
+import { OcppMessagePayload } from "./OCPPWebSocket";
 
 type OcppMessagePayloadCall =
   | request.RemoteStartTransactionRequest
@@ -15,8 +25,6 @@ type OcppMessagePayloadCall =
   | request.ResetRequest
   | request.GetDiagnosticsRequest
   | request.TriggerMessageRequest;
-
-
 
 type OcppMessagePayloadCallResult =
   | response.AuthorizeResponse
@@ -27,9 +35,7 @@ type OcppMessagePayloadCallResult =
   | response.StatusNotificationResponse
   | response.StopTransactionResponse;
 
-
-
-import {UploadFile} from "./file_upload.ts";
+import { UploadFile } from "./file_upload.ts";
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -70,7 +76,7 @@ export class OCPPMessageHandler {
   constructor(
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
-    logger: Logger
+    logger: Logger,
   ) {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
@@ -81,12 +87,8 @@ export class OCPPMessageHandler {
 
   public authorize(tagId: string): void {
     const messageId = this.generateMessageId();
-    const payload: request.AuthorizeRequest = {idTag: tagId};
-    this.sendRequest(
-      OCPPAction.Authorize,
-      messageId,
-      payload
-    );
+    const payload: request.AuthorizeRequest = { idTag: tagId };
+    this.sendRequest(OCPPAction.Authorize, messageId, payload);
   }
 
   public startTransaction(transaction: Transaction, connectorId: number): void {
@@ -101,7 +103,7 @@ export class OCPPMessageHandler {
       OCPPAction.StartTransaction,
       messageId,
       payload,
-      connectorId
+      connectorId,
     );
   }
 
@@ -117,7 +119,7 @@ export class OCPPMessageHandler {
       OCPPAction.StopTransaction,
       messageId,
       payload,
-      connectorId
+      connectorId,
     );
   }
 
@@ -134,24 +136,20 @@ export class OCPPMessageHandler {
       meterType: bootPayload.MeterType,
       meterSerialNumber: bootPayload.MeterSerialNumber,
     };
-    this.sendRequest(
-      OCPPAction.BootNotification,
-      messageId,
-      payload,
-    );
+    this.sendRequest(OCPPAction.BootNotification, messageId, payload);
   }
 
   public sendHeartbeat(): void {
     const messageId = this.generateMessageId();
     const payload: request.HeartbeatRequest = {};
-    this.sendRequest(
-      OCPPAction.Heartbeat,
-      messageId,
-      payload
-    );
+    this.sendRequest(OCPPAction.Heartbeat, messageId, payload);
   }
 
-  public sendMeterValue(transactionId:number|undefined,connectorId: number, meterValue: number): void {
+  public sendMeterValue(
+    transactionId: number | undefined,
+    connectorId: number,
+    meterValue: number,
+  ): void {
     const messageId = this.generateMessageId();
     const payload: request.MeterValuesRequest = {
       transactionId: transactionId,
@@ -159,15 +157,11 @@ export class OCPPMessageHandler {
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: [{value: meterValue.toString()}],
+          sampledValue: [{ value: meterValue.toString() }],
         },
       ],
     };
-    this.sendRequest(
-      OCPPAction.MeterValues,
-      messageId,
-      payload
-    );
+    this.sendRequest(OCPPAction.MeterValues, messageId, payload);
   }
 
   public sendStatusNotification(connectorId: number, status: OCPPStatus): void {
@@ -177,20 +171,22 @@ export class OCPPMessageHandler {
       errorCode: "NoError",
       status: status,
     };
-    this.sendRequest(
-      OCPPAction.StatusNotification,
-      messageId,
-      payload
-    );
+    this.sendRequest(OCPPAction.StatusNotification, messageId, payload);
   }
 
   private sendRequest(
     action: OCPPAction,
     id: string,
     payload: OcppMessageRequestPayload,
-    connectorId?: number
+    connectorId?: number,
   ): void {
-    this._requests.add({type: OCPPMessageType.CALL, action, id, payload, connectorId});
+    this._requests.add({
+      type: OCPPMessageType.CALL,
+      action,
+      id,
+      payload,
+      connectorId,
+    });
     this._webSocket.sendAction(id, action, payload);
   }
 
@@ -198,17 +194,20 @@ export class OCPPMessageHandler {
     messageType: OCPPMessageType,
     messageId: string,
     action: OCPPAction,
-    payload: OcppMessagePayload
+    payload: OcppMessagePayload,
   ): void {
     this._logger.log(
-      `Handling incoming message: ${messageType}, ${messageId}, ${action}`
+      `Handling incoming message: ${messageType}, ${messageId}, ${action}`,
     );
     switch (messageType) {
       case OCPPMessageType.CALL:
         this.handleCall(messageId, action, payload as OcppMessagePayloadCall);
         break;
       case OCPPMessageType.CALL_RESULT:
-        this.handleCallResult(messageId, payload as OcppMessagePayloadCallResult);
+        this.handleCallResult(
+          messageId,
+          payload as OcppMessagePayloadCallResult,
+        );
         break;
       case OCPPMessageType.CALL_ERROR:
         this.handleCallError(messageId, payload);
@@ -221,35 +220,39 @@ export class OCPPMessageHandler {
   private handleCall(
     messageId: string,
     action: OCPPAction,
-    payload: OcppMessagePayloadCall
+    payload: OcppMessagePayloadCall,
   ): void {
     let response: OcppMessageResponsePayload;
     switch (action) {
       case OCPPAction.RemoteStartTransaction:
         response = this.handleRemoteStartTransaction(
-          payload as request.RemoteStartTransactionRequest
+          payload as request.RemoteStartTransactionRequest,
         );
         break;
       case OCPPAction.RemoteStopTransaction:
         response = this.handleRemoteStopTransaction(
-          payload as request.RemoteStopTransactionRequest
+          payload as request.RemoteStopTransactionRequest,
         );
         break;
       case OCPPAction.Reset:
         response = this.handleReset(payload as request.ResetRequest);
         break;
       case OCPPAction.GetDiagnostics:
-        response = this.handleGetDiagnostics(payload as request.GetDiagnosticsRequest);
+        response = this.handleGetDiagnostics(
+          payload as request.GetDiagnosticsRequest,
+        );
         break;
       case OCPPAction.TriggerMessage:
-        response = this.handleTriggerMessage(payload as request.TriggerMessageRequest);
+        response = this.handleTriggerMessage(
+          payload as request.TriggerMessageRequest,
+        );
         break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
           messageId,
           "NotImplemented",
-          "This action is not supported"
+          "This action is not supported",
         );
         return;
     }
@@ -258,7 +261,7 @@ export class OCPPMessageHandler {
 
   private handleCallResult(
     messageId: string,
-    payload: OcppMessagePayloadCallResult
+    payload: OcppMessagePayloadCallResult,
   ): void {
     if (!this._requests || !this._requests.get(messageId)) {
       this._logger.log(`Received unexpected CallResult: ${messageId}`);
@@ -269,7 +272,7 @@ export class OCPPMessageHandler {
     switch (action) {
       case OCPPAction.BootNotification:
         this.handleBootNotificationResponse(
-          payload as response.BootNotificationResponse
+          payload as response.BootNotificationResponse,
         );
         break;
       case OCPPAction.Authorize:
@@ -278,24 +281,27 @@ export class OCPPMessageHandler {
       case OCPPAction.StartTransaction:
         this.handleStartTransactionResponse(
           request?.connectorId || 1,
-          payload as response.StartTransactionResponse
+          payload as response.StartTransactionResponse,
         );
         break;
       case OCPPAction.StopTransaction:
         this.handleStopTransactionResponse(
           request?.connectorId || 1,
-          payload as response.StopTransactionResponse
+          payload as response.StopTransactionResponse,
         );
         break;
       case OCPPAction.Heartbeat:
         this.handleHeartbeatResponse(payload as response.HeartbeatResponse);
         break;
       case OCPPAction.MeterValues:
-        this.handleMeterValuesResponse(payload as response.MeterValuesResponse, request?.payload as request.MeterValuesRequest);
+        this.handleMeterValuesResponse(
+          payload as response.MeterValuesResponse,
+          request?.payload as request.MeterValuesRequest,
+        );
         break;
       case OCPPAction.StatusNotification:
         this.handleStatusNotificationResponse(
-          payload as response.StatusNotificationResponse
+          payload as response.StatusNotificationResponse,
         );
         break;
       default:
@@ -307,43 +313,43 @@ export class OCPPMessageHandler {
 
   private handleCallError(messageId: string, error: OcppMessagePayload): void {
     this._logger.log(
-      `Received error for message ${messageId}: ${JSON.stringify(error)}`
+      `Received error for message ${messageId}: ${JSON.stringify(error)}`,
     );
     // Handle the error appropriately
     this._requests.remove(messageId);
   }
 
   private handleRemoteStartTransaction(
-    payload: request.RemoteStartTransactionRequest
+    payload: request.RemoteStartTransactionRequest,
   ): response.RemoteStartTransactionResponse {
-    const {idTag, connectorId} = payload;
+    const { idTag, connectorId } = payload;
     const connector = this._chargePoint.getConnector(connectorId || 1);
 
     if (connector && connector.availability == "Operative") {
       this._chargePoint.startTransaction(idTag, connectorId || 1);
-      return {status: "Accepted"};
+      return { status: "Accepted" };
     } else {
-      return {status: "Rejected"};
+      return { status: "Rejected" };
     }
   }
 
   private handleRemoteStopTransaction(
-    payload: request.RemoteStopTransactionRequest
+    payload: request.RemoteStopTransactionRequest,
   ): response.RemoteStopTransactionResponse {
-    const {transactionId} = payload;
+    const { transactionId } = payload;
     const connector = Array.from(this._chargePoint.connectors.values()).find(
-      (c) => c.transaction && c.transaction.id === transactionId
+      (c) => c.transaction && c.transaction.id === transactionId,
     );
 
     if (connector) {
       this._chargePoint.updateConnectorStatus(
         connector.id,
-        OCPPStatus.SuspendedEVSE
+        OCPPStatus.SuspendedEVSE,
       );
       this._chargePoint.stopTransaction(connector);
-      return {status: "Accepted"};
+      return { status: "Accepted" };
     } else {
-      return {status: "Rejected"};
+      return { status: "Rejected" };
     }
   }
 
@@ -357,31 +363,31 @@ export class OCPPMessageHandler {
         this._chargePoint.boot();
       }
     }, 5_000);
-    return {status: "Accepted"};
+    return { status: "Accepted" };
   }
 
   private handleGetDiagnostics(
-    payload: request.GetDiagnosticsRequest
+    payload: request.GetDiagnosticsRequest,
   ): response.GetDiagnosticsResponse {
     this._logger.log(`Get diagnostics request received: ${payload.location}`); // e.g. `FTP
     const logs = this._logger.getLogs().join("\n");
-    const blob = new Blob([logs], {type: "text/plain"});
+    const blob = new Blob([logs], { type: "text/plain" });
     const file = new File([blob], "diagnostics.txt");
     (async () => await UploadFile(payload.location, file))();
-    return {fileName: "diagnostics.txt"};
+    return { fileName: "diagnostics.txt" };
   }
 
   private handleTriggerMessage(
-    payload: request.TriggerMessageRequest
+    payload: request.TriggerMessageRequest,
   ): response.TriggerMessageResponse {
     this._logger.log(
-      `Trigger message request received: ${payload.requestedMessage}`
+      `Trigger message request received: ${payload.requestedMessage}`,
     ); // e.g. `DiagnosticsStatusNotification`
-    return {status: "Accepted"};
+    return { status: "Accepted" };
   }
 
   private handleBootNotificationResponse(
-    payload: response.BootNotificationResponse
+    payload: response.BootNotificationResponse,
   ): void {
     this._logger.log("Boot notification successful");
     if (payload.status === "Accepted") {
@@ -393,7 +399,7 @@ export class OCPPMessageHandler {
   }
 
   private handleAuthorizeResponse(payload: response.AuthorizeResponse): void {
-    const {idTagInfo} = payload;
+    const { idTagInfo } = payload;
     if (idTagInfo.status === "Accepted") {
       this._logger.log("Authorization successful");
     } else {
@@ -403,9 +409,9 @@ export class OCPPMessageHandler {
 
   private handleStartTransactionResponse(
     connectorId: number,
-    payload: response.StartTransactionResponse
+    payload: response.StartTransactionResponse,
   ): void {
-    const {transactionId, idTagInfo} = payload;
+    const { transactionId, idTagInfo } = payload;
     const connector = this._chargePoint.getConnector(connectorId);
     if (idTagInfo.status === "Accepted") {
       if (connector) {
@@ -424,16 +430,19 @@ export class OCPPMessageHandler {
       } else {
         this._chargePoint.cleanTransaction(connectorId);
       }
-      this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      this._chargePoint.updateConnectorStatus(
+        connectorId,
+        OCPPStatus.Available,
+      );
     }
   }
 
   private handleStopTransactionResponse(
     connectorId: number,
-    payload: response.StopTransactionResponse
+    payload: response.StopTransactionResponse,
   ): void {
     this._logger.log(
-      `Transaction stopped successfully: ${JSON.stringify(payload)}`
+      `Transaction stopped successfully: ${JSON.stringify(payload)}`,
     );
     const connector = this._chargePoint.getConnector(connectorId);
     if (connector) {
@@ -447,45 +456,49 @@ export class OCPPMessageHandler {
     this._logger.log(`Received heartbeat response: ${payload.currentTime}`);
   }
 
-  private handleMeterValuesResponse(payload: response.MeterValuesResponse, request?: request.MeterValuesRequest): void {
+  private handleMeterValuesResponse(
+    payload: response.MeterValuesResponse,
+    request?: request.MeterValuesRequest,
+  ): void {
     if (request) {
       const connector = this._chargePoint.getConnector(request.connectorId);
       if (connector && connector.transaction) {
         connector.transaction.meterSent = true;
       }
     }
-    this._logger.log(`Meter values sent successfully: ${JSON.stringify(payload)}`);
+    this._logger.log(
+      `Meter values sent successfully: ${JSON.stringify(payload)}`,
+    );
   }
 
   private handleStatusNotificationResponse(
-    payload: response.StatusNotificationResponse
+    payload: response.StatusNotificationResponse,
   ): void {
-    this._logger.log(`Status notification sent successfully: ${JSON.stringify(payload)}`);
+    this._logger.log(
+      `Status notification sent successfully: ${JSON.stringify(payload)}`,
+    );
   }
 
-  private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {
-    this._webSocket.sendResult(
-      messageId,
-      payload,
-    );
+  private sendCallResult(
+    messageId: string,
+    payload: OcppMessageResponsePayload,
+  ): void {
+    this._webSocket.sendResult(messageId, payload);
   }
 
   private sendCallError(
     messageId: string,
     errorCode: OCPPErrorCode,
-    errorDescription: string
+    errorDescription: string,
   ): void {
     const errorDetails = {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.sendError(
-      messageId,
-      errorDetails,
-    );
+    this._webSocket.sendError(messageId, errorDetails);
   }
 
   private generateMessageId(): string {
-    return crypto.randomUUID()
+    return crypto.randomUUID();
   }
 }

@@ -1,7 +1,7 @@
-import React, {useState, useEffect} from "react";
-import {configAtom} from "../store/store.ts";
-import {useAtom} from "jotai/index";
-import {DefaultBootNotification} from "../cp/OcppTypes.ts";
+import React, { useState, useEffect } from "react";
+import { configAtom } from "../store/store.ts";
+import { useAtom } from "jotai/index";
+import { DefaultBootNotification } from "../cp/OcppTypes.ts";
 
 const Settings: React.FC = () => {
   const [wsURL, setWsURL] = useState<string>("");
@@ -14,14 +14,17 @@ const Settings: React.FC = () => {
   const [basicAuthUsername, setBasicAuthUsername] = useState<string>("");
   const [basicAuthPassword, setBasicAuthPassword] = useState<string>("");
 
-  const [autoMeterValueEnabled, setAutoMeterValueEnabled] = useState<boolean>(false);
-  const [autoMeterValueInterval, setAutoMeterValueInterval] = useState<number>(0);
+  const [autoMeterValueEnabled, setAutoMeterValueEnabled] =
+    useState<boolean>(false);
+  const [autoMeterValueInterval, setAutoMeterValueInterval] =
+    useState<number>(0);
   const [autoMeterValue, setAutoMeterValue] = useState<number>(0);
 
   const [experimental, setExperimental] = useState<string | null>(null);
-  const [bootNotification, setBootNotification] = useState<string | null>(JSON.stringify(DefaultBootNotification));
+  const [bootNotification, setBootNotification] = useState<string | null>(
+    JSON.stringify(DefaultBootNotification),
+  );
   const [config, setConfig] = useAtom(configAtom);
-
 
   useEffect(() => {
     if (config) {
@@ -39,8 +42,14 @@ const Settings: React.FC = () => {
       setAutoMeterValueInterval(config.autoMeterValueSetting?.interval);
       setAutoMeterValue(config.autoMeterValueSetting?.value);
 
-      setExperimental(config.Experimental ? JSON.stringify(config.Experimental) : null);
-      setBootNotification(config.BootNotification ? JSON.stringify(config.BootNotification) : null);
+      setExperimental(
+        config.Experimental ? JSON.stringify(config.Experimental) : null,
+      );
+      setBootNotification(
+        config.BootNotification
+          ? JSON.stringify(config.BootNotification)
+          : null,
+      );
     }
   }, [config]);
 
@@ -60,10 +69,14 @@ const Settings: React.FC = () => {
       autoMeterValueSetting: {
         enabled: autoMeterValueEnabled,
         interval: autoMeterValueInterval,
-        value: autoMeterValue
+        value: autoMeterValue,
       },
-      Experimental: experimental !== "" ? experimental && JSON.parse(experimental) : null,
-      BootNotification: bootNotification !== "" ? bootNotification && JSON.parse(bootNotification) : null,
+      Experimental:
+        experimental !== "" ? experimental && JSON.parse(experimental) : null,
+      BootNotification:
+        bootNotification !== ""
+          ? bootNotification && JSON.parse(bootNotification)
+          : null,
     });
     // navigate(`/${location.hash}`)
   };
@@ -105,7 +118,7 @@ const Settings: React.FC = () => {
             value={connectorNumber}
             onChange={(e) => setConnectorNumber(parseInt(e.target.value))}
             placeholder="2"
-            style={{maxWidth: "20ch"}}
+            style={{ maxWidth: "20ch" }}
           />
         </div>
 
@@ -123,7 +136,7 @@ const Settings: React.FC = () => {
             value={cpID}
             onChange={(e) => setCpID(e.target.value)}
             placeholder="CP001"
-            style={{maxWidth: "20ch"}}
+            style={{ maxWidth: "20ch" }}
           />
         </div>
 
@@ -141,7 +154,7 @@ const Settings: React.FC = () => {
             value={tagID}
             onChange={(e) => setTagID(e.target.value)}
             placeholder="XXX"
-            style={{maxWidth: "20ch"}}
+            style={{ maxWidth: "20ch" }}
           />
         </div>
 
@@ -157,7 +170,7 @@ const Settings: React.FC = () => {
             id="OCPP"
             value={ocppVersion}
             onChange={(e) => setOcppVersion(e.target.value)}
-            style={{maxWidth: "20ch"}}
+            style={{ maxWidth: "20ch" }}
           >
             <option value="OCPP-1.6J">OCPP-1.6J</option>
           </select>
@@ -170,14 +183,17 @@ const Settings: React.FC = () => {
             type="checkbox"
             checked={basicAuthEnabled}
             onChange={(e) => {
-              setBasicAuthEnabled(e.target.checked)
-              if(!e.target.checked) {
-                setBasicAuthUsername("")
-                setBasicAuthPassword("")
+              setBasicAuthEnabled(e.target.checked);
+              if (!e.target.checked) {
+                setBasicAuthUsername("");
+                setBasicAuthPassword("");
               }
             }}
           />
-          <label className="text-gray-700 text-sm font-bold ml-2" htmlFor="BasicAuth">
+          <label
+            className="text-gray-700 text-sm font-bold ml-2"
+            htmlFor="BasicAuth"
+          >
             BasicAuth Settings
           </label>
           {basicAuthEnabled && (
@@ -189,7 +205,7 @@ const Settings: React.FC = () => {
                 value={basicAuthUsername}
                 onChange={(e) => setBasicAuthUsername(e.target.value)}
                 placeholder="username"
-                style={{maxWidth: "20ch"}}
+                style={{ maxWidth: "20ch" }}
                 required
               />
               <input
@@ -199,7 +215,7 @@ const Settings: React.FC = () => {
                 value={basicAuthPassword}
                 onChange={(e) => setBasicAuthPassword(e.target.value)}
                 placeholder="password"
-                style={{maxWidth: "20ch"}}
+                style={{ maxWidth: "20ch" }}
                 required
               />
             </div>
@@ -213,14 +229,17 @@ const Settings: React.FC = () => {
             type="checkbox"
             checked={autoMeterValueEnabled}
             onChange={(e) => {
-              setAutoMeterValueEnabled(e.target.checked)
-              if(!e.target.checked) {
-                setAutoMeterValueInterval(0)
-                setAutoMeterValue(0)
+              setAutoMeterValueEnabled(e.target.checked);
+              if (!e.target.checked) {
+                setAutoMeterValueInterval(0);
+                setAutoMeterValue(0);
               }
             }}
           />
-          <label className="text-gray-700 text-sm font-bold ml-2" htmlFor="AutoMeterValue">
+          <label
+            className="text-gray-700 text-sm font-bold ml-2"
+            htmlFor="AutoMeterValue"
+          >
             Auto Meter Value
           </label>
           {autoMeterValueEnabled && (
@@ -230,12 +249,16 @@ const Settings: React.FC = () => {
                 id="AutoMeterValueInterval"
                 type="number"
                 value={autoMeterValueInterval}
-                onChange={(e) => setAutoMeterValueInterval(parseInt(e.target.value))}
+                onChange={(e) =>
+                  setAutoMeterValueInterval(parseInt(e.target.value))
+                }
                 placeholder="30"
-                style={{maxWidth: "20ch"}}
+                style={{ maxWidth: "20ch" }}
                 required
               />
-              <span className="text-gray-700 text-sm font-bold ml-2">seconds</span>
+              <span className="text-gray-700 text-sm font-bold ml-2">
+                seconds
+              </span>
 
               <input
                 className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -244,7 +267,7 @@ const Settings: React.FC = () => {
                 value={autoMeterValue}
                 onChange={(e) => setAutoMeterValue(parseInt(e.target.value))}
                 placeholder="10"
-                style={{maxWidth: "20ch"}}
+                style={{ maxWidth: "20ch" }}
                 required
               />
               <span className="text-gray-700 text-sm font-bold ml-2">kWh</span>
@@ -261,21 +284,21 @@ const Settings: React.FC = () => {
           <textarea
             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             id="Experimental"
-            placeholder="{
-            &quot;ChargePointIDs&quot;: [
+            placeholder='{
+            "ChargePointIDs": [
             {
-            &quot;ChargePointID&quot;: &quot;CP001&quot;,
-            &quot;ConnectorNumber&quot;: 1
+            "ChargePointID": "CP001",
+            "ConnectorNumber": 1
             }
             ],
-            &quot;TagIDs&quot;: [
-            &quot;123456&quot;
+            "TagIDs": [
+            "123456"
             ]
-            }"
-            style={{height: "100px"}}
+            }'
+            style={{ height: "100px" }}
             value={experimental || ""}
-            onChange={(e) => setExperimental(e.target.value)
-            }></textarea>
+            onChange={(e) => setExperimental(e.target.value)}
+          ></textarea>
         </div>
         <div className="mb-4">
           <label
@@ -287,21 +310,21 @@ const Settings: React.FC = () => {
           <textarea
             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             id="BootNotification"
-            placeholder="{
-            &quot;ChargeBoxSerialNumber&quot;: &quot;123456&quot;,
-            &quot;ChargePointModel&quot;: &quot;Model 3&quot;,
-            &quot;ChargePointSerialNumber&quot;: &quot;123456&quot;,
-            &quot;ChargePointVendor&quot;: &quot;Vendor&quot;,
-            &quot;FirmwareVersion&quot;: &quot;1.0.0&quot;,
-            &quot;Iccid&quot;: &quot;123456&quot;,
-            &quot;Imsi&quot;: &quot;123456&quot;,
-            &quot;MeterSerialNumber&quot;: &quot;123456&quot;,
-            &quot;MeterType&quot;: &quot;Model 3&quot;
-            }"
-            style={{height: "100px"}}
+            placeholder='{
+            "ChargeBoxSerialNumber": "123456",
+            "ChargePointModel": "Model 3",
+            "ChargePointSerialNumber": "123456",
+            "ChargePointVendor": "Vendor",
+            "FirmwareVersion": "1.0.0",
+            "Iccid": "123456",
+            "Imsi": "123456",
+            "MeterSerialNumber": "123456",
+            "MeterType": "Model 3"
+            }'
+            style={{ height: "100px" }}
             value={bootNotification || ""}
-            onChange={(e) => setBootNotification(e.target.value)
-            }></textarea>
+            onChange={(e) => setBootNotification(e.target.value)}
+          ></textarea>
         </div>
 
         <div className="flex items-center justify-between">

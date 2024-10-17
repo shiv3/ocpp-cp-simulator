@@ -1,4 +1,4 @@
-import {ErrorCode} from "@voltbras/ts-ocpp/dist/ws";
+import { ErrorCode } from "@voltbras/ts-ocpp/dist/ws";
 
 export enum OCPPStatus {
   Available = "Available",

@@ -39,6 +39,30 @@ export enum OCPPAction {
   Heartbeat = "Heartbeat",
   Authorize = "Authorize",
   Reset = "Reset",
+  GetConfiguration = "GetConfiguration",
+  ChangeConfiguration = "ChangeConfiguration",
+}
+
+export enum OcppFeatureProfile {
+  // Basic Charge Point functionality comparable with OCPP 1.5 [OCPP1.5]
+  // without support for firmware updates, local authorization list management and reservations.
+  Core = "Core",
+  // Support for firmware update management and diagnostic log file download.
+  FirmwareManagement = "FirmwareManagement",
+  // Features to manage the local authorization list in Charge Points.
+  LocalAuthListManagement = "LocalAuthListManagement",
+  // Support for reservation of a Charge Point.
+  Reservation = "Reservation",
+  // Support for basic Smart Charging, for instance using control pilot.
+  SmartCharging = "SmartCharging",
+  // Support for remote triggering of Charge Point initiated messages
+  RemoteTrigger = "RemoteTrigger",
+}
+
+export type OcppConfigurationKey = {
+  key: string;
+  readonly: boolean;
+  value?: string;
 }
 
 export type OCPPErrorCode = ErrorCode;

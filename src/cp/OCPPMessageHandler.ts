@@ -83,7 +83,6 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: request.AuthorizeRequest = {idTag: tagId};
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.Authorize,
       messageId,
       payload
@@ -99,7 +98,6 @@ export class OCPPMessageHandler {
       timestamp: transaction.startTime.toISOString(),
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.StartTransaction,
       messageId,
       payload,
@@ -116,7 +114,6 @@ export class OCPPMessageHandler {
       timestamp: transaction.stopTime!.toISOString(),
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.StopTransaction,
       messageId,
       payload,
@@ -138,7 +135,6 @@ export class OCPPMessageHandler {
       meterSerialNumber: bootPayload.MeterSerialNumber,
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.BootNotification,
       messageId,
       payload,
@@ -149,7 +145,6 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: request.HeartbeatRequest = {};
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.Heartbeat,
       messageId,
       payload
@@ -169,7 +164,6 @@ export class OCPPMessageHandler {
       ],
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.MeterValues,
       messageId,
       payload
@@ -184,7 +178,6 @@ export class OCPPMessageHandler {
       status: status,
     };
     this.sendRequest(
-      OCPPMessageType.CALL,
       OCPPAction.StatusNotification,
       messageId,
       payload
@@ -192,14 +185,13 @@ export class OCPPMessageHandler {
   }
 
   private sendRequest(
-    type: OCPPMessageType,
     action: OCPPAction,
     id: string,
     payload: OcppMessageRequestPayload,
     connectorId?: number
   ): void {
-    this._requests.add({type, action, id, payload, connectorId});
-    this._webSocket.send(type, id, action, payload);
+    this._requests.add({type: OCPPMessageType.CALL, action, id, payload, connectorId});
+    this._webSocket.sendAction(id, action, payload);
   }
 
   private handleIncomingMessage(
@@ -464,11 +456,9 @@ export class OCPPMessageHandler {
   }
 
   private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {
-    this._webSocket.send(
-      OCPPMessageType.CALL_RESULT,
+    this._webSocket.sendResult(
       messageId,
-      "" as OCPPAction,
-      payload
+      payload,
     );
   }
 
@@ -481,11 +471,9 @@ export class OCPPMessageHandler {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.send(
-      OCPPMessageType.CALL_ERROR,
+    this._webSocket.sendError(
       messageId,
-      "" as OCPPAction,
-      errorDetails
+      errorDetails,
     );
   }
 

@@ -357,6 +357,14 @@ export class OCPPMessageHandler {
 
   private handleReset(payload: request.ResetRequest): response.ResetResponse {
     this._logger.log(`Reset request received: ${payload.type}`);
+    setTimeout(() => {
+      this._logger.log(`Reset chargePoint: ${this._chargePoint.id}`);
+      if (payload.type === "Hard") {
+        this._chargePoint.reset();
+      } else {
+        this._chargePoint.boot();
+      }
+    }, 5_000);
     return {status: "Accepted"};
   }
 

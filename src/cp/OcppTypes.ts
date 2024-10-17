@@ -12,10 +12,7 @@ export enum OCPPStatus {
   Faulted = "Faulted",
 }
 
-export enum OCPPAvailability {
-  Operative = "Operative",
-  Inoperative = "Inoperative",
-}
+export type OCPPAvailability = "Operative" | "Inoperative"
 
 export enum OCPPMessageType {
   CALL = 2,
@@ -27,7 +24,7 @@ export enum OCPPAction {
   // Core actions
   Authorize = "Authorize",
   BootNotification = "BootNotification",
-  ChangeAvailability = "ChangeAvailability", // TODO
+  ChangeAvailability = "ChangeAvailability",
   ChangeConfiguration = "ChangeConfiguration",
   ClearCache = "ClearCache", // TODO
   DataTransfer = "DataTransfer", // TODO

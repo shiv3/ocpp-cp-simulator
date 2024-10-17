@@ -14,7 +14,7 @@ import {
   OCPPStatus,
   BootNotification,
   OCPPErrorCode,
-  OcppConfigurationKey
+  OcppConfigurationKey,
 } from "./OcppTypes";
 import {UploadFile} from "./file_upload.ts";
 import {
@@ -326,6 +326,11 @@ export class OCPPMessageHandler {
     const request = this._requests.get(messageId);
     const action = request?.action;
     switch (action) {
+      case OCPPAction.ChangeAvailability:
+        this.handleChangeAvailability(
+          payload as request.ChangeAvailabilityRequest
+        );
+        break;
       case OCPPAction.BootNotification:
         this.handleBootNotificationResponse(
           payload as response.BootNotificationResponse
@@ -489,6 +494,16 @@ export class OCPPMessageHandler {
       `Trigger message request received: ${payload.requestedMessage}`
     ); // e.g. `DiagnosticsStatusNotification`
     return {status: "Accepted"};
+  }
+
+  private handleChangeAvailability(payload: request.ChangeAvailabilityRequest): response.ChangeAvailabilityResponse {
+    this._logger.log(`Change availability request received: ${JSON.stringify(payload)}`);
+    const updated = this._chargePoint.updateConnectorAvailability(payload.connectorId, payload.type);
+    if (updated) {
+      return {status: "Accepted"};
+    } else {
+      return {status: "Rejected"};
+    }
   }
 
   private handleBootNotificationResponse(

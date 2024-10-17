@@ -104,14 +104,33 @@ export class OCPPWebSocket {
     }
   }
 
-  public send(
-    messageType: OCPPMessageType,
+  public sendAction(
     messageId: string,
     action: OCPPAction,
-    payload: OcppMessagePayload
+    payload: OcppMessageRequestPayload,
   ): void {
+    const message = JSON.stringify([OCPPMessageType.CALL, messageId, action, payload]);
+    this.send(message);
+  }
+
+  public sendResult(
+      messageId: string,
+      payload: OcppMessageResponsePayload,
+  ): void {
+    const message = JSON.stringify([OCPPMessageType.CALL_RESULT, messageId, payload]);
+    this.send(message);
+  }
+
+  public sendError(
+      messageId: string,
+      payload: OcppMessageErrorPayload,
+  ): void {
+    const message = JSON.stringify([OCPPMessageType.CALL_ERROR, messageId, payload]);
+    this.send(message);
+  }
+
+  private send(message: string): void {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      const message = JSON.stringify([messageType, messageId, action, payload]);
       this._ws.send(message);
       this._logger.log(`Sent: ${message}`);
     } else {

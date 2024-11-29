@@ -12,14 +12,17 @@ export type OcppMessageRequestPayload =
   | request.MeterValuesRequest
   | request.StartTransactionRequest
   | request.StatusNotificationRequest
-  | request.StopTransactionRequest;
+  | request.StopTransactionRequest
 
 export type OcppMessageResponsePayload =
+  | response.ChangeConfigurationResponse
+  | response.GetConfigurationResponse
   | response.GetDiagnosticsResponse
   | response.RemoteStartTransactionResponse
   | response.RemoteStopTransactionResponse
   | response.ResetResponse
-  | response.TriggerMessageResponse;
+  | response.TriggerMessageResponse
+  | response.UnlockConnectorResponse
 
 export type OcppMessageErrorPayload = {
   readonly errorCode: OCPPErrorCode;

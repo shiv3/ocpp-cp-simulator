@@ -17,7 +17,7 @@ export class Connector {
   constructor(id: number) {
     this._id = id;
     this._status = OCPPStatus.Available;
-    this._availability = OCPPAvailability.Operative;
+    this._availability = "Operative";
     this._meterValue = 0;
     this._transaction = null;
 
@@ -45,7 +45,7 @@ export class Connector {
     })
   }
 
-  get availability(): string {
+  get availability(): OCPPAvailability {
     return this._availability;
   }
 

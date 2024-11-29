@@ -28,7 +28,7 @@ export class ChargePoint {
     | null = null;
   private _availabilityChangeCallbacks: Map<
     number,
-    (availability: string) => void
+    (availability: OCPPAvailability) => void
   > = new Map();
 
   constructor(id: string,
@@ -121,7 +121,7 @@ export class ChargePoint {
 
   setAvailabilityChangeCallback(
     connectorId: number,
-    callback: (availability: string) => void
+    callback: (availability: OCPPAvailability) => void
   ): void {
     this._availabilityChangeCallbacks.set(connectorId, callback);
   }
@@ -320,23 +320,24 @@ export class ChargePoint {
 
   public updateConnectorAvailability(
     connectorId: number,
-    newAvailability: string
-  ): void {
+    newAvailability: OCPPAvailability
+  ): boolean {
     const connector = this.getConnector(connectorId);
-    if (connector) {
-      connector.availability! = newAvailability;
-      if (newAvailability === OCPPAvailability.Inoperative) {
-        this.updateConnectorStatus(connectorId, OCPPStatus.Unavailable);
-      } else if (newAvailability === OCPPAvailability.Operative) {
-        this.updateConnectorStatus(connectorId, OCPPStatus.Available);
-      }
-      const callback = this._availabilityChangeCallbacks.get(connectorId);
-      if (callback) {
-        callback(newAvailability);
-      }
-    } else {
+    if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`);
+      return false;
     }
+    connector.availability = newAvailability;
+    if (newAvailability === "Inoperative") {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Unavailable);
+    } else if (newAvailability === "Operative") {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+    }
+    const callback = this._availabilityChangeCallbacks.get(connectorId);
+    if (callback) {
+      callback(newAvailability);
+    }
+    return true;
   }
 
   public setTransactionID(connectorId: number, transactionId: number): void {

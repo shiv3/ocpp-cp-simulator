@@ -1,35 +1,91 @@
-import {OcppMessageRequestPayload, OcppMessageResponsePayload, OCPPWebSocket} from "./OCPPWebSocket";
-import {ChargePoint} from "./ChargePoint";
-import {Transaction} from "./Transaction";
-import {Logger} from "./Logger";
-import {OCPPMessageType, OCPPAction, OCPPStatus, BootNotification, OCPPErrorCode} from "./OcppTypes";
+import {
+  OcppMessageErrorPayload,
+  OcppMessagePayload,
+  OcppMessageRequestPayload,
+  OcppMessageResponsePayload,
+  OCPPWebSocket
+} from "./OCPPWebSocket";
+import { ChargePoint } from "./ChargePoint";
+import { Transaction } from "./Transaction";
+import { Logger } from "./Logger";
+import {
+  BootNotification,
+  OCPPAction,
+  OcppConfigurationKey,
+  OCPPErrorCode,
+  OCPPMessageType,
+  OCPPStatus
+} from "./OcppTypes";
+import { UploadFile } from "./file_upload.ts";
+import {
+  ArrayConfigurationValue,
+  BooleanConfigurationValue,
+  Configuration,
+  ConfigurationValue,
+  defaultConfiguration,
+  IntegerConfigurationValue,
+  StringConfigurationValue
+} from "./Configuration.ts";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
-import {OcppMessagePayload} from "./OCPPWebSocket";
-
-type OcppMessagePayloadCall =
+type CoreOcppMessagePayloadCall =
+  | request.ChangeAvailabilityRequest
+  | request.ChangeConfigurationRequest
+  | request.ClearCacheRequest
+  | request.GetConfigurationRequest
   | request.RemoteStartTransactionRequest
   | request.RemoteStopTransactionRequest
   | request.ResetRequest
+  | request.UnlockConnectorRequest
+
+type FirmwareManagementOcppMessagePayloadCall =
   | request.GetDiagnosticsRequest
-  | request.TriggerMessageRequest;
+  | request.UpdateFirmwareRequest
 
+type LocalAuthListManagementOcppMessagePayloadCall =
+  | request.GetLocalListVersionRequest
+  | request.SendLocalListRequest
 
+type ReservationOcppMessagePayloadCall =
+  | request.CancelReservationRequest
+  | request.ReserveNowRequest
 
-type OcppMessagePayloadCallResult =
+type SmartChargingOcppMessagePayloadCall =
+  | request.ClearChargingProfileRequest
+  | request.GetCompositeScheduleRequest
+  | request.SetChargingProfileRequest
+
+type RemoteTriggerOcppMessagePayloadCall =
+  | request.TriggerMessageRequest
+
+type OcppMessagePayloadCall =
+  | CoreOcppMessagePayloadCall
+  | FirmwareManagementOcppMessagePayloadCall
+  | LocalAuthListManagementOcppMessagePayloadCall
+  | ReservationOcppMessagePayloadCall
+  | SmartChargingOcppMessagePayloadCall
+  | RemoteTriggerOcppMessagePayloadCall
+
+type CoreOcppMessagePayloadCallResult =
   | response.AuthorizeResponse
   | response.BootNotificationResponse
+  | response.ChangeConfigurationResponse
+  | response.DataTransferResponse
   | response.HeartbeatResponse
   | response.MeterValuesResponse
   | response.StartTransactionResponse
   | response.StatusNotificationResponse
-  | response.StopTransactionResponse;
+  | response.StopTransactionResponse
 
+type FirmwareManagementOcppMessagePayloadCallResult =
+  | response.DiagnosticsStatusNotificationResponse
+  | response.FirmwareStatusNotificationResponse
 
-
-import {UploadFile} from "./file_upload.ts";
+type OcppMessagePayloadCallResult =
+  | CoreOcppMessagePayloadCallResult
+  | FirmwareManagementOcppMessagePayloadCallResult
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -211,7 +267,7 @@ export class OCPPMessageHandler {
         this.handleCallResult(messageId, payload as OcppMessagePayloadCallResult);
         break;
       case OCPPMessageType.CALL_ERROR:
-        this.handleCallError(messageId, payload);
+        this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:
         this._logger.error(`Unknown message type: ${messageType}`);
@@ -244,6 +300,18 @@ export class OCPPMessageHandler {
       case OCPPAction.TriggerMessage:
         response = this.handleTriggerMessage(payload as request.TriggerMessageRequest);
         break;
+      case OCPPAction.GetConfiguration:
+        response = this.handleGetConfiguration(payload as request.GetConfigurationRequest);
+        break;
+      case OCPPAction.ChangeConfiguration:
+        response = this.handleChangeConfiguration(payload as request.ChangeConfigurationRequest);
+        break;
+      case OCPPAction.ClearCache:
+        response = this.handleClearCache(payload as request.ClearCacheRequest);
+        break;
+      case OCPPAction.UnlockConnector:
+        response = this.handleUnlockConnector(payload as request.UnlockConnectorRequest);
+        break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
@@ -267,6 +335,11 @@ export class OCPPMessageHandler {
     const request = this._requests.get(messageId);
     const action = request?.action;
     switch (action) {
+      case OCPPAction.ChangeAvailability:
+        this.handleChangeAvailability(
+          payload as request.ChangeAvailabilityRequest
+        );
+        break;
       case OCPPAction.BootNotification:
         this.handleBootNotificationResponse(
           payload as response.BootNotificationResponse
@@ -298,6 +371,9 @@ export class OCPPMessageHandler {
           payload as response.StatusNotificationResponse
         );
         break;
+      case OCPPAction.DataTransfer:
+        this.handleDataTransferResponse(payload as response.DataTransferResponse);
+        break;
       default:
         this._logger.log(`Unsupported action result: ${action}`);
     }
@@ -305,7 +381,7 @@ export class OCPPMessageHandler {
     this._requests.remove(messageId);
   }
 
-  private handleCallError(messageId: string, error: OcppMessagePayload): void {
+  private handleCallError(messageId: string, error: OcppMessageErrorPayload): void {
     this._logger.log(
       `Received error for message ${messageId}: ${JSON.stringify(error)}`
     );
@@ -371,6 +447,58 @@ export class OCPPMessageHandler {
     return {fileName: "diagnostics.txt"};
   }
 
+  private handleGetConfiguration(
+    payload: request.GetConfigurationRequest
+  ): response.GetConfigurationResponse {
+    this._logger.log(`Get configuration request received: ${JSON.stringify(payload.key)}`);
+    const configuration = OCPPMessageHandler.mapConfiguration(defaultConfiguration(this._chargePoint));
+    if (!payload.key || payload.key.length === 0) {
+      return {
+        configurationKey: configuration,
+      };
+    }
+    const filteredConfig = configuration.filter((c) => payload.key?.includes(c.key));
+    const configurationKeys = configuration.map((c) => c.key);
+    const unknownKeys = payload.key.filter((c) => !configurationKeys.includes(c));
+    return {
+      configurationKey: filteredConfig,
+      unknownKey: unknownKeys,
+    }
+  }
+
+  private static mapConfiguration(config: Configuration): OcppConfigurationKey[] {
+    return config.map(c => ({
+      key: c.key.name,
+      readonly: c.key.readonly,
+      value: OCPPMessageHandler.mapValue(c),
+    }));
+  }
+
+  private static mapValue(value: ConfigurationValue): string {
+    switch (value.key.type) {
+      case "string":
+        return (value as StringConfigurationValue).value;
+      case "boolean":
+        return String((value as BooleanConfigurationValue).value);
+      case "integer":
+        return String((value as IntegerConfigurationValue).value);
+      case "array":
+        return (value as ArrayConfigurationValue).value.join(',');
+    }
+  }
+
+  private handleChangeConfiguration(
+      payload: request.ChangeConfigurationRequest
+  ): response.ChangeConfigurationResponse {
+    this._logger.log(`Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`);
+    switch (payload.key) {
+      default:
+        return {
+          status: "NotSupported",
+        };
+    }
+  }
+
   private handleTriggerMessage(
     payload: request.TriggerMessageRequest
   ): response.TriggerMessageResponse {
@@ -378,6 +506,30 @@ export class OCPPMessageHandler {
       `Trigger message request received: ${payload.requestedMessage}`
     ); // e.g. `DiagnosticsStatusNotification`
     return {status: "Accepted"};
+  }
+
+  private handleChangeAvailability(payload: request.ChangeAvailabilityRequest): response.ChangeAvailabilityResponse {
+    this._logger.log(`Change availability request received: ${JSON.stringify(payload)}`);
+    const updated = this._chargePoint.updateConnectorAvailability(payload.connectorId, payload.type);
+    if (updated) {
+      return {status: "Accepted"};
+    } else {
+      return {status: "Rejected"};
+    }
+  }
+
+  private handleClearCache(
+    payload: request.ClearCacheRequest
+  ): response.ClearCacheResponse {
+    this._logger.log(`Clear cache request received: ${JSON.stringify(payload)}`);
+    return {status: "Accepted"};
+  }
+
+  private handleUnlockConnector(
+    payload: request.UnlockConnectorRequest
+  ): response.UnlockConnectorResponse {
+    this._logger.log(`Unlock connector request received: ${JSON.stringify(payload)}`);
+    return {status: "NotSupported"};
   }
 
   private handleBootNotificationResponse(
@@ -461,6 +613,12 @@ export class OCPPMessageHandler {
     payload: response.StatusNotificationResponse
   ): void {
     this._logger.log(`Status notification sent successfully: ${JSON.stringify(payload)}`);
+  }
+
+  private handleDataTransferResponse(
+    payload: response.DataTransferResponse
+  ): void {
+    this._logger.log(`Data transfer sent successfully: ${JSON.stringify(payload)}`);
   }
 
   private sendCallResult(messageId: string, payload: OcppMessageResponsePayload): void {

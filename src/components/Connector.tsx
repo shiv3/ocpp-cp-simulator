@@ -1,6 +1,7 @@
 import React, {useState, useEffect} from "react";
 import {ChargePoint} from "../cp/ChargePoint.ts";
 import * as ocpp from "../cp/OcppTypes";
+import { OCPPAvailability } from "../cp/OcppTypes";
 
 interface ConnectorProps {
   id: number;
@@ -13,8 +14,8 @@ const Connector: React.FC<ConnectorProps> = ({id: connector_id, cp,idTag}) => {
   const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(
     ocpp.OCPPStatus.Unavailable
   );
-  const [availability, setAvailability] = useState<string>(
-    ocpp.OCPPAvailability.Operative
+  const [availability, setAvailability] = useState<OCPPAvailability>(
+    "Operative"
   );
   const [meterValue, setMeterValue] = useState<number>(0);
   const [tagId, setIdTag] = useState<string>(idTag);
@@ -223,12 +224,12 @@ const ConnectorStatus: React.FC<{ status: string }> = ({status}) => {
   return <span className={statusColor(status)}>{status}</span>;
 };
 
-const ConnectorAvailability: React.FC<{ availability: string }> = ({availability,}) => {
-  const availabilityColor = (a: string) => {
+const ConnectorAvailability: React.FC<{ availability: OCPPAvailability }> = ({availability,}) => {
+  const availabilityColor = (a: OCPPAvailability) => {
     switch (a) {
-      case ocpp.OCPPAvailability.Operative:
+      case "Operative":
         return "text-green-500";
-      case ocpp.OCPPAvailability.Inoperative:
+      case "Inoperative":
         return "text-red-500";
       default:
         return "text-black";

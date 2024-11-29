@@ -12,10 +12,7 @@ export enum OCPPStatus {
   Faulted = "Faulted",
 }
 
-export enum OCPPAvailability {
-  Operative = "Operative",
-  Inoperative = "Inoperative",
-}
+export type OCPPAvailability = "Operative" | "Inoperative"
 
 export enum OCPPMessageType {
   CALL = 2,
@@ -24,21 +21,64 @@ export enum OCPPMessageType {
 }
 
 export enum OCPPAction {
-  // Charge Point to Central System
-  CallResult = "CallResult",
-
+  // Core actions
+  Authorize = "Authorize",
+  BootNotification = "BootNotification",
+  ChangeAvailability = "ChangeAvailability",
+  ChangeConfiguration = "ChangeConfiguration",
+  ClearCache = "ClearCache",
+  DataTransfer = "DataTransfer",
+  GetConfiguration = "GetConfiguration",
+  Heartbeat = "Heartbeat",
+  MeterValues = "MeterValues",
   RemoteStartTransaction = "RemoteStartTransaction",
   RemoteStopTransaction = "RemoteStopTransaction",
-  StartTransaction = "StartTransaction",
-  StopTransaction = "StopTransaction",
-  GetDiagnostics = "GetDiagnostics",
-  TriggerMessage = "TriggerMessage",
-  StatusNotification = "StatusNotification",
-  MeterValues = "MeterValues",
-  BootNotification = "BootNotification",
-  Heartbeat = "Heartbeat",
-  Authorize = "Authorize",
   Reset = "Reset",
+  StartTransaction = "StartTransaction",
+  StatusNotification = "StatusNotification",
+  StopTransaction = "StopTransaction",
+  UnlockConnector = "UnlockConnector",
+  // FirmwareManagement actions
+  GetDiagnostics = "GetDiagnostics",
+  DiagnosticsStatusNotification = "DiagnosticsStatusNotification", // TODO
+  FirmwareStatusNotification = "FirmwareStatusNotification", // TODO
+  UpdateFirmware = "UpdateFirmware", // TODO
+  // LocalAuthListManagement actions
+  GetLocalListVersion = "GetLocalListVersion", // TODO
+  SendLocalList = "SendLocalList", // TODO
+  // Reservation actions
+  CancelReservation = "CancelReservation", // TODO
+  ReserveNow = "ReserveNow", // TODO
+  // SmartCharging actions
+  ClearChargingProfile = "ClearChargingProfile", // TODO
+  GetCompositeSchedule = "GetCompositeSchedule", // TODO
+  SetChargingProfile = "SetChargingProfile", // TODO
+  // RemoteTrigger actions
+  TriggerMessage = "TriggerMessage",
+  // Fake actions
+  CallResult = "CallResult",
+}
+
+export enum OcppFeatureProfile {
+  // Basic Charge Point functionality comparable with OCPP 1.5 [OCPP1.5]
+  // without support for firmware updates, local authorization list management and reservations.
+  Core = "Core",
+  // Support for firmware update management and diagnostic log file download.
+  FirmwareManagement = "FirmwareManagement",
+  // Features to manage the local authorization list in Charge Points.
+  LocalAuthListManagement = "LocalAuthListManagement",
+  // Support for reservation of a Charge Point.
+  Reservation = "Reservation",
+  // Support for basic Smart Charging, for instance using control pilot.
+  SmartCharging = "SmartCharging",
+  // Support for remote triggering of Charge Point initiated messages
+  RemoteTrigger = "RemoteTrigger",
+}
+
+export type OcppConfigurationKey = {
+  key: string;
+  readonly: boolean;
+  value?: string;
 }
 
 export type OCPPErrorCode = ErrorCode;

@@ -153,7 +153,7 @@ export class OCPPWebSocket {
   }
 
   private handleMessage(ev: MessageEvent): void {
-    this._logger.log(`Received: ${JSON.stringify(ev.data)}`);
+    this._logger.log(`Received: ${ev.data}`);
     try {
       const messageArray = JSON.parse(ev.data.toString());
       const len = messageArray.length;

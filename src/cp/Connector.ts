@@ -1,5 +1,5 @@
-import {OCPPStatus, OCPPAvailability} from "./OcppTypes";
-import {Transaction} from "./Transaction";
+import { OCPPStatus, OCPPAvailability } from "./OcppTypes";
+import { Transaction } from "./Transaction";
 import * as ocpp from "./OcppTypes.ts";
 
 export class Connector {
@@ -9,8 +9,9 @@ export class Connector {
   private _meterValue: number;
   private _transaction: Transaction | null;
 
-  private _transactionIDChangeCallbacks:
-    | ((transactionId: number | null) => void)[]
+  private _transactionIDChangeCallbacks: ((
+    transactionId: number | null,
+  ) => void)[];
   private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void)[];
   private _meterValueChangeCallbacks: ((meterValue: number) => void)[];
 
@@ -40,9 +41,10 @@ export class Connector {
 
   set status(newStatus: ocpp.OCPPStatus) {
     this._status = newStatus;
-    this._statusChangeCallbacks && this._statusChangeCallbacks.forEach((callback) => {
-      callback(newStatus);
-    })
+    this._statusChangeCallbacks &&
+      this._statusChangeCallbacks.forEach((callback) => {
+        callback(newStatus);
+      });
   }
 
   get availability(): OCPPAvailability {
@@ -59,9 +61,10 @@ export class Connector {
 
   set meterValue(value: number) {
     this._meterValue = value;
-    this._meterValueChangeCallbacks && this._meterValueChangeCallbacks.forEach((callback) => {
-      callback(value);
-    })
+    this._meterValueChangeCallbacks &&
+      this._meterValueChangeCallbacks.forEach((callback) => {
+        callback(value);
+      });
   }
 
   get transaction(): Transaction | null {
@@ -75,16 +78,15 @@ export class Connector {
   set transactionId(transactionId: number | null) {
     if (this._transaction) {
       this._transaction.id = transactionId;
-      this._transactionIDChangeCallbacks && this._transactionIDChangeCallbacks.forEach((callback) => {
-        callback(transactionId);
-      })
-
+      this._transactionIDChangeCallbacks &&
+        this._transactionIDChangeCallbacks.forEach((callback) => {
+          callback(transactionId);
+        });
     }
   }
 
-
   public setTransactionIDChangeCallbacks(
-    callback: (transactionId: number | null) => void
+    callback: (transactionId: number | null) => void,
   ) {
     this._transactionIDChangeCallbacks.push(callback);
   }
@@ -96,5 +98,4 @@ export class Connector {
   public setMeterValueChangeCallbacks(callback: (meterValue: number) => void) {
     this._meterValueChangeCallbacks.push(callback);
   }
-
 }

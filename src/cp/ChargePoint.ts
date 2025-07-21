@@ -1,9 +1,9 @@
-import {Connector} from "./Connector";
-import {OCPPWebSocket} from "./OCPPWebSocket";
-import {OCPPMessageHandler} from "./OCPPMessageHandler";
-import {Logger} from "./Logger";
-import {OCPPStatus, OCPPAvailability, BootNotification} from "./OcppTypes";
-import {Transaction} from "./Transaction.ts";
+import { Connector } from "./Connector";
+import { OCPPWebSocket } from "./OCPPWebSocket";
+import { OCPPMessageHandler } from "./OCPPMessageHandler";
+import { Logger } from "./Logger";
+import { OCPPStatus, OCPPAvailability, BootNotification } from "./OcppTypes";
+import { Transaction } from "./Transaction.ts";
 import * as ocpp from "./OcppTypes.ts";
 
 export class ChargePoint {
@@ -17,8 +17,7 @@ export class ChargePoint {
 
   public _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error: string = "";
-  public _errorCallback: (error: string) => void = () => {
-  };
+  public _errorCallback: (error: string) => void = () => {};
 
   private _heartbeat: number | null = null;
   private _autoMeterValueIntervals: Map<number, number> = new Map();
@@ -31,12 +30,14 @@ export class ChargePoint {
     (availability: OCPPAvailability) => void
   > = new Map();
 
-  constructor(id: string,
-              _bootNotification: BootNotification,
-              connectorCount: number,
-              wsUrl: string,
-              basicAuthSettings: { username: string; password: string } | null,
-              autoMeterValueSetting: { interval: number; value: number } | null) {
+  constructor(
+    id: string,
+    _bootNotification: BootNotification,
+    connectorCount: number,
+    wsUrl: string,
+    basicAuthSettings: { username: string; password: string } | null,
+    autoMeterValueSetting: { interval: number; value: number } | null,
+  ) {
     this._id = id;
     this._bootNotification = _bootNotification;
     this._connectors = new Map();
@@ -44,11 +45,16 @@ export class ChargePoint {
       this._connectors.set(i, new Connector(i));
     }
     this._logger = new Logger();
-    this._webSocket = new OCPPWebSocket(wsUrl, this._id, this._logger, basicAuthSettings);
+    this._webSocket = new OCPPWebSocket(
+      wsUrl,
+      this._id,
+      this._logger,
+      basicAuthSettings,
+    );
     this._messageHandler = new OCPPMessageHandler(
       this,
       this._webSocket,
-      this._logger
+      this._logger,
     );
     this._autoMeterValueSetting = autoMeterValueSetting;
   }
@@ -89,7 +95,7 @@ export class ChargePoint {
 
   // Setters and getters for callbacks
   set statusChangeCallback(
-    callback: (status: string, message?: string) => void
+    callback: (status: string, message?: string) => void,
   ) {
     this._statusChangeCallback = callback;
   }
@@ -100,28 +106,28 @@ export class ChargePoint {
 
   setConnectorTransactionIDChangeCallback(
     connectorId: number,
-    callback: (transactionId: number | null) => void
+    callback: (transactionId: number | null) => void,
   ): void {
     this.connectors.get(connectorId)?.setTransactionIDChangeCallbacks(callback);
   }
 
   setConnectorStatusChangeCallback(
     connectorId: number,
-    callback: (status: ocpp.OCPPStatus) => void
+    callback: (status: ocpp.OCPPStatus) => void,
   ): void {
     this.connectors.get(connectorId)?.setStatusChangeCallbacks(callback);
   }
 
   setConnectorMeterValueChangeCallback(
     connectorId: number,
-    callback: (meterValue: number) => void
+    callback: (meterValue: number) => void,
   ): void {
     this.connectors.get(connectorId)?.setMeterValueChangeCallbacks(callback);
   }
 
   setAvailabilityChangeCallback(
     connectorId: number,
-    callback: (availability: OCPPAvailability) => void
+    callback: (availability: OCPPAvailability) => void,
   ): void {
     this._availabilityChangeCallbacks.set(connectorId, callback);
   }
@@ -133,12 +139,12 @@ export class ChargePoint {
         this.status = OCPPStatus.Unavailable;
         this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
         this._logger.error(
-          `WebSocket closed code: ${ev.code} reason: ${ev.reason}`
+          `WebSocket closed code: ${ev.code} reason: ${ev.reason}`,
         );
         if (ev.code !== 1005) {
           this.error = `WebSocket closed code: ${ev.code} reason: ${ev.reason}`;
         }
-      }
+      },
     );
   }
 
@@ -187,10 +193,16 @@ export class ChargePoint {
       connector.transaction = transaction;
       this._messageHandler.startTransaction(transaction, connectorId);
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
-      if (this._autoMeterValueSetting !== null &&
+      if (
+        this._autoMeterValueSetting !== null &&
         this._autoMeterValueSetting.interval !== 0 &&
-        this._autoMeterValueSetting.value !== 0) {
-        this.startAutoMeterValue(connectorId, this._autoMeterValueSetting.interval, this._autoMeterValueSetting.value);
+        this._autoMeterValueSetting.value !== 0
+      ) {
+        this.startAutoMeterValue(
+          connectorId,
+          this._autoMeterValueSetting.interval,
+          this._autoMeterValueSetting.value,
+        );
       }
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
@@ -200,7 +212,7 @@ export class ChargePoint {
   public stopTransaction(connectorId: number | Connector): void {
     let connId: number;
     let connector: Connector | undefined;
-    if (typeof connectorId === 'number') {
+    if (typeof connectorId === "number") {
       connId = connectorId;
       connector = this.getConnector(connectorId);
     } else {
@@ -210,10 +222,7 @@ export class ChargePoint {
     if (connector) {
       connector.transaction!.stopTime = new Date();
       connector.transaction!.meterStop = connector.meterValue;
-      this._messageHandler.stopTransaction(
-        connector.transaction!,
-        connId
-      );
+      this._messageHandler.stopTransaction(connector.transaction!, connId);
       this.cleanTransaction(connector);
     } else {
       this._logger.error(`Connector for id ${connId} not found`);
@@ -224,7 +233,7 @@ export class ChargePoint {
   public cleanTransaction(connector: Connector | number): void {
     let connectorId: number;
     let transaction: Transaction | undefined | null;
-    if (typeof connector === 'number') {
+    if (typeof connector === "number") {
       connectorId = connector;
       transaction = this.getConnector(connectorId)?.transaction;
     } else {
@@ -269,15 +278,26 @@ export class ChargePoint {
   public sendMeterValue(connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
-      this._messageHandler.sendMeterValue(connector.transaction?.id ?? undefined, connectorId, connector.meterValue);
+      this._messageHandler.sendMeterValue(
+        connector.transaction?.id ?? undefined,
+        connectorId,
+        connector.meterValue,
+      );
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
   }
 
-  public startAutoMeterValue(connectorId: number, intervalSec: number, value: number): void {
+  public startAutoMeterValue(
+    connectorId: number,
+    intervalSec: number,
+    value: number,
+  ): void {
     const intervalNum = setInterval(() => {
-      this.setMeterValue(connectorId, this.getConnector(connectorId)!.meterValue + value);
+      this.setMeterValue(
+        connectorId,
+        this.getConnector(connectorId)!.meterValue + value,
+      );
       this.sendMeterValue(connectorId);
     }, intervalSec * 1000);
     this._autoMeterValueIntervals.set(connectorId, intervalNum);
@@ -307,7 +327,7 @@ export class ChargePoint {
 
   public updateConnectorStatus(
     connectorId: number,
-    newStatus: OCPPStatus
+    newStatus: OCPPStatus,
   ): void {
     const connector = this.getConnector(connectorId);
     if (connector) {
@@ -320,7 +340,7 @@ export class ChargePoint {
 
   public updateConnectorAvailability(
     connectorId: number,
-    newAvailability: OCPPAvailability
+    newAvailability: OCPPAvailability,
   ): boolean {
     const connector = this.getConnector(connectorId);
     if (!connector) {

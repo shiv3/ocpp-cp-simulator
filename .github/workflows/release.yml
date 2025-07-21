@@ -3,7 +3,7 @@ name: Release Desktop App
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -14,18 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-            target: 'aarch64-apple-darwin'
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-            target: 'x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            args: ''
-            target: 'x86_64-unknown-linux-gnu'
-          - platform: 'windows-latest'
-            args: ''
-            target: 'x86_64-pc-windows-msvc'
+          - platform: "macos-latest"
+            args: "--target aarch64-apple-darwin"
+            target: "aarch64-apple-darwin"
+          - platform: "macos-latest"
+            args: "--target x86_64-apple-darwin"
+            target: "x86_64-apple-darwin"
+          - platform: "ubuntu-22.04"
+            args: ""
+            target: "x86_64-unknown-linux-gnu"
+          - platform: "windows-latest"
+            args: ""
+            target: "x86_64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -61,18 +61,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'OCPP CP Simulator ${{ github.ref_name }}'
+          releaseName: "OCPP CP Simulator ${{ github.ref_name }}"
           releaseBody: |
             See the assets to download this version and install.
-            
+
             ## What's Changed
-            
+
             ### Desktop App Downloads
             - **macOS (Apple Silicon)**: `OCPP.CP.Simulator_*_aarch64.dmg`
             - **macOS (Intel)**: `OCPP.CP.Simulator_*_x64.dmg`
             - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `.msi`
             - **Linux**: `ocpp-cp-simulator_*_amd64.AppImage` or `.deb`
-            
+
             ### Web Version
             The web version is available at: https://shiv3.github.io/ocpp-cp-simulator/
           releaseDraft: true
@@ -98,10 +98,10 @@ jobs:
               repo: context.repo.repo,
               tag: context.ref.replace('refs/tags/', '')
             });
-            
+
             // Get commit history
             let body = release.body;
-            
+
             try {
               const { data: commits } = await github.rest.repos.compareCommits({
                 owner: context.repo.owner,
@@ -118,7 +118,7 @@ jobs:
             } catch (e) {
               console.log('Failed to get commit history:', e.message);
             }
-            
+
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

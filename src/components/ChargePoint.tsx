@@ -1,11 +1,11 @@
-import React, {useState, useEffect} from "react";
-import {ChargePoint as OCPPChargePoint} from "../cp/ChargePoint";
+import React, { useState, useEffect } from "react";
+import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint";
 import Connector from "./Connector.tsx";
 import Logger from "./Logger.tsx";
 import * as ocpp from "../cp/OcppTypes";
 
 interface ChargePointProps {
-  cp : OCPPChargePoint;
+  cp: OCPPChargePoint;
   TagID: string;
 }
 
@@ -13,7 +13,7 @@ const ChargePoint: React.FC<ChargePointProps> = (props) => {
   const [cp, setCp] = useState<OCPPChargePoint | null>(null);
   const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
   const [cpError, setCpError] = useState<string>("");
-  const [logs , setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<string[]>([]);
 
   useEffect(() => {
     console.log("ChargePointProps", props);
@@ -34,25 +34,25 @@ const ChargePoint: React.FC<ChargePointProps> = (props) => {
 
   return (
     <div className="bg-white shadow-md rounded px-2 pt-2 pb-1 h-screen">
-      <SettingsView {...props}/>
+      <SettingsView {...props} />
       <div className="flex flex-col md:flex-row">
-        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError}/>
+        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError} />
         <div className="flex-1">
-          <AuthView cp={cp} cpStatus={cpStatus} tagID={props.TagID}/>
+          <AuthView cp={cp} cpStatus={cpStatus} tagID={props.TagID} />
           <div className="flex flex-col md:flex-row mt-4">
             {cp?.connectors &&
               Array.from(Array(cp.connectors.size).keys()).map((i) => (
-                <Connector key={i + 1} id={i + 1} cp={cp} idTag={props.TagID}/>
+                <Connector key={i + 1} id={i + 1} cp={cp} idTag={props.TagID} />
               ))}
           </div>
         </div>
       </div>
-      <Logger logs={logs}/>
+      <Logger logs={logs} />
     </div>
   );
 };
 
-const CPStatus: React.FC<{ status: string }> = ({status}) => {
+const CPStatus: React.FC<{ status: string }> = ({ status }) => {
   const statusColor = (s: string) => {
     switch (s) {
       case ocpp.OCPPStatus.Unavailable:
@@ -107,7 +107,7 @@ const AuthView: React.FC<AuthViewProps> = (props) => {
           value={tagID}
           onChange={(e) => setTagID(e.target.value)}
           placeholder="DEADBEEF"
-          style={{maxWidth: "20ch"}}
+          style={{ maxWidth: "20ch" }}
         />
         <p className="text-gray-600 text-xs italic mt-1">
           The ID of the simulated RFID tag
@@ -133,10 +133,10 @@ interface ChargePointControlsProps {
 }
 
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
-                                                                   cp,
-                                                                   cpStatus,
-                                                                   cpError,
-                                                                 }) => {
+  cp,
+  cpStatus,
+  cpError,
+}) => {
   const [isHeartbeatEnabled, setIsHeartbeatEnabled] = useState<boolean>(false);
 
   const handleConnect = () => {
@@ -169,7 +169,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   return (
     <div className="bg-gray-100 rounded p-4 mr-4">
       <div className="bg-gray-100 rounded p-4 mr-4">
-        <CPStatus status={cpStatus}/>
+        <CPStatus status={cpStatus} />
       </div>
       <div>
         {cpError !== "" && (

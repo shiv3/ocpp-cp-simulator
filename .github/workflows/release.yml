@@ -35,6 +35,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: 'npm'
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          cache-targets: "false"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

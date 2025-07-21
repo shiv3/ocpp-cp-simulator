@@ -1,4 +1,4 @@
-import {ErrorCode} from "@voltbras/ts-ocpp/dist/ws";
+import { ErrorCode } from "@voltbras/ts-ocpp/dist/ws";
 
 export enum OCPPStatus {
   Available = "Available",
@@ -12,7 +12,7 @@ export enum OCPPStatus {
   Faulted = "Faulted",
 }
 
-export type OCPPAvailability = "Operative" | "Inoperative"
+export type OCPPAvailability = "Operative" | "Inoperative";
 
 export enum OCPPMessageType {
   CALL = 2,
@@ -79,7 +79,7 @@ export type OcppConfigurationKey = {
   key: string;
   readonly: boolean;
   value?: string;
-}
+};
 
 export type OCPPErrorCode = ErrorCode;
 

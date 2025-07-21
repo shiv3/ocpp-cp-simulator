@@ -1,14 +1,13 @@
-import {atom} from 'jotai';
-import {atomWithStorage} from 'jotai/utils'
-import {atomWithHash} from 'jotai-location'
-import {BootNotification} from "../cp/OcppTypes.ts";
-
+import { atom } from "jotai";
+import { atomWithStorage } from "jotai/utils";
+import { atomWithHash } from "jotai-location";
+import { BootNotification } from "../cp/OcppTypes.ts";
 
 interface Config {
   wsURL: string;
   ChargePointID: string;
   connectorNumber: number;
-  tagID: string
+  tagID: string;
   ocppVersion: string;
   basicAuthSettings: BasicAuthSettings;
   autoMeterValueSetting: AutoMeterValueSetting;
@@ -38,10 +37,11 @@ interface ExperimentalChargePoint {
   ConnectorNumber: number;
 }
 
-
-const key = "config"
+const key = "config";
 const configHashAtom = atomWithHash<Config | null>(key, null);
-const configStorageAtom = atomWithStorage<Config | null>(key, null, undefined, {getOnInit: true});
+const configStorageAtom = atomWithStorage<Config | null>(key, null, undefined, {
+  getOnInit: true,
+});
 export const configAtom = atom(
   (get) => {
     const hashValue = get(configHashAtom);
@@ -51,6 +51,5 @@ export const configAtom = atom(
   (_, set, update: Config) => {
     set(configHashAtom, update);
     set(configStorageAtom, update);
-  }
+  },
 );
-

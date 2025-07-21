@@ -30,6 +30,7 @@ Available for:
 2. Open the downloaded file
 3. Drag the OCPP CP Simulator app to your Applications folder
 4. First time opening: Right-click and select "Open" to bypass Gatekeeper
+   - Alternatively, you can bypass the security warning by running: `xattr -c "/Applications/OCPP CP Simulator.app"`
 
 #### Windows
 

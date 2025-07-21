@@ -1,8 +1,17 @@
 # OCPP Simulator
 
-OCPP charger simulator written in react that works stand-alone
+OCPP charger simulator written in React that works as a standalone web app or desktop application.
 
+## Web Version
 https://shiv3.github.io/ocpp-cp-simulator/#config=%7B"wsURL"%3A"wss%3A%2F%2Flocalhost%3A8080%2F"%2C"connectorNumber"%3A2%2C"ChargePointID"%3A"test-cp"%2C"tagID"%3A"test-tag"%2C"ocppVersion"%3A"OCPP-1.6J"%2C"Experimental"%3Anull%7D
+
+## Desktop Application
+Download the latest desktop version from the [Releases](https://github.com/shiv3/ocpp-cp-simulator/releases) page.
+
+Available for:
+- macOS (Apple Silicon & Intel)
+- Windows
+- Linux (AppImage & .deb)
 
 <img width="1532" alt="image" src="https://github.com/user-attachments/assets/480f6e76-a426-4f0c-b133-a62a03f0847e">
 

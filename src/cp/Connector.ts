@@ -8,12 +8,14 @@ export class Connector {
   private _availability: OCPPAvailability;
   private _meterValue: number;
   private _transaction: Transaction | null;
+  private _isPlugged: boolean;
 
   private _transactionIDChangeCallbacks: ((
     transactionId: number | null,
   ) => void)[];
   private _statusChangeCallbacks: ((status: ocpp.OCPPStatus) => void)[];
   private _meterValueChangeCallbacks: ((meterValue: number) => void)[];
+  private _plugStatusChangeCallbacks: ((isPlugged: boolean) => void)[];
 
   constructor(id: number) {
     this._id = id;
@@ -21,10 +23,12 @@ export class Connector {
     this._availability = "Operative";
     this._meterValue = 0;
     this._transaction = null;
+    this._isPlugged = false;
 
     this._transactionIDChangeCallbacks = [];
     this._statusChangeCallbacks = [];
     this._meterValueChangeCallbacks = [];
+    this._plugStatusChangeCallbacks = [];
   }
 
   get id(): number {
@@ -97,5 +101,21 @@ export class Connector {
 
   public setMeterValueChangeCallbacks(callback: (meterValue: number) => void) {
     this._meterValueChangeCallbacks.push(callback);
+  }
+
+  public setPlugStatusChangeCallbacks(callback: (isPlugged: boolean) => void) {
+    this._plugStatusChangeCallbacks.push(callback);
+  }
+
+  get isPlugged(): boolean {
+    return this._isPlugged;
+  }
+
+  set isPlugged(plugged: boolean) {
+    this._isPlugged = plugged;
+    this._plugStatusChangeCallbacks &&
+      this._plugStatusChangeCallbacks.forEach((callback) => {
+        callback(plugged);
+      });
   }
 }

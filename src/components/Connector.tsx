@@ -22,6 +22,7 @@ const Connector: React.FC<ConnectorProps> = ({
     useState<OCPPAvailability>("Operative");
   const [meterValue, setMeterValue] = useState<number>(0);
   const [tagId, setIdTag] = useState<string>(idTag);
+  const [isPlugged, setIsPlugged] = useState<boolean>(false);
 
   useEffect(() => {
     if (cp) {
@@ -32,6 +33,7 @@ const Connector: React.FC<ConnectorProps> = ({
       );
       cp.setConnectorMeterValueChangeCallback(connector_id, setMeterValue);
       cp.setAvailabilityChangeCallback(connector_id, setAvailability);
+      cp.setPlugStatusChangeCallback(connector_id, setIsPlugged);
     }
   }, [connector_id, cp]);
 
@@ -68,6 +70,18 @@ const Connector: React.FC<ConnectorProps> = ({
     }
   };
 
+  const handlePlugIn = () => {
+    if (cp) {
+      cp.plugConnector(connector_id);
+    }
+  };
+
+  const handleUnplug = () => {
+    if (cp) {
+      cp.unplugConnector(connector_id);
+    }
+  };
+
   return (
     <div className="bg-gray-200 p-4 rounded mb-4 border border-gray-400">
       <label className="text-lg font-semibold">Connector {connector_id}</label>
@@ -78,6 +92,12 @@ const Connector: React.FC<ConnectorProps> = ({
               Connector Status:{" "}
             </label>
             <ConnectorStatus status={connectorStatus} />
+          </div>
+          <div className="mb-6">
+            <label className="text-gray-700 text-sm font-bold mb-2">
+              Plug Status:{" "}
+            </label>
+            <PlugStatus isPlugged={isPlugged} />
           </div>
           {connectorStatus === ocpp.OCPPStatus.Charging && (
             <div className="mb-6">
@@ -153,11 +173,39 @@ const Connector: React.FC<ConnectorProps> = ({
             />
           </div>
         </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <button
+            onClick={handlePlugIn}
+            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded
+            disabled:opacity-50"
+            disabled={
+              isPlugged ||
+              connectorStatus === ocpp.OCPPStatus.Unavailable ||
+              availability === "Inoperative"
+            }
+          >
+            Plug In
+          </button>
+          <button
+            onClick={handleUnplug}
+            className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded
+            disabled:opacity-50"
+            disabled={
+              !isPlugged || connectorStatus === ocpp.OCPPStatus.Unavailable
+            }
+          >
+            Unplug
+          </button>
+        </div>
         <button
           onClick={handleStartTransaction}
           className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded mb-2 w-full
           disabled:opacity-50"
-          disabled={connectorStatus !== ocpp.OCPPStatus.Available}
+          disabled={
+            !isPlugged ||
+            (connectorStatus !== ocpp.OCPPStatus.Available &&
+              connectorStatus !== ocpp.OCPPStatus.Preparing)
+          }
         >
           Start Transaction
         </button>
@@ -246,6 +294,14 @@ const ConnectorAvailability: React.FC<{ availability: OCPPAvailability }> = ({
 
   return (
     <span className={availabilityColor(availability)}>{availability}</span>
+  );
+};
+
+const PlugStatus: React.FC<{ isPlugged: boolean }> = ({ isPlugged }) => {
+  return (
+    <span className={isPlugged ? "text-green-500" : "text-gray-500"}>
+      {isPlugged ? "Plugged" : "Not Plugged"}
+    </span>
   );
 };
 

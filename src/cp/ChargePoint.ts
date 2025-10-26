@@ -132,6 +132,13 @@ export class ChargePoint {
     this._availabilityChangeCallbacks.set(connectorId, callback);
   }
 
+  setPlugStatusChangeCallback(
+    connectorId: number,
+    callback: (isPlugged: boolean) => void,
+  ): void {
+    this.connectors.get(connectorId)?.setPlugStatusChangeCallbacks(callback);
+  }
+
   public connect(): void {
     this._webSocket.connect(
       () => this.boot(),
@@ -367,5 +374,37 @@ export class ChargePoint {
     } else {
       this._logger.error(`Connector ${connectorId} not found`);
     }
+  }
+
+  public plugConnector(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(`Connector ${connectorId} not found`);
+      return;
+    }
+
+    connector.isPlugged = true;
+    this._logger.info(`Connector ${connectorId} plugged in`);
+    this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+  }
+
+  public unplugConnector(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(`Connector ${connectorId} not found`);
+      return;
+    }
+
+    // If there's an active transaction, stop it first
+    if (connector.transaction && connector.status === OCPPStatus.Charging) {
+      this._logger.info(
+        `Connector ${connectorId} unplugged during charging - stopping transaction`,
+      );
+      this.stopTransaction(connectorId);
+    }
+
+    connector.isPlugged = false;
+    this._logger.info(`Connector ${connectorId} unplugged`);
+    this.updateConnectorStatus(connectorId, OCPPStatus.Available);
   }
 }

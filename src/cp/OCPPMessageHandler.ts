@@ -174,18 +174,8 @@ export class OCPPMessageHandler {
 
   public sendBootNotification(bootPayload: BootNotification): void {
     const messageId = this.generateMessageId();
-    const payload: request.BootNotificationRequest = {
-      chargePointVendor: bootPayload.ChargePointVendor,
-      chargePointModel: bootPayload.ChargePointModel,
-      chargePointSerialNumber: bootPayload.ChargePointSerialNumber,
-      chargeBoxSerialNumber: bootPayload.ChargeBoxSerialNumber,
-      firmwareVersion: bootPayload.FirmwareVersion,
-      iccid: bootPayload.Iccid,
-      imsi: bootPayload.Imsi,
-      meterType: bootPayload.MeterType,
-      meterSerialNumber: bootPayload.MeterSerialNumber,
-    };
-    this.sendRequest(OCPPAction.BootNotification, messageId, payload);
+    // bootPayload is already in the correct format (BootNotificationRequest from ts-ocpp)
+    this.sendRequest(OCPPAction.BootNotification, messageId, bootPayload);
   }
 
   public sendHeartbeat(): void {
@@ -252,13 +242,13 @@ export class OCPPMessageHandler {
       case OCPPMessageType.CALL:
         this.handleCall(messageId, action, payload as OcppMessagePayloadCall);
         break;
-      case OCPPMessageType.CALL_RESULT:
+      case OCPPMessageType.CALLRESULT:
         this.handleCallResult(
           messageId,
           payload as OcppMessagePayloadCallResult,
         );
         break;
-      case OCPPMessageType.CALL_ERROR:
+      case OCPPMessageType.CALLERROR:
         this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:

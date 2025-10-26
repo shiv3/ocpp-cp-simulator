@@ -57,7 +57,7 @@ const Settings: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setConfig({
+    const config = {
       wsURL,
       connectorNumber,
       ChargePointID: cpID,
@@ -79,7 +79,8 @@ const Settings: React.FC = () => {
         bootNotification && bootNotification !== ""
           ? JSON.parse(bootNotification)
           : null,
-    } as Config);
+    };
+    setConfig(config);
     navigate("/");
   };
 
@@ -313,15 +314,15 @@ const Settings: React.FC = () => {
             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             id="BootNotification"
             placeholder='{
-            "ChargeBoxSerialNumber": "123456",
-            "ChargePointModel": "Model 3",
-            "ChargePointSerialNumber": "123456",
-            "ChargePointVendor": "Vendor",
-            "FirmwareVersion": "1.0.0",
-            "Iccid": "123456",
-            "Imsi": "123456",
-            "MeterSerialNumber": "123456",
-            "MeterType": "Model 3"
+            "chargeBoxSerialNumber": "123456",
+            "chargePointModel": "Model 3",
+            "chargePointSerialNumber": "123456",
+            "chargePointVendor": "Vendor",
+            "firmwareVersion": "1.0.0",
+            "iccid": "123456",
+            "imsi": "123456",
+            "meterSerialNumber": "123456",
+            "meterType": "Model 3"
             }'
             style={{ height: "100px" }}
             value={bootNotification || ""}

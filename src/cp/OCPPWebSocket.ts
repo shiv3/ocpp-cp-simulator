@@ -133,7 +133,7 @@ export class OCPPWebSocket {
     payload: OcppMessageResponsePayload,
   ): void {
     const message = JSON.stringify([
-      OCPPMessageType.CALL_RESULT,
+      OCPPMessageType.CALLRESULT,
       messageId,
       payload,
     ]);
@@ -142,7 +142,7 @@ export class OCPPWebSocket {
 
   public sendError(messageId: string, payload: OcppMessageErrorPayload): void {
     const message = JSON.stringify([
-      OCPPMessageType.CALL_ERROR,
+      OCPPMessageType.CALLERROR,
       messageId,
       payload,
     ]);

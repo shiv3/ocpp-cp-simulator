@@ -7,28 +7,39 @@ import {
 } from "./OCPPWebSocket";
 import { ChargePoint } from "./ChargePoint";
 import { Transaction } from "./Transaction";
-import { Logger } from "./Logger";
+import { Logger, LogType } from "./Logger";
 import {
   BootNotification,
   OCPPAction,
-  OcppConfigurationKey,
   OCPPErrorCode,
   OCPPMessageType,
-  OCPPStatus,
 } from "./OcppTypes";
-import { UploadFile } from "./file_upload.ts";
-import {
-  ArrayConfigurationValue,
-  BooleanConfigurationValue,
-  Configuration,
-  ConfigurationValue,
-  defaultConfiguration,
-  IntegerConfigurationValue,
-  StringConfigurationValue,
-} from "./Configuration.ts";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+
+// Import handler registry and handlers
+import {
+  MessageHandlerRegistry,
+  HandlerContext,
+  RemoteStartTransactionHandler,
+  RemoteStopTransactionHandler,
+  ResetHandler,
+  GetDiagnosticsHandler,
+  GetConfigurationHandler,
+  ChangeConfigurationHandler,
+  TriggerMessageHandler,
+  ClearCacheHandler,
+  UnlockConnectorHandler,
+  BootNotificationResultHandler,
+  StartTransactionResultHandler,
+  StopTransactionResultHandler,
+  AuthorizeResultHandler,
+  HeartbeatResultHandler,
+  MeterValuesResultHandler,
+  StatusNotificationResultHandler,
+  DataTransferResultHandler,
+} from "./handlers";
 
 type CoreOcppMessagePayloadCall =
   | request.ChangeAvailabilityRequest
@@ -121,6 +132,7 @@ export class OCPPMessageHandler {
   private _webSocket: OCPPWebSocket;
   private _logger: Logger;
   private _requests: RequestHistory = new RequestHistory();
+  private _registry: MessageHandlerRegistry = new MessageHandlerRegistry();
 
   constructor(
     chargePoint: ChargePoint,
@@ -132,6 +144,69 @@ export class OCPPMessageHandler {
     this._logger = logger;
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
+    this.initializeHandlers();
+  }
+
+  /**
+   * Initialize all message handlers using the registry pattern
+   */
+  private initializeHandlers(): void {
+    // Register CALL handlers (incoming requests from central system)
+    this._registry.registerCallHandler(
+      OCPPAction.RemoteStartTransaction,
+      new RemoteStartTransactionHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.RemoteStopTransaction,
+      new RemoteStopTransactionHandler(),
+    );
+    this._registry.registerCallHandler(OCPPAction.Reset, new ResetHandler());
+    this._registry.registerCallHandler(
+      OCPPAction.GetDiagnostics,
+      new GetDiagnosticsHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.TriggerMessage,
+      new TriggerMessageHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.GetConfiguration,
+      new GetConfigurationHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.ChangeConfiguration,
+      new ChangeConfigurationHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.ClearCache,
+      new ClearCacheHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.UnlockConnector,
+      new UnlockConnectorHandler(),
+    );
+
+    // Register CALLRESULT handlers (incoming responses from central system)
+    this._registry.registerCallResultHandler(
+      OCPPAction.BootNotification,
+      new BootNotificationResultHandler(),
+    );
+    this._registry.registerCallResultHandler(
+      OCPPAction.Authorize,
+      new AuthorizeResultHandler(),
+    );
+    this._registry.registerCallResultHandler(
+      OCPPAction.Heartbeat,
+      new HeartbeatResultHandler(),
+    );
+    this._registry.registerCallResultHandler(
+      OCPPAction.StatusNotification,
+      new StatusNotificationResultHandler(),
+    );
+    this._registry.registerCallResultHandler(
+      OCPPAction.DataTransfer,
+      new DataTransferResultHandler(),
+    );
   }
 
   public authorize(tagId: string): void {
@@ -235,8 +310,9 @@ export class OCPPMessageHandler {
     action: OCPPAction,
     payload: OcppMessagePayload,
   ): void {
-    this._logger.log(
+    this._logger.info(
       `Handling incoming message: ${messageType}, ${messageId}, ${action}`,
+      LogType.OCPP,
     );
     switch (messageType) {
       case OCPPMessageType.CALL:
@@ -252,7 +328,7 @@ export class OCPPMessageHandler {
         this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:
-        this._logger.error(`Unknown message type: ${messageType}`);
+        this._logger.error(`Unknown message type: ${messageType}`, LogType.OCPP);
     }
   }
 
@@ -261,118 +337,70 @@ export class OCPPMessageHandler {
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
   ): void {
-    let response: OcppMessageResponsePayload;
-    switch (action) {
-      case OCPPAction.RemoteStartTransaction:
-        response = this.handleRemoteStartTransaction(
-          payload as request.RemoteStartTransactionRequest,
-        );
-        break;
-      case OCPPAction.RemoteStopTransaction:
-        response = this.handleRemoteStopTransaction(
-          payload as request.RemoteStopTransactionRequest,
-        );
-        break;
-      case OCPPAction.Reset:
-        response = this.handleReset(payload as request.ResetRequest);
-        break;
-      case OCPPAction.GetDiagnostics:
-        response = this.handleGetDiagnostics(
-          payload as request.GetDiagnosticsRequest,
-        );
-        break;
-      case OCPPAction.TriggerMessage:
-        response = this.handleTriggerMessage(
-          payload as request.TriggerMessageRequest,
-        );
-        break;
-      case OCPPAction.GetConfiguration:
-        response = this.handleGetConfiguration(
-          payload as request.GetConfigurationRequest,
-        );
-        break;
-      case OCPPAction.ChangeConfiguration:
-        response = this.handleChangeConfiguration(
-          payload as request.ChangeConfigurationRequest,
-        );
-        break;
-      case OCPPAction.ClearCache:
-        response = this.handleClearCache(payload as request.ClearCacheRequest);
-        break;
-      case OCPPAction.UnlockConnector:
-        response = this.handleUnlockConnector(
-          payload as request.UnlockConnectorRequest,
-        );
-        break;
-      default:
-        this._logger.error(`Unsupported action: ${action}`);
-        this.sendCallError(
-          messageId,
-          "NotImplemented",
-          "This action is not supported",
-        );
-        return;
+    // Use registry to get handler
+    const handler = this._registry.getCallHandler(action);
+
+    if (!handler) {
+      this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
+      this.sendCallError(
+        messageId,
+        "NotImplemented",
+        "This action is not supported",
+      );
+      return;
     }
-    this.sendCallResult(messageId, response);
+
+    try {
+      const context: HandlerContext = {
+        chargePoint: this._chargePoint,
+        logger: this._logger,
+      };
+      const response = handler.handle(payload, context);
+      this.sendCallResult(messageId, response);
+    } catch (error) {
+      this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
+      this.sendCallError(messageId, "InternalError", String(error));
+    }
   }
 
   private handleCallResult(
     messageId: string,
     payload: OcppMessagePayloadCallResult,
   ): void {
-    if (!this._requests || !this._requests.get(messageId)) {
-      this._logger.log(`Received unexpected CallResult: ${messageId}`);
+    const request = this._requests.get(messageId);
+    if (!request) {
+      this._logger.warn(`Received unexpected CallResult: ${messageId}`, LogType.OCPP);
       return;
     }
-    const request = this._requests.get(messageId);
-    const action = request?.action;
-    switch (action) {
-      case OCPPAction.ChangeAvailability:
-        this.handleChangeAvailability(
-          payload as request.ChangeAvailabilityRequest,
+
+    const action = request.action;
+    let handler = this._registry.getCallResultHandler(action);
+
+    // For transaction-related handlers that need connector info, create them dynamically
+    if (!handler) {
+      if (action === OCPPAction.StartTransaction) {
+        handler = new StartTransactionResultHandler(request.connectorId || 1);
+      } else if (action === OCPPAction.StopTransaction) {
+        handler = new StopTransactionResultHandler(request.connectorId || 1);
+      } else if (action === OCPPAction.MeterValues) {
+        handler = new MeterValuesResultHandler(
+          request.payload as request.MeterValuesRequest,
         );
-        break;
-      case OCPPAction.BootNotification:
-        this.handleBootNotificationResponse(
-          payload as response.BootNotificationResponse,
-        );
-        break;
-      case OCPPAction.Authorize:
-        this.handleAuthorizeResponse(payload as response.AuthorizeResponse);
-        break;
-      case OCPPAction.StartTransaction:
-        this.handleStartTransactionResponse(
-          request?.connectorId || 1,
-          payload as response.StartTransactionResponse,
-        );
-        break;
-      case OCPPAction.StopTransaction:
-        this.handleStopTransactionResponse(
-          request?.connectorId || 1,
-          payload as response.StopTransactionResponse,
-        );
-        break;
-      case OCPPAction.Heartbeat:
-        this.handleHeartbeatResponse(payload as response.HeartbeatResponse);
-        break;
-      case OCPPAction.MeterValues:
-        this.handleMeterValuesResponse(
-          payload as response.MeterValuesResponse,
-          request?.payload as request.MeterValuesRequest,
-        );
-        break;
-      case OCPPAction.StatusNotification:
-        this.handleStatusNotificationResponse(
-          payload as response.StatusNotificationResponse,
-        );
-        break;
-      case OCPPAction.DataTransfer:
-        this.handleDataTransferResponse(
-          payload as response.DataTransferResponse,
-        );
-        break;
-      default:
-        this._logger.log(`Unsupported action result: ${action}`);
+      }
+    }
+
+    if (handler) {
+      try {
+        const context: HandlerContext = {
+          chargePoint: this._chargePoint,
+          logger: this._logger,
+        };
+        handler.handle(payload, context);
+      } catch (error) {
+        this._logger.error(`Error handling ${action} result: ${error}`, LogType.OCPP);
+      }
+    } else {
+      this._logger.warn(`No handler for action result: ${action}`, LogType.OCPP);
     }
 
     this._requests.remove(messageId);
@@ -382,279 +410,16 @@ export class OCPPMessageHandler {
     messageId: string,
     error: OcppMessageErrorPayload,
   ): void {
-    this._logger.log(
+    this._logger.error(
       `Received error for message ${messageId}: ${JSON.stringify(error)}`,
+      LogType.OCPP,
     );
     // Handle the error appropriately
     this._requests.remove(messageId);
   }
 
-  private handleRemoteStartTransaction(
-    payload: request.RemoteStartTransactionRequest,
-  ): response.RemoteStartTransactionResponse {
-    const { idTag, connectorId } = payload;
-    const connector = this._chargePoint.getConnector(connectorId || 1);
-
-    if (connector && connector.availability == "Operative") {
-      this._chargePoint.startTransaction(idTag, connectorId || 1);
-      return { status: "Accepted" };
-    } else {
-      return { status: "Rejected" };
-    }
-  }
-
-  private handleRemoteStopTransaction(
-    payload: request.RemoteStopTransactionRequest,
-  ): response.RemoteStopTransactionResponse {
-    const { transactionId } = payload;
-    const connector = Array.from(this._chargePoint.connectors.values()).find(
-      (c) => c.transaction && c.transaction.id === transactionId,
-    );
-
-    if (connector) {
-      this._chargePoint.updateConnectorStatus(
-        connector.id,
-        OCPPStatus.SuspendedEVSE,
-      );
-      this._chargePoint.stopTransaction(connector);
-      return { status: "Accepted" };
-    } else {
-      return { status: "Rejected" };
-    }
-  }
-
-  private handleReset(payload: request.ResetRequest): response.ResetResponse {
-    this._logger.log(`Reset request received: ${payload.type}`);
-    setTimeout(() => {
-      this._logger.log(`Reset chargePoint: ${this._chargePoint.id}`);
-      if (payload.type === "Hard") {
-        this._chargePoint.reset();
-      } else {
-        this._chargePoint.boot();
-      }
-    }, 5_000);
-    return { status: "Accepted" };
-  }
-
-  private handleGetDiagnostics(
-    payload: request.GetDiagnosticsRequest,
-  ): response.GetDiagnosticsResponse {
-    this._logger.log(`Get diagnostics request received: ${payload.location}`); // e.g. `FTP
-    const logs = this._logger.getLogs().join("\n");
-    const blob = new Blob([logs], { type: "text/plain" });
-    const file = new File([blob], "diagnostics.txt");
-    (async () => await UploadFile(payload.location, file))();
-    return { fileName: "diagnostics.txt" };
-  }
-
-  private handleGetConfiguration(
-    payload: request.GetConfigurationRequest,
-  ): response.GetConfigurationResponse {
-    this._logger.log(
-      `Get configuration request received: ${JSON.stringify(payload.key)}`,
-    );
-    const configuration = OCPPMessageHandler.mapConfiguration(
-      defaultConfiguration(this._chargePoint),
-    );
-    if (!payload.key || payload.key.length === 0) {
-      return {
-        configurationKey: configuration,
-      };
-    }
-    const filteredConfig = configuration.filter((c) =>
-      payload.key?.includes(c.key),
-    );
-    const configurationKeys = configuration.map((c) => c.key);
-    const unknownKeys = payload.key.filter(
-      (c) => !configurationKeys.includes(c),
-    );
-    return {
-      configurationKey: filteredConfig,
-      unknownKey: unknownKeys,
-    };
-  }
-
-  private static mapConfiguration(
-    config: Configuration,
-  ): OcppConfigurationKey[] {
-    return config.map((c) => ({
-      key: c.key.name,
-      readonly: c.key.readonly,
-      value: OCPPMessageHandler.mapValue(c),
-    }));
-  }
-
-  private static mapValue(value: ConfigurationValue): string {
-    switch (value.key.type) {
-      case "string":
-        return (value as StringConfigurationValue).value;
-      case "boolean":
-        return String((value as BooleanConfigurationValue).value);
-      case "integer":
-        return String((value as IntegerConfigurationValue).value);
-      case "array":
-        return (value as ArrayConfigurationValue).value.join(",");
-    }
-  }
-
-  private handleChangeConfiguration(
-    payload: request.ChangeConfigurationRequest,
-  ): response.ChangeConfigurationResponse {
-    this._logger.log(
-      `Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`,
-    );
-    switch (payload.key) {
-      default:
-        return {
-          status: "NotSupported",
-        };
-    }
-  }
-
-  private handleTriggerMessage(
-    payload: request.TriggerMessageRequest,
-  ): response.TriggerMessageResponse {
-    this._logger.log(
-      `Trigger message request received: ${payload.requestedMessage}`,
-    ); // e.g. `DiagnosticsStatusNotification`
-    return { status: "Accepted" };
-  }
-
-  private handleChangeAvailability(
-    payload: request.ChangeAvailabilityRequest,
-  ): response.ChangeAvailabilityResponse {
-    this._logger.log(
-      `Change availability request received: ${JSON.stringify(payload)}`,
-    );
-    const updated = this._chargePoint.updateConnectorAvailability(
-      payload.connectorId,
-      payload.type,
-    );
-    if (updated) {
-      return { status: "Accepted" };
-    } else {
-      return { status: "Rejected" };
-    }
-  }
-
-  private handleClearCache(
-    payload: request.ClearCacheRequest,
-  ): response.ClearCacheResponse {
-    this._logger.log(
-      `Clear cache request received: ${JSON.stringify(payload)}`,
-    );
-    return { status: "Accepted" };
-  }
-
-  private handleUnlockConnector(
-    payload: request.UnlockConnectorRequest,
-  ): response.UnlockConnectorResponse {
-    this._logger.log(
-      `Unlock connector request received: ${JSON.stringify(payload)}`,
-    );
-    return { status: "NotSupported" };
-  }
-
-  private handleBootNotificationResponse(
-    payload: response.BootNotificationResponse,
-  ): void {
-    this._logger.log("Boot notification successful");
-    if (payload.status === "Accepted") {
-      this._chargePoint.updateAllConnectorsStatus(OCPPStatus.Available);
-      this._chargePoint.status = OCPPStatus.Available;
-    } else {
-      this._logger.error("Boot notification failed");
-    }
-  }
-
-  private handleAuthorizeResponse(payload: response.AuthorizeResponse): void {
-    const { idTagInfo } = payload;
-    if (idTagInfo.status === "Accepted") {
-      this._logger.log("Authorization successful");
-    } else {
-      this._logger.log("Authorization failed");
-    }
-  }
-
-  private handleStartTransactionResponse(
-    connectorId: number,
-    payload: response.StartTransactionResponse,
-  ): void {
-    const { transactionId, idTagInfo } = payload;
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (idTagInfo.status === "Accepted") {
-      if (connector) {
-        connector.transactionId = transactionId;
-        connector.status = OCPPStatus.Charging;
-      }
-    } else {
-      this._logger.log("Failed to start transaction");
-      if (connector) {
-        connector.status = OCPPStatus.Faulted;
-        if (connector.transaction && connector.transaction.meterSent) {
-          this._chargePoint.stopTransaction(connector);
-        } else {
-          this._chargePoint.cleanTransaction(connector);
-        }
-      } else {
-        this._chargePoint.cleanTransaction(connectorId);
-      }
-      this._chargePoint.updateConnectorStatus(
-        connectorId,
-        OCPPStatus.Available,
-      );
-    }
-  }
-
-  private handleStopTransactionResponse(
-    connectorId: number,
-    payload: response.StopTransactionResponse,
-  ): void {
-    this._logger.log(
-      `Transaction stopped successfully: ${JSON.stringify(payload)}`,
-    );
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (connector) {
-      connector.transaction = null;
-      connector.transactionId = null;
-      connector.status = OCPPStatus.Available;
-    }
-  }
-
-  private handleHeartbeatResponse(payload: response.HeartbeatResponse): void {
-    this._logger.log(`Received heartbeat response: ${payload.currentTime}`);
-  }
-
-  private handleMeterValuesResponse(
-    payload: response.MeterValuesResponse,
-    request?: request.MeterValuesRequest,
-  ): void {
-    if (request) {
-      const connector = this._chargePoint.getConnector(request.connectorId);
-      if (connector && connector.transaction) {
-        connector.transaction.meterSent = true;
-      }
-    }
-    this._logger.log(
-      `Meter values sent successfully: ${JSON.stringify(payload)}`,
-    );
-  }
-
-  private handleStatusNotificationResponse(
-    payload: response.StatusNotificationResponse,
-  ): void {
-    this._logger.log(
-      `Status notification sent successfully: ${JSON.stringify(payload)}`,
-    );
-  }
-
-  private handleDataTransferResponse(
-    payload: response.DataTransferResponse,
-  ): void {
-    this._logger.log(
-      `Data transfer sent successfully: ${JSON.stringify(payload)}`,
-    );
-  }
+  // All handler methods have been moved to individual handler classes
+  // See src/cp/handlers/ directory
 
   private sendCallResult(
     messageId: string,

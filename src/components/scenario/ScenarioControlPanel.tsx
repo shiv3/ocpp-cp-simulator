@@ -1,0 +1,149 @@
+import React from "react";
+import { ScenarioExecutionState, ScenarioExecutionMode } from "../../cp/types/ScenarioTypes";
+
+interface ScenarioControlPanelProps {
+  executionState: ScenarioExecutionState;
+  executionMode: ScenarioExecutionMode;
+  onStart: (mode: ScenarioExecutionMode) => void;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+  onStep: () => void;
+  onModeChange: (mode: ScenarioExecutionMode) => void;
+}
+
+const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
+  executionState,
+  executionMode,
+  onStart,
+  onPause,
+  onResume,
+  onStop,
+  onStep,
+  onModeChange,
+}) => {
+  const isRunning = executionState === "running";
+  const isPaused = executionState === "paused";
+  const isIdle = executionState === "idle";
+  const isStepMode = executionMode === "step";
+
+  return (
+    <div className="panel p-4">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-base font-semibold text-primary">Scenario Control</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">Status:</span>
+          <span className={`text-xs font-semibold ${getStateColor(executionState)}`}>
+            {executionState.toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {/* Execution Mode Selection */}
+        <div>
+          <label className="text-xs font-semibold text-primary mb-1 block">
+            Execution Mode
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onModeChange("oneshot")}
+              disabled={!isIdle}
+              className={`flex-1 text-xs px-3 py-2 rounded ${
+                executionMode === "oneshot"
+                  ? "btn-primary"
+                  : "btn-secondary"
+              }`}
+            >
+              One-Shot
+            </button>
+            <button
+              onClick={() => onModeChange("loop")}
+              disabled={!isIdle}
+              className={`flex-1 text-xs px-3 py-2 rounded ${
+                executionMode === "loop"
+                  ? "btn-primary"
+                  : "btn-secondary"
+              }`}
+            >
+              Loop
+            </button>
+            <button
+              onClick={() => onModeChange("step")}
+              disabled={!isIdle}
+              className={`flex-1 text-xs px-3 py-2 rounded ${
+                executionMode === "step"
+                  ? "btn-primary"
+                  : "btn-secondary"
+              }`}
+            >
+              Step
+            </button>
+          </div>
+        </div>
+
+        {/* Control Buttons */}
+        <div className="flex gap-2">
+          {isIdle && (
+            <button
+              onClick={() => onStart(executionMode)}
+              className="flex-1 btn-success"
+            >
+              ▶️ Start
+            </button>
+          )}
+
+          {isRunning && !isStepMode && (
+            <button onClick={onPause} className="flex-1 btn-warning">
+              ⏸️ Pause
+            </button>
+          )}
+
+          {isPaused && (
+            <button onClick={onResume} className="flex-1 btn-success">
+              ▶️ Resume
+            </button>
+          )}
+
+          {(isRunning || isPaused) && (
+            <button onClick={onStop} className="flex-1 btn-danger">
+              ⏹️ Stop
+            </button>
+          )}
+
+          {isStepMode && (isRunning || isPaused) && (
+            <button onClick={onStep} className="flex-1 btn-info">
+              ⏭️ Step
+            </button>
+          )}
+        </div>
+
+        {/* Loop Info */}
+        {executionMode === "loop" && !isIdle && (
+          <div className="text-xs text-muted text-center">
+            🔄 Loop mode active - will repeat until stopped
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+function getStateColor(state: ScenarioExecutionState): string {
+  switch (state) {
+    case "idle":
+      return "text-gray-500";
+    case "running":
+      return "text-green-600";
+    case "paused":
+      return "text-yellow-600";
+    case "completed":
+      return "text-blue-600";
+    case "error":
+      return "text-red-600";
+    default:
+      return "text-gray-500";
+  }
+}
+
+export default ScenarioControlPanel;

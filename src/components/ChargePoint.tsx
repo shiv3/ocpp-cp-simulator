@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint";
 import Connector from "./Connector.tsx";
 import Logger from "./Logger.tsx";
 import * as ocpp from "../cp/OcppTypes";
+import { LogEntry } from "../cp/Logger";
 
 interface ChargePointProps {
   cp: OCPPChargePoint;
@@ -13,41 +14,76 @@ const ChargePoint: React.FC<ChargePointProps> = (props) => {
   const [cp, setCp] = useState<OCPPChargePoint | null>(null);
   const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
   const [cpError, setCpError] = useState<string>("");
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [connectorCount, setConnectorCount] = useState<number>(0);
+
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+    // Clear the logger in the ChargePoint
+    if (cp) {
+      cp.logger.clearLogs();
+    }
+  }, [cp]);
 
   useEffect(() => {
     console.log("ChargePointProps", props);
-    props.cp.statusChangeCallback = statusChangeCb;
-    props.cp.loggingCallback = logMsg;
-    props.cp.errorCallback = setCpError;
     setCp(props.cp);
+    setConnectorCount(props.cp.connectorNumber);
+
+    // Subscribe to events using EventEmitter
+    const unsubStatus = props.cp.events.on("statusChange", (data) => {
+      setCpStatus(data.status);
+    });
+
+    const unsubError = props.cp.events.on("error", (data) => {
+      setCpError(data.error);
+    });
+
+    const unsubConnectorRemoved = props.cp.events.on("connectorRemoved", () => {
+      // Update connector count to trigger re-render
+      setConnectorCount(props.cp.connectorNumber);
+    });
+
+    // Set up logging callback (still uses callback for Logger compatibility)
+    const logMsg = (msg: string) => {
+      console.log(msg);
+      const logEntry = parseFormattedLog(msg);
+      setLogs((prevLogs) => [...prevLogs, logEntry]);
+    };
+    props.cp.loggingCallback = logMsg;
+
+    // Cleanup function to prevent memory leaks
+    return () => {
+      unsubStatus();
+      unsubError();
+      unsubConnectorRemoved();
+      props.cp.loggingCallback = () => {};
+    };
   }, [props]);
 
-  const statusChangeCb = (s: string) => {
-    setCpStatus(s);
-  };
-
-  const logMsg = (msg: string) => {
-    console.log(msg);
-    setLogs((prevLogs) => [...prevLogs, msg]);
-  };
-
   return (
-    <div className="bg-white shadow-md rounded px-2 pt-2 pb-1 h-screen">
-      <SettingsView {...props} />
-      <div className="flex flex-col md:flex-row">
-        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError} />
-        <div className="flex-1">
-          <AuthView cp={cp} cpStatus={cpStatus} tagID={props.TagID} />
-          <div className="flex flex-col md:flex-row mt-4">
-            {cp?.connectors &&
-              Array.from(Array(cp.connectors.size).keys()).map((i) => (
-                <Connector key={i + 1} id={i + 1} cp={cp} idTag={props.TagID} />
-              ))}
-          </div>
+    <div className="card px-4 py-3">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+        <div className="lg:col-span-1">
+          <CPStatus status={cpStatus} />
+        </div>
+        <div className="lg:col-span-3">
+          <SettingsView {...props} />
         </div>
       </div>
-      <Logger logs={logs} />
+
+      <div className="mt-3">
+        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError} tagID={props.TagID} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+        {cp?.connectors &&
+          Array.from(cp.connectors.keys()).map((connectorId) => (
+            <Connector key={connectorId} id={connectorId} cp={cp} idTag={props.TagID} />
+          ))}
+      </div>
+
+      <Logger logs={logs} onClear={clearLogs} />
     </div>
   );
 };
@@ -56,19 +92,19 @@ const CPStatus: React.FC<{ status: string }> = ({ status }) => {
   const statusColor = (s: string) => {
     switch (s) {
       case ocpp.OCPPStatus.Unavailable:
-        return "text-black";
+        return "status-unavailable";
       case ocpp.OCPPStatus.Available:
-        return "text-green-500";
+        return "status-available";
       case ocpp.OCPPStatus.Charging:
-        return "text-blue-500";
+        return "status-charging";
       default:
-        return "text-red-500";
+        return "status-error";
     }
   };
   return (
-    <div className="bg-gray-100 rounded p-4 mr-4 border border-gray-400">
-      <label className="block text-lg font-semibold">CP Status</label>
-      <p className="text-2xl font-bold text-center">
+    <div className="panel-border mb-2">
+      <label className="block text-sm font-semibold text-primary">CP Status</label>
+      <p className="text-xl font-bold text-center">
         <span className={statusColor(status)}>{status}</span>
       </p>
     </div>
@@ -81,61 +117,18 @@ interface AuthViewProps {
   tagID: string;
 }
 
-const AuthView: React.FC<AuthViewProps> = (props) => {
-  const [tagID, setTagID] = useState<string>(props.tagID);
-
-  const handleAuthorize = () => {
-    if (props.cp) {
-      props.cp.authorize(tagID);
-    }
-  };
-
-  return (
-    <div className="bg-gray-100 rounded p-4">
-      <div className="mb-6">
-        <label
-          className="block text-gray-700 text-sm font-bold mb-2"
-          htmlFor="TAG"
-        >
-          {" "}
-          RFID Tag
-        </label>
-        <input
-          className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-          id="TAG"
-          type="text"
-          value={tagID}
-          onChange={(e) => setTagID(e.target.value)}
-          placeholder="DEADBEEF"
-          style={{ maxWidth: "20ch" }}
-        />
-        <p className="text-gray-600 text-xs italic mt-1">
-          The ID of the simulated RFID tag
-        </p>
-      </div>
-      <button
-        onClick={handleAuthorize}
-        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded
-              disabled:bg-green-300
-              "
-        disabled={props.cpStatus !== ocpp.OCPPStatus.Available}
-      >
-        Authorize
-      </button>
-    </div>
-  );
-};
-
 interface ChargePointControlsProps {
   cp: OCPPChargePoint | null;
   cpStatus: string;
   cpError: string;
+  tagID: string;
 }
 
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   cp,
   cpStatus,
   cpError,
+  tagID,
 }) => {
   const [isHeartbeatEnabled, setIsHeartbeatEnabled] = useState<boolean>(false);
 
@@ -166,72 +159,133 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
       }
     }
   };
+
+  const handleAuthorize = () => {
+    if (cp) {
+      cp.authorize(tagID);
+    }
+  };
+
   return (
-    <div className="bg-gray-100 rounded p-4 mr-4">
-      <div className="bg-gray-100 rounded p-4 mr-4">
-        <CPStatus status={cpStatus} />
-      </div>
-      <div>
-        {cpError !== "" && (
-          <div className="bg-red-500 text-white p-2 rounded mb-2">
-            Error: {cpError}
-          </div>
-        )}
-      </div>
-      <button
-        onClick={handleConnect}
-        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-2 w-full
-            disabled:bg-blue-300
-            "
-        disabled={cpStatus !== ocpp.OCPPStatus.Unavailable}
-      >
-        Connect
-      </button>
-      <button
-        onClick={handleDisconnect}
-        className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded mb-2 w-full
-            disabled:bg-red-300
-            "
-        disabled={cpStatus === ocpp.OCPPStatus.Unavailable}
-      >
-        Disconnect
-      </button>
-      <div className="bg-gray-100 rounded p-4">
+    <div className="panel p-3">
+      {cpError !== "" && (
+        <div className="btn-danger mb-2 text-sm p-2">
+          Error: {cpError}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={handleConnect}
+          className="btn-primary"
+          disabled={cpStatus !== ocpp.OCPPStatus.Unavailable}
+        >
+          Connect
+        </button>
+        <button
+          onClick={handleDisconnect}
+          className="btn-danger"
+          disabled={cpStatus === ocpp.OCPPStatus.Unavailable}
+        >
+          Disconnect
+        </button>
         <button
           onClick={handleHeartbeat}
-          className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded mb-2 w-full
-            disabled:bg-purple-300
-            "
+          className="btn-info"
           disabled={cpStatus === ocpp.OCPPStatus.Unavailable}
         >
           Heartbeat
         </button>
-        <div className="flex items-center">
-          <button
-            className={`bg-${
-              isHeartbeatEnabled ? "red" : "green"
-            }-500 hover:bg-${
-              isHeartbeatEnabled ? "red" : "green"
-            }-700 text-white font-bold py-2 px-4 rounded mb-2 w-full`}
-            onClick={() => handleHeartbeatInterval(!isHeartbeatEnabled)}
-          >
-            {isHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat
-          </button>
-        </div>
+        <button
+          className={isHeartbeatEnabled ? "btn-danger" : "btn-success"}
+          onClick={() => handleHeartbeatInterval(!isHeartbeatEnabled)}
+        >
+          {isHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat
+        </button>
+        <button
+          onClick={handleAuthorize}
+          className="btn-success"
+          disabled={cpStatus !== ocpp.OCPPStatus.Available}
+        >
+          Authorize
+        </button>
       </div>
     </div>
   );
 };
 
 const SettingsView: React.FC<ChargePointProps> = (props) => {
+  const [isExpanded, setIsExpanded] = React.useState(false);
+
   return (
-    <div className="mb-1 bg-gray-100 rounded p-2">
-      <p className="text-lg font-semibold">settings</p>
-      <li>CPID: {props.cp.id}</li>
-      <li>CONNECTORS: {props.cp.connectorNumber}</li>
-      <li>WSURL: {props.cp.wsUrl}</li>
+    <div className="panel p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-4 text-sm flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-muted text-xs">ID:</span>
+            <span className="font-semibold text-primary">{props.cp.id}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted text-xs">Connectors:</span>
+            <span className="text-secondary">{props.cp.connectorNumber}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted text-xs">Tag:</span>
+            <span className="font-mono text-secondary text-xs">{props.TagID}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="text-sm text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+        >
+          {isExpanded ? "Hide Details" : "Show Details"}
+        </button>
+      </div>
+
+      {isExpanded && (
+        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-muted text-xs block">WebSocket URL</span>
+              <span className="text-secondary text-xs font-mono break-all">{props.cp.wsUrl}</span>
+            </div>
+            <div>
+              <span className="text-muted text-xs block">OCPP Version</span>
+              <span className="text-secondary">1.6J</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+/**
+ * Helper function to parse formatted log messages back into LogEntry objects
+ * Format: [timestamp] [level] [type] message
+ */
+function parseFormattedLog(formattedMessage: string): LogEntry {
+  // Match the format: [timestamp] [level] [type] message
+  const match = formattedMessage.match(
+    /\[([\d-T:.Z]+)\] \[(\w+)\] \[(\w+)\] (.*)/,
+  );
+
+  if (match) {
+    const [, timestamp, level, type, message] = match;
+    return {
+      timestamp: new Date(timestamp),
+      level: (ocpp.LogLevel as Record<string, number>)[level] ?? ocpp.LogLevel.INFO,
+      type: type as ocpp.LogType,
+      message,
+    };
+  }
+
+  // Fallback if parsing fails
+  return {
+    timestamp: new Date(),
+    level: ocpp.LogLevel.INFO,
+    type: ocpp.LogType.GENERAL,
+    message: formattedMessage,
+  };
+}
 
 export default ChargePoint;

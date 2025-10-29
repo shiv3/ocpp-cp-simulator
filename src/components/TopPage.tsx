@@ -1,29 +1,50 @@
 import React, { useEffect, useState } from "react";
 import ChargePoint from "./ChargePoint.tsx";
-import { Tabs } from "flowbite-react";
+import { Tabs, Button } from "flowbite-react";
 import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint.ts";
-// import {HiStatusOnline, HiStatusOffline} from "react-icons/hi";
 import { useAtom } from "jotai";
 import { configAtom } from "../store/store.ts";
 import { BootNotification, DefaultBootNotification } from "../cp/OcppTypes.ts";
 import { useNavigate } from "react-router-dom";
+import ChargePointConfigModal, { ChargePointConfig, defaultChargePointConfig } from "./ChargePointConfigModal.tsx";
+import { HiPlus, HiCog, HiTrash } from "react-icons/hi";
+import { loadConnectorAutoMeterConfig } from "../utils/connectorStorage";
 
 const TopPage: React.FC = () => {
   const [cps, setCps] = useState<OCPPChargePoint[]>([]);
-  const [config] = useAtom(configAtom);
+  const [config, setConfig] = useAtom(configAtom);
   const [tagIDs, setTagIDs] = useState<string[]>([]);
+  const [chargePointConfigs, setChargePointConfigs] = useState<ChargePointConfig[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!config) {
-      navigate("/settings");
+    if (!config || !config.Experimental) {
+      // No config yet, just show empty state
+      setCps([]);
+      setTagIDs([]);
+      setChargePointConfigs([]);
       return;
     }
-    console.log(
-      `Connector Number: ${config.connectorNumber} WSURL: ${config.wsURL} CPID: ${config.ChargePointID} TagID: ${config.tagID}`,
-    );
-    if (config.Experimental) {
-      const cps = config.Experimental.ChargePointIDs.map((cp) =>
+
+    // Check if we need to create new ChargePoints or update existing ones
+    setCps((prevCps) => {
+      const newCpIds = config.Experimental.ChargePointIDs.map((cp) => cp.ChargePointID);
+      const existingCpIds = prevCps.map((cp) => cp.id);
+
+      // If the ChargePoint IDs haven't changed, keep existing instances
+      const sameIds =
+        newCpIds.length === existingCpIds.length &&
+        newCpIds.every((id, index) => id === existingCpIds[index]);
+
+      if (sameIds) {
+        // Keep existing ChargePoint instances to preserve event listeners
+        return prevCps;
+      }
+
+      // Create new ChargePoints only if IDs changed
+      return config.Experimental.ChargePointIDs.map((cp) =>
         NewChargePoint(
           cp.ConnectorNumber,
           cp.ChargePointID,
@@ -33,34 +54,145 @@ const TopPage: React.FC = () => {
           config.autoMeterValueSetting,
         ),
       );
-      setCps(cps ?? []);
-      const tagIDs = config.Experimental.TagIDs;
-      setTagIDs(tagIDs ?? []);
+    });
+
+    setTagIDs(config.Experimental.TagIDs ?? []);
+
+    // Extract configs for modal editing
+    const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map((cp) => ({
+      cpId: cp.ChargePointID,
+      connectorNumber: cp.ConnectorNumber,
+      wsURL: config.wsURL,
+      ocppVersion: config.ocppVersion,
+      basicAuthEnabled: config.basicAuthSettings?.enabled || false,
+      basicAuthUsername: config.basicAuthSettings?.username || "",
+      basicAuthPassword: config.basicAuthSettings?.password || "",
+      autoMeterValueEnabled: config.autoMeterValueSetting?.enabled || false,
+      autoMeterValueInterval: config.autoMeterValueSetting?.interval || 30,
+      autoMeterValue: config.autoMeterValueSetting?.value || 10,
+      chargePointVendor: config.BootNotification?.chargePointVendor || "Vendor",
+      chargePointModel: config.BootNotification?.chargePointModel || "Model",
+      firmwareVersion: config.BootNotification?.firmwareVersion || "1.0",
+      chargeBoxSerialNumber: config.BootNotification?.chargeBoxSerialNumber || "",
+      chargePointSerialNumber: config.BootNotification?.chargePointSerialNumber || "",
+      meterSerialNumber: config.BootNotification?.meterSerialNumber || "",
+      meterType: config.BootNotification?.meterType || "",
+      iccid: config.BootNotification?.iccid || "",
+      imsi: config.BootNotification?.imsi || "",
+      tagIds: config.Experimental.TagIDs ?? ["123456"],
+    }));
+    setChargePointConfigs(configs);
+  }, [config]);
+
+  const handleAddChargePoint = () => {
+    setEditingIndex(null);
+    setIsModalOpen(true);
+  };
+
+  const handleEditChargePoint = (index: number) => {
+    setEditingIndex(index);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveChargePoint = (cpConfig: ChargePointConfig) => {
+    const updatedConfigs = [...chargePointConfigs];
+
+    if (editingIndex !== null) {
+      // Edit existing
+      updatedConfigs[editingIndex] = cpConfig;
     } else {
-      setCps([
-        NewChargePoint(
-          config.connectorNumber,
-          config.ChargePointID,
-          config.BootNotification ?? DefaultBootNotification,
-          config.wsURL,
-          config.basicAuthSettings,
-          config.autoMeterValueSetting,
-        ),
-      ]);
+      // Add new
+      updatedConfigs.push(cpConfig);
     }
-  }, [config, navigate]);
+
+    setChargePointConfigs(updatedConfigs);
+
+    // Update tagIDs state from config
+    setTagIDs(cpConfig.tagIds);
+
+    // Update or create global config
+    const newConfig = {
+      ...(config || {}),
+      wsURL: cpConfig.wsURL,
+      connectorNumber: cpConfig.connectorNumber,
+      ChargePointID: cpConfig.cpId,
+      tagID: cpConfig.tagIds[0] || "123456",
+      ocppVersion: cpConfig.ocppVersion,
+      basicAuthSettings: {
+        enabled: cpConfig.basicAuthEnabled,
+        username: cpConfig.basicAuthUsername,
+        password: cpConfig.basicAuthPassword,
+      },
+      autoMeterValueSetting: {
+        enabled: cpConfig.autoMeterValueEnabled,
+        interval: cpConfig.autoMeterValueInterval,
+        value: cpConfig.autoMeterValue,
+      },
+      BootNotification: {
+        chargePointVendor: cpConfig.chargePointVendor,
+        chargePointModel: cpConfig.chargePointModel,
+        firmwareVersion: cpConfig.firmwareVersion,
+        chargeBoxSerialNumber: cpConfig.chargeBoxSerialNumber,
+        chargePointSerialNumber: cpConfig.chargePointSerialNumber,
+        meterSerialNumber: cpConfig.meterSerialNumber,
+        meterType: cpConfig.meterType,
+        iccid: cpConfig.iccid,
+        imsi: cpConfig.imsi,
+      },
+      Experimental: {
+        ChargePointIDs: updatedConfigs.map((cfg) => ({
+          ChargePointID: cfg.cpId,
+          ConnectorNumber: cfg.connectorNumber,
+        })),
+        TagIDs: cpConfig.tagIds,
+      },
+    };
+    setConfig(newConfig);
+  };
+
+  const handleDeleteChargePoint = (index: number) => {
+    const updatedConfigs = [...chargePointConfigs];
+    updatedConfigs.splice(index, 1);
+    setChargePointConfigs(updatedConfigs);
+
+    if (updatedConfigs.length === 0) {
+      // If no charge points left, clear config
+      setConfig(null);
+      setCps([]);
+      return;
+    }
+
+    // Update global config
+    const newConfig = {
+      ...(config || {}),
+      Experimental: {
+        ChargePointIDs: updatedConfigs.map((cfg) => ({
+          ChargePointID: cfg.cpId,
+          ConnectorNumber: cfg.connectorNumber,
+        })),
+        TagIDs: tagIDs.length > 0 ? tagIDs : ["123456"],
+      },
+    };
+    setConfig(newConfig);
+  };
 
   return (
-    <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-      {config?.Experimental || cps.length !== 1 ? (
-        <>
-          <ExperimentalView cps={cps} tagIDs={tagIDs} />
-        </>
-      ) : (
-        <>
-          <ChargePoint cp={cps[0]} TagID={config?.tagID ?? ""} />
-        </>
-      )}
+    <div className="px-8 pt-6 pb-8 mb-4">
+      <ExperimentalView
+        cps={cps}
+        tagIDs={tagIDs}
+        onAddChargePoint={handleAddChargePoint}
+        onEditChargePoint={handleEditChargePoint}
+        onDeleteChargePoint={handleDeleteChargePoint}
+      />
+
+      <ChargePointConfigModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleSaveChargePoint}
+        initialConfig={editingIndex !== null ? chargePointConfigs[editingIndex] : defaultChargePointConfig}
+        isNewChargePoint={editingIndex === null}
+      />
     </div>
   );
 };
@@ -68,6 +200,9 @@ const TopPage: React.FC = () => {
 interface ExperimentalProps {
   cps: OCPPChargePoint[];
   tagIDs: string[];
+  onAddChargePoint: () => void;
+  onEditChargePoint: (index: number) => void;
+  onDeleteChargePoint: (index: number) => void;
 }
 
 interface transactionInfo {
@@ -77,7 +212,7 @@ interface transactionInfo {
   connectorID: number;
 }
 
-const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs }) => {
+const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddChargePoint, onEditChargePoint, onDeleteChargePoint }) => {
   const handleAllConnect = () => {
     console.log("Connecting all charge points");
     const chunk = 100;
@@ -104,6 +239,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs }) => {
 
   const [isAllHeartbeatEnabled, setIsAllHeartbeatEnabled] =
     useState<boolean>(false);
+
   const handleAllHeartbeatInterval = (isEnalbe: boolean) => {
     setIsAllHeartbeatEnabled(isEnalbe);
     if (isEnalbe) {
@@ -142,84 +278,98 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs }) => {
 
   return (
     <>
-      <div>
-        <label className="block text-gray-700 text-sm font-bold mb-2">
-          experimental feature is on
-        </label>
-        <button
-          onClick={handleAllConnect}
-          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-2
-                disabled:bg-blue-300
-                "
-          // disabled={cps.some((cp) => cp.status === "Available")}
-        >
-          Connect All
-        </button>
-        <button
-          onClick={handleAllDisconnect}
-          className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded mb-2
-                disabled:bg-red-300
-                "
-          // disabled={cps.every((cp) => cp.status === "Available")}
-        >
-          Disconnect All
-        </button>
-        <button
-          onClick={handleAllHeartbeat}
-          className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded mb-2
-            disabled:bg-purple-300"
-        >
-          Heartbeat All
-        </button>
-        <button
-          className={`bg-${
-            isAllHeartbeatEnabled ? "red" : "green"
-          }-500 hover:bg-${
-            isAllHeartbeatEnabled ? "red" : "green"
-          }-700 text-white font-bold py-2 px-4 rounded mb-2`}
-          onClick={() => handleAllHeartbeatInterval(!isAllHeartbeatEnabled)}
-        >
-          {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
-        </button>
-        <div className="bg-gray-100 rounded p-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">
-            Transaction all
-          </label>
-          <label className="block text-gray-700 text-sm font-bold mb-2">
-            <div>Tag IDs: {tagIDs.join(", ")}</div>
-            {/*<div>Transaction IDs: {transactions.map((t) => t.transactionID).join(", ")}</div>*/}
-          </label>
-          <button
-            onClick={handleAllStartTransaction}
-            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mb-2
-                disabled:bg-green-300
-                "
-          >
-            Start Transaction All
-          </button>
-          <button
-            onClick={handleAllStopTransaction}
-            className="bg-orange-500 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded mb-2
-                disabled:bg-orange-300
-                "
-          >
-            Stop Transaction All
-          </button>
-        </div>
-      </div>
-      <Tabs>
+      {cps.length >= 2 && (
+        <>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button onClick={handleAllConnect} className="btn-primary">
+              Connect All
+            </button>
+            <button onClick={handleAllDisconnect} className="btn-danger">
+              Disconnect All
+            </button>
+            <button onClick={handleAllHeartbeat} className="btn-info">
+              Heartbeat All
+            </button>
+            <button
+              className={isAllHeartbeatEnabled ? "btn-danger" : "btn-success"}
+              onClick={() => handleAllHeartbeatInterval(!isAllHeartbeatEnabled)}
+            >
+              {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
+            </button>
+          </div>
+
+          <div className="panel mb-3 p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-primary text-sm font-bold">Transaction All</span>
+                <span className="text-secondary text-xs ml-3">Tag IDs: {tagIDs.join(", ")}</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleAllStartTransaction} className="btn-success">
+                  Start Transaction All
+                </button>
+                <button onClick={handleAllStopTransaction} className="btn-warning">
+                  Stop Transaction All
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      <Tabs aria-label="Charge Points">
         {cps.map((cp, key) => {
           return (
             <Tabs.Item
-              className="bg-gray-100 rounded p-4"
-              // icon={cp.status === "Available" ? HiStatusOnline : HiStatusOffline}
               key={key}
-              title={cp.id}
+              title={
+                <div className="flex items-center gap-2">
+                  <span>{cp.id}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditChargePoint(key);
+                    }}
+                    className="p-1 rounded"
+                    title="Edit Charge Point"
+                  >
+                    <HiCog className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
+                        onDeleteChargePoint(key);
+                      }
+                    }}
+                    className="p-1 hover:bg-red-200 dark:hover:bg-red-600 rounded text-red-600 dark:text-red-400"
+                    title="Delete Charge Point"
+                  >
+                    <HiTrash className="h-4 w-4" />
+                  </button>
+                </div>
+              }
             >
               <ChargePoint cp={cp} TagID={tagIDs[0]} />
             </Tabs.Item>
           );
         })}
+        <Tabs.Item
+          title={
+            <div
+              onClick={onAddChargePoint}
+              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center cursor-pointer"
+              title="Add Charge Point"
+            >
+              <HiPlus className="h-5 w-5" />
+            </div>
+          }
+        >
+          {/* Empty content - this tab is just for the + button */}
+          <div className="p-4 text-center text-secondary">
+            Click the + button to add a new charge point
+          </div>
+        </Tabs.Item>
       </Tabs>
     </>
   );
@@ -236,7 +386,7 @@ const NewChargePoint = (
   console.log(
     `Creating new ChargePoint with ID: ${ChargePointID} Connector Number: ${ConnectorNumber} WSURL: ${WSURL}`,
   );
-  return new OCPPChargePoint(
+  const chargePoint = new OCPPChargePoint(
     ChargePointID,
     BootNotification,
     ConnectorNumber,
@@ -244,6 +394,19 @@ const NewChargePoint = (
     basicAuthSettings,
     autoMeterValueSetting,
   );
+
+  // Load auto MeterValue config from localStorage for each connector
+  for (let i = 1; i <= ConnectorNumber; i++) {
+    const savedConfig = loadConnectorAutoMeterConfig(ChargePointID, i);
+    if (savedConfig) {
+      const connector = chargePoint.getConnector(i);
+      if (connector) {
+        connector.autoMeterValueConfig = savedConfig;
+      }
+    }
+  }
+
+  return chargePoint;
 };
 
 export default TopPage;

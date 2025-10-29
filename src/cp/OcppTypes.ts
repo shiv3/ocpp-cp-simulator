@@ -1,5 +1,6 @@
 import { ErrorCode, MessageType } from "@voltbras/ts-ocpp/dist/ws";
 import { BootNotificationRequest } from "@voltbras/ts-ocpp/dist/messages/json/request";
+import { LogLevel, LogType } from "./Logger";
 
 export enum OCPPStatus {
   Available = "Available",
@@ -95,3 +96,6 @@ export const DefaultBootNotification: BootNotification = {
   meterSerialNumber: "123456",
   meterType: "",
 };
+
+// Re-export Logger types for convenience
+export { LogLevel, LogType };

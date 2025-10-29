@@ -1,0 +1,669 @@
+import React, { useMemo, useEffect, useState } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  Node,
+  Edge,
+  NodeTypes,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { OCPPStatus } from "../../cp/OcppTypes";
+import StateNode from "./StateNode";
+import StateTransitionTimeline from "./StateTransitionTimeline";
+import type { Connector } from "../../cp/Connector";
+import type { ChargePoint } from "../../cp/ChargePoint";
+import { StateHistoryEntry } from "../../cp/managers/types/StateSnapshot";
+
+interface StateTransitionViewerProps {
+  connector: Connector;
+  chargePoint: ChargePoint;
+  className?: string;
+}
+
+const nodeTypes: NodeTypes = {
+  stateNode: StateNode,
+};
+
+const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
+  connector,
+  chargePoint,
+  className = "",
+}) => {
+  const [currentStatus, setCurrentStatus] = useState<OCPPStatus>(
+    connector.status as OCPPStatus
+  );
+  const [history, setHistory] = useState<StateHistoryEntry[]>([]);
+  const [currentHistoryIndex, setCurrentHistoryIndex] = useState<number>(-1);
+
+  // Connectorの状態変更を監視
+  useEffect(() => {
+    const unsubscribe = connector.events.on("statusChange", ({ status }) => {
+      setCurrentStatus(status);
+      // リアルタイム状態が変更されたら履歴インデックスをリセット
+      setCurrentHistoryIndex(-1);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [connector]);
+
+  // 履歴を取得
+  useEffect(() => {
+    if (!chargePoint.stateManager) return;
+
+    const fetchHistory = () => {
+      const allHistory = chargePoint.stateManager.history.getHistory({
+        entity: "connector",
+        entityId: connector.id,
+        transitionType: "status",
+      });
+      setHistory(allHistory);
+    };
+
+    // 初回取得
+    fetchHistory();
+
+    // 定期的に履歴を更新（新しい遷移があれば反映）
+    const interval = setInterval(fetchHistory, 1000);
+
+    return () => clearInterval(interval);
+  }, [chargePoint, connector.id]);
+
+  // 履歴再生時の状態を反映
+  const displayStatus = useMemo(() => {
+    if (currentHistoryIndex >= 0 && currentHistoryIndex < history.length) {
+      return history[currentHistoryIndex].toState as OCPPStatus;
+    }
+    return currentStatus;
+  }, [currentHistoryIndex, history, currentStatus]);
+
+  // ノード定義（間隔を広げて配置を最適化）
+  const nodes: Node[] = useMemo(
+    () => [
+      // Available (中央下)
+      {
+        id: "available",
+        type: "stateNode",
+        position: { x: 500, y: 600 },
+        data: {
+          status: OCPPStatus.Available,
+          label: "Available",
+          isCurrent: displayStatus === OCPPStatus.Available,
+          isOperative: true,
+        },
+      },
+      // Preparing (中央)
+      {
+        id: "preparing",
+        type: "stateNode",
+        position: { x: 500, y: 420 },
+        data: {
+          status: OCPPStatus.Preparing,
+          label: "Preparing",
+          isCurrent: displayStatus === OCPPStatus.Preparing,
+          isOperative: true,
+        },
+      },
+      // Charging (上中央)
+      {
+        id: "charging",
+        type: "stateNode",
+        position: { x: 500, y: 150 },
+        data: {
+          status: OCPPStatus.Charging,
+          label: "Charging",
+          isCurrent: displayStatus === OCPPStatus.Charging,
+          isOperative: true,
+        },
+      },
+      // SuspendedEV (左上)
+      {
+        id: "suspendedEV",
+        type: "stateNode",
+        position: { x: 150, y: 80 },
+        data: {
+          status: OCPPStatus.SuspendedEV,
+          label: "Suspended (EV)",
+          isCurrent: displayStatus === OCPPStatus.SuspendedEV,
+          isOperative: true,
+        },
+      },
+      // SuspendedEVSE (右上)
+      {
+        id: "suspendedEVSE",
+        type: "stateNode",
+        position: { x: 850, y: 80 },
+        data: {
+          status: OCPPStatus.SuspendedEVSE,
+          label: "Suspended (EVSE)",
+          isCurrent: displayStatus === OCPPStatus.SuspendedEVSE,
+          isOperative: true,
+        },
+      },
+      // Finishing (中央やや下)
+      {
+        id: "finishing",
+        type: "stateNode",
+        position: { x: 500, y: 285 },
+        data: {
+          status: OCPPStatus.Finishing,
+          label: "Finishing",
+          isCurrent: displayStatus === OCPPStatus.Finishing,
+          isOperative: true,
+        },
+      },
+      // Reserved (左下)
+      {
+        id: "reserved",
+        type: "stateNode",
+        position: { x: 150, y: 600 },
+        data: {
+          status: OCPPStatus.Reserved,
+          label: "Reserved",
+          isCurrent: displayStatus === OCPPStatus.Reserved,
+          isOperative: true,
+        },
+      },
+      // Unavailable (右下)
+      {
+        id: "unavailable",
+        type: "stateNode",
+        position: { x: 850, y: 600 },
+        data: {
+          status: OCPPStatus.Unavailable,
+          label: "Unavailable",
+          isCurrent: displayStatus === OCPPStatus.Unavailable,
+          isOperative: false,
+        },
+      },
+      // Faulted (最下中央)
+      {
+        id: "faulted",
+        type: "stateNode",
+        position: { x: 500, y: 780 },
+        data: {
+          status: OCPPStatus.Faulted,
+          label: "Faulted",
+          isCurrent: displayStatus === OCPPStatus.Faulted,
+          isOperative: false,
+        },
+      },
+    ],
+    [displayStatus]
+  );
+
+  // エッジ定義（OCPP 1.6J準拠の遷移、smoothstepで見やすく）
+  const edges: Edge[] = useMemo(
+    () => [
+      // Available からの遷移
+      {
+        id: "available-preparing",
+        source: "available",
+        target: "preparing",
+        sourceHandle: "top-source",
+        targetHandle: "bottom-target",
+        type: "smoothstep",
+        label: "PLUGIN",
+        animated: true,
+        style: { stroke: "#22c55e", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "available-reserved",
+        source: "available",
+        target: "reserved",
+        sourceHandle: "left-source",
+        targetHandle: "right-target",
+        type: "smoothstep",
+        label: "RESERVE",
+        style: { stroke: "#a855f7", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "available-unavailable",
+        source: "available",
+        target: "unavailable",
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        label: "SET_UNAVAILABLE",
+        style: { stroke: "#6b7280", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "available-faulted",
+        source: "available",
+        target: "faulted",
+        sourceHandle: "bottom",
+        targetHandle: "top",
+        type: "default",
+        label: "ERROR",
+        style: { stroke: "#ef4444", strokeWidth: 2, strokeDasharray: "5, 5" },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // Preparing からの遷移
+      {
+        id: "preparing-charging",
+        source: "preparing",
+        target: "charging",
+        sourceHandle: "top-source",
+        targetHandle: "bottom-target",
+        type: "smoothstep",
+        label: "START_TX",
+        animated: true,
+        style: { stroke: "#10b981", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "preparing-available",
+        source: "preparing",
+        target: "available",
+        sourceHandle: "bottom",
+        targetHandle: "top",
+        type: "smoothstep",
+        label: "PLUGOUT",
+        style: { stroke: "#6b7280", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "preparing-faulted",
+        source: "preparing",
+        target: "faulted",
+        sourceHandle: "right",
+        targetHandle: "right-target",
+        type: "default",
+        label: "ERROR",
+        style: { stroke: "#ef4444", strokeWidth: 2, strokeDasharray: "5, 5" },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // Charging からの遷移
+      {
+        id: "charging-suspendedEV",
+        source: "charging",
+        target: "suspendedEV",
+        sourceHandle: "left-source",
+        targetHandle: "right-target",
+        type: "smoothstep",
+        label: "SUSPEND_EV",
+        style: { stroke: "#f97316", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "charging-suspendedEVSE",
+        source: "charging",
+        target: "suspendedEVSE",
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        label: "SUSPEND_EVSE",
+        style: { stroke: "#f97316", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "charging-finishing",
+        source: "charging",
+        target: "finishing",
+        sourceHandle: "bottom",
+        targetHandle: "top",
+        type: "smoothstep",
+        label: "STOP_TX",
+        animated: true,
+        style: { stroke: "#06b6d4", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "charging-faulted",
+        source: "charging",
+        target: "faulted",
+        sourceHandle: "left-source",
+        targetHandle: "left",
+        type: "default",
+        label: "ERROR",
+        style: { stroke: "#ef4444", strokeWidth: 2, strokeDasharray: "5, 5" },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // SuspendedEV からの遷移
+      {
+        id: "suspendedEV-charging",
+        source: "suspendedEV",
+        target: "charging",
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        label: "RESUME",
+        style: { stroke: "#10b981", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "suspendedEV-suspendedEVSE",
+        source: "suspendedEV",
+        target: "suspendedEVSE",
+        sourceHandle: "top-source",
+        targetHandle: "top",
+        type: "smoothstep",
+        label: "SUSPEND_EVSE",
+        style: { stroke: "#f97316", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "suspendedEV-finishing",
+        source: "suspendedEV",
+        target: "finishing",
+        sourceHandle: "bottom",
+        targetHandle: "left",
+        type: "smoothstep",
+        label: "STOP_TX",
+        style: { stroke: "#06b6d4", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // SuspendedEVSE からの遷移
+      {
+        id: "suspendedEVSE-charging",
+        source: "suspendedEVSE",
+        target: "charging",
+        sourceHandle: "left-source",
+        targetHandle: "right-target",
+        type: "smoothstep",
+        label: "RESUME",
+        style: { stroke: "#10b981", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "suspendedEVSE-suspendedEV",
+        source: "suspendedEVSE",
+        target: "suspendedEV",
+        sourceHandle: "top-source",
+        targetHandle: "top",
+        type: "smoothstep",
+        label: "SUSPEND_EV",
+        style: { stroke: "#f97316", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "suspendedEVSE-finishing",
+        source: "suspendedEVSE",
+        target: "finishing",
+        sourceHandle: "bottom",
+        targetHandle: "right-target",
+        type: "smoothstep",
+        label: "STOP_TX",
+        style: { stroke: "#06b6d4", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // Finishing からの遷移
+      {
+        id: "finishing-available",
+        source: "finishing",
+        target: "available",
+        sourceHandle: "bottom",
+        targetHandle: "top",
+        type: "smoothstep",
+        label: "PLUGOUT",
+        animated: true,
+        style: { stroke: "#22c55e", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "finishing-faulted",
+        source: "finishing",
+        target: "faulted",
+        sourceHandle: "left-source",
+        targetHandle: "top",
+        type: "default",
+        label: "ERROR",
+        style: { stroke: "#ef4444", strokeWidth: 2, strokeDasharray: "5, 5" },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // Reserved からの遷移
+      {
+        id: "reserved-preparing",
+        source: "reserved",
+        target: "preparing",
+        sourceHandle: "top-source",
+        targetHandle: "left",
+        type: "smoothstep",
+        label: "PLUGIN",
+        style: { stroke: "#22c55e", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "reserved-available",
+        source: "reserved",
+        target: "available",
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        label: "CANCEL",
+        style: { stroke: "#6b7280", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "reserved-faulted",
+        source: "reserved",
+        target: "faulted",
+        sourceHandle: "bottom",
+        targetHandle: "left",
+        type: "default",
+        label: "ERROR",
+        style: { stroke: "#ef4444", strokeWidth: 2, strokeDasharray: "5, 5" },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // Unavailable からの遷移
+      {
+        id: "unavailable-available",
+        source: "unavailable",
+        target: "available",
+        sourceHandle: "left-source",
+        targetHandle: "right-target",
+        type: "smoothstep",
+        label: "SET_AVAILABLE",
+        style: { stroke: "#22c55e", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "unavailable-faulted",
+        source: "unavailable",
+        target: "faulted",
+        sourceHandle: "bottom",
+        targetHandle: "right-target",
+        type: "default",
+        label: "ERROR",
+        style: { stroke: "#ef4444", strokeWidth: 2, strokeDasharray: "5, 5" },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+
+      // Faulted からの遷移
+      {
+        id: "faulted-available",
+        source: "faulted",
+        target: "available",
+        sourceHandle: "top-source",
+        targetHandle: "bottom-target",
+        type: "smoothstep",
+        label: "RESET",
+        style: { stroke: "#22c55e", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+      {
+        id: "faulted-unavailable",
+        source: "faulted",
+        target: "unavailable",
+        sourceHandle: "right",
+        targetHandle: "bottom-target",
+        type: "smoothstep",
+        label: "SET_UNAVAILABLE",
+        style: { stroke: "#6b7280", strokeWidth: 2 },
+        labelStyle: { fill: "#1f2937", fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+        labelBgPadding: [8, 4] as [number, number],
+        labelBgBorderRadius: 4,
+      },
+    ],
+    []
+  );
+
+  return (
+    <div className={`h-full w-full flex flex-col ${className}`}>
+      {/* React Flow - 上部 */}
+      <div className="flex-1 relative">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          nodesDraggable={true}
+          fitView
+          attributionPosition="bottom-left"
+          minZoom={0.5}
+          maxZoom={2}
+          defaultEdgeOptions={{
+            markerEnd: {
+              type: "arrowclosed",
+              width: 20,
+              height: 20,
+            },
+          }}
+        >
+          <Background />
+          <Controls />
+          <MiniMap
+            nodeColor={(node) => {
+              if (node.data?.isCurrent) return "#3b82f6";
+              if (!node.data?.isOperative) return "#6b7280";
+              return "#22c55e";
+            }}
+            nodeStrokeWidth={3}
+          />
+        </ReactFlow>
+
+        {/* 凡例 */}
+        <div className="absolute top-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg text-sm">
+          <h3 className="font-bold mb-2 text-gray-900 dark:text-white">
+            状態遷移図
+          </h3>
+          <div className="space-y-1 text-gray-700 dark:text-gray-300">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-blue-500 rounded"></div>
+              <span>現在の状態</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-green-400 rounded"></div>
+              <span>Available</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-emerald-500 rounded"></div>
+              <span>Charging</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-orange-400 rounded"></div>
+              <span>Suspended</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-gray-400 rounded"></div>
+              <span>Inoperative</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-red-500 rounded"></div>
+              <span>Faulted</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline - 下部 */}
+      <div className="h-64 flex-shrink-0">
+        <StateTransitionTimeline
+          history={history}
+          onSelectTransition={setCurrentHistoryIndex}
+          currentIndex={currentHistoryIndex}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default StateTransitionViewer;

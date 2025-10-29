@@ -6,6 +6,7 @@ import { OCPPStatus, OCPPAvailability, BootNotification } from "./OcppTypes";
 import { Transaction } from "./Transaction.ts";
 import * as ocpp from "./OcppTypes.ts";
 import { HeartbeatManager, MeterValueManager } from "./managers";
+import { StateManager } from "./managers/StateManager";
 import { EventEmitter } from "./EventEmitter";
 import { ChargePointEvents } from "./ChargePointEvents";
 
@@ -21,6 +22,7 @@ export class ChargePoint {
   // Manager instances
   private _heartbeatManager: HeartbeatManager;
   private _meterValueManager: MeterValueManager;
+  private _stateManager: StateManager;
 
   // EventEmitter for type-safe events
   private _events: EventEmitter<ChargePointEvents> = new EventEmitter();
@@ -72,6 +74,32 @@ export class ChargePoint {
     this._meterValueManager.setSendMeterValueCallback((connectorId) =>
       this.sendMeterValue(connectorId),
     );
+
+    // Initialize StateManager
+    this._stateManager = new StateManager(
+      this._logger,
+      this._events,
+      () => ({ status: this._status, error: this._error }),
+      (id) => {
+        const connector = this._connectors.get(id);
+        if (!connector) return undefined;
+        return {
+          status: connector.status as string,
+          availability: connector.availability,
+          transaction: connector.transaction,
+          meterValue: connector.meterValue,
+        };
+      },
+    );
+
+    // Initialize connectors in StateManager
+    this._connectors.forEach((connector, id) => {
+      this._stateManager.initializeConnector(
+        id,
+        connector.status as OCPPStatus,
+        connector.availability,
+      );
+    });
   }
 
   // Getters
@@ -111,6 +139,13 @@ export class ChargePoint {
    */
   get events(): EventEmitter<ChargePointEvents> {
     return this._events;
+  }
+
+  /**
+   * Get the state manager for this charge point
+   */
+  get stateManager(): StateManager {
+    return this._stateManager;
   }
 
   /**
@@ -187,6 +222,10 @@ export class ChargePoint {
     this._messageHandler.authorize(tagId);
   }
 
+  /**
+   * Set the charge point status
+   * @deprecated Use stateManager.transitionChargePointStatus() instead for better state management
+   */
   set status(status: OCPPStatus) {
     this._status = status;
 
@@ -199,6 +238,12 @@ export class ChargePoint {
 
     // Emit event through EventEmitter
     this._events.emit("statusChange", { status });
+
+    // Also record in StateManager
+    this._stateManager.transitionChargePointStatus(status, {
+      source: "legacy-setter",
+      timestamp: new Date(),
+    });
   }
 
   public startTransaction(tagId: string, connectorId: number): void {
@@ -362,8 +407,7 @@ export class ChargePoint {
 
   public updateAllConnectorsStatus(newStatus: OCPPStatus): void {
     this._connectors.forEach((connector) => {
-      connector.status = newStatus;
-      this._messageHandler.sendStatusNotification(connector.id, newStatus);
+      this.updateConnectorStatus(connector.id, newStatus);
     });
   }
 
@@ -376,6 +420,25 @@ export class ChargePoint {
       const previousStatus = connector.status as OCPPStatus;
       connector.status = newStatus;
       this._messageHandler.sendStatusNotification(connectorId, newStatus);
+
+      // Record transition in StateHistory
+      this._stateManager.history.recordTransition({
+        id: crypto.randomUUID(),
+        timestamp: new Date(),
+        entity: "connector",
+        entityId: connectorId,
+        transitionType: "status",
+        fromState: previousStatus,
+        toState: newStatus,
+        context: {
+          source: "updateConnectorStatus",
+          timestamp: new Date(),
+        },
+        validationResult: {
+          level: "OK",
+        },
+        success: true,
+      });
 
       // Emit connector status change event
       this._events.emit("connectorStatusChange", {

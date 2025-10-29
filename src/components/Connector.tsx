@@ -6,9 +6,10 @@ import { AutoMeterValueConfig } from "../cp/types/MeterValueCurve";
 import { ScenarioMode } from "../cp/types/ScenarioTypes";
 import MeterValueCurveModal from "./MeterValueCurveModal.tsx";
 import ScenarioEditor from "./scenario/ScenarioEditor.tsx";
+import StateTransitionViewer from "./state-transition/StateTransitionViewer.tsx";
 import { HiCog } from "react-icons/hi";
+import { FaProjectDiagram } from "react-icons/fa";
 import { saveConnectorAutoMeterConfig } from "../utils/connectorStorage";
-import { Modal } from "flowbite-react";
 
 interface ConnectorProps {
   id: number;
@@ -34,6 +35,7 @@ const Connector: React.FC<ConnectorProps> = ({
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [mode, setMode] = useState<ScenarioMode>("manual");
   const [isScenarioEditorOpen, setIsScenarioEditorOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"scenario" | "stateTransition">("scenario");
   const [panelWidth, setPanelWidth] = useState(80); // Default 80vw
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartX = useRef(0);
@@ -243,14 +245,14 @@ const Connector: React.FC<ConnectorProps> = ({
 
       <div className="text-sm text-muted text-center py-2">
         <span className="inline-flex items-center gap-1">
-          ⚙️ Click to open Scenario Editor
+          ⚙️ Click to open Editor (Scenario / State Diagram)
         </span>
       </div>
 
-      {/* Scenario Editor Side Panel */}
+      {/* Side Panel with Tabs */}
       {isScenarioEditorOpen && cp && (
         <div className="fixed inset-0 z-[9999] flex justify-end">
-          {/* Semi-transparent overlay on the left - clicking closes the editor */}
+          {/* Semi-transparent overlay on the left - clicking closes the panel */}
           <div
             className="flex-1 bg-black bg-opacity-20"
             onClick={() => setIsScenarioEditorOpen(false)}
@@ -258,30 +260,89 @@ const Connector: React.FC<ConnectorProps> = ({
 
           {/* Side Panel */}
           <div
-            className="bg-white dark:bg-gray-900 shadow-2xl overflow-hidden flex"
+            className="bg-white dark:bg-gray-900 shadow-2xl overflow-hidden flex flex-col"
             style={{ width: `${panelWidth}vw` }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Resize Handle */}
-            <div
-              className={`w-1 bg-gray-300 dark:bg-gray-600 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-col-resize flex-shrink-0 ${
-                isResizing ? "bg-blue-500 dark:bg-blue-400" : ""
-              }`}
-              onMouseDown={handleResizeStart}
-              style={{ cursor: "col-resize" }}
-            >
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="w-0.5 h-8 bg-gray-400 dark:bg-gray-500"></div>
+            <div className="flex">
+              {/* Resize Handle */}
+              <div
+                className={`w-1 bg-gray-300 dark:bg-gray-600 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-col-resize flex-shrink-0 ${
+                  isResizing ? "bg-blue-500 dark:bg-blue-400" : ""
+                }`}
+                onMouseDown={handleResizeStart}
+                style={{ cursor: "col-resize" }}
+              >
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="w-0.5 h-8 bg-gray-400 dark:bg-gray-500"></div>
+                </div>
+              </div>
+
+              {/* Tab Header */}
+              <div className="flex-1 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex">
+                  <button
+                    onClick={() => setActiveTab("scenario")}
+                    className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                      activeTab === "scenario"
+                        ? "bg-white dark:bg-gray-800 text-primary border-b-2 border-blue-500"
+                        : "bg-gray-50 dark:bg-gray-900 text-muted hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    ⚙️ Scenario Editor
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("stateTransition")}
+                    className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                      activeTab === "stateTransition"
+                        ? "bg-white dark:bg-gray-800 text-primary border-b-2 border-blue-500"
+                        : "bg-gray-50 dark:bg-gray-900 text-muted hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <FaProjectDiagram /> 状態遷移図
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Panel Content */}
             <div className="flex-1 overflow-hidden">
-              <ScenarioEditor
-                chargePoint={cp}
-                connectorId={connector_id}
-                onClose={() => setIsScenarioEditorOpen(false)}
-              />
+              {activeTab === "scenario" ? (
+                <ScenarioEditor
+                  chargePoint={cp}
+                  connectorId={connector_id}
+                  onClose={() => setIsScenarioEditorOpen(false)}
+                />
+              ) : (
+                <div className="h-full flex flex-col">
+                  {/* State Transition Viewer Header */}
+                  <div className="panel p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-bold text-primary">
+                        状態遷移図 (OCPP 1.6J)
+                      </h2>
+                      <p className="text-xs text-muted">
+                        Connector {connector_id}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setIsScenarioEditorOpen(false)}
+                      className="btn-danger text-xs px-2 py-1"
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+                  {/* State Transition Viewer Content */}
+                  <div className="flex-1 overflow-hidden">
+                    {cp.getConnector(connector_id) && (
+                      <StateTransitionViewer
+                        connector={cp.getConnector(connector_id)!}
+                        chargePoint={cp}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

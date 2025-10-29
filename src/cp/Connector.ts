@@ -65,6 +65,10 @@ export class Connector {
     return this._status;
   }
 
+  /**
+   * Set connector status
+   * @deprecated Prefer using ChargePoint.stateManager.transitionConnectorStatus() for better state management
+   */
   set status(newStatus: ocpp.OCPPStatus) {
     const previousStatus = this._status as OCPPStatus;
     this._status = newStatus;
@@ -80,6 +84,10 @@ export class Connector {
     return this._availability;
   }
 
+  /**
+   * Set connector availability
+   * @deprecated Prefer using ChargePoint.stateManager for better state management
+   */
   set availability(newAvailability: OCPPAvailability) {
     this._availability = newAvailability;
 

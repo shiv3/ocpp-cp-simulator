@@ -1,4 +1,4 @@
-import { Logger } from "./Logger";
+import { Logger, LogType } from "./Logger";
 import { OCPPAction, OCPPErrorCode, OCPPMessageType } from "./OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
@@ -51,6 +51,7 @@ export class OCPPWebSocket {
   private _reconnectAttempts: number = 0;
   private _maxReconnectAttempts: number = 5;
   private _reconnectDelay: number = 5000; // 5 seconds
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     url: string,
@@ -104,6 +105,13 @@ export class OCPPWebSocket {
   }
 
   public disconnect(): void {
+    // Clear reconnect timer to prevent reconnection attempts
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    this._reconnectAttempts = 0;
+
     if (this._ws) {
       this._ws.close();
       this._ws = null;
@@ -152,9 +160,9 @@ export class OCPPWebSocket {
   private send(message: string): void {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       this._ws.send(message);
-      this._logger.log(`Sent: ${message}`);
+      this._logger.info(`Sent: ${message}`, LogType.WEBSOCKET);
     } else {
-      this._logger.log("WebSocket is not connected");
+      this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
     }
   }
 
@@ -163,23 +171,25 @@ export class OCPPWebSocket {
   }
 
   private handleOpen(): void {
-    this._logger.log("WebSocket connected");
+    this._logger.info("WebSocket connected", LogType.WEBSOCKET);
     this._reconnectAttempts = 0;
 
     // this.startPingInterval();
   }
 
   private handleMessage(ev: MessageEvent): void {
-    this._logger.log(`Received: ${ev.data}`);
+    this._logger.info(`Received: ${ev.data}`, LogType.WEBSOCKET);
     try {
       const messageArray = JSON.parse(ev.data.toString());
-      const len = messageArray.length;
-      if (!(!Array.isArray(messageArray) || len !== 3 || len !== 4)) {
-        this._logger.error("Invalid message format: " + messageArray);
+
+      // Validate message format: must be array with length 3 or 4
+      if (!Array.isArray(messageArray) || (messageArray.length !== 3 && messageArray.length !== 4)) {
+        this._logger.error("Invalid message format: " + messageArray, LogType.WEBSOCKET);
         return;
       }
+
       if (this._messageHandler) {
-        if (len == 3) {
+        if (messageArray.length === 3) {
           const [messageType, messageId, payload] = messageArray;
           this._messageHandler(
             messageType,
@@ -187,25 +197,24 @@ export class OCPPWebSocket {
             OCPPAction.CallResult,
             payload,
           );
-        }
-        if (len == 4) {
+        } else if (messageArray.length === 4) {
           const [messageType, messageId, action, payload] = messageArray;
           this._messageHandler(messageType, messageId, action, payload);
         }
       } else {
-        this._logger.log("No message handler set");
+        this._logger.warn("No message handler set", LogType.WEBSOCKET);
       }
     } catch (error) {
-      this._logger.log(`Error parsing message: ${error}`);
+      this._logger.error(`Error parsing message: ${error}`, LogType.WEBSOCKET);
     }
   }
 
   private handleError(evt: Event): void {
-    this._logger.log(`WebSocket error type: ${evt.type}`);
+    this._logger.error(`WebSocket error type: ${evt.type}`, LogType.WEBSOCKET);
   }
 
   private handleClose(msg: MessageEvent): void {
-    this._logger.log(`WebSocket closed: ${msg}`);
+    this._logger.info(`WebSocket closed: ${msg}`, LogType.WEBSOCKET);
     this.stopPingInterval();
     this.attemptReconnect();
   }
@@ -226,15 +235,26 @@ export class OCPPWebSocket {
   }
 
   private attemptReconnect(): void {
+    // Clear any existing reconnect timer
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
     if (this._reconnectAttempts < this._maxReconnectAttempts) {
       this._reconnectAttempts++;
-      this._logger.log(
+      this._logger.info(
         `Attempting to reconnect (${this._reconnectAttempts}/${this._maxReconnectAttempts})...`,
+        LogType.WEBSOCKET,
       );
-      setTimeout(() => this.connect(), this._reconnectDelay);
+      this._reconnectTimer = setTimeout(() => {
+        this._reconnectTimer = null;
+        this.connect();
+      }, this._reconnectDelay);
     } else {
-      this._logger.log(
+      this._logger.warn(
         "Max reconnect attempts reached. Please check your connection and try again.",
+        LogType.WEBSOCKET,
       );
     }
   }

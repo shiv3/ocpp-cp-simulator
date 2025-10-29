@@ -18,6 +18,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.7.0",
     "@voltbras/ts-ocpp": "^2.7.3",
+    "@xyflow/react": "^12.9.0",
     "flowbite": "^2.5.2",
     "flowbite-react": "^0.10.2",
     "jotai": "^2.12.5",

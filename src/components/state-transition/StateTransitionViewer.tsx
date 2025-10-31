@@ -9,12 +9,12 @@ import {
   NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { OCPPStatus } from "../../cp/OcppTypes";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import StateNode from "./StateNode";
 import StateTransitionTimeline from "./StateTransitionTimeline";
-import type { Connector } from "../../cp/Connector";
-import type { ChargePoint } from "../../cp/ChargePoint";
-import { StateHistoryEntry } from "../../cp/managers/types/StateSnapshot";
+import type { Connector } from "../../cp/domain/connector/Connector";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import { StateHistoryEntry } from "../../cp/application/services/types/StateSnapshot";
 
 interface StateTransitionViewerProps {
   connector: Connector;

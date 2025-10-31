@@ -1,5 +1,8 @@
-import { ScenarioDefinition, ScenarioNodeType } from "../cp/types/ScenarioTypes";
-import { OCPPStatus } from "../cp/OcppTypes";
+import {
+  ScenarioDefinition,
+  ScenarioNodeType,
+} from "../cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 
 export interface ScenarioTemplate {
   id: string;
@@ -382,6 +385,58 @@ const errorRecoveryTemplate: ScenarioTemplate = {
 };
 
 /**
+ * Template: Auto Heartbeat (Loop)
+ * Periodically sends Heartbeat messages every 10 seconds
+ * Use "Loop" execution mode for continuous heartbeat
+ */
+const autoHeartbeatTemplate: ScenarioTemplate = {
+  id: "auto-heartbeat",
+  name: "Auto Heartbeat (Loop)",
+  description: "Automatically sends Heartbeat messages every 10 seconds (use Loop mode)",
+  targetType: "connector",
+  createScenario: (chargePointId, connectorId) => ({
+    id: `scenario-${Date.now()}`,
+    name: "Auto Heartbeat",
+    description: "Periodic Heartbeat sender",
+    targetType: "connector",
+    targetId: connectorId ?? undefined,
+    nodes: [
+      {
+        id: "start-1",
+        type: ScenarioNodeType.START,
+        position: { x: 250, y: 50 },
+        data: { label: "Start" },
+      },
+      {
+        id: "notification-1",
+        type: ScenarioNodeType.NOTIFICATION,
+        position: { x: 250, y: 150 },
+        data: { label: "Send Heartbeat", messageType: "Heartbeat", payload: {} },
+      },
+      {
+        id: "delay-1",
+        type: ScenarioNodeType.DELAY,
+        position: { x: 250, y: 250 },
+        data: { label: "Wait 10s", delaySeconds: 10 },
+      },
+      {
+        id: "end-1",
+        type: ScenarioNodeType.END,
+        position: { x: 250, y: 350 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [
+      { id: "e-start-1", source: "start-1", target: "notification-1" },
+      { id: "e-1-2", source: "notification-1", target: "delay-1" },
+      { id: "e-2-end", source: "delay-1", target: "end-1" },
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }),
+};
+
+/**
  * All available templates
  */
 export const scenarioTemplates: ScenarioTemplate[] = [
@@ -389,6 +444,7 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   chargingWithMeterValuesTemplate,
   remoteStartTemplate,
   errorRecoveryTemplate,
+  autoHeartbeatTemplate,
 ];
 
 /**

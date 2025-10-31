@@ -2,8 +2,11 @@ import React, { useState } from "react";
 import { configAtom } from "../store/store.ts";
 import { useAtom } from "jotai/index";
 import { useNavigate } from "react-router-dom";
-import { Card, Button, Textarea, Alert } from "flowbite-react";
-import { HiDownload, HiUpload, HiHome } from "react-icons/hi";
+import { Download, Upload, Home } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const Settings: React.FC = () => {
   const [config, setConfig] = useAtom(configAtom);
@@ -68,60 +71,61 @@ const Settings: React.FC = () => {
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="card-header">Settings</h2>
-        <Button onClick={handleBackToHome} className="btn-secondary" size="sm">
-          <HiHome className="mr-2 h-4 w-4" />
+        <h2 className="text-2xl font-bold">Settings</h2>
+        <Button onClick={handleBackToHome} variant="secondary" size="sm">
+          <Home className="mr-2 h-4 w-4" />
           Back to Home
         </Button>
       </div>
 
       {error && (
-        <Alert color="failure" className="mb-4">
-          {error}
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
       {success && (
-        <Alert color="success" className="mb-4">
-          {success}
+        <Alert className="mb-4 border-green-500 bg-green-50 dark:bg-green-900">
+          <AlertDescription className="text-green-800 dark:text-green-100">{success}</AlertDescription>
         </Alert>
       )}
 
-      <Card className="card p-6">
-        <div className="space-y-6">
-          <div>
-            <h3 className="card-header mb-4">Configuration Management</h3>
-            <p className="text-secondary mb-4">
-              Export your current configuration to a JSON file or import a previously saved configuration.
-              You can also manually edit the JSON configuration below.
-            </p>
-          </div>
-
+      <Card>
+        <CardHeader>
+          <CardTitle>Configuration Management</CardTitle>
+          <p className="text-muted-foreground text-sm mt-2">
+            Export your current configuration to a JSON file or import a previously saved configuration.
+            You can also manually edit the JSON configuration below.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-6">
           <div className="flex gap-4">
-            <Button onClick={handleExport} className="btn-success">
-              <HiDownload className="mr-2 h-5 w-5" />
+            <Button onClick={handleExport} variant="success">
+              <Download className="mr-2 h-5 w-5" />
               Export Configuration
             </Button>
 
-            <label htmlFor="file-upload" className="btn-primary cursor-pointer inline-flex items-center">
-              <HiUpload className="mr-2 h-5 w-5" />
-              Import Configuration
-              <input
-                id="file-upload"
-                type="file"
-                accept=".json"
-                onChange={handleImport}
-                className="hidden"
-              />
-            </label>
+            <Button asChild>
+              <label htmlFor="file-upload" className="cursor-pointer">
+                <Upload className="mr-2 h-5 w-5" />
+                Import Configuration
+                <input
+                  id="file-upload"
+                  type="file"
+                  accept=".json"
+                  onChange={handleImport}
+                  className="hidden"
+                />
+              </label>
+            </Button>
           </div>
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <h4 className="text-lg font-semibold text-primary">
+              <h4 className="text-lg font-semibold">
                 Configuration JSON
               </h4>
-              <Button onClick={handleApplyJson} className="btn-primary" size="sm">
+              <Button onClick={handleApplyJson} size="sm">
                 Apply Changes
               </Button>
             </div>
@@ -129,26 +133,28 @@ const Settings: React.FC = () => {
               value={jsonText}
               onChange={(e) => setJsonText(e.target.value)}
               rows={20}
-              className="font-mono text-sm logger-input"
+              className="font-mono text-sm"
               placeholder="Paste your configuration JSON here..."
             />
-            <p className="text-muted text-xs mt-2">
+            <p className="text-muted-foreground text-xs mt-2">
               Edit the JSON configuration directly and click "Apply Changes" to update.
             </p>
           </div>
 
-          <div className="card p-4 bg-blue-50 dark:bg-blue-900">
-            <h4 className="text-sm font-semibold text-primary mb-2">
-              Note
-            </h4>
-            <ul className="text-secondary text-sm space-y-1 list-disc list-inside">
-              <li>Individual charge point settings can be configured from the Home page</li>
-              <li>Click the gear icon next to each charge point tab to edit its settings</li>
-              <li>Use the "+ Add Charge Point" button to add new charge points</li>
-              <li>This page is for bulk configuration import/export only</li>
-            </ul>
-          </div>
-        </div>
+          <Card className="bg-blue-50 dark:bg-blue-950/50">
+            <CardContent className="pt-6">
+              <h4 className="text-sm font-semibold mb-2">
+                Note
+              </h4>
+              <ul className="text-muted-foreground text-sm space-y-1 list-disc list-inside">
+                <li>Individual charge point settings can be configured from the Home page</li>
+                <li>Click the gear icon next to each charge point tab to edit its settings</li>
+                <li>Use the "+ Add Charge Point" button to add new charge points</li>
+                <li>This page is for bulk configuration import/export only</li>
+              </ul>
+            </CardContent>
+          </Card>
+        </CardContent>
       </Card>
     </div>
   );

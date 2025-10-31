@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { RemoteStartTriggerNodeData } from "../../../cp/types/ScenarioTypes";
+import { RemoteStartTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 const RemoteStartTriggerNode: React.FC<NodeProps<RemoteStartTriggerNodeData>> = ({
   data,

@@ -1,5 +1,8 @@
 import React from "react";
-import { ScenarioExecutionState, ScenarioExecutionMode } from "../../cp/types/ScenarioTypes";
+import {
+  ScenarioExecutionState,
+  ScenarioExecutionMode,
+} from "../../cp/application/scenario/ScenarioTypes";
 
 interface ScenarioControlPanelProps {
   executionState: ScenarioExecutionState;
@@ -10,6 +13,7 @@ interface ScenarioControlPanelProps {
   onStop: () => void;
   onStep: () => void;
   onModeChange: (mode: ScenarioExecutionMode) => void;
+  onSave: () => void;
 }
 
 const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
@@ -21,6 +25,7 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
   onStop,
   onStep,
   onModeChange,
+  onSave,
 }) => {
   const isRunning = executionState === "running";
   const isPaused = executionState === "paused";
@@ -31,11 +36,20 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
     <div className="panel p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-semibold text-primary">Scenario Control</h3>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted">Status:</span>
-          <span className={`text-xs font-semibold ${getStateColor(executionState)}`}>
-            {executionState.toUpperCase()}
-          </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onSave}
+            className="btn-success text-xs px-3 py-1.5"
+            title="Save Scenario"
+          >
+            💾 Save
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted">Status:</span>
+            <span className={`text-xs font-semibold ${getStateColor(executionState)}`}>
+              {executionState.toUpperCase()}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -56,17 +70,6 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
               }`}
             >
               One-Shot
-            </button>
-            <button
-              onClick={() => onModeChange("loop")}
-              disabled={!isIdle}
-              className={`flex-1 text-xs px-3 py-2 rounded ${
-                executionMode === "loop"
-                  ? "btn-primary"
-                  : "btn-secondary"
-              }`}
-            >
-              Loop
             </button>
             <button
               onClick={() => onModeChange("step")}
@@ -117,13 +120,6 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
             </button>
           )}
         </div>
-
-        {/* Loop Info */}
-        {executionMode === "loop" && !isIdle && (
-          <div className="text-xs text-muted text-center">
-            🔄 Loop mode active - will repeat until stopped
-          </div>
-        )}
       </div>
     </div>
   );

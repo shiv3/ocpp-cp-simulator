@@ -1,6 +1,23 @@
 import React, { useState, useEffect } from "react";
-import { Modal, Label, TextInput, Select, Checkbox, Button } from "flowbite-react";
-import { HiSave, HiX } from "react-icons/hi";
+import { Save, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 
 export interface ChargePointConfig {
   cpId: string;
@@ -83,19 +100,21 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   };
 
   return (
-    <Modal show={isOpen} onClose={onClose} size="4xl">
-      <Modal.Header>
-        {isNewChargePoint ? "Add New Charge Point" : `Configure ${config.cpId}`}
-      </Modal.Header>
-      <Modal.Body>
-        <div className="space-y-6">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {isNewChargePoint ? "Add New Charge Point" : `Configure ${config.cpId}`}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-6 py-4">
           {/* Basic Settings */}
           <div className="card p-4">
             <h3 className="card-header mb-4">Basic Settings</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="cpId" value="Charge Point ID" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="cpId" className="mb-2 logger-label">Charge Point ID</Label>
+                <Input
                   id="cpId"
                   type="text"
                   value={config.cpId}
@@ -105,8 +124,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div>
-                <Label htmlFor="connectorNumber" value="Number of Connectors" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="connectorNumber" className="mb-2 logger-label">Number of Connectors</Label>
+                <Input
                   id="connectorNumber"
                   type="number"
                   min="1"
@@ -118,8 +137,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div className="col-span-2">
-                <Label htmlFor="wsURL" value="WebSocket URL" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="wsURL" className="mb-2 logger-label">WebSocket URL</Label>
+                <Input
                   id="wsURL"
                   type="url"
                   value={config.wsURL}
@@ -129,20 +148,22 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div>
-                <Label htmlFor="ocppVersion" value="OCPP Version" className="mb-2 logger-label" />
+                <Label htmlFor="ocppVersion" className="mb-2">OCPP Version</Label>
                 <Select
-                  id="ocppVersion"
                   value={config.ocppVersion}
-                  onChange={(e) => updateConfig("ocppVersion", e.target.value)}
-                  required
-                  className="logger-input"
+                  onValueChange={(value) => updateConfig("ocppVersion", value)}
                 >
-                  <option value="OCPP-1.6J">OCPP 1.6J</option>
+                  <SelectTrigger id="ocppVersion">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
               <div className="col-span-2">
-                <Label htmlFor="tagIds" value="RFID Tag IDs (comma-separated)" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="tagIds" className="mb-2 logger-label">RFID Tag IDs (comma-separated)</Label>
+                <Input
                   id="tagIds"
                   type="text"
                   value={config.tagIds.join(", ")}
@@ -165,8 +186,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             <h3 className="card-header mb-4">Boot Notification</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="chargePointVendor" value="Vendor" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="chargePointVendor" className="mb-2 logger-label">Vendor</Label>
+                <Input
                   id="chargePointVendor"
                   type="text"
                   value={config.chargePointVendor}
@@ -175,8 +196,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div>
-                <Label htmlFor="chargePointModel" value="Model" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="chargePointModel" className="mb-2 logger-label">Model</Label>
+                <Input
                   id="chargePointModel"
                   type="text"
                   value={config.chargePointModel}
@@ -185,8 +206,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div>
-                <Label htmlFor="firmwareVersion" value="Firmware Version" className="mb-2 logger-label" />
-                <TextInput
+                <Label htmlFor="firmwareVersion" className="mb-2 logger-label">Firmware Version</Label>
+                <Input
                   id="firmwareVersion"
                   type="text"
                   value={config.firmwareVersion}
@@ -207,15 +228,15 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 <Checkbox
                   id="basicAuthEnabled"
                   checked={config.basicAuthEnabled}
-                  onChange={(e) => updateConfig("basicAuthEnabled", e.target.checked)}
+                  onCheckedChange={(checked) => updateConfig("basicAuthEnabled", checked as boolean)}
                 />
-                <Label htmlFor="basicAuthEnabled" value="Enable Basic Authentication" className="logger-label" />
+                <Label htmlFor="basicAuthEnabled" className="logger-label">Enable Basic Authentication</Label>
               </div>
               {config.basicAuthEnabled && (
                 <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="basicAuthUsername" value="Username" className="mb-2 logger-label" />
-                    <TextInput
+                    <Label htmlFor="basicAuthUsername" className="mb-2 logger-label">Username</Label>
+                    <Input
                       id="basicAuthUsername"
                       type="text"
                       value={config.basicAuthUsername}
@@ -224,8 +245,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="basicAuthPassword" value="Password" className="mb-2 logger-label" />
-                    <TextInput
+                    <Label htmlFor="basicAuthPassword" className="mb-2 logger-label">Password</Label>
+                    <Input
                       id="basicAuthPassword"
                       type="password"
                       value={config.basicAuthPassword}
@@ -243,15 +264,15 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 <Checkbox
                   id="autoMeterValueEnabled"
                   checked={config.autoMeterValueEnabled}
-                  onChange={(e) => updateConfig("autoMeterValueEnabled", e.target.checked)}
+                  onCheckedChange={(checked) => updateConfig("autoMeterValueEnabled", checked as boolean)}
                 />
-                <Label htmlFor="autoMeterValueEnabled" value="Enable Auto Meter Value" className="logger-label" />
+                <Label htmlFor="autoMeterValueEnabled" className="logger-label">Enable Auto Meter Value</Label>
               </div>
               {config.autoMeterValueEnabled && (
                 <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="autoMeterValueInterval" value="Interval (seconds)" className="mb-2 logger-label" />
-                    <TextInput
+                    <Label htmlFor="autoMeterValueInterval" className="mb-2 logger-label">Interval (seconds)</Label>
+                    <Input
                       id="autoMeterValueInterval"
                       type="number"
                       min="1"
@@ -261,8 +282,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="autoMeterValue" value="Increment Value (kWh)" className="mb-2 logger-label" />
-                    <TextInput
+                    <Label htmlFor="autoMeterValue" className="mb-2 logger-label">Increment Value (kWh)</Label>
+                    <Input
                       id="autoMeterValue"
                       type="number"
                       min="1"
@@ -276,20 +297,18 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             </div>
           </div>
         </div>
-      </Modal.Body>
-      <Modal.Footer>
-        <div className="flex justify-end gap-2 w-full">
-          <Button onClick={onClose} className="btn-secondary">
-            <HiX className="mr-2 h-5 w-5" />
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
+            <X className="mr-2 h-5 w-5" />
             Cancel
           </Button>
-          <Button onClick={handleSave} className="btn-primary">
-            <HiSave className="mr-2 h-5 w-5" />
+          <Button onClick={handleSave}>
+            <Save className="mr-2 h-5 w-5" />
             Save
           </Button>
-        </div>
-      </Modal.Footer>
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

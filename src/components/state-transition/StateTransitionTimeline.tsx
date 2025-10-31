@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { StateHistoryEntry } from "../../cp/managers/types/StateSnapshot";
-import { OCPPStatus } from "../../cp/OcppTypes";
+import { StateHistoryEntry } from "../../cp/application/services/types/StateSnapshot";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
 interface StateTransitionTimelineProps {
   history: StateHistoryEntry[];

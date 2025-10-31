@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { StatusTriggerNodeData } from "../../../cp/types/ScenarioTypes";
+import { StatusTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 const StatusTriggerNode: React.FC<NodeProps<StatusTriggerNodeData>> = ({
   data,

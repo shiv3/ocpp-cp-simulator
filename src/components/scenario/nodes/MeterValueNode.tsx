@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { MeterValueNodeData } from "../../../cp/types/ScenarioTypes";
+import { MeterValueNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 interface ExtendedMeterValueNodeData extends MeterValueNodeData {
   progress?: {

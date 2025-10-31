@@ -83,6 +83,10 @@ npm run tauri:build
 
 https://deepwiki.com/shiv3/ocpp-cp-simulator
 
+## Contributing
+
+Review `AGENTS.md` for repository guidelines covering project layout, required commands, and pull request expectations.
+
 ### Experimental feature
 
 experimental feature support e.g. simultaneous use of multiple chargers

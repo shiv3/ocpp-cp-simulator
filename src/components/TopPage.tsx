@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from "react";
 import ChargePoint from "./ChargePoint.tsx";
-import { Tabs, Button } from "flowbite-react";
-import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint.ts";
+import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import { useAtom } from "jotai";
 import { configAtom } from "../store/store.ts";
-import { BootNotification, DefaultBootNotification } from "../cp/OcppTypes.ts";
+import {
+  BootNotification,
+  DefaultBootNotification,
+} from "../cp/domain/types/OcppTypes";
 import { useNavigate } from "react-router-dom";
 import ChargePointConfigModal, { ChargePointConfig, defaultChargePointConfig } from "./ChargePointConfigModal.tsx";
-import { HiPlus, HiCog, HiTrash } from "react-icons/hi";
+import { Plus, Settings, Trash2 } from "lucide-react";
 import { loadConnectorAutoMeterConfig } from "../utils/connectorStorage";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 
 const TopPage: React.FC = () => {
   const [cps, setCps] = useState<OCPPChargePoint[]>([]);
@@ -213,6 +217,15 @@ interface transactionInfo {
 }
 
 const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddChargePoint, onEditChargePoint, onDeleteChargePoint }) => {
+  const [selectedTab, setSelectedTab] = useState<string>("");
+
+  // Auto-select first ChargePoint when cps change
+  useEffect(() => {
+    if (cps.length > 0 && (!selectedTab || !cps.find(cp => cp.id === selectedTab))) {
+      setSelectedTab(cps[0].id);
+    }
+  }, [cps, selectedTab]);
+
   const handleAllConnect = () => {
     console.log("Connecting all charge points");
     const chunk = 100;
@@ -281,95 +294,90 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddCharg
       {cps.length >= 2 && (
         <>
           <div className="flex flex-wrap gap-2 mb-3">
-            <button onClick={handleAllConnect} className="btn-primary">
+            <Button onClick={handleAllConnect}>
               Connect All
-            </button>
-            <button onClick={handleAllDisconnect} className="btn-danger">
+            </Button>
+            <Button onClick={handleAllDisconnect} variant="destructive">
               Disconnect All
-            </button>
-            <button onClick={handleAllHeartbeat} className="btn-info">
+            </Button>
+            <Button onClick={handleAllHeartbeat} variant="info">
               Heartbeat All
-            </button>
-            <button
-              className={isAllHeartbeatEnabled ? "btn-danger" : "btn-success"}
+            </Button>
+            <Button
+              variant={isAllHeartbeatEnabled ? "destructive" : "success"}
               onClick={() => handleAllHeartbeatInterval(!isAllHeartbeatEnabled)}
             >
               {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
-            </button>
+            </Button>
           </div>
 
           <div className="panel mb-3 p-3">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-primary text-sm font-bold">Transaction All</span>
-                <span className="text-secondary text-xs ml-3">Tag IDs: {tagIDs.join(", ")}</span>
+                <span className="text-sm font-bold">Transaction All</span>
+                <span className="text-muted-foreground text-xs ml-3">Tag IDs: {tagIDs.join(", ")}</span>
               </div>
               <div className="flex gap-2">
-                <button onClick={handleAllStartTransaction} className="btn-success">
+                <Button onClick={handleAllStartTransaction} variant="success">
                   Start Transaction All
-                </button>
-                <button onClick={handleAllStopTransaction} className="btn-warning">
+                </Button>
+                <Button onClick={handleAllStopTransaction} variant="warning">
                   Stop Transaction All
-                </button>
+                </Button>
               </div>
             </div>
           </div>
         </>
       )}
 
-      <Tabs aria-label="Charge Points">
-        {cps.map((cp, key) => {
-          return (
-            <Tabs.Item
-              key={key}
-              title={
-                <div className="flex items-center gap-2">
-                  <span>{cp.id}</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEditChargePoint(key);
-                    }}
-                    className="p-1 rounded"
-                    title="Edit Charge Point"
-                  >
-                    <HiCog className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
-                        onDeleteChargePoint(key);
-                      }
-                    }}
-                    className="p-1 hover:bg-red-200 dark:hover:bg-red-600 rounded text-red-600 dark:text-red-400"
-                    title="Delete Charge Point"
-                  >
-                    <HiTrash className="h-4 w-4" />
-                  </button>
-                </div>
-              }
-            >
-              <ChargePoint cp={cp} TagID={tagIDs[0]} />
-            </Tabs.Item>
-          );
-        })}
-        <Tabs.Item
-          title={
-            <div
-              onClick={onAddChargePoint}
-              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center cursor-pointer"
-              title="Add Charge Point"
-            >
-              <HiPlus className="h-5 w-5" />
-            </div>
-          }
-        >
-          {/* Empty content - this tab is just for the + button */}
-          <div className="p-4 text-center text-secondary">
-            Click the + button to add a new charge point
-          </div>
-        </Tabs.Item>
+      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+        <TabsList className="w-full justify-start flex-wrap h-auto">
+          {cps.map((cp, key) => (
+            <TabsTrigger key={key} value={cp.id} className="flex items-center gap-2">
+              <span>{cp.id}</span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditChargePoint(key);
+                }}
+                title="Edit Charge Point"
+              >
+                <Settings className="h-3 w-3" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
+                    onDeleteChargePoint(key);
+                  }
+                }}
+                title="Delete Charge Point"
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </TabsTrigger>
+          ))}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9"
+            onClick={onAddChargePoint}
+            title="Add Charge Point"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </TabsList>
+        {cps.map((cp, key) => (
+          <TabsContent key={key} value={cp.id}>
+            <ChargePoint cp={cp} TagID={tagIDs[0]} />
+          </TabsContent>
+        ))}
       </Tabs>
     </>
   );

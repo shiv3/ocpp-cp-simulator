@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { TransactionNodeData } from "../../../cp/types/ScenarioTypes";
+import { TransactionNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 const TransactionNode: React.FC<NodeProps<TransactionNodeData>> = ({ data, selected }) => {
   const actionColor = data.action === "start" ? "bg-green-600" : "bg-orange-600";

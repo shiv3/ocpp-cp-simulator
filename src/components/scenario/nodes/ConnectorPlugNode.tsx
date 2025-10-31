@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { ConnectorPlugNodeData } from "../../../cp/types/ScenarioTypes";
+import { ConnectorPlugNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 const ConnectorPlugNode: React.FC<NodeProps<ConnectorPlugNodeData>> = ({ data, selected }) => {
   const actionIcon = data.action === "plugin" ? "🔌" : "🔓";

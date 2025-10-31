@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { DelayNodeData } from "../../../cp/types/ScenarioTypes";
+import { DelayNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 interface ExtendedDelayNodeData extends DelayNodeData {
   progress?: {

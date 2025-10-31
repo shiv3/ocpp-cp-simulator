@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint";
+import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import Connector from "./Connector.tsx";
 import Logger from "./Logger.tsx";
-import * as ocpp from "../cp/OcppTypes";
-import { LogEntry } from "../cp/Logger";
+import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import { LogEntry, LogLevel, LogType } from "../cp/shared/Logger";
 
 interface ChargePointProps {
   cp: OCPPChargePoint;
@@ -12,7 +12,7 @@ interface ChargePointProps {
 
 const ChargePoint: React.FC<ChargePointProps> = (props) => {
   const [cp, setCp] = useState<OCPPChargePoint | null>(null);
-  const [cpStatus, setCpStatus] = useState<string>(ocpp.OCPPStatus.Unavailable);
+  const [cpStatus, setCpStatus] = useState<string>(OCPPStatus.Unavailable);
   const [cpError, setCpError] = useState<string>("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connectorCount, setConnectorCount] = useState<number>(0);
@@ -91,11 +91,11 @@ const ChargePoint: React.FC<ChargePointProps> = (props) => {
 const CPStatus: React.FC<{ status: string }> = ({ status }) => {
   const statusColor = (s: string) => {
     switch (s) {
-      case ocpp.OCPPStatus.Unavailable:
+      case OCPPStatus.Unavailable:
         return "status-unavailable";
-      case ocpp.OCPPStatus.Available:
+      case OCPPStatus.Available:
         return "status-available";
-      case ocpp.OCPPStatus.Charging:
+      case OCPPStatus.Charging:
         return "status-charging";
       default:
         return "status-error";
@@ -177,21 +177,21 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
         <button
           onClick={handleConnect}
           className="btn-primary"
-          disabled={cpStatus !== ocpp.OCPPStatus.Unavailable}
+          disabled={cpStatus !== OCPPStatus.Unavailable}
         >
           Connect
         </button>
         <button
           onClick={handleDisconnect}
           className="btn-danger"
-          disabled={cpStatus === ocpp.OCPPStatus.Unavailable}
+          disabled={cpStatus === OCPPStatus.Unavailable}
         >
           Disconnect
         </button>
         <button
           onClick={handleHeartbeat}
           className="btn-info"
-          disabled={cpStatus === ocpp.OCPPStatus.Unavailable}
+          disabled={cpStatus === OCPPStatus.Unavailable}
         >
           Heartbeat
         </button>
@@ -204,7 +204,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
         <button
           onClick={handleAuthorize}
           className="btn-success"
-          disabled={cpStatus !== ocpp.OCPPStatus.Available}
+          disabled={cpStatus !== OCPPStatus.Available}
         >
           Authorize
         </button>
@@ -271,10 +271,17 @@ function parseFormattedLog(formattedMessage: string): LogEntry {
 
   if (match) {
     const [, timestamp, level, type, message] = match;
+    const levelMap: Record<string, LogLevel> = {
+      DEBUG: LogLevel.DEBUG,
+      INFO: LogLevel.INFO,
+      WARN: LogLevel.WARN,
+      ERROR: LogLevel.ERROR,
+    };
+
     return {
       timestamp: new Date(timestamp),
-      level: (ocpp.LogLevel as Record<string, number>)[level] ?? ocpp.LogLevel.INFO,
-      type: type as ocpp.LogType,
+      level: levelMap[level] ?? LogLevel.INFO,
+      type: (type as LogType) ?? LogType.GENERAL,
       message,
     };
   }
@@ -282,8 +289,8 @@ function parseFormattedLog(formattedMessage: string): LogEntry {
   // Fallback if parsing fails
   return {
     timestamp: new Date(),
-    level: ocpp.LogLevel.INFO,
-    type: ocpp.LogType.GENERAL,
+    level: LogLevel.INFO,
+    type: LogType.GENERAL,
     message: formattedMessage,
   };
 }

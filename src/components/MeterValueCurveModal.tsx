@@ -1,11 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Modal, Label, Button, Checkbox, TextInput } from "flowbite-react";
-import { HiSave, HiX, HiPlus, HiTrash } from "react-icons/hi";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Save, X, Plus, Trash2 } from "lucide-react";
 import {
   AutoMeterValueConfig,
   CurvePoint,
   calculateBezierPoint,
-} from "../cp/types/MeterValueCurve";
+} from "../cp/domain/connector/MeterValueCurve";
 
 interface MeterValueCurveModalProps {
   isOpen: boolean;
@@ -338,19 +348,19 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
   };
 
   return (
-    <Modal show={isOpen} onClose={onClose} size="6xl">
-      <Modal.Header>
-        <span className="text-lg">Configure Auto MeterValue</span>
-      </Modal.Header>
-      <Modal.Body>
-        <div className="space-y-4">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-6xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Configure Auto MeterValue</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
           {/* Enable/Disable */}
           <div className="flex items-center gap-2">
             <Checkbox
               id="autoEnabled"
               checked={config.enabled}
-              onChange={(e) =>
-                setConfig({ ...config, enabled: e.target.checked })
+              onCheckedChange={(checked) =>
+                setConfig({ ...config, enabled: checked as boolean })
               }
             />
             <Label htmlFor="autoEnabled">Enable Auto MeterValue</Label>
@@ -378,7 +388,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="maxTime">Max Time (minutes)</Label>
-              <TextInput
+              <Input
                 id="maxTime"
                 type="number"
                 value={maxTime}
@@ -388,7 +398,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
             </div>
             <div>
               <Label htmlFor="maxValue">Max Value (kWh)</Label>
-              <TextInput
+              <Input
                 id="maxValue"
                 type="number"
                 value={maxValue}
@@ -402,24 +412,27 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
           <div>
             <Label>Presets</Label>
             <div className="flex gap-2 mt-2">
-              <button
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={() => handleLoadPreset("linear")}
-                className="btn-secondary text-sm px-3 py-1"
               >
                 Linear
-              </button>
-              <button
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={() => handleLoadPreset("exponential")}
-                className="btn-secondary text-sm px-3 py-1"
               >
                 Exponential
-              </button>
-              <button
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={() => handleLoadPreset("step")}
-                className="btn-secondary text-sm px-3 py-1"
               >
                 Step
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -427,7 +440,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="intervalSeconds">Send Interval (seconds)</Label>
-              <TextInput
+              <Input
                 id="intervalSeconds"
                 type="number"
                 value={config.intervalSeconds}
@@ -445,10 +458,10 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
               <Checkbox
                 id="autoCalculateInterval"
                 checked={config.autoCalculateInterval}
-                onChange={(e) =>
+                onCheckedChange={(checked) =>
                   setConfig({
                     ...config,
-                    autoCalculateInterval: e.target.checked,
+                    autoCalculateInterval: checked as boolean,
                   })
                 }
               />
@@ -460,13 +473,14 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
           <div>
             <div className="flex items-center justify-between mb-2">
               <Label>Control Points</Label>
-              <button
+              <Button
+                size="sm"
+                variant="success"
                 onClick={handleAddPoint}
-                className="btn-success text-sm px-2 py-1 flex items-center gap-1"
               >
-                <HiPlus className="h-4 w-4" />
+                <Plus className="mr-2 h-4 w-4" />
                 Add Point
-              </button>
+              </Button>
             </div>
             <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded p-2 bg-gray-50 dark:bg-gray-800">
               {config.curvePoints.map((point, index) => (
@@ -476,56 +490,56 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
                 >
                   <div className="flex-1 grid grid-cols-2 gap-2">
                     <div>
-                      <input
+                      <Input
                         type="number"
                         value={point.time.toFixed(2)}
                         onChange={(e) =>
                           handleUpdatePoint(index, "time", Number(e.target.value))
                         }
-                        className="w-full px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                        className="text-xs"
                         step={0.1}
                       />
                       <span className="text-xs text-gray-600 dark:text-gray-400">min</span>
                     </div>
                     <div>
-                      <input
+                      <Input
                         type="number"
                         value={point.value.toFixed(2)}
                         onChange={(e) =>
                           handleUpdatePoint(index, "value", Number(e.target.value))
                         }
-                        className="w-full px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                        className="text-xs"
                         step={0.1}
                       />
                       <span className="text-xs text-gray-600 dark:text-gray-400">kWh</span>
                     </div>
                   </div>
-                  <button
+                  <Button
+                    size="icon"
+                    variant="ghost"
                     onClick={() => handleDeletePoint(index)}
-                    className="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded"
                     disabled={config.curvePoints.length <= 2}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900"
                   >
-                    <HiTrash className="h-4 w-4" />
-                  </button>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      </Modal.Body>
-      <Modal.Footer>
-        <div className="flex gap-2">
-          <Button onClick={handleSave} className="btn-primary">
-            <HiSave className="mr-2 h-5 w-5" />
-            Save
-          </Button>
-          <Button onClick={onClose} color="gray">
-            <HiX className="mr-2 h-5 w-5" />
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
+            <X className="mr-2 h-5 w-5" />
             Cancel
           </Button>
-        </div>
-      </Modal.Footer>
-    </Modal>
+          <Button onClick={handleSave}>
+            <Save className="mr-2 h-5 w-5" />
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

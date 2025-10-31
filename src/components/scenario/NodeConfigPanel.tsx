@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { Modal } from "flowbite-react";
 import { Node } from "@xyflow/react";
 import {
   ScenarioNodeType,
@@ -9,8 +8,27 @@ import {
   DelayNodeData,
   NotificationNodeData,
   ConnectorPlugNodeData,
-} from "../../cp/types/ScenarioTypes";
-import { OCPPStatus } from "../../cp/OcppTypes";
+} from "../../cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface NodeConfigPanelProps {
   node: Node | null;
@@ -44,80 +62,78 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     switch (node.type) {
       case ScenarioNodeType.STATUS_CHANGE:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="label">Label</Label>
+              <Input
+                id="label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Status
-              </label>
-              <select
-                className="input-base w-full"
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select
                 value={formData.status || OCPPStatus.Available}
-                onChange={(e) =>
-                  setFormData({ ...formData, status: e.target.value })
+                onValueChange={(value) =>
+                  setFormData({ ...formData, status: value })
                 }
               >
-                {Object.values(OCPPStatus).map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.values(OCPPStatus).map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         );
 
       case ScenarioNodeType.TRANSACTION:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="trans-label">Label</Label>
+              <Input
+                id="trans-label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Action
-              </label>
-              <select
-                className="input-base w-full"
+            <div className="space-y-2">
+              <Label htmlFor="trans-action">Action</Label>
+              <Select
                 value={formData.action || "start"}
-                onChange={(e) =>
-                  setFormData({ ...formData, action: e.target.value })
+                onValueChange={(value) =>
+                  setFormData({ ...formData, action: value })
                 }
               >
-                <option value="start">Start Transaction</option>
-                <option value="stop">Stop Transaction</option>
-              </select>
+                <SelectTrigger id="trans-action">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="start">Start Transaction</SelectItem>
+                  <SelectItem value="stop">Stop Transaction</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             {formData.action === "start" && (
-              <div>
-                <label className="block text-sm font-semibold text-primary mb-1">
-                  Tag ID
-                </label>
-                <input
+              <div className="space-y-2">
+                <Label htmlFor="tag-id">Tag ID</Label>
+                <Input
+                  id="tag-id"
                   type="text"
-                  className="input-base w-full"
                   value={formData.tagId || ""}
                   onChange={(e) =>
                     setFormData({ ...formData, tagId: e.target.value })
@@ -131,27 +147,23 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
       case ScenarioNodeType.METER_VALUE:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="meter-label">Label</Label>
+              <Input
+                id="meter-label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Value (Wh)
-              </label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="meter-value">Value (Wh)</Label>
+              <Input
+                id="meter-value"
                 type="number"
-                className="input-base w-full"
                 value={formData.value || 0}
                 onChange={(e) =>
                   setFormData({
@@ -162,48 +174,39 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               />
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 id="sendMessage"
                 checked={formData.sendMessage || false}
-                onChange={(e) =>
-                  setFormData({ ...formData, sendMessage: e.target.checked })
+                onCheckedChange={(checked) =>
+                  setFormData({ ...formData, sendMessage: checked })
                 }
-                className="w-4 h-4"
               />
-              <label
-                htmlFor="sendMessage"
-                className="text-sm font-semibold text-primary"
-              >
+              <Label htmlFor="sendMessage" className="font-normal cursor-pointer">
                 Send MeterValue Message
-              </label>
+              </Label>
             </div>
           </div>
         );
 
       case ScenarioNodeType.DELAY:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="delay-label">Label</Label>
+              <Input
+                id="delay-label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Delay (seconds)
-              </label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="delay-seconds">Delay (seconds)</Label>
+              <Input
+                id="delay-seconds"
                 type="number"
-                className="input-base w-full"
                 value={formData.delaySeconds || 0}
                 onChange={(e) =>
                   setFormData({
@@ -219,27 +222,23 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
       case ScenarioNodeType.NOTIFICATION:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="notif-label">Label</Label>
+              <Input
+                id="notif-label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Message Type
-              </label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="message-type">Message Type</Label>
+              <Input
+                id="message-type"
                 type="text"
-                className="input-base w-full"
                 value={formData.messageType || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, messageType: e.target.value })
@@ -247,12 +246,11 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 placeholder="e.g., Heartbeat, DataTransfer"
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Payload (JSON)
-              </label>
-              <textarea
-                className="input-base w-full font-mono text-xs"
+            <div className="space-y-2">
+              <Label htmlFor="payload">Payload (JSON)</Label>
+              <Textarea
+                id="payload"
+                className="font-mono text-xs"
                 rows={6}
                 value={
                   typeof formData.payload === "string"
@@ -275,61 +273,57 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
       case ScenarioNodeType.CONNECTOR_PLUG:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="plug-label">Label</Label>
+              <Input
+                id="plug-label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Action
-              </label>
-              <select
-                className="input-base w-full"
+            <div className="space-y-2">
+              <Label htmlFor="plug-action">Action</Label>
+              <Select
                 value={formData.action || "plugin"}
-                onChange={(e) =>
-                  setFormData({ ...formData, action: e.target.value })
+                onValueChange={(value) =>
+                  setFormData({ ...formData, action: value })
                 }
               >
-                <option value="plugin">Plugin (接続)</option>
-                <option value="plugout">Plugout (切断)</option>
-              </select>
+                <SelectTrigger id="plug-action">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="plugin">Plugin (接続)</SelectItem>
+                  <SelectItem value="plugout">Plugout (切断)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         );
 
       case ScenarioNodeType.REMOTE_START_TRIGGER:
         return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="remote-label">Label</Label>
+              <Input
+                id="remote-label"
                 type="text"
-                className="input-base w-full"
                 value={formData.label || ""}
                 onChange={(e) =>
                   setFormData({ ...formData, label: e.target.value })
                 }
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary mb-1">
-                Timeout (seconds)
-              </label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="timeout">Timeout (seconds)</Label>
+              <Input
+                id="timeout"
                 type="number"
-                className="input-base w-full"
                 value={formData.timeout || 0}
                 onChange={(e) =>
                   setFormData({
@@ -339,7 +333,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 }
                 min="0"
               />
-              <p className="text-xs text-muted mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 0 = No timeout (wait indefinitely for RemoteStartTransaction)
               </p>
             </div>
@@ -348,7 +342,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
       default:
         return (
-          <div className="text-sm text-muted">
+          <div className="text-sm text-muted-foreground">
             This node type does not have configurable properties.
           </div>
         );
@@ -377,26 +371,24 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   };
 
   return (
-    <Modal show={isOpen} onClose={onClose} size="md">
-      <Modal.Header>
-        <span className="text-primary font-bold">
-          Configure {getNodeTypeName(node.type || "")}
-        </span>
-      </Modal.Header>
-      <Modal.Body>
-        <div className="space-y-4">{renderConfigForm()}</div>
-      </Modal.Body>
-      <Modal.Footer>
-        <div className="flex gap-2 justify-end w-full">
-          <button onClick={onClose} className="btn-secondary">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>
+            Configure {getNodeTypeName(node?.type || "")}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="py-4">{renderConfigForm()}</div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
-          </button>
-          <button onClick={handleSave} className="btn-primary">
+          </Button>
+          <Button onClick={handleSave}>
             Save
-          </button>
-        </div>
-      </Modal.Footer>
-    </Modal>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

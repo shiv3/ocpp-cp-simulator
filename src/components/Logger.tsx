@@ -1,6 +1,17 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { LogEntry, LogLevel, LogType } from "../cp/Logger";
-import { Badge, Button, Label, Select, TextInput } from "flowbite-react";
+import { LogEntry, LogLevel, LogType } from "../cp/shared/Logger";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface LoggerProps {
   logs: LogEntry[];
@@ -73,22 +84,20 @@ const Logger: React.FC<LoggerProps> = ({ logs, onClear }) => {
   return (
     <div className="logger-container">
       <div className="flex justify-between items-center mb-3">
-        <h3 className="card-header">Logs</h3>
+        <h3 className="text-xl font-semibold">Logs</h3>
         <div className="flex gap-2 items-center">
-          <Badge className="badge-primary">
+          <Badge>
             Total: {stats.total} | Filtered: {filteredLogs.length}
           </Badge>
-          <label className="flex items-center gap-2 text-sm text-secondary">
-            <input
-              type="checkbox"
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox
               checked={autoScroll}
-              onChange={(e) => setAutoScroll(e.target.checked)}
-              className="rounded logger-input"
+              onCheckedChange={(checked) => setAutoScroll(checked as boolean)}
             />
             Auto-scroll
           </label>
           {onClear && (
-            <Button size="xs" className="btn-secondary" onClick={onClear}>
+            <Button size="sm" variant="secondary" onClick={onClear}>
               Clear Logs
             </Button>
           )}
@@ -98,49 +107,47 @@ const Logger: React.FC<LoggerProps> = ({ logs, onClear }) => {
       {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         {/* Level Filter */}
-        <div>
-          <Label htmlFor="level-filter" value="Log Level" className="mb-1 logger-label" />
+        <div className="space-y-2">
+          <Label htmlFor="level-filter">Log Level</Label>
           <Select
-            id="level-filter"
-            value={selectedLevel}
-            onChange={(e) =>
+            value={selectedLevel.toString()}
+            onValueChange={(value) =>
               setSelectedLevel(
-                e.target.value === "ALL"
-                  ? "ALL"
-                  : (Number(e.target.value) as LogLevel),
+                value === "ALL" ? "ALL" : (Number(value) as LogLevel),
               )
             }
-            sizing="sm"
-            className="logger-input"
           >
-            <option value="ALL">All Levels</option>
-            <option value={LogLevel.DEBUG}>DEBUG and above</option>
-            <option value={LogLevel.INFO}>INFO and above</option>
-            <option value={LogLevel.WARN}>WARN and above</option>
-            <option value={LogLevel.ERROR}>ERROR only</option>
+            <SelectTrigger id="level-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Levels</SelectItem>
+              <SelectItem value={LogLevel.DEBUG.toString()}>DEBUG and above</SelectItem>
+              <SelectItem value={LogLevel.INFO.toString()}>INFO and above</SelectItem>
+              <SelectItem value={LogLevel.WARN.toString()}>WARN and above</SelectItem>
+              <SelectItem value={LogLevel.ERROR.toString()}>ERROR only</SelectItem>
+            </SelectContent>
           </Select>
         </div>
 
         {/* Search Filter */}
-        <div>
-          <Label htmlFor="search-filter" value="Search" className="mb-1 logger-label" />
-          <TextInput
+        <div className="space-y-2">
+          <Label htmlFor="search-filter">Search</Label>
+          <Input
             id="search-filter"
             type="text"
             placeholder="Search logs..."
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            sizing="sm"
-            className="logger-input"
           />
         </div>
 
         {/* Type Statistics */}
-        <div>
-          <Label value="Statistics" className="mb-1 logger-label" />
+        <div className="space-y-2">
+          <Label>Statistics</Label>
           <div className="flex flex-wrap gap-1">
             {Object.entries(stats.byType).map(([type, count]) => (
-              <Badge key={type} size="xs" className="badge-secondary">
+              <Badge key={type} variant="secondary" className="text-xs">
                 {type}: {count}
               </Badge>
             ))}
@@ -151,12 +158,12 @@ const Logger: React.FC<LoggerProps> = ({ logs, onClear }) => {
       {/* Type Filters */}
       <div className="mb-3">
         <div className="flex justify-between items-center mb-2">
-          <Label value="Log Types" className="logger-label" />
+          <Label>Log Types</Label>
           <div className="flex gap-2">
-            <Button size="xs" className="btn-secondary" onClick={selectAllTypes}>
+            <Button size="sm" variant="secondary" onClick={selectAllTypes}>
               All
             </Button>
-            <Button size="xs" className="btn-secondary" onClick={deselectAllTypes}>
+            <Button size="sm" variant="secondary" onClick={deselectAllTypes}>
               None
             </Button>
           </div>
@@ -165,7 +172,8 @@ const Logger: React.FC<LoggerProps> = ({ logs, onClear }) => {
           {Object.values(LogType).map((type) => (
             <Badge
               key={type}
-              className={selectedTypes.has(type) ? "cursor-pointer badge-primary" : "cursor-pointer badge-secondary"}
+              variant={selectedTypes.has(type) ? "default" : "secondary"}
+              className="cursor-pointer"
               onClick={() => toggleType(type)}
             >
               {type} ({stats.byType[type] || 0})

@@ -1,4 +1,4 @@
-import { AutoMeterValueConfig } from "../cp/types/MeterValueCurve";
+import { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 
 const STORAGE_KEY_PREFIX = "connector_auto_meter_";
 

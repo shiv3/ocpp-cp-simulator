@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { OCPPStatus } from "../../cp/OcppTypes";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
 interface StateNodeData {
   status: OCPPStatus;

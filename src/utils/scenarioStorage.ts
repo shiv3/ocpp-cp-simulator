@@ -1,6 +1,11 @@
-import { ScenarioDefinition } from "../cp/types/ScenarioTypes";
+import {
+  ScenarioDefinition,
+  ConnectorScenariosCollection,
+} from "../cp/application/scenario/ScenarioTypes";
 
 const STORAGE_KEY_PREFIX = "scenario_";
+const SCENARIOS_KEY_PREFIX = "scenarios_"; // New prefix for multiple scenarios
+const STORAGE_VERSION = 1;
 
 /**
  * Save scenario to localStorage
@@ -164,6 +169,149 @@ export function createDefaultScenario(
     ],
     edges: [],
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+  };
+}
+
+// ============================================================================
+// MULTIPLE SCENARIOS SUPPORT (NEW)
+// ============================================================================
+
+/**
+ * Build storage key for multiple scenarios
+ */
+function buildScenariosStorageKey(chargePointId: string, connectorId: number | null): string {
+  if (connectorId === null) {
+    return `${SCENARIOS_KEY_PREFIX}${chargePointId}_chargepoint`;
+  }
+  return `${SCENARIOS_KEY_PREFIX}${chargePointId}_connector_${connectorId}`;
+}
+
+/**
+ * Load all scenarios for a connector
+ * Automatically migrates from legacy storage if needed
+ */
+export function loadScenarios(
+  chargePointId: string,
+  connectorId: number | null
+): ScenarioDefinition[] {
+  const key = buildScenariosStorageKey(chargePointId, connectorId);
+
+  try {
+    const stored = localStorage.getItem(key);
+
+    if (stored) {
+      // Load from new storage format
+      const collection = JSON.parse(stored) as ConnectorScenariosCollection;
+      return collection.scenarios || [];
+    } else {
+      // Try to migrate from legacy storage
+      const legacyScenario = loadScenario(chargePointId, connectorId);
+      if (legacyScenario) {
+        // Migrate to new format
+        const migrated = migrateScenarioToNew(legacyScenario);
+        saveScenarios(chargePointId, connectorId, [migrated]);
+        // Delete legacy storage
+        deleteScenario(chargePointId, connectorId);
+        return [migrated];
+      }
+    }
+  } catch (error) {
+    console.error("Failed to load scenarios:", error);
+  }
+
+  return [];
+}
+
+/**
+ * Save all scenarios for a connector
+ */
+export function saveScenarios(
+  chargePointId: string,
+  connectorId: number | null,
+  scenarios: ScenarioDefinition[]
+): void {
+  const key = buildScenariosStorageKey(chargePointId, connectorId);
+
+  try {
+    const collection: ConnectorScenariosCollection = {
+      version: STORAGE_VERSION,
+      scenarios,
+    };
+    localStorage.setItem(key, JSON.stringify(collection));
+  } catch (error) {
+    console.error("Failed to save scenarios:", error);
+  }
+}
+
+/**
+ * Add a new scenario to the collection
+ */
+export function addScenario(
+  chargePointId: string,
+  connectorId: number | null,
+  scenario: ScenarioDefinition
+): void {
+  const scenarios = loadScenarios(chargePointId, connectorId);
+  scenarios.push(scenario);
+  saveScenarios(chargePointId, connectorId, scenarios);
+}
+
+/**
+ * Update an existing scenario
+ */
+export function updateScenario(
+  chargePointId: string,
+  connectorId: number | null,
+  scenarioId: string,
+  updatedScenario: ScenarioDefinition
+): void {
+  const scenarios = loadScenarios(chargePointId, connectorId);
+  const index = scenarios.findIndex((s) => s.id === scenarioId);
+
+  if (index !== -1) {
+    scenarios[index] = { ...updatedScenario, updatedAt: new Date().toISOString() };
+    saveScenarios(chargePointId, connectorId, scenarios);
+  }
+}
+
+/**
+ * Delete a specific scenario by ID
+ */
+export function deleteScenarioById(
+  chargePointId: string,
+  connectorId: number | null,
+  scenarioId: string
+): void {
+  const scenarios = loadScenarios(chargePointId, connectorId);
+  const filtered = scenarios.filter((s) => s.id !== scenarioId);
+  saveScenarios(chargePointId, connectorId, filtered);
+}
+
+/**
+ * Get a specific scenario by ID
+ */
+export function getScenarioById(
+  chargePointId: string,
+  connectorId: number | null,
+  scenarioId: string
+): ScenarioDefinition | null {
+  const scenarios = loadScenarios(chargePointId, connectorId);
+  return scenarios.find((s) => s.id === scenarioId) || null;
+}
+
+/**
+ * Migrate legacy scenario to new format
+ */
+function migrateScenarioToNew(scenario: ScenarioDefinition): ScenarioDefinition {
+  return {
+    ...scenario,
+    trigger: scenario.trigger || { type: "manual" },
+    defaultExecutionMode: scenario.defaultExecutionMode || "oneshot",
+    enabled: scenario.enabled !== undefined ? scenario.enabled : true,
     updatedAt: new Date().toISOString(),
   };
 }

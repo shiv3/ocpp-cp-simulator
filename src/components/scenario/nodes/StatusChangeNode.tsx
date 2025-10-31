@@ -1,7 +1,7 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { StatusChangeNodeData } from "../../../cp/types/ScenarioTypes";
-import { OCPPStatus } from "../../../cp/OcppTypes";
+import { StatusChangeNodeData } from "../../../cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 
 const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({ data, selected }) => {
   const statusColor = (status: OCPPStatus) => {

@@ -8,7 +8,6 @@ import {
   useNodesState,
   useEdgesState,
   Connection,
-  Edge,
   Node,
   NodeTypes,
 } from "@xyflow/react";
@@ -22,11 +21,7 @@ import {
   ScenarioExecutionState,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
-import {
-  CurvePoint,
-  calculateBezierPoint,
-  AutoMeterValueConfig,
-} from "../../cp/domain/connector/MeterValueCurve";
+import { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import MeterValueCurveModal from "../MeterValueCurveModal";
 
 // Import node components
@@ -43,7 +38,6 @@ import CancelReservationNode from "./nodes/CancelReservationNode";
 import ReservationTriggerNode from "./nodes/ReservationTriggerNode";
 import StartEndNode from "./nodes/StartEndNode";
 import ScenarioControlPanel from "./ScenarioControlPanel";
-import NodeConfigPanel from "./NodeConfigPanel";
 
 import {
   loadScenarios,
@@ -54,7 +48,10 @@ import {
   importScenarioFromJSON,
   createDefaultScenario,
 } from "../../utils/scenarioStorage";
-import { scenarioTemplates, getTemplateById } from "../../utils/scenarioTemplates";
+import {
+  scenarioTemplates,
+  getTemplateById,
+} from "../../utils/scenarioTemplates";
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 
@@ -81,7 +78,9 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
   [ScenarioNodeType.RESERVATION_TRIGGER]: ReservationTriggerNode,
-  [ScenarioNodeType.START]: (props) => <StartEndNode {...props} nodeType="start" />,
+  [ScenarioNodeType.START]: (props) => (
+    <StartEndNode {...props} nodeType="start" />
+  ),
   [ScenarioNodeType.END]: (props) => <StartEndNode {...props} nodeType="end" />,
 };
 
@@ -107,25 +106,34 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(scenario.edges);
-  const [executionState, setExecutionState] = useState<ScenarioExecutionState>("idle");
-  const [executionMode, setExecutionMode] = useState<ScenarioExecutionMode>("oneshot");
-  const [executionContext, setExecutionContext] = useState<ScenarioExecutionContext | null>(null);
+  const [executionState, setExecutionState] =
+    useState<ScenarioExecutionState>("idle");
+  const [executionMode, setExecutionMode] =
+    useState<ScenarioExecutionMode>("oneshot");
+  const [executionContext, setExecutionContext] =
+    useState<ScenarioExecutionContext | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
-  const [formData, setFormData] = useState<any>({});
-  const [connectorStatus, setConnectorStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [connectorStatus, setConnectorStatus] = useState<OCPPStatus>(
+    OCPPStatus.Unavailable,
+  );
   const [meterValue, setMeterValue] = useState<number>(0);
   const [transactionId, setTransactionId] = useState<number | null>(null);
-  const [nodeProgress, setNodeProgress] = useState<Record<string, { remaining: number; total: number }>>({});
+  const [nodeProgress, setNodeProgress] = useState<
+    Record<string, { remaining: number; total: number }>
+  >({});
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
   // Scenario metadata state
   const [scenarioName, setScenarioName] = useState(scenario.name);
-  const [scenarioDescription, setScenarioDescription] = useState(scenario.description || "");
-  const [defaultExecutionMode, setDefaultExecutionMode] = useState<ScenarioExecutionMode>(
-    scenario.defaultExecutionMode || "oneshot"
+  const [scenarioDescription, setScenarioDescription] = useState(
+    scenario.description || "",
   );
-  const [scenarioEnabled, setScenarioEnabled] = useState(scenario.enabled !== false);
+  const [defaultExecutionMode, setDefaultExecutionMode] =
+    useState<ScenarioExecutionMode>(scenario.defaultExecutionMode || "oneshot");
+  const [scenarioEnabled, setScenarioEnabled] = useState(
+    scenario.enabled !== false,
+  );
 
   const executorRef = useRef<ScenarioExecutor | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,7 +191,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodes((nds) =>
         nds.map((node) => ({
           ...node,
-          className: (node.className || "").replace(/executing-node|executed-node/g, "").trim(),
+          className: (node.className || "")
+            .replace(/executing-node|executed-node/g, "")
+            .trim(),
           style: {
             ...node.style,
             border: undefined,
@@ -194,7 +204,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             ...node.data,
             progress: undefined,
           },
-        }))
+        })),
       );
       return;
     }
@@ -226,7 +236,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           };
         } else {
           // Reset to default
-          className = className.replace(/executing-node|executed-node/g, "").trim();
+          className = className
+            .replace(/executing-node|executed-node/g, "")
+            .trim();
           style = {
             ...style,
             border: undefined,
@@ -244,7 +256,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             progress: progress || undefined,
           },
         };
-      })
+      }),
     );
   }, [executionContext, nodeProgress]);
 
@@ -264,9 +276,12 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setMeterValue(data.meterValue);
     });
 
-    const unsubTransactionId = connector.events.on("transactionIdChange", (data) => {
-      setTransactionId(data.transactionId);
-    });
+    const unsubTransactionId = connector.events.on(
+      "transactionIdChange",
+      (data) => {
+        setTransactionId(data.transactionId);
+      },
+    );
 
     // Set initial values
     setConnectorStatus(connector.status as OCPPStatus);
@@ -284,11 +299,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     // Auto-detect trigger from nodes (if StatusTriggerNode exists)
     let autoTrigger: ScenarioDefinition["trigger"] = null;
     const statusTriggerNode = nodes.find(
-      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER
+      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
     );
 
     if (statusTriggerNode) {
-      const nodeData = statusTriggerNode.data as any;
+      const nodeData = statusTriggerNode.data as Record<string, unknown>;
       if (nodeData.targetStatus) {
         autoTrigger = {
           type: "statusChange" as const,
@@ -297,7 +312,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           },
         };
         console.log(
-          `[ScenarioEditor] Auto-detected trigger from StatusTriggerNode: toStatus=${nodeData.targetStatus}`
+          `[ScenarioEditor] Auto-detected trigger from StatusTriggerNode: toStatus=${nodeData.targetStatus}`,
         );
       }
     }
@@ -312,7 +327,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       const targetExists = nodeIds.has(edge.target);
       if (!sourceExists || !targetExists) {
         console.warn(
-          `[ScenarioEditor] Removing orphaned edge: ${edge.source} -> ${edge.target}`
+          `[ScenarioEditor] Removing orphaned edge: ${edge.source} -> ${edge.target}`,
         );
         return false;
       }
@@ -340,13 +355,24 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       // Auto-save to storage (but don't reload into ScenarioManager yet)
       updateScenario(chargePoint.id, connectorId, scenario.id, updatedScenario);
     }
-  }, [nodes, edges, scenarioName, scenarioDescription, defaultExecutionMode, scenarioEnabled, setEdges, scenario.id, chargePoint.id, connectorId]);
+  }, [
+    nodes,
+    edges,
+    scenarioName,
+    scenarioDescription,
+    defaultExecutionMode,
+    scenarioEnabled,
+    setEdges,
+    scenario.id,
+    chargePoint.id,
+    connectorId,
+  ]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges((eds) => addEdge(connection, eds));
     },
-    [setEdges]
+    [setEdges],
   );
 
   // Handle node/edge deletion
@@ -359,7 +385,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         }
       });
     },
-    [selectedNode]
+    [selectedNode],
   );
 
   // Delete selected nodes and edges
@@ -385,7 +411,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
       // Check if Start or End node already exists (only one of each allowed)
       if (type === ScenarioNodeType.START) {
-        const hasStart = nodes.some((node) => node.type === ScenarioNodeType.START);
+        const hasStart = nodes.some(
+          (node) => node.type === ScenarioNodeType.START,
+        );
         if (hasStart) {
           alert("Only one Start node is allowed per scenario");
           return;
@@ -409,7 +437,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       const newNode = createNodeByType(type, position);
       setNodes((nds) => nds.concat(newNode));
     },
-    [setNodes, nodes]
+    [setNodes, nodes],
   );
 
   // Execution control handlers
@@ -421,7 +449,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         edges,
       };
 
-      const connector = connectorId ? chargePoint.getConnector(connectorId) : null;
+      const connector = connectorId
+        ? chargePoint.getConnector(connectorId)
+        : null;
 
       executorRef.current = new ScenarioExecutor(currentScenario, {
         onStatusChange: async (status) => {
@@ -458,8 +488,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           setNodes((nds) =>
             nds.map((n) => ({
               ...n,
-              style: n.id === nodeId ? { boxShadow: "0 0 10px 3px #3b82f6" } : {},
-            }))
+              style:
+                n.id === nodeId ? { boxShadow: "0 0 10px 3px #3b82f6" } : {},
+            })),
           );
         },
         onNodeProgress: (nodeId, remaining, total) => {
@@ -474,8 +505,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                       progress: { remaining, total },
                     },
                   }
-                : n
-            )
+                : n,
+            ),
           );
         },
         onError: (error) => {
@@ -487,7 +518,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setExecutionMode(mode);
       await executorRef.current.start(mode);
     },
-    [scenario, nodes, edges, chargePoint, connectorId]
+    [scenario, nodes, edges, chargePoint, connectorId],
   );
 
   const handlePause = useCallback(() => {
@@ -534,7 +565,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setEdges(imported.edges);
 
         // Check if scenario already exists
-        const existing = getScenarioById(chargePoint.id, connectorId, imported.id);
+        const existing = getScenarioById(
+          chargePoint.id,
+          connectorId,
+          imported.id,
+        );
         if (existing) {
           updateScenario(chargePoint.id, connectorId, imported.id, imported);
         } else {
@@ -544,7 +579,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [chargePoint.id, connectorId, setNodes, setEdges]
+    [chargePoint.id, connectorId, setNodes, setEdges],
   );
 
   const handleLoadTemplate = useCallback(
@@ -555,11 +590,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return;
       }
 
-      if (nodes.length > 2 && !window.confirm("Discard the current scenario and load the template?")) {
+      if (
+        nodes.length > 2 &&
+        !window.confirm("Discard the current scenario and load the template?")
+      ) {
         return;
       }
 
-      const templateScenario = template.createScenario(chargePoint.id, connectorId);
+      const templateScenario = template.createScenario(
+        chargePoint.id,
+        connectorId,
+      );
       setScenario(templateScenario);
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
@@ -567,35 +608,38 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       // Templates are always new scenarios, so add them
       addScenario(chargePoint.id, connectorId, templateScenario);
     },
-    [chargePoint.id, connectorId, nodes.length, setNodes, setEdges]
+    [chargePoint.id, connectorId, nodes.length, setNodes, setEdges],
   );
 
   // Handle node double-click to open config panel
   const handleNodeDoubleClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       // Don't open config for start/end nodes
-      if (node.type === ScenarioNodeType.START || node.type === ScenarioNodeType.END) {
+      if (
+        node.type === ScenarioNodeType.START ||
+        node.type === ScenarioNodeType.END
+      ) {
         return;
       }
       setSelectedNode(node);
       setFormData({ ...node.data });
     },
-    []
+    [],
   );
 
   // Handle node config save
   const handleNodeConfigSave = useCallback(
-    (nodeId: string, newData: any) => {
+    (nodeId: string, newData: Record<string, unknown>) => {
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
             return { ...n, data: { ...n.data, ...newData } };
           }
           return n;
-        })
+        }),
       );
     },
-    [setNodes]
+    [setNodes],
   );
 
   // Handle scenario save
@@ -623,7 +667,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
     // Show success message
     alert("Scenario saved successfully!");
-  }, [scenario, scenarioName, scenarioDescription, nodes, edges, defaultExecutionMode, scenarioEnabled, chargePoint, connectorId]);
+  }, [
+    scenario,
+    scenarioName,
+    scenarioDescription,
+    nodes,
+    edges,
+    defaultExecutionMode,
+    scenarioEnabled,
+    chargePoint,
+    connectorId,
+  ]);
 
   // Get status color class
   const getStatusColor = (status: OCPPStatus) => {
@@ -671,7 +725,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const getScenarioStateIndicator = (state: ScenarioExecutionState) => {
     switch (state) {
       case "idle":
-        return <span className="text-gray-400">●</span>;
+        return <span className="text-gray-500 dark:text-gray-400">●</span>;
       case "running":
         return <span className="text-green-500 animate-pulse">●</span>;
       case "paused":
@@ -685,7 +739,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       case "error":
         return <span className="text-red-500">✗</span>;
       default:
-        return <span className="text-gray-400">●</span>;
+        return <span className="text-gray-500 dark:text-gray-400">●</span>;
     }
   };
 
@@ -722,23 +776,33 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Status</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Status
+              </label>
               <select
                 className="input-base w-full text-sm"
                 value={formData.status || OCPPStatus.Available}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, status: e.target.value })
+                }
               >
                 {Object.values(OCPPStatus).map((status) => (
-                  <option key={status} value={status}>{status}</option>
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
                 ))}
               </select>
             </div>
@@ -749,20 +813,28 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Action</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Action
+              </label>
               <select
                 className="input-base w-full text-sm"
                 value={formData.action || "start"}
-                onChange={(e) => setFormData({ ...formData, action: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, action: e.target.value })
+                }
               >
                 <option value="start">Start Transaction</option>
                 <option value="stop">Stop Transaction</option>
@@ -770,12 +842,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             </div>
             {formData.action === "start" && (
               <div>
-                <label className="block text-xs font-semibold text-primary mb-1">Tag ID</label>
+                <label className="block text-xs font-semibold text-primary mb-1">
+                  Tag ID
+                </label>
                 <input
                   type="text"
                   className="input-base w-full text-sm"
                   value={formData.tagId || ""}
-                  onChange={(e) => setFormData({ ...formData, tagId: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, tagId: e.target.value })
+                  }
                   placeholder="RFID123456"
                 />
               </div>
@@ -787,21 +863,32 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Initial Value (Wh)</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Initial Value (Wh)
+              </label>
               <input
                 type="number"
                 className="input-base w-full text-sm"
                 value={formData.value || 0}
-                onChange={(e) => setFormData({ ...formData, value: parseInt(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    value: parseInt(e.target.value) || 0,
+                  })
+                }
               />
             </div>
             <div className="flex items-center gap-2">
@@ -809,10 +896,15 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 type="checkbox"
                 id="sendMessage"
                 checked={formData.sendMessage || false}
-                onChange={(e) => setFormData({ ...formData, sendMessage: e.target.checked })}
+                onChange={(e) =>
+                  setFormData({ ...formData, sendMessage: e.target.checked })
+                }
                 className="w-4 h-4"
               />
-              <label htmlFor="sendMessage" className="text-xs font-semibold text-primary">
+              <label
+                htmlFor="sendMessage"
+                className="text-xs font-semibold text-primary"
+              >
                 Send MeterValue Message
               </label>
             </div>
@@ -822,10 +914,18 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                   type="checkbox"
                   id="autoIncrement"
                   checked={formData.autoIncrement || false}
-                  onChange={(e) => setFormData({ ...formData, autoIncrement: e.target.checked })}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      autoIncrement: e.target.checked,
+                    })
+                  }
                   className="w-4 h-4"
                 />
-                <label htmlFor="autoIncrement" className="text-xs font-semibold text-primary">
+                <label
+                  htmlFor="autoIncrement"
+                  className="text-xs font-semibold text-primary"
+                >
                   Auto Increment
                 </label>
               </div>
@@ -852,21 +952,32 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Delay (seconds)</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Delay (seconds)
+              </label>
               <input
                 type="number"
                 className="input-base w-full text-sm"
                 value={formData.delaySeconds || 0}
-                onChange={(e) => setFormData({ ...formData, delaySeconds: parseInt(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    delaySeconds: parseInt(e.target.value) || 0,
+                  })
+                }
                 min="0"
               />
             </div>
@@ -877,26 +988,36 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Message Type</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Message Type
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.messageType || ""}
-                onChange={(e) => setFormData({ ...formData, messageType: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, messageType: e.target.value })
+                }
                 placeholder="e.g., Heartbeat, DataTransfer"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Payload (JSON)</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Payload (JSON)
+              </label>
               <textarea
                 className="input-base w-full font-mono text-xs"
                 rows={6}
@@ -923,20 +1044,28 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Action</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Action
+              </label>
               <select
                 className="input-base w-full text-sm"
                 value={formData.action || "plugin"}
-                onChange={(e) => setFormData({ ...formData, action: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, action: e.target.value })
+                }
               >
                 <option value="plugin">Plugin (Connect)</option>
                 <option value="plugout">Plugout (Disconnect)</option>
@@ -949,21 +1078,32 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Timeout (seconds)</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Timeout (seconds)
+              </label>
               <input
                 type="number"
                 className="input-base w-full text-sm"
                 value={formData.timeout || 0}
-                onChange={(e) => setFormData({ ...formData, timeout: parseInt(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
                 min="0"
               />
               <p className="text-xs text-muted mt-1">
@@ -977,20 +1117,31 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Label</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
               <input
                 type="text"
                 className="input-base w-full text-sm"
                 value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Target Status</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Target Status
+              </label>
               <select
                 className="input-base w-full text-sm"
                 value={formData.targetStatus || OCPPStatus.Charging}
-                onChange={(e) => setFormData({ ...formData, targetStatus: e.target.value as OCPPStatus })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    targetStatus: e.target.value as OCPPStatus,
+                  })
+                }
               >
                 <option value={OCPPStatus.Available}>Available</option>
                 <option value={OCPPStatus.Preparing}>Preparing</option>
@@ -1004,12 +1155,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-primary mb-1">Timeout (seconds)</label>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Timeout (seconds)
+              </label>
               <input
                 type="number"
                 className="input-base w-full text-sm"
                 value={formData.timeout || 0}
-                onChange={(e) => setFormData({ ...formData, timeout: parseInt(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
                 min="0"
               />
               <p className="text-xs text-muted mt-1">
@@ -1049,7 +1207,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           initialConfig={{
             enabled: true,
             intervalSeconds: formData.incrementInterval || 10,
-            curvePoints: formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }],
+            curvePoints: formData.curvePoints || [
+              { time: 0, value: 0 },
+              { time: 30, value: 50 },
+            ],
             autoCalculateInterval: formData.autoCalculateInterval || false,
           }}
           onSave={handleCurveModalSave}
@@ -1065,7 +1226,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 Scenario Editor
               </h2>
               <p className="text-xs text-muted">
-                {chargePoint.id} - {connectorId ? `Connector ${connectorId}` : "ChargePoint"}
+                {chargePoint.id} -{" "}
+                {connectorId ? `Connector ${connectorId}` : "ChargePoint"}
               </p>
             </div>
             <div className="flex gap-2">
@@ -1074,18 +1236,24 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                   <div className="flex items-center gap-3 text-xs">
                     <div>
                       <span className="text-muted">Status: </span>
-                      <span className={`font-semibold ${getStatusColor(connectorStatus)}`}>
+                      <span
+                        className={`font-semibold ${getStatusColor(connectorStatus)}`}
+                      >
                         {connectorStatus}
                       </span>
                     </div>
                     <div>
                       <span className="text-muted">Meter: </span>
-                      <span className="font-mono text-secondary">{meterValue} Wh</span>
+                      <span className="font-mono text-secondary">
+                        {meterValue} Wh
+                      </span>
                     </div>
                     {transactionId && (
                       <div>
                         <span className="text-muted">TX: </span>
-                        <span className="font-mono text-secondary">{transactionId}</span>
+                        <span className="font-mono text-secondary">
+                          {transactionId}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -1097,15 +1265,22 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                   <span className="text-muted">Scenario State:</span>
                   <div className="flex items-center gap-1">
                     {getScenarioStateIndicator(executionState)}
-                    <span className={`font-semibold ${getScenarioStateColor(executionState)}`}>
-                      {executionState ? executionState.charAt(0).toUpperCase() + executionState.slice(1) : "Idle"}
+                    <span
+                      className={`font-semibold ${getScenarioStateColor(executionState)}`}
+                    >
+                      {executionState
+                        ? executionState.charAt(0).toUpperCase() +
+                          executionState.slice(1)
+                        : "Idle"}
                     </span>
                   </div>
                   {executionContext && executionContext.currentNodeId && (
                     <div className="border-l border-gray-300 dark:border-gray-600 pl-2">
                       <span className="text-muted">Current Node: </span>
                       <span className="font-mono text-blue-600 dark:text-blue-400">
-                        {nodes.find(n => n.id === executionContext.currentNodeId)?.data?.label || executionContext.currentNodeId}
+                        {nodes.find(
+                          (n) => n.id === executionContext.currentNodeId,
+                        )?.data?.label || executionContext.currentNodeId}
                       </span>
                     </div>
                   )}
@@ -1114,10 +1289,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={handleImport} className="btn-secondary text-xs px-2 py-1">
+            <button
+              onClick={handleImport}
+              className="btn-secondary text-xs px-2 py-1"
+            >
               📥 Import
             </button>
-            <button onClick={handleExport} className="btn-secondary text-xs px-2 py-1">
+            <button
+              onClick={handleExport}
+              className="btn-secondary text-xs px-2 py-1"
+            >
               📤 Export
             </button>
             <button onClick={onClose} className="btn-danger text-xs px-2 py-1">
@@ -1161,7 +1342,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         <div className="grid grid-cols-2 gap-2 mt-2">
           {/* Name */}
           <div>
-            <label className="block text-xs font-semibold text-primary mb-1">Scenario Name</label>
+            <label className="block text-xs font-semibold text-primary mb-1">
+              Scenario Name
+            </label>
             <input
               type="text"
               className="input-base w-full text-xs"
@@ -1173,11 +1356,15 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
           {/* Default Execution Mode */}
           <div>
-            <label className="block text-xs font-semibold text-primary mb-1">Execution Mode</label>
+            <label className="block text-xs font-semibold text-primary mb-1">
+              Execution Mode
+            </label>
             <select
               className="input-base w-full text-xs"
               value={defaultExecutionMode}
-              onChange={(e) => setDefaultExecutionMode(e.target.value as ScenarioExecutionMode)}
+              onChange={(e) =>
+                setDefaultExecutionMode(e.target.value as ScenarioExecutionMode)
+              }
             >
               <option value="oneshot">One-shot</option>
               <option value="step">Step</option>
@@ -1186,7 +1373,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
           {/* Description */}
           <div className="col-span-2">
-            <label className="block text-xs font-semibold text-primary mb-1">Description</label>
+            <label className="block text-xs font-semibold text-primary mb-1">
+              Description
+            </label>
             <input
               type="text"
               className="input-base w-full text-xs"
@@ -1205,7 +1394,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 checked={scenarioEnabled}
                 onChange={(e) => setScenarioEnabled(e.target.checked)}
               />
-              <span className="text-xs font-semibold text-primary">Enabled</span>
+              <span className="text-xs font-semibold text-primary">
+                Enabled
+              </span>
             </label>
           </div>
         </div>
@@ -1217,7 +1408,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           {/* Node Palette */}
           <div className="panel p-2 flex-shrink-0">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-semibold text-primary">Node Palette</h3>
+              <h3 className="text-xs font-semibold text-primary">
+                Node Palette
+              </h3>
               <button
                 onClick={handleDeleteSelected}
                 className="btn-danger text-xs px-2 py-1"
@@ -1227,16 +1420,56 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               </button>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <NodePaletteItem type={ScenarioNodeType.START} label="Start" icon="🟢" />
-              <NodePaletteItem type={ScenarioNodeType.END} label="End" icon="🔴" />
-              <NodePaletteItem type={ScenarioNodeType.STATUS_CHANGE} label="Status" icon="📊" />
-              <NodePaletteItem type={ScenarioNodeType.TRANSACTION} label="Transaction" icon="💳" />
-              <NodePaletteItem type={ScenarioNodeType.METER_VALUE} label="Meter" icon="⚡" />
-              <NodePaletteItem type={ScenarioNodeType.DELAY} label="Delay" icon="⏱️" />
-              <NodePaletteItem type={ScenarioNodeType.NOTIFICATION} label="Message" icon="📤" />
-              <NodePaletteItem type={ScenarioNodeType.CONNECTOR_PLUG} label="Plug" icon="🔌" />
-              <NodePaletteItem type={ScenarioNodeType.STATUS_TRIGGER} label="StatusTrigger" icon="🚦" />
-              <NodePaletteItem type={ScenarioNodeType.REMOTE_START_TRIGGER} label="RemoteStart" icon="🎬" />
+              <NodePaletteItem
+                type={ScenarioNodeType.START}
+                label="Start"
+                icon="🟢"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.END}
+                label="End"
+                icon="🔴"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.STATUS_CHANGE}
+                label="Status"
+                icon="📊"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.TRANSACTION}
+                label="Transaction"
+                icon="💳"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.METER_VALUE}
+                label="Meter"
+                icon="⚡"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.DELAY}
+                label="Delay"
+                icon="⏱️"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.NOTIFICATION}
+                label="Message"
+                icon="📤"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.CONNECTOR_PLUG}
+                label="Plug"
+                icon="🔌"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.STATUS_TRIGGER}
+                label="StatusTrigger"
+                icon="🚦"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.REMOTE_START_TRIGGER}
+                label="RemoteStart"
+                icon="🎬"
+              />
             </div>
           </div>
 
@@ -1324,7 +1557,11 @@ interface NodePaletteItemProps {
   icon: string;
 }
 
-const NodePaletteItem: React.FC<NodePaletteItemProps> = ({ type, label, icon }) => {
+const NodePaletteItem: React.FC<NodePaletteItemProps> = ({
+  type,
+  label,
+  icon,
+}) => {
   const onDragStart = (event: React.DragEvent) => {
     event.dataTransfer.setData("application/reactflow", type);
     event.dataTransfer.effectAllowed = "move";
@@ -1337,13 +1574,18 @@ const NodePaletteItem: React.FC<NodePaletteItemProps> = ({ type, label, icon }) 
       className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded cursor-move hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center gap-1 text-xs"
     >
       <span>{icon}</span>
-      <span className="font-medium text-primary whitespace-nowrap">{label}</span>
+      <span className="font-medium text-primary whitespace-nowrap">
+        {label}
+      </span>
     </div>
   );
 };
 
 // Helper function to create nodes
-function createNodeByType(type: string, position: { x: number; y: number }): Node {
+function createNodeByType(
+  type: string,
+  position: { x: number; y: number },
+): Node {
   const id = `${type}-${Date.now()}`;
 
   switch (type) {
@@ -1401,7 +1643,11 @@ function createNodeByType(type: string, position: { x: number; y: number }): Nod
         id,
         type,
         position,
-        data: { label: "Wait for Status", targetStatus: OCPPStatus.Charging, timeout: 0 },
+        data: {
+          label: "Wait for Status",
+          targetStatus: OCPPStatus.Charging,
+          timeout: 0,
+        },
       };
     case ScenarioNodeType.START:
       return {

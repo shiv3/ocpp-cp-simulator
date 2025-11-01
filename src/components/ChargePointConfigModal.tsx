@@ -81,7 +81,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   isNewChargePoint = false,
 }) => {
   const [config, setConfig] = useState<ChargePointConfig>(
-    initialConfig || defaultChargePointConfig
+    initialConfig || defaultChargePointConfig,
   );
 
   useEffect(() => {
@@ -95,7 +95,10 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     onClose();
   };
 
-  const updateConfig = (key: keyof ChargePointConfig, value: any) => {
+  const updateConfig = (
+    key: keyof ChargePointConfig,
+    value: ChargePointConfig[keyof ChargePointConfig],
+  ) => {
     setConfig({ ...config, [key]: value });
   };
 
@@ -104,7 +107,9 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
       <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isNewChargePoint ? "Add New Charge Point" : `Configure ${config.cpId}`}
+            {isNewChargePoint
+              ? "Add New Charge Point"
+              : `Configure ${config.cpId}`}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-6 py-4">
@@ -113,7 +118,9 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             <h3 className="card-header mb-4">Basic Settings</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="cpId" className="mb-2 logger-label">Charge Point ID</Label>
+                <Label htmlFor="cpId" className="mb-2 logger-label">
+                  Charge Point ID
+                </Label>
                 <Input
                   id="cpId"
                   type="text"
@@ -124,20 +131,26 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div>
-                <Label htmlFor="connectorNumber" className="mb-2 logger-label">Number of Connectors</Label>
+                <Label htmlFor="connectorNumber" className="mb-2 logger-label">
+                  Number of Connectors
+                </Label>
                 <Input
                   id="connectorNumber"
                   type="number"
                   min="1"
                   max="10"
                   value={config.connectorNumber}
-                  onChange={(e) => updateConfig("connectorNumber", parseInt(e.target.value))}
+                  onChange={(e) =>
+                    updateConfig("connectorNumber", parseInt(e.target.value))
+                  }
                   required
                   className="logger-input"
                 />
               </div>
               <div className="col-span-2">
-                <Label htmlFor="wsURL" className="mb-2 logger-label">WebSocket URL</Label>
+                <Label htmlFor="wsURL" className="mb-2 logger-label">
+                  WebSocket URL
+                </Label>
                 <Input
                   id="wsURL"
                   type="url"
@@ -148,7 +161,9 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div>
-                <Label htmlFor="ocppVersion" className="mb-2">OCPP Version</Label>
+                <Label htmlFor="ocppVersion" className="mb-2">
+                  OCPP Version
+                </Label>
                 <Select
                   value={config.ocppVersion}
                   onValueChange={(value) => updateConfig("ocppVersion", value)}
@@ -162,20 +177,26 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 </Select>
               </div>
               <div className="col-span-2">
-                <Label htmlFor="tagIds" className="mb-2 logger-label">RFID Tag IDs (comma-separated)</Label>
+                <Label htmlFor="tagIds" className="mb-2 logger-label">
+                  RFID Tag IDs (comma-separated)
+                </Label>
                 <Input
                   id="tagIds"
                   type="text"
                   value={config.tagIds.join(", ")}
                   onChange={(e) => {
-                    const tags = e.target.value.split(",").map(s => s.trim()).filter(s => s.length > 0);
+                    const tags = e.target.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter((s) => s.length > 0);
                     updateConfig("tagIds", tags.length > 0 ? tags : ["123456"]);
                   }}
                   placeholder="e.g., 123456, ABCDEF, TAG001"
                   className="logger-input"
                 />
                 <p className="text-xs text-muted mt-1">
-                  Enter one or more RFID tag IDs separated by commas. These tags can be used for starting transactions.
+                  Enter one or more RFID tag IDs separated by commas. These tags
+                  can be used for starting transactions.
                 </p>
               </div>
             </div>
@@ -186,32 +207,47 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             <h3 className="card-header mb-4">Boot Notification</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="chargePointVendor" className="mb-2 logger-label">Vendor</Label>
+                <Label
+                  htmlFor="chargePointVendor"
+                  className="mb-2 logger-label"
+                >
+                  Vendor
+                </Label>
                 <Input
                   id="chargePointVendor"
                   type="text"
                   value={config.chargePointVendor}
-                  onChange={(e) => updateConfig("chargePointVendor", e.target.value)}
+                  onChange={(e) =>
+                    updateConfig("chargePointVendor", e.target.value)
+                  }
                   className="logger-input"
                 />
               </div>
               <div>
-                <Label htmlFor="chargePointModel" className="mb-2 logger-label">Model</Label>
+                <Label htmlFor="chargePointModel" className="mb-2 logger-label">
+                  Model
+                </Label>
                 <Input
                   id="chargePointModel"
                   type="text"
                   value={config.chargePointModel}
-                  onChange={(e) => updateConfig("chargePointModel", e.target.value)}
+                  onChange={(e) =>
+                    updateConfig("chargePointModel", e.target.value)
+                  }
                   className="logger-input"
                 />
               </div>
               <div>
-                <Label htmlFor="firmwareVersion" className="mb-2 logger-label">Firmware Version</Label>
+                <Label htmlFor="firmwareVersion" className="mb-2 logger-label">
+                  Firmware Version
+                </Label>
                 <Input
                   id="firmwareVersion"
                   type="text"
                   value={config.firmwareVersion}
-                  onChange={(e) => updateConfig("firmwareVersion", e.target.value)}
+                  onChange={(e) =>
+                    updateConfig("firmwareVersion", e.target.value)
+                  }
                   className="logger-input"
                 />
               </div>
@@ -228,29 +264,47 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 <Checkbox
                   id="basicAuthEnabled"
                   checked={config.basicAuthEnabled}
-                  onCheckedChange={(checked) => updateConfig("basicAuthEnabled", checked as boolean)}
+                  onCheckedChange={(checked) =>
+                    updateConfig("basicAuthEnabled", checked as boolean)
+                  }
                 />
-                <Label htmlFor="basicAuthEnabled" className="logger-label">Enable Basic Authentication</Label>
+                <Label htmlFor="basicAuthEnabled" className="logger-label">
+                  Enable Basic Authentication
+                </Label>
               </div>
               {config.basicAuthEnabled && (
                 <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="basicAuthUsername" className="mb-2 logger-label">Username</Label>
+                    <Label
+                      htmlFor="basicAuthUsername"
+                      className="mb-2 logger-label"
+                    >
+                      Username
+                    </Label>
                     <Input
                       id="basicAuthUsername"
                       type="text"
                       value={config.basicAuthUsername}
-                      onChange={(e) => updateConfig("basicAuthUsername", e.target.value)}
+                      onChange={(e) =>
+                        updateConfig("basicAuthUsername", e.target.value)
+                      }
                       className="logger-input"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="basicAuthPassword" className="mb-2 logger-label">Password</Label>
+                    <Label
+                      htmlFor="basicAuthPassword"
+                      className="mb-2 logger-label"
+                    >
+                      Password
+                    </Label>
                     <Input
                       id="basicAuthPassword"
                       type="password"
                       value={config.basicAuthPassword}
-                      onChange={(e) => updateConfig("basicAuthPassword", e.target.value)}
+                      onChange={(e) =>
+                        updateConfig("basicAuthPassword", e.target.value)
+                      }
                       className="logger-input"
                     />
                   </div>
@@ -264,31 +318,52 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 <Checkbox
                   id="autoMeterValueEnabled"
                   checked={config.autoMeterValueEnabled}
-                  onCheckedChange={(checked) => updateConfig("autoMeterValueEnabled", checked as boolean)}
+                  onCheckedChange={(checked) =>
+                    updateConfig("autoMeterValueEnabled", checked as boolean)
+                  }
                 />
-                <Label htmlFor="autoMeterValueEnabled" className="logger-label">Enable Auto Meter Value</Label>
+                <Label htmlFor="autoMeterValueEnabled" className="logger-label">
+                  Enable Auto Meter Value
+                </Label>
               </div>
               {config.autoMeterValueEnabled && (
                 <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="autoMeterValueInterval" className="mb-2 logger-label">Interval (seconds)</Label>
+                    <Label
+                      htmlFor="autoMeterValueInterval"
+                      className="mb-2 logger-label"
+                    >
+                      Interval (seconds)
+                    </Label>
                     <Input
                       id="autoMeterValueInterval"
                       type="number"
                       min="1"
                       value={config.autoMeterValueInterval}
-                      onChange={(e) => updateConfig("autoMeterValueInterval", parseInt(e.target.value))}
+                      onChange={(e) =>
+                        updateConfig(
+                          "autoMeterValueInterval",
+                          parseInt(e.target.value),
+                        )
+                      }
                       className="logger-input"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="autoMeterValue" className="mb-2 logger-label">Increment Value (kWh)</Label>
+                    <Label
+                      htmlFor="autoMeterValue"
+                      className="mb-2 logger-label"
+                    >
+                      Increment Value (kWh)
+                    </Label>
                     <Input
                       id="autoMeterValue"
                       type="number"
                       min="1"
                       value={config.autoMeterValue}
-                      onChange={(e) => updateConfig("autoMeterValue", parseInt(e.target.value))}
+                      onChange={(e) =>
+                        updateConfig("autoMeterValue", parseInt(e.target.value))
+                      }
                       className="logger-input"
                     />
                   </div>

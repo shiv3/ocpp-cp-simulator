@@ -58,7 +58,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             loopCount: 0,
             currentNodeId: null,
             error: undefined,
-          }))
+          })),
         ),
         transition(
           "START",
@@ -71,8 +71,8 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             loopCount: 0,
             currentNodeId: null,
             error: undefined,
-          }))
-        )
+          })),
+        ),
       ),
 
       // Running state - actively executing
@@ -83,16 +83,18 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           "waiting",
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            waitType: event.type === "WAIT_START" ? event.waitType : ctx.waitType,
-          }))
+            waitType:
+              event.type === "WAIT_START" ? event.waitType : ctx.waitType,
+          })),
         ),
         transition(
           "NODE_COMPLETE",
           "running",
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            currentNodeId: event.type === "NODE_COMPLETE" ? event.nodeId : ctx.currentNodeId,
-          }))
+            currentNodeId:
+              event.type === "NODE_COMPLETE" ? event.nodeId : ctx.currentNodeId,
+          })),
         ),
         transition("FLOW_COMPLETE", "completed"),
         transition(
@@ -101,7 +103,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
             error: event.type === "ERROR" ? event.error : ctx.error,
-          }))
+          })),
         ),
         transition(
           "STOP",
@@ -109,8 +111,8 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           reduce((ctx: ScenarioContext) => ({
             ...ctx,
             currentNodeId: null,
-          }))
-        )
+          })),
+        ),
       ),
 
       // Paused state - temporarily halted
@@ -122,8 +124,8 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           reduce((ctx: ScenarioContext) => ({
             ...ctx,
             currentNodeId: null,
-          }))
-        )
+          })),
+        ),
       ),
 
       // Waiting state - blocked on async operation
@@ -135,7 +137,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
             error: event.type === "ERROR" ? event.error : ctx.error,
-          }))
+          })),
         ),
         transition(
           "STOP",
@@ -144,8 +146,8 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             ...ctx,
             currentNodeId: null,
             waitType: undefined,
-          }))
-        )
+          })),
+        ),
       ),
 
       // Stepping state - waiting for step command
@@ -155,15 +157,16 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           "stepping",
           reduce((ctx: ScenarioContext) => ({
             ...ctx,
-          }))
+          })),
         ),
         transition(
           "NODE_COMPLETE",
           "stepping",
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            currentNodeId: event.type === "NODE_COMPLETE" ? event.nodeId : ctx.currentNodeId,
-          }))
+            currentNodeId:
+              event.type === "NODE_COMPLETE" ? event.nodeId : ctx.currentNodeId,
+          })),
         ),
         transition("FLOW_COMPLETE", "completed"),
         transition(
@@ -172,7 +175,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
             error: event.type === "ERROR" ? event.error : ctx.error,
-          }))
+          })),
         ),
         transition(
           "STOP",
@@ -180,8 +183,8 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
           reduce((ctx: ScenarioContext) => ({
             ...ctx,
             currentNodeId: null,
-          }))
-        )
+          })),
+        ),
       ),
 
       // Completed state - successfully finished
@@ -197,7 +200,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             loopCount: 0,
             currentNodeId: null,
             error: undefined,
-          }))
+          })),
         ),
         transition(
           "START",
@@ -210,8 +213,8 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             loopCount: 0,
             currentNodeId: null,
             error: undefined,
-          }))
-        )
+          })),
+        ),
       ),
 
       // Error state - error occurred
@@ -227,7 +230,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             loopCount: 0,
             currentNodeId: null,
             error: undefined,
-          }))
+          })),
         ),
         transition(
           "START",
@@ -240,7 +243,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             loopCount: 0,
             currentNodeId: null,
             error: undefined,
-          }))
+          })),
         ),
         transition(
           "STOP",
@@ -249,15 +252,15 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
             ...ctx,
             currentNodeId: null,
             error: undefined,
-          }))
-        )
+          })),
+        ),
       ),
     },
     // Initial context
     (initialState) => ({
       ...initialContext,
       current: initialState,
-    })
+    }),
   );
 }
 
@@ -266,7 +269,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
  * @param machineState Robot3 machine state
  * @returns State name as string
  */
-export function getScenarioStateName(machineState: any): string {
+export function getScenarioStateName(machineState: { name: string }): string {
   return machineState.name;
 }
 
@@ -275,7 +278,9 @@ export function getScenarioStateName(machineState: any): string {
  * @param machineState Robot3 machine state
  * @returns Scenario context
  */
-export function getScenarioContext(machineState: any): ScenarioContext {
+export function getScenarioContext(machineState: {
+  context: ScenarioContext;
+}): ScenarioContext {
   return {
     scenarioId: machineState.context.scenarioId,
     mode: machineState.context.mode || "oneshot",

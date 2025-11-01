@@ -6,6 +6,7 @@ import {
   ScenarioNodeType,
   ScenarioExecutorCallbacks,
   ScenarioEvents,
+  ScenarioNode,
   StatusChangeNodeData,
   TransactionNodeData,
   MeterValueNodeData,
@@ -18,12 +19,10 @@ import {
   CancelReservationNodeData,
   ReservationTriggerNodeData,
 } from "./ScenarioTypes";
-import { Edge } from "@xyflow/react";
 import {
   createScenarioMachine,
   getScenarioStateName,
   getScenarioContext,
-  ScenarioEvent,
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
 import type { EventEmitter } from "../../shared/EventEmitter";
@@ -31,7 +30,7 @@ import type { EventEmitter } from "../../shared/EventEmitter";
 export class ScenarioExecutor {
   private scenario: ScenarioDefinition;
   private callbacks: ScenarioExecutorCallbacks;
-  private service: any; // Robot3 service
+  private service: ReturnType<typeof interpret>; // Robot3 service
   private stepResolve: ((value: void) => void) | null = null;
   private previousState: ScenarioExecutionState = "idle";
   private eventEmitter?: EventEmitter<ScenarioEvents>;
@@ -39,7 +38,7 @@ export class ScenarioExecutor {
   constructor(
     scenario: ScenarioDefinition,
     callbacks: ScenarioExecutorCallbacks,
-    eventEmitter?: EventEmitter<ScenarioEvents>
+    eventEmitter?: EventEmitter<ScenarioEvents>,
   ) {
     this.scenario = scenario;
     this.callbacks = callbacks;
@@ -56,7 +55,9 @@ export class ScenarioExecutor {
 
     // Create service to manage machine and emit state change events
     this.service = interpret(machine, (machineState) => {
-      const currentState = getScenarioStateName(machineState) as ScenarioExecutionState;
+      const currentState = getScenarioStateName(
+        machineState,
+      ) as ScenarioExecutionState;
 
       // Emit state change event if state actually changed
       if (currentState !== this.previousState) {
@@ -71,10 +72,13 @@ export class ScenarioExecutor {
 
         // Emit hierarchical events with EventEmitter2
         // state.{stateName} - Specific state transition
-        this.eventEmitter?.emit(`state.${currentState}` as any, {
-          scenarioId: this.scenario.id,
-          previousState: this.previousState,
-        });
+        this.eventEmitter?.emit(
+          `state.${currentState}` as keyof ScenarioEvents,
+          {
+            scenarioId: this.scenario.id,
+            previousState: this.previousState,
+          },
+        );
 
         this.previousState = currentState;
       }
@@ -98,7 +102,10 @@ export class ScenarioExecutor {
     this.eventEmitter?.emit("execution.started", startedData); // Hierarchical event
 
     // Log scenario start
-    this.callbacks.log?.(`[${this.scenario.name}] Scenario execution started (mode: ${mode})`, "info");
+    this.callbacks.log?.(
+      `[${this.scenario.name}] Scenario execution started (mode: ${mode})`,
+      "info",
+    );
 
     try {
       await this.executeFlow();
@@ -115,13 +122,19 @@ export class ScenarioExecutor {
         this.eventEmitter?.emit("execution.completed", completedData); // Hierarchical event
 
         // Log scenario completion
-        this.callbacks.log?.(`[${this.scenario.name}] Scenario execution completed`, "info");
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Scenario execution completed`,
+          "info",
+        );
       }
     } catch (error) {
       // Dispatch ERROR event to transition to error state
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.service.send({ type: "ERROR", error: errorMessage });
-      this.callbacks.onError?.(error instanceof Error ? error : new Error(String(error)));
+      this.callbacks.onError?.(
+        error instanceof Error ? error : new Error(String(error)),
+      );
 
       // Emit execution error events
       const errorData = {
@@ -132,7 +145,10 @@ export class ScenarioExecutor {
       this.eventEmitter?.emit("execution.error", errorData); // Hierarchical event
 
       // Log scenario error
-      this.callbacks.log?.(`[${this.scenario.name}] Scenario execution failed: ${errorMessage}`, "error");
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Scenario execution failed: ${errorMessage}`,
+        "error",
+      );
     }
 
     this.notifyStateChange();
@@ -146,7 +162,7 @@ export class ScenarioExecutor {
   private async executeFlow(): Promise<void> {
     // Find start node
     const startNode = this.scenario.nodes.find(
-      (n) => n.type === ScenarioNodeType.START || n.data.label === "Start"
+      (n) => n.type === ScenarioNodeType.START || n.data.label === "Start",
     );
 
     if (!startNode) {
@@ -157,24 +173,35 @@ export class ScenarioExecutor {
     await this.executeSingleNode(startNode);
 
     // Check for parallel branches from Start node
-    const outgoingEdges = this.scenario.edges.filter((e) => e.source === startNode.id);
+    const outgoingEdges = this.scenario.edges.filter(
+      (e) => e.source === startNode.id,
+    );
     const nextNodes = outgoingEdges
       .map((edge) => this.scenario.nodes.find((n) => n.id === edge.target))
       .filter((node) => node !== undefined);
 
     if (nextNodes.length === 0) {
-      this.callbacks.log?.(`[${this.scenario.name}] No nodes after Start, scenario ends`, "warn");
+      this.callbacks.log?.(
+        `[${this.scenario.name}] No nodes after Start, scenario ends`,
+        "warn",
+      );
       return;
     }
 
     if (nextNodes.length === 1) {
       // Single branch - execute sequentially
-      this.callbacks.log?.(`[${this.scenario.name}] Executing single branch`, "debug");
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Executing single branch`,
+        "debug",
+      );
       await this.executeSequentialFlow(nextNodes[0]!);
     } else {
       // Multiple branches - execute in parallel
-      this.callbacks.log?.(`[${this.scenario.name}] Executing ${nextNodes.length} parallel branches`, "info");
-      await this.executeParallelBranches(nextNodes as any[]);
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Executing ${nextNodes.length} parallel branches`,
+        "info",
+      );
+      await this.executeParallelBranches(nextNodes);
     }
 
     // Clear current node
@@ -185,34 +212,50 @@ export class ScenarioExecutor {
    * Execute multiple branches in parallel
    * Each branch runs independently until it reaches an End node or terminates
    */
-  private async executeParallelBranches(startNodes: any[]): Promise<void> {
+  private async executeParallelBranches(
+    startNodes: ScenarioNode[],
+  ): Promise<void> {
     const branches = startNodes.map((node, index) => {
-      this.callbacks.log?.(`[${this.scenario.name}] Starting branch ${index + 1} from node: ${node.data?.label || node.id}`, "debug");
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Starting branch ${index + 1} from node: ${node.data?.label || node.id}`,
+        "debug",
+      );
       return this.executeSequentialFlow(node);
     });
 
     // Wait for all branches to complete
     await Promise.all(branches);
-    this.callbacks.log?.(`[${this.scenario.name}] All ${branches.length} parallel branches completed`, "info");
+    this.callbacks.log?.(
+      `[${this.scenario.name}] All ${branches.length} parallel branches completed`,
+      "info",
+    );
   }
 
   /**
    * Execute a sequential flow starting from a given node
    */
-  private async executeSequentialFlow(startNode: any): Promise<void> {
+  private async executeSequentialFlow(startNode: ScenarioNode): Promise<void> {
     let currentNode = startNode;
 
-    while (currentNode && getScenarioStateName(this.service.machine) !== "idle") {
+    while (
+      currentNode &&
+      getScenarioStateName(this.service.machine) !== "idle"
+    ) {
       // Execute the current node
       await this.executeSingleNode(currentNode);
 
       // Check if this is the end node
-      if (currentNode.type === ScenarioNodeType.END || currentNode.data.label === "End") {
+      if (
+        currentNode.type === ScenarioNodeType.END ||
+        currentNode.data.label === "End"
+      ) {
         break;
       }
 
       // Find next node
-      const outgoingEdges = this.scenario.edges.filter((e) => e.source === currentNode!.id);
+      const outgoingEdges = this.scenario.edges.filter(
+        (e) => e.source === currentNode!.id,
+      );
       if (outgoingEdges.length === 0) {
         break; // No more nodes to execute
       }
@@ -229,7 +272,7 @@ export class ScenarioExecutor {
 
       if (!nextNode) {
         console.warn(
-          `[ScenarioExecutor] All outgoing edges from node ${currentNode!.id} point to non-existent nodes. Branch will end here.`
+          `[ScenarioExecutor] All outgoing edges from node ${currentNode!.id} point to non-existent nodes. Branch will end here.`,
         );
         break;
       }
@@ -241,7 +284,7 @@ export class ScenarioExecutor {
   /**
    * Execute a single node
    */
-  private async executeSingleNode(node: any): Promise<void> {
+  private async executeSingleNode(node: ScenarioNode): Promise<void> {
     // Update context with current node
     const context = getScenarioContext(this.service.machine);
     context.currentNodeId = node.id;
@@ -263,7 +306,10 @@ export class ScenarioExecutor {
     this.eventEmitter?.emit("nodeExecute", nodeExecuteData); // Backward compatibility
     this.eventEmitter?.emit("node.execute", nodeExecuteData); // Hierarchical event
     // Emit specific node type event: node.{nodeType}.execute
-    this.eventEmitter?.emit(`node.${node.type}.execute` as any, nodeExecuteData);
+    this.eventEmitter?.emit(
+      `node.${node.type}.execute` as keyof ScenarioEvents,
+      nodeExecuteData,
+    );
 
     // Wait if paused
     await this.waitIfPaused();
@@ -275,7 +321,10 @@ export class ScenarioExecutor {
     }
 
     // Execute node
-    if (node.type !== ScenarioNodeType.START && node.type !== ScenarioNodeType.END) {
+    if (
+      node.type !== ScenarioNodeType.START &&
+      node.type !== ScenarioNodeType.END
+    ) {
       await this.executeNode(node);
     }
 
@@ -290,16 +339,22 @@ export class ScenarioExecutor {
     this.eventEmitter?.emit("nodeComplete", nodeCompleteData); // Backward compatibility
     this.eventEmitter?.emit("node.complete", nodeCompleteData); // Hierarchical event
     // Emit specific node type event: node.{nodeType}.complete
-    this.eventEmitter?.emit(`node.${node.type}.complete` as any, nodeCompleteData);
+    this.eventEmitter?.emit(
+      `node.${node.type}.complete` as keyof ScenarioEvents,
+      nodeCompleteData,
+    );
   }
 
   /**
    * Execute a single node
    */
-  private async executeNode(node: any): Promise<void> {
+  private async executeNode(node: ScenarioNode): Promise<void> {
     // Log node execution
     const nodeLabel = node.data?.label || node.id;
-    this.callbacks.log?.(`[${this.scenario.name}] Executing node: ${nodeLabel} (${node.type})`, "debug");
+    this.callbacks.log?.(
+      `[${this.scenario.name}] Executing node: ${nodeLabel} (${node.type})`,
+      "debug",
+    );
 
     switch (node.type) {
       case ScenarioNodeType.STATUS_CHANGE:
@@ -327,11 +382,17 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.REMOTE_START_TRIGGER:
-        await this.executeRemoteStartTrigger(node.id, node.data as RemoteStartTriggerNodeData);
+        await this.executeRemoteStartTrigger(
+          node.id,
+          node.data as RemoteStartTriggerNodeData,
+        );
         break;
 
       case ScenarioNodeType.STATUS_TRIGGER:
-        await this.executeStatusTrigger(node.id, node.data as StatusTriggerNodeData);
+        await this.executeStatusTrigger(
+          node.id,
+          node.data as StatusTriggerNodeData,
+        );
         break;
 
       case ScenarioNodeType.RESERVE_NOW:
@@ -339,11 +400,16 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.CANCEL_RESERVATION:
-        await this.executeCancelReservation(node.data as CancelReservationNodeData);
+        await this.executeCancelReservation(
+          node.data as CancelReservationNodeData,
+        );
         break;
 
       case ScenarioNodeType.RESERVATION_TRIGGER:
-        await this.executeReservationTrigger(node.id, node.data as ReservationTriggerNodeData);
+        await this.executeReservationTrigger(
+          node.id,
+          node.data as ReservationTriggerNodeData,
+        );
         break;
 
       default:
@@ -369,7 +435,7 @@ export class ScenarioExecutor {
         await this.callbacks.onStartTransaction(
           data.tagId || "123456",
           data.batteryCapacityKwh,
-          data.initialSoc
+          data.initialSoc,
         );
       }
     } else if (data.action === "stop") {
@@ -382,14 +448,20 @@ export class ScenarioExecutor {
   /**
    * Execute meter value node with auto-increment support
    */
-  private async executeMeterValue(nodeId: string, data: MeterValueNodeData): Promise<void> {
+  private async executeMeterValue(
+    nodeId: string,
+    data: MeterValueNodeData,
+  ): Promise<void> {
     if (this.callbacks.onSetMeterValue) {
       this.callbacks.onSetMeterValue(data.value);
     }
 
     // Handle auto-increment mode - start AutoMeterValue manager
     if (data.autoIncrement && this.callbacks.onStartAutoMeterValue) {
-      this.callbacks.log?.(`[${this.scenario.name}] Starting AutoMeterValue: interval=${data.incrementInterval || 10}s increment=${data.incrementAmount || 1000}Wh maxTime=${data.maxTime || 'unlimited'} maxValue=${data.maxValue || 'unlimited'}`, "info");
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Starting AutoMeterValue: interval=${data.incrementInterval || 10}s increment=${data.incrementAmount || 1000}Wh maxTime=${data.maxTime || "unlimited"} maxValue=${data.maxValue || "unlimited"}`,
+        "info",
+      );
 
       this.callbacks.onStartAutoMeterValue({
         intervalSeconds: data.incrementInterval || 10,
@@ -407,7 +479,10 @@ export class ScenarioExecutor {
   /**
    * Execute delay node with progress updates
    */
-  private async executeDelay(nodeId: string, data: DelayNodeData): Promise<void> {
+  private async executeDelay(
+    nodeId: string,
+    data: DelayNodeData,
+  ): Promise<void> {
     if (this.callbacks.onDelay) {
       await this.callbacks.onDelay(data.delaySeconds);
     } else {
@@ -470,7 +545,9 @@ export class ScenarioExecutor {
   /**
    * Execute connector plug node
    */
-  private async executeConnectorPlug(data: ConnectorPlugNodeData): Promise<void> {
+  private async executeConnectorPlug(
+    data: ConnectorPlugNodeData,
+  ): Promise<void> {
     if (this.callbacks.onConnectorPlug) {
       await this.callbacks.onConnectorPlug(data.action);
     }
@@ -480,7 +557,10 @@ export class ScenarioExecutor {
    * Execute remote start trigger node with progress updates
    * Waits for RemoteStartTransaction request from central system
    */
-  private async executeRemoteStartTrigger(nodeId: string, data: RemoteStartTriggerNodeData): Promise<void> {
+  private async executeRemoteStartTrigger(
+    nodeId: string,
+    data: RemoteStartTriggerNodeData,
+  ): Promise<void> {
     if (!this.callbacks.onWaitForRemoteStart) return;
 
     const timeout = data.timeout || 0;
@@ -542,7 +622,10 @@ export class ScenarioExecutor {
    * Execute status trigger node with progress updates
    * Waits for connector status to change to target status
    */
-  private async executeStatusTrigger(nodeId: string, data: StatusTriggerNodeData): Promise<void> {
+  private async executeStatusTrigger(
+    nodeId: string,
+    data: StatusTriggerNodeData,
+  ): Promise<void> {
     if (!this.callbacks.onWaitForStatus) return;
 
     const timeout = data.timeout || 0;
@@ -607,20 +690,23 @@ export class ScenarioExecutor {
     if (!this.callbacks.onReserveNow) return;
 
     // Generate reservation ID if not provided
-    const reservationId = data.reservationId || Math.floor(Math.random() * 1000000);
+    const reservationId =
+      data.reservationId || Math.floor(Math.random() * 1000000);
 
     await this.callbacks.onReserveNow(
       data.expiryMinutes,
       data.idTag,
       data.parentIdTag,
-      reservationId
+      reservationId,
     );
   }
 
   /**
    * Execute cancel reservation node
    */
-  private async executeCancelReservation(data: CancelReservationNodeData): Promise<void> {
+  private async executeCancelReservation(
+    data: CancelReservationNodeData,
+  ): Promise<void> {
     if (!this.callbacks.onCancelReservation) return;
 
     await this.callbacks.onCancelReservation(data.reservationId);
@@ -629,7 +715,10 @@ export class ScenarioExecutor {
   /**
    * Execute reservation trigger node (wait for ReserveNow request)
    */
-  private async executeReservationTrigger(nodeId: string, data: ReservationTriggerNodeData): Promise<void> {
+  private async executeReservationTrigger(
+    nodeId: string,
+    data: ReservationTriggerNodeData,
+  ): Promise<void> {
     if (!this.callbacks.onWaitForReservation) return;
 
     const timeout = data.timeout || 0;

@@ -4,7 +4,7 @@ import { Download, Upload, Home } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
 
 const Settings: React.FC = () => {
@@ -99,7 +99,9 @@ const Settings: React.FC = () => {
 
       {success && (
         <Alert className="mb-4 border-green-500 bg-green-50 dark:bg-green-900">
-          <AlertDescription className="text-green-800 dark:text-green-100">{success}</AlertDescription>
+          <AlertDescription className="text-green-800 dark:text-green-100">
+            {success}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -107,8 +109,9 @@ const Settings: React.FC = () => {
         <CardHeader>
           <CardTitle>Configuration Management</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            Export your current configuration to a JSON file or import a previously saved configuration.
-            You can also manually edit the JSON configuration below.
+            Export your current configuration to a JSON file or import a
+            previously saved configuration. You can also manually edit the JSON
+            configuration below.
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -135,9 +138,7 @@ const Settings: React.FC = () => {
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <h4 className="text-lg font-semibold">
-                Configuration JSON
-              </h4>
+              <h4 className="text-lg font-semibold">Configuration JSON</h4>
               <Button onClick={handleApplyJson} size="sm">
                 Apply Changes
               </Button>
@@ -150,19 +151,26 @@ const Settings: React.FC = () => {
               placeholder="Paste your configuration JSON here..."
             />
             <p className="text-muted-foreground text-xs mt-2">
-              Edit the JSON configuration directly and click "Apply Changes" to update.
+              Edit the JSON configuration directly and click "Apply Changes" to
+              update.
             </p>
           </div>
 
           <Card className="bg-blue-50 dark:bg-blue-950/50">
             <CardContent className="pt-6">
-              <h4 className="text-sm font-semibold mb-2">
-                Note
-              </h4>
+              <h4 className="text-sm font-semibold mb-2">Note</h4>
               <ul className="text-muted-foreground text-sm space-y-1 list-disc list-inside">
-                <li>Individual charge point settings can be configured from the Home page</li>
-                <li>Click the gear icon next to each charge point tab to edit its settings</li>
-                <li>Use the "+ Add Charge Point" button to add new charge points</li>
+                <li>
+                  Individual charge point settings can be configured from the
+                  Home page
+                </li>
+                <li>
+                  Click the gear icon next to each charge point tab to edit its
+                  settings
+                </li>
+                <li>
+                  Use the "+ Add Charge Point" button to add new charge points
+                </li>
                 <li>This page is for bulk configuration import/export only</li>
               </ul>
             </CardContent>

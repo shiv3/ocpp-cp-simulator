@@ -3,7 +3,7 @@
  * Based on EventEmitter2 with additional type safety
  */
 
-import EventEmitter2 from 'eventemitter2';
+import EventEmitter2 from "eventemitter2";
 
 export type EventListener<T = unknown> = (data: T) => void;
 
@@ -24,7 +24,7 @@ export class EventEmitter<T extends EventMap> {
   constructor() {
     this.emitter = new EventEmitter2({
       wildcard: true,
-      delimiter: '.',
+      delimiter: ".",
       maxListeners: 50,
       // Prevent memory leaks by warning
       verboseMemoryLeak: true,
@@ -37,8 +37,8 @@ export class EventEmitter<T extends EventMap> {
    * @returns Unsubscribe function
    */
   on<K extends keyof T>(event: K, listener: EventListener<T[K]>): () => void;
-  on(event: string, listener: EventListener<any>): () => void;
-  on(event: string | keyof T, listener: EventListener<any>): () => void {
+  on(event: string, listener: EventListener<unknown>): () => void;
+  on(event: string | keyof T, listener: EventListener<unknown>): () => void {
     this.emitter.on(event as string, listener);
 
     // Return unsubscribe function
@@ -52,8 +52,8 @@ export class EventEmitter<T extends EventMap> {
    * Supports wildcards: once('connector.*', listener)
    */
   once<K extends keyof T>(event: K, listener: EventListener<T[K]>): () => void;
-  once(event: string, listener: EventListener<any>): () => void;
-  once(event: string | keyof T, listener: EventListener<any>): () => void {
+  once(event: string, listener: EventListener<unknown>): () => void;
+  once(event: string | keyof T, listener: EventListener<unknown>): () => void {
     this.emitter.once(event as string, listener);
 
     // Return unsubscribe function
@@ -77,8 +77,8 @@ export class EventEmitter<T extends EventMap> {
    * Remove a specific listener
    */
   off<K extends keyof T>(event: K, listener: EventListener<T[K]>): void;
-  off(event: string, listener: EventListener<any>): void;
-  off(event: string | keyof T, listener: EventListener<any>): void {
+  off(event: string, listener: EventListener<unknown>): void;
+  off(event: string | keyof T, listener: EventListener<unknown>): void {
     this.emitter.off(event as string, listener);
   }
 
@@ -112,7 +112,9 @@ export class EventEmitter<T extends EventMap> {
    * @param listener Callback that receives (event, data)
    * @returns Unsubscribe function
    */
-  onAny(listener: (event: string | string[], data: any) => void): () => void {
+  onAny(
+    listener: (event: string | string[], data: unknown) => void,
+  ): () => void {
     this.emitter.onAny(listener);
     return () => {
       this.emitter.offAny(listener);
@@ -122,7 +124,7 @@ export class EventEmitter<T extends EventMap> {
   /**
    * Remove a listener from all events
    */
-  offAny(listener: (event: string | string[], data: any) => void): void {
+  offAny(listener: (event: string | string[], data: unknown) => void): void {
     this.emitter.offAny(listener);
   }
 
@@ -133,8 +135,8 @@ export class EventEmitter<T extends EventMap> {
    * @returns Promise that resolves with the event data
    */
   async waitFor<K extends keyof T>(event: K, timeout?: number): Promise<T[K]>;
-  async waitFor(event: string, timeout?: number): Promise<any>;
-  async waitFor(event: string | keyof T, timeout?: number): Promise<any> {
+  async waitFor(event: string, timeout?: number): Promise<unknown>;
+  async waitFor(event: string | keyof T, timeout?: number): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const timer = timeout
         ? setTimeout(() => {
@@ -143,7 +145,7 @@ export class EventEmitter<T extends EventMap> {
           }, timeout)
         : null;
 
-      const handler = (data: any) => {
+      const handler = (data: unknown) => {
         if (timer) clearTimeout(timer);
         resolve(data);
       };

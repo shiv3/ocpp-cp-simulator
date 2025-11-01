@@ -13,7 +13,7 @@ const STORAGE_VERSION = 1;
 export function saveScenario(
   chargePointId: string,
   connectorId: number | null,
-  scenario: ScenarioDefinition
+  scenario: ScenarioDefinition,
 ): void {
   const key = buildStorageKey(chargePointId, connectorId);
   try {
@@ -28,7 +28,7 @@ export function saveScenario(
  */
 export function loadScenario(
   chargePointId: string,
-  connectorId: number | null
+  connectorId: number | null,
 ): ScenarioDefinition | null {
   const key = buildStorageKey(chargePointId, connectorId);
   try {
@@ -45,7 +45,10 @@ export function loadScenario(
 /**
  * Delete scenario from localStorage
  */
-export function deleteScenario(chargePointId: string, connectorId: number | null): void {
+export function deleteScenario(
+  chargePointId: string,
+  connectorId: number | null,
+): void {
   const key = buildStorageKey(chargePointId, connectorId);
   try {
     localStorage.removeItem(key);
@@ -101,7 +104,9 @@ export function listAllScenarios(chargePointId: string): ScenarioDefinition[] {
     // Also check for legacy scenarios and migrate them
     const legacyScenarios = listScenarios(chargePointId);
     if (legacyScenarios.length > 0) {
-      console.log(`[scenarioStorage] Found ${legacyScenarios.length} legacy scenarios, migrating...`);
+      console.log(
+        `[scenarioStorage] Found ${legacyScenarios.length} legacy scenarios, migrating...`,
+      );
       // Migrate each legacy scenario
       legacyScenarios.forEach((legacyScenario) => {
         const connectorId = legacyScenario.targetId || null;
@@ -111,7 +116,7 @@ export function listAllScenarios(chargePointId: string): ScenarioDefinition[] {
         const existing = loadScenarios(chargePointId, connectorId);
 
         // Check if this scenario already exists in the new format
-        const alreadyMigrated = existing.some(s => s.id === migrated.id);
+        const alreadyMigrated = existing.some((s) => s.id === migrated.id);
 
         if (!alreadyMigrated) {
           // Add to new storage
@@ -153,7 +158,9 @@ export function exportScenarioToJSON(scenario: ScenarioDefinition): void {
 /**
  * Import scenario from JSON file
  */
-export function importScenarioFromJSON(file: File): Promise<ScenarioDefinition> {
+export function importScenarioFromJSON(
+  file: File,
+): Promise<ScenarioDefinition> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -184,7 +191,10 @@ export function importScenarioFromJSON(file: File): Promise<ScenarioDefinition> 
 /**
  * Build storage key
  */
-function buildStorageKey(chargePointId: string, connectorId: number | null): string {
+function buildStorageKey(
+  chargePointId: string,
+  connectorId: number | null,
+): string {
   if (connectorId === null) {
     return `${STORAGE_KEY_PREFIX}${chargePointId}_chargepoint`;
   }
@@ -197,11 +207,12 @@ function buildStorageKey(chargePointId: string, connectorId: number | null): str
 export function createDefaultScenario(
   chargePointId: string,
   connectorId: number | null,
-  name?: string
+  name?: string,
 ): ScenarioDefinition {
   const targetType = connectorId === null ? "chargePoint" : "connector";
   const scenarioName =
-    name || `Scenario for ${targetType === "chargePoint" ? chargePointId : `${chargePointId} Connector ${connectorId}`}`;
+    name ||
+    `Scenario for ${targetType === "chargePoint" ? chargePointId : `${chargePointId} Connector ${connectorId}`}`;
 
   return {
     id: `${chargePointId}_${connectorId || "cp"}_${Date.now()}`,
@@ -239,7 +250,10 @@ export function createDefaultScenario(
 /**
  * Build storage key for multiple scenarios
  */
-function buildScenariosStorageKey(chargePointId: string, connectorId: number | null): string {
+function buildScenariosStorageKey(
+  chargePointId: string,
+  connectorId: number | null,
+): string {
   if (connectorId === null) {
     return `${SCENARIOS_KEY_PREFIX}${chargePointId}_chargepoint`;
   }
@@ -252,7 +266,7 @@ function buildScenariosStorageKey(chargePointId: string, connectorId: number | n
  */
 export function loadScenarios(
   chargePointId: string,
-  connectorId: number | null
+  connectorId: number | null,
 ): ScenarioDefinition[] {
   const key = buildScenariosStorageKey(chargePointId, connectorId);
 
@@ -288,7 +302,7 @@ export function loadScenarios(
 export function saveScenarios(
   chargePointId: string,
   connectorId: number | null,
-  scenarios: ScenarioDefinition[]
+  scenarios: ScenarioDefinition[],
 ): void {
   const key = buildScenariosStorageKey(chargePointId, connectorId);
 
@@ -311,7 +325,7 @@ export function saveScenarios(
 export function addScenario(
   chargePointId: string,
   connectorId: number | null,
-  scenario: ScenarioDefinition
+  scenario: ScenarioDefinition,
 ): void {
   // Replace all existing scenarios with this one (only one scenario per connector)
   saveScenarios(chargePointId, connectorId, [scenario]);
@@ -326,7 +340,7 @@ export function updateScenario(
   chargePointId: string,
   connectorId: number | null,
   scenarioId: string,
-  updatedScenario: ScenarioDefinition
+  updatedScenario: ScenarioDefinition,
 ): void {
   // Simply save the updated scenario as the only scenario
   const updated = { ...updatedScenario, updatedAt: new Date().toISOString() };
@@ -341,7 +355,8 @@ export function updateScenario(
 export function deleteScenarioById(
   chargePointId: string,
   connectorId: number | null,
-  scenarioId: string
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _scenarioId: string,
 ): void {
   // Delete all scenarios (which should only be one)
   saveScenarios(chargePointId, connectorId, []);
@@ -353,7 +368,7 @@ export function deleteScenarioById(
 export function getScenarioById(
   chargePointId: string,
   connectorId: number | null,
-  scenarioId: string
+  scenarioId: string,
 ): ScenarioDefinition | null {
   const scenarios = loadScenarios(chargePointId, connectorId);
   return scenarios.find((s) => s.id === scenarioId) || null;
@@ -362,7 +377,9 @@ export function getScenarioById(
 /**
  * Migrate legacy scenario to new format
  */
-function migrateScenarioToNew(scenario: ScenarioDefinition): ScenarioDefinition {
+function migrateScenarioToNew(
+  scenario: ScenarioDefinition,
+): ScenarioDefinition {
   return {
     ...scenario,
     trigger: scenario.trigger || { type: "manual" },
@@ -378,13 +395,13 @@ function migrateScenarioToNew(scenario: ScenarioDefinition): ScenarioDefinition 
  */
 export function ensureSingleScenario(
   chargePointId: string,
-  connectorId: number | null
+  connectorId: number | null,
 ): void {
   const scenarios = loadScenarios(chargePointId, connectorId);
 
   if (scenarios.length > 1) {
     console.warn(
-      `[scenarioStorage] Found ${scenarios.length} scenarios for connector ${connectorId}, keeping only the first one`
+      `[scenarioStorage] Found ${scenarios.length} scenarios for connector ${connectorId}, keeping only the first one`,
     );
     // Keep only the first (most recent or enabled) scenario
     const firstEnabled = scenarios.find((s) => s.enabled) || scenarios[0];

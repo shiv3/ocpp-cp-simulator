@@ -10,7 +10,12 @@ export type ScenarioMode = "manual" | "scenario";
 /**
  * Scenario execution state
  */
-export type ScenarioExecutionState = "idle" | "running" | "paused" | "completed" | "error";
+export type ScenarioExecutionState =
+  | "idle"
+  | "running"
+  | "paused"
+  | "completed"
+  | "error";
 
 /**
  * Scenario execution control mode
@@ -88,7 +93,7 @@ export interface DelayNodeData extends BaseNodeData {
  */
 export interface NotificationNodeData extends BaseNodeData {
   messageType: string; // e.g., "Authorize", "DataTransfer", etc.
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 }
 
 /**
@@ -171,7 +176,7 @@ export interface ScenarioTrigger {
   type: "manual" | "statusChange";
   conditions?: {
     fromStatus?: OCPPStatus; // Optional: trigger only from specific status
-    toStatus?: OCPPStatus;   // Optional: trigger only to specific status
+    toStatus?: OCPPStatus; // Optional: trigger only to specific status
   };
 }
 
@@ -190,9 +195,9 @@ export interface ScenarioDefinition {
   updatedAt: string;
 
   // Auto-execution settings
-  trigger?: ScenarioTrigger;              // Trigger configuration (default: manual)
+  trigger?: ScenarioTrigger; // Trigger configuration (default: manual)
   defaultExecutionMode?: ScenarioExecutionMode; // Default execution mode (default: oneshot)
-  enabled?: boolean;                       // Enable/disable toggle (default: true)
+  enabled?: boolean; // Enable/disable toggle (default: true)
 }
 
 /**
@@ -213,9 +218,9 @@ export interface ScenarioExecutionContext {
  * Stores multiple scenarios for a single connector
  */
 export interface ConnectorScenariosCollection {
-  version: number;                    // Storage version for migrations
-  scenarios: ScenarioDefinition[];    // All scenarios for this connector
-  activeScenarioIds?: string[];       // Currently executing scenario IDs
+  version: number; // Storage version for migrations
+  scenarios: ScenarioDefinition[]; // All scenarios for this connector
+  activeScenarioIds?: string[]; // Currently executing scenario IDs
 }
 
 /**
@@ -223,18 +228,38 @@ export interface ConnectorScenariosCollection {
  */
 export interface ScenarioExecutorCallbacks {
   onStatusChange?: (status: OCPPStatus) => Promise<void>;
-  onStartTransaction?: (tagId: string, batteryCapacityKwh?: number, initialSoc?: number) => Promise<void>;
+  onStartTransaction?: (
+    tagId: string,
+    batteryCapacityKwh?: number,
+    initialSoc?: number,
+  ) => Promise<void>;
   onStopTransaction?: () => Promise<void>;
   onSetMeterValue?: (value: number) => void;
   onSendMeterValue?: () => Promise<void>;
-  onStartAutoMeterValue?: (config: { intervalSeconds: number; incrementValue: number; maxTimeSeconds?: number; maxValue?: number }) => void;
+  onStartAutoMeterValue?: (config: {
+    intervalSeconds: number;
+    incrementValue: number;
+    maxTimeSeconds?: number;
+    maxValue?: number;
+  }) => void;
   onStopAutoMeterValue?: () => void;
-  onSendNotification?: (messageType: string, payload: Record<string, any>) => Promise<void>;
+  onSendNotification?: (
+    messageType: string,
+    payload: Record<string, unknown>,
+  ) => Promise<void>;
   onConnectorPlug?: (action: "plugin" | "plugout") => Promise<void>;
   onDelay?: (seconds: number) => Promise<void>;
   onWaitForRemoteStart?: (timeout?: number) => Promise<string>; // Returns tagId from RemoteStartTransaction
-  onWaitForStatus?: (targetStatus: OCPPStatus, timeout?: number) => Promise<void>; // Waits for status change
-  onReserveNow?: (expiryMinutes: number, idTag: string, parentIdTag?: string, reservationId?: number) => Promise<number>; // Returns reservationId
+  onWaitForStatus?: (
+    targetStatus: OCPPStatus,
+    timeout?: number,
+  ) => Promise<void>; // Waits for status change
+  onReserveNow?: (
+    expiryMinutes: number,
+    idTag: string,
+    parentIdTag?: string,
+    reservationId?: number,
+  ) => Promise<number>; // Returns reservationId
   onCancelReservation?: (reservationId: number) => Promise<void>;
   onWaitForReservation?: (timeout?: number) => Promise<number>; // Returns reservationId from ReserveNow request
   onStateChange?: (context: ScenarioExecutionContext) => void;
@@ -378,5 +403,5 @@ export interface ScenarioEvents {
 
   // Dynamic hierarchical events for specific node types
   // These are string-indexed for flexibility with EventEmitter2 wildcards
-  [key: string]: any;
+  [key: string]: unknown;
 }

@@ -19,12 +19,14 @@ import type { HistoryOptions, StateHistoryEntry } from "./types/StateSnapshot";
 import { OCPPStatus, LogType } from "../../domain/types/OcppTypes";
 
 interface ConnectorGetter {
-  (id: number): {
-    status: string;
-    availability: "Operative" | "Inoperative";
-    transaction: { id: number } | null;
-    meterValue: number;
-  } | undefined;
+  (id: number):
+    | {
+        status: string;
+        availability: "Operative" | "Inoperative";
+        transaction: { id: number } | null;
+        meterValue: number;
+      }
+    | undefined;
 }
 
 interface ChargePointGetter {
@@ -39,7 +41,8 @@ interface ChargePointGetter {
  * Robot3を使ったConnector状態管理
  */
 export class StateManager {
-  private connectorMachines: Map<number, any> = new Map();
+  private connectorMachines: Map<number, ReturnType<typeof interpret>> =
+    new Map();
   private connectorPreviousStatus: Map<number, OCPPStatus> = new Map();
   public readonly history: StateHistory;
 
@@ -47,30 +50,33 @@ export class StateManager {
     private logger: Logger,
     private eventEmitter: EventEmitter<ChargePointEvents>,
     private chargePointGetter: ChargePointGetter,
-    private connectorGetter: ConnectorGetter
+    private connectorGetter: ConnectorGetter,
   ) {
     this.history = new StateHistory(1000);
 
     // Listen to connector status changes and record them in history
-    this.eventEmitter.on("connectorStatusChange", ({ connectorId, status, previousStatus }) => {
-      this.history.recordTransition({
-        id: crypto.randomUUID(),
-        timestamp: new Date(),
-        entity: "connector",
-        entityId: connectorId,
-        transitionType: "status",
-        fromState: previousStatus,
-        toState: status,
-        context: {
-          source: "ChargePoint.updateConnectorStatus",
+    this.eventEmitter.on(
+      "connectorStatusChange",
+      ({ connectorId, status, previousStatus }) => {
+        this.history.recordTransition({
+          id: crypto.randomUUID(),
           timestamp: new Date(),
-        },
-        validationResult: {
-          level: "OK",
-        },
-        success: true,
-      });
-    });
+          entity: "connector",
+          entityId: connectorId,
+          transitionType: "status",
+          fromState: previousStatus,
+          toState: status,
+          context: {
+            source: "ChargePoint.updateConnectorStatus",
+            timestamp: new Date(),
+          },
+          validationResult: {
+            level: "OK",
+          },
+          success: true,
+        });
+      },
+    );
   }
 
   /**
@@ -82,7 +88,7 @@ export class StateManager {
   initializeConnector(
     connectorId: number,
     initialStatus: OCPPStatus = OCPPStatus.Available,
-    availability: "Operative" | "Inoperative" = "Operative"
+    availability: "Operative" | "Inoperative" = "Operative",
   ): void {
     const initialContext: ConnectorContext = {
       connectorId,
@@ -115,7 +121,7 @@ export class StateManager {
       // ログ記録
       this.logger.info(
         `[StateManager] Connector ${connectorId} status: ${previousStatus} → ${status}`,
-        LogType.System
+        LogType.System,
       );
 
       // 前回のステータスを更新
@@ -136,7 +142,7 @@ export class StateManager {
   transitionConnectorStatus(
     connectorId: number,
     event: ConnectorEvent,
-    context?: TransitionContext
+    context?: TransitionContext,
   ): StateTransitionResult {
     const service = this.connectorMachines.get(connectorId);
 
@@ -181,13 +187,14 @@ export class StateManager {
         previousState,
         newState,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Guard条件失敗などで遷移が拒否された場合
-      const errorMessage = error.message || "Transition failed";
+      const errorMessage =
+        error instanceof Error ? error.message : "Transition failed";
 
       this.logger.error(
         `[StateManager] State transition failed for connector ${connectorId}: ${errorMessage}`,
-        LogType.System
+        LogType.System,
       );
 
       // 失敗を履歴に記録
@@ -225,7 +232,10 @@ export class StateManager {
    * @param tagId Tag ID
    * @returns 遷移結果
    */
-  prepareTransaction(connectorId: number, tagId: string): StateTransitionResult {
+  prepareTransaction(
+    connectorId: number,
+    tagId: string,
+  ): StateTransitionResult {
     return this.transitionConnectorStatus(
       connectorId,
       { type: "PLUGIN" },
@@ -233,7 +243,7 @@ export class StateManager {
         source: "prepareTransaction",
         timestamp: new Date(),
         metadata: { tagId },
-      }
+      },
     );
   }
 
@@ -247,7 +257,7 @@ export class StateManager {
   startTransaction(
     connectorId: number,
     transactionId: number,
-    tagId?: string
+    tagId?: string,
   ): StateTransitionResult {
     const service = this.connectorMachines.get(connectorId);
 
@@ -264,7 +274,7 @@ export class StateManager {
         source: "startTransaction",
         timestamp: new Date(),
         metadata: { transactionId, tagId },
-      }
+      },
     );
   }
 
@@ -274,10 +284,7 @@ export class StateManager {
    * @param reason 停止理由
    * @returns 遷移結果
    */
-  stopTransaction(
-    connectorId: number,
-    reason?: string
-  ): StateTransitionResult {
+  stopTransaction(connectorId: number, reason?: string): StateTransitionResult {
     return this.transitionConnectorStatus(
       connectorId,
       { type: "STOP_TRANSACTION", reason },
@@ -285,7 +292,7 @@ export class StateManager {
         source: "stopTransaction",
         timestamp: new Date(),
         reason,
-      }
+      },
     );
   }
 
@@ -297,7 +304,7 @@ export class StateManager {
    */
   transitionChargePointStatus(
     status: OCPPStatus,
-    context: TransitionContext
+    context: TransitionContext,
   ): StateTransitionResult {
     const chargePoint = this.chargePointGetter();
     const previousStatus = chargePoint.status;
@@ -319,7 +326,7 @@ export class StateManager {
 
     this.logger.info(
       `[StateManager] ChargePoint status: ${previousStatus} → ${status}`,
-      LogType.System
+      LogType.System,
     );
 
     return {

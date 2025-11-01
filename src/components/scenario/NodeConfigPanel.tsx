@@ -1,17 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Node } from "@xyflow/react";
-import {
-  ScenarioNodeType,
-  StatusChangeNodeData,
-  TransactionNodeData,
-  MeterValueNodeData,
-  DelayNodeData,
-  NotificationNodeData,
-  ConnectorPlugNodeData,
-  ReserveNowNodeData,
-  CancelReservationNodeData,
-  ReservationTriggerNodeData,
-} from "../../cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import {
   Dialog,
@@ -37,7 +26,7 @@ interface NodeConfigPanelProps {
   node: Node | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (nodeId: string, newData: any) => void;
+  onSave: (nodeId: string, newData: Record<string, unknown>) => void;
 }
 
 const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
@@ -46,7 +35,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   onClose,
   onSave,
 }) => {
-  const [formData, setFormData] = useState<any>({});
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
     if (node) {
@@ -146,7 +135,9 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="battery-capacity">Battery Capacity (kWh)</Label>
+                  <Label htmlFor="battery-capacity">
+                    Battery Capacity (kWh)
+                  </Label>
                   <Input
                     id="battery-capacity"
                     type="number"
@@ -154,7 +145,9 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        batteryCapacityKwh: e.target.value ? parseFloat(e.target.value) : undefined,
+                        batteryCapacityKwh: e.target.value
+                          ? parseFloat(e.target.value)
+                          : undefined,
                       })
                     }
                     placeholder="e.g., 40, 60, 100"
@@ -162,7 +155,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    EV battery capacity (optional). Used for calculating charge percentage from energy values.
+                    EV battery capacity (optional). Used for calculating charge
+                    percentage from energy values.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -174,7 +168,9 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        initialSoc: e.target.value ? parseFloat(e.target.value) : undefined,
+                        initialSoc: e.target.value
+                          ? parseFloat(e.target.value)
+                          : undefined,
                       })
                     }
                     placeholder="e.g., 20, 50, 80"
@@ -183,7 +179,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                     max="100"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Initial State of Charge percentage (optional). If provided, SoC will be tracked instead of just energy.
+                    Initial State of Charge percentage (optional). If provided,
+                    SoC will be tracked instead of just energy.
                   </p>
                 </div>
               </>
@@ -227,7 +224,10 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   setFormData({ ...formData, sendMessage: checked })
                 }
               />
-              <Label htmlFor="sendMessage" className="font-normal cursor-pointer">
+              <Label
+                htmlFor="sendMessage"
+                className="font-normal cursor-pointer"
+              >
                 Send MeterValue Message
               </Label>
             </div>
@@ -239,14 +239,19 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   setFormData({ ...formData, autoIncrement: checked })
                 }
               />
-              <Label htmlFor="autoIncrement" className="font-normal cursor-pointer">
+              <Label
+                htmlFor="autoIncrement"
+                className="font-normal cursor-pointer"
+              >
                 Auto Increment (Start AutoMeterValue Manager)
               </Label>
             </div>
             {formData.autoIncrement && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="incrementInterval">Increment Interval (seconds)</Label>
+                  <Label htmlFor="incrementInterval">
+                    Increment Interval (seconds)
+                  </Label>
                   <Input
                     id="incrementInterval"
                     type="number"
@@ -274,7 +279,9 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="maxTime">Max Time (seconds, 0 = unlimited)</Label>
+                  <Label htmlFor="maxTime">
+                    Max Time (seconds, 0 = unlimited)
+                  </Label>
                   <Input
                     id="maxTime"
                     type="number"
@@ -287,11 +294,14 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                     }
                   />
                   <p className="text-xs text-muted-foreground">
-                    AutoMeterValue will stop after this many seconds (0 = unlimited)
+                    AutoMeterValue will stop after this many seconds (0 =
+                    unlimited)
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="maxValue">Max Value (Wh, 0 = unlimited)</Label>
+                  <Label htmlFor="maxValue">
+                    Max Value (Wh, 0 = unlimited)
+                  </Label>
                   <Input
                     id="maxValue"
                     type="number"
@@ -304,7 +314,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                     }
                   />
                   <p className="text-xs text-muted-foreground">
-                    AutoMeterValue will stop when meter reaches this value (0 = unlimited)
+                    AutoMeterValue will stop when meter reaches this value (0 =
+                    unlimited)
                   </p>
                 </div>
               </>
@@ -526,7 +537,9 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    reservationId: e.target.value ? parseInt(e.target.value) : undefined,
+                    reservationId: e.target.value
+                      ? parseInt(e.target.value)
+                      : undefined,
                   })
                 }
                 placeholder="Auto-generated if not provided"
@@ -708,9 +721,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave}>
-            Save
-          </Button>
+          <Button onClick={handleSave}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

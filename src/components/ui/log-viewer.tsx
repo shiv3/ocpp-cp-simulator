@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { LogEntry, LogLevel, LogType } from '@/cp/shared/Logger';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from "react";
+import { LogEntry, LogLevel, LogType } from "@/cp/shared/Logger";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface LogViewerProps {
   logs: LogEntry[];
@@ -17,15 +17,15 @@ interface LogViewerProps {
 export function LogViewer({
   logs,
   onClear,
-  maxHeight = '500px',
+  maxHeight = "500px",
   className,
 }: LogViewerProps) {
-  const [filter, setFilter] = useState('');
+  const [filter, setFilter] = useState("");
   const [logLevelFilter, setLogLevelFilter] = useState<LogLevel[]>([]);
   const [logTypeFilter, setLogTypeFilter] = useState<LogType[]>([]);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
-  const [levelSearch, setLevelSearch] = useState('');
-  const [typeSearch, setTypeSearch] = useState('');
+  const [levelSearch, setLevelSearch] = useState("");
+  const [typeSearch, setTypeSearch] = useState("");
   const [levelExpanded, setLevelExpanded] = useState(true);
   const [typeExpanded, setTypeExpanded] = useState(true);
 
@@ -68,50 +68,50 @@ export function LogViewer({
     if (autoScroll && containerRef.current) {
       containerRef.current.scrollTo({
         top: containerRef.current.scrollHeight,
-        behavior: 'smooth',
+        behavior: "smooth",
       });
     }
   }, [filteredLogs, autoScroll]);
 
   const getLogLevelBadgeVariant = (
     level: LogLevel,
-  ): 'default' | 'secondary' | 'destructive' | 'outline' => {
+  ): "default" | "secondary" | "destructive" | "outline" => {
     switch (level) {
       case LogLevel.ERROR:
-        return 'destructive';
+        return "destructive";
       case LogLevel.WARN:
-        return 'default';
+        return "default";
       case LogLevel.INFO:
-        return 'secondary';
+        return "secondary";
       case LogLevel.DEBUG:
-        return 'outline';
+        return "outline";
       default:
-        return 'secondary';
+        return "secondary";
     }
   };
 
   const getLogTypeBadgeColor = (type: LogType): string => {
     switch (type) {
       case LogType.WEBSOCKET:
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
       case LogType.OCPP:
-        return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300';
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
       case LogType.TRANSACTION:
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
       case LogType.HEARTBEAT:
-        return 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-300';
+        return "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-300";
       case LogType.METER_VALUE:
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300';
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
       case LogType.STATUS:
-        return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-300';
+        return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-300";
       case LogType.CONFIGURATION:
-        return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300';
+        return "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300";
       case LogType.DIAGNOSTICS:
-        return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300';
+        return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300";
       case LogType.SCENARIO:
-        return 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300';
+        return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300";
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300';
+        return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300";
     }
   };
 
@@ -134,27 +134,31 @@ export function LogViewer({
   // Filtered level and type lists for search
   const filteredLevels = useMemo(() => {
     return Object.values(LogLevel)
-      .filter((value) => typeof value === 'number')
+      .filter((value) => typeof value === "number")
       .filter((level) =>
         LogLevel[level as LogLevel]
           .toLowerCase()
-          .includes(levelSearch.toLowerCase())
+          .includes(levelSearch.toLowerCase()),
       ) as LogLevel[];
   }, [levelSearch]);
 
   const filteredTypes = useMemo(() => {
-    return Object.values(LogType).filter((type) =>
-      type.toLowerCase().includes(typeSearch.toLowerCase())
-    );
-  }, [typeSearch]);
+    return Object.values(LogType)
+      .filter((type) => type.toLowerCase().includes(typeSearch.toLowerCase()))
+      .sort((a, b) => (stats.typeCounts[b] || 0) - (stats.typeCounts[a] || 0));
+  }, [typeSearch, stats.typeCounts]);
 
   return (
-    <div className={cn('flex h-full border rounded-lg overflow-hidden', className)}>
+    <div
+      className={cn("flex h-full border rounded-lg overflow-hidden", className)}
+    >
       {/* Left Sidebar - Filters */}
       <div className="w-64 border-r bg-muted/20 flex flex-col">
         {/* Header */}
         <div className="p-3 border-b bg-muted/50">
-          <h3 className="text-sm font-semibold">Filters</h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+            Filters
+          </h3>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -164,11 +168,13 @@ export function LogViewer({
               onClick={() => setLevelExpanded(!levelExpanded)}
               className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
             >
-              <span className="text-sm font-medium">Level</span>
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Level
+              </span>
               {levelExpanded ? (
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
               ) : (
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
               )}
             </button>
             {levelExpanded && (
@@ -190,7 +196,7 @@ export function LogViewer({
                           checked={logLevelFilter.includes(level)}
                           onCheckedChange={() => toggleLogLevel(level)}
                         />
-                        <span className="text-xs truncate">
+                        <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
                           {LogLevel[level]}
                         </span>
                       </div>
@@ -213,11 +219,13 @@ export function LogViewer({
               onClick={() => setTypeExpanded(!typeExpanded)}
               className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
             >
-              <span className="text-sm font-medium">Type</span>
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Type
+              </span>
               {typeExpanded ? (
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
               ) : (
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
               )}
             </button>
             {typeExpanded && (
@@ -239,7 +247,9 @@ export function LogViewer({
                           checked={logTypeFilter.includes(type)}
                           onCheckedChange={() => toggleLogType(type)}
                         />
-                        <span className="text-xs truncate">{type}</span>
+                        <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
+                          {type}
+                        </span>
                       </div>
                       <Badge
                         variant="outline"
@@ -261,13 +271,15 @@ export function LogViewer({
         {/* Top Bar */}
         <div className="flex justify-between items-center p-3 border-b bg-muted/50">
           <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold">Logs</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Logs
+            </h3>
             <Badge variant="outline">
               {logs.length} total / {filteredLogs.length} filtered
             </Badge>
           </div>
           <div className="flex gap-2 items-center">
-            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
               <Checkbox
                 checked={autoScroll}
                 onCheckedChange={(checked) => setAutoScroll(checked as boolean)}
@@ -318,13 +330,21 @@ export function LogViewer({
             <tbody>
               {filteredLogs.length === 0 ? (
                 <tr className="border-b">
-                  <td colSpan={4} className="p-2 text-center text-muted-foreground py-8">
-                    {logs.length === 0 ? 'No logs yet' : 'No logs match the current filters'}
+                  <td
+                    colSpan={4}
+                    className="p-2 text-center text-muted-foreground py-8"
+                  >
+                    {logs.length === 0
+                      ? "No logs yet"
+                      : "No logs match the current filters"}
                   </td>
                 </tr>
               ) : (
                 filteredLogs.map((log, index) => (
-                  <tr key={index} className="border-b transition-colors hover:bg-muted/50 font-mono text-xs">
+                  <tr
+                    key={index}
+                    className="border-b transition-colors hover:bg-muted/50 font-mono text-xs"
+                  >
                     <td className="p-2 align-middle text-muted-foreground">
                       {log.timestamp.toISOString().substring(11, 23)}
                     </td>
@@ -336,12 +356,17 @@ export function LogViewer({
                     <td className="p-2 align-middle">
                       <Badge
                         variant="secondary"
-                        className={cn('font-normal', getLogTypeBadgeColor(log.type))}
+                        className={cn(
+                          "font-normal",
+                          getLogTypeBadgeColor(log.type),
+                        )}
                       >
                         {log.type}
                       </Badge>
                     </td>
-                    <td className="p-2 align-middle break-all">{log.message}</td>
+                    <td className="p-2 align-middle break-all">
+                      {log.message}
+                    </td>
                   </tr>
                 ))
               )}

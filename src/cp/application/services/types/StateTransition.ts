@@ -1,8 +1,11 @@
-import type { OCPPStatus, OCPPAvailability } from "../../../domain/types/OcppTypes";
+import type {
+  OCPPStatus,
+  OCPPAvailability,
+} from "../../../domain/types/OcppTypes";
 import type { Transaction } from "../../../domain/connector/Transaction";
 
 /**
- * 状態遷移の結果
+ * State transition result
  */
 export interface StateTransitionResult {
   success: boolean;
@@ -13,18 +16,18 @@ export interface StateTransitionResult {
 }
 
 /**
- * 状態遷移のコンテキスト情報
+ * State transition context information
  */
 export interface TransitionContext {
   source: string; // 'RemoteStartTransaction', 'UI', 'Boot', etc.
   timestamp: Date;
   ocppMessageId?: string; // OCPP message correlation ID
-  reason?: string; // 追加情報
+  reason?: string; // Additional information
   metadata?: Record<string, unknown>;
 }
 
 /**
- * ChargePoint の状態スナップショット
+ * ChargePoint state snapshot
  */
 export interface ChargePointStateSnapshot {
   status: OCPPStatus;
@@ -33,7 +36,7 @@ export interface ChargePointStateSnapshot {
 }
 
 /**
- * Connector の状態スナップショット
+ * Connector state snapshot
  */
 export interface ConnectorStateSnapshot {
   connectorId: number;
@@ -50,7 +53,7 @@ export interface ConnectorStateSnapshot {
 }
 
 /**
- * Connector情報（バリデーション用）
+ * Connector information (for validation)
  */
 export interface ConnectorInfo {
   id: number;

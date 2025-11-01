@@ -1,12 +1,12 @@
 import type { OCPPAvailability } from "../../../domain/types/OcppTypes";
 
 /**
- * バリデーションレベル
+ * Validation level
  */
 export type ValidationLevel = "OK" | "WARNING" | "ERROR";
 
 /**
- * バリデーション結果
+ * Validation result
  */
 export interface ValidationResult {
   level: ValidationLevel;
@@ -15,7 +15,7 @@ export interface ValidationResult {
 }
 
 /**
- * バリデーションコンテキスト
+ * Validation context
  */
 export interface ValidationContext {
   source: string;

@@ -32,7 +32,7 @@ export interface LogFilter {
   endTime?: Date;
 }
 
-import EventEmitter2 from 'eventemitter2';
+import EventEmitter2 from "eventemitter2";
 
 export class Logger {
   private level: LogLevel;
@@ -40,20 +40,20 @@ export class Logger {
   private enabledTypes: Set<LogType> = new Set(Object.values(LogType));
   private emitter: EventEmitter2;
 
-  // 後方互換性のため残す
+  // Keep for backward compatibility
   public _loggingCallback: ((entry: LogEntry) => void) | null = null;
 
   set loggingCallback(callback: ((entry: LogEntry) => void) | null) {
-    // 古いコールバックを削除
+    // Remove old callback
     if (this._loggingCallback) {
-      this.emitter.off('log', this._loggingCallback);
+      this.emitter.off("log", this._loggingCallback);
     }
 
     this._loggingCallback = callback;
 
-    // 新しいコールバックを登録
+    // Register new callback
     if (callback) {
-      this.emitter.on('log', callback);
+      this.emitter.on("log", callback);
     }
   }
 
@@ -61,7 +61,7 @@ export class Logger {
     this.level = level;
     this.emitter = new EventEmitter2({
       wildcard: true,
-      delimiter: '.',
+      delimiter: ".",
       maxListeners: 50,
     });
   }
@@ -156,24 +156,27 @@ export class Logger {
 
     this.logList.push(logEntry);
 
-    // EventEmitter2でイベント発行
-    // 階層的なイベント名: log.{LogType}.{LogLevel}
+    // Emit event with EventEmitter2
+    // Hierarchical event name: log.{LogType}.{LogLevel}
     const levelName = LogLevel[level];
 
-    // 詳細なイベント: log.OCPP.INFO
+    // Detailed event: log.OCPP.INFO
     this.emitter.emit(`log.${type}.${levelName}`, logEntry);
 
-    // タイプレベルのイベント: log.OCPP
+    // Type-level event: log.OCPP
     this.emitter.emit(`log.${type}`, logEntry);
 
-    // レベルレベルのイベント: log.*.INFO
+    // Level-level event: log.*.INFO
     this.emitter.emit(`log.*.${levelName}`, logEntry);
 
-    // 汎用イベント: log
-    this.emitter.emit('log', logEntry);
+    // Generic event: log
+    this.emitter.emit("log", logEntry);
 
-    // 後方互換性（この呼び出しは不要になったが、念のため）
-    if (this._loggingCallback && !this.emitter.listeners('log').includes(this._loggingCallback)) {
+    // Backward compatibility (this call is no longer needed, but just in case)
+    if (
+      this._loggingCallback &&
+      !this.emitter.listeners("log").includes(this._loggingCallback)
+    ) {
       this._loggingCallback(logEntry);
     }
   }
@@ -281,10 +284,10 @@ export class Logger {
   /**
    * Subscribe to log events with wildcards support
    * Examples:
-   * - on('log.*', listener) - すべてのログ
-   * - on('log.OCPP.*', listener) - すべてのOCPPログ
-   * - on('log.*.ERROR', listener) - すべてのエラーログ
-   * - on('log.TRANSACTION.INFO', listener) - トランザクションの情報ログのみ
+   * - on('log.*', listener) - all logs
+   * - on('log.OCPP.*', listener) - all OCPP logs
+   * - on('log.*.ERROR', listener) - all error logs
+   * - on('log.TRANSACTION.INFO', listener) - transaction info logs only
    * @returns Unsubscribe function
    */
   on(event: string, listener: (entry: LogEntry) => void): () => void {
@@ -315,7 +318,9 @@ export class Logger {
    * Listen to all log events
    * @param listener Callback that receives (event, entry)
    */
-  onAny(listener: (event: string | string[], entry: LogEntry) => void): () => void {
+  onAny(
+    listener: (event: string | string[], entry: LogEntry) => void,
+  ): () => void {
     this.emitter.onAny(listener);
     return () => {
       this.emitter.offAny(listener);

@@ -62,7 +62,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
       setIsPlaying(false);
       onSelectTransition(Math.max(0, Math.min(history.length - 1, index)));
     },
-    [history.length, onSelectTransition]
+    [history.length, onSelectTransition],
   );
 
   const getStatusColor = (status: string) => {
@@ -119,7 +119,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
             onClick={handlePrevious}
             disabled={currentIndex === 0}
             className="btn-secondary text-xs px-2 py-1 disabled:opacity-30"
-            title="前へ"
+            title="Previous"
           >
             ⏮️
           </button>
@@ -128,7 +128,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
           <button
             onClick={handlePlayPause}
             className="btn-primary text-xs px-3 py-1"
-            title={isPlaying ? "一時停止" : "再生"}
+            title={isPlaying ? "Pause" : "Play"}
           >
             {isPlaying ? "⏸️" : "⏯️"}
           </button>
@@ -138,7 +138,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
             onClick={handleNext}
             disabled={currentIndex === history.length - 1}
             className="btn-secondary text-xs px-2 py-1 disabled:opacity-30"
-            title="次へ"
+            title="Next"
           >
             ⏭️
           </button>
@@ -151,7 +151,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
                 ? "bg-blue-500 text-white"
                 : "bg-gray-200 dark:bg-gray-700 text-primary"
             }`}
-            title="ループ再生"
+            title="Loop playback"
           >
             🔄
           </button>

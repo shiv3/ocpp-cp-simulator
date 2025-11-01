@@ -7,4 +7,6 @@ export interface Transaction {
   startTime: Date;
   stopTime: Date | null;
   meterSent: boolean;
+  batteryCapacityKwh?: number; // EV battery capacity in kWh
+  initialSoc?: number; // Initial State of Charge percentage (0-100)
 }

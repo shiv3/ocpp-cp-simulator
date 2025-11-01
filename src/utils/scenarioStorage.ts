@@ -305,19 +305,22 @@ export function saveScenarios(
 
 /**
  * Add a new scenario to the collection
+ * NOTE: Only one scenario per connector is allowed.
+ * This will replace any existing scenario.
  */
 export function addScenario(
   chargePointId: string,
   connectorId: number | null,
   scenario: ScenarioDefinition
 ): void {
-  const scenarios = loadScenarios(chargePointId, connectorId);
-  scenarios.push(scenario);
-  saveScenarios(chargePointId, connectorId, scenarios);
+  // Replace all existing scenarios with this one (only one scenario per connector)
+  saveScenarios(chargePointId, connectorId, [scenario]);
 }
 
 /**
  * Update an existing scenario
+ * NOTE: Since only one scenario per connector is allowed,
+ * this will replace the existing scenario.
  */
 export function updateScenario(
   chargePointId: string,
@@ -325,26 +328,23 @@ export function updateScenario(
   scenarioId: string,
   updatedScenario: ScenarioDefinition
 ): void {
-  const scenarios = loadScenarios(chargePointId, connectorId);
-  const index = scenarios.findIndex((s) => s.id === scenarioId);
-
-  if (index !== -1) {
-    scenarios[index] = { ...updatedScenario, updatedAt: new Date().toISOString() };
-    saveScenarios(chargePointId, connectorId, scenarios);
-  }
+  // Simply save the updated scenario as the only scenario
+  const updated = { ...updatedScenario, updatedAt: new Date().toISOString() };
+  saveScenarios(chargePointId, connectorId, [updated]);
 }
 
 /**
  * Delete a specific scenario by ID
+ * NOTE: Since only one scenario per connector is allowed,
+ * this will delete the only scenario.
  */
 export function deleteScenarioById(
   chargePointId: string,
   connectorId: number | null,
   scenarioId: string
 ): void {
-  const scenarios = loadScenarios(chargePointId, connectorId);
-  const filtered = scenarios.filter((s) => s.id !== scenarioId);
-  saveScenarios(chargePointId, connectorId, filtered);
+  // Delete all scenarios (which should only be one)
+  saveScenarios(chargePointId, connectorId, []);
 }
 
 /**
@@ -370,4 +370,24 @@ function migrateScenarioToNew(scenario: ScenarioDefinition): ScenarioDefinition 
     enabled: scenario.enabled !== undefined ? scenario.enabled : true,
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Ensure only one scenario per connector
+ * Call this to clean up any existing multiple scenarios
+ */
+export function ensureSingleScenario(
+  chargePointId: string,
+  connectorId: number | null
+): void {
+  const scenarios = loadScenarios(chargePointId, connectorId);
+
+  if (scenarios.length > 1) {
+    console.warn(
+      `[scenarioStorage] Found ${scenarios.length} scenarios for connector ${connectorId}, keeping only the first one`
+    );
+    // Keep only the first (most recent or enabled) scenario
+    const firstEnabled = scenarios.find((s) => s.enabled) || scenarios[0];
+    saveScenarios(chargePointId, connectorId, [firstEnabled]);
+  }
 }

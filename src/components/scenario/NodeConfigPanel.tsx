@@ -8,6 +8,9 @@ import {
   DelayNodeData,
   NotificationNodeData,
   ConnectorPlugNodeData,
+  ReserveNowNodeData,
+  CancelReservationNodeData,
+  ReservationTriggerNodeData,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import {
@@ -129,18 +132,61 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               </Select>
             </div>
             {formData.action === "start" && (
-              <div className="space-y-2">
-                <Label htmlFor="tag-id">Tag ID</Label>
-                <Input
-                  id="tag-id"
-                  type="text"
-                  value={formData.tagId || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, tagId: e.target.value })
-                  }
-                  placeholder="RFID123456"
-                />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="tag-id">Tag ID</Label>
+                  <Input
+                    id="tag-id"
+                    type="text"
+                    value={formData.tagId || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tagId: e.target.value })
+                    }
+                    placeholder="RFID123456"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="battery-capacity">Battery Capacity (kWh)</Label>
+                  <Input
+                    id="battery-capacity"
+                    type="number"
+                    value={formData.batteryCapacityKwh || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        batteryCapacityKwh: e.target.value ? parseFloat(e.target.value) : undefined,
+                      })
+                    }
+                    placeholder="e.g., 40, 60, 100"
+                    step="0.1"
+                    min="0"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    EV battery capacity (optional). Used for calculating charge percentage from energy values.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="initial-soc">Initial SoC (%)</Label>
+                  <Input
+                    id="initial-soc"
+                    type="number"
+                    value={formData.initialSoc || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        initialSoc: e.target.value ? parseFloat(e.target.value) : undefined,
+                      })
+                    }
+                    placeholder="e.g., 20, 50, 80"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Initial State of Charge percentage (optional). If provided, SoC will be tracked instead of just energy.
+                  </p>
+                </div>
+              </>
             )}
           </div>
         );
@@ -160,7 +206,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="meter-value">Value (Wh)</Label>
+              <Label htmlFor="meter-value">Initial Value (Wh)</Label>
               <Input
                 id="meter-value"
                 type="number"
@@ -185,6 +231,84 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 Send MeterValue Message
               </Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="autoIncrement"
+                checked={formData.autoIncrement || false}
+                onCheckedChange={(checked) =>
+                  setFormData({ ...formData, autoIncrement: checked })
+                }
+              />
+              <Label htmlFor="autoIncrement" className="font-normal cursor-pointer">
+                Auto Increment (Start AutoMeterValue Manager)
+              </Label>
+            </div>
+            {formData.autoIncrement && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="incrementInterval">Increment Interval (seconds)</Label>
+                  <Input
+                    id="incrementInterval"
+                    type="number"
+                    value={formData.incrementInterval || 10}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        incrementInterval: parseInt(e.target.value) || 10,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="incrementAmount">Increment Amount (Wh)</Label>
+                  <Input
+                    id="incrementAmount"
+                    type="number"
+                    value={formData.incrementAmount || 1000}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        incrementAmount: parseInt(e.target.value) || 1000,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxTime">Max Time (seconds, 0 = unlimited)</Label>
+                  <Input
+                    id="maxTime"
+                    type="number"
+                    value={formData.maxTime || 0}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        maxTime: parseInt(e.target.value) || 0,
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    AutoMeterValue will stop after this many seconds (0 = unlimited)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxValue">Max Value (Wh, 0 = unlimited)</Label>
+                  <Input
+                    id="maxValue"
+                    type="number"
+                    value={formData.maxValue || 0}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        maxValue: parseInt(e.target.value) || 0,
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    AutoMeterValue will stop when meter reaches this value (0 = unlimited)
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         );
 
@@ -297,8 +421,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="plugin">Plugin (接続)</SelectItem>
-                  <SelectItem value="plugout">Plugout (切断)</SelectItem>
+                  <SelectItem value="plugin">Plugin (Connect)</SelectItem>
+                  <SelectItem value="plugout">Plugout (Disconnect)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -340,6 +464,199 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           </div>
         );
 
+      case ScenarioNodeType.RESERVE_NOW:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reserve-label">Label</Label>
+              <Input
+                id="reserve-label"
+                type="text"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="idTag">ID Tag</Label>
+              <Input
+                id="idTag"
+                type="text"
+                value={formData.idTag || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, idTag: e.target.value })
+                }
+                placeholder="Enter ID tag"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="expiryMinutes">Expiry (minutes)</Label>
+              <Input
+                id="expiryMinutes"
+                type="number"
+                value={formData.expiryMinutes || 30}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    expiryMinutes: parseInt(e.target.value) || 30,
+                  })
+                }
+                min="1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="parentIdTag">Parent ID Tag (Optional)</Label>
+              <Input
+                id="parentIdTag"
+                type="text"
+                value={formData.parentIdTag || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, parentIdTag: e.target.value })
+                }
+                placeholder="Optional parent ID tag"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reservationId">Reservation ID (Optional)</Label>
+              <Input
+                id="reservationId"
+                type="number"
+                value={formData.reservationId || ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    reservationId: e.target.value ? parseInt(e.target.value) : undefined,
+                  })
+                }
+                placeholder="Auto-generated if not provided"
+              />
+            </div>
+          </div>
+        );
+
+      case ScenarioNodeType.CANCEL_RESERVATION:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="cancel-label">Label</Label>
+              <Input
+                id="cancel-label"
+                type="text"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cancel-reservationId">Reservation ID</Label>
+              <Input
+                id="cancel-reservationId"
+                type="number"
+                value={formData.reservationId || ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    reservationId: parseInt(e.target.value) || 0,
+                  })
+                }
+                placeholder="Enter reservation ID to cancel"
+              />
+            </div>
+          </div>
+        );
+
+      case ScenarioNodeType.STATUS_TRIGGER:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="status-trigger-label">Label</Label>
+              <Input
+                id="status-trigger-label"
+                type="text"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="target-status">Target Status</Label>
+              <Select
+                value={formData.targetStatus || OCPPStatus.Available}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, targetStatus: value })
+                }
+              >
+                <SelectTrigger id="target-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.values(OCPPStatus).map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="status-timeout">Timeout (seconds)</Label>
+              <Input
+                id="status-timeout"
+                type="number"
+                value={formData.timeout || 0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
+                min="0"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                0 = No timeout (wait indefinitely for status change)
+              </p>
+            </div>
+          </div>
+        );
+
+      case ScenarioNodeType.RESERVATION_TRIGGER:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reservation-trigger-label">Label</Label>
+              <Input
+                id="reservation-trigger-label"
+                type="text"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reservation-timeout">Timeout (seconds)</Label>
+              <Input
+                id="reservation-timeout"
+                type="number"
+                value={formData.timeout || 0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
+                min="0"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                0 = No timeout (wait indefinitely for ReserveNow request)
+              </p>
+            </div>
+          </div>
+        );
+
       default:
         return (
           <div className="text-sm text-muted-foreground">
@@ -365,6 +682,14 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         return "Connector Plug";
       case ScenarioNodeType.REMOTE_START_TRIGGER:
         return "Remote Start Trigger";
+      case ScenarioNodeType.STATUS_TRIGGER:
+        return "Status Trigger";
+      case ScenarioNodeType.RESERVE_NOW:
+        return "Reserve Now";
+      case ScenarioNodeType.CANCEL_RESERVATION:
+        return "Cancel Reservation";
+      case ScenarioNodeType.RESERVATION_TRIGGER:
+        return "Reservation Trigger";
       default:
         return "Node";
     }

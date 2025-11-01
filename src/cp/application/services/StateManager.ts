@@ -50,6 +50,27 @@ export class StateManager {
     private connectorGetter: ConnectorGetter
   ) {
     this.history = new StateHistory(1000);
+
+    // Listen to connector status changes and record them in history
+    this.eventEmitter.on("connectorStatusChange", ({ connectorId, status, previousStatus }) => {
+      this.history.recordTransition({
+        id: crypto.randomUUID(),
+        timestamp: new Date(),
+        entity: "connector",
+        entityId: connectorId,
+        transitionType: "status",
+        fromState: previousStatus,
+        toState: status,
+        context: {
+          source: "ChargePoint.updateConnectorStatus",
+          timestamp: new Date(),
+        },
+        validationResult: {
+          level: "OK",
+        },
+        success: true,
+      });
+    });
   }
 
   /**

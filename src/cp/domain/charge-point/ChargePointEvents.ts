@@ -31,6 +31,10 @@ export interface ChargePointEvents {
     connectorId: number;
     meterValue: number;
   };
+  connectorSocChange: {
+    connectorId: number;
+    soc: number | null;
+  };
   connectorRemoved: {
     connectorId: number;
   };

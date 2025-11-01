@@ -5,8 +5,10 @@ import {
   ScenarioDefinition,
   ScenarioExecutionMode,
   ScenarioExecutorCallbacks,
+  ScenarioEvents,
 } from "./ScenarioTypes";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
+import type { EventEmitter } from "../../shared/EventEmitter";
 
 /**
  * Scenario Manager
@@ -21,15 +23,18 @@ export class ScenarioManager {
   private scenarios: Map<string, ScenarioDefinition> = new Map();
   private executors: Map<string, ScenarioExecutor> = new Map();
   private callbacks: ScenarioExecutorCallbacks;
+  private eventEmitter?: EventEmitter<ScenarioEvents>;
 
   constructor(
     connector: Connector,
     chargePoint: ChargePoint,
-    callbacks: ScenarioExecutorCallbacks
+    callbacks: ScenarioExecutorCallbacks,
+    eventEmitter?: EventEmitter<ScenarioEvents>
   ) {
     this.connector = connector;
     this.chargePoint = chargePoint;
     this.callbacks = callbacks;
+    this.eventEmitter = eventEmitter;
 
     // Subscribe to connector status changes
     this.connector.events.on("statusChange", (data) => {
@@ -142,13 +147,20 @@ export class ScenarioManager {
     // Stop all currently running scenarios
     this.stopAllScenarios();
 
-    // Execute all matching scenarios in parallel
-    matchingScenarios.forEach((scenario) => {
+    // Execute only the first matching scenario (one scenario per connector)
+    if (matchingScenarios.length > 0) {
+      const scenario = matchingScenarios[0];
       this.executeScenario(
         scenario.id,
         scenario.defaultExecutionMode || "oneshot"
       );
-    });
+
+      if (matchingScenarios.length > 1) {
+        console.warn(
+          `[ScenarioManager] Multiple scenarios matched, but only executing the first one: ${scenario.name}`
+        );
+      }
+    }
   }
 
   /**
@@ -261,8 +273,8 @@ export class ScenarioManager {
       `[ScenarioManager] Executing scenario: ${scenario.name} (${mode})`
     );
 
-    // Create executor
-    const executor = new ScenarioExecutor(scenario, this.callbacks);
+    // Create executor with event emitter
+    const executor = new ScenarioExecutor(scenario, this.callbacks, this.eventEmitter);
     this.executors.set(scenarioId, executor);
 
     try {

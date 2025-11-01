@@ -1,42 +1,36 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
-interface StateNodeData {
-  status: OCPPStatus;
+export type ScenarioState = "idle" | "running" | "paused" | "waiting" | "stepping" | "completed" | "error";
+
+interface ScenarioStateNodeData {
+  state: ScenarioState;
   label: string;
   isCurrent: boolean;
-  isOperative: boolean;
 }
 
-const StateNode: React.FC<NodeProps<StateNodeData>> = ({ data }) => {
-  const { status, label, isCurrent, isOperative } = data;
+const ScenarioStateNode: React.FC<NodeProps<ScenarioStateNodeData>> = ({ data }) => {
+  const { state, label, isCurrent } = data;
 
   // Color settings based on state
   const getBackgroundColor = () => {
     if (isCurrent) {
       return "bg-blue-500 border-blue-700";
     }
-    if (!isOperative) {
-      return "bg-gray-400 border-gray-600";
-    }
-    switch (status) {
-      case OCPPStatus.Available:
-        return "bg-green-400 border-green-600";
-      case OCPPStatus.Preparing:
-        return "bg-yellow-400 border-yellow-600";
-      case OCPPStatus.Charging:
+    switch (state) {
+      case "idle":
+        return "bg-gray-400 border-gray-600";
+      case "running":
+        return "bg-green-500 border-green-700";
+      case "paused":
+        return "bg-yellow-500 border-yellow-700";
+      case "waiting":
+        return "bg-orange-500 border-orange-700";
+      case "stepping":
+        return "bg-purple-500 border-purple-700";
+      case "completed":
         return "bg-emerald-500 border-emerald-700";
-      case OCPPStatus.SuspendedEV:
-      case OCPPStatus.SuspendedEVSE:
-        return "bg-orange-400 border-orange-600";
-      case OCPPStatus.Finishing:
-        return "bg-cyan-400 border-cyan-600";
-      case OCPPStatus.Reserved:
-        return "bg-purple-400 border-purple-600";
-      case OCPPStatus.Unavailable:
-        return "bg-gray-500 border-gray-700";
-      case OCPPStatus.Faulted:
+      case "error":
         return "bg-red-500 border-red-700";
       default:
         return "bg-gray-300 border-gray-500";
@@ -121,4 +115,4 @@ const StateNode: React.FC<NodeProps<StateNodeData>> = ({ data }) => {
   );
 };
 
-export default memo(StateNode);
+export default memo(ScenarioStateNode);

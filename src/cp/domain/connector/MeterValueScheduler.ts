@@ -8,11 +8,15 @@ export type MeterValueStrategy =
   | {
       kind: "curve";
       config: AutoMeterValueConfig;
+      maxTimeSeconds?: number; // Maximum time to run (0 = unlimited)
+      maxValue?: number; // Maximum meter value in Wh (0 = unlimited)
     }
   | {
       kind: "increment";
       intervalSeconds: number;
       incrementValue: number;
+      maxTimeSeconds?: number; // Maximum time to run (0 = unlimited)
+      maxValue?: number; // Maximum meter value in Wh (0 = unlimited)
     };
 
 interface MeterValueSchedulerCallbacks {
@@ -62,15 +66,48 @@ export class MeterValueScheduler {
 
     const intervalMs = Math.max(1000, strategy.intervalSeconds * 1000);
     this.logger?.info?.(
-      `[MeterValueScheduler] Starting increment strategy for connector ${this.connectorId} interval=${intervalMs}ms increment=${strategy.incrementValue}`,
+      `[MeterValueScheduler] Starting increment strategy for connector ${this.connectorId} interval=${intervalMs}ms increment=${strategy.incrementValue} maxTime=${strategy.maxTimeSeconds || 'unlimited'} maxValue=${strategy.maxValue || 'unlimited'}`,
     );
 
+    this.startTimestamp = Date.now();
     this.timer = setInterval(() => {
-      const current = this.callbacks.getCurrentValue();
-      const next = current + strategy.incrementValue;
-      this.callbacks.updateValue(next);
-      this.callbacks.onSend(this.connectorId);
+      this.tickIncrement(strategy);
     }, intervalMs);
+  }
+
+  private tickIncrement(strategy: Extract<MeterValueStrategy, { kind: "increment" }>): void {
+    // Check max time
+    if (strategy.maxTimeSeconds && strategy.maxTimeSeconds > 0 && this.startTimestamp) {
+      const elapsedSeconds = (Date.now() - this.startTimestamp) / 1000;
+      if (elapsedSeconds >= strategy.maxTimeSeconds) {
+        this.logger?.info?.(
+          `[MeterValueScheduler] Max time reached (${strategy.maxTimeSeconds}s) for connector ${this.connectorId}, stopping`,
+        );
+        this.stop();
+        return;
+      }
+    }
+
+    const current = this.callbacks.getCurrentValue();
+
+    // Check max value before incrementing
+    if (strategy.maxValue && strategy.maxValue > 0 && current >= strategy.maxValue) {
+      this.logger?.info?.(
+        `[MeterValueScheduler] Max value reached (${strategy.maxValue}Wh) for connector ${this.connectorId}, stopping`,
+      );
+      this.stop();
+      return;
+    }
+
+    const next = current + strategy.incrementValue;
+
+    // Cap at maxValue if specified
+    const finalValue = strategy.maxValue && strategy.maxValue > 0
+      ? Math.min(next, strategy.maxValue)
+      : next;
+
+    this.callbacks.updateValue(finalValue);
+    this.callbacks.onSend(this.connectorId);
   }
 
   stop(): void {

@@ -27,6 +27,7 @@
     "@tauri-apps/api": "^2.7.0",
     "@voltbras/ts-ocpp": "^2.7.3",
     "@xyflow/react": "^12.9.0",
+    "eventemitter2": "^6.4.9",
     "jotai": "^2.12.5",
     "jotai-location": "^0.5.5",
     "jotai-zustand": "^0.4.0",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.7.0",
+    "@types/eventemitter2": "^2.2.1",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@types/uuid": "^10.0.0",

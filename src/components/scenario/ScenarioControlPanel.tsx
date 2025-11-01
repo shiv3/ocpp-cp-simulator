@@ -47,7 +47,7 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted">Status:</span>
             <span className={`text-xs font-semibold ${getStateColor(executionState)}`}>
-              {executionState.toUpperCase()}
+              {executionState ? executionState.toUpperCase() : "IDLE"}
             </span>
           </div>
         </div>

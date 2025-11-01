@@ -132,6 +132,14 @@ export type CallHandlerMap = {
     request.UnlockConnectorRequest,
     response.UnlockConnectorResponse
   >;
+  [OCPPAction.ReserveNow]: CallHandler<
+    request.ReserveNowRequest,
+    response.ReserveNowResponse
+  >;
+  [OCPPAction.CancelReservation]: CallHandler<
+    request.CancelReservationRequest,
+    response.CancelReservationResponse
+  >;
 };
 
 export type CallResultHandlerMap = {

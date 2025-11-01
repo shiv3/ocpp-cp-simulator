@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import Connector from "./Connector.tsx";
-import Logger from "./Logger.tsx";
+import { LogViewer } from "./ui/log-viewer.tsx";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { useChargePointView } from "../data/hooks/useChargePointView";
 import { useDataContext } from "../data/providers/DataProvider";
@@ -40,7 +40,9 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
         ))}
       </div>
 
-      <Logger logs={logs} onClear={handleClearLogs} />
+      <div className="mt-4">
+        <LogViewer logs={logs} onClear={handleClearLogs} maxHeight="500px" />
+      </div>
     </div>
   );
 };

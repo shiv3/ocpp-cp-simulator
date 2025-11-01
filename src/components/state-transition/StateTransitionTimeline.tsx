@@ -104,7 +104,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
   if (history.length === 0) {
     return (
       <div className="p-4 text-center text-muted">
-        状態遷移の履歴がまだありません
+        No state transition history yet
       </div>
     );
   }

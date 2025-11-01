@@ -25,7 +25,9 @@ import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import {
   CurvePoint,
   calculateBezierPoint,
+  AutoMeterValueConfig,
 } from "../../cp/domain/connector/MeterValueCurve";
+import MeterValueCurveModal from "../MeterValueCurveModal";
 
 // Import node components
 import StatusChangeNode from "./nodes/StatusChangeNode";
@@ -36,6 +38,9 @@ import NotificationNode from "./nodes/NotificationNode";
 import ConnectorPlugNode from "./nodes/ConnectorPlugNode";
 import RemoteStartTriggerNode from "./nodes/RemoteStartTriggerNode";
 import StatusTriggerNode from "./nodes/StatusTriggerNode";
+import ReserveNowNode from "./nodes/ReserveNowNode";
+import CancelReservationNode from "./nodes/CancelReservationNode";
+import ReservationTriggerNode from "./nodes/ReservationTriggerNode";
 import StartEndNode from "./nodes/StartEndNode";
 import ScenarioControlPanel from "./ScenarioControlPanel";
 import NodeConfigPanel from "./NodeConfigPanel";
@@ -73,6 +78,9 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.CONNECTOR_PLUG]: ConnectorPlugNode,
   [ScenarioNodeType.REMOTE_START_TRIGGER]: RemoteStartTriggerNode,
   [ScenarioNodeType.STATUS_TRIGGER]: StatusTriggerNode,
+  [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
+  [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
+  [ScenarioNodeType.RESERVATION_TRIGGER]: ReservationTriggerNode,
   [ScenarioNodeType.START]: (props) => <StartEndNode {...props} nodeType="start" />,
   [ScenarioNodeType.END]: (props) => <StartEndNode {...props} nodeType="end" />,
 };
@@ -109,6 +117,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [meterValue, setMeterValue] = useState<number>(0);
   const [transactionId, setTransactionId] = useState<number | null>(null);
   const [nodeProgress, setNodeProgress] = useState<Record<string, { remaining: number; total: number }>>({});
+  const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
   // Scenario metadata state
   const [scenarioName, setScenarioName] = useState(scenario.name);
@@ -546,7 +555,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return;
       }
 
-      if (nodes.length > 2 && !window.confirm("現在のシナリオを破棄してテンプレートを読み込みますか？")) {
+      if (nodes.length > 2 && !window.confirm("Discard the current scenario and load the template?")) {
         return;
       }
 
@@ -633,6 +642,50 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return "status-error";
       default:
         return "text-secondary";
+    }
+  };
+
+  // Get scenario state color class
+  const getScenarioStateColor = (state: ScenarioExecutionState) => {
+    switch (state) {
+      case "idle":
+        return "text-gray-600 dark:text-gray-400";
+      case "running":
+        return "text-green-600 dark:text-green-400";
+      case "paused":
+        return "text-yellow-600 dark:text-yellow-400";
+      case "waiting":
+        return "text-orange-600 dark:text-orange-400";
+      case "stepping":
+        return "text-purple-600 dark:text-purple-400";
+      case "completed":
+        return "text-emerald-600 dark:text-emerald-400";
+      case "error":
+        return "text-red-600 dark:text-red-400";
+      default:
+        return "text-gray-600 dark:text-gray-400";
+    }
+  };
+
+  // Get scenario state indicator
+  const getScenarioStateIndicator = (state: ScenarioExecutionState) => {
+    switch (state) {
+      case "idle":
+        return <span className="text-gray-400">●</span>;
+      case "running":
+        return <span className="text-green-500 animate-pulse">●</span>;
+      case "paused":
+        return <span className="text-yellow-500">⏸</span>;
+      case "waiting":
+        return <span className="text-orange-500 animate-pulse">⏳</span>;
+      case "stepping":
+        return <span className="text-purple-500">⏯</span>;
+      case "completed":
+        return <span className="text-emerald-500">✓</span>;
+      case "error":
+        return <span className="text-red-500">✗</span>;
+      default:
+        return <span className="text-gray-400">●</span>;
     }
   };
 
@@ -778,124 +831,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               </div>
               {formData.autoIncrement && (
                 <div className="ml-6 space-y-2">
-                  <div className="flex items-center gap-2 mb-2">
-                    <input
-                      type="checkbox"
-                      id="useCurve"
-                      checked={formData.useCurve || false}
-                      onChange={(e) => setFormData({ ...formData, useCurve: e.target.checked })}
-                      className="w-4 h-4"
-                    />
-                    <label htmlFor="useCurve" className="text-xs font-semibold text-primary">
-                      Use Curve (2D Graph)
-                    </label>
-                  </div>
-
-                  {!formData.useCurve && (
-                    <>
-                      <div>
-                        <label className="block text-xs font-semibold text-primary mb-1">
-                          Increment Interval (seconds)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-sm"
-                          value={formData.incrementInterval || 10}
-                          onChange={(e) => setFormData({ ...formData, incrementInterval: parseInt(e.target.value) || 10 })}
-                          min="1"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-primary mb-1">
-                          Increment Amount (Wh)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-sm"
-                          value={formData.incrementAmount || 1000}
-                          onChange={(e) => setFormData({ ...formData, incrementAmount: parseInt(e.target.value) || 1000 })}
-                          min="1"
-                        />
-                      </div>
-                      <p className="text-xs text-muted">
-                        Meter value will automatically increment every {formData.incrementInterval || 10}s by {formData.incrementAmount || 1000} Wh
-                      </p>
-                    </>
-                  )}
-
-                  {formData.useCurve && (
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold text-primary mb-2">Curve Control Points</div>
-                      <div className="max-h-40 overflow-y-auto space-y-2 border border-gray-200 dark:border-gray-700 rounded p-2 bg-gray-50 dark:bg-gray-800">
-                        {(formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }]).map((point: CurvePoint, index: number) => (
-                          <div key={index} className="flex items-center gap-2 bg-white dark:bg-gray-700 p-2 rounded">
-                            <div className="flex-1">
-                              <input
-                                type="number"
-                                placeholder="Time (min)"
-                                className="input-base w-full text-xs"
-                                value={point.time}
-                                onChange={(e) => {
-                                  const newPoints = [...(formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }])];
-                                  newPoints[index] = { ...newPoints[index], time: parseFloat(e.target.value) || 0 };
-                                  setFormData({ ...formData, curvePoints: newPoints });
-                                }}
-                                step="0.1"
-                              />
-                              <span className="text-xs text-muted">min</span>
-                            </div>
-                            <div className="flex-1">
-                              <input
-                                type="number"
-                                placeholder="Value (kWh)"
-                                className="input-base w-full text-xs"
-                                value={point.value}
-                                onChange={(e) => {
-                                  const newPoints = [...(formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }])];
-                                  newPoints[index] = { ...newPoints[index], value: parseFloat(e.target.value) || 0 };
-                                  setFormData({ ...formData, curvePoints: newPoints });
-                                }}
-                                step="0.1"
-                              />
-                              <span className="text-xs text-muted">kWh</span>
-                            </div>
-                            {(formData.curvePoints || []).length > 2 && (
-                              <button
-                                onClick={() => {
-                                  const newPoints = (formData.curvePoints || []).filter((_: any, i: number) => i !== index);
-                                  setFormData({ ...formData, curvePoints: newPoints });
-                                }}
-                                className="text-xs text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900 px-1 rounded"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        onClick={() => {
-                          const points = formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }];
-                          const maxTime = Math.max(...points.map((p: CurvePoint) => p.time));
-                          const avgValue = points.reduce((sum: number, p: CurvePoint) => sum + p.value, 0) / points.length;
-                          setFormData({
-                            ...formData,
-                            curvePoints: [...points, { time: maxTime + 10, value: avgValue }]
-                          });
-                        }}
-                        className="text-xs btn-success px-2 py-1 w-full"
-                      >
-                        + Add Point
-                      </button>
-
-                      {/* Curve Visualization Canvas */}
-                      <CurvePreview curvePoints={formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }]} />
-
-                      <div className="text-xs text-muted bg-blue-50 dark:bg-blue-900 p-2 rounded">
-                        Curve defines meter value progression over time using Bezier interpolation
-                      </div>
-                    </div>
-                  )}
+                  <button
+                    onClick={() => setIsCurveModalOpen(true)}
+                    className="btn-primary text-sm w-full"
+                  >
+                    ⚙️ Configure Auto Increment Curve
+                  </button>
+                  <p className="text-xs text-muted">
+                    {formData.curvePoints && formData.curvePoints.length > 0
+                      ? `Configured with ${formData.curvePoints.length} curve points`
+                      : "Click to configure meter value auto-increment curve"}
+                  </p>
                 </div>
               )}
             </div>
@@ -992,8 +938,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 value={formData.action || "plugin"}
                 onChange={(e) => setFormData({ ...formData, action: e.target.value })}
               >
-                <option value="plugin">Plugin (接続)</option>
-                <option value="plugout">Plugout (切断)</option>
+                <option value="plugin">Plugin (Connect)</option>
+                <option value="plugout">Plugout (Disconnect)</option>
               </select>
             </div>
           </div>
@@ -1082,8 +1028,34 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
   };
 
+  // Handle curve modal save
+  const handleCurveModalSave = (config: AutoMeterValueConfig) => {
+    setFormData({
+      ...formData,
+      curvePoints: config.curvePoints,
+      incrementInterval: config.intervalSeconds,
+      autoCalculateInterval: config.autoCalculateInterval,
+    });
+    setIsCurveModalOpen(false);
+  };
+
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
+      {/* MeterValue Curve Config Modal */}
+      {isCurveModalOpen && (
+        <MeterValueCurveModal
+          isOpen={isCurveModalOpen}
+          onClose={() => setIsCurveModalOpen(false)}
+          initialConfig={{
+            enabled: true,
+            intervalSeconds: formData.incrementInterval || 10,
+            curvePoints: formData.curvePoints || [{ time: 0, value: 0 }, { time: 30, value: 50 }],
+            autoCalculateInterval: formData.autoCalculateInterval || false,
+          }}
+          onSave={handleCurveModalSave}
+        />
+      )}
+
       {/* Header */}
       <div className="panel p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
@@ -1096,54 +1068,50 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 {chargePoint.id} - {connectorId ? `Connector ${connectorId}` : "ChargePoint"}
               </p>
             </div>
-            {connectorId && (
-              <div className="panel-border px-3 py-1">
-                <div className="flex items-center gap-3 text-xs">
-                  <div>
-                    <span className="text-muted">Status: </span>
-                    <span className={`font-semibold ${getStatusColor(connectorStatus)}`}>
-                      {connectorStatus}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-muted">Meter: </span>
-                    <span className="font-mono text-secondary">{meterValue} Wh</span>
-                  </div>
-                  {transactionId && (
+            <div className="flex gap-2">
+              {connectorId && (
+                <div className="panel-border px-3 py-1">
+                  <div className="flex items-center gap-3 text-xs">
                     <div>
-                      <span className="text-muted">TX: </span>
-                      <span className="font-mono text-secondary">{transactionId}</span>
+                      <span className="text-muted">Status: </span>
+                      <span className={`font-semibold ${getStatusColor(connectorStatus)}`}>
+                        {connectorStatus}
+                      </span>
                     </div>
-                  )}
-                  <div className="border-l border-gray-300 dark:border-gray-600 pl-3 ml-1 flex items-center gap-2">
-                    <select
-                      className="input-base text-xs py-0.5 px-1"
-                      value=""
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          const connector = chargePoint.getConnector(connectorId);
-                          if (connector) {
-                            chargePoint.updateConnectorStatus(connectorId, e.target.value as OCPPStatus);
-                          }
-                          e.target.value = "";
-                        }
-                      }}
-                    >
-                      <option value="">Send Status...</option>
-                      <option value={OCPPStatus.Available}>Available</option>
-                      <option value={OCPPStatus.Preparing}>Preparing</option>
-                      <option value={OCPPStatus.Charging}>Charging</option>
-                      <option value={OCPPStatus.SuspendedEVSE}>SuspendedEVSE</option>
-                      <option value={OCPPStatus.SuspendedEV}>SuspendedEV</option>
-                      <option value={OCPPStatus.Finishing}>Finishing</option>
-                      <option value={OCPPStatus.Reserved}>Reserved</option>
-                      <option value={OCPPStatus.Unavailable}>Unavailable</option>
-                      <option value={OCPPStatus.Faulted}>Faulted</option>
-                    </select>
+                    <div>
+                      <span className="text-muted">Meter: </span>
+                      <span className="font-mono text-secondary">{meterValue} Wh</span>
+                    </div>
+                    {transactionId && (
+                      <div>
+                        <span className="text-muted">TX: </span>
+                        <span className="font-mono text-secondary">{transactionId}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
+              )}
+              {/* Scenario Execution State */}
+              <div className="panel-border px-3 py-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted">Scenario State:</span>
+                  <div className="flex items-center gap-1">
+                    {getScenarioStateIndicator(executionState)}
+                    <span className={`font-semibold ${getScenarioStateColor(executionState)}`}>
+                      {executionState ? executionState.charAt(0).toUpperCase() + executionState.slice(1) : "Idle"}
+                    </span>
+                  </div>
+                  {executionContext && executionContext.currentNodeId && (
+                    <div className="border-l border-gray-300 dark:border-gray-600 pl-2">
+                      <span className="text-muted">Current Node: </span>
+                      <span className="font-mono text-blue-600 dark:text-blue-400">
+                        {nodes.find(n => n.id === executionContext.currentNodeId)?.data?.label || executionContext.currentNodeId}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={handleImport} className="btn-secondary text-xs px-2 py-1">
@@ -1458,111 +1426,5 @@ function createNodeByType(type: string, position: { x: number; y: number }): Nod
       };
   }
 }
-
-// Curve Preview Component
-const CurvePreview: React.FC<{ curvePoints: CurvePoint[] }> = ({ curvePoints }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || curvePoints.length === 0) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-    const padding = 20;
-    const graphWidth = width - 2 * padding;
-    const graphHeight = height - 2 * padding;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-
-    // Calculate ranges
-    const sortedPoints = [...curvePoints].sort((a, b) => a.time - b.time);
-    const maxTime = Math.max(...sortedPoints.map(p => p.time), 1);
-    const maxValue = Math.max(...sortedPoints.map(p => p.value), 1);
-
-    // Draw grid
-    ctx.strokeStyle = "#e5e7eb";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const x = padding + (graphWidth * i) / 4;
-      ctx.beginPath();
-      ctx.moveTo(x, padding);
-      ctx.lineTo(x, padding + graphHeight);
-      ctx.stroke();
-
-      const y = padding + (graphHeight * i) / 4;
-      ctx.beginPath();
-      ctx.moveTo(padding, y);
-      ctx.lineTo(padding + graphWidth, y);
-      ctx.stroke();
-    }
-
-    // Draw axes
-    ctx.strokeStyle = "#9ca3af";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(padding, padding);
-    ctx.lineTo(padding, padding + graphHeight);
-    ctx.lineTo(padding + graphWidth, padding + graphHeight);
-    ctx.stroke();
-
-    // Draw curve
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    const segments = 50;
-    for (let i = 0; i <= segments; i++) {
-      const t = i / segments;
-      const value = calculateBezierPoint(t, sortedPoints);
-      const time = sortedPoints[0].time + (sortedPoints[sortedPoints.length - 1].time - sortedPoints[0].time) * t;
-
-      const x = padding + (time / maxTime) * graphWidth;
-      const y = padding + graphHeight - (value / maxValue) * graphHeight;
-
-      if (i === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    ctx.stroke();
-
-    // Draw control points
-    sortedPoints.forEach((point) => {
-      const x = padding + (point.time / maxTime) * graphWidth;
-      const y = padding + graphHeight - (point.value / maxValue) * graphHeight;
-
-      ctx.fillStyle = "#10b981";
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, 2 * Math.PI);
-      ctx.fill();
-
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    });
-
-    // Draw labels
-    ctx.fillStyle = "#6b7280";
-    ctx.font = "10px sans-serif";
-    ctx.fillText(`${maxTime.toFixed(0)}min`, padding + graphWidth - 20, padding + graphHeight + 15);
-    ctx.fillText(`${maxValue.toFixed(0)}kWh`, padding - 15, padding + 5);
-
-  }, [curvePoints]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={280}
-      height={150}
-      className="w-full border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-900"
-    />
-  );
-};
 
 export default ScenarioEditor;

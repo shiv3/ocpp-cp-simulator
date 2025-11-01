@@ -306,6 +306,16 @@ export class LocalChargePointService implements ChargePointService {
         }),
       );
 
+      unsubscribes.push(
+        connector.events.on("socChange", ({ soc }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-soc",
+            connectorId: connector.id,
+            soc,
+          });
+        }),
+      );
+
       connector.setOnMeterValueSend((id) => {
         chargePoint.sendMeterValue(id);
       });

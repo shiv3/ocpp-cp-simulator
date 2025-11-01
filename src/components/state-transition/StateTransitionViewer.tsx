@@ -45,11 +45,11 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
     historyOptions,
   });
 
-  // Connectorの状態変更を監視
+  // Monitor connector status changes
   useEffect(() => {
     const unsubscribe = connector.events.on("statusChange", ({ status }) => {
       setCurrentStatus(status);
-      // リアルタイム状態が変更されたら履歴インデックスをリセット
+      // Reset history index when real-time status changes
       setCurrentHistoryIndex(-1);
     });
 
@@ -58,8 +58,8 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
     };
   }, [connector]);
 
-  // 履歴を取得
-  // 履歴再生時の状態を反映
+  // Get history
+  // Reflect state during history playback
   const displayStatus = useMemo(() => {
     if (currentHistoryIndex >= 0 && currentHistoryIndex < history.length) {
       return history[currentHistoryIndex].toState as OCPPStatus;
@@ -67,10 +67,10 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
     return currentStatus;
   }, [currentHistoryIndex, history, currentStatus]);
 
-  // ノード定義（間隔を広げて配置を最適化）
+  // Node definitions (optimized layout with wider spacing)
   const nodes: Node[] = useMemo(
     () => [
-      // Available (中央下)
+      // Available (center bottom)
       {
         id: "available",
         type: "stateNode",
@@ -82,7 +82,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // Preparing (中央)
+      // Preparing (center)
       {
         id: "preparing",
         type: "stateNode",
@@ -94,7 +94,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // Charging (上中央)
+      // Charging (top center)
       {
         id: "charging",
         type: "stateNode",
@@ -106,7 +106,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // SuspendedEV (左上)
+      // SuspendedEV (top left)
       {
         id: "suspendedEV",
         type: "stateNode",
@@ -118,7 +118,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // SuspendedEVSE (右上)
+      // SuspendedEVSE (top right)
       {
         id: "suspendedEVSE",
         type: "stateNode",
@@ -130,7 +130,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // Finishing (中央やや下)
+      // Finishing (center slightly down)
       {
         id: "finishing",
         type: "stateNode",
@@ -142,7 +142,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // Reserved (左下)
+      // Reserved (bottom left)
       {
         id: "reserved",
         type: "stateNode",
@@ -154,7 +154,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: true,
         },
       },
-      // Unavailable (右下)
+      // Unavailable (bottom right)
       {
         id: "unavailable",
         type: "stateNode",
@@ -166,7 +166,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           isOperative: false,
         },
       },
-      // Faulted (最下中央)
+      // Faulted (bottom center)
       {
         id: "faulted",
         type: "stateNode",
@@ -182,10 +182,10 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
     [displayStatus]
   );
 
-  // エッジ定義（OCPP 1.6J準拠の遷移、smoothstepで見やすく）
+  // Edge definitions (OCPP 1.6J compliant transitions, using smoothstep for better visibility)
   const edges: Edge[] = useMemo(
     () => [
-      // Available からの遷移
+      // Transitions from Available
       {
         id: "available-preparing",
         source: "available",
@@ -244,7 +244,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // Preparing からの遷移
+      // Transitions from Preparing
       {
         id: "preparing-charging",
         source: "preparing",
@@ -289,7 +289,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // Charging からの遷移
+      // Transitions from Charging
       {
         id: "charging-suspendedEV",
         source: "charging",
@@ -348,7 +348,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // SuspendedEV からの遷移
+      // Transitions from SuspendedEV
       {
         id: "suspendedEV-charging",
         source: "suspendedEV",
@@ -392,7 +392,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // SuspendedEVSE からの遷移
+      // Transitions from SuspendedEVSE
       {
         id: "suspendedEVSE-charging",
         source: "suspendedEVSE",
@@ -436,7 +436,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // Finishing からの遷移
+      // Transitions from Finishing
       {
         id: "finishing-available",
         source: "finishing",
@@ -467,7 +467,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // Reserved からの遷移
+      // Transitions from Reserved
       {
         id: "reserved-preparing",
         source: "reserved",
@@ -511,7 +511,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // Unavailable からの遷移
+      // Transitions from Unavailable
       {
         id: "unavailable-available",
         source: "unavailable",
@@ -541,7 +541,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
 
-      // Faulted からの遷移
+      // Transitions from Faulted
       {
         id: "faulted-available",
         source: "faulted",
@@ -576,7 +576,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
 
   return (
     <div className={`h-full w-full flex flex-col ${className}`}>
-      {/* React Flow - 上部 */}
+      {/* React Flow - Top */}
       <div className="flex-1 relative">
         <ReactFlow
           nodes={nodes}
@@ -607,15 +607,15 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           />
         </ReactFlow>
 
-        {/* 凡例 */}
+        {/* Legend */}
         <div className="absolute top-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg text-sm">
           <h3 className="font-bold mb-2 text-gray-900 dark:text-white">
-            状態遷移図
+            State Transition Diagram
           </h3>
           <div className="space-y-1 text-gray-700 dark:text-gray-300">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-blue-500 rounded"></div>
-              <span>現在の状態</span>
+              <span>Current State</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-green-400 rounded"></div>
@@ -641,7 +641,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         </div>
       </div>
 
-      {/* Timeline - 下部 */}
+      {/* Timeline - Bottom */}
       <div className="h-64 flex-shrink-0">
         <StateTransitionTimeline
           history={history}

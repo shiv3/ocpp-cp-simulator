@@ -8,6 +8,7 @@ import { OCPPMessageHandler } from "../../infrastructure/transport/OCPPMessageHa
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
 import { BootNotification, OCPPStatus } from "../types/OcppTypes";
 import type { Transaction } from "../connector/Transaction";
+import { ReservationManager } from "../reservation/Reservation";
 
 interface BasicAuthSettings {
   username: string;
@@ -28,6 +29,7 @@ export class ChargePoint {
   private readonly _messageHandler: OCPPMessageHandler;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
+  private readonly _reservationManager: ReservationManager;
 
   private _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error = "";
@@ -69,6 +71,8 @@ export class ChargePoint {
 
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() => this._messageHandler.sendHeartbeat());
+
+    this._reservationManager = new ReservationManager(this._logger);
 
     this._stateManager = new StateManager(
       this._logger,
@@ -154,6 +158,10 @@ export class ChargePoint {
     return this._logger;
   }
 
+  get reservationManager(): ReservationManager {
+    return this._reservationManager;
+  }
+
   set loggingCallback(callback: (entry: LogEntry) => void) {
     this._logger._loggingCallback = callback;
   }
@@ -191,6 +199,7 @@ export class ChargePoint {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._connectors.forEach((connector) => connector.cleanup());
+    this._reservationManager.dispose();
     this._webSocket.disconnect();
   }
 
@@ -217,7 +226,7 @@ export class ChargePoint {
     });
   }
 
-  startTransaction(tagId: string, connectorId: number): void {
+  startTransaction(tagId: string, connectorId: number, batteryCapacityKwh?: number, initialSoc?: number): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.TRANSACTION);
@@ -233,7 +242,14 @@ export class ChargePoint {
       startTime: new Date(),
       stopTime: null,
       meterSent: false,
+      batteryCapacityKwh,
+      initialSoc,
     };
+
+    // Set initial SoC on connector if provided
+    if (initialSoc !== undefined) {
+      connector.soc = initialSoc;
+    }
 
     connector.beginTransaction(transaction);
     this._messageHandler.startTransaction(transaction, connectorId);
@@ -333,6 +349,7 @@ export class ChargePoint {
       connector.transaction?.id ?? undefined,
       connectorId,
       connector.meterValue,
+      connector.soc ?? undefined,
     );
   }
 

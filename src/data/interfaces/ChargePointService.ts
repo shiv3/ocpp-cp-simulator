@@ -26,6 +26,7 @@ export type ChargePointEvent =
   | { type: "connector-availability"; connectorId: number; availability: OCPPAvailability }
   | { type: "connector-transaction"; connectorId: number; transactionId: number | null }
   | { type: "connector-meter"; connectorId: number; meterValue: number }
+  | { type: "connector-soc"; connectorId: number; soc: number | null }
   | { type: "connector-auto-meter"; connectorId: number; config: AutoMeterValueConfig }
   | { type: "connector-mode"; connectorId: number; mode: ScenarioMode }
   | { type: "log"; entry: LogEntry }

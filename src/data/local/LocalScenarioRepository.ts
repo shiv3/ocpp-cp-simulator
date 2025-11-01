@@ -1,9 +1,10 @@
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import {
-  loadScenario,
-  saveScenario,
-  deleteScenario,
+  loadScenarios,
+  addScenario,
+  deleteScenarioById,
   listAllScenarios,
+  ensureSingleScenario,
 } from "../../utils/scenarioStorage";
 import type { ScenarioRepository } from "../interfaces/ScenarioRepository";
 
@@ -15,7 +16,11 @@ export class LocalScenarioRepository implements ScenarioRepository {
   private readonly listeners = new Map<string, Set<(scenario: ScenarioDefinition | null) => void>>();
 
   async load(chargePointId: string, connectorId: number | null): Promise<ScenarioDefinition | null> {
-    return loadScenario(chargePointId, connectorId);
+    // Ensure only one scenario exists
+    ensureSingleScenario(chargePointId, connectorId);
+
+    const scenarios = loadScenarios(chargePointId, connectorId);
+    return scenarios.length > 0 ? scenarios[0] : null;
   }
 
   async save(
@@ -23,12 +28,17 @@ export class LocalScenarioRepository implements ScenarioRepository {
     connectorId: number | null,
     scenario: ScenarioDefinition,
   ): Promise<void> {
-    saveScenario(chargePointId, connectorId, scenario);
+    // addScenario now replaces any existing scenario (only one scenario per connector)
+    addScenario(chargePointId, connectorId, scenario);
     this.notify(chargePointId, connectorId, scenario);
   }
 
   async delete(chargePointId: string, connectorId: number | null): Promise<void> {
-    deleteScenario(chargePointId, connectorId);
+    // Delete all scenarios for this connector (should only be one)
+    const scenarios = loadScenarios(chargePointId, connectorId);
+    if (scenarios.length > 0) {
+      deleteScenarioById(chargePointId, connectorId, scenarios[0].id);
+    }
     this.notify(chargePointId, connectorId, null);
   }
 

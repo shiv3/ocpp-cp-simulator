@@ -185,6 +185,32 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
             <span className="text-sm font-mono font-semibold">{meterValue.toLocaleString()} Wh</span>
           </div>
         </div>
+
+        {/* Status Change Selector */}
+        <div className="mt-3">
+          <select
+            className="input-base text-sm w-full font-medium text-gray-900 dark:text-gray-100"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) {
+                cp.updateConnectorStatus(connectorId, e.target.value as ocpp.OCPPStatus);
+                e.target.value = "";
+              }
+            }}
+          >
+            <option value="" className="text-gray-500 dark:text-gray-400">Change Status...</option>
+            <option value={ocpp.OCPPStatus.Available} className="text-gray-900 dark:text-gray-100">Available</option>
+            <option value={ocpp.OCPPStatus.Preparing} className="text-gray-900 dark:text-gray-100">Preparing</option>
+            <option value={ocpp.OCPPStatus.Charging} className="text-gray-900 dark:text-gray-100">Charging</option>
+            <option value={ocpp.OCPPStatus.SuspendedEVSE} className="text-gray-900 dark:text-gray-100">SuspendedEVSE</option>
+            <option value={ocpp.OCPPStatus.SuspendedEV} className="text-gray-900 dark:text-gray-100">SuspendedEV</option>
+            <option value={ocpp.OCPPStatus.Finishing} className="text-gray-900 dark:text-gray-100">Finishing</option>
+            <option value={ocpp.OCPPStatus.Reserved} className="text-gray-900 dark:text-gray-100">Reserved</option>
+            <option value={ocpp.OCPPStatus.Unavailable} className="text-gray-900 dark:text-gray-100">Unavailable</option>
+            <option value={ocpp.OCPPStatus.Faulted} className="text-gray-900 dark:text-gray-100">Faulted</option>
+          </select>
+        </div>
+
         <button
           onClick={onStatusNotification}
           className="btn-secondary w-full mt-3 text-sm"
@@ -318,6 +344,7 @@ const Connector: React.FC<ConnectorProps> = ({
     status: connectorStatus,
     availability,
     meterValue: liveMeterValue,
+    soc: liveSoc,
     transactionId,
     autoMeterValueConfig,
   } = useConnectorView(cp, connector_id);
@@ -372,8 +399,8 @@ const Connector: React.FC<ConnectorProps> = ({
       onStatusChange: async (status) => {
         cp.updateConnectorStatus(connector_id, status);
       },
-      onStartTransaction: async (tagId) => {
-        cp.startTransaction(tagId, connector_id);
+      onStartTransaction: async (tagId, batteryCapacityKwh, initialSoc) => {
+        cp.startTransaction(tagId, connector_id, batteryCapacityKwh, initialSoc);
       },
       onStopTransaction: async () => {
         cp.stopTransaction(connector_id);
@@ -383,6 +410,24 @@ const Connector: React.FC<ConnectorProps> = ({
       },
       onSendMeterValue: async () => {
         cp.sendMeterValue(connector_id);
+      },
+      onStartAutoMeterValue: (config) => {
+        const connector = cp.getConnector(connector_id);
+        if (!connector) return;
+
+        connector.startAutoMeterValue({
+          kind: "increment",
+          intervalSeconds: config.intervalSeconds,
+          incrementValue: config.incrementValue,
+          maxTimeSeconds: config.maxTimeSeconds,
+          maxValue: config.maxValue,
+        });
+      },
+      onStopAutoMeterValue: () => {
+        const connector = cp.getConnector(connector_id);
+        if (!connector) return;
+
+        connector.stopAutoMeterValue();
       },
       onSendNotification: async (messageType, payload) => {
         if (!cp) return;
@@ -455,9 +500,26 @@ const Connector: React.FC<ConnectorProps> = ({
           setScenarioExecutionContext(context);
         }
       },
+      log: (message, level = "info") => {
+        // Use ChargePoint logger with SCENARIO log type
+        switch (level) {
+          case "debug":
+            cp.logger.debug(message, ocpp.LogType.SCENARIO);
+            break;
+          case "info":
+            cp.logger.info(message, ocpp.LogType.SCENARIO);
+            break;
+          case "warn":
+            cp.logger.warn(message, ocpp.LogType.SCENARIO);
+            break;
+          case "error":
+            cp.logger.error(message, ocpp.LogType.SCENARIO);
+            break;
+        }
+      },
     };
 
-    const manager = new ScenarioManager(connector, cp, callbacks);
+    const manager = new ScenarioManager(connector, cp, callbacks, connector.scenarioEvents);
     scenarioManagerRef.current = manager;
     connector.setScenarioManager(manager);
 
@@ -577,7 +639,7 @@ const Connector: React.FC<ConnectorProps> = ({
   const handleRemoveConnector = () => {
     if (!cp) return;
 
-    if (window.confirm(`Connector ${connector_id} を削除してもよろしいですか？`)) {
+    if (window.confirm(`Are you sure you want to remove Connector ${connector_id}?`)) {
       cp.removeConnector(connector_id);
     }
   };
@@ -652,10 +714,37 @@ const Connector: React.FC<ConnectorProps> = ({
     };
   }, [isScenarioEditorOpen]);
 
+  // Get battery capacity from transaction or use default
+  const connector = cp?.getConnector(connector_id);
+  const batteryCapacityKwh = connector?.transaction?.batteryCapacityKwh ?? 100; // Default 100kWh
+
+  // Calculate charging level percentage (0-100%)
+  // Prefer SoC if available, otherwise calculate from energy and battery capacity
+  const chargingLevel = liveSoc !== null
+    ? Math.min(100, Math.max(0, liveSoc))
+    : Math.min(100, (liveMeterValue / (batteryCapacityKwh * 1000)) * 100);
+
+  // Get battery color based on status and level
+  const getBatteryColor = () => {
+    if (connectorStatus === ocpp.OCPPStatus.Faulted) return "text-red-500 dark:text-red-400";
+    if (connectorStatus === ocpp.OCPPStatus.Unavailable) return "text-gray-400 dark:text-gray-600";
+    if (connectorStatus === ocpp.OCPPStatus.Charging) return "text-green-500 dark:text-green-400";
+    if (connectorStatus === ocpp.OCPPStatus.Available) return "text-blue-500 dark:text-blue-400";
+    return "text-yellow-500 dark:text-yellow-400";
+  };
+
+  const getBatteryFillColor = () => {
+    if (connectorStatus === ocpp.OCPPStatus.Faulted) return "bg-red-500 dark:bg-red-400";
+    if (connectorStatus === ocpp.OCPPStatus.Charging) return "bg-green-500 dark:bg-green-400";
+    if (chargingLevel > 80) return "bg-green-500 dark:bg-green-400";
+    if (chargingLevel > 20) return "bg-yellow-500 dark:bg-yellow-400";
+    return "bg-red-500 dark:bg-red-400";
+  };
+
   return (
     <div className="panel cursor-pointer hover:shadow-lg transition-shadow" onClick={handleOpenScenarioEditor}>
       <div className="mb-3">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-3">
           <h3 className="text-base font-semibold text-primary">Connector {connector_id}</h3>
           <div className="flex items-center gap-2">
             <button
@@ -670,24 +759,65 @@ const Connector: React.FC<ConnectorProps> = ({
             </button>
           </div>
         </div>
-        <div className="panel-border mb-2">
-          <div className="flex items-center justify-between">
-            <label className="block text-sm font-semibold text-primary">Status:</label>
-            {connectorStatus === ocpp.OCPPStatus.Charging && transactionId && (
-              <div className="flex items-center gap-1">
-                <span className="text-muted text-xs">TX:</span>
-                <span className="font-mono text-xs text-secondary">{transactionId}</span>
-              </div>
+
+        {/* Charging Visualization */}
+        <div className="flex items-center gap-4 mb-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+          {/* Battery Icon */}
+          <div className="relative flex-shrink-0">
+            <div className={`text-5xl ${getBatteryColor()}`}>
+              🔋
+            </div>
+            {connectorStatus === ocpp.OCPPStatus.Charging && (
+              <div className="absolute -top-1 -right-1 text-xl animate-pulse">⚡</div>
             )}
           </div>
-          <p className="text-xl font-bold text-center">
-            <ConnectorStatus status={connectorStatus} />
-          </p>
+
+          {/* Status and Meter Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-semibold text-primary">
+                <ConnectorStatus status={connectorStatus} />
+              </span>
+              {transactionId && (
+                <span className="text-xs text-muted font-mono">TX:{transactionId}</span>
+              )}
+            </div>
+
+            {/* Meter Value Progress Bar */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>{liveSoc !== null ? "Battery SoC" : "Energy"}</span>
+                <span className="font-mono font-semibold">
+                  {liveSoc !== null
+                    ? `${liveSoc.toFixed(1)}%`
+                    : `${(liveMeterValue / 1000).toFixed(2)} kWh`}
+                </span>
+              </div>
+              {liveSoc !== null && (
+                <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${getBatteryFillColor()} transition-all duration-300 ease-out`}
+                    style={{ width: `${chargingLevel}%` }}
+                  ></div>
+                </div>
+              )}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted">
+                  <ConnectorAvailability availability={availability} />
+                </span>
+                {liveSoc !== null && (
+                  <span className="text-muted">
+                    {(liveMeterValue / 1000).toFixed(2)} kWh charged
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="text-sm text-muted text-center py-2">
-        <span className="inline-flex items-center gap-1">
+      <div className="text-sm text-center py-2 border-t border-gray-200 dark:border-gray-700">
+        <span className="inline-flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium">
           ⚙️ Click to open Editor (Scenario / State Diagram)
         </span>
       </div>
@@ -762,7 +892,7 @@ const Connector: React.FC<ConnectorProps> = ({
                         : "bg-gray-50 dark:bg-gray-900 text-muted dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-100"
                     }`}
                   >
-                    <GitBranch className="h-4 w-4" /> 状態遷移
+                    <GitBranch className="h-4 w-4" /> State Transition
                   </button>
                   {/* Close Button - Always visible in tab header */}
                   <button
@@ -826,7 +956,7 @@ const Connector: React.FC<ConnectorProps> = ({
                     {/* State Transition Viewer Header */}
                     <div className="panel p-3 border-b border-gray-200 dark:border-gray-700">
                       <h2 className="text-lg font-bold text-primary">
-                        状態遷移図 (OCPP 1.6J)
+                        State Transition Diagram (OCPP 1.6J)
                       </h2>
                       <p className="text-xs text-muted">
                         Connector {connector_id}

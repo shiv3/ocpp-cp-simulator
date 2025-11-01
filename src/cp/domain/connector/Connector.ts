@@ -7,13 +7,14 @@ import {
 import { MeterValueScheduler, type MeterValueStrategy } from "./MeterValueScheduler";
 import { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
 import type { ScenarioManager } from "../../application/scenario/ScenarioManager";
-import { ScenarioMode } from "../../application/scenario/ScenarioTypes";
+import { ScenarioMode, ScenarioEvents } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
 
 export interface ConnectorEvents {
   statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
   transactionIdChange: { transactionId: number | null };
   meterValueChange: { meterValue: number };
+  socChange: { soc: number | null };
   availabilityChange: { availability: OCPPAvailability };
   autoMeterValueChange: { config: AutoMeterValueConfig };
   modeChange: { mode: ScenarioMode };
@@ -29,11 +30,13 @@ interface IncrementStrategyConfig {
  */
 export class Connector {
   private readonly eventsEmitter = new EventEmitter<ConnectorEvents>();
+  private readonly scenarioEventsEmitter = new EventEmitter<ScenarioEvents>();
   private readonly meterScheduler: MeterValueScheduler;
 
   private statusValue: OCPPStatus = OCPPStatus.Unavailable;
   private availabilityValue: OCPPAvailability = "Operative";
   private meterValueWh = 0;
+  private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
 
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
@@ -67,6 +70,10 @@ export class Connector {
     return this.eventsEmitter;
   }
 
+  get scenarioEvents(): EventEmitter<ScenarioEvents> {
+    return this.scenarioEventsEmitter;
+  }
+
   get status(): OCPPStatus {
     return this.statusValue;
   }
@@ -92,6 +99,15 @@ export class Connector {
 
   set meterValue(value: number) {
     this.applyMeterValue(value);
+  }
+
+  get soc(): number | null {
+    return this.socPercent;
+  }
+
+  set soc(value: number | null) {
+    this.socPercent = value;
+    this.eventsEmitter.emit("socChange", { soc: value });
   }
 
   get transaction(): Transaction | null {
@@ -203,6 +219,7 @@ export class Connector {
     this.eventsEmitter.removeAllListeners();
     this.onMeterSend = null;
     this.transactionValue = null;
+    this.socPercent = null;
   }
 
   private applyMeterValue(value: number): void {

@@ -14,6 +14,7 @@ export enum LogType {
   STATUS = "Status",
   CONFIGURATION = "Configuration",
   DIAGNOSTICS = "Diagnostics",
+  SCENARIO = "Scenario",
   GENERAL = "General",
 }
 
@@ -31,18 +32,38 @@ export interface LogFilter {
   endTime?: Date;
 }
 
+import EventEmitter2 from 'eventemitter2';
+
 export class Logger {
   private level: LogLevel;
   private logList: LogEntry[] = [];
   private enabledTypes: Set<LogType> = new Set(Object.values(LogType));
+  private emitter: EventEmitter2;
+
+  // 後方互換性のため残す
   public _loggingCallback: ((entry: LogEntry) => void) | null = null;
 
   set loggingCallback(callback: ((entry: LogEntry) => void) | null) {
+    // 古いコールバックを削除
+    if (this._loggingCallback) {
+      this.emitter.off('log', this._loggingCallback);
+    }
+
     this._loggingCallback = callback;
+
+    // 新しいコールバックを登録
+    if (callback) {
+      this.emitter.on('log', callback);
+    }
   }
 
   constructor(level: LogLevel = LogLevel.DEBUG) {
     this.level = level;
+    this.emitter = new EventEmitter2({
+      wildcard: true,
+      delimiter: '.',
+      maxListeners: 50,
+    });
   }
 
   setLevel(level: LogLevel): void {
@@ -135,7 +156,24 @@ export class Logger {
 
     this.logList.push(logEntry);
 
-    if (this._loggingCallback) {
+    // EventEmitter2でイベント発行
+    // 階層的なイベント名: log.{LogType}.{LogLevel}
+    const levelName = LogLevel[level];
+
+    // 詳細なイベント: log.OCPP.INFO
+    this.emitter.emit(`log.${type}.${levelName}`, logEntry);
+
+    // タイプレベルのイベント: log.OCPP
+    this.emitter.emit(`log.${type}`, logEntry);
+
+    // レベルレベルのイベント: log.*.INFO
+    this.emitter.emit(`log.*.${levelName}`, logEntry);
+
+    // 汎用イベント: log
+    this.emitter.emit('log', logEntry);
+
+    // 後方互換性（この呼び出しは不要になったが、念のため）
+    if (this._loggingCallback && !this.emitter.listeners('log').includes(this._loggingCallback)) {
       this._loggingCallback(logEntry);
     }
   }
@@ -238,5 +276,79 @@ export class Logger {
     // the File System Access API or offer a download. In Node.js, you'd use the fs module.
     console.log(`Saving logs to ${filename}`);
     // Implementation depends on your environment (browser vs Node.js)
+  }
+
+  /**
+   * Subscribe to log events with wildcards support
+   * Examples:
+   * - on('log.*', listener) - すべてのログ
+   * - on('log.OCPP.*', listener) - すべてのOCPPログ
+   * - on('log.*.ERROR', listener) - すべてのエラーログ
+   * - on('log.TRANSACTION.INFO', listener) - トランザクションの情報ログのみ
+   * @returns Unsubscribe function
+   */
+  on(event: string, listener: (entry: LogEntry) => void): () => void {
+    this.emitter.on(event, listener);
+    return () => {
+      this.emitter.off(event, listener);
+    };
+  }
+
+  /**
+   * Subscribe to log events (one-time only)
+   */
+  once(event: string, listener: (entry: LogEntry) => void): () => void {
+    this.emitter.once(event, listener);
+    return () => {
+      this.emitter.off(event, listener);
+    };
+  }
+
+  /**
+   * Remove a specific listener
+   */
+  off(event: string, listener: (entry: LogEntry) => void): void {
+    this.emitter.off(event, listener);
+  }
+
+  /**
+   * Listen to all log events
+   * @param listener Callback that receives (event, entry)
+   */
+  onAny(listener: (event: string | string[], entry: LogEntry) => void): () => void {
+    this.emitter.onAny(listener);
+    return () => {
+      this.emitter.offAny(listener);
+    };
+  }
+
+  /**
+   * Remove listener from all events
+   */
+  offAny(listener: (event: string | string[], entry: LogEntry) => void): void {
+    this.emitter.offAny(listener);
+  }
+
+  /**
+   * Wait for a specific log event (Promise-based)
+   * @param event Event name (supports wildcards)
+   * @param timeout Optional timeout in milliseconds
+   */
+  async waitFor(event: string, timeout?: number): Promise<LogEntry> {
+    return new Promise((resolve, reject) => {
+      const timer = timeout
+        ? setTimeout(() => {
+            this.emitter.off(event, handler);
+            reject(new Error(`Timeout waiting for log event: ${event}`));
+          }, timeout)
+        : null;
+
+      const handler = (entry: LogEntry) => {
+        if (timer) clearTimeout(timer);
+        resolve(entry);
+      };
+
+      this.emitter.once(event, handler);
+    });
   }
 }

@@ -1,5 +1,13 @@
 import { ErrorCode, MessageType } from "@voltbras/ts-ocpp/dist/ws";
-import { BootNotificationRequest } from "@voltbras/ts-ocpp/dist/messages/json/request";
+import {
+  BootNotificationRequest,
+  ReserveNowRequest,
+  CancelReservationRequest,
+} from "@voltbras/ts-ocpp/dist/messages/json/request";
+import {
+  ReserveNowResponse,
+  CancelReservationResponse,
+} from "@voltbras/ts-ocpp/dist/messages/json/response";
 import { LogLevel, LogType } from "../../shared/Logger";
 
 export enum OCPPStatus {
@@ -99,3 +107,32 @@ export const DefaultBootNotification: BootNotification = {
 
 // Re-export Logger types for convenience
 export { LogLevel, LogType };
+
+// ============================================
+// Reservation Profile Types (OCPP 1.6)
+// ============================================
+
+/**
+ * ReserveNow response status values
+ */
+export enum ReservationStatus {
+  Accepted = "Accepted",
+  Faulted = "Faulted",
+  Occupied = "Occupied",
+  Rejected = "Rejected",
+  Unavailable = "Unavailable",
+}
+
+/**
+ * CancelReservation response status values
+ */
+export enum CancelReservationStatus {
+  Accepted = "Accepted",
+  Rejected = "Rejected",
+}
+
+// Re-export reservation request/response types from ts-ocpp
+export type ReserveNow = ReserveNowRequest;
+export type ReserveNowResponseType = ReserveNowResponse;
+export type CancelReservation = CancelReservationRequest;
+export type CancelReservationResponseType = CancelReservationResponse;

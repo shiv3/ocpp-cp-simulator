@@ -31,6 +31,8 @@ import {
   TriggerMessageHandler,
   ClearCacheHandler,
   UnlockConnectorHandler,
+  ReserveNowHandler,
+  CancelReservationHandler,
   BootNotificationResultHandler,
   StartTransactionResultHandler,
   StopTransactionResultHandler,
@@ -185,6 +187,14 @@ export class OCPPMessageHandler {
       OCPPAction.UnlockConnector,
       new UnlockConnectorHandler(),
     );
+    this._registry.registerCallHandler(
+      OCPPAction.ReserveNow,
+      new ReserveNowHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.CancelReservation,
+      new CancelReservationHandler(),
+    );
 
     // Register CALLRESULT handlers (incoming responses from central system)
     this._registry.registerCallResultHandler(
@@ -263,15 +273,35 @@ export class OCPPMessageHandler {
     transactionId: number | undefined,
     connectorId: number,
     meterValue: number,
+    soc?: number,
   ): void {
     const messageId = this.generateMessageId();
+
+    // Build sampled values array
+    const sampledValue: Array<{ value: string; measurand?: string; unit?: string }> = [
+      {
+        value: meterValue.toString(),
+        measurand: "Energy.Active.Import.Register",
+        unit: "Wh"
+      }
+    ];
+
+    // Add SoC if available
+    if (soc !== undefined) {
+      sampledValue.push({
+        value: soc.toString(),
+        measurand: "SoC",
+        unit: "Percent"
+      });
+    }
+
     const payload: request.MeterValuesRequest = {
       transactionId: transactionId,
       connectorId: connectorId,
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: [{ value: meterValue.toString() }],
+          sampledValue,
         },
       ],
     };

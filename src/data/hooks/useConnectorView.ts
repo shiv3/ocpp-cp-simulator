@@ -11,6 +11,7 @@ interface ConnectorViewState {
   status: OCPPStatus;
   availability: OCPPAvailability;
   meterValue: number;
+  soc: number | null;
   transactionId: number | null;
   logs: string[];
   autoMeterValueConfig: AutoMeterValueConfig | null;
@@ -29,6 +30,7 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
   const [status, setStatus] = useState<OCPPStatus>(initialConnector?.status as OCPPStatus ?? DEFAULT_STATUS);
   const [availability, setAvailability] = useState<OCPPAvailability>(initialConnector?.availability ?? DEFAULT_AVAILABILITY);
   const [meterValue, setMeterValue] = useState<number>(initialConnector?.meterValue ?? 0);
+  const [soc, setSoc] = useState<number | null>(initialConnector?.soc ?? null);
   const [transactionId, setTransactionId] = useState<number | null>(initialConnector?.transaction?.id ?? null);
   const [logs, setLogs] = useState<string[]>([]);
   const [autoMeterValueConfig, setAutoMeterValueConfig] = useState<AutoMeterValueConfig | null>(
@@ -41,6 +43,7 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
       setStatus(DEFAULT_STATUS);
       setAvailability(DEFAULT_AVAILABILITY);
       setMeterValue(0);
+      setSoc(null);
       setTransactionId(null);
       setAutoMeterValueConfig(null);
       setMode(DEFAULT_MODE);
@@ -53,6 +56,7 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
       setStatus(connector.status as OCPPStatus);
       setAvailability(connector.availability);
       setMeterValue(connector.meterValue);
+      setSoc(connector.soc);
       setTransactionId(connector.transaction?.id ?? null);
       setAutoMeterValueConfig(connector.autoMeterValueConfig ?? null);
       setMode(connector.mode);
@@ -73,6 +77,11 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
         case "connector-meter":
           if (event.connectorId === connectorId) {
             setMeterValue(event.meterValue);
+          }
+          break;
+        case "connector-soc":
+          if (event.connectorId === connectorId) {
+            setSoc(event.soc);
           }
           break;
         case "connector-transaction":
@@ -111,6 +120,7 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
     status,
     availability,
     meterValue,
+    soc,
     transactionId,
     logs: logsMemo,
     autoMeterValueConfig,

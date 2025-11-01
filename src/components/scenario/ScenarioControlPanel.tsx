@@ -35,7 +35,9 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
   return (
     <div className="panel p-4">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-semibold text-primary">Scenario Control</h3>
+        <h3 className="text-base font-semibold text-primary">
+          Scenario Control
+        </h3>
         <div className="flex items-center gap-3">
           <button
             onClick={onSave}
@@ -46,7 +48,9 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
           </button>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted">Status:</span>
-            <span className={`text-xs font-semibold ${getStateColor(executionState)}`}>
+            <span
+              className={`text-xs font-semibold ${getStateColor(executionState)}`}
+            >
               {executionState ? executionState.toUpperCase() : "IDLE"}
             </span>
           </div>
@@ -64,9 +68,7 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
               onClick={() => onModeChange("oneshot")}
               disabled={!isIdle}
               className={`flex-1 text-xs px-3 py-2 rounded ${
-                executionMode === "oneshot"
-                  ? "btn-primary"
-                  : "btn-secondary"
+                executionMode === "oneshot" ? "btn-primary" : "btn-secondary"
               }`}
             >
               One-Shot
@@ -75,9 +77,7 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
               onClick={() => onModeChange("step")}
               disabled={!isIdle}
               className={`flex-1 text-xs px-3 py-2 rounded ${
-                executionMode === "step"
-                  ? "btn-primary"
-                  : "btn-secondary"
+                executionMode === "step" ? "btn-primary" : "btn-secondary"
               }`}
             >
               Step
@@ -128,17 +128,17 @@ const ScenarioControlPanel: React.FC<ScenarioControlPanelProps> = ({
 function getStateColor(state: ScenarioExecutionState): string {
   switch (state) {
     case "idle":
-      return "text-gray-500";
+      return "text-gray-600 dark:text-gray-400";
     case "running":
-      return "text-green-600";
+      return "text-green-600 dark:text-green-400";
     case "paused":
-      return "text-yellow-600";
+      return "text-yellow-600 dark:text-yellow-400";
     case "completed":
-      return "text-blue-600";
+      return "text-blue-600 dark:text-blue-400";
     case "error":
-      return "text-red-600";
+      return "text-red-600 dark:text-red-400";
     default:
-      return "text-gray-500";
+      return "text-gray-600 dark:text-gray-400";
   }
 }
 

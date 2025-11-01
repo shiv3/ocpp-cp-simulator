@@ -12,7 +12,12 @@ interface ChargePointProps {
 }
 
 const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
-  const { status: cpStatus, error: cpError, logs, clearLogs } = useChargePointView(cp);
+  const {
+    status: cpStatus,
+    error: cpError,
+    logs,
+    clearLogs,
+  } = useChargePointView(cp);
   const connectorIds = cp ? Array.from(cp.connectors.keys()) : [];
 
   const handleClearLogs = useCallback(() => {
@@ -31,10 +36,15 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
       </div>
 
       <div className="mt-3">
-        <ChargePointControls chargePointId={cp?.id ?? null} cpStatus={cpStatus} cpError={cpError} tagID={TagID} />
+        <ChargePointControls
+          chargePointId={cp?.id ?? null}
+          cpStatus={cpStatus}
+          cpError={cpError}
+          tagID={TagID}
+        />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-3">
         {connectorIds.map((connectorId) => (
           <Connector key={connectorId} id={connectorId} cp={cp} idTag={TagID} />
         ))}
@@ -62,7 +72,9 @@ const CPStatus: React.FC<{ status: string }> = ({ status }) => {
   };
   return (
     <div className="panel-border mb-2">
-      <label className="block text-sm font-semibold text-primary">CP Status</label>
+      <label className="block text-sm font-semibold text-primary">
+        CP Status
+      </label>
       <p className="text-xl font-bold text-center">
         <span className={statusColor(status)}>{status}</span>
       </p>
@@ -118,9 +130,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   return (
     <div className="panel p-3">
       {cpError !== "" && (
-        <div className="btn-danger mb-2 text-sm p-2">
-          Error: {cpError}
-        </div>
+        <div className="btn-danger mb-2 text-sm p-2">Error: {cpError}</div>
       )}
       <div className="flex flex-wrap gap-2">
         <button
@@ -191,15 +201,23 @@ const SettingsView: React.FC<ChargePointProps> = ({ cp, TagID }) => {
       </div>
 
       {isExpanded && (
-        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-2 text-sm">
+        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <span className="text-muted text-xs block">WebSocket URL</span>
-              <span className="text-secondary text-xs font-mono break-all">{cp.wsUrl}</span>
+              <span className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
+                WebSocket URL
+              </span>
+              <span className="text-xs text-gray-900 dark:text-gray-100 font-mono break-all">
+                {cp.wsUrl}
+              </span>
             </div>
             <div>
-              <span className="text-muted text-xs block">OCPP Version</span>
-              <span className="text-secondary">1.6J</span>
+              <span className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
+                OCPP Version
+              </span>
+              <span className="text-xs text-gray-900 dark:text-gray-100">
+                1.6J
+              </span>
             </div>
           </div>
         </div>

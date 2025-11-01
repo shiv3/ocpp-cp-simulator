@@ -1,21 +1,34 @@
-import React, { useState } from "react";
-import { configAtom } from "../store/store.ts";
-import { useAtom } from "jotai/index";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Download, Upload, Home } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useConfig } from "../data/hooks/useConfig";
 
 const Settings: React.FC = () => {
-  const [config, setConfig] = useAtom(configAtom);
-  const [jsonText, setJsonText] = useState<string>(
-    JSON.stringify(config, null, 2)
-  );
+  const { config, setConfig: persistConfig, isLoading } = useConfig();
+  const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (config) {
+      setJsonText(JSON.stringify(config, null, 2));
+    } else {
+      setJsonText("null");
+    }
+  }, [config, isLoading]);
+
+  const updateConfig = useCallback(
+    (next: Parameters<typeof persistConfig>[0]) => {
+      void persistConfig(next);
+    },
+    [persistConfig],
+  );
 
   const handleExport = () => {
     const dataStr = JSON.stringify(config, null, 2);
@@ -38,7 +51,7 @@ const Settings: React.FC = () => {
     reader.onload = (e) => {
       try {
         const json = JSON.parse(e.target?.result as string);
-        setConfig(json);
+        updateConfig(json);
         setJsonText(JSON.stringify(json, null, 2));
         setError("");
         setSuccess("Configuration imported successfully!");
@@ -54,7 +67,7 @@ const Settings: React.FC = () => {
   const handleApplyJson = () => {
     try {
       const json = JSON.parse(jsonText);
-      setConfig(json);
+      updateConfig(json);
       setError("");
       setSuccess("Configuration applied successfully!");
       setTimeout(() => setSuccess(""), 3000);

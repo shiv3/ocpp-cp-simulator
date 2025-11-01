@@ -1,4 +1,6 @@
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { ScenarioMode } from "../../cp/application/scenario/ScenarioTypes";
 import type { OCPPAvailability, OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { LogEntry } from "../../cp/shared/Logger";
 
@@ -24,6 +26,8 @@ export type ChargePointEvent =
   | { type: "connector-availability"; connectorId: number; availability: OCPPAvailability }
   | { type: "connector-transaction"; connectorId: number; transactionId: number | null }
   | { type: "connector-meter"; connectorId: number; meterValue: number }
+  | { type: "connector-auto-meter"; connectorId: number; config: AutoMeterValueConfig }
+  | { type: "connector-mode"; connectorId: number; mode: ScenarioMode }
   | { type: "log"; entry: LogEntry }
   | { type: "connected" }
   | { type: "disconnected"; code: number; reason: string };
@@ -39,6 +43,7 @@ export interface ChargePointService {
   sendHeartbeat(id: string): Promise<void>;
   startHeartbeat(id: string, intervalSeconds: number): Promise<void>;
   stopHeartbeat(id: string): Promise<void>;
+  authorize(id: string, tagId: string): Promise<void>;
 
   startTransaction(id: string, connectorId: number, tagId: string): Promise<void>;
   stopTransaction(id: string, connectorId: number): Promise<void>;

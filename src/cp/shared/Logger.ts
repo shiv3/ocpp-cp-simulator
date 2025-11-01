@@ -35,9 +35,9 @@ export class Logger {
   private level: LogLevel;
   private logList: LogEntry[] = [];
   private enabledTypes: Set<LogType> = new Set(Object.values(LogType));
-  public _loggingCallback: ((message: string) => void) | null = null;
+  public _loggingCallback: ((entry: LogEntry) => void) | null = null;
 
-  set loggingCallback(callback: ((message: string) => void) | null) {
+  set loggingCallback(callback: ((entry: LogEntry) => void) | null) {
     this._loggingCallback = callback;
   }
 
@@ -136,7 +136,7 @@ export class Logger {
     this.logList.push(logEntry);
 
     if (this._loggingCallback) {
-      this._loggingCallback(formattedMessage);
+      this._loggingCallback(logEntry);
     }
   }
 

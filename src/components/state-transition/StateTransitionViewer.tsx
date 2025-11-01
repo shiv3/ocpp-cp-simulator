@@ -14,7 +14,8 @@ import StateNode from "./StateNode";
 import StateTransitionTimeline from "./StateTransitionTimeline";
 import type { Connector } from "../../cp/domain/connector/Connector";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
-import { StateHistoryEntry } from "../../cp/application/services/types/StateSnapshot";
+import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
+import { useStateHistory } from "../../data/hooks/useStateHistory";
 
 interface StateTransitionViewerProps {
   connector: Connector;
@@ -34,8 +35,15 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
   const [currentStatus, setCurrentStatus] = useState<OCPPStatus>(
     connector.status as OCPPStatus
   );
-  const [history, setHistory] = useState<StateHistoryEntry[]>([]);
   const [currentHistoryIndex, setCurrentHistoryIndex] = useState<number>(-1);
+  const historyOptions = useMemo<HistoryOptions>(() => ({
+    entity: "connector",
+    entityId: connector.id,
+    transitionType: "status",
+  }), [connector.id]);
+  const { history } = useStateHistory(chargePoint.id, {
+    historyOptions,
+  });
 
   // Connectorの状態変更を監視
   useEffect(() => {
@@ -51,27 +59,6 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
   }, [connector]);
 
   // 履歴を取得
-  useEffect(() => {
-    if (!chargePoint.stateManager) return;
-
-    const fetchHistory = () => {
-      const allHistory = chargePoint.stateManager.history.getHistory({
-        entity: "connector",
-        entityId: connector.id,
-        transitionType: "status",
-      });
-      setHistory(allHistory);
-    };
-
-    // 初回取得
-    fetchHistory();
-
-    // 定期的に履歴を更新（新しい遷移があれば反映）
-    const interval = setInterval(fetchHistory, 1000);
-
-    return () => clearInterval(interval);
-  }, [chargePoint, connector.id]);
-
   // 履歴再生時の状態を反映
   const displayStatus = useMemo(() => {
     if (currentHistoryIndex >= 0 && currentHistoryIndex < history.length) {

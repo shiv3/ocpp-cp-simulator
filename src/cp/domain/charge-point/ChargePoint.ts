@@ -1,5 +1,5 @@
 import { EventEmitter } from "../../shared/EventEmitter";
-import { Logger, LogType } from "../../shared/Logger";
+import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
 import { Connector } from "../connector/Connector";
@@ -42,6 +42,16 @@ export class ChargePoint {
     autoMeterValueSetting: AutoMeterValueSetting | null,
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
+
+    // Setup logger callback to emit log events
+    this._logger.loggingCallback = (entry) => {
+      this._events.emit("log", {
+        timestamp: entry.timestamp,
+        level: entry.level,
+        type: entry.type,
+        message: entry.message,
+      });
+    };
 
     for (let connectorId = 1; connectorId <= connectorCount; connectorId++) {
       const connector = new Connector(connectorId, this._logger);
@@ -144,7 +154,7 @@ export class ChargePoint {
     return this._logger;
   }
 
-  set loggingCallback(callback: (message: string) => void) {
+  set loggingCallback(callback: (entry: LogEntry) => void) {
     this._logger._loggingCallback = callback;
   }
 
@@ -355,6 +365,11 @@ export class ChargePoint {
 
     const previousStatus = connector.status;
     connector.status = status;
+    this._events.emit("connectorStatusChange", {
+      connectorId,
+      status,
+      previousStatus,
+    });
     this._messageHandler.sendStatusNotification(connectorId, status, previousStatus);
   }
 }

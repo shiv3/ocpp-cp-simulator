@@ -38,6 +38,13 @@ export class ScenarioManager {
   }
 
   /**
+   * Evaluate status change explicitly (used when scenarios are reloaded)
+   */
+  public evaluateStatus(fromStatus: OCPPStatus, toStatus: OCPPStatus): void {
+    this.handleStatusChange(fromStatus, toStatus);
+  }
+
+  /**
    * Load scenarios from storage or set directly
    */
   loadScenarios(scenarios: ScenarioDefinition[]): void {
@@ -110,11 +117,19 @@ export class ScenarioManager {
    * Finds matching scenarios and executes them in parallel
    */
   private handleStatusChange(fromStatus: OCPPStatus, toStatus: OCPPStatus): void {
+    console.log(
+      `[ScenarioManager] handleStatusChange called: ${fromStatus} → ${toStatus}`
+    );
+
     // Find matching scenarios
     const matchingScenarios = this.findMatchingScenarios("statusChange", {
       fromStatus,
       toStatus,
     });
+
+    console.log(
+      `[ScenarioManager] Found ${matchingScenarios.length} matching scenario(s) for ${fromStatus} → ${toStatus}`
+    );
 
     if (matchingScenarios.length === 0) {
       return;
@@ -148,19 +163,35 @@ export class ScenarioManager {
   ): ScenarioDefinition[] {
     const matching: ScenarioDefinition[] = [];
 
+    console.log(
+      `[ScenarioManager] findMatchingScenarios: triggerType=${triggerType}, conditions=`,
+      conditions,
+      `total scenarios=${this.scenarios.size}`
+    );
+
     this.scenarios.forEach((scenario) => {
+      console.log(
+        `[ScenarioManager] Checking scenario: ${scenario.name}, enabled=${scenario.enabled}, trigger=`,
+        scenario.trigger
+      );
+
       // Skip disabled scenarios
       if (scenario.enabled === false) {
+        console.log(`[ScenarioManager] Skipping disabled scenario: ${scenario.name}`);
         return;
       }
 
       // Skip if no trigger defined (manual only)
       if (!scenario.trigger) {
+        console.log(`[ScenarioManager] Skipping scenario without trigger: ${scenario.name}`);
         return;
       }
 
       // Check trigger type
       if (scenario.trigger.type !== triggerType) {
+        console.log(
+          `[ScenarioManager] Trigger type mismatch: ${scenario.trigger.type} !== ${triggerType}`
+        );
         return;
       }
 
@@ -170,6 +201,7 @@ export class ScenarioManager {
 
         // If no conditions, match any status change
         if (!triggerConditions) {
+          console.log(`[ScenarioManager] No conditions, matching: ${scenario.name}`);
           matching.push(scenario);
           return;
         }
@@ -179,6 +211,9 @@ export class ScenarioManager {
           triggerConditions.fromStatus &&
           triggerConditions.fromStatus !== conditions.fromStatus
         ) {
+          console.log(
+            `[ScenarioManager] fromStatus mismatch: ${triggerConditions.fromStatus} !== ${conditions.fromStatus}`
+          );
           return;
         }
 
@@ -187,10 +222,14 @@ export class ScenarioManager {
           triggerConditions.toStatus &&
           triggerConditions.toStatus !== conditions.toStatus
         ) {
+          console.log(
+            `[ScenarioManager] toStatus mismatch: ${triggerConditions.toStatus} !== ${conditions.toStatus}`
+          );
           return;
         }
 
         // All conditions matched
+        console.log(`[ScenarioManager] All conditions matched! Adding: ${scenario.name}`);
         matching.push(scenario);
       }
     });

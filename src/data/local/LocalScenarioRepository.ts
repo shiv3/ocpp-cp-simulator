@@ -3,7 +3,7 @@ import {
   loadScenario,
   saveScenario,
   deleteScenario,
-  listScenarios,
+  listAllScenarios,
 } from "../../utils/scenarioStorage";
 import type { ScenarioRepository } from "../interfaces/ScenarioRepository";
 
@@ -33,7 +33,7 @@ export class LocalScenarioRepository implements ScenarioRepository {
   }
 
   async list(chargePointId: string): Promise<ScenarioDefinition[]> {
-    return listScenarios(chargePointId);
+    return listAllScenarios(chargePointId);
   }
 
   subscribe(

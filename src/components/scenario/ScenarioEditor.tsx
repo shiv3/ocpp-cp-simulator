@@ -56,6 +56,7 @@ import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 interface ScenarioEditorProps {
   chargePoint: ChargePoint;
   connectorId: number | null;
+  scenario?: ScenarioDefinition | null;
   scenarioId?: string; // Optional: if provided, edit specific scenario
   executionContext?: ScenarioExecutionContext | null; // Execution context from ScenarioManager
   nodeProgress?: Record<string, { remaining: number; total: number }>; // Node progress from ScenarioManager
@@ -79,12 +80,16 @@ const nodeTypes: NodeTypes = {
 const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   chargePoint,
   connectorId,
+  scenario: scenarioProp,
   scenarioId,
   executionContext: propsExecutionContext,
   nodeProgress: propsNodeProgress,
   onClose,
 }) => {
   const [scenario, setScenario] = useState<ScenarioDefinition>(() => {
+    if (scenarioProp) {
+      return scenarioProp;
+    }
     if (scenarioId) {
       const found = getScenarioById(chargePoint.id, connectorId, scenarioId);
       if (found) return found;
@@ -116,8 +121,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const executorRef = useRef<ScenarioExecutor | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Reload scenario when scenarioId changes
+  // Reload scenario when props change
   useEffect(() => {
+    if (scenarioProp) {
+      setScenario(scenarioProp);
+      setNodes(scenarioProp.nodes);
+      setEdges(scenarioProp.edges);
+      setScenarioName(scenarioProp.name);
+      setScenarioDescription(scenarioProp.description || "");
+      setDefaultExecutionMode(scenarioProp.defaultExecutionMode || "oneshot");
+      setScenarioEnabled(scenarioProp.enabled !== false);
+      return;
+    }
+
     if (scenarioId) {
       const found = getScenarioById(chargePoint.id, connectorId, scenarioId);
       if (found) {
@@ -130,7 +146,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setScenarioEnabled(found.enabled !== false);
       }
     }
-  }, [scenarioId, chargePoint.id, connectorId]);
+  }, [scenarioProp, scenarioId, chargePoint.id, connectorId]);
 
   // Update execution context from props
   useEffect(() => {
@@ -151,7 +167,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
   }, [propsNodeProgress]);
 
-  // Update node styles based on execution context
+  // Update node styles based on execution context and progress
   useEffect(() => {
     // Reset styles if no execution context
     if (!executionContext) {
@@ -165,6 +181,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             boxShadow: undefined,
             opacity: 1,
           },
+          data: {
+            ...node.data,
+            progress: undefined,
+          },
         }))
       );
       return;
@@ -174,6 +194,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       nds.map((node) => {
         const isCurrentNode = node.id === executionContext.currentNodeId;
         const isExecuted = executionContext.executedNodes.includes(node.id);
+        const progress = nodeProgress[node.id];
 
         // Apply styles based on execution state
         let className = node.className || "";
@@ -209,10 +230,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           ...node,
           className,
           style,
+          data: {
+            ...node.data,
+            progress: progress || undefined,
+          },
         };
       })
     );
-  }, [executionContext]);
+  }, [executionContext, nodeProgress]);
 
   // Subscribe to connector status changes
   useEffect(() => {

@@ -4,7 +4,6 @@ import * as ocpp from "../cp/domain/types/OcppTypes";
 import { OCPPAvailability } from "../cp/domain/types/OcppTypes";
 import { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import {
-  ScenarioMode,
   ScenarioDefinition,
   ScenarioExecutorCallbacks,
   ScenarioExecutionContext,
@@ -14,11 +13,9 @@ import ScenarioEditor from "./scenario/ScenarioEditor.tsx";
 import StateTransitionViewer from "./state-transition/StateTransitionViewer.tsx";
 import { GitBranch } from "lucide-react";
 import { saveConnectorAutoMeterConfig } from "../utils/connectorStorage";
-import {
-  loadScenarios,
-  createDefaultScenario,
-} from "../utils/scenarioStorage";
 import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
+import { useScenarios } from "../data/hooks/useScenarios";
+import { useConnectorView } from "../data/hooks/useConnectorView";
 
 interface ConnectorProps {
   id: number;
@@ -71,7 +68,7 @@ interface ConnectorDetailsPanelProps {
   cp: ChargePoint;
   connectorId: number;
   connectorStatus: ocpp.OCPPStatus;
-  cpTransactionID: number | null;
+  transactionId: number | null;
   meterValue: number;
   setMeterValue: (value: number) => void;
   tagId: string;
@@ -91,7 +88,7 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
   cp,
   connectorId,
   connectorStatus,
-  cpTransactionID,
+  transactionId,
   meterValue,
   setMeterValue,
   tagId,
@@ -109,8 +106,23 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
   const connector = cp.getConnector(connectorId);
   const scenarioManager = connector?.scenarioManager;
 
-  // Get scenario status
-  const activeScenarioIds = scenarioManager?.getActiveScenarioIds() || [];
+  // Get scenario status with reactive polling
+  const [activeScenarioIds, setActiveScenarioIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Poll active scenarios every 500ms to keep UI reactive
+    const interval = setInterval(() => {
+      const ids = scenarioManager?.getActiveScenarioIds() || [];
+      setActiveScenarioIds(ids);
+    }, 500);
+
+    // Initial load
+    const ids = scenarioManager?.getActiveScenarioIds() || [];
+    setActiveScenarioIds(ids);
+
+    return () => clearInterval(interval);
+  }, [scenarioManager]);
+
   const hasActiveScenario = activeScenarioIds.length > 0;
 
   return (
@@ -129,12 +141,16 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
           </div>
           {hasActiveScenario && (
             <div className="mt-2 text-xs text-muted space-y-1">
-              {activeScenarioIds.map((id, idx) => (
-                <div key={id} className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                  <span>Scenario {idx + 1}</span>
-                </div>
-              ))}
+              {activeScenarioIds.map((id) => {
+                const scenario = scenarioManager?.getScenario(id);
+                const name = scenario?.name || id;
+                return (
+                  <div key={id} className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                    <span>{name}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -156,11 +172,11 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
               <ConnectorAvailability availability={availability} />
             </span>
           </div>
-          {cpTransactionID !== null && cpTransactionID !== 0 && (
+          {transactionId !== null && transactionId !== 0 && (
             <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
               <span className="text-sm text-muted">Transaction ID:</span>
               <span className="text-sm font-mono font-semibold bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded">
-                {cpTransactionID}
+                {transactionId}
               </span>
             </div>
           )}
@@ -298,18 +314,20 @@ const Connector: React.FC<ConnectorProps> = ({
   cp,
   idTag,
 }) => {
-  const [cpTransactionID, setCpTransactionID] = useState<number | null>(0);
-  const [connectorStatus, setConnectorStatus] = useState<ocpp.OCPPStatus>(
-    ocpp.OCPPStatus.Unavailable,
-  );
-  const [availability, setAvailability] =
-    useState<OCPPAvailability>("Operative");
-  const [meterValue, setMeterValue] = useState<number>(0);
+  const {
+    status: connectorStatus,
+    availability,
+    meterValue: liveMeterValue,
+    transactionId,
+    autoMeterValueConfig,
+  } = useConnectorView(cp, connector_id);
+  const { scenarios } = useScenarios(cp?.id ?? null, connector_id);
+  const [meterValueInput, setMeterValueInput] = useState<number>(liveMeterValue);
+  useEffect(() => {
+    setMeterValueInput(liveMeterValue);
+  }, [liveMeterValue]);
   const [tagId, setIdTag] = useState<string>(idTag);
-  const [autoMeterValueConfig, setAutoMeterValueConfig] =
-    useState<AutoMeterValueConfig | null>(null);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [mode, setMode] = useState<ScenarioMode>("manual");
   const [isScenarioEditorOpen, setIsScenarioEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"connector" | "scenario" | "stateTransition">("connector");
   const [panelWidth, setPanelWidth] = useState(50); // Default 50vw
@@ -319,7 +337,6 @@ const Connector: React.FC<ConnectorProps> = ({
 
   // Scenario state (single scenario per connector)
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
-  const [isScenarioActive, setIsScenarioActive] = useState(false);
   const [scenarioExecutionContext, setScenarioExecutionContext] = useState<ScenarioExecutionContext | null>(null);
   const [nodeProgress, setNodeProgress] = useState<Record<string, { remaining: number; total: number }>>({});
 
@@ -329,83 +346,30 @@ const Connector: React.FC<ConnectorProps> = ({
     const connector = cp.getConnector(connector_id);
     if (!connector) return;
 
-    // Subscribe to connector events using EventEmitter
-    const unsubStatus = connector.events.on("statusChange", (data) => {
-      setConnectorStatus(data.status);
-    });
-
-    const unsubTransactionId = connector.events.on(
-      "transactionIdChange",
-      (data) => {
-        setCpTransactionID(data.transactionId);
-      },
-    );
-
-    const unsubMeterValue = connector.events.on("meterValueChange", (data) => {
-      setMeterValue(data.meterValue);
-    });
-
-    const unsubAvailability = connector.events.on(
-      "availabilityChange",
-      (data) => {
-        setAvailability(data.availability);
-      },
-    );
-
-    const unsubAutoMeterValue = connector.events.on(
-      "autoMeterValueChange",
-      (data) => {
-        setAutoMeterValueConfig(data.config);
-      },
-    );
-
-    const unsubMode = connector.events.on("modeChange", (data) => {
-      setMode(data.mode);
-    });
-
-    // Initial state
-    setConnectorStatus(connector.status as ocpp.OCPPStatus);
-    setAvailability(connector.availability);
-    setMeterValue(connector.meterValue);
-    setAutoMeterValueConfig(connector.autoMeterValueConfig);
-    setMode(connector.mode);
-
-    // Set callback for auto MeterValue send
     connector.setOnMeterValueSend((connId) => {
-      if (cp) {
-        cp.sendMeterValue(connId);
-      }
+      cp.sendMeterValue(connId);
     });
 
-    // Cleanup function
     return () => {
-      unsubStatus();
-      unsubTransactionId();
-      unsubMeterValue();
-      unsubAvailability();
-      unsubAutoMeterValue();
-      unsubMode();
+      connector.setOnMeterValueSend(() => {});
     };
   }, [connector_id, cp]);
 
-  // Initialize ScenarioManager
+  const scenarioManagerRef = useRef<ScenarioManager | null>(null);
+  const scenarioRef = useRef<ScenarioDefinition | null>(null);
+
+  useEffect(() => {
+    scenarioRef.current = scenario;
+  }, [scenario]);
+
   useEffect(() => {
     if (!cp) return;
 
     const connector = cp.getConnector(connector_id);
     if (!connector) return;
 
-    // Load all scenarios from storage (new multi-scenario storage)
-    const loadedScenarios = loadScenarios(cp.id, connector_id);
-    if (loadedScenarios.length > 0) {
-      // Set the first scenario as active in the editor
-      setScenario(loadedScenarios[0]);
-    }
-
-    // Create ScenarioExecutorCallbacks
     const callbacks: ScenarioExecutorCallbacks = {
       onStatusChange: async (status) => {
-        // Use updateConnectorStatus to send StatusNotification message
         cp.updateConnectorStatus(connector_id, status);
       },
       onStartTransaction: async (tagId) => {
@@ -437,19 +401,46 @@ const Connector: React.FC<ConnectorProps> = ({
         }
       },
       onConnectorPlug: async (action) => {
-        // TODO: Implement connector plug/unplug
         console.log(`Connector ${action}`, connector_id);
       },
       onDelay: async (seconds) => {
         await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
       },
-      onWaitForRemoteStart: async (timeout) => {
-        // TODO: Implement waiting for RemoteStartTransaction
+      onWaitForRemoteStart: async () => {
         return "default-tag";
       },
       onWaitForStatus: async (targetStatus, timeout) => {
-        // TODO: Implement waiting for status change
-        console.log(`Waiting for status: ${targetStatus}`, timeout);
+        console.log(`[StatusTrigger] Waiting for status: ${targetStatus}`, timeout);
+
+        // Check if already at target status
+        if (connector.status === targetStatus) {
+          console.log(`[StatusTrigger] Already at target status: ${targetStatus}`);
+          return;
+        }
+
+        return new Promise<void>((resolve, reject) => {
+          let timeoutId: NodeJS.Timeout | null = null;
+
+          const statusChangeHandler = (data: { status: string; previousStatus: string }) => {
+            console.log(`[StatusTrigger] Status changed: ${data.previousStatus} → ${data.status}`);
+            if (data.status === targetStatus) {
+              console.log(`[StatusTrigger] Target status reached: ${targetStatus}`);
+              if (timeoutId) clearTimeout(timeoutId);
+              connector.events.off("statusChange", statusChangeHandler);
+              resolve();
+            }
+          };
+
+          connector.events.on("statusChange", statusChangeHandler);
+
+          // Set timeout if specified and not 0
+          if (timeout && timeout > 0) {
+            timeoutId = setTimeout(() => {
+              connector.events.off("statusChange", statusChangeHandler);
+              reject(new Error(`Timeout waiting for status: ${targetStatus} (${timeout}s)`));
+            }, timeout * 1000);
+          }
+        });
       },
       onNodeProgress: (nodeId, remaining, total) => {
         setNodeProgress((prev) => ({
@@ -457,39 +448,67 @@ const Connector: React.FC<ConnectorProps> = ({
           [nodeId]: { remaining, total },
         }));
       },
+      onStateChange: (context) => {
+        // Update execution context when scenario state changes
+        const currentScenario = scenarioRef.current;
+        if (currentScenario && context.scenarioId === currentScenario.id) {
+          setScenarioExecutionContext(context);
+        }
+      },
     };
 
-    // Create and set ScenarioManager
-    const scenarioManager = new ScenarioManager(connector, cp, callbacks);
-    if (loadedScenarios.length > 0) {
-      scenarioManager.loadScenarios(loadedScenarios);
-    }
-    connector.setScenarioManager(scenarioManager);
+    const manager = new ScenarioManager(connector, cp, callbacks);
+    scenarioManagerRef.current = manager;
+    connector.setScenarioManager(manager);
 
-    // Subscribe to scenario changes - poll active scenario periodically
     const intervalId = setInterval(() => {
-      if (connector.scenarioManager) {
-        const activeIds = connector.scenarioManager.getActiveScenarioIds();
-        // Update isScenarioActive based on whether ANY scenario is active
-        setIsScenarioActive(activeIds.length > 0);
+      const activeManager = scenarioManagerRef.current;
+      if (!activeManager) return;
 
-        // If there's a currently selected scenario in the editor, get its execution context
-        if (scenario && activeIds.includes(scenario.id)) {
-          const context = connector.scenarioManager.getScenarioExecutionContext(scenario.id);
-          setScenarioExecutionContext(context);
-        } else {
-          setScenarioExecutionContext(null);
-        }
+      const activeIds = activeManager.getActiveScenarioIds();
+      const currentScenario = scenarioRef.current;
+      if (currentScenario && activeIds.includes(currentScenario.id)) {
+        const context = activeManager.getScenarioExecutionContext(currentScenario.id);
+        setScenarioExecutionContext(context);
+      } else {
+        setScenarioExecutionContext(null);
       }
     }, 500);
 
     return () => {
       clearInterval(intervalId);
-      if (connector.scenarioManager) {
-        connector.scenarioManager.destroy();
-      }
+      manager.destroy();
+      scenarioManagerRef.current = null;
     };
   }, [connector_id, cp]);
+
+  useEffect(() => {
+    if (scenarios.length > 0) {
+      console.debug("[Connector] Loaded scenarios", scenarios);
+      setScenario((current) => {
+        const match = current ? scenarios.find((item) => item.id === current.id) : null;
+        const next = match ?? scenarios[0];
+        scenarioRef.current = next;
+        return next;
+      });
+    } else {
+      setScenario(null);
+      scenarioRef.current = null;
+    }
+
+    const manager = scenarioManagerRef.current;
+    if (manager) {
+      console.debug("[Connector] Refreshing ScenarioManager with scenarios", scenarios);
+      manager.loadScenarios(scenarios);
+
+      if (cp) {
+        const latestEntry = cp.stateManager.history.getLatestEntry("connector", connector_id);
+        if (latestEntry) {
+          manager.evaluateStatus(latestEntry.fromState as ocpp.OCPPStatus, latestEntry.toState as ocpp.OCPPStatus);
+        }
+      }
+    }
+  }, [scenarios]);
 
   // Implement connector logic here...
   const handleStatusNotification = () => {
@@ -512,14 +531,15 @@ const Connector: React.FC<ConnectorProps> = ({
 
   const handleIncreaseMeterValue = () => {
     if (cp) {
-      setMeterValue(meterValue + 10);
-      cp.setMeterValue(connector_id, meterValue);
+      const nextValue = meterValueInput + 10;
+      setMeterValueInput(nextValue);
+      cp.setMeterValue(connector_id, nextValue);
     }
   };
 
   const handleSendMeterValue = () => {
     if (cp) {
-      setMeterValue(meterValue);
+      cp.setMeterValue(connector_id, meterValueInput);
       cp.sendMeterValue(connector_id);
     }
   };
@@ -653,10 +673,10 @@ const Connector: React.FC<ConnectorProps> = ({
         <div className="panel-border mb-2">
           <div className="flex items-center justify-between">
             <label className="block text-sm font-semibold text-primary">Status:</label>
-            {connectorStatus === ocpp.OCPPStatus.Charging && (
+            {connectorStatus === ocpp.OCPPStatus.Charging && transactionId && (
               <div className="flex items-center gap-1">
                 <span className="text-muted text-xs">TX:</span>
-                <span className="font-mono text-xs text-secondary">{cpTransactionID}</span>
+                <span className="font-mono text-xs text-secondary">{transactionId}</span>
               </div>
             )}
           </div>
@@ -774,9 +794,9 @@ const Connector: React.FC<ConnectorProps> = ({
                         cp={cp}
                         connectorId={connector_id}
                         connectorStatus={connectorStatus}
-                        cpTransactionID={cpTransactionID}
-                        meterValue={meterValue}
-                        setMeterValue={setMeterValue}
+                        transactionId={transactionId}
+                        meterValue={meterValueInput}
+                        setMeterValue={setMeterValueInput}
                         tagId={tagId}
                         setIdTag={setIdTag}
                         availability={availability}
@@ -795,6 +815,7 @@ const Connector: React.FC<ConnectorProps> = ({
                   <ScenarioEditor
                     chargePoint={cp}
                     connectorId={connector_id}
+                    scenario={scenario}
                     scenarioId={scenario?.id}
                     executionContext={scenarioExecutionContext}
                     nodeProgress={nodeProgress}

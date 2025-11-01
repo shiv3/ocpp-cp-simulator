@@ -16,7 +16,7 @@ export class LocalConfigRepository implements ConfigRepository {
     return this.store.get(configAtom);
   }
 
-  async save(config: Config): Promise<void> {
+  async save(config: Config | null): Promise<void> {
     this.store.set(configAtom, config);
   }
 

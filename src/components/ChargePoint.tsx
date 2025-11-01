@@ -1,65 +1,23 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import Connector from "./Connector.tsx";
 import Logger from "./Logger.tsx";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
-import { LogEntry, LogLevel, LogType } from "../cp/shared/Logger";
+import { useChargePointView } from "../data/hooks/useChargePointView";
+import { useDataContext } from "../data/providers/DataProvider";
 
 interface ChargePointProps {
   cp: OCPPChargePoint;
   TagID: string;
 }
 
-const ChargePoint: React.FC<ChargePointProps> = (props) => {
-  const [cp, setCp] = useState<OCPPChargePoint | null>(null);
-  const [cpStatus, setCpStatus] = useState<string>(OCPPStatus.Unavailable);
-  const [cpError, setCpError] = useState<string>("");
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [connectorCount, setConnectorCount] = useState<number>(0);
+const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
+  const { status: cpStatus, error: cpError, logs, clearLogs } = useChargePointView(cp);
+  const connectorIds = cp ? Array.from(cp.connectors.keys()) : [];
 
-  const clearLogs = useCallback(() => {
-    setLogs([]);
-    // Clear the logger in the ChargePoint
-    if (cp) {
-      cp.logger.clearLogs();
-    }
-  }, [cp]);
-
-  useEffect(() => {
-    console.log("ChargePointProps", props);
-    setCp(props.cp);
-    setConnectorCount(props.cp.connectorNumber);
-
-    // Subscribe to events using EventEmitter
-    const unsubStatus = props.cp.events.on("statusChange", (data) => {
-      setCpStatus(data.status);
-    });
-
-    const unsubError = props.cp.events.on("error", (data) => {
-      setCpError(data.error);
-    });
-
-    const unsubConnectorRemoved = props.cp.events.on("connectorRemoved", () => {
-      // Update connector count to trigger re-render
-      setConnectorCount(props.cp.connectorNumber);
-    });
-
-    // Set up logging callback (still uses callback for Logger compatibility)
-    const logMsg = (msg: string) => {
-      console.log(msg);
-      const logEntry = parseFormattedLog(msg);
-      setLogs((prevLogs) => [...prevLogs, logEntry]);
-    };
-    props.cp.loggingCallback = logMsg;
-
-    // Cleanup function to prevent memory leaks
-    return () => {
-      unsubStatus();
-      unsubError();
-      unsubConnectorRemoved();
-      props.cp.loggingCallback = () => {};
-    };
-  }, [props]);
+  const handleClearLogs = useCallback(() => {
+    clearLogs();
+  }, [clearLogs]);
 
   return (
     <div className="card px-4 py-3">
@@ -68,22 +26,21 @@ const ChargePoint: React.FC<ChargePointProps> = (props) => {
           <CPStatus status={cpStatus} />
         </div>
         <div className="lg:col-span-3">
-          <SettingsView {...props} />
+          <SettingsView cp={cp} TagID={TagID} />
         </div>
       </div>
 
       <div className="mt-3">
-        <ChargePointControls cp={cp} cpStatus={cpStatus} cpError={cpError} tagID={props.TagID} />
+        <ChargePointControls chargePointId={cp?.id ?? null} cpStatus={cpStatus} cpError={cpError} tagID={TagID} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-        {cp?.connectors &&
-          Array.from(cp.connectors.keys()).map((connectorId) => (
-            <Connector key={connectorId} id={connectorId} cp={cp} idTag={props.TagID} />
-          ))}
+        {connectorIds.map((connectorId) => (
+          <Connector key={connectorId} id={connectorId} cp={cp} idTag={TagID} />
+        ))}
       </div>
 
-      <Logger logs={logs} onClear={clearLogs} />
+      <Logger logs={logs} onClear={handleClearLogs} />
     </div>
   );
 };
@@ -111,59 +68,49 @@ const CPStatus: React.FC<{ status: string }> = ({ status }) => {
   );
 };
 
-interface AuthViewProps {
-  cp: OCPPChargePoint | null;
-  cpStatus: string;
-  tagID: string;
-}
-
 interface ChargePointControlsProps {
-  cp: OCPPChargePoint | null;
+  chargePointId: string | null;
   cpStatus: string;
   cpError: string;
   tagID: string;
 }
 
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
-  cp,
+  chargePointId,
   cpStatus,
   cpError,
   tagID,
 }) => {
   const [isHeartbeatEnabled, setIsHeartbeatEnabled] = useState<boolean>(false);
+  const { chargePointService } = useDataContext();
 
   const handleConnect = () => {
-    if (cp) {
-      cp.connect();
-    }
+    if (!chargePointId) return;
+    void chargePointService.connect(chargePointId);
   };
 
   const handleDisconnect = () => {
-    if (cp) {
-      cp.disconnect();
-    }
+    if (!chargePointId) return;
+    void chargePointService.disconnect(chargePointId);
   };
   const handleHeartbeat = () => {
-    if (cp) {
-      cp.sendHeartbeat();
-    }
+    if (!chargePointId) return;
+    void chargePointService.sendHeartbeat(chargePointId);
   };
 
-  const handleHeartbeatInterval = (isEnalbe: boolean) => {
-    setIsHeartbeatEnabled(isEnalbe);
-    if (cp) {
-      if (isEnalbe) {
-        cp.startHeartbeat(10);
-      } else {
-        cp.stopHeartbeat();
-      }
+  const handleHeartbeatInterval = (isEnable: boolean) => {
+    setIsHeartbeatEnabled(isEnable);
+    if (!chargePointId) return;
+    if (isEnable) {
+      void chargePointService.startHeartbeat(chargePointId, 10);
+    } else {
+      void chargePointService.stopHeartbeat(chargePointId);
     }
   };
 
   const handleAuthorize = () => {
-    if (cp) {
-      cp.authorize(tagID);
-    }
+    if (!chargePointId) return;
+    void chargePointService.authorize(chargePointId, tagID);
   };
 
   return (
@@ -213,8 +160,8 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   );
 };
 
-const SettingsView: React.FC<ChargePointProps> = (props) => {
-  const [isExpanded, setIsExpanded] = React.useState(false);
+const SettingsView: React.FC<ChargePointProps> = ({ cp, TagID }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
 
   return (
     <div className="panel p-3">
@@ -222,15 +169,15 @@ const SettingsView: React.FC<ChargePointProps> = (props) => {
         <div className="flex items-center gap-4 text-sm flex-wrap">
           <div className="flex items-center gap-2">
             <span className="text-muted text-xs">ID:</span>
-            <span className="font-semibold text-primary">{props.cp.id}</span>
+            <span className="font-semibold text-primary">{cp.id}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-muted text-xs">Connectors:</span>
-            <span className="text-secondary">{props.cp.connectorNumber}</span>
+            <span className="text-secondary">{cp.connectorNumber}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-muted text-xs">Tag:</span>
-            <span className="font-mono text-secondary text-xs">{props.TagID}</span>
+            <span className="font-mono text-secondary text-xs">{TagID}</span>
           </div>
         </div>
         <button
@@ -246,7 +193,7 @@ const SettingsView: React.FC<ChargePointProps> = (props) => {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <span className="text-muted text-xs block">WebSocket URL</span>
-              <span className="text-secondary text-xs font-mono break-all">{props.cp.wsUrl}</span>
+              <span className="text-secondary text-xs font-mono break-all">{cp.wsUrl}</span>
             </div>
             <div>
               <span className="text-muted text-xs block">OCPP Version</span>
@@ -258,41 +205,5 @@ const SettingsView: React.FC<ChargePointProps> = (props) => {
     </div>
   );
 };
-
-/**
- * Helper function to parse formatted log messages back into LogEntry objects
- * Format: [timestamp] [level] [type] message
- */
-function parseFormattedLog(formattedMessage: string): LogEntry {
-  // Match the format: [timestamp] [level] [type] message
-  const match = formattedMessage.match(
-    /\[([\d-T:.Z]+)\] \[(\w+)\] \[(\w+)\] (.*)/,
-  );
-
-  if (match) {
-    const [, timestamp, level, type, message] = match;
-    const levelMap: Record<string, LogLevel> = {
-      DEBUG: LogLevel.DEBUG,
-      INFO: LogLevel.INFO,
-      WARN: LogLevel.WARN,
-      ERROR: LogLevel.ERROR,
-    };
-
-    return {
-      timestamp: new Date(timestamp),
-      level: levelMap[level] ?? LogLevel.INFO,
-      type: (type as LogType) ?? LogType.GENERAL,
-      message,
-    };
-  }
-
-  // Fallback if parsing fails
-  return {
-    timestamp: new Date(),
-    level: LogLevel.INFO,
-    type: LogType.GENERAL,
-    message: formattedMessage,
-  };
-}
 
 export default ChargePoint;

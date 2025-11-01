@@ -55,7 +55,7 @@ export function deleteScenario(chargePointId: string, connectorId: number | null
 }
 
 /**
- * List all scenarios for a charge point
+ * List all scenarios for a charge point (LEGACY - uses old storage format)
  */
 export function listScenarios(chargePointId: string): ScenarioDefinition[] {
   const scenarios: ScenarioDefinition[] = [];
@@ -73,6 +73,62 @@ export function listScenarios(chargePointId: string): ScenarioDefinition[] {
     });
   } catch (error) {
     console.error("Failed to list scenarios:", error);
+  }
+
+  return scenarios;
+}
+
+/**
+ * List all scenarios for a charge point using the NEW storage format
+ * Aggregates scenarios from all connectors and the charge point itself
+ */
+export function listAllScenarios(chargePointId: string): ScenarioDefinition[] {
+  const scenarios: ScenarioDefinition[] = [];
+  const prefix = `${SCENARIOS_KEY_PREFIX}${chargePointId}_`;
+
+  try {
+    const keys = Object.keys(localStorage);
+    keys.forEach((key) => {
+      if (key.startsWith(prefix)) {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const collection = JSON.parse(stored) as ConnectorScenariosCollection;
+          scenarios.push(...(collection.scenarios || []));
+        }
+      }
+    });
+
+    // Also check for legacy scenarios and migrate them
+    const legacyScenarios = listScenarios(chargePointId);
+    if (legacyScenarios.length > 0) {
+      console.log(`[scenarioStorage] Found ${legacyScenarios.length} legacy scenarios, migrating...`);
+      // Migrate each legacy scenario
+      legacyScenarios.forEach((legacyScenario) => {
+        const connectorId = legacyScenario.targetId || null;
+        const migrated = migrateScenarioToNew(legacyScenario);
+
+        // Load existing scenarios for this connector
+        const existing = loadScenarios(chargePointId, connectorId);
+
+        // Check if this scenario already exists in the new format
+        const alreadyMigrated = existing.some(s => s.id === migrated.id);
+
+        if (!alreadyMigrated) {
+          // Add to new storage
+          existing.push(migrated);
+          saveScenarios(chargePointId, connectorId, existing);
+          scenarios.push(migrated);
+        }
+      });
+
+      // Delete legacy storage keys after migration
+      legacyScenarios.forEach((scenario) => {
+        const connectorId = scenario.targetId || null;
+        deleteScenario(chargePointId, connectorId);
+      });
+    }
+  } catch (error) {
+    console.error("Failed to list all scenarios:", error);
   }
 
   return scenarios;

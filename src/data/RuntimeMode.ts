@@ -14,8 +14,17 @@ export function resolveRuntimeMode(envValue?: string | null): RuntimeMode {
   }
 
   // Attempt to read from Vite env if available at runtime
-  if (typeof import.meta !== "undefined" && (import.meta as any).env) {
-    return parseRuntimeMode((import.meta as any).env.VITE_RUNTIME_MODE);
+  if (typeof import.meta !== "undefined") {
+    const meta = import.meta as unknown;
+    if (typeof meta === "object" && meta !== null && "env" in meta) {
+      const envRecord = (meta as { env?: Record<string, unknown> }).env;
+      const runtimeMode = typeof envRecord?.VITE_RUNTIME_MODE === "string"
+        ? (envRecord.VITE_RUNTIME_MODE as string)
+        : undefined;
+      if (runtimeMode) {
+        return parseRuntimeMode(runtimeMode);
+      }
+    }
   }
 
   return DEFAULT_RUNTIME_MODE;

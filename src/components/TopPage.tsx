@@ -1,64 +1,35 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import ChargePoint from "./ChargePoint.tsx";
 import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
-import { useAtom } from "jotai";
-import { configAtom } from "../store/store.ts";
-import {
-  BootNotification,
-  DefaultBootNotification,
-} from "../cp/domain/types/OcppTypes";
-import { useNavigate } from "react-router-dom";
 import ChargePointConfigModal, { ChargePointConfig, defaultChargePointConfig } from "./ChargePointConfigModal.tsx";
 import { Plus, Settings, Trash2 } from "lucide-react";
-import { loadConnectorAutoMeterConfig } from "../utils/connectorStorage";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { useConfig } from "../data/hooks/useConfig";
+import { useChargePoints } from "../data/hooks/useChargePoints";
 
 const TopPage: React.FC = () => {
-  const [cps, setCps] = useState<OCPPChargePoint[]>([]);
-  const [config, setConfig] = useAtom(configAtom);
+  const { config, setConfig: persistConfig, isLoading } = useConfig();
   const [tagIDs, setTagIDs] = useState<string[]>([]);
   const [chargePointConfigs, setChargePointConfigs] = useState<ChargePointConfig[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const navigate = useNavigate();
+  const chargePoints = useChargePoints(config, { isLoading });
+
+  const updateConfig = useCallback(
+    (next: Parameters<typeof persistConfig>[0]) => {
+      void persistConfig(next);
+    },
+    [persistConfig],
+  );
 
   useEffect(() => {
-    if (!config || !config.Experimental) {
+    if (isLoading || !config || !config.Experimental) {
       // No config yet, just show empty state
-      setCps([]);
       setTagIDs([]);
       setChargePointConfigs([]);
       return;
     }
-
-    // Check if we need to create new ChargePoints or update existing ones
-    setCps((prevCps) => {
-      const newCpIds = config.Experimental.ChargePointIDs.map((cp) => cp.ChargePointID);
-      const existingCpIds = prevCps.map((cp) => cp.id);
-
-      // If the ChargePoint IDs haven't changed, keep existing instances
-      const sameIds =
-        newCpIds.length === existingCpIds.length &&
-        newCpIds.every((id, index) => id === existingCpIds[index]);
-
-      if (sameIds) {
-        // Keep existing ChargePoint instances to preserve event listeners
-        return prevCps;
-      }
-
-      // Create new ChargePoints only if IDs changed
-      return config.Experimental.ChargePointIDs.map((cp) =>
-        NewChargePoint(
-          cp.ConnectorNumber,
-          cp.ChargePointID,
-          config.BootNotification ?? DefaultBootNotification,
-          config.wsURL,
-          config.basicAuthSettings,
-          config.autoMeterValueSetting,
-        ),
-      );
-    });
 
     setTagIDs(config.Experimental.TagIDs ?? []);
 
@@ -86,7 +57,7 @@ const TopPage: React.FC = () => {
       tagIds: config.Experimental.TagIDs ?? ["123456"],
     }));
     setChargePointConfigs(configs);
-  }, [config]);
+  }, [config, isLoading]);
 
   const handleAddChargePoint = () => {
     setEditingIndex(null);
@@ -151,7 +122,7 @@ const TopPage: React.FC = () => {
         TagIDs: cpConfig.tagIds,
       },
     };
-    setConfig(newConfig);
+    updateConfig(newConfig);
   };
 
   const handleDeleteChargePoint = (index: number) => {
@@ -161,8 +132,7 @@ const TopPage: React.FC = () => {
 
     if (updatedConfigs.length === 0) {
       // If no charge points left, clear config
-      setConfig(null);
-      setCps([]);
+      updateConfig(null);
       return;
     }
 
@@ -177,13 +147,13 @@ const TopPage: React.FC = () => {
         TagIDs: tagIDs.length > 0 ? tagIDs : ["123456"],
       },
     };
-    setConfig(newConfig);
+    updateConfig(newConfig);
   };
 
   return (
     <div className="px-8 pt-6 pb-8 mb-4">
       <ExperimentalView
-        cps={cps}
+        cps={chargePoints}
         tagIDs={tagIDs}
         onAddChargePoint={handleAddChargePoint}
         onEditChargePoint={handleEditChargePoint}
@@ -381,40 +351,6 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddCharg
       </Tabs>
     </>
   );
-};
-
-const NewChargePoint = (
-  ConnectorNumber: number,
-  ChargePointID: string,
-  BootNotification: BootNotification,
-  WSURL: string,
-  basicAuthSettings: { username: string; password: string } | null,
-  autoMeterValueSetting: { interval: number; value: number } | null,
-) => {
-  console.log(
-    `Creating new ChargePoint with ID: ${ChargePointID} Connector Number: ${ConnectorNumber} WSURL: ${WSURL}`,
-  );
-  const chargePoint = new OCPPChargePoint(
-    ChargePointID,
-    BootNotification,
-    ConnectorNumber,
-    WSURL,
-    basicAuthSettings,
-    autoMeterValueSetting,
-  );
-
-  // Load auto MeterValue config from localStorage for each connector
-  for (let i = 1; i <= ConnectorNumber; i++) {
-    const savedConfig = loadConnectorAutoMeterConfig(ChargePointID, i);
-    if (savedConfig) {
-      const connector = chargePoint.getConnector(i);
-      if (connector) {
-        connector.autoMeterValueConfig = savedConfig;
-      }
-    }
-  }
-
-  return chargePoint;
 };
 
 export default TopPage;

@@ -48,7 +48,7 @@ export const configAtom = atom(
     const storageValue = get(configStorageAtom);
     return hashValue ?? storageValue;
   },
-  (_, set, update: Config) => {
+  (_, set, update: Config | null) => {
     set(configHashAtom, update);
     set(configStorageAtom, update);
   },

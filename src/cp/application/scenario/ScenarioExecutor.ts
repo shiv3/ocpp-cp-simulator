@@ -11,6 +11,8 @@ import {
   DelayNodeData,
   NotificationNodeData,
   ConnectorPlugNodeData,
+  RemoteStartTriggerNodeData,
+  StatusTriggerNodeData,
 } from "./ScenarioTypes";
 import { Edge } from "@xyflow/react";
 
@@ -164,6 +166,14 @@ export class ScenarioExecutor {
         await this.executeConnectorPlug(node.data as ConnectorPlugNodeData);
         break;
 
+      case ScenarioNodeType.REMOTE_START_TRIGGER:
+        await this.executeRemoteStartTrigger(node.id, node.data as RemoteStartTriggerNodeData);
+        break;
+
+      case ScenarioNodeType.STATUS_TRIGGER:
+        await this.executeStatusTrigger(node.id, node.data as StatusTriggerNodeData);
+        break;
+
       default:
         console.warn(`Unknown node type: ${node.type}`);
     }
@@ -293,6 +303,94 @@ export class ScenarioExecutor {
   private async executeConnectorPlug(data: ConnectorPlugNodeData): Promise<void> {
     if (this.callbacks.onConnectorPlug) {
       await this.callbacks.onConnectorPlug(data.action);
+    }
+  }
+
+  /**
+   * Execute remote start trigger node with progress updates
+   * Waits for RemoteStartTransaction request from central system
+   */
+  private async executeRemoteStartTrigger(nodeId: string, data: RemoteStartTriggerNodeData): Promise<void> {
+    if (!this.callbacks.onWaitForRemoteStart) return;
+
+    const timeout = data.timeout || 0;
+
+    // If no timeout, just wait without progress
+    if (!timeout || timeout === 0) {
+      await this.callbacks.onWaitForRemoteStart(timeout);
+      return;
+    }
+
+    // Start timeout countdown with progress updates
+    const startTime = Date.now();
+    const timeoutMs = timeout * 1000;
+
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
+
+      if (this.callbacks.onNodeProgress) {
+        this.callbacks.onNodeProgress(nodeId, remaining, timeout);
+      }
+
+      if (remaining <= 0) {
+        clearInterval(progressInterval);
+      }
+    }, 100);
+
+    try {
+      await this.callbacks.onWaitForRemoteStart(timeout);
+    } finally {
+      clearInterval(progressInterval);
+
+      // Clear progress
+      if (this.callbacks.onNodeProgress) {
+        this.callbacks.onNodeProgress(nodeId, 0, timeout);
+      }
+    }
+  }
+
+  /**
+   * Execute status trigger node with progress updates
+   * Waits for connector status to change to target status
+   */
+  private async executeStatusTrigger(nodeId: string, data: StatusTriggerNodeData): Promise<void> {
+    if (!this.callbacks.onWaitForStatus) return;
+
+    const timeout = data.timeout || 0;
+
+    // If no timeout, just wait without progress
+    if (!timeout || timeout === 0) {
+      await this.callbacks.onWaitForStatus(data.targetStatus, timeout);
+      return;
+    }
+
+    // Start timeout countdown with progress updates
+    const startTime = Date.now();
+    const timeoutMs = timeout * 1000;
+
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
+
+      if (this.callbacks.onNodeProgress) {
+        this.callbacks.onNodeProgress(nodeId, remaining, timeout);
+      }
+
+      if (remaining <= 0) {
+        clearInterval(progressInterval);
+      }
+    }, 100);
+
+    try {
+      await this.callbacks.onWaitForStatus(data.targetStatus, timeout);
+    } finally {
+      clearInterval(progressInterval);
+
+      // Clear progress
+      if (this.callbacks.onNodeProgress) {
+        this.callbacks.onNodeProgress(nodeId, 0, timeout);
+      }
     }
   }
 

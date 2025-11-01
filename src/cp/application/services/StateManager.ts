@@ -38,7 +38,7 @@ interface ChargePointGetter {
 
 /**
  * StateManager
- * Robot3を使ったConnector状態管理
+ * Connector state management using Robot3
  */
 export class StateManager {
   private connectorMachines: Map<number, ReturnType<typeof interpret>> =
@@ -80,10 +80,10 @@ export class StateManager {
   }
 
   /**
-   * Connectorを初期化
+   * Initialize connector
    * @param connectorId Connector ID
-   * @param initialStatus 初期ステータス
-   * @param availability 初期Availability
+   * @param initialStatus Initial status
+   * @param availability Initial availability
    */
   initializeConnector(
     connectorId: number,
@@ -100,31 +100,31 @@ export class StateManager {
 
     const machine = createConnectorMachine(initialContext);
 
-    // 状態変更を監視
+    // Monitor state changes
     const service = interpret(machine, (machineState) => {
       const status = getStatusFromMachineState(machineState.name);
       const previousStatus =
         this.connectorPreviousStatus.get(connectorId) || initialStatus;
 
-      // 前回と同じ状態の場合はイベント発火しない
+      // Don't fire event if status is the same
       if (status === previousStatus) {
         return;
       }
 
-      // イベント発火
+      // Fire event
       this.eventEmitter.emit("connectorStatusChange", {
         connectorId,
         status,
         previousStatus,
       });
 
-      // ログ記録
+      // Log the change
       this.logger.info(
         `[StateManager] Connector ${connectorId} status: ${previousStatus} → ${status}`,
         LogType.System,
       );
 
-      // 前回のステータスを更新
+      // Update previous status
       this.connectorPreviousStatus.set(connectorId, status);
     });
 
@@ -133,11 +133,11 @@ export class StateManager {
   }
 
   /**
-   * Connector状態を遷移
+   * Transition connector state
    * @param connectorId Connector ID
-   * @param event イベント
-   * @param context 遷移コンテキスト
-   * @returns 遷移結果
+   * @param event Event
+   * @param context Transition context
+   * @returns Transition result
    */
   transitionConnectorStatus(
     connectorId: number,
@@ -158,12 +158,12 @@ export class StateManager {
     const previousState = getStatusFromMachineState(service.machine.current);
 
     try {
-      // イベント送信（Robot3が自動的にvalidation実行）
+      // Send event (Robot3 automatically executes validation)
       service.send(event);
 
       const newState = getStatusFromMachineState(service.machine.current);
 
-      // 履歴記録
+      // Record history
       this.history.recordTransition({
         id: crypto.randomUUID(),
         timestamp: new Date(),
@@ -188,7 +188,7 @@ export class StateManager {
         newState,
       };
     } catch (error: unknown) {
-      // Guard条件失敗などで遷移が拒否された場合
+      // When transition is rejected due to guard condition failure, etc.
       const errorMessage =
         error instanceof Error ? error.message : "Transition failed";
 
@@ -197,7 +197,7 @@ export class StateManager {
         LogType.System,
       );
 
-      // 失敗を履歴に記録
+      // Record failure in history
       this.history.recordTransition({
         id: crypto.randomUUID(),
         timestamp: new Date(),
@@ -205,7 +205,7 @@ export class StateManager {
         entityId: connectorId,
         transitionType: "status",
         fromState: previousState,
-        toState: previousState, // 遷移失敗なので同じ状態
+        toState: previousState, // Same state because transition failed
         context: context || {
           source: "StateManager",
           timestamp: new Date(),
@@ -227,10 +227,10 @@ export class StateManager {
   }
 
   /**
-   * Transactionを準備（Preparing状態に遷移）
+   * Prepare transaction (transition to Preparing state)
    * @param connectorId Connector ID
    * @param tagId Tag ID
-   * @returns 遷移結果
+   * @returns Transition result
    */
   prepareTransaction(
     connectorId: number,
@@ -248,11 +248,11 @@ export class StateManager {
   }
 
   /**
-   * Transactionを開始（Charging状態に遷移）
+   * Start transaction (transition to Charging state)
    * @param connectorId Connector ID
    * @param transactionId Transaction ID
    * @param tagId Tag ID
-   * @returns 遷移結果
+   * @returns Transition result
    */
   startTransaction(
     connectorId: number,
@@ -262,11 +262,11 @@ export class StateManager {
     const service = this.connectorMachines.get(connectorId);
 
     if (service && tagId) {
-      // まず認証
+      // Authorize first
       service.send({ type: "AUTHORIZE", tagId });
     }
 
-    // Transactionを開始
+    // Start transaction
     return this.transitionConnectorStatus(
       connectorId,
       { type: "START_TRANSACTION", transactionId },
@@ -279,10 +279,10 @@ export class StateManager {
   }
 
   /**
-   * Transactionを停止（Finishing状態に遷移）
+   * Stop transaction (transition to Finishing state)
    * @param connectorId Connector ID
-   * @param reason 停止理由
-   * @returns 遷移結果
+   * @param reason Stop reason
+   * @returns Transition result
    */
   stopTransaction(connectorId: number, reason?: string): StateTransitionResult {
     return this.transitionConnectorStatus(
@@ -297,10 +297,10 @@ export class StateManager {
   }
 
   /**
-   * ChargePoint状態を遷移
-   * @param status 新しいステータス
-   * @param context 遷移コンテキスト
-   * @returns 遷移結果
+   * Transition charge point state
+   * @param status New status
+   * @param context Transition context
+   * @returns Transition result
    */
   transitionChargePointStatus(
     status: OCPPStatus,
@@ -309,7 +309,7 @@ export class StateManager {
     const chargePoint = this.chargePointGetter();
     const previousStatus = chargePoint.status;
 
-    // 履歴記録
+    // Record history
     this.history.recordTransition({
       id: crypto.randomUUID(),
       timestamp: new Date(),
@@ -337,8 +337,8 @@ export class StateManager {
   }
 
   /**
-   * ChargePoint状態のスナップショットを取得
-   * @returns スナップショット
+   * Get charge point state snapshot
+   * @returns Snapshot
    */
   getChargePointState(): ChargePointStateSnapshot {
     const chargePoint = this.chargePointGetter();
@@ -350,9 +350,9 @@ export class StateManager {
   }
 
   /**
-   * Connector状態のスナップショットを取得
+   * Get connector state snapshot
    * @param connectorId Connector ID
-   * @returns スナップショット
+   * @returns Snapshot
    */
   getConnectorState(connectorId: number): ConnectorStateSnapshot | null {
     const connector = this.connectorGetter(connectorId);
@@ -383,23 +383,23 @@ export class StateManager {
   }
 
   /**
-   * 状態履歴を取得
-   * @param options 照会オプション
-   * @returns 履歴エントリの配列
+   * Get state history
+   * @param options Query options
+   * @returns Array of history entries
    */
   getStateHistory(options?: HistoryOptions): StateHistoryEntry[] {
     return this.history.getHistory(options);
   }
 
   /**
-   * 統計情報を取得
+   * Get statistics
    */
   getStatistics() {
     return this.history.getStatistics();
   }
 
   /**
-   * クリーンアップ
+   * Cleanup
    */
   cleanup(): void {
     this.connectorMachines.clear();

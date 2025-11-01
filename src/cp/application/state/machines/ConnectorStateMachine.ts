@@ -2,7 +2,7 @@ import { createMachine, state, transition, guard, reduce } from "robot3";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 /**
- * Connector の状態マシンコンテキスト
+ * Connector state machine context
  */
 export interface ConnectorContext {
   connectorId: number;
@@ -13,7 +13,7 @@ export interface ConnectorContext {
 }
 
 /**
- * Connector イベント型定義
+ * Connector event type definitions
  */
 export type ConnectorEvent =
   | { type: "PLUGIN" }
@@ -31,19 +31,19 @@ export type ConnectorEvent =
   | { type: "SET_UNAVAILABLE" }
   | { type: "SET_AVAILABLE" };
 
-// Guards（遷移条件）
+// Guards (transition conditions)
 const isAuthorized = (ctx: ConnectorContext) => ctx.authorized === true;
 const isOperative = (ctx: ConnectorContext) => ctx.availability === "Operative";
 
 /**
- * Connector State Machine を作成
- * @param initialContext 初期コンテキスト
+ * Create Connector State Machine
+ * @param initialContext Initial context
  * @returns Robot3 state machine
  */
 export function createConnectorMachine(initialContext: ConnectorContext) {
   return createMachine(
     {
-      // Available 状態
+      // Available state
       available: state(
         transition(
           "PLUGIN",
@@ -52,14 +52,14 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
           reduce((ctx: ConnectorContext) => ({
             ...ctx,
             authorized: false,
-          }))
+          })),
         ),
         transition("RESERVE", "reserved"),
         transition("SET_UNAVAILABLE", "unavailable"),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // Preparing 状態
+      // Preparing state
       preparing: state(
         transition(
           "AUTHORIZE",
@@ -68,7 +68,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             ...ctx,
             authorized: true,
             tagId: event.type === "AUTHORIZE" ? event.tagId : ctx.tagId,
-          }))
+          })),
         ),
         transition(
           "START_TRANSACTION",
@@ -80,7 +80,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
               event.type === "START_TRANSACTION"
                 ? event.transactionId
                 : ctx.transactionId,
-          }))
+          })),
         ),
         transition(
           "PLUGOUT",
@@ -89,13 +89,13 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             ...ctx,
             authorized: false,
             tagId: null,
-          }))
+          })),
         ),
         transition("SET_UNAVAILABLE", "unavailable"),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // Charging 状態
+      // Charging state
       charging: state(
         transition("SUSPEND_EV", "suspendedEV"),
         transition("SUSPEND_EVSE", "suspendedEVSE"),
@@ -106,13 +106,13 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             ...ctx,
             transactionId: null,
             authorized: false,
-          }))
+          })),
         ),
         transition("SET_UNAVAILABLE", "unavailable"),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // SuspendedEV 状態
+      // SuspendedEV state
       suspendedEV: state(
         transition("RESUME", "charging"),
         transition("SUSPEND_EVSE", "suspendedEVSE"),
@@ -123,12 +123,12 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             ...ctx,
             transactionId: null,
             authorized: false,
-          }))
+          })),
         ),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // SuspendedEVSE 状態
+      // SuspendedEVSE state
       suspendedEVSE: state(
         transition("RESUME", "charging"),
         transition("SUSPEND_EV", "suspendedEV"),
@@ -139,12 +139,12 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             ...ctx,
             transactionId: null,
             authorized: false,
-          }))
+          })),
         ),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // Finishing 状態
+      // Finishing state
       finishing: state(
         transition(
           "PLUGOUT",
@@ -154,13 +154,13 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             transactionId: null,
             authorized: false,
             tagId: null,
-          }))
+          })),
         ),
         transition("SET_UNAVAILABLE", "unavailable"),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // Reserved 状態
+      // Reserved state
       reserved: state(
         transition("PLUGIN", "preparing", guard(isOperative)),
         transition(
@@ -169,13 +169,13 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
           reduce((ctx: ConnectorContext) => ({
             ...ctx,
             tagId: null,
-          }))
+          })),
         ),
         transition("SET_UNAVAILABLE", "unavailable"),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // Unavailable 状態
+      // Unavailable state
       unavailable: state(
         transition(
           "SET_AVAILABLE",
@@ -183,12 +183,12 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
           reduce((ctx: ConnectorContext) => ({
             ...ctx,
             availability: "Operative",
-          }))
+          })),
         ),
-        transition("ERROR", "faulted")
+        transition("ERROR", "faulted"),
       ),
 
-      // Faulted 状態
+      // Faulted state
       faulted: state(
         transition(
           "RESET",
@@ -198,22 +198,22 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
             transactionId: null,
             authorized: false,
             tagId: null,
-          }))
+          })),
         ),
-        transition("SET_UNAVAILABLE", "unavailable")
+        transition("SET_UNAVAILABLE", "unavailable"),
       ),
     },
-    // 初期コンテキスト
+    // Initial context
     (initialState) => ({
       ...initialContext,
       current: initialState,
-    })
+    }),
   );
 }
 
 /**
- * マシン状態名からOCPPStatusへのマッピング
- * @param machineState Robot3のstate名
+ * Mapping from machine state name to OCPPStatus
+ * @param machineState Robot3 state name
  * @returns OCPPStatus
  */
 export function getStatusFromMachineState(machineState: string): OCPPStatus {
@@ -232,9 +232,9 @@ export function getStatusFromMachineState(machineState: string): OCPPStatus {
 }
 
 /**
- * OCPPStatusからマシン状態名へのマッピング
+ * Mapping from OCPPStatus to machine state name
  * @param status OCPPStatus
- * @returns Robot3のstate名
+ * @returns Robot3 state name
  */
 export function getMachineStateFromStatus(status: OCPPStatus): string {
   const mapping: Record<OCPPStatus, string> = {

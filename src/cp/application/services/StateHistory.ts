@@ -5,8 +5,8 @@ import type {
 } from "./types/StateSnapshot";
 
 /**
- * 状態履歴管理クラス
- * メモリベースで状態遷移の履歴を記録・照会する
+ * State history management class
+ * Records and queries state transition history in memory
  */
 export class StateHistory {
   private entries: StateHistoryEntry[] = [];
@@ -18,64 +18,64 @@ export class StateHistory {
   }
 
   /**
-   * 履歴エントリを追加
-   * @param entry 履歴エントリ
+   * Add history entry
+   * @param entry History entry
    */
   recordTransition(entry: StateHistoryEntry): void {
     this.entries.push(entry);
 
-    // 最初のエントリのタイムスタンプを記録
+    // Record timestamp of first entry
     if (this.firstEntryTime === null) {
       this.firstEntryTime = entry.timestamp;
     }
 
-    // 最大エントリ数を超えた場合、古いエントリを削除
+    // Delete old entries if max entries exceeded
     if (this.entries.length > this.maxEntries) {
-      this.entries.shift(); // 最古のエントリを削除
+      this.entries.shift(); // Delete oldest entry
     }
   }
 
   /**
-   * 履歴を照会
-   * @param options 照会オプション
-   * @returns 履歴エントリの配列
+   * Query history
+   * @param options Query options
+   * @returns Array of history entries
    */
   getHistory(options?: HistoryOptions): StateHistoryEntry[] {
     let filtered = [...this.entries];
 
     if (options) {
-      // エンティティでフィルタ
+      // Filter by entity
       if (options.entity) {
         filtered = filtered.filter((e) => e.entity === options.entity);
       }
 
-      // エンティティIDでフィルタ
+      // Filter by entity ID
       if (options.entityId !== undefined) {
         filtered = filtered.filter((e) => e.entityId === options.entityId);
       }
 
-      // 開始時刻でフィルタ
+      // Filter by start time
       if (options.fromTimestamp) {
         filtered = filtered.filter(
-          (e) => e.timestamp >= options.fromTimestamp!
+          (e) => e.timestamp >= options.fromTimestamp!,
         );
       }
 
-      // 終了時刻でフィルタ
+      // Filter by end time
       if (options.toTimestamp) {
         filtered = filtered.filter((e) => e.timestamp <= options.toTimestamp!);
       }
 
-      // 遷移タイプでフィルタ
+      // Filter by transition type
       if (options.transitionType) {
         filtered = filtered.filter(
-          (e) => e.transitionType === options.transitionType
+          (e) => e.transitionType === options.transitionType,
         );
       }
 
-      // 制限数を適用
+      // Apply limit
       if (options.limit && options.limit > 0) {
-        filtered = filtered.slice(-options.limit); // 最新のN件を取得
+        filtered = filtered.slice(-options.limit); // Get latest N entries
       }
     }
 
@@ -83,14 +83,14 @@ export class StateHistory {
   }
 
   /**
-   * 最新のエントリを取得
-   * @param entity エンティティタイプ
-   * @param entityId エンティティID（connectorの場合）
-   * @returns 最新のエントリ、または null
+   * Get latest entry
+   * @param entity Entity type
+   * @param entityId Entity ID (for connector)
+   * @returns Latest entry or null
    */
   getLatestEntry(
     entity: "chargePoint" | "connector",
-    entityId?: number
+    entityId?: number,
   ): StateHistoryEntry | null {
     const filtered = this.entries.filter((e) => {
       if (e.entity !== entity) return false;
@@ -104,29 +104,27 @@ export class StateHistory {
   }
 
   /**
-   * 統計情報を取得
-   * @returns 統計情報
+   * Get statistics
+   * @returns Statistics
    */
   getStatistics(): StateStatistics {
     const totalTransitions = this.entries.length;
 
-    // エンティティ別の集計
+    // Aggregate by entity
     const transitionsByEntity: Record<string, number> = {};
     this.entries.forEach((e) => {
-      const key = e.entityId
-        ? `${e.entity}-${e.entityId}`
-        : e.entity;
+      const key = e.entityId ? `${e.entity}-${e.entityId}` : e.entity;
       transitionsByEntity[key] = (transitionsByEntity[key] || 0) + 1;
     });
 
-    // タイプ別の集計
+    // Aggregate by type
     const transitionsByType: Record<string, number> = {};
     this.entries.forEach((e) => {
       transitionsByType[e.transitionType] =
         (transitionsByType[e.transitionType] || 0) + 1;
     });
 
-    // エラー・警告のカウント
+    // Count errors and warnings
     let errorCount = 0;
     let warningCount = 0;
     this.entries.forEach((e) => {
@@ -137,7 +135,7 @@ export class StateHistory {
       }
     });
 
-    // 平均遷移回数/分を計算
+    // Calculate average transitions per minute
     let averageTransitionsPerMinute = 0;
     if (this.firstEntryTime && this.entries.length > 0) {
       const lastEntry = this.entries[this.entries.length - 1];
@@ -160,15 +158,15 @@ export class StateHistory {
   }
 
   /**
-   * エクスポート機能（将来のAPI用）
-   * @param format エクスポート形式
-   * @returns エクスポートされた文字列
+   * Export feature (for future API)
+   * @param format Export format
+   * @returns Exported string
    */
   export(format: "json" | "csv"): string {
     if (format === "json") {
       return JSON.stringify(this.entries, null, 2);
     } else if (format === "csv") {
-      // CSVヘッダー
+      // CSV header
       const headers = [
         "id",
         "timestamp",
@@ -183,7 +181,7 @@ export class StateHistory {
         "errorMessage",
       ].join(",");
 
-      // CSVボディ
+      // CSV body
       const rows = this.entries.map((e) => {
         return [
           e.id,
@@ -209,20 +207,20 @@ export class StateHistory {
   }
 
   /**
-   * クリーンアップ（古いエントリの削除）
-   * @param olderThan この時刻より古いエントリを削除
+   * Cleanup (delete old entries)
+   * @param olderThan Delete entries older than this time
    */
   cleanup(olderThan?: Date): void {
     if (olderThan) {
       this.entries = this.entries.filter((e) => e.timestamp >= olderThan);
     } else {
-      // olderThan が指定されていない場合、最大エントリ数まで削減
+      // If olderThan not specified, reduce to max entries
       if (this.entries.length > this.maxEntries) {
         this.entries = this.entries.slice(-this.maxEntries);
       }
     }
 
-    // firstEntryTime を更新
+    // Update firstEntryTime
     if (this.entries.length > 0) {
       this.firstEntryTime = this.entries[0].timestamp;
     } else {
@@ -231,7 +229,7 @@ export class StateHistory {
   }
 
   /**
-   * 全エントリをクリア
+   * Clear all entries
    */
   clear(): void {
     this.entries = [];
@@ -239,7 +237,7 @@ export class StateHistory {
   }
 
   /**
-   * 現在のエントリ数を取得
+   * Get current entry count
    */
   get count(): number {
     return this.entries.length;

@@ -167,28 +167,36 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
         </h3>
         <div className="space-y-2">
           <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-sm text-muted">Status:</span>
-            <span className="text-sm font-semibold">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Status:
+            </span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               <ConnectorStatus status={connectorStatus} />
             </span>
           </div>
           <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-sm text-muted">Availability:</span>
-            <span className="text-sm font-semibold">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Availability:
+            </span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               <ConnectorAvailability availability={availability} />
             </span>
           </div>
           {transactionId !== null && transactionId !== 0 && (
             <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
-              <span className="text-sm text-muted">Transaction ID:</span>
-              <span className="text-sm font-mono font-semibold bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded">
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                Transaction ID:
+              </span>
+              <span className="text-sm font-mono font-semibold text-gray-900 dark:text-gray-100 bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded">
                 {transactionId}
               </span>
             </div>
           )}
           <div className="flex justify-between items-center py-1">
-            <span className="text-sm text-muted">Meter Value:</span>
-            <span className="text-sm font-mono font-semibold">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Meter Value:
+            </span>
+            <span className="text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">
               {meterValue.toLocaleString()} Wh
             </span>
           </div>
@@ -285,9 +293,11 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
           </h3>
           <div className="space-y-2">
             <div className="flex items-center justify-between py-1">
-              <span className="text-sm text-muted">Status:</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                Status:
+              </span>
               <span
-                className={`text-sm font-semibold flex items-center gap-1 ${autoMeterValueConfig.enabled ? "text-green-600 dark:text-green-400" : "text-gray-500"}`}
+                className={`text-sm font-semibold flex items-center gap-1 ${autoMeterValueConfig.enabled ? "text-green-600 dark:text-green-400" : "text-gray-500 dark:text-gray-400"}`}
               >
                 {autoMeterValueConfig.enabled && (
                   <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
@@ -298,20 +308,26 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
             {autoMeterValueConfig.enabled && (
               <>
                 <div className="flex items-center justify-between py-1 border-t border-gray-200 dark:border-gray-700">
-                  <span className="text-xs text-muted">Send Interval:</span>
-                  <span className="text-xs font-mono bg-purple-100 dark:bg-purple-900 px-2 py-1 rounded">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">
+                    Send Interval:
+                  </span>
+                  <span className="text-xs font-mono text-gray-900 dark:text-gray-100 bg-purple-100 dark:bg-purple-900 px-2 py-1 rounded">
                     {autoMeterValueConfig.intervalSeconds}s
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-1">
-                  <span className="text-xs text-muted">Curve Points:</span>
-                  <span className="text-xs font-mono">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">
+                    Curve Points:
+                  </span>
+                  <span className="text-xs font-mono text-gray-900 dark:text-gray-100">
                     {autoMeterValueConfig.curvePoints.length} points
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-1">
-                  <span className="text-xs text-muted">Auto Calculate:</span>
-                  <span className="text-xs">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">
+                    Auto Calculate:
+                  </span>
+                  <span className="text-xs text-gray-900 dark:text-gray-100">
                     {autoMeterValueConfig.autoCalculateInterval ? "Yes" : "No"}
                   </span>
                 </div>
@@ -342,12 +358,14 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
         </h3>
         <div className="space-y-2">
           <div>
-            <label className="block text-xs text-muted mb-1">ID Tag</label>
+            <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+              ID Tag
+            </label>
             <input
               type="text"
               value={tagId}
               onChange={(e) => setIdTag(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-primary focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
               placeholder="Enter ID Tag"
             />
           </div>
@@ -377,14 +395,14 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
         </h3>
         <div className="space-y-2">
           <div>
-            <label className="block text-xs text-muted mb-1">
+            <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
               Manual Value (Wh)
             </label>
             <input
               type="number"
               value={meterValue}
               onChange={(e) => setMeterValue(Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-primary font-mono focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -928,9 +946,9 @@ const Connector: React.FC<ConnectorProps> = ({
 
             {/* Meter Value Progress Bar */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs text-muted">
+              <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
                 <span>{liveSoc !== null ? "Battery SoC" : "Energy"}</span>
-                <span className="font-mono font-semibold">
+                <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">
                   {liveSoc !== null
                     ? `${liveSoc.toFixed(1)}%`
                     : `${(liveMeterValue / 1000).toFixed(2)} kWh`}
@@ -945,11 +963,11 @@ const Connector: React.FC<ConnectorProps> = ({
                 </div>
               )}
               <div className="flex items-center justify-between text-xs">
-                <span className="text-muted">
+                <span className="text-gray-600 dark:text-gray-400">
                   <ConnectorAvailability availability={availability} />
                 </span>
                 {liveSoc !== null && (
-                  <span className="text-muted">
+                  <span className="text-gray-600 dark:text-gray-400">
                     {(liveMeterValue / 1000).toFixed(2)} kWh charged
                   </span>
                 )}
@@ -959,8 +977,8 @@ const Connector: React.FC<ConnectorProps> = ({
         </div>
       </div>
 
-      <div className="text-sm text-center py-2 border-t border-gray-200 dark:border-gray-700">
-        <span className="inline-flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium">
+      <div className="text-center py-2 border-t border-gray-200 dark:border-gray-700">
+        <span className="inline-flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300 font-medium">
           ⚙️ Click to open Editor (Scenario / State Diagram)
         </span>
       </div>

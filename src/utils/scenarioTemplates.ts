@@ -9,17 +9,20 @@ export interface ScenarioTemplate {
   name: string;
   description: string;
   targetType: "chargePoint" | "connector";
-  createScenario: (chargePointId: string, connectorId: number | null) => ScenarioDefinition;
+  createScenario: (
+    chargePointId: string,
+    connectorId: number | null,
+  ) => ScenarioDefinition;
 }
 
 /**
  * Template: Smart Charging with Auto MeterValue
- * ステータス変化をトリガーにして、自動的にMeterValueを増やす実用的なシナリオ
+ * Practical scenario that automatically increases MeterValue triggered by status changes
  */
 const smartChargingTemplate: ScenarioTemplate = {
   id: "smart-charging",
   name: "Smart Charging (Auto MeterValue)",
-  description: "Chargingになったら自動的にMeterValueを増やし、Finishingで停止",
+  description: "Auto-increment MeterValue when Charging, stop when Finishing",
   targetType: "connector",
   createScenario: (chargePointId, connectorId) => ({
     id: `scenario-${Date.now()}`,
@@ -34,14 +37,18 @@ const smartChargingTemplate: ScenarioTemplate = {
         position: { x: 400, y: 50 },
         data: { label: "Start" },
       },
-      // Charging開始を待機
+      // Wait for Charging to start
       {
         id: "trigger-charging",
         type: ScenarioNodeType.STATUS_TRIGGER,
         position: { x: 400, y: 150 },
-        data: { label: "Wait for Charging", targetStatus: OCPPStatus.Charging, timeout: 0 },
+        data: {
+          label: "Wait for Charging",
+          targetStatus: OCPPStatus.Charging,
+          timeout: 0,
+        },
       },
-      // AutoMeterValueを開始（1kW/10秒、最大30kWh）
+      // Start AutoMeterValue (1kW/10sec, max 30kWh)
       {
         id: "meter-auto",
         type: ScenarioNodeType.METER_VALUE,
@@ -57,12 +64,16 @@ const smartChargingTemplate: ScenarioTemplate = {
           maxTime: 0,
         },
       },
-      // Finishing/Availableを待機してAutoMeterValueを停止
+      // Wait for Finishing/Available to stop AutoMeterValue
       {
         id: "trigger-finish",
         type: ScenarioNodeType.STATUS_TRIGGER,
         position: { x: 400, y: 350 },
-        data: { label: "Wait for Finishing", targetStatus: OCPPStatus.Finishing, timeout: 0 },
+        data: {
+          label: "Wait for Finishing",
+          targetStatus: OCPPStatus.Finishing,
+          timeout: 0,
+        },
       },
       {
         id: "end-1",
@@ -73,7 +84,11 @@ const smartChargingTemplate: ScenarioTemplate = {
     ],
     edges: [
       { id: "e-start-charging", source: "start-1", target: "trigger-charging" },
-      { id: "e-charging-meter", source: "trigger-charging", target: "meter-auto" },
+      {
+        id: "e-charging-meter",
+        source: "trigger-charging",
+        target: "meter-auto",
+      },
       { id: "e-meter-finish", source: "meter-auto", target: "trigger-finish" },
       { id: "e-finish-end", source: "trigger-finish", target: "end-1" },
     ],
@@ -89,12 +104,13 @@ const smartChargingTemplate: ScenarioTemplate = {
 
 /**
  * Template: Multi-Status Monitor (Parallel)
- * 並列実行を活用して、複数のステータスを同時に監視
+ * Monitor multiple statuses simultaneously using parallel execution
  */
 const multiStatusMonitorTemplate: ScenarioTemplate = {
   id: "multi-status-monitor",
   name: "Multi-Status Monitor (Parallel)",
-  description: "複数のステータスを並列で監視し、それぞれ異なる処理を実行",
+  description:
+    "Monitor multiple statuses in parallel and execute different actions",
   targetType: "connector",
   createScenario: (chargePointId, connectorId) => ({
     id: `scenario-${Date.now()}`,
@@ -109,18 +125,26 @@ const multiStatusMonitorTemplate: ScenarioTemplate = {
         position: { x: 400, y: 50 },
         data: { label: "Start" },
       },
-      // Branch 1: Available -> Heartbeat送信
+      // Branch 1: Available -> Send Heartbeat
       {
         id: "trigger-available",
         type: ScenarioNodeType.STATUS_TRIGGER,
         position: { x: 150, y: 200 },
-        data: { label: "Wait: Available", targetStatus: OCPPStatus.Available, timeout: 0 },
+        data: {
+          label: "Wait: Available",
+          targetStatus: OCPPStatus.Available,
+          timeout: 0,
+        },
       },
       {
         id: "notify-available",
         type: ScenarioNodeType.NOTIFICATION,
         position: { x: 150, y: 300 },
-        data: { label: "Send Heartbeat", messageType: "Heartbeat", payload: {} },
+        data: {
+          label: "Send Heartbeat",
+          messageType: "Heartbeat",
+          payload: {},
+        },
       },
       {
         id: "end-available",
@@ -128,12 +152,16 @@ const multiStatusMonitorTemplate: ScenarioTemplate = {
         position: { x: 150, y: 400 },
         data: { label: "End" },
       },
-      // Branch 2: Charging -> AutoMeterValue開始
+      // Branch 2: Charging -> Start AutoMeterValue
       {
         id: "trigger-charging",
         type: ScenarioNodeType.STATUS_TRIGGER,
         position: { x: 400, y: 200 },
-        data: { label: "Wait: Charging", targetStatus: OCPPStatus.Charging, timeout: 0 },
+        data: {
+          label: "Wait: Charging",
+          targetStatus: OCPPStatus.Charging,
+          timeout: 0,
+        },
       },
       {
         id: "meter-charging",
@@ -156,18 +184,26 @@ const multiStatusMonitorTemplate: ScenarioTemplate = {
         position: { x: 400, y: 400 },
         data: { label: "End" },
       },
-      // Branch 3: Faulted -> エラーログ送信
+      // Branch 3: Faulted -> Send Error Log
       {
         id: "trigger-faulted",
         type: ScenarioNodeType.STATUS_TRIGGER,
         position: { x: 650, y: 200 },
-        data: { label: "Wait: Faulted", targetStatus: OCPPStatus.Faulted, timeout: 0 },
+        data: {
+          label: "Wait: Faulted",
+          targetStatus: OCPPStatus.Faulted,
+          timeout: 0,
+        },
       },
       {
         id: "notify-faulted",
         type: ScenarioNodeType.NOTIFICATION,
         position: { x: 650, y: 300 },
-        data: { label: "Send Status", messageType: "StatusNotification", payload: { status: "Faulted" } },
+        data: {
+          label: "Send Status",
+          messageType: "StatusNotification",
+          payload: { status: "Faulted" },
+        },
       },
       {
         id: "end-faulted",
@@ -178,16 +214,36 @@ const multiStatusMonitorTemplate: ScenarioTemplate = {
     ],
     edges: [
       // Branch 1
-      { id: "e-start-available", source: "start-1", target: "trigger-available" },
-      { id: "e-available-notify", source: "trigger-available", target: "notify-available" },
-      { id: "e-notify-end1", source: "notify-available", target: "end-available" },
+      {
+        id: "e-start-available",
+        source: "start-1",
+        target: "trigger-available",
+      },
+      {
+        id: "e-available-notify",
+        source: "trigger-available",
+        target: "notify-available",
+      },
+      {
+        id: "e-notify-end1",
+        source: "notify-available",
+        target: "end-available",
+      },
       // Branch 2
       { id: "e-start-charging", source: "start-1", target: "trigger-charging" },
-      { id: "e-charging-meter", source: "trigger-charging", target: "meter-charging" },
+      {
+        id: "e-charging-meter",
+        source: "trigger-charging",
+        target: "meter-charging",
+      },
       { id: "e-meter-end2", source: "meter-charging", target: "end-charging" },
       // Branch 3
       { id: "e-start-faulted", source: "start-1", target: "trigger-faulted" },
-      { id: "e-faulted-notify", source: "trigger-faulted", target: "notify-faulted" },
+      {
+        id: "e-faulted-notify",
+        source: "trigger-faulted",
+        target: "notify-faulted",
+      },
       { id: "e-notify-end3", source: "notify-faulted", target: "end-faulted" },
     ],
     createdAt: new Date().toISOString(),
@@ -202,12 +258,12 @@ const multiStatusMonitorTemplate: ScenarioTemplate = {
 
 /**
  * Template: Full Charging Cycle
- * 完全な充電サイクル：Available → Preparing → Charging(AutoMeterValue) → Finishing → Available
+ * Complete charging cycle: Available → Preparing → Charging(AutoMeterValue) → Finishing → Available
  */
 const fullChargingCycleTemplate: ScenarioTemplate = {
   id: "full-charging-cycle",
   name: "Full Charging Cycle",
-  description: "完全な充電サイクル with AutoMeterValue",
+  description: "Complete charging cycle with AutoMeterValue",
   targetType: "connector",
   createScenario: (chargePointId, connectorId) => ({
     id: `scenario-${Date.now()}`,
@@ -264,7 +320,7 @@ const fullChargingCycleTemplate: ScenarioTemplate = {
           incrementInterval: 5,
           incrementAmount: 500,
           maxValue: 25000, // 25kWh
-          maxTime: 300, // 5分
+          maxTime: 300, // 5 minutes
         },
       },
       {
@@ -299,15 +355,47 @@ const fullChargingCycleTemplate: ScenarioTemplate = {
       },
     ],
     edges: [
-      { id: "e-start-available", source: "start-1", target: "status-available" },
-      { id: "e-available-preparing", source: "status-available", target: "status-preparing" },
-      { id: "e-preparing-txstart", source: "status-preparing", target: "transaction-start" },
-      { id: "e-txstart-charging", source: "transaction-start", target: "status-charging" },
-      { id: "e-charging-meter", source: "status-charging", target: "meter-auto" },
+      {
+        id: "e-start-available",
+        source: "start-1",
+        target: "status-available",
+      },
+      {
+        id: "e-available-preparing",
+        source: "status-available",
+        target: "status-preparing",
+      },
+      {
+        id: "e-preparing-txstart",
+        source: "status-preparing",
+        target: "transaction-start",
+      },
+      {
+        id: "e-txstart-charging",
+        source: "transaction-start",
+        target: "status-charging",
+      },
+      {
+        id: "e-charging-meter",
+        source: "status-charging",
+        target: "meter-auto",
+      },
       { id: "e-meter-delay", source: "meter-auto", target: "delay-charging" },
-      { id: "e-delay-txstop", source: "delay-charging", target: "transaction-stop" },
-      { id: "e-txstop-finishing", source: "transaction-stop", target: "status-finishing" },
-      { id: "e-finishing-available2", source: "status-finishing", target: "status-available2" },
+      {
+        id: "e-delay-txstop",
+        source: "delay-charging",
+        target: "transaction-stop",
+      },
+      {
+        id: "e-txstop-finishing",
+        source: "transaction-stop",
+        target: "status-finishing",
+      },
+      {
+        id: "e-finishing-available2",
+        source: "status-finishing",
+        target: "status-available2",
+      },
       { id: "e-available2-end", source: "status-available2", target: "end-1" },
     ],
     createdAt: new Date().toISOString(),
@@ -322,12 +410,12 @@ const fullChargingCycleTemplate: ScenarioTemplate = {
 
 /**
  * Template: Status-Triggered Auto Actions
- * ステータス変化で自動実行される並列アクション
+ * Parallel actions automatically executed on status change
  */
 const statusTriggeredActionsTemplate: ScenarioTemplate = {
   id: "status-triggered-actions",
   name: "Status-Triggered Auto Actions",
-  description: "ステータス変化をトリガーに自動実行（Available時にHeartbeat送信ループ）",
+  description: "Auto-execute on status change (Heartbeat loop when Available)",
   targetType: "connector",
   createScenario: (chargePointId, connectorId) => ({
     id: `scenario-${Date.now()}`,
@@ -346,13 +434,21 @@ const statusTriggeredActionsTemplate: ScenarioTemplate = {
         id: "trigger-available",
         type: ScenarioNodeType.STATUS_TRIGGER,
         position: { x: 400, y: 150 },
-        data: { label: "Wait for Available", targetStatus: OCPPStatus.Available, timeout: 0 },
+        data: {
+          label: "Wait for Available",
+          targetStatus: OCPPStatus.Available,
+          timeout: 0,
+        },
       },
       {
         id: "notification-heartbeat",
         type: ScenarioNodeType.NOTIFICATION,
         position: { x: 400, y: 250 },
-        data: { label: "Send Heartbeat", messageType: "Heartbeat", payload: {} },
+        data: {
+          label: "Send Heartbeat",
+          messageType: "Heartbeat",
+          payload: {},
+        },
       },
       {
         id: "delay-10s",
@@ -369,9 +465,21 @@ const statusTriggeredActionsTemplate: ScenarioTemplate = {
     ],
     edges: [
       { id: "e-start-trigger", source: "start-1", target: "trigger-available" },
-      { id: "e-trigger-notify", source: "trigger-available", target: "notification-heartbeat" },
-      { id: "e-notify-delay", source: "notification-heartbeat", target: "delay-10s" },
-      { id: "e-delay-notify", source: "delay-10s", target: "notification-heartbeat" }, // Loop back
+      {
+        id: "e-trigger-notify",
+        source: "trigger-available",
+        target: "notification-heartbeat",
+      },
+      {
+        id: "e-notify-delay",
+        source: "notification-heartbeat",
+        target: "delay-10s",
+      },
+      {
+        id: "e-delay-notify",
+        source: "delay-10s",
+        target: "notification-heartbeat",
+      }, // Loop back
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -388,12 +496,12 @@ const statusTriggeredActionsTemplate: ScenarioTemplate = {
 
 /**
  * Template: Remote Start with Auto MeterValue
- * RemoteStartをトリガーに充電開始＋AutoMeterValue
+ * Start charging + AutoMeterValue triggered by RemoteStart
  */
 const remoteStartAutoMeterTemplate: ScenarioTemplate = {
   id: "remote-start-auto-meter",
   name: "Remote Start + Auto MeterValue",
-  description: "RemoteStartTransaction待機 → 充電開始 → AutoMeterValue",
+  description: "Wait RemoteStartTransaction → Start charging → AutoMeterValue",
   targetType: "connector",
   createScenario: (chargePointId, connectorId) => ({
     id: `scenario-${Date.now()}`,
@@ -424,7 +532,11 @@ const remoteStartAutoMeterTemplate: ScenarioTemplate = {
         id: "transaction-start",
         type: ScenarioNodeType.TRANSACTION,
         position: { x: 400, y: 350 },
-        data: { label: "Start Transaction", action: "start", tagId: "REMOTE001" },
+        data: {
+          label: "Start Transaction",
+          action: "start",
+          tagId: "REMOTE001",
+        },
       },
       {
         id: "status-charging",
@@ -456,10 +568,26 @@ const remoteStartAutoMeterTemplate: ScenarioTemplate = {
     ],
     edges: [
       { id: "e-start-remote", source: "start-1", target: "trigger-remote" },
-      { id: "e-remote-preparing", source: "trigger-remote", target: "status-preparing" },
-      { id: "e-preparing-tx", source: "status-preparing", target: "transaction-start" },
-      { id: "e-tx-charging", source: "transaction-start", target: "status-charging" },
-      { id: "e-charging-meter", source: "status-charging", target: "meter-auto" },
+      {
+        id: "e-remote-preparing",
+        source: "trigger-remote",
+        target: "status-preparing",
+      },
+      {
+        id: "e-preparing-tx",
+        source: "status-preparing",
+        target: "transaction-start",
+      },
+      {
+        id: "e-tx-charging",
+        source: "transaction-start",
+        target: "status-charging",
+      },
+      {
+        id: "e-charging-meter",
+        source: "status-charging",
+        target: "meter-auto",
+      },
       { id: "e-meter-end", source: "meter-auto", target: "end-1" },
     ],
     createdAt: new Date().toISOString(),
@@ -486,6 +614,8 @@ export const scenarioTemplates: ScenarioTemplate[] = [
 /**
  * Get template by ID
  */
-export function getTemplateById(templateId: string): ScenarioTemplate | undefined {
+export function getTemplateById(
+  templateId: string,
+): ScenarioTemplate | undefined {
   return scenarioTemplates.find((t) => t.id === templateId);
 }

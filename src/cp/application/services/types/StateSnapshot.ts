@@ -2,24 +2,24 @@ import type { TransitionContext } from "./StateTransition";
 import type { ValidationResult } from "./ValidationResult";
 
 /**
- * 状態履歴エントリ
+ * State history entry
  */
 export interface StateHistoryEntry {
   id: string; // UUID
   timestamp: Date;
   entity: "chargePoint" | "connector";
-  entityId?: number; // connector の場合
+  entityId?: number; // for connector
   transitionType: "status" | "availability" | "transaction" | "error";
   fromState: string;
   toState: string;
-  context: TransitionContext; // 遷移のトリガー情報
+  context: TransitionContext; // transition trigger information
   validationResult: ValidationResult;
   success: boolean;
   errorMessage?: string;
 }
 
 /**
- * 履歴照会オプション
+ * History query options
  */
 export interface HistoryOptions {
   entity?: "chargePoint" | "connector";
@@ -31,7 +31,7 @@ export interface HistoryOptions {
 }
 
 /**
- * 状態統計情報
+ * State statistics
  */
 export interface StateStatistics {
   totalTransitions: number;

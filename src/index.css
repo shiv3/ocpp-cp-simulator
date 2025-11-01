@@ -115,6 +115,27 @@
     @apply text-gray-600 dark:text-gray-400;
   }
 
+  /* Text size utilities with default colors for Light Mode */
+  .text-xs {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-sm {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-base {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-lg {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-xl {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
   /* Input components */
   .input-base {
     @apply shadow appearance-none border rounded py-2 px-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500;

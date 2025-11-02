@@ -28,6 +28,8 @@
     "@voltbras/ts-ocpp": "^2.7.3",
     "@xyflow/react": "^12.9.0",
     "eventemitter2": "^6.4.9",
+    "flowbite": "^3.1.2",
+    "flowbite-react": "^0.12.10",
     "jotai": "^2.12.5",
     "jotai-location": "^0.5.5",
     "jotai-zustand": "^0.4.0",

@@ -1,0 +1,24 @@
+/* V1 App specific styles */
+.v1-app input::placeholder,
+.v1-app textarea::placeholder {
+  color: #9CA3AF; /* gray-400 */
+  opacity: 1;
+}
+
+.v1-app input::-webkit-input-placeholder,
+.v1-app textarea::-webkit-input-placeholder {
+  color: #9CA3AF;
+  opacity: 1;
+}
+
+.v1-app input::-moz-placeholder,
+.v1-app textarea::-moz-placeholder {
+  color: #9CA3AF;
+  opacity: 1;
+}
+
+.v1-app input:-ms-input-placeholder,
+.v1-app textarea:-ms-input-placeholder {
+  color: #9CA3AF;
+  opacity: 1;
+}

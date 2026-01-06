@@ -1,344 +1,182 @@
-import React, { useState, useEffect } from "react";
-import { configAtom } from "../store/store.ts";
-import { useAtom } from "jotai/index";
-import { DefaultBootNotification } from "../cp/OcppTypes.ts";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Download, Upload, Home } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useConfig } from "../data/hooks/useConfig";
 
 const Settings: React.FC = () => {
-  const [wsURL, setWsURL] = useState<string>("");
-  const [connectorNumber, setConnectorNumber] = useState<number>(2);
-  const [cpID, setCpID] = useState<string>("");
-  const [tagID, setTagID] = useState<string>("");
-  const [ocppVersion, setOcppVersion] = useState<string>("OCPP-1.6J");
-
-  const [basicAuthEnabled, setBasicAuthEnabled] = useState<boolean>(false);
-  const [basicAuthUsername, setBasicAuthUsername] = useState<string>("");
-  const [basicAuthPassword, setBasicAuthPassword] = useState<string>("");
-
-  const [autoMeterValueEnabled, setAutoMeterValueEnabled] =
-    useState<boolean>(false);
-  const [autoMeterValueInterval, setAutoMeterValueInterval] =
-    useState<number>(0);
-  const [autoMeterValue, setAutoMeterValue] = useState<number>(0);
-
-  const [experimental, setExperimental] = useState<string | null>(null);
-  const [bootNotification, setBootNotification] = useState<string | null>(
-    JSON.stringify(DefaultBootNotification),
-  );
-  const [config, setConfig] = useAtom(configAtom);
+  const { config, setConfig: persistConfig, isLoading } = useConfig();
+  const [jsonText, setJsonText] = useState<string>("{}");
+  const [error, setError] = useState<string>("");
+  const [success, setSuccess] = useState<string>("");
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (isLoading) return;
     if (config) {
-      setWsURL(config.wsURL);
-      setConnectorNumber(config.connectorNumber);
-      setCpID(config.ChargePointID);
-      setTagID(config.tagID);
-      setOcppVersion(config.ocppVersion);
-
-      setBasicAuthEnabled(config.basicAuthSettings?.enabled);
-      setBasicAuthUsername(config.basicAuthSettings?.username);
-      setBasicAuthPassword(config.basicAuthSettings?.password);
-
-      setAutoMeterValueEnabled(config.autoMeterValueSetting?.enabled);
-      setAutoMeterValueInterval(config.autoMeterValueSetting?.interval);
-      setAutoMeterValue(config.autoMeterValueSetting?.value);
-
-      setExperimental(
-        config.Experimental ? JSON.stringify(config.Experimental) : null,
-      );
-      setBootNotification(
-        config.BootNotification
-          ? JSON.stringify(config.BootNotification)
-          : null,
-      );
+      setJsonText(JSON.stringify(config, null, 2));
+    } else {
+      setJsonText("null");
     }
-  }, [config]);
+  }, [config, isLoading]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const config = {
-      wsURL,
-      connectorNumber,
-      ChargePointID: cpID,
-      tagID,
-      ocppVersion,
-      basicAuthSettings: {
-        enabled: basicAuthEnabled,
-        username: basicAuthUsername,
-        password: basicAuthPassword,
-      },
-      autoMeterValueSetting: {
-        enabled: autoMeterValueEnabled,
-        interval: autoMeterValueInterval,
-        value: autoMeterValue,
-      },
-      Experimental:
-        experimental && experimental !== "" ? JSON.parse(experimental) : null,
-      BootNotification:
-        bootNotification && bootNotification !== ""
-          ? JSON.parse(bootNotification)
-          : null,
+  const updateConfig = useCallback(
+    (next: Parameters<typeof persistConfig>[0]) => {
+      void persistConfig(next);
+    },
+    [persistConfig],
+  );
+
+  const handleExport = () => {
+    const dataStr = JSON.stringify(config, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ocpp-config-${new Date().toISOString().split("T")[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setSuccess("Configuration exported successfully!");
+    setTimeout(() => setSuccess(""), 3000);
+  };
+
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        updateConfig(json);
+        setJsonText(JSON.stringify(json, null, 2));
+        setError("");
+        setSuccess("Configuration imported successfully!");
+        setTimeout(() => setSuccess(""), 3000);
+      } catch (err) {
+        setError("Invalid JSON file. Please check the file format.");
+        setTimeout(() => setError(""), 5000);
+      }
     };
-    setConfig(config);
+    reader.readAsText(file);
+  };
+
+  const handleApplyJson = () => {
+    try {
+      const json = JSON.parse(jsonText);
+      updateConfig(json);
+      setError("");
+      setSuccess("Configuration applied successfully!");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err) {
+      setError("Invalid JSON. Please check the syntax.");
+      setTimeout(() => setError(""), 5000);
+    }
+  };
+
+  const handleBackToHome = () => {
     navigate("/");
   };
 
   return (
-    <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-      <h2 className="text-2xl font-bold mb-6">Settings</h2>
-      <form onSubmit={handleSubmit}>
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="WSURL"
-          >
-            OCPP Server
-          </label>
-          <input
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="WSURL"
-            type="text"
-            value={wsURL}
-            onChange={(e) => setWsURL(e.target.value)}
-            placeholder="ws://localhost:8080/steve/websocket/CentralSystemService/"
-          />
-          <p className="text-gray-600 text-xs italic mt-1">
-            The base URL of the OCPP Server (without the ChargePoint ID)
+    <div className="max-w-5xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold">Settings</h2>
+        <Button onClick={handleBackToHome} variant="secondary" size="sm">
+          <Home className="mr-2 h-4 w-4" />
+          Back to Home
+        </Button>
+      </div>
+
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {success && (
+        <Alert className="mb-4 border-green-500 bg-green-50 dark:bg-green-900">
+          <AlertDescription className="text-green-800 dark:text-green-100">
+            {success}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Configuration Management</CardTitle>
+          <p className="text-muted-foreground text-sm mt-2">
+            Export your current configuration to a JSON file or import a
+            previously saved configuration. You can also manually edit the JSON
+            configuration below.
           </p>
-        </div>
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="CONNECTORS"
-          >
-            Number of Connectors
-          </label>
-          <input
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="CONNECTORS"
-            type="number"
-            value={connectorNumber}
-            onChange={(e) => setConnectorNumber(parseInt(e.target.value))}
-            placeholder="2"
-            style={{ maxWidth: "20ch" }}
-          />
-        </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex gap-4">
+            <Button onClick={handleExport} variant="success">
+              <Download className="mr-2 h-5 w-5" />
+              Export Configuration
+            </Button>
 
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="CPID"
-          >
-            ChargePoint ID
-          </label>
-          <input
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="CPID"
-            type="text"
-            value={cpID}
-            onChange={(e) => setCpID(e.target.value)}
-            placeholder="CP001"
-            style={{ maxWidth: "20ch" }}
-          />
-        </div>
+            <Button asChild>
+              <label htmlFor="file-upload" className="cursor-pointer">
+                <Upload className="mr-2 h-5 w-5" />
+                Import Configuration
+                <input
+                  id="file-upload"
+                  type="file"
+                  accept=".json"
+                  onChange={handleImport}
+                  className="hidden"
+                />
+              </label>
+            </Button>
+          </div>
 
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="TagID"
-          >
-            RFID Tag ID
-          </label>
-          <input
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="TagID"
-            type="text"
-            value={tagID}
-            onChange={(e) => setTagID(e.target.value)}
-            placeholder="XXX"
-            style={{ maxWidth: "20ch" }}
-          />
-        </div>
-
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="OCPP"
-          >
-            OCPP Version
-          </label>
-          <select
-            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="OCPP"
-            value={ocppVersion}
-            onChange={(e) => setOcppVersion(e.target.value)}
-            style={{ maxWidth: "20ch" }}
-          >
-            <option value="OCPP-1.6J">OCPP-1.6J</option>
-          </select>
-        </div>
-
-        <div className="mb-4">
-          <input
-            className="shadow border rounded w-fit py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="BasicAuth"
-            type="checkbox"
-            checked={basicAuthEnabled}
-            onChange={(e) => {
-              setBasicAuthEnabled(e.target.checked);
-              if (!e.target.checked) {
-                setBasicAuthUsername("");
-                setBasicAuthPassword("");
-              }
-            }}
-          />
-          <label
-            className="text-gray-700 text-sm font-bold ml-2"
-            htmlFor="BasicAuth"
-          >
-            BasicAuth Settings
-          </label>
-          {basicAuthEnabled && (
-            <div className="flex items-center">
-              <input
-                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                id="BasicAuthUsername"
-                type="text"
-                value={basicAuthUsername}
-                onChange={(e) => setBasicAuthUsername(e.target.value)}
-                placeholder="username"
-                style={{ maxWidth: "20ch" }}
-                required
-              />
-              <input
-                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                id="BasicAuthPassword"
-                type="text"
-                value={basicAuthPassword}
-                onChange={(e) => setBasicAuthPassword(e.target.value)}
-                placeholder="password"
-                style={{ maxWidth: "20ch" }}
-                required
-              />
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-lg font-semibold">Configuration JSON</h4>
+              <Button onClick={handleApplyJson} size="sm">
+                Apply Changes
+              </Button>
             </div>
-          )}
-        </div>
+            <Textarea
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+              rows={20}
+              className="font-mono text-sm"
+              placeholder="Paste your configuration JSON here..."
+            />
+            <p className="text-muted-foreground text-xs mt-2">
+              Edit the JSON configuration directly and click "Apply Changes" to
+              update.
+            </p>
+          </div>
 
-        <div className="mb-4">
-          <input
-            className="shadow border rounded w-fit py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="AutoMeterValue"
-            type="checkbox"
-            checked={autoMeterValueEnabled}
-            onChange={(e) => {
-              setAutoMeterValueEnabled(e.target.checked);
-              if (!e.target.checked) {
-                setAutoMeterValueInterval(0);
-                setAutoMeterValue(0);
-              }
-            }}
-          />
-          <label
-            className="text-gray-700 text-sm font-bold ml-2"
-            htmlFor="AutoMeterValue"
-          >
-            Auto Meter Value
-          </label>
-          {autoMeterValueEnabled && (
-            <div className="flex items-center">
-              <input
-                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                id="AutoMeterValueInterval"
-                type="number"
-                value={autoMeterValueInterval}
-                onChange={(e) =>
-                  setAutoMeterValueInterval(parseInt(e.target.value))
-                }
-                placeholder="30"
-                style={{ maxWidth: "20ch" }}
-                required
-              />
-              <span className="text-gray-700 text-sm font-bold ml-2">
-                seconds
-              </span>
-
-              <input
-                className="shadow appearance-none border rounded w-1/3 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                id="AutoMeterValue"
-                type="number"
-                value={autoMeterValue}
-                onChange={(e) => setAutoMeterValue(parseInt(e.target.value))}
-                placeholder="10"
-                style={{ maxWidth: "20ch" }}
-                required
-              />
-              <span className="text-gray-700 text-sm font-bold ml-2">kWh</span>
-            </div>
-          )}
-        </div>
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="Experimental"
-          >
-            Experimental
-          </label>
-          <textarea
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="Experimental"
-            placeholder='{
-            "ChargePointIDs": [
-            {
-            "ChargePointID": "CP001",
-            "ConnectorNumber": 1
-            }
-            ],
-            "TagIDs": [
-            "123456"
-            ]
-            }'
-            style={{ height: "100px" }}
-            value={experimental || ""}
-            onChange={(e) => setExperimental(e.target.value)}
-          ></textarea>
-        </div>
-        <div className="mb-4">
-          <label
-            className="block text-gray-700 text-sm font-bold mb-2"
-            htmlFor="BootNotification"
-          >
-            Boot Notification
-          </label>
-          <textarea
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            id="BootNotification"
-            placeholder='{
-            "chargeBoxSerialNumber": "123456",
-            "chargePointModel": "Model 3",
-            "chargePointSerialNumber": "123456",
-            "chargePointVendor": "Vendor",
-            "firmwareVersion": "1.0.0",
-            "iccid": "123456",
-            "imsi": "123456",
-            "meterSerialNumber": "123456",
-            "meterType": "Model 3"
-            }'
-            style={{ height: "100px" }}
-            value={bootNotification || ""}
-            onChange={(e) => setBootNotification(e.target.value)}
-          ></textarea>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <button
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
-            type="submit"
-          >
-            Save
-          </button>
-        </div>
-      </form>
+          <Card className="bg-blue-50 dark:bg-blue-950/50">
+            <CardContent className="pt-6">
+              <h4 className="text-sm font-semibold mb-2">Note</h4>
+              <ul className="text-muted-foreground text-sm space-y-1 list-disc list-inside">
+                <li>
+                  Individual charge point settings can be configured from the
+                  Home page
+                </li>
+                <li>
+                  Click the gear icon next to each charge point tab to edit its
+                  settings
+                </li>
+                <li>
+                  Use the "+ Add Charge Point" button to add new charge points
+                </li>
+                <li>This page is for bulk configuration import/export only</li>
+              </ul>
+            </CardContent>
+          </Card>
+        </CardContent>
+      </Card>
     </div>
   );
 };

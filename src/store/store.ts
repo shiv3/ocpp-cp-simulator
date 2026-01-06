@@ -1,9 +1,9 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomWithHash } from "jotai-location";
-import { BootNotification } from "../cp/OcppTypes.ts";
+import { BootNotification } from "../cp/domain/types/OcppTypes";
 
-interface Config {
+export interface Config {
   wsURL: string;
   ChargePointID: string;
   connectorNumber: number;
@@ -48,7 +48,7 @@ export const configAtom = atom(
     const storageValue = get(configStorageAtom);
     return hashValue ?? storageValue;
   },
-  (_, set, update: Config) => {
+  (_, set, update: Config | null) => {
     set(configHashAtom, update);
     set(configStorageAtom, update);
   },

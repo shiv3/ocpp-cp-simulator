@@ -1,3 +1,249 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Card components */
+  .card {
+    @apply bg-white dark:bg-gray-800 shadow-md rounded-lg transition-colors;
+  }
+
+  .card-header {
+    @apply text-xl font-semibold text-gray-900 dark:text-white;
+  }
+
+  /* Button variants - Softer, modern colors */
+  .btn-primary {
+    @apply bg-blue-500 hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-400 hover:bg-gray-500 dark:bg-gray-500 dark:hover:bg-gray-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-success {
+    @apply bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-500 dark:hover:bg-emerald-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply bg-rose-500 hover:bg-rose-600 dark:bg-rose-500 dark:hover:bg-rose-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-warning {
+    @apply bg-amber-500 hover:bg-amber-600 dark:bg-amber-500 dark:hover:bg-amber-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-info {
+    @apply bg-indigo-500 hover:bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Panel/Container components - Lighter, more modern */
+  .panel {
+    @apply bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 transition-colors;
+  }
+
+  .panel-border {
+    @apply bg-white dark:bg-gray-800 rounded-xl p-4 border-2 border-gray-300 dark:border-gray-600 shadow-sm transition-colors;
+  }
+
+  /* Text styles */
+  .text-primary {
+    @apply text-gray-900 dark:text-white;
+  }
+
+  .text-secondary {
+    @apply text-gray-700 dark:text-gray-300;
+  }
+
+  .text-muted {
+    @apply text-gray-600 dark:text-gray-400;
+  }
+
+  /* Text size utilities with default colors for Light Mode */
+  .text-xs {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-sm {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-base {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-lg {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .text-xl {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  /* Input components */
+  .input-base {
+    @apply shadow appearance-none border rounded py-2 px-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500;
+    @apply text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500;
+  }
+
+  /* Badge components */
+  .badge {
+    @apply px-2 py-1 rounded text-xs font-semibold;
+  }
+
+  .badge-primary {
+    @apply badge bg-blue-500 dark:bg-blue-600 text-white;
+  }
+
+  .badge-secondary {
+    @apply badge bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200;
+  }
+
+  /* Status colors */
+  .status-available {
+    @apply text-green-500 dark:text-green-400;
+  }
+
+  .status-charging {
+    @apply text-blue-500 dark:text-blue-400;
+  }
+
+  .status-unavailable {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .status-error {
+    @apply text-red-500 dark:text-red-400;
+  }
+
+  /* Log type colors */
+  .log-websocket {
+    @apply bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200;
+  }
+
+  .log-ocpp {
+    @apply bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200;
+  }
+
+  .log-transaction {
+    @apply bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200;
+  }
+
+  .log-heartbeat {
+    @apply bg-pink-100 dark:bg-pink-900 text-pink-800 dark:text-pink-200;
+  }
+
+  .log-meter-value {
+    @apply bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200;
+  }
+
+  .log-status {
+    @apply bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200;
+  }
+
+  .log-configuration {
+    @apply bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200;
+  }
+
+  .log-diagnostics {
+    @apply bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200;
+  }
+
+  .log-general {
+    @apply bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200;
+  }
+
+  /* Log level colors */
+  .log-level-debug {
+    @apply text-gray-600 dark:text-gray-400;
+  }
+
+  .log-level-info {
+    @apply text-blue-600 dark:text-blue-400;
+  }
+
+  .log-level-warn {
+    @apply text-yellow-600 dark:text-yellow-400;
+  }
+
+  .log-level-error {
+    @apply text-red-600 dark:text-red-400;
+  }
+
+  /* Logger specific styles */
+  .logger-container {
+    @apply mt-4 border border-gray-300 dark:border-gray-600 rounded-lg p-4 bg-white dark:bg-gray-800 transition-colors;
+  }
+
+  .logger-display {
+    @apply bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-3 h-96 overflow-y-auto font-mono text-xs;
+  }
+
+  .logger-log-line {
+    @apply mb-1 hover:bg-gray-100 dark:hover:bg-gray-800 px-1 rounded;
+  }
+
+  .logger-label {
+    @apply dark:text-gray-200;
+  }
+
+  .logger-input {
+    @apply dark:bg-gray-700 dark:text-white dark:border-gray-600;
+  }
+}

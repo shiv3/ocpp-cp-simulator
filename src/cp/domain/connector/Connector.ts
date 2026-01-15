@@ -4,10 +4,16 @@ import {
   type AutoMeterValueConfig,
   defaultAutoMeterValueConfig,
 } from "./MeterValueCurve";
-import { MeterValueScheduler, type MeterValueStrategy } from "./MeterValueScheduler";
+import {
+  MeterValueScheduler,
+  type MeterValueStrategy,
+} from "./MeterValueScheduler";
 import { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
 import type { ScenarioManager } from "../../application/scenario/ScenarioManager";
-import { ScenarioMode, ScenarioEvents } from "../../application/scenario/ScenarioTypes";
+import {
+  ScenarioMode,
+  ScenarioEvents,
+} from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
 
 export interface ConnectorEvents {
@@ -18,6 +24,7 @@ export interface ConnectorEvents {
   availabilityChange: { availability: OCPPAvailability };
   autoMeterValueChange: { config: AutoMeterValueConfig };
   modeChange: { mode: ScenarioMode };
+  autoResetToAvailableChange: { enabled: boolean };
 }
 
 interface IncrementStrategyConfig {
@@ -45,8 +52,12 @@ export class Connector {
 
   private modeValue: ScenarioMode = "manual";
   private _scenarioManager?: ScenarioManager;
+  private _autoResetToAvailable = true;
 
-  constructor(private readonly connectorId: number, private readonly logger: Logger) {
+  constructor(
+    private readonly connectorId: number,
+    private readonly logger: Logger,
+  ) {
     this.meterScheduler = new MeterValueScheduler(
       connectorId,
       {
@@ -81,7 +92,10 @@ export class Connector {
   set status(newStatus: OCPPStatus) {
     const previousStatus = this.statusValue;
     this.statusValue = newStatus;
-    this.eventsEmitter.emit("statusChange", { status: newStatus, previousStatus });
+    this.eventsEmitter.emit("statusChange", {
+      status: newStatus,
+      previousStatus,
+    });
   }
 
   get availability(): OCPPAvailability {
@@ -90,7 +104,9 @@ export class Connector {
 
   set availability(newAvailability: OCPPAvailability) {
     this.availabilityValue = newAvailability;
-    this.eventsEmitter.emit("availabilityChange", { availability: newAvailability });
+    this.eventsEmitter.emit("availabilityChange", {
+      availability: newAvailability,
+    });
   }
 
   get meterValue(): number {
@@ -131,6 +147,15 @@ export class Connector {
   set mode(newMode: ScenarioMode) {
     this.modeValue = newMode;
     this.eventsEmitter.emit("modeChange", { mode: newMode });
+  }
+
+  get autoResetToAvailable(): boolean {
+    return this._autoResetToAvailable;
+  }
+
+  set autoResetToAvailable(enabled: boolean) {
+    this._autoResetToAvailable = enabled;
+    this.eventsEmitter.emit("autoResetToAvailableChange", { enabled });
   }
 
   get autoMeterValueConfig(): AutoMeterValueConfig {
@@ -179,7 +204,11 @@ export class Connector {
       return;
     }
 
-    if (this.incrementFallback && this.incrementFallback.incrementValue > 0 && this.incrementFallback.intervalSeconds > 0) {
+    if (
+      this.incrementFallback &&
+      this.incrementFallback.incrementValue > 0 &&
+      this.incrementFallback.intervalSeconds > 0
+    ) {
       this.meterScheduler.start({
         kind: "increment",
         intervalSeconds: this.incrementFallback.intervalSeconds,

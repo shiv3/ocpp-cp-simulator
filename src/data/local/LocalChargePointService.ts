@@ -11,7 +11,9 @@ import { loadConnectorAutoMeterConfig } from "../../utils/connectorStorage";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 
-function toConnectorSnapshot(connector: ReturnType<ChargePoint["getConnector"]>): ConnectorSnapshot | null {
+function toConnectorSnapshot(
+  connector: ReturnType<ChargePoint["getConnector"]>,
+): ConnectorSnapshot | null {
   if (!connector) return null;
   return {
     id: connector.id,
@@ -48,7 +50,10 @@ export interface LocalChargePointDefinition {
 
 export class LocalChargePointService implements ChargePointService {
   private readonly chargePoints = new Map<string, ChargePoint>();
-  private readonly listeners = new Map<string, Set<(event: ChargePointEvent) => void>>();
+  private readonly listeners = new Map<
+    string,
+    Set<(event: ChargePointEvent) => void>
+  >();
   private readonly eventSubscriptions = new Map<string, Array<() => void>>();
 
   registerChargePoint(chargePoint: ChargePoint): void {
@@ -73,7 +78,10 @@ export class LocalChargePointService implements ChargePointService {
         try {
           unsubscribe();
         } catch (error) {
-          console.error(`[LocalChargePointService] Failed to unsubscribe listener for ${id}`, error);
+          console.error(
+            `[LocalChargePointService] Failed to unsubscribe listener for ${id}`,
+            error,
+          );
         }
       });
       this.eventSubscriptions.delete(id);
@@ -126,7 +134,11 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).authorize(tagId);
   }
 
-  async startTransaction(id: string, connectorId: number, tagId: string): Promise<void> {
+  async startTransaction(
+    id: string,
+    connectorId: number,
+    tagId: string,
+  ): Promise<void> {
     this.getExistingChargePointOrThrow(id).startTransaction(tagId, connectorId);
   }
 
@@ -134,11 +146,22 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).stopTransaction(connectorId);
   }
 
-  async sendStatusNotification(id: string, connectorId: number, status: OCPPStatus): Promise<void> {
-    this.getExistingChargePointOrThrow(id).updateConnectorStatus(connectorId, status);
+  async sendStatusNotification(
+    id: string,
+    connectorId: number,
+    status: OCPPStatus,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).updateConnectorStatus(
+      connectorId,
+      status,
+    );
   }
 
-  async setMeterValue(id: string, connectorId: number, value: number): Promise<void> {
+  async setMeterValue(
+    id: string,
+    connectorId: number,
+    value: number,
+  ): Promise<void> {
     this.getExistingChargePointOrThrow(id).setMeterValue(connectorId, value);
   }
 
@@ -146,7 +169,10 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).sendMeterValue(connectorId);
   }
 
-  subscribe(id: string, handler: (event: ChargePointEvent) => void): () => void {
+  subscribe(
+    id: string,
+    handler: (event: ChargePointEvent) => void,
+  ): () => void {
     const listeners = this.listeners.get(id) ?? new Set();
     listeners.add(handler);
     this.listeners.set(id, listeners);
@@ -172,12 +198,16 @@ export class LocalChargePointService implements ChargePointService {
   private getExistingChargePointOrThrow(id: string): ChargePoint {
     const cp = this.chargePoints.get(id);
     if (!cp) {
-      throw new Error(`ChargePoint ${id} not registered in LocalChargePointService`);
+      throw new Error(
+        `ChargePoint ${id} not registered in LocalChargePointService`,
+      );
     }
     return cp;
   }
 
-  async syncLocalChargePoints(definitions: LocalChargePointDefinition[]): Promise<ChargePoint[]> {
+  async syncLocalChargePoints(
+    definitions: LocalChargePointDefinition[],
+  ): Promise<ChargePoint[]> {
     const seen = new Set<string>();
 
     for (const definition of definitions) {
@@ -206,7 +236,9 @@ export class LocalChargePointService implements ChargePointService {
       .filter((value): value is ChargePoint => Boolean(value));
   }
 
-  private buildChargePoint(definition: LocalChargePointDefinition): ChargePoint {
+  private buildChargePoint(
+    definition: LocalChargePointDefinition,
+  ): ChargePoint {
     const chargePoint = new ChargePoint(
       definition.id,
       definition.bootNotification,
@@ -217,8 +249,15 @@ export class LocalChargePointService implements ChargePointService {
     );
 
     // Restore connector-level settings from localStorage
-    for (let connectorId = 1; connectorId <= definition.connectorNumber; connectorId++) {
-      const savedConfig = loadConnectorAutoMeterConfig(definition.id, connectorId);
+    for (
+      let connectorId = 1;
+      connectorId <= definition.connectorNumber;
+      connectorId++
+    ) {
+      const savedConfig = loadConnectorAutoMeterConfig(
+        definition.id,
+        connectorId,
+      );
       if (!savedConfig) continue;
 
       const connector = chargePoint.getConnector(connectorId);
@@ -245,44 +284,56 @@ export class LocalChargePointService implements ChargePointService {
     );
 
     unsubscribes.push(
-      chargePoint.events.on("connectorStatusChange", ({ connectorId, status, previousStatus }) => {
-        this.emit(chargePoint.id, {
-          type: "connector-status",
-          connectorId,
-          status,
-          previousStatus,
-        });
-      }),
+      chargePoint.events.on(
+        "connectorStatusChange",
+        ({ connectorId, status, previousStatus }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-status",
+            connectorId,
+            status,
+            previousStatus,
+          });
+        },
+      ),
     );
 
     unsubscribes.push(
-      chargePoint.events.on("connectorAvailabilityChange", ({ connectorId, availability }) => {
-        this.emit(chargePoint.id, {
-          type: "connector-availability",
-          connectorId,
-          availability,
-        });
-      }),
+      chargePoint.events.on(
+        "connectorAvailabilityChange",
+        ({ connectorId, availability }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-availability",
+            connectorId,
+            availability,
+          });
+        },
+      ),
     );
 
     unsubscribes.push(
-      chargePoint.events.on("connectorTransactionChange", ({ connectorId, transactionId }) => {
-        this.emit(chargePoint.id, {
-          type: "connector-transaction",
-          connectorId,
-          transactionId,
-        });
-      }),
+      chargePoint.events.on(
+        "connectorTransactionChange",
+        ({ connectorId, transactionId }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-transaction",
+            connectorId,
+            transactionId,
+          });
+        },
+      ),
     );
 
     unsubscribes.push(
-      chargePoint.events.on("connectorMeterValueChange", ({ connectorId, meterValue }) => {
-        this.emit(chargePoint.id, {
-          type: "connector-meter",
-          connectorId,
-          meterValue,
-        });
-      }),
+      chargePoint.events.on(
+        "connectorMeterValueChange",
+        ({ connectorId, meterValue }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-meter",
+            connectorId,
+            meterValue,
+          });
+        },
+      ),
     );
 
     chargePoint.connectors.forEach((connector) => {
@@ -302,6 +353,16 @@ export class LocalChargePointService implements ChargePointService {
             type: "connector-mode",
             connectorId: connector.id,
             mode,
+          });
+        }),
+      );
+
+      unsubscribes.push(
+        connector.events.on("autoResetToAvailableChange", ({ enabled }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-auto-reset-to-available",
+            connectorId: connector.id,
+            enabled,
           });
         }),
       );
@@ -356,7 +417,10 @@ export class LocalChargePointService implements ChargePointService {
       try {
         listener(event);
       } catch (error) {
-        console.error(`[LocalChargePointService] Listener error for charge point ${id}`, error);
+        console.error(
+          `[LocalChargePointService] Listener error for charge point ${id}`,
+          error,
+        );
       }
     });
   }

@@ -75,6 +75,7 @@ interface ConnectorDetailsPanelProps {
   setIdTag: (tagId: string) => void;
   availability: OCPPAvailability;
   autoMeterValueConfig: AutoMeterValueConfig | null;
+  autoResetToAvailable: boolean;
   onStartTransaction: () => void;
   onStopTransaction: () => void;
   onIncreaseMeterValue: () => void;
@@ -82,6 +83,7 @@ interface ConnectorDetailsPanelProps {
   onToggleAutoMeterValue: () => void;
   onOpenConfigModal: () => void;
   onStatusNotification: () => void;
+  onToggleAutoResetToAvailable: () => void;
 }
 
 const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
@@ -95,6 +97,7 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
   setIdTag,
   availability,
   autoMeterValueConfig,
+  autoResetToAvailable,
   onStartTransaction,
   onStopTransaction,
   onIncreaseMeterValue,
@@ -102,6 +105,7 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
   onToggleAutoMeterValue,
   onOpenConfigModal,
   onStatusNotification,
+  onToggleAutoResetToAvailable,
 }) => {
   const connector = cp.getConnector(connectorId);
   const scenarioManager = connector?.scenarioManager;
@@ -385,6 +389,25 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
               ⏹️ Stop
             </button>
           </div>
+          <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
+            <span className="text-xs text-gray-600 dark:text-gray-400">
+              Auto Available on Stop
+            </span>
+            <button
+              onClick={onToggleAutoResetToAvailable}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                autoResetToAvailable
+                  ? "bg-green-500"
+                  : "bg-gray-300 dark:bg-gray-600"
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  autoResetToAvailable ? "translate-x-5" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -434,6 +457,7 @@ const Connector: React.FC<ConnectorProps> = ({
     soc: liveSoc,
     transactionId,
     autoMeterValueConfig,
+    autoResetToAvailable,
   } = useConnectorView(cp, connector_id);
   const { scenarios } = useScenarios(cp?.id ?? null, connector_id);
   const [meterValueInput, setMeterValueInput] =
@@ -513,7 +537,7 @@ const Connector: React.FC<ConnectorProps> = ({
         const connector = cp.getConnector(connector_id);
         if (!connector) return;
 
-        connector.startAutoMeterValue({
+        connector.startManualMeterStrategy({
           kind: "increment",
           intervalSeconds: config.intervalSeconds,
           incrementValue: config.incrementValue,
@@ -768,6 +792,15 @@ const Connector: React.FC<ConnectorProps> = ({
 
     // Save to localStorage
     saveConnectorAutoMeterConfig(cp.id, connector_id, config);
+  };
+
+  const handleToggleAutoResetToAvailable = () => {
+    if (!cp) return;
+
+    const connector = cp.getConnector(connector_id);
+    if (!connector) return;
+
+    connector.autoResetToAvailable = !connector.autoResetToAvailable;
   };
 
   const handleOpenScenarioEditor = () => {
@@ -1088,6 +1121,7 @@ const Connector: React.FC<ConnectorProps> = ({
                         setIdTag={setIdTag}
                         availability={availability}
                         autoMeterValueConfig={autoMeterValueConfig}
+                        autoResetToAvailable={autoResetToAvailable}
                         onStartTransaction={handleStartTransaction}
                         onStopTransaction={handleStopTransaction}
                         onIncreaseMeterValue={handleIncreaseMeterValue}
@@ -1095,6 +1129,9 @@ const Connector: React.FC<ConnectorProps> = ({
                         onToggleAutoMeterValue={handleToggleAutoMeterValue}
                         onOpenConfigModal={() => setIsConfigModalOpen(true)}
                         onStatusNotification={handleStatusNotification}
+                        onToggleAutoResetToAvailable={
+                          handleToggleAutoResetToAvailable
+                        }
                       />
                     </div>
                   </div>

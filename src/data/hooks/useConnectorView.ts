@@ -16,27 +16,45 @@ interface ConnectorViewState {
   logs: string[];
   autoMeterValueConfig: AutoMeterValueConfig | null;
   mode: ScenarioMode;
+  autoResetToAvailable: boolean;
 }
 
 const DEFAULT_STATUS = OCPPStatus.Unavailable;
 const DEFAULT_AVAILABILITY: OCPPAvailability = "Operative";
 const DEFAULT_MODE: ScenarioMode = "manual";
 
-export function useConnectorView(chargePoint: ChargePoint | null, connectorId: number): ConnectorViewState {
+export function useConnectorView(
+  chargePoint: ChargePoint | null,
+  connectorId: number,
+): ConnectorViewState {
   const { chargePointService } = useDataContext();
   const chargePointId = chargePoint?.id ?? null;
   const initialConnector = chargePoint?.getConnector(connectorId) ?? null;
 
-  const [status, setStatus] = useState<OCPPStatus>(initialConnector?.status as OCPPStatus ?? DEFAULT_STATUS);
-  const [availability, setAvailability] = useState<OCPPAvailability>(initialConnector?.availability ?? DEFAULT_AVAILABILITY);
-  const [meterValue, setMeterValue] = useState<number>(initialConnector?.meterValue ?? 0);
-  const [soc, setSoc] = useState<number | null>(initialConnector?.soc ?? null);
-  const [transactionId, setTransactionId] = useState<number | null>(initialConnector?.transaction?.id ?? null);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [autoMeterValueConfig, setAutoMeterValueConfig] = useState<AutoMeterValueConfig | null>(
-    initialConnector?.autoMeterValueConfig ?? null,
+  const [status, setStatus] = useState<OCPPStatus>(
+    (initialConnector?.status as OCPPStatus) ?? DEFAULT_STATUS,
   );
-  const [mode, setMode] = useState<ScenarioMode>(initialConnector?.mode ?? DEFAULT_MODE);
+  const [availability, setAvailability] = useState<OCPPAvailability>(
+    initialConnector?.availability ?? DEFAULT_AVAILABILITY,
+  );
+  const [meterValue, setMeterValue] = useState<number>(
+    initialConnector?.meterValue ?? 0,
+  );
+  const [soc, setSoc] = useState<number | null>(initialConnector?.soc ?? null);
+  const [transactionId, setTransactionId] = useState<number | null>(
+    initialConnector?.transaction?.id ?? null,
+  );
+  const [logs, setLogs] = useState<string[]>([]);
+  const [autoMeterValueConfig, setAutoMeterValueConfig] =
+    useState<AutoMeterValueConfig | null>(
+      initialConnector?.autoMeterValueConfig ?? null,
+    );
+  const [mode, setMode] = useState<ScenarioMode>(
+    initialConnector?.mode ?? DEFAULT_MODE,
+  );
+  const [autoResetToAvailable, setAutoResetToAvailable] = useState<boolean>(
+    initialConnector?.autoResetToAvailable ?? true,
+  );
 
   useEffect(() => {
     if (!chargePointId) {
@@ -47,6 +65,7 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
       setTransactionId(null);
       setAutoMeterValueConfig(null);
       setMode(DEFAULT_MODE);
+      setAutoResetToAvailable(true);
       setLogs([]);
       return;
     }
@@ -60,52 +79,64 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
       setTransactionId(connector.transaction?.id ?? null);
       setAutoMeterValueConfig(connector.autoMeterValueConfig ?? null);
       setMode(connector.mode);
+      setAutoResetToAvailable(connector.autoResetToAvailable);
     }
 
-    const unsubscribe = chargePointService.subscribe(chargePointId, (event: ChargePointEvent) => {
-      switch (event.type) {
-        case "connector-status":
-          if (event.connectorId === connectorId) {
-            setStatus(event.status);
-          }
-          break;
-        case "connector-availability":
-          if (event.connectorId === connectorId) {
-            setAvailability(event.availability);
-          }
-          break;
-        case "connector-meter":
-          if (event.connectorId === connectorId) {
-            setMeterValue(event.meterValue);
-          }
-          break;
-        case "connector-soc":
-          if (event.connectorId === connectorId) {
-            setSoc(event.soc);
-          }
-          break;
-        case "connector-transaction":
-          if (event.connectorId === connectorId) {
-            setTransactionId(event.transactionId);
-          }
-          break;
-        case "connector-auto-meter":
-          if (event.connectorId === connectorId) {
-            setAutoMeterValueConfig(event.config);
-          }
-          break;
-        case "connector-mode":
-          if (event.connectorId === connectorId) {
-            setMode(event.mode);
-          }
-          break;
-        case "log":
-          setLogs((prev) => [...prev, `[${event.entry.timestamp.toISOString()}] ${event.entry.message}`]);
-          break;
-        default:
-          break;
-      }
-    });
+    const unsubscribe = chargePointService.subscribe(
+      chargePointId,
+      (event: ChargePointEvent) => {
+        switch (event.type) {
+          case "connector-status":
+            if (event.connectorId === connectorId) {
+              setStatus(event.status);
+            }
+            break;
+          case "connector-availability":
+            if (event.connectorId === connectorId) {
+              setAvailability(event.availability);
+            }
+            break;
+          case "connector-meter":
+            if (event.connectorId === connectorId) {
+              setMeterValue(event.meterValue);
+            }
+            break;
+          case "connector-soc":
+            if (event.connectorId === connectorId) {
+              setSoc(event.soc);
+            }
+            break;
+          case "connector-transaction":
+            if (event.connectorId === connectorId) {
+              setTransactionId(event.transactionId);
+            }
+            break;
+          case "connector-auto-meter":
+            if (event.connectorId === connectorId) {
+              setAutoMeterValueConfig(event.config);
+            }
+            break;
+          case "connector-mode":
+            if (event.connectorId === connectorId) {
+              setMode(event.mode);
+            }
+            break;
+          case "connector-auto-reset-to-available":
+            if (event.connectorId === connectorId) {
+              setAutoResetToAvailable(event.enabled);
+            }
+            break;
+          case "log":
+            setLogs((prev) => [
+              ...prev,
+              `[${event.entry.timestamp.toISOString()}] ${event.entry.message}`,
+            ]);
+            break;
+          default:
+            break;
+        }
+      },
+    );
 
     return () => {
       if (unsubscribe) {
@@ -125,5 +156,6 @@ export function useConnectorView(chargePoint: ChargePoint | null, connectorId: n
     logs: logsMemo,
     autoMeterValueConfig,
     mode,
+    autoResetToAvailable,
   };
 }

@@ -66,11 +66,22 @@ export class ChargePoint {
       this._connectors.set(connectorId, connector);
     }
 
-    this._webSocket = new OCPPWebSocket(wsUrl, this._id, this._logger, basicAuthSettings);
-    this._messageHandler = new OCPPMessageHandler(this, this._webSocket, this._logger);
+    this._webSocket = new OCPPWebSocket(
+      wsUrl,
+      this._id,
+      this._logger,
+      basicAuthSettings,
+    );
+    this._messageHandler = new OCPPMessageHandler(
+      this,
+      this._webSocket,
+      this._logger,
+    );
 
     this._heartbeat = new HeartbeatService(this._logger);
-    this._heartbeat.setHeartbeatCallback(() => this._messageHandler.sendHeartbeat());
+    this._heartbeat.setHeartbeatCallback(() =>
+      this._messageHandler.sendHeartbeat(),
+    );
 
     this._reservationManager = new ReservationManager(this._logger);
 
@@ -226,10 +237,18 @@ export class ChargePoint {
     });
   }
 
-  startTransaction(tagId: string, connectorId: number, batteryCapacityKwh?: number, initialSoc?: number): void {
+  startTransaction(
+    tagId: string,
+    connectorId: number,
+    batteryCapacityKwh?: number,
+    initialSoc?: number,
+  ): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
-      this._logger.error(`Connector ${connectorId} not found`, LogType.TRANSACTION);
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
       return;
     }
 
@@ -268,7 +287,8 @@ export class ChargePoint {
         ? this.getConnector(connectorOrId)
         : connectorOrId;
     if (!connector) {
-      const connId = typeof connectorOrId === "number" ? connectorOrId : connectorOrId.id;
+      const connId =
+        typeof connectorOrId === "number" ? connectorOrId : connectorOrId.id;
       this._logger.error(`Connector ${connId} not found`, LogType.TRANSACTION);
       return;
     }
@@ -295,7 +315,9 @@ export class ChargePoint {
 
     this.cleanTransaction(connector);
     connector.stopTransaction();
-    this.updateConnectorStatus(connector.id, OCPPStatus.Available);
+    if (connector.autoResetToAvailable) {
+      this.updateConnectorStatus(connector.id, OCPPStatus.Available);
+    }
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
@@ -333,7 +355,10 @@ export class ChargePoint {
   setMeterValue(connectorId: number, value: number): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
-      this._logger.error(`Connector ${connectorId} not found`, LogType.METER_VALUE);
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.METER_VALUE,
+      );
       return;
     }
     connector.meterValue = value;
@@ -342,7 +367,10 @@ export class ChargePoint {
   sendMeterValue(connectorId: number): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
-      this._logger.error(`Connector ${connectorId} not found`, LogType.METER_VALUE);
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.METER_VALUE,
+      );
       return;
     }
     this._messageHandler.sendMeterValue(
@@ -370,7 +398,9 @@ export class ChargePoint {
   }
 
   updateAllConnectorsStatus(status: OCPPStatus): void {
-    this._connectors.forEach((connector) => this.updateConnectorStatus(connector.id, status));
+    this._connectors.forEach((connector) =>
+      this.updateConnectorStatus(connector.id, status),
+    );
   }
 
   updateConnectorStatus(connectorId: number, status: OCPPStatus): void {
@@ -387,6 +417,10 @@ export class ChargePoint {
       status,
       previousStatus,
     });
-    this._messageHandler.sendStatusNotification(connectorId, status, previousStatus);
+    this._messageHandler.sendStatusNotification(
+      connectorId,
+      status,
+      previousStatus,
+    );
   }
 }

@@ -15,6 +15,7 @@ import {
   ScenarioEvents,
 } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
+import { type EVSettings, defaultEVSettings } from "./EVSettings";
 
 export interface ConnectorEvents {
   statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
@@ -25,6 +26,7 @@ export interface ConnectorEvents {
   autoMeterValueChange: { config: AutoMeterValueConfig };
   modeChange: { mode: ScenarioMode };
   autoResetToAvailableChange: { enabled: boolean };
+  evSettingsChange: { settings: EVSettings };
 }
 
 interface IncrementStrategyConfig {
@@ -53,6 +55,7 @@ export class Connector {
   private modeValue: ScenarioMode = "manual";
   private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
+  private _evSettings: EVSettings = { ...defaultEVSettings };
 
   constructor(
     private readonly connectorId: number,
@@ -156,6 +159,15 @@ export class Connector {
   set autoResetToAvailable(enabled: boolean) {
     this._autoResetToAvailable = enabled;
     this.eventsEmitter.emit("autoResetToAvailableChange", { enabled });
+  }
+
+  get evSettings(): EVSettings {
+    return this._evSettings;
+  }
+
+  set evSettings(settings: EVSettings) {
+    this._evSettings = { ...settings };
+    this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
   }
 
   get autoMeterValueConfig(): AutoMeterValueConfig {

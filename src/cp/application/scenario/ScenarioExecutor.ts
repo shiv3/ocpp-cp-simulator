@@ -34,6 +34,7 @@ export class ScenarioExecutor {
   private stepResolve: ((value: void) => void) | null = null;
   private previousState: ScenarioExecutionState = "idle";
   private eventEmitter?: EventEmitter<ScenarioEvents>;
+  private forceSkipResolve: (() => void) | null = null;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -469,6 +470,17 @@ export class ScenarioExecutor {
         maxTimeSeconds: data.maxTime,
         maxValue: data.maxValue,
       });
+
+      if (data.maxTime && data.maxTime > 0) {
+        await this.waitWithProgress(nodeId, data.maxTime);
+        this.callbacks.onStopAutoMeterValue?.();
+      } else if (data.maxValue && data.maxValue > 0) {
+        await this.waitWithOptionalForceSkip(
+          this.callbacks.onWaitForMeterValue?.(data.maxValue) ??
+            Promise.resolve(),
+        );
+        this.callbacks.onStopAutoMeterValue?.();
+      }
     }
 
     if (data.sendMessage && this.callbacks.onSendMeterValue) {
@@ -483,54 +495,61 @@ export class ScenarioExecutor {
     nodeId: string,
     data: DelayNodeData,
   ): Promise<void> {
+    await this.waitWithProgress(nodeId, data.delaySeconds);
+  }
+
+  private async waitWithProgress(
+    nodeId: string,
+    totalSeconds: number,
+  ): Promise<void> {
     if (this.callbacks.onDelay) {
-      await this.callbacks.onDelay(data.delaySeconds);
-    } else {
-      const totalSeconds = data.delaySeconds;
-      const updateInterval = 100; // Update progress every 100ms
-      let elapsed = 0;
+      await this.callbacks.onDelay(totalSeconds);
+      return;
+    }
 
-      const progressInterval = setInterval(() => {
-        elapsed += updateInterval / 1000;
-        const remaining = Math.max(0, totalSeconds - elapsed);
+    const updateInterval = 100; // Update progress every 100ms
+    let elapsed = 0;
 
-        if (this.callbacks.onNodeProgress) {
-          this.callbacks.onNodeProgress(nodeId, remaining, totalSeconds);
-        }
+    const progressInterval = setInterval(() => {
+      elapsed += updateInterval / 1000;
+      const remaining = Math.max(0, totalSeconds - elapsed);
 
-        // Emit node progress events
-        const progressData = {
-          scenarioId: this.scenario.id,
-          nodeId,
-          remaining,
-          total: totalSeconds,
-        };
-        this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
-        this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-
-        if (remaining <= 0) {
-          clearInterval(progressInterval);
-        }
-      }, updateInterval);
-
-      await this.sleep(totalSeconds * 1000);
-      clearInterval(progressInterval);
-
-      // Final progress update
       if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
+        this.callbacks.onNodeProgress(nodeId, remaining, totalSeconds);
       }
 
-      // Emit final progress events
-      const finalProgressData = {
+      // Emit node progress events
+      const progressData = {
         scenarioId: this.scenario.id,
         nodeId,
-        remaining: 0,
+        remaining,
         total: totalSeconds,
       };
-      this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
+      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
+      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
+
+      if (remaining <= 0) {
+        clearInterval(progressInterval);
+      }
+    }, updateInterval);
+
+    await this.sleep(totalSeconds * 1000);
+    clearInterval(progressInterval);
+
+    // Final progress update
+    if (this.callbacks.onNodeProgress) {
+      this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
     }
+
+    // Emit final progress events
+    const finalProgressData = {
+      scenarioId: this.scenario.id,
+      nodeId,
+      remaining: 0,
+      total: totalSeconds,
+    };
+    this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
+    this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
   }
 
   /**
@@ -567,7 +586,9 @@ export class ScenarioExecutor {
 
     // If no timeout, just wait without progress
     if (!timeout || timeout === 0) {
-      await this.callbacks.onWaitForRemoteStart(timeout);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onWaitForRemoteStart(timeout),
+      );
       return;
     }
 
@@ -599,7 +620,9 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.callbacks.onWaitForRemoteStart(timeout);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onWaitForRemoteStart(timeout),
+      );
     } finally {
       clearInterval(progressInterval);
 
@@ -632,7 +655,9 @@ export class ScenarioExecutor {
 
     // If no timeout, just wait without progress
     if (!timeout || timeout === 0) {
-      await this.callbacks.onWaitForStatus(data.targetStatus, timeout);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onWaitForStatus(data.targetStatus, timeout),
+      );
       return;
     }
 
@@ -664,7 +689,9 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.callbacks.onWaitForStatus(data.targetStatus, timeout);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onWaitForStatus(data.targetStatus, timeout),
+      );
     } finally {
       clearInterval(progressInterval);
 
@@ -725,7 +752,9 @@ export class ScenarioExecutor {
 
     // If no timeout, just wait without progress
     if (!timeout || timeout === 0) {
-      await this.callbacks.onWaitForReservation(timeout);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onWaitForReservation(timeout),
+      );
       return;
     }
 
@@ -757,7 +786,9 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.callbacks.onWaitForReservation(timeout);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onWaitForReservation(timeout),
+      );
     } finally {
       clearInterval(progressInterval);
 
@@ -834,6 +865,25 @@ export class ScenarioExecutor {
   }
 
   /**
+   * Force step even while waiting for trigger/meter events
+   */
+  public forceStep(): void {
+    const stateName = getScenarioStateName(this.service.machine);
+    if (stateName !== "stepping") return;
+
+    if (this.forceSkipResolve) {
+      this.forceSkipResolve();
+      this.forceSkipResolve = null;
+    }
+
+    if (this.stepResolve) {
+      this.service.send({ type: "STEP" });
+      this.stepResolve();
+      this.stepResolve = null;
+    }
+  }
+
+  /**
    * Get current execution context
    */
   public getContext(): ScenarioExecutionContext {
@@ -870,6 +920,30 @@ export class ScenarioExecutor {
     return new Promise<void>((resolve) => {
       this.stepResolve = resolve;
     });
+  }
+
+  private async waitWithOptionalForceSkip(
+    waitPromise: Promise<void>,
+  ): Promise<void> {
+    const stateName = getScenarioStateName(this.service.machine);
+    if (stateName !== "stepping") {
+      await waitPromise;
+      return;
+    }
+
+    let localResolve: (() => void) | null = null;
+    const forcePromise = new Promise<void>((resolve) => {
+      localResolve = resolve;
+    });
+    this.forceSkipResolve = localResolve;
+
+    try {
+      await Promise.race([waitPromise, forcePromise]);
+    } finally {
+      if (this.forceSkipResolve === localResolve) {
+        this.forceSkipResolve = null;
+      }
+    }
   }
 
   /**

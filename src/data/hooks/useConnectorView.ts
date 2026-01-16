@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import {
+  type EVSettings,
+  defaultEVSettings,
+} from "../../cp/domain/connector/EVSettings";
 import type { ScenarioMode } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPAvailability, OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { ChargePointEvent } from "../interfaces/ChargePointService";
@@ -17,6 +21,7 @@ interface ConnectorViewState {
   autoMeterValueConfig: AutoMeterValueConfig | null;
   mode: ScenarioMode;
   autoResetToAvailable: boolean;
+  evSettings: EVSettings;
 }
 
 const DEFAULT_STATUS = OCPPStatus.Unavailable;
@@ -55,6 +60,9 @@ export function useConnectorView(
   const [autoResetToAvailable, setAutoResetToAvailable] = useState<boolean>(
     initialConnector?.autoResetToAvailable ?? true,
   );
+  const [evSettings, setEvSettings] = useState<EVSettings>(
+    initialConnector?.evSettings ?? { ...defaultEVSettings },
+  );
 
   useEffect(() => {
     if (!chargePointId) {
@@ -66,6 +74,7 @@ export function useConnectorView(
       setAutoMeterValueConfig(null);
       setMode(DEFAULT_MODE);
       setAutoResetToAvailable(true);
+      setEvSettings({ ...defaultEVSettings });
       setLogs([]);
       return;
     }
@@ -80,6 +89,7 @@ export function useConnectorView(
       setAutoMeterValueConfig(connector.autoMeterValueConfig ?? null);
       setMode(connector.mode);
       setAutoResetToAvailable(connector.autoResetToAvailable);
+      setEvSettings(connector.evSettings);
     }
 
     const unsubscribe = chargePointService.subscribe(
@@ -126,6 +136,11 @@ export function useConnectorView(
               setAutoResetToAvailable(event.enabled);
             }
             break;
+          case "connector-ev-settings":
+            if (event.connectorId === connectorId) {
+              setEvSettings(event.settings);
+            }
+            break;
           case "log":
             setLogs((prev) => [
               ...prev,
@@ -157,5 +172,6 @@ export function useConnectorView(
     autoMeterValueConfig,
     mode,
     autoResetToAvailable,
+    evSettings,
   };
 }

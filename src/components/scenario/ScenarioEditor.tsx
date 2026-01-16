@@ -1,4 +1,11 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  lazy,
+  Suspense,
+} from "react";
 import {
   ReactFlow,
   Background,
@@ -22,7 +29,9 @@ import {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
-import MeterValueCurveModal from "../MeterValueCurveModal";
+
+// Dynamic import for heavy component (bundle-dynamic-imports)
+const MeterValueCurveModal = lazy(() => import("../MeterValueCurveModal"));
 
 // Import node components
 import StatusChangeNode from "./nodes/StatusChangeNode";
@@ -37,7 +46,6 @@ import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
 import ReservationTriggerNode from "./nodes/ReservationTriggerNode";
 import StartEndNode from "./nodes/StartEndNode";
-import ScenarioControlPanel from "./ScenarioControlPanel";
 
 import {
   loadScenarios,
@@ -54,6 +62,7 @@ import {
 } from "../../utils/scenarioTemplates";
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import { createScenarioExecutorCallbacks } from "../../cp/application/scenario/ScenarioRuntime";
 
 interface ScenarioEditorProps {
   chargePoint: ChargePoint;
@@ -108,6 +117,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState(scenario.edges);
   const [executionState, setExecutionState] =
     useState<ScenarioExecutionState>("idle");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [executionMode, setExecutionMode] =
     useState<ScenarioExecutionMode>("oneshot");
   const [executionContext, setExecutionContext] =
@@ -163,7 +173,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setScenarioEnabled(found.enabled !== false);
       }
     }
-  }, [scenarioProp, scenarioId, chargePoint.id, connectorId]);
+  }, [
+    scenarioProp,
+    scenarioId,
+    chargePoint.id,
+    connectorId,
+    setNodes,
+    setEdges,
+  ]);
 
   // Update execution context from props
   useEffect(() => {
@@ -258,7 +275,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         };
       }),
     );
-  }, [executionContext, nodeProgress]);
+  }, [executionContext, nodeProgress, setNodes]);
 
   // Subscribe to connector status changes
   useEffect(() => {
@@ -355,6 +372,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       // Auto-save to storage (but don't reload into ScenarioManager yet)
       updateScenario(chargePoint.id, connectorId, scenario.id, updatedScenario);
     }
+
+    // Keep ScenarioManager in sync while editing
+    const connector = chargePoint.getConnector(connectorId || 1);
+    if (connector?.scenarioManager) {
+      const allScenarios = loadScenarios(chargePoint.id, connectorId);
+      connector.scenarioManager.loadScenarios(allScenarios);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scenario is intentionally excluded to avoid infinite loop (this effect updates scenario)
   }, [
     nodes,
     edges,
@@ -366,6 +391,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenario.id,
     chargePoint.id,
     connectorId,
+    chargePoint,
   ]);
 
   const onConnect = useCallback(
@@ -443,6 +469,15 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // Execution control handlers
   const handleStart = useCallback(
     async (mode: ScenarioExecutionMode) => {
+      if (chargePoint.status !== OCPPStatus.Available) {
+        console.warn(
+          `[ScenarioEditor] ChargePoint status is ${chargePoint.status}. Scenario execution skipped.`,
+        );
+        return;
+      }
+      executorRef.current?.stop();
+      setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
+
       const currentScenario: ScenarioDefinition = {
         ...scenario,
         nodes,
@@ -453,91 +488,143 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         ? chargePoint.getConnector(connectorId)
         : null;
 
-      executorRef.current = new ScenarioExecutor(currentScenario, {
-        onStatusChange: async (status) => {
-          if (connector) {
-            chargePoint.updateConnectorStatus(connector.id, status);
-          }
-        },
-        onStartTransaction: async (tagId) => {
-          if (connector) {
-            chargePoint.startTransaction(tagId, connector.id);
-          }
-        },
-        onStopTransaction: async () => {
-          if (connector) {
-            chargePoint.stopTransaction(connector.id);
-          }
-        },
-        onSetMeterValue: (value) => {
-          if (connector) {
-            chargePoint.setMeterValue(connector.id, value);
-          }
-        },
-        onSendMeterValue: async () => {
-          if (connector) {
-            chargePoint.sendMeterValue(connector.id);
-          }
-        },
-        onStateChange: (context) => {
-          setExecutionState(context.state);
-          setExecutionContext(context);
-        },
-        onNodeExecute: (nodeId) => {
-          // Highlight executing node
-          setNodes((nds) =>
-            nds.map((n) => ({
-              ...n,
-              style:
-                n.id === nodeId ? { boxShadow: "0 0 10px 3px #3b82f6" } : {},
-            })),
-          );
-        },
-        onNodeProgress: (nodeId, remaining, total) => {
-          // Update node data with progress information
-          setNodes((nds) =>
-            nds.map((n) =>
-              n.id === nodeId
-                ? {
-                    ...n,
-                    data: {
-                      ...n.data,
-                      progress: { remaining, total },
-                    },
-                  }
-                : n,
-            ),
-          );
-        },
-        onError: (error) => {
-          console.error("Scenario execution error:", error);
-          alert(`Scenario error: ${error.message}`);
-        },
-      });
+      if (!connector) {
+        console.warn("Connector not found. Scenario execution aborted.");
+        return;
+      }
+
+      executorRef.current = new ScenarioExecutor(
+        currentScenario,
+        createScenarioExecutorCallbacks({
+          chargePoint,
+          connector,
+          hooks: {
+            onStateChange: (context) => {
+              setExecutionState(context.state);
+              setExecutionContext(context);
+            },
+            onNodeExecute: (nodeId) => {
+              // Highlight executing node
+              setNodes((nds) =>
+                nds.map((n) => ({
+                  ...n,
+                  style:
+                    n.id === nodeId
+                      ? { boxShadow: "0 0 10px 3px #3b82f6" }
+                      : {},
+                })),
+              );
+            },
+            onNodeProgress: (nodeId, remaining, total) => {
+              // Update node data with progress information
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === nodeId
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          progress: { remaining, total },
+                        },
+                      }
+                    : n,
+                ),
+              );
+            },
+            onError: (error) => {
+              console.error("Scenario execution error:", error);
+              alert(`Scenario error: ${error.message}`);
+            },
+          },
+        }),
+      );
 
       setExecutionMode(mode);
       await executorRef.current.start(mode);
     },
-    [scenario, nodes, edges, chargePoint, connectorId],
+    [scenario, nodes, edges, chargePoint, connectorId, setNodes],
   );
 
-  const handlePause = useCallback(() => {
-    executorRef.current?.pause();
-  }, []);
+  const handleForceStep = useCallback(() => {
+    if (executionState === "idle") {
+      void handleStart("step");
+      setTimeout(() => {
+        executorRef.current?.forceStep();
+      }, 0);
+      return;
+    }
+    executorRef.current?.forceStep();
+  }, [executionState, handleStart]);
 
-  const handleResume = useCallback(() => {
-    executorRef.current?.resume();
-  }, []);
-
-  const handleStop = useCallback(() => {
+  const handleForceStop = useCallback(() => {
     executorRef.current?.stop();
     setExecutionState("idle");
     setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
   }, [setNodes]);
 
-  const handleStep = useCallback(() => {
-    executorRef.current?.step();
-  }, []);
+  const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastAutoStartKeyRef = useRef<string | null>(null);
+
+  // Auto-start after save/changes (manual trigger only, no StatusTrigger node)
+  useEffect(() => {
+    if (!scenarioEnabled) {
+      executorRef.current?.stop();
+      setExecutionState("idle");
+      lastAutoStartKeyRef.current = null;
+      return;
+    }
+
+    const hasStatusTriggerNode = nodes.some(
+      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
+    );
+
+    if (scenario.trigger?.type !== "manual" || hasStatusTriggerNode) {
+      executorRef.current?.stop();
+      setExecutionState("idle");
+      lastAutoStartKeyRef.current = null;
+      return;
+    }
+
+    if (executionState !== "idle") {
+      return;
+    }
+
+    const connector = connectorId
+      ? chargePoint.getConnector(connectorId)
+      : null;
+    if (!connector) return;
+
+    const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
+    if (lastAutoStartKeyRef.current === autoStartKey) {
+      return;
+    }
+    lastAutoStartKeyRef.current = autoStartKey;
+
+    if (autoStartTimerRef.current) {
+      clearTimeout(autoStartTimerRef.current);
+    }
+
+    autoStartTimerRef.current = setTimeout(() => {
+      handleStart(defaultExecutionMode);
+    }, 300);
+
+    return () => {
+      if (autoStartTimerRef.current) {
+        clearTimeout(autoStartTimerRef.current);
+      }
+    };
+  }, [
+    scenario.id,
+    scenario.updatedAt,
+    scenario.trigger?.type,
+    nodes,
+    defaultExecutionMode,
+    scenarioEnabled,
+    executionState,
+    connectorId,
+    chargePoint,
+    handleStart,
+  ]);
 
   // File operations
   const handleExport = useCallback(() => {
@@ -641,43 +728,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     },
     [setNodes],
   );
-
-  // Handle scenario save
-  const handleSaveScenario = useCallback(() => {
-    const updatedScenario: ScenarioDefinition = {
-      ...scenario,
-      name: scenarioName,
-      description: scenarioDescription,
-      nodes,
-      edges,
-      defaultExecutionMode,
-      enabled: scenarioEnabled,
-    };
-
-    // Save using the new multi-scenario storage
-    updateScenario(chargePoint.id, connectorId, scenario.id, updatedScenario);
-    setScenario(updatedScenario);
-
-    // Reload ALL scenarios from storage into ScenarioManager
-    const connector = chargePoint.getConnector(connectorId || 1);
-    if (connector?.scenarioManager) {
-      const allScenarios = loadScenarios(chargePoint.id, connectorId);
-      connector.scenarioManager.loadScenarios(allScenarios);
-    }
-
-    // Show success message
-    alert("Scenario saved successfully!");
-  }, [
-    scenario,
-    scenarioName,
-    scenarioDescription,
-    nodes,
-    edges,
-    defaultExecutionMode,
-    scenarioEnabled,
-    chargePoint,
-    connectorId,
-  ]);
 
   // Get status color class
   const getStatusColor = (status: OCPPStatus) => {
@@ -1199,23 +1249,31 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
-      {/* MeterValue Curve Config Modal */}
-      {isCurveModalOpen && (
-        <MeterValueCurveModal
-          isOpen={isCurveModalOpen}
-          onClose={() => setIsCurveModalOpen(false)}
-          initialConfig={{
-            enabled: true,
-            intervalSeconds: formData.incrementInterval || 10,
-            curvePoints: formData.curvePoints || [
-              { time: 0, value: 0 },
-              { time: 30, value: 50 },
-            ],
-            autoCalculateInterval: formData.autoCalculateInterval || false,
-          }}
-          onSave={handleCurveModalSave}
-        />
-      )}
+      {/* MeterValue Curve Config Modal (rendering-conditional-render + bundle-dynamic-imports) */}
+      {isCurveModalOpen ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+              <div className="text-white">Loading...</div>
+            </div>
+          }
+        >
+          <MeterValueCurveModal
+            isOpen={isCurveModalOpen}
+            onClose={() => setIsCurveModalOpen(false)}
+            initialConfig={{
+              enabled: true,
+              intervalSeconds: formData.incrementInterval || 10,
+              curvePoints: formData.curvePoints || [
+                { time: 0, value: 0 },
+                { time: 30, value: 50 },
+              ],
+              autoCalculateInterval: formData.autoCalculateInterval || false,
+            }}
+            onSave={handleCurveModalSave}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Header */}
       <div className="panel p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -1399,11 +1457,27 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               </span>
             </label>
           </div>
+
+          {/* Force Step Controls */}
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={handleForceStep}
+              className="btn-info text-xs px-3 py-1.5"
+            >
+              Force Step
+            </button>
+            <button
+              onClick={handleForceStop}
+              className="btn-danger text-xs px-3 py-1.5"
+            >
+              Stop
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 flex gap-3 p-3 overflow-hidden min-h-0">
-        {/* Left Column: Node Palette + Canvas + Control Panel */}
+        {/* Left Column: Node Palette + Canvas */}
         <div className="flex-1 flex flex-col gap-3 overflow-hidden min-h-0">
           {/* Node Palette */}
           <div className="panel p-2 flex-shrink-0">
@@ -1493,21 +1567,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               <Controls />
               <MiniMap />
             </ReactFlow>
-          </div>
-
-          {/* Control Panel */}
-          <div className="flex-shrink-0">
-            <ScenarioControlPanel
-              executionState={executionState}
-              executionMode={executionMode}
-              onStart={handleStart}
-              onPause={handlePause}
-              onResume={handleResume}
-              onStop={handleStop}
-              onStep={handleStep}
-              onModeChange={setExecutionMode}
-              onSave={handleSaveScenario}
-            />
           </div>
         </div>
 

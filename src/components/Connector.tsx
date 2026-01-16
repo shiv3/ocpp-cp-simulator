@@ -1,19 +1,31 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  lazy,
+  Suspense,
+  memo,
+} from "react";
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import * as ocpp from "../cp/domain/types/OcppTypes";
 import { OCPPAvailability } from "../cp/domain/types/OcppTypes";
 import { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import {
   ScenarioDefinition,
-  ScenarioExecutorCallbacks,
   ScenarioExecutionContext,
 } from "../cp/application/scenario/ScenarioTypes";
-import MeterValueCurveModal from "./MeterValueCurveModal.tsx";
-import ScenarioEditor from "./scenario/ScenarioEditor.tsx";
-import StateTransitionViewer from "./state-transition/StateTransitionViewer.tsx";
+
+// Dynamic imports for heavy components (bundle-dynamic-imports)
+const MeterValueCurveModal = lazy(() => import("./MeterValueCurveModal"));
+const ScenarioEditor = lazy(() => import("./scenario/ScenarioEditor"));
+const StateTransitionViewer = lazy(
+  () => import("./state-transition/StateTransitionViewer"),
+);
 import { GitBranch } from "lucide-react";
 import { saveConnectorAutoMeterConfig } from "../utils/connectorStorage";
 import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
+import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 
@@ -21,10 +33,12 @@ interface ConnectorProps {
   id: number;
   cp: ChargePoint | null;
   idTag: string;
+  isSelected?: boolean;
+  onSelect?: () => void;
 }
 
-// Helper Components
-const ConnectorStatus: React.FC<{ status: string }> = ({ status }) => {
+// Helper Components (rerender-memo)
+const ConnectorStatus = memo<{ status: string }>(({ status }) => {
   const statusColor = (s: string) => {
     switch (s) {
       case ocpp.OCPPStatus.Unavailable:
@@ -43,26 +57,28 @@ const ConnectorStatus: React.FC<{ status: string }> = ({ status }) => {
   };
 
   return <span className={statusColor(status)}>{status}</span>;
-};
+});
+ConnectorStatus.displayName = "ConnectorStatus";
 
-const ConnectorAvailability: React.FC<{ availability: OCPPAvailability }> = ({
-  availability,
-}) => {
-  const availabilityColor = (a: OCPPAvailability) => {
-    switch (a) {
-      case "Operative":
-        return "status-available";
-      case "Inoperative":
-        return "status-unavailable";
-      default:
-        return "text-secondary";
-    }
-  };
+const ConnectorAvailability = memo<{ availability: OCPPAvailability }>(
+  ({ availability }) => {
+    const availabilityColor = (a: OCPPAvailability) => {
+      switch (a) {
+        case "Operative":
+          return "status-available";
+        case "Inoperative":
+          return "status-unavailable";
+        default:
+          return "text-secondary";
+      }
+    };
 
-  return (
-    <span className={availabilityColor(availability)}>{availability}</span>
-  );
-};
+    return (
+      <span className={availabilityColor(availability)}>{availability}</span>
+    );
+  },
+);
+ConnectorAvailability.displayName = "ConnectorAvailability";
 
 interface ConnectorDetailsPanelProps {
   cp: ChargePoint;
@@ -112,6 +128,8 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
 
   // Get scenario status with reactive polling
   const [activeScenarioIds, setActiveScenarioIds] = useState<string[]>([]);
+  const [duration, setDuration] = useState<string>("00:00:00");
+  const [transactionStartTime, setTransactionStartTime] = useState<string>("");
 
   useEffect(() => {
     // Poll active scenarios every 500ms to keep UI reactive
@@ -127,89 +145,236 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
     return () => clearInterval(interval);
   }, [scenarioManager]);
 
+  // Track transaction duration
+  useEffect(() => {
+    if (
+      connectorStatus !== ocpp.OCPPStatus.Charging ||
+      !connector?.transaction
+    ) {
+      setDuration("00:00:00");
+      setTransactionStartTime("");
+      return;
+    }
+
+    const startTime = connector.transaction.startTime;
+    if (startTime) {
+      setTransactionStartTime(startTime.toLocaleTimeString());
+    }
+
+    const interval = setInterval(() => {
+      const currentConnector = cp.getConnector(connectorId);
+      const txStartTime = currentConnector?.transaction?.startTime;
+      if (txStartTime) {
+        const elapsed = Date.now() - txStartTime.getTime();
+        const hours = Math.floor(elapsed / 3600000);
+        const minutes = Math.floor((elapsed % 3600000) / 60000);
+        const seconds = Math.floor((elapsed % 60000) / 1000);
+        setDuration(
+          `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
+        );
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [connectorStatus, connector?.transaction, cp, connectorId]);
+
   const hasActiveScenario = activeScenarioIds.length > 0;
 
+  // Helper function to get status color
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case ocpp.OCPPStatus.Available:
+        return "bg-green-500";
+      case ocpp.OCPPStatus.Charging:
+        return "bg-blue-500";
+      case ocpp.OCPPStatus.Preparing:
+        return "bg-yellow-500";
+      case ocpp.OCPPStatus.Faulted:
+        return "bg-red-500";
+      case ocpp.OCPPStatus.Unavailable:
+        return "bg-gray-500";
+      default:
+        return "bg-gray-400";
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      {/* Scenario Status */}
-      <div className="panel p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 border-l-4 border-blue-500">
-        <h3 className="text-sm font-semibold mb-3 text-primary flex items-center gap-2">
-          ⚙️ Scenario Status
+    <div className="space-y-3">
+      {/* Status Dashboard - 3 Column Cards */}
+      <div className="panel p-4">
+        <h3 className="text-sm font-semibold mb-3 text-primary">
+          📊 Status Dashboard
         </h3>
-        <div className="space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-muted">Active Scenarios:</span>
-            <span
-              className={`text-sm font-semibold ${hasActiveScenario ? "text-green-600 dark:text-green-400" : "text-gray-500"}`}
-            >
-              {hasActiveScenario
-                ? `${activeScenarioIds.length} Running`
-                : "None"}
-            </span>
-          </div>
-          {hasActiveScenario && (
-            <div className="mt-2 text-xs text-muted space-y-1">
-              {activeScenarioIds.map((id) => {
-                const scenario = scenarioManager?.getScenario(id);
-                const name = scenario?.name || id;
-                return (
-                  <div key={id} className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                    <span>{name}</span>
-                  </div>
-                );
-              })}
+        <div className="grid grid-cols-3 gap-3">
+          {/* Status Card */}
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted mb-1">Status</div>
+            <div className="flex items-center justify-center gap-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${getStatusColor(connectorStatus)}`}
+              ></span>
+              <span className="text-sm font-bold text-primary">
+                {connectorStatus}
+              </span>
             </div>
-          )}
+          </div>
+          {/* Meter Card */}
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted mb-1">Meter</div>
+            <div className="text-sm font-bold font-mono text-primary">
+              {meterValue.toLocaleString()}
+            </div>
+            <div className="text-xs text-muted">Wh</div>
+          </div>
+          {/* Availability Card */}
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted mb-1">Availability</div>
+            <div className="flex items-center justify-center gap-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${availability === "Operative" ? "bg-green-500" : "bg-red-500"}`}
+              ></span>
+              <span className="text-sm font-bold text-primary">
+                {availability}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Status Information */}
-      <div className="panel p-4">
-        <h3 className="text-sm font-semibold mb-3 text-primary">
-          📊 Status Information
-        </h3>
-        <div className="space-y-2">
-          <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              Status:
-            </span>
-            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-              <ConnectorStatus status={connectorStatus} />
-            </span>
+      {/* Active Transaction Panel - Only shown when charging (rendering-conditional-render) */}
+      {connectorStatus === ocpp.OCPPStatus.Charging &&
+      transactionId !== null &&
+      transactionId !== 0 ? (
+        <div className="panel p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/50 dark:to-emerald-950/50 border-l-4 border-green-500">
+          <h3 className="text-sm font-semibold mb-3 text-green-700 dark:text-green-300 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            Active Transaction
+          </h3>
+          <div className="text-2xl font-bold font-mono text-green-800 dark:text-green-200 mb-3">
+            #{transactionId}
           </div>
-          <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              Availability:
-            </span>
-            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-              <ConnectorAvailability availability={availability} />
-            </span>
-          </div>
-          {transactionId !== null && transactionId !== 0 && (
-            <div className="flex justify-between items-center py-1 border-b border-gray-200 dark:border-gray-700">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                Transaction ID:
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-green-600 dark:text-green-400">
+                ID Tag:
               </span>
-              <span className="text-sm font-mono font-semibold text-gray-900 dark:text-gray-100 bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded">
-                {transactionId}
+              <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                {connector?.transaction?.tagId || tagId}
               </span>
             </div>
-          )}
-          <div className="flex justify-between items-center py-1">
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              Meter Value:
+            <div className="flex justify-between">
+              <span className="text-green-600 dark:text-green-400">
+                Started:
+              </span>
+              <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                {transactionStartTime}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-green-600 dark:text-green-400">
+                Duration:
+              </span>
+              <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                {duration}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-green-600 dark:text-green-400">
+                Energy:
+              </span>
+              <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                {(meterValue / 1000).toFixed(2)} kWh
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Scenario Status - Compact (rendering-conditional-render) */}
+      {hasActiveScenario ? (
+        <div className="panel p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50 border-l-4 border-blue-500">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-primary flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+              Scenario Running
             </span>
-            <span className="text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">
-              {meterValue.toLocaleString()} Wh
+            <span className="text-xs text-muted">
+              {activeScenarioIds
+                .map((id) => scenarioManager?.getScenario(id)?.name || id)
+                .join(", ")}
             </span>
           </div>
         </div>
+      ) : null}
 
-        {/* Status Change Selector */}
-        <div className="mt-3">
+      {/* Controls Section - 2 Column Layout */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Transaction Control Card */}
+        <div className="panel p-3">
+          <h4 className="text-xs font-semibold mb-2 text-muted flex items-center gap-1">
+            💳 Transaction
+          </h4>
+          <input
+            type="text"
+            value={tagId}
+            onChange={(e) => setIdTag(e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 mb-2"
+            placeholder="ID Tag"
+          />
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={onStartTransaction}
+              disabled={connectorStatus === ocpp.OCPPStatus.Charging}
+              className="btn-success text-xs py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ▶️ Start
+            </button>
+            <button
+              onClick={onStopTransaction}
+              disabled={connectorStatus !== ocpp.OCPPStatus.Charging}
+              className="btn-warning text-xs py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ⏹️ Stop
+            </button>
+          </div>
+        </div>
+
+        {/* Meter Control Card */}
+        <div className="panel p-3">
+          <h4 className="text-xs font-semibold mb-2 text-muted flex items-center gap-1">
+            ⚡ Meter Value
+          </h4>
+          <input
+            type="number"
+            value={meterValue}
+            onChange={(e) => setMeterValue(Number(e.target.value))}
+            className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono focus:ring-2 focus:ring-blue-500 mb-2"
+          />
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={onIncreaseMeterValue}
+              className="btn-info text-xs py-1.5"
+            >
+              +10 Wh
+            </button>
+            <button
+              onClick={onSendMeterValue}
+              className="btn-secondary text-xs py-1.5"
+            >
+              📤 Send
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Status Control */}
+      <div className="panel p-3">
+        <h4 className="text-xs font-semibold mb-2 text-muted">
+          📡 Status Control
+        </h4>
+        <div className="flex gap-2">
           <select
-            className="input-base text-sm w-full font-medium text-gray-900 dark:text-gray-100"
+            className="input-base text-xs flex-1 py-1.5"
             value=""
             onChange={(e) => {
               if (e.target.value) {
@@ -221,175 +386,32 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
               }
             }}
           >
-            <option value="" className="text-gray-500 dark:text-gray-400">
-              Change Status...
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Available}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Available
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Preparing}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Preparing
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Charging}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Charging
-            </option>
-            <option
-              value={ocpp.OCPPStatus.SuspendedEVSE}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              SuspendedEVSE
-            </option>
-            <option
-              value={ocpp.OCPPStatus.SuspendedEV}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              SuspendedEV
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Finishing}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Finishing
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Reserved}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Reserved
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Unavailable}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Unavailable
-            </option>
-            <option
-              value={ocpp.OCPPStatus.Faulted}
-              className="text-gray-900 dark:text-gray-100"
-            >
-              Faulted
-            </option>
+            <option value="">Change Status...</option>
+            <option value={ocpp.OCPPStatus.Available}>Available</option>
+            <option value={ocpp.OCPPStatus.Preparing}>Preparing</option>
+            <option value={ocpp.OCPPStatus.Charging}>Charging</option>
+            <option value={ocpp.OCPPStatus.SuspendedEVSE}>SuspendedEVSE</option>
+            <option value={ocpp.OCPPStatus.SuspendedEV}>SuspendedEV</option>
+            <option value={ocpp.OCPPStatus.Finishing}>Finishing</option>
+            <option value={ocpp.OCPPStatus.Reserved}>Reserved</option>
+            <option value={ocpp.OCPPStatus.Unavailable}>Unavailable</option>
+            <option value={ocpp.OCPPStatus.Faulted}>Faulted</option>
           </select>
+          <button
+            onClick={onStatusNotification}
+            className="btn-secondary text-xs px-3"
+          >
+            📤 Send
+          </button>
         </div>
-
-        <button
-          onClick={onStatusNotification}
-          className="btn-secondary w-full mt-3 text-sm"
-        >
-          📤 Send StatusNotification
-        </button>
       </div>
 
-      {/* Auto Meter Value Status */}
-      {autoMeterValueConfig && (
-        <div className="panel p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950 dark:to-pink-950 border-l-4 border-purple-500">
-          <h3 className="text-sm font-semibold mb-3 text-primary flex items-center gap-2">
-            📈 Auto MeterValue Status
-          </h3>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between py-1">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                Status:
-              </span>
-              <span
-                className={`text-sm font-semibold flex items-center gap-1 ${autoMeterValueConfig.enabled ? "text-green-600 dark:text-green-400" : "text-gray-500 dark:text-gray-400"}`}
-              >
-                {autoMeterValueConfig.enabled && (
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                )}
-                {autoMeterValueConfig.enabled ? "Active" : "Inactive"}
-              </span>
-            </div>
-            {autoMeterValueConfig.enabled && (
-              <>
-                <div className="flex items-center justify-between py-1 border-t border-gray-200 dark:border-gray-700">
-                  <span className="text-xs text-gray-600 dark:text-gray-400">
-                    Send Interval:
-                  </span>
-                  <span className="text-xs font-mono text-gray-900 dark:text-gray-100 bg-purple-100 dark:bg-purple-900 px-2 py-1 rounded">
-                    {autoMeterValueConfig.intervalSeconds}s
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-xs text-gray-600 dark:text-gray-400">
-                    Curve Points:
-                  </span>
-                  <span className="text-xs font-mono text-gray-900 dark:text-gray-100">
-                    {autoMeterValueConfig.curvePoints.length} points
-                  </span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-xs text-gray-600 dark:text-gray-400">
-                    Auto Calculate:
-                  </span>
-                  <span className="text-xs text-gray-900 dark:text-gray-100">
-                    {autoMeterValueConfig.autoCalculateInterval ? "Yes" : "No"}
-                  </span>
-                </div>
-              </>
-            )}
-            <div className="grid grid-cols-2 gap-2 mt-3">
-              <button
-                onClick={onToggleAutoMeterValue}
-                className={`text-sm ${autoMeterValueConfig.enabled ? "btn-warning" : "btn-success"}`}
-              >
-                {autoMeterValueConfig.enabled ? "⏸️ Disable" : "▶️ Enable"}
-              </button>
-              <button
-                onClick={onOpenConfigModal}
-                className="btn-secondary text-sm"
-              >
-                ⚙️ Configure
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transaction Controls */}
-      <div className="panel p-4">
-        <h3 className="text-sm font-semibold mb-3 text-primary">
-          💳 Transaction
-        </h3>
+      {/* Settings Section */}
+      <div className="panel p-3">
+        <h3 className="text-xs font-semibold mb-3 text-muted">⚙️ Settings</h3>
         <div className="space-y-2">
-          <div>
-            <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-              ID Tag
-            </label>
-            <input
-              type="text"
-              value={tagId}
-              onChange={(e) => setIdTag(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter ID Tag"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={onStartTransaction}
-              disabled={connectorStatus === ocpp.OCPPStatus.Charging}
-              className="btn-success text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ▶️ Start
-            </button>
-            <button
-              onClick={onStopTransaction}
-              disabled={connectorStatus !== ocpp.OCPPStatus.Charging}
-              className="btn-warning text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ⏹️ Stop
-            </button>
-          </div>
-          <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
+          {/* Auto Reset Toggle */}
+          <div className="flex items-center justify-between py-1">
             <span className="text-xs text-gray-600 dark:text-gray-400">
               Auto Available on Stop
             </span>
@@ -408,37 +430,41 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
               />
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* Meter Value Controls */}
-      <div className="panel p-4">
-        <h3 className="text-sm font-semibold mb-3 text-primary">
-          ⚡ Meter Value Controls
-        </h3>
-        <div className="space-y-2">
-          <div>
-            <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-              Manual Value (Wh)
-            </label>
-            <input
-              type="number"
-              value={meterValue}
-              onChange={(e) => setMeterValue(Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={onIncreaseMeterValue} className="btn-info text-sm">
-              ➕ +10 Wh
-            </button>
-            <button
-              onClick={onSendMeterValue}
-              className="btn-secondary text-sm"
-            >
-              📤 Send
-            </button>
-          </div>
+          {/* Auto Meter Value Config (rendering-conditional-render) */}
+          {autoMeterValueConfig ? (
+            <div className="flex items-center justify-between py-1 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-600 dark:text-gray-400">
+                  Auto MeterValue
+                </span>
+                {autoMeterValueConfig.enabled ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                    Active
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={onToggleAutoMeterValue}
+                  className={`text-xs px-2 py-1 rounded ${
+                    autoMeterValueConfig.enabled
+                      ? "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300"
+                      : "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300"
+                  }`}
+                >
+                  {autoMeterValueConfig.enabled ? "Disable" : "Enable"}
+                </button>
+                <button
+                  onClick={onOpenConfigModal}
+                  className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                >
+                  ⚙️
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -449,6 +475,8 @@ const Connector: React.FC<ConnectorProps> = ({
   id: connector_id,
   cp,
   idTag,
+  isSelected = false,
+  onSelect,
 }) => {
   const {
     status: connectorStatus,
@@ -512,156 +540,25 @@ const Connector: React.FC<ConnectorProps> = ({
     const connector = cp.getConnector(connector_id);
     if (!connector) return;
 
-    const callbacks: ScenarioExecutorCallbacks = {
-      onStatusChange: async (status) => {
-        cp.updateConnectorStatus(connector_id, status);
-      },
-      onStartTransaction: async (tagId, batteryCapacityKwh, initialSoc) => {
-        cp.startTransaction(
-          tagId,
-          connector_id,
-          batteryCapacityKwh,
-          initialSoc,
-        );
-      },
-      onStopTransaction: async () => {
-        cp.stopTransaction(connector_id);
-      },
-      onSetMeterValue: (value) => {
-        cp.setMeterValue(connector_id, value);
-      },
-      onSendMeterValue: async () => {
-        cp.sendMeterValue(connector_id);
-      },
-      onStartAutoMeterValue: (config) => {
-        const connector = cp.getConnector(connector_id);
-        if (!connector) return;
-
-        connector.startManualMeterStrategy({
-          kind: "increment",
-          intervalSeconds: config.intervalSeconds,
-          incrementValue: config.incrementValue,
-          maxTimeSeconds: config.maxTimeSeconds,
-          maxValue: config.maxValue,
-        });
-      },
-      onStopAutoMeterValue: () => {
-        const connector = cp.getConnector(connector_id);
-        if (!connector) return;
-
-        connector.stopAutoMeterValue();
-      },
-      onSendNotification: async (messageType, payload) => {
-        if (!cp) return;
-
-        switch (messageType) {
-          case "Heartbeat":
-            cp.sendHeartbeat();
-            break;
-          case "StatusNotification":
-            if (payload?.status) {
-              cp.updateConnectorStatus(
-                connector_id,
-                payload.status as ocpp.OCPPStatus,
-              );
-            }
-            break;
-          default:
-            console.warn(
-              `Unhandled scenario notification type: ${messageType}`,
-              payload,
-            );
-        }
-      },
-      onConnectorPlug: async (action) => {
-        console.log(`Connector ${action}`, connector_id);
-      },
-      onDelay: async (seconds) => {
-        await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-      },
-      onWaitForRemoteStart: async () => {
-        return "default-tag";
-      },
-      onWaitForStatus: async (targetStatus, timeout) => {
-        console.log(
-          `[StatusTrigger] Waiting for status: ${targetStatus}`,
-          timeout,
-        );
-
-        // Check if already at target status
-        if (connector.status === targetStatus) {
-          console.log(
-            `[StatusTrigger] Already at target status: ${targetStatus}`,
-          );
-          return;
-        }
-
-        return new Promise<void>((resolve, reject) => {
-          let timeoutId: NodeJS.Timeout | null = null;
-
-          const statusChangeHandler = (data: {
-            status: string;
-            previousStatus: string;
-          }) => {
-            console.log(
-              `[StatusTrigger] Status changed: ${data.previousStatus} → ${data.status}`,
-            );
-            if (data.status === targetStatus) {
-              console.log(
-                `[StatusTrigger] Target status reached: ${targetStatus}`,
-              );
-              if (timeoutId) clearTimeout(timeoutId);
-              connector.events.off("statusChange", statusChangeHandler);
-              resolve();
-            }
-          };
-
-          connector.events.on("statusChange", statusChangeHandler);
-
-          // Set timeout if specified and not 0
-          if (timeout && timeout > 0) {
-            timeoutId = setTimeout(() => {
-              connector.events.off("statusChange", statusChangeHandler);
-              reject(
-                new Error(
-                  `Timeout waiting for status: ${targetStatus} (${timeout}s)`,
-                ),
-              );
-            }, timeout * 1000);
+    const callbacks = createScenarioExecutorCallbacks({
+      chargePoint: cp,
+      connector,
+      hooks: {
+        onNodeProgress: (nodeId, remaining, total) => {
+          setNodeProgress((prev) => ({
+            ...prev,
+            [nodeId]: { remaining, total },
+          }));
+        },
+        onStateChange: (context) => {
+          // Update execution context when scenario state changes
+          const currentScenario = scenarioRef.current;
+          if (currentScenario && context.scenarioId === currentScenario.id) {
+            setScenarioExecutionContext(context);
           }
-        });
+        },
       },
-      onNodeProgress: (nodeId, remaining, total) => {
-        setNodeProgress((prev) => ({
-          ...prev,
-          [nodeId]: { remaining, total },
-        }));
-      },
-      onStateChange: (context) => {
-        // Update execution context when scenario state changes
-        const currentScenario = scenarioRef.current;
-        if (currentScenario && context.scenarioId === currentScenario.id) {
-          setScenarioExecutionContext(context);
-        }
-      },
-      log: (message, level = "info") => {
-        // Use ChargePoint logger with SCENARIO log type
-        switch (level) {
-          case "debug":
-            cp.logger.debug(message, ocpp.LogType.SCENARIO);
-            break;
-          case "info":
-            cp.logger.info(message, ocpp.LogType.SCENARIO);
-            break;
-          case "warn":
-            cp.logger.warn(message, ocpp.LogType.SCENARIO);
-            break;
-          case "error":
-            cp.logger.error(message, ocpp.LogType.SCENARIO);
-            break;
-        }
-      },
-    };
+    });
 
     const manager = new ScenarioManager(
       connector,
@@ -732,7 +629,7 @@ const Connector: React.FC<ConnectorProps> = ({
         }
       }
     }
-  }, [scenarios]);
+  }, [scenarios, cp, connector_id]);
 
   // Implement connector logic here...
   const handleStatusNotification = () => {
@@ -928,10 +825,19 @@ const Connector: React.FC<ConnectorProps> = ({
     return "bg-red-500 dark:bg-red-400";
   };
 
+  // Handle card click - open side panel
+  const handleCardClick = useCallback(() => {
+    if (onSelect) {
+      onSelect();
+    }
+  }, [onSelect]);
+
   return (
     <div
-      className="panel cursor-pointer hover:shadow-lg transition-shadow"
-      onClick={handleOpenScenarioEditor}
+      className={`panel cursor-pointer hover:shadow-lg transition-all ${
+        isSelected ? "ring-2 ring-blue-500 shadow-lg" : ""
+      }`}
+      onClick={handleCardClick}
     >
       <div className="mb-3">
         <div className="flex items-center justify-between mb-3">
@@ -957,11 +863,11 @@ const Connector: React.FC<ConnectorProps> = ({
           {/* Battery Icon */}
           <div className="relative flex-shrink-0">
             <div className={`text-5xl ${getBatteryColor()}`}>🔋</div>
-            {connectorStatus === ocpp.OCPPStatus.Charging && (
+            {connectorStatus === ocpp.OCPPStatus.Charging ? (
               <div className="absolute -top-1 -right-1 text-xl animate-pulse">
                 ⚡
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Status and Meter Info */}
@@ -970,11 +876,12 @@ const Connector: React.FC<ConnectorProps> = ({
               <span className="text-sm font-semibold text-primary">
                 <ConnectorStatus status={connectorStatus} />
               </span>
-              {transactionId && (
+              {/* rendering-conditional-render: use ternary to avoid 0 being rendered */}
+              {transactionId != null && transactionId !== 0 ? (
                 <span className="text-xs text-muted font-mono">
                   TX:{transactionId}
                 </span>
-              )}
+              ) : null}
             </div>
 
             {/* Meter Value Progress Bar */}
@@ -987,47 +894,65 @@ const Connector: React.FC<ConnectorProps> = ({
                     : `${(liveMeterValue / 1000).toFixed(2)} kWh`}
                 </span>
               </div>
-              {liveSoc !== null && (
+              {liveSoc !== null ? (
                 <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                   <div
                     className={`h-full ${getBatteryFillColor()} transition-all duration-300 ease-out`}
                     style={{ width: `${chargingLevel}%` }}
                   ></div>
                 </div>
-              )}
+              ) : null}
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-600 dark:text-gray-400">
                   <ConnectorAvailability availability={availability} />
                 </span>
-                {liveSoc !== null && (
+                {liveSoc !== null ? (
                   <span className="text-gray-600 dark:text-gray-400">
                     {(liveMeterValue / 1000).toFixed(2)} kWh charged
                   </span>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="text-center py-2 border-t border-gray-200 dark:border-gray-700">
-        <span className="inline-flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300 font-medium">
-          ⚙️ Click to open Editor (Scenario / State Diagram)
+      <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-gray-700">
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          Click to open details panel
         </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenScenarioEditor();
+          }}
+          className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
+        >
+          <GitBranch className="h-3 w-3" />
+          Scenario Editor
+        </button>
       </div>
 
       {/* MeterValue Curve Config Modal */}
-      {isConfigModalOpen && autoMeterValueConfig && (
-        <MeterValueCurveModal
-          isOpen={isConfigModalOpen}
-          onClose={() => setIsConfigModalOpen(false)}
-          initialConfig={autoMeterValueConfig}
-          onSave={handleSaveAutoMeterValueConfig}
-        />
-      )}
+      {isConfigModalOpen && autoMeterValueConfig ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+              <div className="text-white">Loading...</div>
+            </div>
+          }
+        >
+          <MeterValueCurveModal
+            isOpen={isConfigModalOpen}
+            onClose={() => setIsConfigModalOpen(false)}
+            initialConfig={autoMeterValueConfig}
+            onSave={handleSaveAutoMeterValueConfig}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Side Panel with Tabs */}
-      {isScenarioEditorOpen && cp && (
+      {isScenarioEditorOpen && cp ? (
         <div className="fixed inset-0 z-[9999] flex justify-end pointer-events-none">
           {/* Semi-transparent overlay on the left - visual effect only, clicks pass through */}
           <div className="flex-1 bg-black bg-opacity-20 pointer-events-none" />
@@ -1136,15 +1061,25 @@ const Connector: React.FC<ConnectorProps> = ({
                     </div>
                   </div>
                 ) : activeTab === "scenario" ? (
-                  <ScenarioEditor
-                    chargePoint={cp}
-                    connectorId={connector_id}
-                    scenario={scenario}
-                    scenarioId={scenario?.id}
-                    executionContext={scenarioExecutionContext}
-                    nodeProgress={nodeProgress}
-                    onClose={handleCloseScenarioEditor}
-                  />
+                  <Suspense
+                    fallback={
+                      <div className="h-full flex items-center justify-center">
+                        <div className="text-muted">
+                          Loading Scenario Editor...
+                        </div>
+                      </div>
+                    }
+                  >
+                    <ScenarioEditor
+                      chargePoint={cp}
+                      connectorId={connector_id}
+                      scenario={scenario}
+                      scenarioId={scenario?.id}
+                      executionContext={scenarioExecutionContext}
+                      nodeProgress={nodeProgress}
+                      onClose={handleCloseScenarioEditor}
+                    />
+                  </Suspense>
                 ) : (
                   <div className="h-full flex flex-col">
                     {/* State Transition Viewer Header */}
@@ -1158,12 +1093,22 @@ const Connector: React.FC<ConnectorProps> = ({
                     </div>
                     {/* State Transition Viewer Content */}
                     <div className="flex-1 overflow-hidden">
-                      {cp.getConnector(connector_id) && (
-                        <StateTransitionViewer
-                          connector={cp.getConnector(connector_id)!}
-                          chargePoint={cp}
-                        />
-                      )}
+                      {cp.getConnector(connector_id) ? (
+                        <Suspense
+                          fallback={
+                            <div className="h-full flex items-center justify-center">
+                              <div className="text-muted">
+                                Loading State Diagram...
+                              </div>
+                            </div>
+                          }
+                        >
+                          <StateTransitionViewer
+                            connector={cp.getConnector(connector_id)!}
+                            chargePoint={cp}
+                          />
+                        </Suspense>
+                      ) : null}
                     </div>
                   </div>
                 )}
@@ -1171,7 +1116,7 @@ const Connector: React.FC<ConnectorProps> = ({
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

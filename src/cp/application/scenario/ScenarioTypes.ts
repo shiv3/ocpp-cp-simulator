@@ -254,6 +254,10 @@ export interface ScenarioExecutorCallbacks {
     targetStatus: OCPPStatus,
     timeout?: number,
   ) => Promise<void>; // Waits for status change
+  onWaitForMeterValue?: (
+    targetValue: number,
+    timeout?: number,
+  ) => Promise<void>; // Waits for meter value to reach target
   onReserveNow?: (
     expiryMinutes: number,
     idTag: string,

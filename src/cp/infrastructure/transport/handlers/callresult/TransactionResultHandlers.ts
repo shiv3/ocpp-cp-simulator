@@ -57,10 +57,12 @@ export class StopTransactionResultHandler
     if (connector) {
       connector.transactionId = null;
       connector.stopTransaction();
-      context.chargePoint.updateConnectorStatus(
-        this.connectorId,
-        OCPPStatus.Available,
-      );
+      if (connector.autoResetToAvailable) {
+        context.chargePoint.updateConnectorStatus(
+          this.connectorId,
+          OCPPStatus.Available,
+        );
+      }
     }
   }
 }
@@ -68,10 +70,7 @@ export class StopTransactionResultHandler
 export class AuthorizeResultHandler
   implements CallResultHandler<response.AuthorizeResponse>
 {
-  handle(
-    payload: response.AuthorizeResponse,
-    context: HandlerContext,
-  ): void {
+  handle(payload: response.AuthorizeResponse, context: HandlerContext): void {
     const { idTagInfo } = payload;
     if (idTagInfo.status === "Accepted") {
       context.logger.info("Authorization successful", LogType.TRANSACTION);

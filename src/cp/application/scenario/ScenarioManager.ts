@@ -29,7 +29,7 @@ export class ScenarioManager {
     connector: Connector,
     chargePoint: ChargePoint,
     callbacks: ScenarioExecutorCallbacks,
-    eventEmitter?: EventEmitter<ScenarioEvents>
+    eventEmitter?: EventEmitter<ScenarioEvents>,
   ) {
     this.connector = connector;
     this.chargePoint = chargePoint;
@@ -38,7 +38,10 @@ export class ScenarioManager {
 
     // Subscribe to connector status changes
     this.connector.events.on("statusChange", (data) => {
-      this.handleStatusChange(data.previousStatus as OCPPStatus, data.status as OCPPStatus);
+      this.handleStatusChange(
+        data.previousStatus as OCPPStatus,
+        data.status as OCPPStatus,
+      );
     });
   }
 
@@ -121,9 +124,12 @@ export class ScenarioManager {
    * Handle status change event
    * Finds matching scenarios and executes them in parallel
    */
-  private handleStatusChange(fromStatus: OCPPStatus, toStatus: OCPPStatus): void {
+  private handleStatusChange(
+    fromStatus: OCPPStatus,
+    toStatus: OCPPStatus,
+  ): void {
     console.log(
-      `[ScenarioManager] handleStatusChange called: ${fromStatus} → ${toStatus}`
+      `[ScenarioManager] handleStatusChange called: ${fromStatus} → ${toStatus}`,
     );
 
     // Find matching scenarios
@@ -133,7 +139,7 @@ export class ScenarioManager {
     });
 
     console.log(
-      `[ScenarioManager] Found ${matchingScenarios.length} matching scenario(s) for ${fromStatus} → ${toStatus}`
+      `[ScenarioManager] Found ${matchingScenarios.length} matching scenario(s) for ${fromStatus} → ${toStatus}`,
     );
 
     if (matchingScenarios.length === 0) {
@@ -141,7 +147,7 @@ export class ScenarioManager {
     }
 
     console.log(
-      `[ScenarioManager] Status changed: ${fromStatus} → ${toStatus}. Found ${matchingScenarios.length} matching scenario(s).`
+      `[ScenarioManager] Status changed: ${fromStatus} → ${toStatus}. Found ${matchingScenarios.length} matching scenario(s).`,
     );
 
     // Stop all currently running scenarios
@@ -152,12 +158,12 @@ export class ScenarioManager {
       const scenario = matchingScenarios[0];
       this.executeScenario(
         scenario.id,
-        scenario.defaultExecutionMode || "oneshot"
+        scenario.defaultExecutionMode || "oneshot",
       );
 
       if (matchingScenarios.length > 1) {
         console.warn(
-          `[ScenarioManager] Multiple scenarios matched, but only executing the first one: ${scenario.name}`
+          `[ScenarioManager] Multiple scenarios matched, but only executing the first one: ${scenario.name}`,
         );
       }
     }
@@ -171,38 +177,42 @@ export class ScenarioManager {
     conditions: {
       fromStatus?: OCPPStatus;
       toStatus?: OCPPStatus;
-    }
+    },
   ): ScenarioDefinition[] {
     const matching: ScenarioDefinition[] = [];
 
     console.log(
       `[ScenarioManager] findMatchingScenarios: triggerType=${triggerType}, conditions=`,
       conditions,
-      `total scenarios=${this.scenarios.size}`
+      `total scenarios=${this.scenarios.size}`,
     );
 
     this.scenarios.forEach((scenario) => {
       console.log(
         `[ScenarioManager] Checking scenario: ${scenario.name}, enabled=${scenario.enabled}, trigger=`,
-        scenario.trigger
+        scenario.trigger,
       );
 
       // Skip disabled scenarios
       if (scenario.enabled === false) {
-        console.log(`[ScenarioManager] Skipping disabled scenario: ${scenario.name}`);
+        console.log(
+          `[ScenarioManager] Skipping disabled scenario: ${scenario.name}`,
+        );
         return;
       }
 
       // Skip if no trigger defined (manual only)
       if (!scenario.trigger) {
-        console.log(`[ScenarioManager] Skipping scenario without trigger: ${scenario.name}`);
+        console.log(
+          `[ScenarioManager] Skipping scenario without trigger: ${scenario.name}`,
+        );
         return;
       }
 
       // Check trigger type
       if (scenario.trigger.type !== triggerType) {
         console.log(
-          `[ScenarioManager] Trigger type mismatch: ${scenario.trigger.type} !== ${triggerType}`
+          `[ScenarioManager] Trigger type mismatch: ${scenario.trigger.type} !== ${triggerType}`,
         );
         return;
       }
@@ -213,7 +223,9 @@ export class ScenarioManager {
 
         // If no conditions, match any status change
         if (!triggerConditions) {
-          console.log(`[ScenarioManager] No conditions, matching: ${scenario.name}`);
+          console.log(
+            `[ScenarioManager] No conditions, matching: ${scenario.name}`,
+          );
           matching.push(scenario);
           return;
         }
@@ -224,7 +236,7 @@ export class ScenarioManager {
           triggerConditions.fromStatus !== conditions.fromStatus
         ) {
           console.log(
-            `[ScenarioManager] fromStatus mismatch: ${triggerConditions.fromStatus} !== ${conditions.fromStatus}`
+            `[ScenarioManager] fromStatus mismatch: ${triggerConditions.fromStatus} !== ${conditions.fromStatus}`,
           );
           return;
         }
@@ -235,13 +247,15 @@ export class ScenarioManager {
           triggerConditions.toStatus !== conditions.toStatus
         ) {
           console.log(
-            `[ScenarioManager] toStatus mismatch: ${triggerConditions.toStatus} !== ${conditions.toStatus}`
+            `[ScenarioManager] toStatus mismatch: ${triggerConditions.toStatus} !== ${conditions.toStatus}`,
           );
           return;
         }
 
         // All conditions matched
-        console.log(`[ScenarioManager] All conditions matched! Adding: ${scenario.name}`);
+        console.log(
+          `[ScenarioManager] All conditions matched! Adding: ${scenario.name}`,
+        );
         matching.push(scenario);
       }
     });
@@ -256,8 +270,14 @@ export class ScenarioManager {
    */
   async executeScenario(
     scenarioId: string,
-    mode: ScenarioExecutionMode
+    mode: ScenarioExecutionMode,
   ): Promise<void> {
+    if (this.chargePoint.status !== OCPPStatus.Available) {
+      console.warn(
+        `[ScenarioManager] ChargePoint status is ${this.chargePoint.status}. Scenario execution skipped.`,
+      );
+      return;
+    }
     const scenario = this.scenarios.get(scenarioId);
     if (!scenario) {
       console.error(`[ScenarioManager] Scenario not found: ${scenarioId}`);
@@ -270,11 +290,15 @@ export class ScenarioManager {
     }
 
     console.log(
-      `[ScenarioManager] Executing scenario: ${scenario.name} (${mode})`
+      `[ScenarioManager] Executing scenario: ${scenario.name} (${mode})`,
     );
 
     // Create executor with event emitter
-    const executor = new ScenarioExecutor(scenario, this.callbacks, this.eventEmitter);
+    const executor = new ScenarioExecutor(
+      scenario,
+      this.callbacks,
+      this.eventEmitter,
+    );
     this.executors.set(scenarioId, executor);
 
     try {
@@ -306,7 +330,7 @@ export class ScenarioManager {
     const activeIds = Array.from(this.executors.keys());
     if (activeIds.length > 0) {
       console.log(
-        `[ScenarioManager] Stopping ${activeIds.length} active scenario(s)`
+        `[ScenarioManager] Stopping ${activeIds.length} active scenario(s)`,
       );
       activeIds.forEach((id) => this.stopScenario(id));
     }
@@ -318,7 +342,7 @@ export class ScenarioManager {
    */
   async manualExecute(
     scenarioId: string,
-    mode: ScenarioExecutionMode
+    mode: ScenarioExecutionMode,
   ): Promise<void> {
     const scenario = this.scenarios.get(scenarioId);
     if (!scenario) {
@@ -326,7 +350,7 @@ export class ScenarioManager {
     }
 
     console.log(
-      `[ScenarioManager] Manual execution: ${scenario.name} (${mode})`
+      `[ScenarioManager] Manual execution: ${scenario.name} (${mode})`,
     );
 
     await this.executeScenario(scenarioId, mode);

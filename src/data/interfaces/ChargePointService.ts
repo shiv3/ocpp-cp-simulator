@@ -1,5 +1,6 @@
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { ScenarioMode } from "../../cp/application/scenario/ScenarioTypes";
 import type {
   OCPPAvailability,
@@ -53,6 +54,11 @@ export type ChargePointEvent =
       type: "connector-auto-reset-to-available";
       connectorId: number;
       enabled: boolean;
+    }
+  | {
+      type: "connector-ev-settings";
+      connectorId: number;
+      settings: EVSettings;
     }
   | { type: "log"; entry: LogEntry }
   | { type: "connected" }

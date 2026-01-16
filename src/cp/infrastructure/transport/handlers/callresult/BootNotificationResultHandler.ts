@@ -12,7 +12,19 @@ export class BootNotificationResultHandler
   ): void {
     if (payload.status === "Accepted") {
       context.logger.info("Boot notification successful", LogType.OCPP);
-      context.chargePoint.updateAllConnectorsStatus(OCPPStatus.Available);
+      context.chargePoint.connectors.forEach((connector) => {
+        if (connector.autoResetToAvailable) {
+          context.chargePoint.updateConnectorStatus(
+            connector.id,
+            OCPPStatus.Available,
+          );
+          return;
+        }
+        context.chargePoint.updateConnectorStatus(
+          connector.id,
+          connector.status,
+        );
+      });
       context.chargePoint.status = OCPPStatus.Available;
     } else {
       context.logger.error("Boot notification failed", LogType.OCPP);

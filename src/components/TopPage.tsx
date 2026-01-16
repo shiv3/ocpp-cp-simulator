@@ -1,17 +1,22 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import ChargePoint from "./ChargePoint.tsx";
 import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
-import ChargePointConfigModal, { ChargePointConfig, defaultChargePointConfig } from "./ChargePointConfigModal.tsx";
+import ChargePointConfigModal, {
+  ChargePointConfig,
+  defaultChargePointConfig,
+} from "./ChargePointConfigModal.tsx";
 import { Plus, Settings, Trash2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useConfig } from "../data/hooks/useConfig";
 import { useChargePoints } from "../data/hooks/useChargePoints";
 
 const TopPage: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
   const [tagIDs, setTagIDs] = useState<string[]>([]);
-  const [chargePointConfigs, setChargePointConfigs] = useState<ChargePointConfig[]>([]);
+  const [chargePointConfigs, setChargePointConfigs] = useState<
+    ChargePointConfig[]
+  >([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const chargePoints = useChargePoints(config, { isLoading });
@@ -21,6 +26,12 @@ const TopPage: React.FC = () => {
       void persistConfig(next);
     },
     [persistConfig],
+  );
+
+  // rerender-dependencies: Use stable primitive key instead of object reference
+  const configKey = useMemo(
+    () => (config ? JSON.stringify(config) : null),
+    [config],
   );
 
   useEffect(() => {
@@ -34,30 +45,36 @@ const TopPage: React.FC = () => {
     setTagIDs(config.Experimental.TagIDs ?? []);
 
     // Extract configs for modal editing
-    const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map((cp) => ({
-      cpId: cp.ChargePointID,
-      connectorNumber: cp.ConnectorNumber,
-      wsURL: config.wsURL,
-      ocppVersion: config.ocppVersion,
-      basicAuthEnabled: config.basicAuthSettings?.enabled || false,
-      basicAuthUsername: config.basicAuthSettings?.username || "",
-      basicAuthPassword: config.basicAuthSettings?.password || "",
-      autoMeterValueEnabled: config.autoMeterValueSetting?.enabled || false,
-      autoMeterValueInterval: config.autoMeterValueSetting?.interval || 30,
-      autoMeterValue: config.autoMeterValueSetting?.value || 10,
-      chargePointVendor: config.BootNotification?.chargePointVendor || "Vendor",
-      chargePointModel: config.BootNotification?.chargePointModel || "Model",
-      firmwareVersion: config.BootNotification?.firmwareVersion || "1.0",
-      chargeBoxSerialNumber: config.BootNotification?.chargeBoxSerialNumber || "",
-      chargePointSerialNumber: config.BootNotification?.chargePointSerialNumber || "",
-      meterSerialNumber: config.BootNotification?.meterSerialNumber || "",
-      meterType: config.BootNotification?.meterType || "",
-      iccid: config.BootNotification?.iccid || "",
-      imsi: config.BootNotification?.imsi || "",
-      tagIds: config.Experimental.TagIDs ?? ["123456"],
-    }));
+    const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map(
+      (cp) => ({
+        cpId: cp.ChargePointID,
+        connectorNumber: cp.ConnectorNumber,
+        wsURL: config.wsURL,
+        ocppVersion: config.ocppVersion,
+        basicAuthEnabled: config.basicAuthSettings?.enabled || false,
+        basicAuthUsername: config.basicAuthSettings?.username || "",
+        basicAuthPassword: config.basicAuthSettings?.password || "",
+        autoMeterValueEnabled: config.autoMeterValueSetting?.enabled || false,
+        autoMeterValueInterval: config.autoMeterValueSetting?.interval || 30,
+        autoMeterValue: config.autoMeterValueSetting?.value || 10,
+        chargePointVendor:
+          config.BootNotification?.chargePointVendor || "Vendor",
+        chargePointModel: config.BootNotification?.chargePointModel || "Model",
+        firmwareVersion: config.BootNotification?.firmwareVersion || "1.0",
+        chargeBoxSerialNumber:
+          config.BootNotification?.chargeBoxSerialNumber || "",
+        chargePointSerialNumber:
+          config.BootNotification?.chargePointSerialNumber || "",
+        meterSerialNumber: config.BootNotification?.meterSerialNumber || "",
+        meterType: config.BootNotification?.meterType || "",
+        iccid: config.BootNotification?.iccid || "",
+        imsi: config.BootNotification?.imsi || "",
+        tagIds: config.Experimental.TagIDs ?? ["123456"],
+      }),
+    );
     setChargePointConfigs(configs);
-  }, [config, isLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configKey, isLoading]);
 
   const handleAddChargePoint = () => {
     setEditingIndex(null);
@@ -164,7 +181,11 @@ const TopPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveChargePoint}
-        initialConfig={editingIndex !== null ? chargePointConfigs[editingIndex] : defaultChargePointConfig}
+        initialConfig={
+          editingIndex !== null
+            ? chargePointConfigs[editingIndex]
+            : defaultChargePointConfig
+        }
         isNewChargePoint={editingIndex === null}
       />
     </div>
@@ -186,12 +207,21 @@ interface transactionInfo {
   connectorID: number;
 }
 
-const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddChargePoint, onEditChargePoint, onDeleteChargePoint }) => {
+const ExperimentalView: React.FC<ExperimentalProps> = ({
+  cps,
+  tagIDs,
+  onAddChargePoint,
+  onEditChargePoint,
+  onDeleteChargePoint,
+}) => {
   const [selectedTab, setSelectedTab] = useState<string>("");
 
   // Auto-select first ChargePoint when cps change
   useEffect(() => {
-    if (cps.length > 0 && (!selectedTab || !cps.find(cp => cp.id === selectedTab))) {
+    if (
+      cps.length > 0 &&
+      (!selectedTab || !cps.find((cp) => cp.id === selectedTab))
+    ) {
       setSelectedTab(cps[0].id);
     }
   }, [cps, selectedTab]);
@@ -261,12 +291,11 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddCharg
 
   return (
     <>
-      {cps.length >= 2 && (
+      {/* rendering-conditional-render: use ternary to avoid potential issues with falsy values */}
+      {cps.length >= 2 ? (
         <>
           <div className="flex flex-wrap gap-2 mb-3">
-            <Button onClick={handleAllConnect}>
-              Connect All
-            </Button>
+            <Button onClick={handleAllConnect}>Connect All</Button>
             <Button onClick={handleAllDisconnect} variant="destructive">
               Disconnect All
             </Button>
@@ -285,7 +314,9 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddCharg
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-sm font-bold">Transaction All</span>
-                <span className="text-muted-foreground text-xs ml-3">Tag IDs: {tagIDs.join(", ")}</span>
+                <span className="text-muted-foreground text-xs ml-3">
+                  Tag IDs: {tagIDs.join(", ")}
+                </span>
               </div>
               <div className="flex gap-2">
                 <Button onClick={handleAllStartTransaction} variant="success">
@@ -298,39 +329,73 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs, onAddCharg
             </div>
           </div>
         </>
-      )}
+      ) : null}
 
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+      <Tabs
+        value={selectedTab}
+        onValueChange={setSelectedTab}
+        className="w-full"
+      >
         <TabsList className="w-full justify-start flex-wrap h-auto">
           {cps.map((cp, key) => (
-            <TabsTrigger key={key} value={cp.id} className="flex items-center gap-2">
+            <TabsTrigger
+              key={key}
+              value={cp.id}
+              className="flex items-center gap-2"
+            >
               <span>{cp.id}</span>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6"
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Edit Charge Point"
+                className={buttonVariants({
+                  variant: "ghost",
+                  size: "icon",
+                  className: "h-6 w-6",
+                })}
                 onClick={(e) => {
                   e.stopPropagation();
                   onEditChargePoint(key);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEditChargePoint(key);
+                  }
+                }}
                 title="Edit Charge Point"
               >
                 <Settings className="h-3 w-3" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6 text-destructive hover:text-destructive"
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Delete Charge Point"
+                className={buttonVariants({
+                  variant: "ghost",
+                  size: "icon",
+                  className: "h-6 w-6 text-destructive hover:text-destructive",
+                })}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
                     onDeleteChargePoint(key);
                   }
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
+                      onDeleteChargePoint(key);
+                    }
+                  }
+                }}
                 title="Delete Charge Point"
               >
                 <Trash2 className="h-3 w-3" />
-              </Button>
+              </span>
             </TabsTrigger>
           ))}
           <Button

@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import Connector from "./Connector.tsx";
+import { ConnectorSidePanel } from "./ConnectorSidePanel.tsx";
 import { LogViewer } from "./ui/log-viewer.tsx";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { useChargePointView } from "../data/hooks/useChargePointView";
@@ -11,6 +12,10 @@ interface ChargePointProps {
   TagID: string;
 }
 
+// Panel width constants (in vw)
+const PANEL_DEFAULT_WIDTH = 50; // 50vw default
+const PANEL_COLLAPSED_WIDTH_PX = 60; // px for collapsed
+
 const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
   const {
     status: cpStatus,
@@ -20,39 +25,112 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
   } = useChargePointView(cp);
   const connectorIds = cp ? Array.from(cp.connectors.keys()) : [];
 
+  // Side panel state
+  const [selectedConnector, setSelectedConnector] = useState<number | null>(
+    null,
+  );
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+  const [panelWidthVw, setPanelWidthVw] = useState(PANEL_DEFAULT_WIDTH);
+
   const handleClearLogs = useCallback(() => {
     clearLogs();
   }, [clearLogs]);
 
+  const handleConnectorSelect = useCallback((connectorId: number) => {
+    setSelectedConnector(connectorId);
+    setIsPanelCollapsed(false);
+  }, []);
+
+  const handleClosePanel = useCallback(() => {
+    setSelectedConnector(null);
+  }, []);
+
+  const handleToggleCollapse = useCallback(() => {
+    setIsPanelCollapsed((prev) => !prev);
+  }, []);
+
+  const handleWidthChange = useCallback((newWidth: number) => {
+    setPanelWidthVw(newWidth);
+  }, []);
+
+  // Calculate margin for main content
+  const mainContentMargin = selectedConnector
+    ? isPanelCollapsed
+      ? `${PANEL_COLLAPSED_WIDTH_PX}px`
+      : `${panelWidthVw}vw`
+    : "0";
+
   return (
-    <div className="card px-4 py-3">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-        <div className="lg:col-span-1">
-          <CPStatus status={cpStatus} />
+    <div className="relative">
+      {/* Main Content Area */}
+      <div
+        className="transition-all duration-300 ease-in-out"
+        style={{ marginRight: mainContentMargin }}
+      >
+        <div className="card px-4 py-3">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+            <div className="lg:col-span-1">
+              <CPStatus status={cpStatus} />
+            </div>
+            <div className="lg:col-span-3">
+              <SettingsView cp={cp} TagID={TagID} />
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <ChargePointControls
+              chargePointId={cp?.id ?? null}
+              cpStatus={cpStatus}
+              cpError={cpError}
+              tagID={TagID}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-3">
+            {connectorIds.map((connectorId) => (
+              <Connector
+                key={connectorId}
+                id={connectorId}
+                cp={cp}
+                idTag={TagID}
+                isSelected={selectedConnector === connectorId}
+                onSelect={() => handleConnectorSelect(connectorId)}
+              />
+            ))}
+          </div>
+
+          <div className="mt-4">
+            <LogViewer
+              logs={logs}
+              onClear={handleClearLogs}
+              maxHeight="500px"
+            />
+          </div>
         </div>
-        <div className="lg:col-span-3">
-          <SettingsView cp={cp} TagID={TagID} />
+      </div>
+
+      {/* Fixed Side Panel */}
+      {selectedConnector !== null && (
+        <div
+          className="fixed right-0 top-0 bottom-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl z-50 transition-all duration-300 ease-in-out"
+          style={{
+            width: isPanelCollapsed
+              ? `${PANEL_COLLAPSED_WIDTH_PX}px`
+              : `${panelWidthVw}vw`,
+          }}
+        >
+          <ConnectorSidePanel
+            chargePoint={cp}
+            connectorId={selectedConnector}
+            idTag={TagID}
+            onClose={handleClosePanel}
+            isCollapsed={isPanelCollapsed}
+            onToggleCollapse={handleToggleCollapse}
+            panelWidth={panelWidthVw}
+            onWidthChange={handleWidthChange}
+          />
         </div>
-      </div>
-
-      <div className="mt-3">
-        <ChargePointControls
-          chargePointId={cp?.id ?? null}
-          cpStatus={cpStatus}
-          cpError={cpError}
-          tagID={TagID}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-3">
-        {connectorIds.map((connectorId) => (
-          <Connector key={connectorId} id={connectorId} cp={cp} idTag={TagID} />
-        ))}
-      </div>
-
-      <div className="mt-4">
-        <LogViewer logs={logs} onClear={handleClearLogs} maxHeight="500px" />
-      </div>
+      )}
     </div>
   );
 };

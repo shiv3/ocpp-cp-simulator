@@ -201,7 +201,13 @@ export class ChargePoint {
   boot(): void {
     this._messageHandler.sendBootNotification(this._bootNotification);
     this.status = OCPPStatus.Available;
-    this.updateAllConnectorsStatus(OCPPStatus.Available);
+    this._connectors.forEach((connector) => {
+      if (connector.autoResetToAvailable) {
+        this.updateConnectorStatus(connector.id, OCPPStatus.Available);
+        return;
+      }
+      this.updateConnectorStatus(connector.id, connector.status);
+    });
     this.error = "";
   }
 

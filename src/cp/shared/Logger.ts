@@ -16,6 +16,7 @@ export enum LogType {
   DIAGNOSTICS = "Diagnostics",
   SCENARIO = "Scenario",
   GENERAL = "General",
+  SYSTEM = "System",
 }
 
 export interface LogEntry {

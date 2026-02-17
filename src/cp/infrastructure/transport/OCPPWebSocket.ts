@@ -1,5 +1,9 @@
 import { Logger, LogType } from "../../shared/Logger";
-import { OCPPAction, OCPPErrorCode, OCPPMessageType } from "../../domain/types/OcppTypes";
+import {
+  OCPPAction,
+  OCPPErrorCode,
+  OCPPMessageType,
+} from "../../domain/types/OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
@@ -93,7 +97,6 @@ export class OCPPWebSocket {
       url.username = this._basicAuth.username;
       url.password = this._basicAuth.password;
     }
-    console.log("url", url);
     this._ws = new WebSocket(`${url.toString()}${this._chargePointId}`, [
       "ocpp1.6",
       "ocpp1.5",
@@ -190,7 +193,7 @@ export class OCPPWebSocket {
     if (this._reconnectAttempts > 0) {
       this._logger.info(
         `Reconnection successful after ${this._reconnectAttempts} attempt(s)`,
-        LogType.WEBSOCKET
+        LogType.WEBSOCKET,
       );
     }
     this._reconnectAttempts = 0;
@@ -204,8 +207,14 @@ export class OCPPWebSocket {
       const messageArray = JSON.parse(ev.data.toString());
 
       // Validate message format: must be array with length 3 or 4
-      if (!Array.isArray(messageArray) || (messageArray.length !== 3 && messageArray.length !== 4)) {
-        this._logger.error("Invalid message format: " + messageArray, LogType.WEBSOCKET);
+      if (
+        !Array.isArray(messageArray) ||
+        (messageArray.length !== 3 && messageArray.length !== 4)
+      ) {
+        this._logger.error(
+          "Invalid message format: " + messageArray,
+          LogType.WEBSOCKET,
+        );
         return;
       }
 
@@ -237,7 +246,7 @@ export class OCPPWebSocket {
   private handleClose(ev: CloseEvent): void {
     this._logger.info(
       `WebSocket closed: code=${ev.code}, reason=${ev.reason || "none"}, wasClean=${ev.wasClean}`,
-      LogType.WEBSOCKET
+      LogType.WEBSOCKET,
     );
     this.stopPingInterval();
 
@@ -273,7 +282,8 @@ export class OCPPWebSocket {
 
     // Calculate delay with exponential backoff: baseDelay * 2^(attempts - 1)
     // Example: 1s, 2s, 4s, 8s, 16s, 30s (max)
-    const exponentialDelay = this._baseReconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
+    const exponentialDelay =
+      this._baseReconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
     const delay = Math.min(exponentialDelay, this._maxReconnectDelay);
 
     this._logger.info(

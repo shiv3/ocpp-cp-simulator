@@ -18,7 +18,10 @@ export class StartTransactionResultHandler
     if (idTagInfo.status === "Accepted") {
       if (connector) {
         connector.transactionId = transactionId;
-        connector.status = OCPPStatus.Charging;
+        context.chargePoint.updateConnectorStatus(
+          this.connectorId,
+          OCPPStatus.Charging,
+        );
       }
     } else {
       context.logger.error("Failed to start transaction", LogType.TRANSACTION);

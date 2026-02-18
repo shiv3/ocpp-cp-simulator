@@ -13,6 +13,7 @@ import {
   OCPPAction,
   OCPPErrorCode,
   OCPPMessageType,
+  OCPPStatus,
 } from "../../domain/types/OcppTypes";
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
@@ -278,12 +279,16 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
 
     // Build sampled values array
-    const sampledValue: Array<{ value: string; measurand?: string; unit?: string }> = [
+    const sampledValue: Array<{
+      value: string;
+      measurand?: string;
+      unit?: string;
+    }> = [
       {
         value: meterValue.toString(),
         measurand: "Energy.Active.Import.Register",
-        unit: "Wh"
-      }
+        unit: "Wh",
+      },
     ];
 
     // Add SoC if available
@@ -291,7 +296,7 @@ export class OCPPMessageHandler {
       sampledValue.push({
         value: soc.toString(),
         measurand: "SoC",
-        unit: "Percent"
+        unit: "Percent",
       });
     }
 
@@ -358,7 +363,10 @@ export class OCPPMessageHandler {
         this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:
-        this._logger.error(`Unknown message type: ${messageType}`, LogType.OCPP);
+        this._logger.error(
+          `Unknown message type: ${messageType}`,
+          LogType.OCPP,
+        );
     }
   }
 
@@ -399,7 +407,10 @@ export class OCPPMessageHandler {
   ): void {
     const request = this._requests.get(messageId);
     if (!request) {
-      this._logger.warn(`Received unexpected CallResult: ${messageId}`, LogType.OCPP);
+      this._logger.warn(
+        `Received unexpected CallResult: ${messageId}`,
+        LogType.OCPP,
+      );
       return;
     }
 
@@ -427,10 +438,16 @@ export class OCPPMessageHandler {
         };
         handler.handle(payload, context);
       } catch (error) {
-        this._logger.error(`Error handling ${action} result: ${error}`, LogType.OCPP);
+        this._logger.error(
+          `Error handling ${action} result: ${error}`,
+          LogType.OCPP,
+        );
       }
     } else {
-      this._logger.warn(`No handler for action result: ${action}`, LogType.OCPP);
+      this._logger.warn(
+        `No handler for action result: ${action}`,
+        LogType.OCPP,
+      );
     }
 
     this._requests.remove(messageId);

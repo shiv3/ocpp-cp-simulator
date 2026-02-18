@@ -412,7 +412,7 @@ export class ChargePoint {
   updateConnectorStatus(connectorId: number, status: OCPPStatus): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
-      this._logger.error(`Connector ${connectorId} not found`, LogType.System);
+      this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);
       return;
     }
 
@@ -423,10 +423,6 @@ export class ChargePoint {
       status,
       previousStatus,
     });
-    this._messageHandler.sendStatusNotification(
-      connectorId,
-      status,
-      previousStatus,
-    );
+    this._messageHandler.sendStatusNotification(connectorId, status);
   }
 }

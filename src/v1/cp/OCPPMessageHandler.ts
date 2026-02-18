@@ -595,7 +595,10 @@ export class OCPPMessageHandler {
     if (idTagInfo.status === "Accepted") {
       if (connector) {
         connector.transactionId = transactionId;
-        connector.status = OCPPStatus.Charging;
+        this._chargePoint.updateConnectorStatus(
+          connectorId,
+          OCPPStatus.Charging,
+        );
       }
     } else {
       this._logger.log("Failed to start transaction");

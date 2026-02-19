@@ -40,6 +40,10 @@ export interface ChargePointEvents {
   };
 
   // Transaction events
+  remoteStartReceived: {
+    connectorId: number;
+    tagId: string;
+  };
   transactionStarted: {
     connectorId: number;
     transactionId: number;

@@ -6,6 +6,7 @@ export interface CLIOptions {
   readonly daemon: boolean;
   readonly send: string | null;
   readonly events: boolean;
+  readonly stop: boolean;
   readonly basicAuth: {
     readonly username: string;
     readonly password: string;

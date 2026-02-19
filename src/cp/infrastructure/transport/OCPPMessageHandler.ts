@@ -457,11 +457,26 @@ export class OCPPMessageHandler {
     messageId: string,
     error: OcppMessageErrorPayload,
   ): void {
+    const request = this._requests.get(messageId);
     this._logger.error(
-      `Received error for message ${messageId}: ${JSON.stringify(error)}`,
+      `Received CALLERROR for message ${messageId} (action=${request?.action ?? "unknown"}): ${JSON.stringify(error)}`,
       LogType.OCPP,
     );
-    // Handle the error appropriately
+
+    // Recover connector state when StartTransaction fails
+    if (request?.action === OCPPAction.StartTransaction) {
+      const connectorId = request.connectorId ?? 1;
+      this._logger.info(
+        `Recovering connector ${connectorId} after StartTransaction CALLERROR`,
+        LogType.TRANSACTION,
+      );
+      this._chargePoint.cleanTransaction(connectorId);
+      this._chargePoint.updateConnectorStatus(
+        connectorId,
+        OCPPStatus.Available,
+      );
+    }
+
     this._requests.remove(messageId);
   }
 

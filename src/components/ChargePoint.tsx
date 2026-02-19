@@ -205,30 +205,37 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
     void chargePointService.authorize(chargePointId, tagID);
   };
 
+  const handleCPStatusChange = (status: OCPPStatus) => {
+    if (!chargePointId) return;
+    void chargePointService.sendStatusNotification(chargePointId, 0, status);
+  };
+
+  const isConnected = cpStatus !== OCPPStatus.Unavailable;
+
   return (
     <div className="panel p-3">
       {cpError !== "" && (
         <div className="btn-danger mb-2 text-sm p-2">Error: {cpError}</div>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 items-center">
         <button
           onClick={handleConnect}
           className="btn-primary"
-          disabled={cpStatus !== OCPPStatus.Unavailable}
+          disabled={isConnected}
         >
           Connect
         </button>
         <button
           onClick={handleDisconnect}
           className="btn-danger"
-          disabled={cpStatus === OCPPStatus.Unavailable}
+          disabled={!isConnected}
         >
           Disconnect
         </button>
         <button
           onClick={handleHeartbeat}
           className="btn-info"
-          disabled={cpStatus === OCPPStatus.Unavailable}
+          disabled={!isConnected}
         >
           Heartbeat
         </button>
@@ -245,6 +252,29 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
         >
           Authorize
         </button>
+
+        <div className="flex items-center gap-1 ml-2">
+          <label className="text-xs text-muted whitespace-nowrap">
+            CP Status:
+          </label>
+          <select
+            className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800 text-primary"
+            disabled={!isConnected}
+            value=""
+            onChange={(e) => {
+              if (e.target.value) {
+                handleCPStatusChange(e.target.value as OCPPStatus);
+              }
+            }}
+          >
+            <option value="" disabled>
+              Send...
+            </option>
+            <option value={OCPPStatus.Available}>Available</option>
+            <option value={OCPPStatus.Unavailable}>Unavailable</option>
+            <option value={OCPPStatus.Faulted}>Faulted</option>
+          </select>
+        </div>
       </div>
     </div>
   );

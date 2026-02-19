@@ -14,10 +14,19 @@ export class RemoteStartTransactionHandler
     context: HandlerContext,
   ): response.RemoteStartTransactionResponse {
     const { idTag, connectorId } = payload;
-    const connector = context.chargePoint.getConnector(connectorId || 1);
+    const resolvedConnectorId = connectorId || 1;
+    const connector = context.chargePoint.getConnector(resolvedConnectorId);
 
     if (connector && connector.availability === "Operative") {
-      context.chargePoint.startTransaction(idTag, connectorId || 1);
+      if (context.chargePoint.isScenarioHandled(resolvedConnectorId)) {
+        // Scenario is waiting for RemoteStart - let it handle the transaction flow
+        context.chargePoint.notifyRemoteStartReceived(
+          resolvedConnectorId,
+          idTag,
+        );
+      } else {
+        context.chargePoint.startTransaction(idTag, resolvedConnectorId);
+      }
       return { status: "Accepted" };
     } else {
       return { status: "Rejected" };

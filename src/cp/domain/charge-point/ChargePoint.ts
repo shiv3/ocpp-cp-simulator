@@ -34,6 +34,7 @@ export class ChargePoint {
   private _status: OCPPStatus = OCPPStatus.Unavailable;
   private _error = "";
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
+  private readonly _scenarioHandledConnectors: Set<number> = new Set();
 
   constructor(
     private readonly _id: string,
@@ -173,6 +174,27 @@ export class ChargePoint {
     return this._reservationManager;
   }
 
+  /**
+   * Register a connector as being handled by a scenario.
+   * When registered, RemoteStartTransaction handler will emit
+   * remoteStartReceived instead of calling startTransaction directly.
+   */
+  registerScenarioHandler(connectorId: number): void {
+    this._scenarioHandledConnectors.add(connectorId);
+  }
+
+  unregisterScenarioHandler(connectorId: number): void {
+    this._scenarioHandledConnectors.delete(connectorId);
+  }
+
+  isScenarioHandled(connectorId: number): boolean {
+    return this._scenarioHandledConnectors.has(connectorId);
+  }
+
+  notifyRemoteStartReceived(connectorId: number, tagId: string): void {
+    this._events.emit("remoteStartReceived", { connectorId, tagId });
+  }
+
   set loggingCallback(callback: (entry: LogEntry) => void) {
     this._logger._loggingCallback = callback;
   }
@@ -217,6 +239,7 @@ export class ChargePoint {
     this._heartbeat.cleanup();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
+    this._scenarioHandledConnectors.clear();
     this._webSocket.disconnect();
   }
 

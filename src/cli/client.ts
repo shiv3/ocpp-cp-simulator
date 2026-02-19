@@ -71,6 +71,63 @@ export async function sendCommand(
   });
 }
 
+export async function stopDaemon(cpId: string): Promise<void> {
+  const socketPath = getSocketPath(cpId);
+  const line = JSON.stringify({ command: "shutdown" });
+
+  return new Promise<void>((resolve, reject) => {
+    const conn = net.connect(socketPath);
+
+    conn.setTimeout(CLIENT_TIMEOUT_MS);
+
+    let response = "";
+
+    conn.on("connect", () => {
+      conn.write(`${line}\n`);
+    });
+
+    conn.on("data", (chunk) => {
+      response += chunk.toString();
+    });
+
+    conn.on("end", () => {
+      const trimmed = response.trim();
+      if (trimmed) {
+        try {
+          const parsed = JSON.parse(trimmed) as { ok: boolean };
+          if (parsed.ok) {
+            process.stdout.write(`Daemon for ${cpId} stopped.\n`);
+          } else {
+            process.stdout.write(`${trimmed}\n`);
+          }
+        } catch {
+          process.stdout.write(`${trimmed}\n`);
+        }
+      }
+      resolve();
+    });
+
+    conn.on("timeout", () => {
+      process.stderr.write("Error: Connection timed out\n");
+      conn.destroy();
+      reject(new Error("Connection timed out"));
+    });
+
+    conn.on("error", (err) => {
+      const errWithCode = err as NodeJS.ErrnoException;
+      if (errWithCode.code === "ENOENT") {
+        process.stderr.write(`No daemon running for ${cpId}\n`);
+        resolve();
+        return;
+      }
+      process.stderr.write(
+        `Error: ${formatSocketError(errWithCode, cpId, socketPath)}\n`,
+      );
+      reject(err);
+    });
+  });
+}
+
 export async function subscribeEvents(cpId: string): Promise<void> {
   const socketPath = getSocketPath(cpId);
 

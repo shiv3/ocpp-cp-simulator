@@ -3,7 +3,7 @@ import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
 import { startDaemon } from "./daemon";
-import { sendCommand, subscribeEvents } from "./client";
+import { sendCommand, subscribeEvents, stopDaemon } from "./client";
 
 function parseArgs(argv: string[]): CLIOptions {
   let wsUrl = "";
@@ -13,6 +13,7 @@ function parseArgs(argv: string[]): CLIOptions {
   let daemon = false;
   let send: string | null = null;
   let events = false;
+  let stop = false;
   let basicAuthUser = "";
   let basicAuthPass = "";
   let vendor = "CLI-Vendor";
@@ -50,6 +51,9 @@ function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--events":
         events = true;
+        break;
+      case "--stop":
+        stop = true;
         break;
       case "--basic-auth-user":
         basicAuthUser = next ?? "";
@@ -99,7 +103,7 @@ function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
-  const isClientMode = send !== null || events;
+  const isClientMode = send !== null || events || stop;
   if (!isClientMode && !wsUrl) {
     process.stderr.write("Error: --ws-url is required\n");
     printUsage();
@@ -124,6 +128,7 @@ function parseArgs(argv: string[]): CLIOptions {
     daemon,
     send,
     events,
+    stop,
     basicAuth,
     vendor,
     model,
@@ -148,6 +153,7 @@ Modes:
   --daemon                 Start as daemon (auto-connect, listen on Unix socket)
   --send <json>            Send command to running daemon
   --events                 Subscribe to events from running daemon
+  --stop                   Stop a running daemon gracefully
 
 Optional:
   --connectors <n>         Number of connectors (default: 1)
@@ -176,13 +182,18 @@ Examples:
   # Subscribe to events
   bun src/cli/main.ts --cp-id CP001 --events
 
-  # Shutdown daemon
-  bun src/cli/main.ts --cp-id CP001 --send '{"command":"shutdown"}'
+  # Stop daemon
+  bun src/cli/main.ts --cp-id CP001 --stop
 `);
 }
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv);
+
+  if (options.stop) {
+    await stopDaemon(options.cpId);
+    return;
+  }
 
   if (options.send !== null) {
     await sendCommand(options.cpId, options.send);

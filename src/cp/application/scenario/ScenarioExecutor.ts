@@ -35,6 +35,7 @@ export class ScenarioExecutor {
   private previousState: ScenarioExecutionState = "idle";
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private forceSkipResolve: (() => void) | null = null;
+  private remoteStartTagId: string | null = null;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -433,8 +434,11 @@ export class ScenarioExecutor {
   private async executeTransaction(data: TransactionNodeData): Promise<void> {
     if (data.action === "start") {
       if (this.callbacks.onStartTransaction) {
+        // Use the tagId captured from a preceding RemoteStartTrigger node if available
+        const tagId = this.remoteStartTagId || data.tagId || "123456";
+        this.remoteStartTagId = null;
         await this.callbacks.onStartTransaction(
-          data.tagId || "123456",
+          tagId,
           data.batteryCapacityKwh,
           data.initialSoc,
         );
@@ -575,6 +579,7 @@ export class ScenarioExecutor {
   /**
    * Execute remote start trigger node with progress updates
    * Waits for RemoteStartTransaction request from central system
+   * Captures the tagId for use by subsequent Transaction nodes
    */
   private async executeRemoteStartTrigger(
     nodeId: string,
@@ -584,11 +589,19 @@ export class ScenarioExecutor {
 
     const timeout = data.timeout || 0;
 
+    // Wrap the promise to capture the resolved tagId
+    let resolvedTagId: string | null = null;
+    const captureTagId = (promise: Promise<string>): Promise<void> =>
+      promise.then((tagId) => {
+        resolvedTagId = tagId;
+      });
+
     // If no timeout, just wait without progress
     if (!timeout || timeout === 0) {
       await this.waitWithOptionalForceSkip(
-        this.callbacks.onWaitForRemoteStart(timeout),
+        captureTagId(this.callbacks.onWaitForRemoteStart(timeout)),
       );
+      this.remoteStartTagId = resolvedTagId;
       return;
     }
 
@@ -621,8 +634,9 @@ export class ScenarioExecutor {
 
     try {
       await this.waitWithOptionalForceSkip(
-        this.callbacks.onWaitForRemoteStart(timeout),
+        captureTagId(this.callbacks.onWaitForRemoteStart(timeout)),
       );
+      this.remoteStartTagId = resolvedTagId;
     } finally {
       clearInterval(progressInterval);
 

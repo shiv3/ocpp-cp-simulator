@@ -82,34 +82,62 @@ const waitForStatus = (
   });
 };
 
+interface CancellableWait<T> {
+  promise: Promise<T>;
+  cancel: () => void;
+}
+
 const waitForRemoteStart = (
   chargePoint: ChargePoint,
   connector: Connector,
   timeout?: number,
-): Promise<string> => {
-  if (connector.transaction?.tagId) {
-    return Promise.resolve(connector.transaction.tagId);
-  }
+): CancellableWait<string> => {
+  // Register so the handler emits remoteStartReceived instead of starting a transaction
+  chargePoint.registerScenarioHandler(connector.id);
 
-  return new Promise<string>((resolve, reject) => {
+  let cleanupFn: (() => void) | null = null;
+
+  const promise = new Promise<string>((resolve, reject) => {
     let timeoutId: NodeJS.Timeout | null = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      chargePoint.events.off("remoteStartReceived", handler);
+      chargePoint.events.off("disconnected", disconnectHandler);
+      chargePoint.unregisterScenarioHandler(connector.id);
+    };
+
+    cleanupFn = cleanup;
 
     const handler = (data: { connectorId: number; tagId: string }) => {
       if (data.connectorId !== connector.id) return;
-      if (timeoutId) clearTimeout(timeoutId);
-      chargePoint.events.off("transactionStarted", handler);
+      cleanup();
       resolve(data.tagId);
     };
 
-    chargePoint.events.on("transactionStarted", handler);
+    const disconnectHandler = () => {
+      cleanup();
+      reject(new Error("Disconnected while waiting for remote start"));
+    };
+
+    chargePoint.events.on("remoteStartReceived", handler);
+    chargePoint.events.on("disconnected", disconnectHandler);
 
     if (timeout && timeout > 0) {
       timeoutId = setTimeout(() => {
-        chargePoint.events.off("transactionStarted", handler);
+        cleanup();
         reject(new Error(`Timeout waiting for remote start (${timeout}s)`));
       }, timeout * 1000);
     }
   });
+
+  return {
+    promise,
+    cancel: () => cleanupFn?.(),
+  };
 };
 
 const waitForReservation = (
@@ -259,8 +287,19 @@ export const createScenarioExecutorCallbacks = (
     onDelay: async (seconds) => {
       await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
     },
-    onWaitForRemoteStart: async (timeout) =>
-      waitForRemoteStart(chargePoint, connector, timeout),
+    onWaitForRemoteStart: async (timeout) => {
+      const { promise, cancel } = waitForRemoteStart(
+        chargePoint,
+        connector,
+        timeout,
+      );
+      try {
+        return await promise;
+      } finally {
+        // Ensure cleanup even if the promise is abandoned (e.g., force-skip, scenario stop)
+        cancel();
+      }
+    },
     onWaitForStatus: async (targetStatus, timeout) =>
       waitForStatus(connector, targetStatus, timeout),
     onWaitForMeterValue: async (targetValue, timeout) =>

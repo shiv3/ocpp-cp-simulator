@@ -410,6 +410,23 @@ export class ChargePoint {
   }
 
   updateConnectorStatus(connectorId: number, status: OCPPStatus): void {
+    // Connector 0 represents the charge point main controller (OCPP 1.6J spec)
+    if (connectorId === 0) {
+      const previousStatus = this._status;
+      this._status = status;
+      this._events.emit("statusChange", { status });
+      this._stateManager.transitionChargePointStatus(status, {
+        source: "connector-0-update",
+        timestamp: new Date(),
+      });
+      this._logger.info(
+        `Charge point status updated: ${previousStatus} -> ${status} (connector 0)`,
+        LogType.SYSTEM,
+      );
+      this._messageHandler.sendStatusNotification(0, status);
+      return;
+    }
+
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);

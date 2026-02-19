@@ -165,10 +165,13 @@ export class OCPPWebSocket {
   }
 
   public sendError(messageId: string, payload: OcppMessageErrorPayload): void {
+    // OCPP 1.6J CALLERROR: [4, messageId, errorCode, errorDescription, errorDetails]
     const message = JSON.stringify([
       OCPPMessageType.CALLERROR,
       messageId,
-      payload,
+      payload.errorCode,
+      payload.errorDescription,
+      payload.errorDetails ?? {},
     ]);
     this.send(message);
   }
@@ -206,10 +209,11 @@ export class OCPPWebSocket {
     try {
       const messageArray = JSON.parse(ev.data.toString());
 
-      // Validate message format: must be array with length 3 or 4
+      // Validate message format: must be array with length 3 (CALLRESULT), 4 (CALL), or 5 (CALLERROR)
       if (
         !Array.isArray(messageArray) ||
-        (messageArray.length !== 3 && messageArray.length !== 4)
+        messageArray.length < 3 ||
+        messageArray.length > 5
       ) {
         this._logger.error(
           "Invalid message format: " + messageArray,
@@ -220,6 +224,7 @@ export class OCPPWebSocket {
 
       if (this._messageHandler) {
         if (messageArray.length === 3) {
+          // CALLRESULT: [messageType, messageId, payload]
           const [messageType, messageId, payload] = messageArray;
           this._messageHandler(
             messageType,
@@ -228,8 +233,25 @@ export class OCPPWebSocket {
             payload,
           );
         } else if (messageArray.length === 4) {
+          // CALL: [messageType, messageId, action, payload]
           const [messageType, messageId, action, payload] = messageArray;
           this._messageHandler(messageType, messageId, action, payload);
+        } else if (messageArray.length === 5) {
+          // CALLERROR: [messageType, messageId, errorCode, errorDescription, errorDetails]
+          // Action is set to CallResult (sentinel) since CALLERROR has no action field.
+          // handleIncomingMessage dispatches on messageType (4=CALLERROR), not the action param.
+          const [
+            messageType,
+            messageId,
+            errorCode,
+            errorDescription,
+            errorDetails,
+          ] = messageArray;
+          this._messageHandler(messageType, messageId, OCPPAction.CallResult, {
+            errorCode,
+            errorDescription,
+            errorDetails: errorDetails ?? {},
+          });
         }
       } else {
         this._logger.warn("No message handler set", LogType.WEBSOCKET);

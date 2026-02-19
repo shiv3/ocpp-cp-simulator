@@ -12,6 +12,8 @@ export class BootNotificationResultHandler
   ): void {
     if (payload.status === "Accepted") {
       context.logger.info("Boot notification successful", LogType.OCPP);
+      // Send connector 0 (charge point level) status first
+      context.chargePoint.updateConnectorStatus(0, OCPPStatus.Available);
       context.chargePoint.connectors.forEach((connector) => {
         if (connector.autoResetToAvailable) {
           context.chargePoint.updateConnectorStatus(

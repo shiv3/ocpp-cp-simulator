@@ -31,6 +31,7 @@ import {
   GitBranch,
   Settings,
   Zap,
+  Gauge,
 } from "lucide-react";
 
 interface ConnectorSidePanelProps {
@@ -132,6 +133,7 @@ const FullPanelContent: React.FC<{
     autoMeterValueConfig,
     autoResetToAvailable,
     evSettings,
+    chargingProfile,
   } = useConnectorView(chargePoint, connectorId);
 
   const { scenarios } = useScenarios(chargePoint.id, connectorId);
@@ -495,6 +497,109 @@ const FullPanelContent: React.FC<{
                 isCharging={isCharging}
                 onChange={handleEVSettingsChange}
               />
+
+              {/* Charging Profile */}
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h3 className="text-sm font-semibold mb-3 text-gray-900 dark:text-white flex items-center gap-2">
+                  <Gauge className="w-4 h-4 text-indigo-500" />
+                  Charging Profile
+                </h3>
+                {chargingProfile ? (
+                  <div>
+                    <div
+                      className={`rounded-lg p-3 mb-3 ${
+                        chargingProfile.chargingSchedulePeriods.every(
+                          (p) => p.limit === 0,
+                        )
+                          ? "bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
+                          : "bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span
+                          className={`text-xs font-bold ${
+                            chargingProfile.chargingSchedulePeriods.every(
+                              (p) => p.limit === 0,
+                            )
+                              ? "text-orange-700 dark:text-orange-300"
+                              : "text-indigo-700 dark:text-indigo-300"
+                          }`}
+                        >
+                          {chargingProfile.chargingSchedulePeriods.every(
+                            (p) => p.limit === 0,
+                          )
+                            ? "⏸ Paused (zero limit)"
+                            : "⚡ Active"}
+                        </span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                          #{chargingProfile.chargingProfileId}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Purpose
+                        </span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
+                          {chargingProfile.chargingProfilePurpose}
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Kind
+                        </span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {chargingProfile.chargingProfileKind}
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Stack Level
+                        </span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {chargingProfile.stackLevel}
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Unit
+                        </span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {chargingProfile.chargingRateUnit}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                      Schedule Periods
+                    </div>
+                    <div className="space-y-1">
+                      {chargingProfile.chargingSchedulePeriods.map(
+                        (period, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between bg-white dark:bg-gray-700 rounded px-2.5 py-1.5 text-xs"
+                          >
+                            <span className="text-gray-500 dark:text-gray-400">
+                              @{period.startPeriod}s
+                            </span>
+                            <span
+                              className={`font-bold font-mono ${
+                                period.limit === 0
+                                  ? "text-orange-600 dark:text-orange-400"
+                                  : "text-indigo-600 dark:text-indigo-400"
+                              }`}
+                            >
+                              {period.limit} {chargingProfile.chargingRateUnit}
+                            </span>
+                            {period.numberPhases != null && (
+                              <span className="text-gray-400 dark:text-gray-500">
+                                {period.numberPhases}φ
+                              </span>
+                            )}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
+                    No active charging profile
+                  </div>
+                )}
+              </div>
 
               {/* Controls */}
               <div className="grid grid-cols-2 gap-3">

@@ -1,5 +1,6 @@
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { ScenarioMode } from "../../cp/application/scenario/ScenarioTypes";
 import type {
@@ -59,6 +60,11 @@ export type ChargePointEvent =
       type: "connector-ev-settings";
       connectorId: number;
       settings: EVSettings;
+    }
+  | {
+      type: "connector-charging-profile";
+      connectorId: number;
+      profile: ActiveChargingProfile | null;
     }
   | { type: "log"; entry: LogEntry }
   | { type: "connected" }

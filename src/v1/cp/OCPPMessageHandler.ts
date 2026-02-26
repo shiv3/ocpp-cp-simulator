@@ -314,6 +314,21 @@ export class OCPPMessageHandler {
           payload as request.UnlockConnectorRequest,
         );
         break;
+      case OCPPAction.SetChargingProfile:
+        response = this.handleSetChargingProfile(
+          payload as request.SetChargingProfileRequest,
+        );
+        break;
+      case OCPPAction.ClearChargingProfile:
+        response = this.handleClearChargingProfile(
+          payload as request.ClearChargingProfileRequest,
+        );
+        break;
+      case OCPPAction.GetCompositeSchedule:
+        response = this.handleGetCompositeSchedule(
+          payload as request.GetCompositeScheduleRequest,
+        );
+        break;
       default:
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
@@ -563,6 +578,76 @@ export class OCPPMessageHandler {
       `Unlock connector request received: ${JSON.stringify(payload)}`,
     );
     return { status: "NotSupported" };
+  }
+
+  private handleSetChargingProfile(
+    payload: request.SetChargingProfileRequest,
+  ): response.SetChargingProfileResponse {
+    const { connectorId, csChargingProfiles } = payload;
+    this._logger.log(
+      `SetChargingProfile received for connector ${connectorId}: profileId=${csChargingProfiles.chargingProfileId}, purpose=${csChargingProfiles.chargingProfilePurpose}`,
+    );
+
+    const periods = csChargingProfiles.chargingSchedule.chargingSchedulePeriod;
+    const isPausing = periods.length > 0 && periods.every((p) => p.limit === 0);
+
+    const applyStatus = (cid: number) => {
+      const connector = this._chargePoint.getConnector(cid);
+      if (!connector) return;
+      if (isPausing && connector.status === OCPPStatus.Charging) {
+        this._chargePoint.updateConnectorStatus(cid, OCPPStatus.SuspendedEVSE);
+      } else if (
+        !isPausing &&
+        connector.status === OCPPStatus.SuspendedEVSE &&
+        connector.transaction != null
+      ) {
+        this._chargePoint.updateConnectorStatus(cid, OCPPStatus.Charging);
+      }
+    };
+
+    if (connectorId === 0) {
+      this._chargePoint.connectors.forEach((_, cid) => applyStatus(cid));
+    } else {
+      applyStatus(connectorId);
+    }
+
+    return { status: "Accepted" };
+  }
+
+  private handleClearChargingProfile(
+    payload: request.ClearChargingProfileRequest,
+  ): response.ClearChargingProfileResponse {
+    this._logger.log(
+      `ClearChargingProfile received: id=${payload.id}, connectorId=${payload.connectorId}`,
+    );
+
+    const restoreCharging = (cid: number) => {
+      const connector = this._chargePoint.getConnector(cid);
+      if (
+        connector &&
+        connector.status === OCPPStatus.SuspendedEVSE &&
+        connector.transaction != null
+      ) {
+        this._chargePoint.updateConnectorStatus(cid, OCPPStatus.Charging);
+      }
+    };
+
+    if (payload.connectorId != null) {
+      restoreCharging(payload.connectorId);
+    } else {
+      this._chargePoint.connectors.forEach((_, cid) => restoreCharging(cid));
+    }
+
+    return { status: "Accepted" };
+  }
+
+  private handleGetCompositeSchedule(
+    payload: request.GetCompositeScheduleRequest,
+  ): response.GetCompositeScheduleResponse {
+    this._logger.log(
+      `GetCompositeSchedule received: connectorId=${payload.connectorId}, duration=${payload.duration}`,
+    );
+    return { status: "Rejected" };
   }
 
   private handleBootNotificationResponse(

@@ -57,9 +57,9 @@ export enum OCPPAction {
   CancelReservation = "CancelReservation", // TODO
   ReserveNow = "ReserveNow", // TODO
   // SmartCharging actions
-  ClearChargingProfile = "ClearChargingProfile", // TODO
-  GetCompositeSchedule = "GetCompositeSchedule", // TODO
-  SetChargingProfile = "SetChargingProfile", // TODO
+  ClearChargingProfile = "ClearChargingProfile",
+  GetCompositeSchedule = "GetCompositeSchedule",
+  SetChargingProfile = "SetChargingProfile",
   // RemoteTrigger actions
   TriggerMessage = "TriggerMessage",
   // Fake actions

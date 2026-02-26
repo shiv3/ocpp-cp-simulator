@@ -25,7 +25,8 @@ export type OcppMessageResponsePayload =
   | response.RemoteStopTransactionResponse
   | response.ResetResponse
   | response.TriggerMessageResponse
-  | response.UnlockConnectorResponse;
+  | response.UnlockConnectorResponse
+  | response.ClearChargingProfileResponse;
 
 export type OcppMessageErrorPayload = {
   readonly errorCode: OCPPErrorCode;

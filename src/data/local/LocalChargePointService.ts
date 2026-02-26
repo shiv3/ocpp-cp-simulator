@@ -387,6 +387,16 @@ export class LocalChargePointService implements ChargePointService {
         }),
       );
 
+      unsubscribes.push(
+        connector.events.on("chargingProfileChange", ({ profile }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-charging-profile",
+            connectorId: connector.id,
+            profile,
+          });
+        }),
+      );
+
       connector.setOnMeterValueSend((id) => {
         chargePoint.sendMeterValue(id);
       });

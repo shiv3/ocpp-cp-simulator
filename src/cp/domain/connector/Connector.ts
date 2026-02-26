@@ -17,6 +17,26 @@ import {
 import { Transaction } from "./Transaction";
 import { type EVSettings, defaultEVSettings } from "./EVSettings";
 
+export interface ChargingSchedulePeriod {
+  startPeriod: number;
+  limit: number;
+  numberPhases?: number;
+}
+
+/**
+ * Represents the most recently received charging profile for a connector.
+ * Populated by SetChargingProfile, cleared by ClearChargingProfile.
+ */
+export interface ActiveChargingProfile {
+  chargingProfileId: number;
+  connectorId: number;
+  stackLevel: number;
+  chargingProfilePurpose: string;
+  chargingProfileKind: string;
+  chargingRateUnit: string;
+  chargingSchedulePeriods: ChargingSchedulePeriod[];
+}
+
 export interface ConnectorEvents {
   statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
   transactionIdChange: { transactionId: number | null };
@@ -27,6 +47,7 @@ export interface ConnectorEvents {
   modeChange: { mode: ScenarioMode };
   autoResetToAvailableChange: { enabled: boolean };
   evSettingsChange: { settings: EVSettings };
+  chargingProfileChange: { profile: ActiveChargingProfile | null };
 }
 
 interface IncrementStrategyConfig {
@@ -56,6 +77,7 @@ export class Connector {
   private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
   private _evSettings: EVSettings = { ...defaultEVSettings };
+  private _chargingProfile: ActiveChargingProfile | null = null;
 
   constructor(
     private readonly connectorId: number,
@@ -168,6 +190,15 @@ export class Connector {
   set evSettings(settings: EVSettings) {
     this._evSettings = { ...settings };
     this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
+  }
+
+  get chargingProfile(): ActiveChargingProfile | null {
+    return this._chargingProfile;
+  }
+
+  set chargingProfile(profile: ActiveChargingProfile | null) {
+    this._chargingProfile = profile;
+    this.eventsEmitter.emit("chargingProfileChange", { profile });
   }
 
   get autoMeterValueConfig(): AutoMeterValueConfig {

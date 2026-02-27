@@ -7,7 +7,11 @@ import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
 } from "../interfaces/ChargePointService";
-import { loadConnectorAutoMeterConfig } from "../../utils/connectorStorage";
+import {
+  loadConnectorAutoMeterConfig,
+  loadConnectorChargingProfiles,
+  saveConnectorChargingProfiles,
+} from "../../utils/connectorStorage";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 
@@ -258,11 +262,24 @@ export class LocalChargePointService implements ChargePointService {
         definition.id,
         connectorId,
       );
-      if (!savedConfig) continue;
+      if (savedConfig) {
+        const connector = chargePoint.getConnector(connectorId);
+        if (connector) {
+          connector.autoMeterValueConfig = savedConfig;
+        }
+      }
 
-      const connector = chargePoint.getConnector(connectorId);
-      if (!connector) continue;
-      connector.autoMeterValueConfig = savedConfig;
+      // Load charging profiles
+      const savedProfiles = loadConnectorChargingProfiles(
+        definition.id,
+        connectorId,
+      );
+      if (savedProfiles.length > 0) {
+        const connector = chargePoint.getConnector(connectorId);
+        if (connector) {
+          connector.setChargingProfiles(savedProfiles);
+        }
+      }
     }
 
     return chargePoint;
@@ -383,6 +400,28 @@ export class LocalChargePointService implements ChargePointService {
             type: "connector-ev-settings",
             connectorId: connector.id,
             settings,
+          });
+        }),
+      );
+
+      unsubscribes.push(
+        connector.events.on("chargingProfileChange", ({ profile }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-charging-profile",
+            connectorId: connector.id,
+            profile,
+          });
+        }),
+      );
+
+      unsubscribes.push(
+        connector.events.on("chargingProfilesChange", ({ profiles }) => {
+          // Persist to localStorage whenever profiles change
+          saveConnectorChargingProfiles(chargePoint.id, connector.id, profiles);
+          this.emit(chargePoint.id, {
+            type: "connector-charging-profiles",
+            connectorId: connector.id,
+            profiles,
           });
         }),
       );

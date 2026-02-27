@@ -8,6 +8,7 @@ export class Connector {
   private _availability: OCPPAvailability;
   private _meterValue: number;
   private _transaction: Transaction | null;
+  private _chargingProfiles: ocpp.ActiveChargingProfile[];
 
   private _transactionIDChangeCallbacks: ((
     transactionId: number | null,
@@ -21,6 +22,7 @@ export class Connector {
     this._availability = "Operative";
     this._meterValue = 0;
     this._transaction = null;
+    this._chargingProfiles = [];
 
     this._transactionIDChangeCallbacks = [];
     this._statusChangeCallbacks = [];
@@ -73,6 +75,73 @@ export class Connector {
 
   set transaction(transaction: Transaction | null) {
     this._transaction = transaction;
+  }
+
+  get chargingProfiles(): ocpp.ActiveChargingProfile[] {
+    return [...this._chargingProfiles].sort(
+      (a, b) => b.stackLevel - a.stackLevel,
+    );
+  }
+
+  getActiveChargingProfile(): ocpp.ActiveChargingProfile | null {
+    const now = new Date();
+    const validProfiles = this._chargingProfiles.filter((profile) => {
+      if (profile.validFrom && new Date(profile.validFrom) > now) return false;
+      if (profile.validTo && new Date(profile.validTo) < now) return false;
+      return true;
+    });
+    if (validProfiles.length === 0) return null;
+    return validProfiles.reduce((highest, current) =>
+      current.stackLevel > highest.stackLevel ? current : highest,
+    );
+  }
+
+  addChargingProfile(profile: ocpp.ActiveChargingProfile): void {
+    this._chargingProfiles = this._chargingProfiles.filter(
+      (p) => p.chargingProfileId !== profile.chargingProfileId,
+    );
+    this._chargingProfiles.push(profile);
+  }
+
+  removeChargingProfiles(criteria: {
+    profileId?: number;
+    connectorId?: number;
+    purpose?: ocpp.ChargingProfilePurposeType;
+    stackLevel?: number;
+  }): number {
+    const before = this._chargingProfiles.length;
+    this._chargingProfiles = this._chargingProfiles.filter((profile) => {
+      if (
+        criteria.profileId != null &&
+        profile.chargingProfileId !== criteria.profileId
+      ) {
+        return true;
+      }
+      if (
+        criteria.connectorId != null &&
+        profile.connectorId !== criteria.connectorId
+      ) {
+        return true;
+      }
+      if (
+        criteria.purpose != null &&
+        profile.chargingProfilePurpose !== criteria.purpose
+      ) {
+        return true;
+      }
+      if (
+        criteria.stackLevel != null &&
+        profile.stackLevel !== criteria.stackLevel
+      ) {
+        return true;
+      }
+      return false;
+    });
+    return before - this._chargingProfiles.length;
+  }
+
+  clearAllChargingProfiles(): void {
+    this._chargingProfiles = [];
   }
 
   set transactionId(transactionId: number | null) {

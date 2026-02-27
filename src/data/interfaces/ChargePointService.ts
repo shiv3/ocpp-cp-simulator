@@ -66,6 +66,11 @@ export type ChargePointEvent =
       connectorId: number;
       profile: ActiveChargingProfile | null;
     }
+  | {
+      type: "connector-charging-profiles";
+      connectorId: number;
+      profiles: ActiveChargingProfile[];
+    }
   | { type: "log"; entry: LogEntry }
   | { type: "connected" }
   | { type: "disconnected"; code: number; reason: string };

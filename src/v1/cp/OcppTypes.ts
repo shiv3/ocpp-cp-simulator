@@ -75,6 +75,51 @@ export enum OcppFeatureProfile {
   RemoteTrigger = "RemoteTrigger",
 }
 
+// ============================================
+// Smart Charging Profile Types (OCPP 1.6)
+// ============================================
+
+export enum ChargingProfilePurposeType {
+  ChargePointMaxProfile = "ChargePointMaxProfile",
+  TxDefaultProfile = "TxDefaultProfile",
+  TxProfile = "TxProfile",
+}
+
+export enum ChargingProfileKindType {
+  Absolute = "Absolute",
+  Recurring = "Recurring",
+  Relative = "Relative",
+}
+
+export enum ChargingRateUnitType {
+  W = "W",
+  A = "A",
+}
+
+export enum RecurrencyKindType {
+  Daily = "Daily",
+  Weekly = "Weekly",
+}
+
+export interface ChargingSchedulePeriod {
+  startPeriod: number;
+  limit: number;
+  numberPhases?: number;
+}
+
+export interface ActiveChargingProfile {
+  chargingProfileId: number;
+  connectorId: number;
+  stackLevel: number;
+  chargingProfilePurpose: ChargingProfilePurposeType;
+  chargingProfileKind: ChargingProfileKindType;
+  chargingRateUnit: ChargingRateUnitType;
+  recurrencyKind?: RecurrencyKindType;
+  validFrom?: string;
+  validTo?: string;
+  chargingSchedulePeriods: ChargingSchedulePeriod[];
+}
+
 export type OcppConfigurationKey = {
   key: string;
   readonly: boolean;

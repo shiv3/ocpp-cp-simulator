@@ -1,3 +1,17 @@
+/**
+ * OCPP 1.6 Message Handler (Legacy V1 Implementation)
+ *
+ * NOTE: Smart Charging implementation uses simplified approach
+ * See main implementation in src/cp/infrastructure/transport/handlers/call/SmartChargingHandlers.ts
+ * for detailed documentation on non-compliant behaviors.
+ *
+ * Key simplifications:
+ * - ConnectorId=0 profiles duplicated to all connectors
+ * - No composite schedule merging with min() logic
+ * - No ChargePointMaxProfile total station enforcement
+ * - Adequate for simulator/testing purposes
+ */
+
 import {
   OcppMessageErrorPayload,
   OcppMessagePayload,
@@ -6,11 +20,16 @@ import {
   OCPPWebSocket,
 } from "./OCPPWebSocket";
 import { ChargePoint } from "./ChargePoint";
+import type { Connector } from "./Connector";
 import { Transaction } from "./Transaction";
 import { Logger } from "./Logger";
 import {
   BootNotification,
   OCPPAction,
+  ChargingProfilePurposeType,
+  ChargingProfileKindType,
+  ChargingRateUnitType,
+  RecurrencyKindType,
   OcppConfigurationKey,
   OCPPErrorCode,
   OCPPMessageType,
@@ -29,6 +48,26 @@ import {
 
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+
+function applyProfileStatus(
+  chargePoint: ChargePoint,
+  connector: Connector,
+): void {
+  const activeProfile = connector.getActiveChargingProfile();
+  const isPaused = activeProfile
+    ? activeProfile.chargingSchedulePeriods.every((p) => p.limit === 0)
+    : false;
+
+  if (isPaused && connector.status === OCPPStatus.Charging) {
+    chargePoint.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+  } else if (
+    !isPaused &&
+    connector.status === OCPPStatus.SuspendedEVSE &&
+    connector.transaction != null
+  ) {
+    chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);
+  }
+}
 
 type CoreOcppMessagePayloadCall =
   | request.ChangeAvailabilityRequest
@@ -589,26 +628,61 @@ export class OCPPMessageHandler {
     );
 
     const periods = csChargingProfiles.chargingSchedule.chargingSchedulePeriod;
-    const isPausing = periods.length > 0 && periods.every((p) => p.limit === 0);
+    if (!periods || periods.length === 0) {
+      this._logger.log("SetChargingProfile rejected: no schedule periods");
+      return { status: "Rejected" };
+    }
 
-    const applyStatus = (cid: number) => {
-      const connector = this._chargePoint.getConnector(cid);
-      if (!connector) return;
-      if (isPausing && connector.status === OCPPStatus.Charging) {
-        this._chargePoint.updateConnectorStatus(cid, OCPPStatus.SuspendedEVSE);
-      } else if (
-        !isPausing &&
-        connector.status === OCPPStatus.SuspendedEVSE &&
-        connector.transaction != null
-      ) {
-        this._chargePoint.updateConnectorStatus(cid, OCPPStatus.Charging);
-      }
+    if (
+      csChargingProfiles.chargingProfilePurpose ===
+        ChargingProfilePurposeType.TxProfile &&
+      connectorId === 0
+    ) {
+      this._logger.log(
+        "SetChargingProfile rejected: TxProfile on connectorId 0",
+      );
+      return { status: "Rejected" };
+    }
+
+    if (
+      csChargingProfiles.chargingProfileKind ===
+        ChargingProfileKindType.Recurring &&
+      !csChargingProfiles.recurrencyKind
+    ) {
+      this._logger.log(
+        "SetChargingProfile rejected: Recurring profile missing recurrencyKind",
+      );
+      return { status: "Rejected" };
+    }
+
+    const profile = {
+      chargingProfileId: csChargingProfiles.chargingProfileId,
+      connectorId,
+      stackLevel: csChargingProfiles.stackLevel,
+      chargingProfilePurpose:
+        csChargingProfiles.chargingProfilePurpose as ChargingProfilePurposeType,
+      chargingProfileKind:
+        csChargingProfiles.chargingProfileKind as ChargingProfileKindType,
+      chargingRateUnit: csChargingProfiles.chargingSchedule
+        .chargingRateUnit as ChargingRateUnitType,
+      recurrencyKind: csChargingProfiles.recurrencyKind as
+        | RecurrencyKindType
+        | undefined,
+      validFrom: csChargingProfiles.validFrom,
+      validTo: csChargingProfiles.validTo,
+      chargingSchedulePeriods: periods,
     };
 
     if (connectorId === 0) {
-      this._chargePoint.connectors.forEach((_, cid) => applyStatus(cid));
+      this._chargePoint.connectors.forEach((connector) => {
+        connector.addChargingProfile({ ...profile, connectorId: connector.id });
+        applyProfileStatus(this._chargePoint, connector);
+      });
     } else {
-      applyStatus(connectorId);
+      const connector = this._chargePoint.getConnector(connectorId);
+      if (!connector) return { status: "Rejected" };
+      connector.addChargingProfile(profile);
+      applyProfileStatus(this._chargePoint, connector);
     }
 
     return { status: "Accepted" };
@@ -621,21 +695,25 @@ export class OCPPMessageHandler {
       `ClearChargingProfile received: id=${payload.id}, connectorId=${payload.connectorId}`,
     );
 
-    const restoreCharging = (cid: number) => {
-      const connector = this._chargePoint.getConnector(cid);
-      if (
-        connector &&
-        connector.status === OCPPStatus.SuspendedEVSE &&
-        connector.transaction != null
-      ) {
-        this._chargePoint.updateConnectorStatus(cid, OCPPStatus.Charging);
-      }
-    };
+    const criteria: Parameters<Connector["removeChargingProfiles"]>[0] = {};
+    if (payload.id != null) criteria.profileId = payload.id;
+    if (payload.chargingProfilePurpose != null) {
+      criteria.purpose =
+        payload.chargingProfilePurpose as ChargingProfilePurposeType;
+    }
+    if (payload.stackLevel != null) criteria.stackLevel = payload.stackLevel;
 
     if (payload.connectorId != null) {
-      restoreCharging(payload.connectorId);
+      const connector = this._chargePoint.getConnector(payload.connectorId);
+      if (connector) {
+        connector.removeChargingProfiles(criteria);
+        applyProfileStatus(this._chargePoint, connector);
+      }
     } else {
-      this._chargePoint.connectors.forEach((_, cid) => restoreCharging(cid));
+      this._chargePoint.connectors.forEach((connector) => {
+        connector.removeChargingProfiles(criteria);
+        applyProfileStatus(this._chargePoint, connector);
+      });
     }
 
     return { status: "Accepted" };
@@ -647,7 +725,37 @@ export class OCPPMessageHandler {
     this._logger.log(
       `GetCompositeSchedule received: connectorId=${payload.connectorId}, duration=${payload.duration}`,
     );
-    return { status: "Rejected" };
+
+    const connector = this._chargePoint.getConnector(payload.connectorId);
+    if (!connector) return { status: "Rejected" };
+
+    const activeProfile = connector.getActiveChargingProfile();
+    if (!activeProfile) return { status: "Rejected" };
+
+    if (
+      payload.chargingRateUnit &&
+      payload.chargingRateUnit !== activeProfile.chargingRateUnit
+    ) {
+      return { status: "Rejected" };
+    }
+
+    return {
+      status: "Accepted",
+      connectorId: payload.connectorId,
+      scheduleStart: activeProfile.validFrom || new Date().toISOString(),
+      chargingSchedule: {
+        duration: payload.duration,
+        startSchedule: activeProfile.validFrom || new Date().toISOString(),
+        chargingRateUnit: activeProfile.chargingRateUnit,
+        chargingSchedulePeriod: activeProfile.chargingSchedulePeriods.map(
+          (period) => ({
+            startPeriod: period.startPeriod,
+            limit: period.limit,
+            numberPhases: period.numberPhases,
+          }),
+        ),
+      },
+    };
   }
 
   private handleBootNotificationResponse(

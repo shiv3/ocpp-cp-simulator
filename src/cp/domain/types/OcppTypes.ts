@@ -136,3 +136,41 @@ export type ReserveNow = ReserveNowRequest;
 export type ReserveNowResponseType = ReserveNowResponse;
 export type CancelReservation = CancelReservationRequest;
 export type CancelReservationResponseType = CancelReservationResponse;
+
+// ============================================
+// Smart Charging Profile Types (OCPP 1.6)
+// ============================================
+
+/**
+ * Charging profile purpose types
+ */
+export enum ChargingProfilePurposeType {
+  ChargePointMaxProfile = "ChargePointMaxProfile",
+  TxDefaultProfile = "TxDefaultProfile",
+  TxProfile = "TxProfile",
+}
+
+/**
+ * Charging profile kind types
+ */
+export enum ChargingProfileKindType {
+  Absolute = "Absolute",
+  Recurring = "Recurring",
+  Relative = "Relative",
+}
+
+/**
+ * Charging rate unit types
+ */
+export enum ChargingRateUnitType {
+  W = "W", // Watts
+  A = "A", // Amperes
+}
+
+/**
+ * Recurrency kind types (for Recurring profiles)
+ */
+export enum RecurrencyKindType {
+  Daily = "Daily",
+  Weekly = "Weekly",
+}

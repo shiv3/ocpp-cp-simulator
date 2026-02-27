@@ -24,6 +24,7 @@ interface ConnectorViewState {
   autoResetToAvailable: boolean;
   evSettings: EVSettings;
   chargingProfile: ActiveChargingProfile | null;
+  chargingProfiles: ActiveChargingProfile[];
 }
 
 const DEFAULT_STATUS = OCPPStatus.Unavailable;
@@ -69,6 +70,9 @@ export function useConnectorView(
     useState<ActiveChargingProfile | null>(
       initialConnector?.chargingProfile ?? null,
     );
+  const [chargingProfiles, setChargingProfiles] = useState<
+    ActiveChargingProfile[]
+  >(initialConnector?.chargingProfiles ?? []);
 
   useEffect(() => {
     if (!chargePointId) {
@@ -82,6 +86,7 @@ export function useConnectorView(
       setAutoResetToAvailable(true);
       setEvSettings({ ...defaultEVSettings });
       setChargingProfile(null);
+      setChargingProfiles([]);
       setLogs([]);
       return;
     }
@@ -98,6 +103,7 @@ export function useConnectorView(
       setAutoResetToAvailable(connector.autoResetToAvailable);
       setEvSettings(connector.evSettings);
       setChargingProfile(connector.chargingProfile ?? null);
+      setChargingProfiles(connector.chargingProfiles ?? []);
     }
 
     const unsubscribe = chargePointService.subscribe(
@@ -154,6 +160,11 @@ export function useConnectorView(
               setChargingProfile(event.profile);
             }
             break;
+          case "connector-charging-profiles":
+            if (event.connectorId === connectorId) {
+              setChargingProfiles(event.profiles);
+            }
+            break;
           case "log":
             setLogs((prev) => [
               ...prev,
@@ -187,5 +198,6 @@ export function useConnectorView(
     autoResetToAvailable,
     evSettings,
     chargingProfile,
+    chargingProfiles,
   };
 }

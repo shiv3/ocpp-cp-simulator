@@ -134,6 +134,7 @@ const FullPanelContent: React.FC<{
     autoResetToAvailable,
     evSettings,
     chargingProfile,
+    chargingProfiles,
   } = useConnectorView(chargePoint, connectorId);
 
   const { scenarios } = useScenarios(chargePoint.id, connectorId);
@@ -143,6 +144,13 @@ const FullPanelContent: React.FC<{
   const [tagIdInput, setTagIdInput] = useState<string>(idTag);
   const [duration, setDuration] = useState<string>("00:00:00");
   const [transactionStartTime, setTransactionStartTime] = useState<string>("");
+  const profilesToDisplay =
+    chargingProfiles.length > 0
+      ? chargingProfiles
+      : chargingProfile
+        ? [chargingProfile]
+        : [];
+  const activeProfileId = chargingProfile?.chargingProfileId ?? null;
 
   // Scenario state
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
@@ -504,99 +512,103 @@ const FullPanelContent: React.FC<{
                   <Gauge className="w-4 h-4 text-indigo-500" />
                   Charging Profile
                 </h3>
-                {chargingProfile ? (
-                  <div>
-                    <div
-                      className={`rounded-lg p-3 mb-3 ${
-                        chargingProfile.chargingSchedulePeriods.every(
-                          (p) => p.limit === 0,
-                        )
-                          ? "bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
-                          : "bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span
-                          className={`text-xs font-bold ${
-                            chargingProfile.chargingSchedulePeriods.every(
-                              (p) => p.limit === 0,
-                            )
-                              ? "text-orange-700 dark:text-orange-300"
-                              : "text-indigo-700 dark:text-indigo-300"
-                          }`}
-                        >
-                          {chargingProfile.chargingSchedulePeriods.every(
-                            (p) => p.limit === 0,
-                          )
-                            ? "⏸ Paused (zero limit)"
-                            : "⚡ Active"}
-                        </span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-                          #{chargingProfile.chargingProfileId}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                        <span className="text-gray-500 dark:text-gray-400">
-                          Purpose
-                        </span>
-                        <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
-                          {chargingProfile.chargingProfilePurpose}
-                        </span>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          Kind
-                        </span>
-                        <span className="font-medium text-gray-800 dark:text-gray-200">
-                          {chargingProfile.chargingProfileKind}
-                        </span>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          Stack Level
-                        </span>
-                        <span className="font-medium text-gray-800 dark:text-gray-200">
-                          {chargingProfile.stackLevel}
-                        </span>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          Unit
-                        </span>
-                        <span className="font-medium text-gray-800 dark:text-gray-200">
-                          {chargingProfile.chargingRateUnit}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                      Schedule Periods
-                    </div>
-                    <div className="space-y-1">
-                      {chargingProfile.chargingSchedulePeriods.map(
-                        (period, idx) => (
+                {profilesToDisplay.length > 0 ? (
+                  <div className="space-y-4">
+                    {profilesToDisplay.map((profile) => {
+                      const isPaused = profile.chargingSchedulePeriods.every(
+                        (p) => p.limit === 0,
+                      );
+                      const isActive =
+                        activeProfileId === profile.chargingProfileId;
+                      return (
+                        <div key={profile.chargingProfileId}>
                           <div
-                            key={idx}
-                            className="flex items-center justify-between bg-white dark:bg-gray-700 rounded px-2.5 py-1.5 text-xs"
+                            className={`rounded-lg p-3 mb-3 ${
+                              isPaused
+                                ? "bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
+                                : "bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800"
+                            }`}
                           >
-                            <span className="text-gray-500 dark:text-gray-400">
-                              @{period.startPeriod}s
-                            </span>
-                            <span
-                              className={`font-bold font-mono ${
-                                period.limit === 0
-                                  ? "text-orange-600 dark:text-orange-400"
-                                  : "text-indigo-600 dark:text-indigo-400"
-                              }`}
-                            >
-                              {period.limit} {chargingProfile.chargingRateUnit}
-                            </span>
-                            {period.numberPhases != null && (
-                              <span className="text-gray-400 dark:text-gray-500">
-                                {period.numberPhases}φ
+                            <div className="flex items-center justify-between mb-2">
+                              <span
+                                className={`text-xs font-bold ${
+                                  isPaused
+                                    ? "text-orange-700 dark:text-orange-300"
+                                    : "text-indigo-700 dark:text-indigo-300"
+                                }`}
+                              >
+                                {isPaused ? "⏸ Paused" : "⚡ Active"}
+                                {isActive ? " · Current" : " · Stored"}
                               </span>
+                              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                #{profile.chargingProfileId}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                              <span className="text-gray-500 dark:text-gray-400">
+                                Purpose
+                              </span>
+                              <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
+                                {profile.chargingProfilePurpose}
+                              </span>
+                              <span className="text-gray-500 dark:text-gray-400">
+                                Kind
+                              </span>
+                              <span className="font-medium text-gray-800 dark:text-gray-200">
+                                {profile.chargingProfileKind}
+                              </span>
+                              <span className="text-gray-500 dark:text-gray-400">
+                                Stack Level
+                              </span>
+                              <span className="font-medium text-gray-800 dark:text-gray-200">
+                                {profile.stackLevel}
+                              </span>
+                              <span className="text-gray-500 dark:text-gray-400">
+                                Unit
+                              </span>
+                              <span className="font-medium text-gray-800 dark:text-gray-200">
+                                {profile.chargingRateUnit}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                            Schedule Periods
+                          </div>
+                          <div className="space-y-1">
+                            {profile.chargingSchedulePeriods.map(
+                              (period, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between bg-white dark:bg-gray-700 rounded px-2.5 py-1.5 text-xs"
+                                >
+                                  <span className="text-gray-500 dark:text-gray-400">
+                                    @{period.startPeriod}s
+                                  </span>
+                                  <span
+                                    className={`font-bold font-mono ${
+                                      period.limit === 0
+                                        ? "text-orange-600 dark:text-orange-400"
+                                        : "text-indigo-600 dark:text-indigo-400"
+                                    }`}
+                                  >
+                                    {period.limit} {profile.chargingRateUnit}
+                                  </span>
+                                  {period.numberPhases != null && (
+                                    <span className="text-gray-400 dark:text-gray-500">
+                                      {period.numberPhases}φ
+                                    </span>
+                                  )}
+                                </div>
+                              ),
                             )}
                           </div>
-                        ),
-                      )}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-                    No active charging profile
+                    No charging profiles
                   </div>
                 )}
               </div>

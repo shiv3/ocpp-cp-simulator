@@ -8,7 +8,14 @@ import {
   MeterValueScheduler,
   type MeterValueStrategy,
 } from "./MeterValueScheduler";
-import { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
+import {
+  OCPPAvailability,
+  OCPPStatus,
+  ChargingProfilePurposeType,
+  ChargingProfileKindType,
+  ChargingRateUnitType,
+  RecurrencyKindType,
+} from "../types/OcppTypes";
 import type { ScenarioManager } from "../../application/scenario/ScenarioManager";
 import {
   ScenarioMode,
@@ -24,16 +31,45 @@ export interface ChargingSchedulePeriod {
 }
 
 /**
- * Represents the most recently received charging profile for a connector.
+ * Represents an active charging profile for a connector.
  * Populated by SetChargingProfile, cleared by ClearChargingProfile.
+ *
+ * OCPP 1.6J Smart Charging Profile Management
+ * ===========================================
+ *
+ * SIMPLIFIED IMPLEMENTATION NOTES:
+ *
+ * 1. Profile Storage:
+ *    - Each connector stores its own array of profiles
+ *    - Profiles from connectorId=0 are duplicated to each connector (non-spec-compliant)
+ *    - SPEC: Charge-point-level profiles should be stored centrally at ChargePoint level
+ *
+ * 2. Active Profile Selection (getActiveChargingProfile):
+ *    - Returns profile with highest stackLevel among currently valid profiles
+ *    - Checks validFrom/validTo for time-based validity
+ *    - Does NOT implement purpose-based precedence (TxProfile > TxDefaultProfile)
+ *    - SPEC: Should apply purpose precedence, then stackLevel within purpose
+ *
+ * 3. Recurring Profiles:
+ *    - Stored as-is without calculating current period based on time elapsed
+ *    - SPEC: Should calculate which period applies based on Daily/Weekly recurrence
+ *
+ * 4. ChargePointMaxProfile:
+ *    - Treated as regular profile without enforcing station-wide total limit
+ *    - SPEC: Should enforce that sum of all connector draws doesn't exceed this limit
+ *
+ * For production charge point implementation, see OCPP 1.6J spec section 5.10.
  */
 export interface ActiveChargingProfile {
   chargingProfileId: number;
   connectorId: number;
   stackLevel: number;
-  chargingProfilePurpose: string;
-  chargingProfileKind: string;
-  chargingRateUnit: string;
+  chargingProfilePurpose: ChargingProfilePurposeType;
+  chargingProfileKind: ChargingProfileKindType;
+  chargingRateUnit: ChargingRateUnitType;
+  recurrencyKind?: RecurrencyKindType;
+  validFrom?: string; // ISO 8601 timestamp
+  validTo?: string; // ISO 8601 timestamp
   chargingSchedulePeriods: ChargingSchedulePeriod[];
 }
 
@@ -48,6 +84,7 @@ export interface ConnectorEvents {
   autoResetToAvailableChange: { enabled: boolean };
   evSettingsChange: { settings: EVSettings };
   chargingProfileChange: { profile: ActiveChargingProfile | null };
+  chargingProfilesChange: { profiles: ActiveChargingProfile[] };
 }
 
 interface IncrementStrategyConfig {
@@ -77,7 +114,7 @@ export class Connector {
   private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
   private _evSettings: EVSettings = { ...defaultEVSettings };
-  private _chargingProfile: ActiveChargingProfile | null = null;
+  private _chargingProfiles: ActiveChargingProfile[] = [];
 
   constructor(
     private readonly connectorId: number,
@@ -192,13 +229,151 @@ export class Connector {
     this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
   }
 
-  get chargingProfile(): ActiveChargingProfile | null {
-    return this._chargingProfile;
+  /**
+   * Get all charging profiles for this connector, sorted by stack level (highest first)
+   */
+  get chargingProfiles(): ActiveChargingProfile[] {
+    return [...this._chargingProfiles].sort(
+      (a, b) => b.stackLevel - a.stackLevel,
+    );
   }
 
+  /**
+   * Get the currently active charging profile (highest valid stack level)
+   * Returns null if no valid profiles exist.
+   */
+  getActiveChargingProfile(): ActiveChargingProfile | null {
+    const now = new Date();
+    const validProfiles = this._chargingProfiles.filter((profile) => {
+      // Check validity period
+      if (profile.validFrom && new Date(profile.validFrom) > now) {
+        return false;
+      }
+      if (profile.validTo && new Date(profile.validTo) < now) {
+        return false;
+      }
+      return true;
+    });
+
+    if (validProfiles.length === 0) {
+      return null;
+    }
+
+    // Return profile with highest stack level
+    return validProfiles.reduce((highest, current) =>
+      current.stackLevel > highest.stackLevel ? current : highest,
+    );
+  }
+
+  /**
+   * Backwards compatibility: get the active charging profile
+   * @deprecated Use getActiveChargingProfile() instead
+   */
+  get chargingProfile(): ActiveChargingProfile | null {
+    return this.getActiveChargingProfile();
+  }
+
+  /**
+   * Backwards compatibility: set a single charging profile (replaces all profiles)
+   * @deprecated Use addChargingProfile() or setChargingProfiles() instead
+   */
   set chargingProfile(profile: ActiveChargingProfile | null) {
-    this._chargingProfile = profile;
-    this.eventsEmitter.emit("chargingProfileChange", { profile });
+    if (profile === null) {
+      this.clearAllChargingProfiles();
+    } else {
+      this._chargingProfiles = [profile];
+      this.emitProfileChanges();
+    }
+  }
+
+  /**
+   * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
+   */
+  addChargingProfile(profile: ActiveChargingProfile): void {
+    // Remove existing profile with same ID
+    this._chargingProfiles = this._chargingProfiles.filter(
+      (p) => p.chargingProfileId !== profile.chargingProfileId,
+    );
+    // Add new profile
+    this._chargingProfiles.push(profile);
+    this.emitProfileChanges();
+  }
+
+  /**
+   * Remove charging profiles matching the given criteria
+   * @param criteria Filter criteria (profileId, connectorId, purpose, stackLevel)
+   * @returns Number of profiles removed
+   */
+  removeChargingProfiles(criteria: {
+    profileId?: number;
+    connectorId?: number;
+    purpose?: ChargingProfilePurposeType;
+    stackLevel?: number;
+  }): number {
+    const before = this._chargingProfiles.length;
+    this._chargingProfiles = this._chargingProfiles.filter((profile) => {
+      if (
+        criteria.profileId != null &&
+        profile.chargingProfileId !== criteria.profileId
+      ) {
+        return true; // Keep (doesn't match filter)
+      }
+      if (
+        criteria.connectorId != null &&
+        profile.connectorId !== criteria.connectorId
+      ) {
+        return true;
+      }
+      if (
+        criteria.purpose != null &&
+        profile.chargingProfilePurpose !== criteria.purpose
+      ) {
+        return true;
+      }
+      if (
+        criteria.stackLevel != null &&
+        profile.stackLevel !== criteria.stackLevel
+      ) {
+        return true;
+      }
+      return false; // Remove (matches all criteria)
+    });
+    const removed = before - this._chargingProfiles.length;
+    if (removed > 0) {
+      this.emitProfileChanges();
+    }
+    return removed;
+  }
+
+  /**
+   * Clear all charging profiles
+   */
+  clearAllChargingProfiles(): void {
+    if (this._chargingProfiles.length > 0) {
+      this._chargingProfiles = [];
+      this.emitProfileChanges();
+    }
+  }
+
+  /**
+   * Set all charging profiles (replaces existing profiles)
+   */
+  setChargingProfiles(profiles: ActiveChargingProfile[]): void {
+    this._chargingProfiles = [...profiles];
+    this.emitProfileChanges();
+  }
+
+  /**
+   * Emit events when charging profiles change
+   */
+  private emitProfileChanges(): void {
+    this.eventsEmitter.emit("chargingProfilesChange", {
+      profiles: this.chargingProfiles,
+    });
+    // Also emit backwards-compatible event
+    this.eventsEmitter.emit("chargingProfileChange", {
+      profile: this.getActiveChargingProfile(),
+    });
   }
 
   get autoMeterValueConfig(): AutoMeterValueConfig {

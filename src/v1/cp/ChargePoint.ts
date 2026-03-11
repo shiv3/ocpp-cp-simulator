@@ -2,7 +2,12 @@ import { Connector } from "./Connector";
 import { OCPPWebSocket } from "./OCPPWebSocket";
 import { OCPPMessageHandler } from "./OCPPMessageHandler";
 import { Logger } from "./Logger";
-import { OCPPStatus, OCPPAvailability, BootNotification } from "./OcppTypes";
+import {
+  OCPPStatus,
+  OCPPAvailability,
+  BootNotification,
+  ChargingProfilePurposeType,
+} from "./OcppTypes";
 import { Transaction } from "./Transaction.ts";
 import * as ocpp from "./OcppTypes.ts";
 
@@ -223,6 +228,9 @@ export class ChargePoint {
       connector.transaction!.stopTime = new Date();
       connector.transaction!.meterStop = connector.meterValue;
       this._messageHandler.stopTransaction(connector.transaction!, connId);
+      connector.removeChargingProfiles({
+        purpose: ChargingProfilePurposeType.TxProfile,
+      });
       this.cleanTransaction(connector);
     } else {
       this._logger.error(`Connector for id ${connId} not found`);

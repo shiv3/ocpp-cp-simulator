@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import {
   type EVSettings,
   defaultEVSettings,
@@ -22,6 +23,8 @@ interface ConnectorViewState {
   mode: ScenarioMode;
   autoResetToAvailable: boolean;
   evSettings: EVSettings;
+  chargingProfile: ActiveChargingProfile | null;
+  chargingProfiles: ActiveChargingProfile[];
 }
 
 const DEFAULT_STATUS = OCPPStatus.Unavailable;
@@ -63,6 +66,13 @@ export function useConnectorView(
   const [evSettings, setEvSettings] = useState<EVSettings>(
     initialConnector?.evSettings ?? { ...defaultEVSettings },
   );
+  const [chargingProfile, setChargingProfile] =
+    useState<ActiveChargingProfile | null>(
+      initialConnector?.chargingProfile ?? null,
+    );
+  const [chargingProfiles, setChargingProfiles] = useState<
+    ActiveChargingProfile[]
+  >(initialConnector?.chargingProfiles ?? []);
 
   useEffect(() => {
     if (!chargePointId) {
@@ -75,6 +85,8 @@ export function useConnectorView(
       setMode(DEFAULT_MODE);
       setAutoResetToAvailable(true);
       setEvSettings({ ...defaultEVSettings });
+      setChargingProfile(null);
+      setChargingProfiles([]);
       setLogs([]);
       return;
     }
@@ -90,6 +102,8 @@ export function useConnectorView(
       setMode(connector.mode);
       setAutoResetToAvailable(connector.autoResetToAvailable);
       setEvSettings(connector.evSettings);
+      setChargingProfile(connector.chargingProfile ?? null);
+      setChargingProfiles(connector.chargingProfiles ?? []);
     }
 
     const unsubscribe = chargePointService.subscribe(
@@ -141,6 +155,16 @@ export function useConnectorView(
               setEvSettings(event.settings);
             }
             break;
+          case "connector-charging-profile":
+            if (event.connectorId === connectorId) {
+              setChargingProfile(event.profile);
+            }
+            break;
+          case "connector-charging-profiles":
+            if (event.connectorId === connectorId) {
+              setChargingProfiles(event.profiles);
+            }
+            break;
           case "log":
             setLogs((prev) => [
               ...prev,
@@ -173,5 +197,7 @@ export function useConnectorView(
     mode,
     autoResetToAvailable,
     evSettings,
+    chargingProfile,
+    chargingProfiles,
   };
 }

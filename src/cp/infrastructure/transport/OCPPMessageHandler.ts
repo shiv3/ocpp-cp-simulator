@@ -34,6 +34,9 @@ import {
   UnlockConnectorHandler,
   ReserveNowHandler,
   CancelReservationHandler,
+  SetChargingProfileHandler,
+  ClearChargingProfileHandler,
+  GetCompositeScheduleHandler,
   BootNotificationResultHandler,
   StartTransactionResultHandler,
   StopTransactionResultHandler,
@@ -195,6 +198,18 @@ export class OCPPMessageHandler {
     this._registry.registerCallHandler(
       OCPPAction.CancelReservation,
       new CancelReservationHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.SetChargingProfile,
+      new SetChargingProfileHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.ClearChargingProfile,
+      new ClearChargingProfileHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.GetCompositeSchedule,
+      new GetCompositeScheduleHandler(),
     );
 
     // Register CALLRESULT handlers (incoming responses from central system)

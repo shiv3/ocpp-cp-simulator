@@ -6,7 +6,11 @@ import { Connector } from "../connector/Connector";
 import type { ChargePointEvents } from "./ChargePointEvents";
 import { OCPPMessageHandler } from "../../infrastructure/transport/OCPPMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
-import { BootNotification, OCPPStatus } from "../types/OcppTypes";
+import {
+  BootNotification,
+  OCPPStatus,
+  ChargingProfilePurposeType,
+} from "../types/OcppTypes";
 import type { Transaction } from "../connector/Transaction";
 import { ReservationManager } from "../reservation/Reservation";
 
@@ -341,6 +345,19 @@ export class ChargePoint {
       connectorId: connector.id,
       transactionId: transaction.id ?? 0,
     });
+
+    // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)
+    // NOTE: Only TxProfile is cleared. TxDefaultProfile persists for future transactions.
+    // ChargePointMaxProfile also persists as it applies to the entire station.
+    const clearedProfiles = connector.removeChargingProfiles({
+      purpose: ChargingProfilePurposeType.TxProfile,
+    });
+    if (clearedProfiles > 0) {
+      this._logger.info(
+        `Cleared ${clearedProfiles} TxProfile(s) after transaction end on connector ${connector.id}`,
+        LogType.TRANSACTION,
+      );
+    }
 
     this.cleanTransaction(connector);
     connector.stopTransaction();

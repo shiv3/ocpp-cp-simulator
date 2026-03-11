@@ -50,9 +50,9 @@ export enum OCPPAction {
   CancelReservation = "CancelReservation", // TODO
   ReserveNow = "ReserveNow", // TODO
   // SmartCharging actions
-  ClearChargingProfile = "ClearChargingProfile", // TODO
-  GetCompositeSchedule = "GetCompositeSchedule", // TODO
-  SetChargingProfile = "SetChargingProfile", // TODO
+  ClearChargingProfile = "ClearChargingProfile",
+  GetCompositeSchedule = "GetCompositeSchedule",
+  SetChargingProfile = "SetChargingProfile",
   // RemoteTrigger actions
   TriggerMessage = "TriggerMessage",
   // Fake actions
@@ -73,6 +73,51 @@ export enum OcppFeatureProfile {
   SmartCharging = "SmartCharging",
   // Support for remote triggering of Charge Point initiated messages
   RemoteTrigger = "RemoteTrigger",
+}
+
+// ============================================
+// Smart Charging Profile Types (OCPP 1.6)
+// ============================================
+
+export enum ChargingProfilePurposeType {
+  ChargePointMaxProfile = "ChargePointMaxProfile",
+  TxDefaultProfile = "TxDefaultProfile",
+  TxProfile = "TxProfile",
+}
+
+export enum ChargingProfileKindType {
+  Absolute = "Absolute",
+  Recurring = "Recurring",
+  Relative = "Relative",
+}
+
+export enum ChargingRateUnitType {
+  W = "W",
+  A = "A",
+}
+
+export enum RecurrencyKindType {
+  Daily = "Daily",
+  Weekly = "Weekly",
+}
+
+export interface ChargingSchedulePeriod {
+  startPeriod: number;
+  limit: number;
+  numberPhases?: number;
+}
+
+export interface ActiveChargingProfile {
+  chargingProfileId: number;
+  connectorId: number;
+  stackLevel: number;
+  chargingProfilePurpose: ChargingProfilePurposeType;
+  chargingProfileKind: ChargingProfileKindType;
+  chargingRateUnit: ChargingRateUnitType;
+  recurrencyKind?: RecurrencyKindType;
+  validFrom?: string;
+  validTo?: string;
+  chargingSchedulePeriods: ChargingSchedulePeriod[];
 }
 
 export type OcppConfigurationKey = {

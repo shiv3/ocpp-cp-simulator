@@ -9,6 +9,7 @@ export * from "./call/GetDiagnosticsHandler";
 export * from "./call/GetConfigurationHandler";
 export * from "./call/OtherCallHandlers";
 export * from "./call/ReservationHandlers";
+export * from "./call/SmartChargingHandlers";
 
 // Export CALLRESULT handlers
 export * from "./callresult/BootNotificationResultHandler";

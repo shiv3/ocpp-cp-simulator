@@ -21,6 +21,10 @@ npm run dev
 bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
+**With this monorepo’s `apps/ocpp-csms`:** use a **trailing slash** on `--ws-url`. **CLI (Bun)** sends **HTTP Basic** via `--basic-auth-user` / `--basic-auth-pass`. The **browser UI** cannot send Basic on WebSocket; the simulator appends `?ocpp_ws_secret=…` when Basic auth is enabled, which the CSMS accepts by default (`CSMS_OCPP_CP_QUERY_PASSWORD_PARAM`). Example CLI:
+
+`bun src/cli/main.ts --ws-url ws://127.0.0.1:9000/ocpp/ --cp-id CP001 --basic-auth-user CP001 --basic-auth-pass dev-cp-secret`
+
 ## Doc
 
 https://deepwiki.com/shiv3/ocpp-cp-simulator

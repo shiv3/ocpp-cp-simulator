@@ -1,4 +1,5 @@
 import { Logger, LogType } from "../../shared/Logger";
+import { buildOcppWebSocketUrl } from "./wsUrlWithBasic";
 import {
   OCPPAction,
   OCPPErrorCode,
@@ -92,15 +93,12 @@ export class OCPPWebSocket {
 
     this._isManualDisconnect = false;
 
-    const url = new URL(this._url);
-    if (this?._basicAuth) {
-      url.username = this._basicAuth.username;
-      url.password = this._basicAuth.password;
-    }
-    this._ws = new WebSocket(`${url.toString()}${this._chargePointId}`, [
-      "ocpp1.6",
-      "ocpp1.5",
-    ]);
+    const wsUrl = buildOcppWebSocketUrl({
+      baseUrl: this._url,
+      chargePointId: this._chargePointId,
+      basicAuth: this._basicAuth,
+    });
+    this._ws = new WebSocket(wsUrl, ["ocpp1.6", "ocpp1.5"]);
     this._ws.onopen = () => {
       this.handleOpen();
       if (this._onOpenCallback) {

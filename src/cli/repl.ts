@@ -24,6 +24,16 @@ Commands:
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
 export async function startRepl(service: CLIChargePointService): Promise<void> {
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      "Interactive REPL requires a TTY on stdin (e.g. run in a real terminal).\n" +
+        "From the repo root use: bun run --cwd apps/ocpp-cp-simulator cli -- …\n" +
+        "Avoid `bun run --filter … cli` here — it often drops stdin and exits immediately.\n" +
+        "For scripts or CI, use --json instead.\n",
+    );
+    process.exit(1);
+  }
+
   service.onEvent((evt) => {
     if (evt.event === "log") return;
     const line = formatEvent(evt.event, evt.data);

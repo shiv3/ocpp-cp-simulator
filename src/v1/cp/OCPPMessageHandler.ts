@@ -561,18 +561,24 @@ export class OCPPMessageHandler {
     }
   }
 
+  private static readonly _abbSupportedChangeKeys = new Set<string>([
+    "MeterValueSampleInterval",
+    "MeterValuesSampledData",
+    "ClockAlignedDataInterval",
+    "LocalAuthorizeOffline",
+    "LocalPreAuthorize",
+  ]);
+
   private handleChangeConfiguration(
     payload: request.ChangeConfigurationRequest,
   ): response.ChangeConfigurationResponse {
     this._logger.log(
       `Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`,
     );
-    switch (payload.key) {
-      default:
-        return {
-          status: "NotSupported",
-        };
+    if (OCPPMessageHandler._abbSupportedChangeKeys.has(payload.key)) {
+      return { status: "Accepted" };
     }
+    return { status: "NotSupported" };
   }
 
   private handleTriggerMessage(

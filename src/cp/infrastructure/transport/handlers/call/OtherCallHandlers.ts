@@ -3,6 +3,14 @@ import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 import { LogType } from "../../../../shared/Logger";
 
+const ABB_SUPPORTED_CHANGE_KEYS = new Set<string>([
+  "MeterValueSampleInterval",
+  "MeterValuesSampledData",
+  "ClockAlignedDataInterval",
+  "LocalAuthorizeOffline",
+  "LocalPreAuthorize",
+]);
+
 export class ChangeConfigurationHandler
   implements
     CallHandler<
@@ -18,7 +26,9 @@ export class ChangeConfigurationHandler
       `Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`,
       LogType.CONFIGURATION,
     );
-    // Currently not supported - can be extended in the future
+    if (ABB_SUPPORTED_CHANGE_KEYS.has(payload.key)) {
+      return { status: "Accepted" };
+    }
     return { status: "NotSupported" };
   }
 }

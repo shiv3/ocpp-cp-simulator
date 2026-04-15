@@ -603,12 +603,22 @@ const remoteStartAutoMeterTemplate: ScenarioTemplate = {
 /**
  * All available templates
  */
+/** Same flow as remote-start auto-meter; labeled for ABB Terra AC / CSMS register testing. */
+const abbTerraAcMeteringTemplate: ScenarioTemplate = {
+  ...remoteStartAutoMeterTemplate,
+  id: "abb-terra-ac-metering",
+  name: "ABB Terra AC (metering)",
+  description:
+    "Remote start → Charging with periodic MeterValues for CSMS Energy.Active.Import.Register validation",
+};
+
 export const scenarioTemplates: ScenarioTemplate[] = [
   fullChargingCycleTemplate,
   smartChargingTemplate,
   multiStatusMonitorTemplate,
   statusTriggeredActionsTemplate,
   remoteStartAutoMeterTemplate,
+  abbTerraAcMeteringTemplate,
 ];
 
 /**

@@ -2,6 +2,12 @@
 
 OCPP charger simulator written in React that works as a standalone web app or desktop application.
 
+## Settings profiles
+
+You can save multiple charger presets (similar to Postman environments), switch the active profile from **Settings** or the **Profile** dropdown in the navbar, and use **Add profile** / **Duplicate** / **Delete** to manage them. Data is stored in `localStorage` under `ocppCpProfiles`. A one-time migration moves the previous single saved config from the legacy `config` key into **Setting 1**.
+
+Opening **Settings** clears any `#config=...` URL hash override so the form always edits the saved profiles; shared hash links still apply on the main **ChargePoint** view until you switch profile (navbar or Settings) or open Settings.
+
 ## Web Version
 
 https://shiv3.github.io/ocpp-cp-simulator/#config=%7B"wsURL"%3A"wss%3A%2F%2Flocalhost%3A8080%2F"%2C"connectorNumber"%3A2%2C"ChargePointID"%3A"test-cp"%2C"tagID"%3A"test-tag"%2C"ocppVersion"%3A"OCPP-1.6J"%2C"Experimental"%3Anull%7D

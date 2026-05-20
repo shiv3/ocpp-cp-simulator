@@ -82,7 +82,7 @@ export class OCPPWebSocket {
   ): void {
     const url = new URL(this._url);
 
-    url.searchParams.set("token", this._apiToken);
+    url.searchParams.set("key", this._apiToken);
     url.searchParams.set("cpid", this._chargePointId);
     if (this?._basicAuth) {
       url.username = this._basicAuth.username;

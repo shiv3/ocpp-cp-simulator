@@ -15,7 +15,7 @@ const TopPage: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!config) {
+    if (!config || !String(config.wsURL ?? "").trim()) {
       navigate("/settings");
       return;
     }

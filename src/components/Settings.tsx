@@ -1,8 +1,32 @@
-import React, { useState, useEffect } from "react";
-import { configAtom } from "../store/store.ts";
-import { useAtom } from "jotai/index";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
+import {
+  clearConfigHashAtom,
+  configAtom,
+  nextCopyName,
+  nextSettingName,
+  profilesStateAtom,
+  saveActiveProfileConfigAtom,
+  setActiveProfileIdAtom,
+  type Config,
+} from "../store/store.ts";
+import { useAtom, useSetAtom } from "jotai/index";
+import {
+  Badge,
+  Button,
+  HelperText,
+  Label,
+  Select,
+  TextInput,
+} from "flowbite-react";
 import { DefaultBootNotification } from "../cp/OcppTypes.ts";
 import { useNavigate } from "react-router-dom";
+import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl.ts";
 
 const Settings: React.FC = () => {
   const [wsURL, setWsURL] = useState<string>("");
@@ -27,40 +51,71 @@ const Settings: React.FC = () => {
   const [bootNotification, setBootNotification] = useState<string | null>(
     JSON.stringify(DefaultBootNotification),
   );
-  const [config, setConfig] = useAtom(configAtom);
+  const [, setConfig] = useAtom(configAtom);
+  const [profilesState, setProfilesState] = useAtom(profilesStateAtom);
+  const saveActiveProfile = useSetAtom(saveActiveProfileConfigAtom);
+  const setActiveProfileId = useSetAtom(setActiveProfileIdAtom);
+  const clearConfigHash = useSetAtom(clearConfigHashAtom);
   const navigate = useNavigate();
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [fullUrlDraft, setFullUrlDraft] = useState<string | null>(null);
+
+  const composedFullUrl = useMemo(
+    () =>
+      buildFullOcppUrl(wsURL, cpID, authToken, {
+        enabled: basicAuthEnabled,
+        username: basicAuthUsername,
+        password: basicAuthPassword,
+      }),
+    [
+      wsURL,
+      cpID,
+      authToken,
+      basicAuthEnabled,
+      basicAuthUsername,
+      basicAuthPassword,
+    ],
+  );
+
+  const displayFullUrl = fullUrlDraft ?? composedFullUrl;
 
   useEffect(() => {
-    if (config) {
-      setWsURL(config.wsURL);
-      setConnectorNumber(config.connectorNumber);
-      setCpID(config.ChargePointID);
-      setTagID(config.tagID);
-      setOcppVersion(config.ocppVersion);
+    setFullUrlDraft(null);
+  }, [
+    wsURL,
+    cpID,
+    authToken,
+    basicAuthEnabled,
+    basicAuthUsername,
+    basicAuthPassword,
+  ]);
 
-      setAuthToken(config.authToken);
-      setBasicAuthEnabled(config.basicAuthSettings?.enabled);
-      setBasicAuthUsername(config.basicAuthSettings?.username);
-      setBasicAuthPassword(config.basicAuthSettings?.password);
+  useEffect(() => {
+    clearConfigHash();
+  }, [clearConfigHash]);
 
-      setAutoMeterValueEnabled(config.autoMeterValueSetting?.enabled);
-      setAutoMeterValueInterval(config.autoMeterValueSetting?.interval);
-      setAutoMeterValue(config.autoMeterValueSetting?.value);
-
-      setExperimental(
-        config.Experimental ? JSON.stringify(config.Experimental) : null,
+  const applyParsedFullUrl = useCallback((raw: string): boolean => {
+    const parsed = parseFullOcppUrl(raw);
+    if (!parsed) {
+      setSaveError(
+        "Invalid WebSocket URL. Use a full ws:// or wss:// URL (with ?cpid= and ?key= if needed).",
       );
-      setBootNotification(
-        config.BootNotification
-          ? JSON.stringify(config.BootNotification)
-          : null,
-      );
+      setSaveMessage(null);
+      return false;
     }
-  }, [config]);
+    setWsURL(parsed.wsURL);
+    setCpID(parsed.chargePointId);
+    setAuthToken(parsed.authToken);
+    setBasicAuthEnabled(parsed.basicAuthEnabled);
+    setBasicAuthUsername(parsed.basicAuthUsername);
+    setBasicAuthPassword(parsed.basicAuthPassword);
+    setFullUrlDraft(null);
+    return true;
+  }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const config = {
+  const buildConfigFromForm = useCallback((): Config => {
+    return {
       wsURL,
       connectorNumber,
       ChargePointID: cpID,
@@ -84,14 +139,310 @@ const Settings: React.FC = () => {
           ? JSON.parse(bootNotification)
           : null,
     };
-    setConfig(config);
+  }, [
+    wsURL,
+    connectorNumber,
+    cpID,
+    tagID,
+    ocppVersion,
+    authToken,
+    basicAuthEnabled,
+    basicAuthUsername,
+    basicAuthPassword,
+    autoMeterValueEnabled,
+    autoMeterValueInterval,
+    autoMeterValue,
+    experimental,
+    bootNotification,
+  ]);
+
+  const applyConfigToForm = useCallback((cfg: Config) => {
+    setWsURL(cfg.wsURL);
+    setConnectorNumber(cfg.connectorNumber);
+    setCpID(cfg.ChargePointID);
+    setTagID(cfg.tagID);
+    setOcppVersion(cfg.ocppVersion);
+    setAuthToken(cfg.authToken);
+    setBasicAuthEnabled(cfg.basicAuthSettings?.enabled ?? false);
+    setBasicAuthUsername(cfg.basicAuthSettings?.username ?? "");
+    setBasicAuthPassword(cfg.basicAuthSettings?.password ?? "");
+    setAutoMeterValueEnabled(cfg.autoMeterValueSetting?.enabled ?? false);
+    setAutoMeterValueInterval(cfg.autoMeterValueSetting?.interval ?? 0);
+    setAutoMeterValue(cfg.autoMeterValueSetting?.value ?? 0);
+    setExperimental(cfg.Experimental ? JSON.stringify(cfg.Experimental) : null);
+    setBootNotification(
+      cfg.BootNotification
+        ? JSON.stringify(cfg.BootNotification)
+        : JSON.stringify(DefaultBootNotification),
+    );
+  }, []);
+
+  const lastLoadedProfileIdRef = useRef<string | null>(null);
+
+  // Load form when switching profile (not after Save on the same profile).
+  useEffect(() => {
+    const id = profilesState.activeProfileId;
+    if (lastLoadedProfileIdRef.current === id) return;
+    lastLoadedProfileIdRef.current = id;
+    const profile = profilesState.profiles.find((p) => p.id === id);
+    if (profile) applyConfigToForm(profile.config);
+  }, [
+    profilesState.activeProfileId,
+    profilesState.profiles,
+    applyConfigToForm,
+  ]);
+
+  const saveCurrentProfile = useCallback((): boolean => {
+    try {
+      const next = buildConfigFromForm();
+      saveActiveProfile(next);
+      setSaveMessage("Settings saved.");
+      setSaveError(null);
+      return true;
+    } catch {
+      setSaveMessage(null);
+      setSaveError(
+        "Could not save: check JSON in Experimental or Boot Notification.",
+      );
+      return false;
+    }
+  }, [buildConfigFromForm, saveActiveProfile]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveCurrentProfile()) return;
+  };
+
+  const handleSaveAndOpenChargePoint = () => {
+    if (!saveCurrentProfile()) return;
+    setConfig(buildConfigFromForm());
     navigate("/");
   };
 
+  const handleProfileSelect = (profileId: string) => {
+    if (profileId === profilesState.activeProfileId) return;
+    if (!saveCurrentProfile()) return;
+    setActiveProfileId(profileId);
+  };
+
+  const handleAddProfile = () => {
+    if (!saveCurrentProfile()) return;
+    clearConfigHash();
+    const newConfig = buildConfigFromForm();
+    setProfilesState((s) => {
+      const id = crypto.randomUUID();
+      const name = nextSettingName(s.profiles);
+      return {
+        ...s,
+        profiles: [...s.profiles, { id, name, config: newConfig }],
+        activeProfileId: id,
+      };
+    });
+  };
+
+  const handleDuplicateProfile = () => {
+    if (!saveCurrentProfile()) return;
+    clearConfigHash();
+    setProfilesState((s) => {
+      const active = s.profiles.find((p) => p.id === s.activeProfileId);
+      if (!active) return s;
+      const id = crypto.randomUUID();
+      const name = nextCopyName(s.profiles, active.name);
+      const copy: Config = JSON.parse(JSON.stringify(active.config)) as Config;
+      return {
+        ...s,
+        profiles: [...s.profiles, { id, name, config: copy }],
+        activeProfileId: id,
+      };
+    });
+  };
+
+  const handleDeleteProfile = () => {
+    if (profilesState.profiles.length <= 1) return;
+    if (!window.confirm("Delete this settings profile?")) return;
+    clearConfigHash();
+    const deleteId = profilesState.activeProfileId;
+    setProfilesState((s) => {
+      const rest = s.profiles.filter((p) => p.id !== deleteId);
+      return { ...s, profiles: rest, activeProfileId: rest[0]!.id };
+    });
+  };
+
+  const activeProfile = profilesState.profiles.find(
+    (p) => p.id === profilesState.activeProfileId,
+  );
+
   return (
-    <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-      <h2 className="text-2xl font-bold mb-6">Settings</h2>
+    <div className="mx-auto mb-4 max-w-4xl rounded-lg bg-white px-5 py-6 shadow-md sm:px-8 sm:py-8">
+      <header className="mb-8 border-b border-gray-100 pb-6">
+        <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+          Settings
+        </h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Manage connection presets and simulator options.
+        </p>
+      </header>
+
+      <section
+        className="mb-8 rounded-xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-5 shadow-sm sm:p-6"
+        aria-labelledby="profiles-heading"
+      >
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h3
+              id="profiles-heading"
+              className="text-lg font-semibold text-gray-900"
+            >
+              Profiles
+            </h3>
+            <HelperText className="mt-1 text-sm">
+              Separate presets for different backends. Switch below or from the
+              header; changing profile clears a URL hash override.
+            </HelperText>
+          </div>
+          <Badge color="info" size="sm" className="shrink-0">
+            {profilesState.profiles.length} profile
+            {profilesState.profiles.length === 1 ? "" : "s"}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div className="min-w-0">
+            <Label htmlFor="profileSelect" value="Active profile" />
+            <Select
+              id="profileSelect"
+              className="mt-2"
+              sizing="md"
+              value={profilesState.activeProfileId}
+              onChange={(e) => handleProfileSelect(e.target.value)}
+            >
+              {profilesState.profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="min-w-0">
+            <Label htmlFor="profileName" value="Display name" />
+            <TextInput
+              id="profileName"
+              className="mt-2"
+              type="text"
+              placeholder="Local lab, Production QA, …"
+              value={activeProfile?.name ?? ""}
+              onChange={(e) => {
+                const name = e.target.value;
+                setProfilesState((s) => ({
+                  ...s,
+                  profiles: s.profiles.map((p) =>
+                    p.id === s.activeProfileId ? { ...p, name } : p,
+                  ),
+                }));
+              }}
+              sizing="md"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-5">
+          <Button
+            type="button"
+            color="light"
+            size="sm"
+            onClick={handleAddProfile}
+          >
+            New profile
+          </Button>
+          <Button
+            type="button"
+            color="light"
+            size="sm"
+            onClick={handleDuplicateProfile}
+          >
+            Duplicate
+          </Button>
+          <Button
+            type="button"
+            color="failure"
+            outline
+            size="sm"
+            onClick={handleDeleteProfile}
+            disabled={profilesState.profiles.length <= 1}
+          >
+            Delete
+          </Button>
+        </div>
+      </section>
+
       <form onSubmit={handleSubmit}>
+        <div className="sticky top-0 z-20 -mx-5 mb-6 flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white/95 px-5 py-3 shadow-sm backdrop-blur sm:-mx-8 sm:px-8">
+          <button
+            type="submit"
+            className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-blue-600 bg-white px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-4 focus:ring-blue-200"
+            onClick={handleSaveAndOpenChargePoint}
+          >
+            Save & open ChargePoint
+          </button>
+          {saveMessage && (
+            <span className="text-sm font-medium text-green-700" role="status">
+              {saveMessage}
+            </span>
+          )}
+          {saveError && (
+            <span className="text-sm font-medium text-red-700" role="alert">
+              {saveError}
+            </span>
+          )}
+        </div>
+
+        <h3 className="mb-4 text-base font-semibold text-gray-900">
+          Connection
+        </h3>
+        <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+          <label
+            className="block text-gray-800 text-sm font-bold mb-2"
+            htmlFor="fullOcppUrl"
+          >
+            Full WebSocket URL
+          </label>
+          <input
+            className="shadow appearance-none border border-blue-200 rounded w-full py-2 px-3 text-gray-800 font-mono text-sm leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+            id="fullOcppUrl"
+            type="url"
+            value={displayFullUrl}
+            onChange={(e) => setFullUrlDraft(e.target.value)}
+            onBlur={() => {
+              if (fullUrlDraft !== null) applyParsedFullUrl(fullUrlDraft);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (fullUrlDraft !== null) applyParsedFullUrl(fullUrlDraft);
+              }
+            }}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text").trim();
+              if (!text) return;
+              e.preventDefault();
+              setFullUrlDraft(text);
+              applyParsedFullUrl(text);
+            }}
+            placeholder="wss://host:8080/?cpid=my-cp&key=my-api-key"
+            spellCheck={false}
+          />
+          <p className="text-gray-600 text-xs mt-2">
+            Built from the fields below (same URL used when connecting). Paste a
+            full URL here to fill OCPP server, charge point ID, auth token, and
+            basic auth — then press Enter or click away.
+          </p>
+        </div>
         <div className="mb-4">
           <label
             className="block text-gray-700 text-sm font-bold mb-2"
@@ -351,13 +702,24 @@ const Settings: React.FC = () => {
           ></textarea>
         </div>
 
-        <div className="flex items-center justify-between">
+        <div className="sticky bottom-0 z-20 -mx-5 mt-8 flex flex-wrap items-center gap-3 border-t border-gray-200 bg-white/95 px-5 py-4 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur sm:-mx-8 sm:px-8">
           <button
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
             type="submit"
+            className="rounded-lg bg-blue-600 px-6 py-3 text-base font-bold text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300"
           >
             Save
           </button>
+          <button
+            type="button"
+            className="rounded-lg border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+            onClick={handleSaveAndOpenChargePoint}
+          >
+            Save & open ChargePoint
+          </button>
+          <p className="w-full text-xs text-gray-500 sm:w-auto">
+            Saves the active profile to this browser. Use Save before switching
+            profiles or leaving the page.
+          </p>
         </div>
       </form>
     </div>

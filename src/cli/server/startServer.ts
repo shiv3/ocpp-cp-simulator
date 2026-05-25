@@ -8,7 +8,7 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
-import { createHttpHandlers } from "./httpServer";
+import { createHttpHandlers, type CorsPolicy } from "./httpServer";
 
 export interface ServerOptions {
   readonly httpPort: number | null;
@@ -22,6 +22,7 @@ export interface ServerOptions {
     readonly scenarioTemplate: string | null;
     readonly scenarioConnector: number;
   } | null;
+  readonly cors: CorsPolicy;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -36,7 +37,12 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     registry,
   });
 
-  const handlers = createHttpHandlers({ registry, bus, lifecycle });
+  const handlers = createHttpHandlers({
+    registry,
+    bus,
+    lifecycle,
+    cors: opts.cors,
+  });
   const servers: AnyServer[] = [];
 
   if (opts.unixSocket) {

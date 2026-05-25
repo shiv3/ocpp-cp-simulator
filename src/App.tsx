@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import Navbar from "./components/Navbar.tsx";
 import Settings from "./components/Settings.tsx";
 import TopPage from "./components/TopPage.tsx";
+import RemotePage from "./components/RemotePage.tsx";
 import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
 import V1App from "./v1/V1App.tsx";
 
@@ -15,6 +16,7 @@ const V2App: React.FC = () => {
         <div className="p-4">
           <Routes>
             <Route path="/" element={<TopPage />} />
+            <Route path="/remote" element={<RemotePage />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>

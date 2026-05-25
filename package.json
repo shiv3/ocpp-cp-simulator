@@ -3,6 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "cp-sim": "src/cli/main.ts"
+  },
+  "files": [
+    "src/cli",
+    "src/cp",
+    "src/utils/scenarioTemplates.ts"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,6 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
+    "postinstall": "node -e \"try{require('fs').chmodSync('src/cli/main.ts',0o755)}catch(e){}\"",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

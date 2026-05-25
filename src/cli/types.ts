@@ -1,6 +1,6 @@
 export interface CLIOptions {
   readonly wsUrl: string;
-  readonly cpId: string;
+  readonly cpId: string | null;
   readonly connectors: number;
   readonly jsonMode: boolean;
   readonly daemon: boolean;
@@ -16,6 +16,23 @@ export interface CLIOptions {
   readonly scenario: string | null;
   readonly scenarioTemplate: string | null;
   readonly scenarioConnector: number;
+  readonly httpPort: number | null;
+  readonly httpHost: string;
+  readonly unixSocket: string | null;
+  readonly httpUrl: string | null;
+  readonly allEvents: boolean;
+}
+
+export interface ChargePointInitOptions {
+  readonly cpId: string;
+  readonly wsUrl: string;
+  readonly connectors: number;
+  readonly vendor: string;
+  readonly model: string;
+  readonly basicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
 }
 
 export interface JsonCommand {

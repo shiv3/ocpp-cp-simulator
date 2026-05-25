@@ -19,6 +19,25 @@ bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
 npm run cli -- --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
+### Installing as the `cp-sim` command
+
+The package exposes a `cp-sim` bin so it can be invoked from anywhere once installed:
+
+```bash
+# From a checkout
+bun link
+bun link ocpp-cp-simulator    # in any consumer project
+
+# Or globally from git
+bun install -g github:shiv3/ocpp-cp-simulator
+
+# Then use cp-sim anywhere
+cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
+cp-sim --daemon --http-port 9700
+```
+
+All flags described below apply to both `cp-sim ...` and `bun src/cli/main.ts ...`.
+
 ## Operation Modes
 
 ### 1. Interactive REPL
@@ -130,44 +149,66 @@ Asynchronous events are emitted as JSON lines without `ok` field:
 | `run_scenario_file`       | `connector`, `file`               | Load and run scenario from file    |
 | `run_scenario_template`   | `connector`, `templateId`         | Load and run a template            |
 
-### 3. Daemon Mode
+### 3. Daemon / Server Mode
 
-Long-running background process that exposes a Unix domain socket for control. Ideal for integration testing and multi-process setups.
+Long-running process that exposes an **HTTP + WebSocket** API over a Unix domain socket and/or TCP port. Replaces the legacy line-delimited JSON protocol. See [docs/server.md](server.md) for the full HTTP API reference.
 
 ```bash
-# Start daemon
+# Start daemon (Unix socket only, default /tmp/ocpp-server.sock)
 bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon &
 
-# Send command to running daemon
+# Start daemon with both Unix socket and TCP
+bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon --http-port 9700 &
+
+# Start foreground HTTP server (no Unix socket by default)
+bun src/cli/main.ts --http-port 9700
+
+# Send command to running server (Unix socket by default)
 bun src/cli/main.ts --cp-id CP001 --send '{"command": "status"}'
 
-# Subscribe to real-time events
-bun src/cli/main.ts --cp-id CP001 --events
+# Send command via TCP HTTP
+bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 --send '{"command": "status"}'
 
-# Shut down daemon
-bun src/cli/main.ts --cp-id CP001 --send '{"command": "shutdown"}'
+# Subscribe to real-time events (TCP only)
+bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 --events
+
+# Subscribe to all CPs' events
+bun src/cli/main.ts --http-url http://127.0.0.1:9700 --events --all
+
+# Shut down the server
+bun src/cli/main.ts --stop
 ```
 
-#### Daemon Files
+#### Server Files
 
-| File                     | Description                      |
-| ------------------------ | -------------------------------- |
-| `/tmp/ocpp-<cpId>.sock`  | Unix domain socket for IPC       |
-| `/tmp/ocpp-<cpId>.pid`   | PID file for duplicate detection |
-| `/tmp/ocpp-<cpId>.jsonl` | Event log (JSON Lines)           |
+| File                    | Description                               |
+| ----------------------- | ----------------------------------------- |
+| `/tmp/ocpp-server.sock` | Unix domain socket (HTTP/WS, daemon)      |
+| `/tmp/ocpp-server.pid`  | PID file for duplicate detection (daemon) |
 
-#### Daemon-only Commands
+Use `--unix-socket /custom/path` to change the path. Use `--unix-socket none` to disable Unix socket entirely (TCP-only daemon).
 
-| Command     | Description                           |
-| ----------- | ------------------------------------- |
-| `subscribe` | Stream real-time events to the client |
-| `shutdown`  | Gracefully shut down the daemon       |
+#### Multiple Charge Points in One Process
 
-All JSON mode commands are also available via the daemon socket.
+`--cp-id` becomes optional in server mode. Additional CPs can be added at runtime via `POST /v1/cp`:
+
+```bash
+# Start with no initial CP
+bun src/cli/main.ts --daemon --http-port 9700 &
+
+# Create CPs dynamically
+curl -X POST http://127.0.0.1:9700/v1/cp \
+  -H 'content-type: application/json' \
+  -d '{"cpId":"CP001","wsUrl":"ws://localhost:9000/ocpp","autoConnect":true}'
+
+curl -X POST http://127.0.0.1:9700/v1/cp \
+  -H 'content-type: application/json' \
+  -d '{"cpId":"CP002","wsUrl":"ws://localhost:9000/ocpp","autoConnect":true}'
+```
 
 #### Startup Scenarios
 
-Run a scenario automatically when the daemon starts:
+Run a scenario automatically when bootstrapping a CP at startup:
 
 ```bash
 # Built-in template
@@ -178,6 +219,8 @@ bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon \
 bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon \
   --scenario /path/to/scenario.json --scenario-connector 1
 ```
+
+> **Breaking change (vs. earlier versions):** the legacy line-delimited JSON protocol on `/tmp/ocpp-<cpId>.sock` has been removed. The daemon now speaks HTTP/WebSocket. If you have external clients that wrote raw JSON to the old socket, migrate them to `POST /v1/cp/<cpId>/command` (HTTP can run over the Unix socket as well).
 
 ## Events
 
@@ -200,21 +243,28 @@ Events are emitted in all modes (REPL shows formatted text, JSON/daemon emit JSO
 
 ## CLI Options
 
-| Option                     | Required | Default      | Description                         |
-| -------------------------- | -------- | ------------ | ----------------------------------- |
-| `--cp-id <id>`             | Yes      | -            | Charge Point ID                     |
-| `--ws-url <url>`           | Yes\*    | -            | WebSocket URL of CSMS               |
-| `--connectors <n>`         | No       | `1`          | Number of connectors                |
-| `--json`                   | No       | -            | JSON Lines mode                     |
-| `--daemon`                 | No       | -            | Daemon mode                         |
-| `--send <json>`            | No       | -            | Send command to running daemon      |
-| `--events`                 | No       | -            | Subscribe to daemon events          |
-| `--basic-auth-user <u>`    | No       | -            | Basic auth username                 |
-| `--basic-auth-pass <p>`    | No       | -            | Basic auth password                 |
-| `--vendor <vendor>`        | No       | `CLI-Vendor` | Charge point vendor                 |
-| `--model <model>`          | No       | `CLI-Model`  | Charge point model                  |
-| `--scenario <file>`        | No       | -            | Startup scenario JSON file (daemon) |
-| `--scenario-template <id>` | No       | -            | Startup scenario template (daemon)  |
-| `--scenario-connector <n>` | No       | `1`          | Connector for startup scenario      |
+| Option                     | Required | Default                 | Description                                   |
+| -------------------------- | -------- | ----------------------- | --------------------------------------------- |
+| `--cp-id <id>`             | Yes\*    | -                       | Charge Point ID                               |
+| `--ws-url <url>`           | Yes\*\*  | -                       | WebSocket URL of CSMS                         |
+| `--connectors <n>`         | No       | `1`                     | Number of connectors                          |
+| `--json`                   | No       | -                       | JSON Lines mode                               |
+| `--daemon`                 | No       | -                       | Server daemon (Unix socket ON by default)     |
+| `--http-port <port>`       | No       | -                       | Enable HTTP/WebSocket on this TCP port        |
+| `--http-host <addr>`       | No       | `127.0.0.1`             | Bind address for HTTP                         |
+| `--unix-socket <path>`     | No       | `/tmp/ocpp-server.sock` | Unix socket path; `none` to disable           |
+| `--http-url <url>`         | No       | -                       | Client target: TCP HTTP base URL              |
+| `--send <json>`            | No       | -                       | Send command to running server                |
+| `--events`                 | No       | -                       | Subscribe to events (TCP only)                |
+| `--all`                    | No       | -                       | With `--events`, subscribe to all CPs' events |
+| `--stop`                   | No       | -                       | Shut down the running server                  |
+| `--basic-auth-user <u>`    | No       | -                       | Basic auth username                           |
+| `--basic-auth-pass <p>`    | No       | -                       | Basic auth password                           |
+| `--vendor <vendor>`        | No       | `CLI-Vendor`            | Charge point vendor                           |
+| `--model <model>`          | No       | `CLI-Model`             | Charge point model                            |
+| `--scenario <file>`        | No       | -                       | Startup scenario JSON file (server mode)      |
+| `--scenario-template <id>` | No       | -                       | Startup scenario template (server mode)       |
+| `--scenario-connector <n>` | No       | `1`                     | Connector for startup scenario                |
 
-\* `--ws-url` is not required when using `--send` or `--events` (client mode).
+\* `--cp-id` is **optional** in server mode (no bootstrap CP). Required for REPL/JSON and for `--send`/`--events` (without `--all`).
+\*\* `--ws-url` is required for REPL/JSON, and only when bootstrapping a CP in server mode. CPs created later via HTTP supply their own `wsUrl` in the request body.

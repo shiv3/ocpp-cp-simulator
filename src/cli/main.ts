@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import type { CLIOptions, ChargePointInitOptions } from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
@@ -208,7 +209,7 @@ function parseArgs(argv: string[]): CLIOptions {
 
 function printUsage(): void {
   process.stderr.write(`
-Usage: bun src/cli/main.ts [options]
+Usage: cp-sim [options]    (or "bun src/cli/main.ts [options]" from a checkout)
 
 Local modes (single CP, no server):
   --cp-id <id> --ws-url <url>                Interactive REPL (default)

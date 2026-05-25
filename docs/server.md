@@ -4,6 +4,8 @@ The simulator can run as a long-lived process exposing an HTTP/WebSocket API. A 
 
 The same HTTP/WS handlers are exposed over both a TCP port and a Unix domain socket, so local tools can use the Unix socket for lower-overhead IPC while remote clients use TCP.
 
+> All examples below show `bun src/cli/main.ts` for clarity when working from a checkout. If you've installed the package (`bun link` or `bun install -g`), `cp-sim` is interchangeable everywhere.
+
 ## Starting the Server
 
 ```bash

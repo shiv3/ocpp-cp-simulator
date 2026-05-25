@@ -19,6 +19,25 @@ bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
 npm run cli -- --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
+### Installing as the `cp-sim` command
+
+The package exposes a `cp-sim` bin so it can be invoked from anywhere once installed:
+
+```bash
+# From a checkout
+bun link
+bun link ocpp-cp-simulator    # in any consumer project
+
+# Or globally from git
+bun install -g github:shiv3/ocpp-cp-simulator
+
+# Then use cp-sim anywhere
+cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
+cp-sim --daemon --http-port 9700
+```
+
+All flags described below apply to both `cp-sim ...` and `bun src/cli/main.ts ...`.
+
 ## Operation Modes
 
 ### 1. Interactive REPL

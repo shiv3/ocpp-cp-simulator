@@ -18,8 +18,26 @@ npm install
 # Browser UI (dev server)
 npm run dev
 
-# CLI mode (requires Bun)
+# CLI / Server mode (requires Bun)
 bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
+```
+
+### Install as a global command (`cp-sim`)
+
+```bash
+# From a checkout
+bun link              # in this repo
+bun link ocpp-cp-simulator   # in any other project
+
+# Or directly from git
+bun install -g github:shiv3/ocpp-cp-simulator
+```
+
+Then run from anywhere:
+
+```bash
+cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
+cp-sim --daemon --http-port 9700        # server mode
 ```
 
 ## Doc

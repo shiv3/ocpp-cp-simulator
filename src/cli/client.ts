@@ -1,176 +1,204 @@
-import * as net from "net";
-import { getSocketPath } from "./daemon";
+import * as http from "http";
+import { DEFAULT_UNIX_SOCKET } from "./server/startServer";
 
-const CLIENT_TIMEOUT_MS = 10_000;
+export type ClientTarget =
+  | { readonly kind: "tcp"; readonly host: string; readonly port: number }
+  | { readonly kind: "unix"; readonly path: string };
 
-function formatSocketError(
-  err: NodeJS.ErrnoException,
-  cpId: string,
-  socketPath: string,
-): string {
-  if (err.code === "ENOENT") {
-    return `No daemon running for ${cpId} (socket not found: ${socketPath})`;
+export interface ClientLocation {
+  readonly httpUrl: string | null;
+  readonly unixSocket: string | null;
+}
+
+export function resolveTarget(loc: ClientLocation): ClientTarget {
+  if (loc.httpUrl) {
+    const url = new URL(loc.httpUrl);
+    const port = url.port
+      ? parseInt(url.port, 10)
+      : url.protocol === "https:"
+        ? 443
+        : 80;
+    return { kind: "tcp", host: url.hostname, port };
   }
-  if (err.code === "ECONNREFUSED") {
-    return `Daemon for ${cpId} is not accepting connections`;
+  if (loc.unixSocket) {
+    return { kind: "unix", path: loc.unixSocket };
+  }
+  return { kind: "unix", path: DEFAULT_UNIX_SOCKET };
+}
+
+interface HttpResult {
+  readonly status: number;
+  readonly body: string;
+}
+
+function httpRequest(
+  target: ClientTarget,
+  method: string,
+  path: string,
+  body: string | null,
+): Promise<HttpResult> {
+  const headers: Record<string, string> = body
+    ? {
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(body)),
+      }
+    : {};
+
+  const reqOpts: http.RequestOptions =
+    target.kind === "tcp"
+      ? { host: target.host, port: target.port, path, method, headers }
+      : {
+          socketPath: target.path,
+          path,
+          method,
+          headers: { ...headers, host: "localhost" },
+        };
+
+  return new Promise<HttpResult>((resolve, reject) => {
+    const req = http.request(reqOpts, (res) => {
+      let buf = "";
+      res.on("data", (chunk) => {
+        buf += chunk.toString();
+      });
+      res.on("end", () => {
+        resolve({ status: res.statusCode ?? 0, body: buf });
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+function formatHttpError(
+  err: NodeJS.ErrnoException,
+  target: ClientTarget,
+): string {
+  if (target.kind === "unix") {
+    if (err.code === "ENOENT") {
+      return `No server running (socket not found: ${target.path})`;
+    }
+    if (err.code === "ECONNREFUSED") {
+      return `Server is not accepting connections at ${target.path}`;
+    }
+  } else {
+    if (err.code === "ECONNREFUSED") {
+      return `Cannot connect to ${target.host}:${target.port}`;
+    }
   }
   return err.message;
 }
 
 export async function sendCommand(
+  loc: ClientLocation,
   cpId: string,
   jsonStr: string,
 ): Promise<void> {
-  const socketPath = getSocketPath(cpId);
+  const target = resolveTarget(loc);
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonStr);
+    JSON.parse(jsonStr);
   } catch {
     process.stderr.write("Error: --send value must be valid JSON\n");
     process.exit(1);
   }
 
-  const line = JSON.stringify(parsed);
-
-  return new Promise<void>((resolve, reject) => {
-    const conn = net.connect(socketPath);
-
-    conn.setTimeout(CLIENT_TIMEOUT_MS);
-
-    let response = "";
-
-    conn.on("connect", () => {
-      conn.write(`${line}\n`);
-    });
-
-    conn.on("data", (chunk) => {
-      response += chunk.toString();
-    });
-
-    conn.on("end", () => {
-      const trimmed = response.trim();
-      if (trimmed) {
-        process.stdout.write(`${trimmed}\n`);
-      }
-      resolve();
-    });
-
-    conn.on("timeout", () => {
-      process.stderr.write("Error: Connection timed out\n");
-      conn.destroy();
-      reject(new Error("Connection timed out"));
-    });
-
-    conn.on("error", (err) => {
-      process.stderr.write(
-        `Error: ${formatSocketError(err as NodeJS.ErrnoException, cpId, socketPath)}\n`,
-      );
-      reject(err);
-    });
-  });
+  try {
+    const res = await httpRequest(
+      target,
+      "POST",
+      `/v1/cp/${encodeURIComponent(cpId)}/command`,
+      jsonStr,
+    );
+    if (res.body.trim()) {
+      process.stdout.write(`${res.body.trim()}\n`);
+    }
+    if (res.status >= 400) {
+      process.exitCode = 1;
+    }
+  } catch (err) {
+    process.stderr.write(
+      `Error: ${formatHttpError(err as NodeJS.ErrnoException, target)}\n`,
+    );
+    process.exitCode = 1;
+  }
 }
 
-export async function stopDaemon(cpId: string): Promise<void> {
-  const socketPath = getSocketPath(cpId);
-  const line = JSON.stringify({ command: "shutdown" });
+export async function stopDaemon(loc: ClientLocation): Promise<void> {
+  const target = resolveTarget(loc);
 
-  return new Promise<void>((resolve, reject) => {
-    const conn = net.connect(socketPath);
-
-    conn.setTimeout(CLIENT_TIMEOUT_MS);
-
-    let response = "";
-
-    conn.on("connect", () => {
-      conn.write(`${line}\n`);
-    });
-
-    conn.on("data", (chunk) => {
-      response += chunk.toString();
-    });
-
-    conn.on("end", () => {
-      const trimmed = response.trim();
-      if (trimmed) {
-        try {
-          const parsed = JSON.parse(trimmed) as { ok: boolean };
-          if (parsed.ok) {
-            process.stdout.write(`Daemon for ${cpId} stopped.\n`);
-          } else {
-            process.stdout.write(`${trimmed}\n`);
-          }
-        } catch {
-          process.stdout.write(`${trimmed}\n`);
+  try {
+    const res = await httpRequest(target, "POST", "/v1/shutdown", null);
+    if (res.body.trim()) {
+      try {
+        const parsed = JSON.parse(res.body) as { ok?: boolean };
+        if (parsed.ok) {
+          process.stdout.write(`Server stopped.\n`);
+        } else {
+          process.stdout.write(`${res.body.trim()}\n`);
         }
+      } catch {
+        process.stdout.write(`${res.body.trim()}\n`);
       }
-      resolve();
-    });
-
-    conn.on("timeout", () => {
-      process.stderr.write("Error: Connection timed out\n");
-      conn.destroy();
-      reject(new Error("Connection timed out"));
-    });
-
-    conn.on("error", (err) => {
-      const errWithCode = err as NodeJS.ErrnoException;
-      if (errWithCode.code === "ENOENT") {
-        process.stderr.write(`No daemon running for ${cpId}\n`);
-        resolve();
-        return;
-      }
-      process.stderr.write(
-        `Error: ${formatSocketError(errWithCode, cpId, socketPath)}\n`,
-      );
-      reject(err);
-    });
-  });
+    }
+  } catch (err) {
+    const errWithCode = err as NodeJS.ErrnoException;
+    if (errWithCode.code === "ENOENT") {
+      process.stderr.write(`No server running\n`);
+      return;
+    }
+    process.stderr.write(`Error: ${formatHttpError(errWithCode, target)}\n`);
+    process.exitCode = 1;
+  }
 }
 
-export async function subscribeEvents(cpId: string): Promise<void> {
-  const socketPath = getSocketPath(cpId);
+export async function subscribeEvents(
+  loc: ClientLocation,
+  cpId: string | null,
+): Promise<void> {
+  if (!loc.httpUrl) {
+    process.stderr.write(
+      "Error: --events requires --http-url (WebSocket over Unix socket is not supported)\n",
+    );
+    process.exit(1);
+  }
 
-  return new Promise<void>((resolve, reject) => {
-    const conn = net.connect(socketPath);
-    let buffer = "";
+  const wsBase = loc.httpUrl.replace(/^http/, "ws").replace(/\/+$/, "");
+  const path = cpId
+    ? `/v1/cp/${encodeURIComponent(cpId)}/events`
+    : "/v1/events";
+  const wsUrl = `${wsBase}${path}`;
 
-    conn.on("connect", () => {
-      conn.write(`${JSON.stringify({ command: "subscribe" })}\n`);
-    });
+  await new Promise<void>((resolve) => {
+    const ws = new WebSocket(wsUrl);
+    let opened = false;
 
-    conn.on("data", (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed) {
-          process.stdout.write(`${trimmed}\n`);
-        }
+    ws.onopen = () => {
+      opened = true;
+      process.stderr.write(`[client] Subscribed to ${wsUrl}\n`);
+    };
+    ws.onmessage = (e: MessageEvent) => {
+      const data = typeof e.data === "string" ? e.data : String(e.data);
+      process.stdout.write(`${data}\n`);
+    };
+    ws.onerror = () => {
+      if (!opened) {
+        process.stderr.write(`Error: WebSocket connection error (${wsUrl})\n`);
+        process.exitCode = 1;
       }
-    });
-
-    conn.on("end", () => {
-      if (buffer.trim()) {
-        process.stdout.write(`${buffer.trim()}\n`);
-      }
+    };
+    ws.onclose = () => {
       resolve();
-    });
+    };
 
-    conn.on("error", (err) => {
-      process.stderr.write(
-        `Error: ${formatSocketError(err as NodeJS.ErrnoException, cpId, socketPath)}\n`,
-      );
-      reject(err);
-    });
-
-    process.on("SIGINT", () => {
-      conn.end();
-    });
-
-    process.on("SIGTERM", () => {
-      conn.end();
-    });
+    const close = () => {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+    };
+    process.on("SIGINT", close);
+    process.on("SIGTERM", close);
   });
 }

@@ -2,11 +2,12 @@
 
 OCPP 1.6J charge point simulator with three interfaces: a browser-based UI, a legacy web version (v1), and a headless CLI for automation.
 
-| Interface     | Description                                         | Docs                               |
-| ------------- | --------------------------------------------------- | ---------------------------------- |
-| **Browser**   | React + Tailwind web app / Tauri desktop app        | [docs/browser.md](docs/browser.md) |
-| **Legacy v1** | Original single-page web UI                         | [docs/v1.md](docs/v1.md)           |
-| **CLI**       | Headless mode for scripting, CI, and AI integration | [docs/cli.md](docs/cli.md)         |
+| Interface     | Description                                              | Docs                               |
+| ------------- | -------------------------------------------------------- | ---------------------------------- |
+| **Browser**   | React + Tailwind web app / Tauri desktop app             | [docs/browser.md](docs/browser.md) |
+| **Legacy v1** | Original single-page web UI                              | [docs/v1.md](docs/v1.md)           |
+| **CLI**       | Headless mode for scripting, CI, and AI integration      | [docs/cli.md](docs/cli.md)         |
+| **Server**    | Long-running HTTP/WebSocket server, multi-CP per process | [docs/server.md](docs/server.md)   |
 
 ## Quick Start
 

@@ -2,7 +2,12 @@ import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type { BootNotification } from "../cp/domain/types/OcppTypes";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
-import type { CLIOptions, ChargePointStatus, ConnectorStatus } from "./types";
+import type {
+  CLIOptions,
+  ChargePointInitOptions,
+  ChargePointStatus,
+  ConnectorStatus,
+} from "./types";
 import { ScenarioExecutor } from "../cp/application/scenario/ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import type {
@@ -103,10 +108,10 @@ export class CLIChargePointService {
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
 
-  constructor(options: CLIOptions) {
+  constructor(init: ChargePointInitOptions) {
     const bootNotification: BootNotification = {
-      chargePointVendor: options.vendor,
-      chargePointModel: options.model,
+      chargePointVendor: init.vendor,
+      chargePointModel: init.model,
       chargePointSerialNumber: "CLI-001",
       chargeBoxSerialNumber: "CLI-001",
       firmwareVersion: "1.0.0",
@@ -119,19 +124,33 @@ export class CLIChargePointService {
     const autoMeterValue: AutoMeterValueSetting | null = null;
 
     // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present
-    const baseUrl = buildBaseUrl(options.wsUrl, options.cpId);
+    const baseUrl = buildBaseUrl(init.wsUrl, init.cpId);
 
     this._chargePoint = new ChargePoint(
-      options.cpId,
+      init.cpId,
       bootNotification,
-      options.connectors,
+      init.connectors,
       baseUrl,
-      options.basicAuth,
+      init.basicAuth,
       autoMeterValue,
     );
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
+  }
+
+  static fromOptions(options: CLIOptions): CLIChargePointService {
+    if (!options.cpId) {
+      throw new Error("cpId is required");
+    }
+    return new CLIChargePointService({
+      cpId: options.cpId,
+      wsUrl: options.wsUrl,
+      connectors: options.connectors,
+      vendor: options.vendor,
+      model: options.model,
+      basicAuth: options.basicAuth,
+    });
   }
 
   onEvent(handler: EventHandler): () => void {
@@ -261,9 +280,7 @@ export class CLIChargePointService {
     return definition.id;
   }
 
-  listScenarios(
-    connectorId: number,
-  ): ReadonlyArray<{
+  listScenarios(connectorId: number): ReadonlyArray<{
     readonly scenarioId: string;
     readonly name: string;
     readonly active: boolean;

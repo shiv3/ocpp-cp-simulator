@@ -32,6 +32,7 @@ function parseArgs(argv: string[]): CLIOptions {
   let unixSocketExplicit = false;
   let httpUrl: string | null = null;
   let allEvents = false;
+  const corsOrigins: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -113,6 +114,16 @@ function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--all":
         allEvents = true;
+        break;
+      case "--cors-origin":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --cors-origin requires a value (refusing to fall back to open CORS)\n",
+          );
+          process.exit(1);
+        }
+        corsOrigins.push(next);
+        i++;
         break;
       case "--help":
       case "-h":
@@ -204,6 +215,7 @@ function parseArgs(argv: string[]): CLIOptions {
     unixSocket,
     httpUrl,
     allEvents,
+    corsOrigins,
   };
 }
 
@@ -247,6 +259,7 @@ Options:
   --unix-socket <path|none> Unix socket path; "none" disables it
   --http-url <url>         Client target: TCP HTTP base URL
   --all                    Use the global event stream (--events only)
+  --cors-origin <origin>   Restrict CORS to this origin (repeatable). Default: any origin (*)
   -h, --help               Show this help
 
 HTTP API (see docs/server.md):
@@ -318,6 +331,10 @@ async function main(): Promise<void> {
             scenarioConnector: options.scenarioConnector,
           }
         : null,
+      cors:
+        options.corsOrigins.length === 0
+          ? { kind: "any" }
+          : { kind: "allowlist", origins: options.corsOrigins },
     });
     return;
   }

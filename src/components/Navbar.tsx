@@ -2,24 +2,52 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle.tsx";
+import { useDataContext } from "../data/providers/DataProvider";
 
 const Navbar: React.FC = () => {
+  const { mode } = useDataContext();
   return (
     <nav className="bg-blue-600 dark:bg-gray-800 text-white shadow-lg transition-colors">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          <Link className="text-xl font-bold hover:text-blue-200 dark:hover:text-blue-400 transition-colors" to="/">
+          <Link
+            className="text-xl font-bold hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
+            to="/"
+          >
             OCPP ChargePoint Simulator
+            <span
+              className={`ml-2 text-xs px-2 py-0.5 rounded ${
+                mode === "remote"
+                  ? "bg-emerald-500/30 text-emerald-100"
+                  : "bg-white/20"
+              }`}
+            >
+              {mode}
+            </span>
           </Link>
           <div className="flex items-center space-x-4">
             <ul className="flex space-x-4">
               <li>
-                <Link className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors" to="/">
+                <Link
+                  className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
+                  to="/"
+                >
                   ChargePoint
                 </Link>
               </li>
               <li>
-                <Link className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors" to="/settings">
+                <Link
+                  className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
+                  to="/remote"
+                >
+                  Remote
+                </Link>
+              </li>
+              <li>
+                <Link
+                  className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
+                  to="/settings"
+                >
                   Settings
                 </Link>
               </li>

@@ -8,10 +8,13 @@ import ChargePointConfigModal, {
 import { Plus, Settings, Trash2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 import { useConfig } from "../data/hooks/useConfig";
 import { useChargePoints } from "../data/hooks/useChargePoints";
+import { useDataContext } from "../data/providers/DataProvider";
 
 const TopPage: React.FC = () => {
+  const { mode } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
   const [tagIDs, setTagIDs] = useState<string[]>([]);
   const [chargePointConfigs, setChargePointConfigs] = useState<
@@ -169,6 +172,15 @@ const TopPage: React.FC = () => {
 
   return (
     <div className="px-8 pt-6 pb-8 mb-4">
+      {mode === "remote" && (
+        <div className="mb-4 p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100">
+          Remote mode is active. The local ChargePoint UI below is paused.{" "}
+          <Link to="/remote" className="underline font-semibold">
+            Open the Remote panel
+          </Link>{" "}
+          to operate the server.
+        </div>
+      )}
       <ExperimentalView
         cps={chargePoints}
         tagIDs={tagIDs}

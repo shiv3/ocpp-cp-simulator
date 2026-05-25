@@ -168,9 +168,25 @@ curl --unix-socket /tmp/ocpp-server.sock http://localhost/v1/cp
 
 The bundled CLI client uses Node's `http.request({ socketPath, ... })` under the hood. `--send` and `--stop` prefer the Unix socket; `--events` always uses TCP.
 
+## CORS
+
+The server returns `Access-Control-Allow-Origin: *` by default so the bundled browser UI can connect from any origin. **The control API is unauthenticated**, so combined with `*` any web page that loads in a browser pointed at the server can call `/v1/cp/:cpId/command` and even `/v1/shutdown`.
+
+For anything beyond localhost development, restrict CORS to the origins of your UI:
+
+```bash
+cp-sim --daemon --http-port 9700 \
+  --cors-origin http://localhost:5173 \
+  --cors-origin https://ocpp-ui.example.com
+```
+
+`--cors-origin` is repeatable. With one or more values, only matching `Origin` headers receive an `Access-Control-Allow-Origin` reply, so browser requests from other origins are blocked.
+
 ## Security
 
 This release ships **without authentication**. Run it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel, …) or keep it on a loopback / Unix socket if exposed beyond your machine. The default bind address is `127.0.0.1`.
+
+When exposing the TCP port to a browser, also pair `--cors-origin` with a tight origin allowlist (see above) so a random page in another tab cannot drive the simulator.
 
 A middleware hook is reserved at the top of the `fetch` handler in `src/cli/server/httpServer.ts` for adding bearer tokens / mTLS later without changing route logic.
 

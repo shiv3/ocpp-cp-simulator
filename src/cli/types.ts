@@ -21,6 +21,7 @@ export interface CLIOptions {
   readonly unixSocket: string | null;
   readonly httpUrl: string | null;
   readonly allEvents: boolean;
+  readonly corsOrigins: ReadonlyArray<string>;
 }
 
 export interface ChargePointInitOptions {

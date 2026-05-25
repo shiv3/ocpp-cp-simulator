@@ -3,6 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "cp-sim": "src/cli/main.ts"
+  },
+  "files": [
+    "src/cli",
+    "src/cp",
+    "src/utils/scenarioTemplates.ts"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -147,7 +147,9 @@ export async function handleJsonCommand(
     }
 
     case "update_connector_status": {
-      const connectorId = requirePositiveInt(params, "connector");
+      // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
+      // any non-negative integer here, not just positive ones.
+      const connectorId = requireNonNegativeInt(params, "connector");
       const status = requireString(params, "status");
       if (!VALID_STATUSES.has(status as OCPPStatus)) {
         throw new Error(
@@ -314,6 +316,19 @@ export function requirePositiveInt(
   if (typeof val !== "number" || !Number.isInteger(val) || val < 1) {
     throw new Error(
       `Missing or invalid parameter: ${key} (expected positive integer)`,
+    );
+  }
+  return val;
+}
+
+export function requireNonNegativeInt(
+  params: Record<string, unknown>,
+  key: string,
+): number {
+  const val = params[key];
+  if (typeof val !== "number" || !Number.isInteger(val) || val < 0) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected non-negative integer)`,
     );
   }
   return val;

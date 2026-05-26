@@ -66,13 +66,18 @@ const TopPage: React.FC = () => {
   );
 
   useEffect(() => {
+    // The local config drives the local tag list; in remote mode we keep
+    // whatever the user persisted via the Add CP modal so Authorize / Start
+    // Transaction still have a non-empty tag id after reload.
     if (isLoading || !config || !config.Experimental) {
-      setTagIDs([]);
+      if (mode === "local") setTagIDs([]);
       setChargePointConfigs([]);
       return;
     }
 
-    setTagIDs(config.Experimental.TagIDs ?? []);
+    if (mode === "local") {
+      setTagIDs(config.Experimental.TagIDs ?? []);
+    }
 
     const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map(
       (cp) => ({
@@ -103,7 +108,7 @@ const TopPage: React.FC = () => {
     );
     setChargePointConfigs(configs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configKey, isLoading]);
+  }, [configKey, isLoading, mode]);
 
   const handleAddChargePoint = () => {
     setEditingIndex(null);

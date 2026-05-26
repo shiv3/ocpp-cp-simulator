@@ -277,6 +277,28 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     );
   }, [executionContext, nodeProgress, setNodes]);
 
+  // In remote mode the in-browser executor is never set, so executionState
+  // would stay "idle" forever and Force Step would keep re-running the
+  // scenario. Sync executionState from scenario_* events instead.
+  useEffect(() => {
+    if (localCp) return;
+    const unsub = chargePointService.subscribe(cpId, (event) => {
+      if (
+        event.type === "scenario-started" &&
+        event.scenarioId === scenario.id
+      ) {
+        setExecutionState("running");
+      } else if (
+        (event.type === "scenario-completed" ||
+          event.type === "scenario-error") &&
+        event.scenarioId === scenario.id
+      ) {
+        setExecutionState("idle");
+      }
+    });
+    return () => unsub();
+  }, [localCp, chargePointService, cpId, scenario.id]);
+
   // Subscribe to connector status changes via the service event bus.
   useEffect(() => {
     if (!connectorId) return;
@@ -657,6 +679,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     // - Remote: just needs a connectorId; handleStart drives the service.
     if (connectorId == null) return;
     if (localCp && !localCp.getConnector(connectorId)) return;
+    // Wait until the connector reports Available — handleStart bails
+    // otherwise. If we consume the auto-start key before the first real
+    // status arrives, the effect won't retry once status changes.
+    if (connectorStatus !== OCPPStatus.Available) return;
 
     const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
     if (lastAutoStartKeyRef.current === autoStartKey) {
@@ -686,6 +712,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEnabled,
     executionState,
     connectorId,
+    connectorStatus,
     localCp,
     handleStart,
   ]);

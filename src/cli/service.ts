@@ -171,6 +171,7 @@ export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _handlers: Set<EventHandler> = new Set();
   private _unsubscribes: Array<() => void> = [];
+  private _connectorUnsubscribes: Array<() => void> = [];
   private readonly _scenarios: Map<
     string,
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
@@ -557,6 +558,7 @@ export class CLIChargePointService {
     this._executors.clear();
     this._scenarios.clear();
     this._chargePoint.disconnect();
+    this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {
       unsub();
     }
@@ -659,6 +661,18 @@ export class CLIChargePointService {
     this.attachConnectorEventForwarders();
     this.attachStateHistoryForwarder();
 
+    // ChargePoint.disconnect() calls connector.cleanup() which removes
+    // every listener from each Connector emitter. Re-attach forwarders
+    // whenever the CP reconnects so remote subscribers keep getting
+    // meter / soc / settings / transactionId-change events across
+    // reconnects.
+    this._unsubscribes.push(
+      this._chargePoint.events.on("connected", () => {
+        this.detachConnectorEventForwarders();
+        this.attachConnectorEventForwarders();
+      }),
+    );
+
     this._unsubscribes.push(
       this._chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
         this.emit({ event: "connector_removed", data: { connectorId } });
@@ -668,7 +682,7 @@ export class CLIChargePointService {
 
   private attachConnectorEventForwarders(): void {
     this._chargePoint.connectors.forEach((connector, connectorId) => {
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("availabilityChange", ({ availability }) => {
           this.emit({
             event: "connector_availability",
@@ -679,7 +693,7 @@ export class CLIChargePointService {
       // Manual meter changes and the auto-meter scheduler emit on the
       // connector's event bus rather than the charge-point's. Forward
       // those so remote subscribers see meter updates in real time.
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("meterValueChange", ({ meterValue }) => {
           this.emit({
             event: "meter_value",
@@ -692,7 +706,7 @@ export class CLIChargePointService {
       // id. Re-emit transaction_started so remote subscribers see the
       // accepted id. Also emit transaction_stopped when it clears (e.g.
       // CSMS-driven stop), so remote clients see the change.
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", ({ transactionId }) => {
           if (transactionId == null) {
             this.emit({
@@ -709,17 +723,17 @@ export class CLIChargePointService {
           });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("socChange", ({ soc }) => {
           this.emit({ event: "connector_soc", data: { connectorId, soc } });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("modeChange", ({ mode }) => {
           this.emit({ event: "connector_mode", data: { connectorId, mode } });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("autoResetToAvailableChange", ({ enabled }) => {
           this.emit({
             event: "connector_auto_reset",
@@ -727,7 +741,7 @@ export class CLIChargePointService {
           });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("autoMeterValueChange", ({ config }) => {
           this.emit({
             event: "connector_auto_meter",
@@ -735,7 +749,7 @@ export class CLIChargePointService {
           });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("evSettingsChange", ({ settings }) => {
           this.emit({
             event: "connector_ev_settings",
@@ -743,7 +757,7 @@ export class CLIChargePointService {
           });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("chargingProfileChange", ({ profile }) => {
           this.emit({
             event: "connector_charging_profile",
@@ -751,7 +765,7 @@ export class CLIChargePointService {
           });
         }),
       );
-      this._unsubscribes.push(
+      this._connectorUnsubscribes.push(
         connector.events.on("chargingProfilesChange", ({ profiles }) => {
           this.emit({
             event: "connector_charging_profiles",
@@ -760,6 +774,17 @@ export class CLIChargePointService {
         }),
       );
     });
+  }
+
+  private detachConnectorEventForwarders(): void {
+    for (const unsub of this._connectorUnsubscribes) {
+      try {
+        unsub();
+      } catch {
+        // ignore
+      }
+    }
+    this._connectorUnsubscribes = [];
   }
 
   private attachStateHistoryForwarder(): void {

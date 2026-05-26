@@ -580,12 +580,32 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     if (executionState === "idle") {
       void handleStart("step");
       setTimeout(() => {
-        executorRef.current?.forceStep();
+        if (localCp) {
+          executorRef.current?.forceStep();
+        } else if (connectorId != null) {
+          void chargePointService
+            .stepScenario(cpId, connectorId, scenario.id, true)
+            .catch((err) => console.error("forceStep (remote) failed", err));
+        }
       }, 0);
       return;
     }
-    executorRef.current?.forceStep();
-  }, [executionState, handleStart]);
+    if (localCp) {
+      executorRef.current?.forceStep();
+    } else if (connectorId != null) {
+      void chargePointService
+        .stepScenario(cpId, connectorId, scenario.id, true)
+        .catch((err) => console.error("forceStep (remote) failed", err));
+    }
+  }, [
+    executionState,
+    handleStart,
+    localCp,
+    connectorId,
+    chargePointService,
+    cpId,
+    scenario.id,
+  ]);
 
   const handleForceStop = useCallback(() => {
     // Stop both in-process and remote executors. In local mode the executor
@@ -632,10 +652,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       return;
     }
 
-    // Auto-start only applies when we can drive an in-process executor (local mode).
-    const connector =
-      localCp && connectorId ? localCp.getConnector(connectorId) : null;
-    if (!connector) return;
+    // Auto-start works for both modes:
+    // - Local: requires a real connector so the in-browser executor can find it.
+    // - Remote: just needs a connectorId; handleStart drives the service.
+    if (connectorId == null) return;
+    if (localCp && !localCp.getConnector(connectorId)) return;
 
     const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
     if (lastAutoStartKeyRef.current === autoStartKey) {

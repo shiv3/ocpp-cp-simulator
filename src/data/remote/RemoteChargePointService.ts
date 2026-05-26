@@ -610,6 +610,19 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async stepScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    force = false,
+  ): Promise<void> {
+    await this.runCommand(id, "step_scenario", {
+      connector: connectorId,
+      scenarioId,
+      force,
+    });
+  }
+
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {
     await this.runCommand(id, "stop_all_scenarios", {
       connector: connectorId,

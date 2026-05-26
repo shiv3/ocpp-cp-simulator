@@ -254,6 +254,12 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void>;
+  stepScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    force?: boolean,
+  ): Promise<void>;
   stopAllScenarios(id: string, connectorId: number): Promise<void>;
   getScenarioStatus(
     id: string,

@@ -130,6 +130,7 @@ export type ChargePointEvent =
       nodeId: string;
     }
   | { type: "state-history-entry"; entry: StateHistoryEntry }
+  | { type: "connector-removed"; connectorId: number }
   | { type: "log"; entry: LogEntry }
   | { type: "connected" }
   | { type: "disconnected"; code: number; reason: string };

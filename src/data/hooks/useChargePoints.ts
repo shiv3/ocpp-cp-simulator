@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { Config } from "../../store/store";
 import { DefaultBootNotification } from "../../cp/domain/types/OcppTypes";
@@ -31,25 +31,29 @@ export function useChargePoints(
 ): UseChargePointsResult {
   const { chargePointService, mode } = useDataContext();
   const [chargePoints, setChargePoints] = useState<ChargePointSnapshot[]>([]);
-  const cancelledRef = useRef(false);
 
-  const fetchAndSet = useCallback(async () => {
+  // Manual refresh exposed to callers. Has no per-effect cancellation —
+  // intended for explicit user-driven refetches (e.g. after Add CP).
+  const refresh = useCallback(async () => {
     try {
       const list = await chargePointService.listChargePoints();
-      if (!cancelledRef.current) {
-        setChargePoints(list);
-      }
+      setChargePoints(list);
     } catch (err) {
       console.error("Failed to list charge points", err);
-      if (!cancelledRef.current) {
-        setChargePoints([]);
-      }
+      setChargePoints([]);
     }
   }, [chargePointService]);
 
   useEffect(() => {
-    cancelledRef.current = false;
+    // Per-effect cancellation: each run owns its own flag so a request in
+    // flight when the service / mode / config changes can't overwrite the
+    // new effect's state.
+    let cancelled = false;
     if (isLoading) return;
+
+    const setIfActive = (list: ChargePointSnapshot[]) => {
+      if (!cancelled) setChargePoints(list);
+    };
 
     if (mode === "local") {
       const isLocalService =
@@ -64,8 +68,10 @@ export function useChargePoints(
         if (isLocalService) {
           void chargePointService.syncLocalChargePoints([]);
         }
-        setChargePoints([]);
-        return;
+        setIfActive([]);
+        return () => {
+          cancelled = true;
+        };
       }
 
       const definitions: LocalChargePointDefinition[] =
@@ -94,27 +100,38 @@ export function useChargePoints(
               chargePointService.getChargePoint(d.id).catch(() => null),
             ),
           );
-          if (!cancelledRef.current) {
-            setChargePoints(
-              snapshots.filter((s): s is ChargePointSnapshot => s !== null),
-            );
-          }
+          setIfActive(
+            snapshots.filter((s): s is ChargePointSnapshot => s !== null),
+          );
         })
         .catch((err) => {
+          if (cancelled) return;
           console.error("Failed to sync local charge points", err);
-          setChargePoints([]);
+          setIfActive([]);
         });
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     // Remote mode: poll the list periodically.
-    void fetchAndSet();
-    const interval = setInterval(fetchAndSet, REMOTE_POLL_INTERVAL_MS);
+    const fetchOnce = async () => {
+      try {
+        const list = await chargePointService.listChargePoints();
+        setIfActive(list);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to list charge points", err);
+        setIfActive([]);
+      }
+    };
+    void fetchOnce();
+    const interval = setInterval(fetchOnce, REMOTE_POLL_INTERVAL_MS);
     return () => {
-      cancelledRef.current = true;
+      cancelled = true;
       clearInterval(interval);
     };
-  }, [chargePointService, mode, config, isLoading, fetchAndSet]);
+  }, [chargePointService, mode, config, isLoading]);
 
-  return { chargePoints, refresh: fetchAndSet };
+  return { chargePoints, refresh };
 }

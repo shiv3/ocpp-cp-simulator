@@ -502,6 +502,22 @@ export class CLIChargePointService {
     });
   }
 
+  stepScenario(connectorId: number, scenarioId: string, force = false): void {
+    const entry = this._scenarios.get(scenarioId);
+    if (!entry) throw new Error(`Scenario ${scenarioId} not found`);
+    if (entry.connectorId !== connectorId) {
+      throw new Error(
+        `Scenario ${scenarioId} is not loaded for connector ${connectorId}`,
+      );
+    }
+    const executor = this._executors.get(scenarioId);
+    if (!executor) {
+      throw new Error(`Scenario ${scenarioId} is not running`);
+    }
+    if (force) executor.forceStep();
+    else executor.step();
+  }
+
   getScenarioStatus(
     _connectorId: number,
     scenarioId: string,

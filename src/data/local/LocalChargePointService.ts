@@ -336,6 +336,29 @@ export class LocalChargePointService implements ChargePointService {
     manager?.stopScenario(scenarioId);
   }
 
+  async stepScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    force = false,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    // ScenarioManager.stepScenario calls executor.step(); for forceStep we
+    // dip into the executor directly via the manager's context.
+    if (!force) {
+      manager.stepScenario(scenarioId);
+      return;
+    }
+    const ctx = manager.getScenarioExecutionContext(scenarioId);
+    if (!ctx) throw new Error(`Scenario ${scenarioId} is not running`);
+    const executor = (
+      manager as unknown as { executors: Map<string, { forceStep(): void }> }
+    ).executors.get(scenarioId);
+    executor?.forceStep();
+  }
+
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
     const manager = connector.scenarioManager;

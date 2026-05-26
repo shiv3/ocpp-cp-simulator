@@ -673,15 +673,17 @@ export class CLIChargePointService {
     this.attachConnectorEventForwarders();
     this.attachStateHistoryForwarder();
 
-    // ChargePoint.disconnect() calls connector.cleanup() which removes
-    // every listener from each Connector emitter. Re-attach forwarders
-    // whenever the CP reconnects so remote subscribers keep getting
-    // meter / soc / settings / transactionId-change events across
-    // reconnects.
+    // ChargePoint.disconnect() calls connector.cleanup(), which clears
+    // every Connector-level listener AND the onMeterSend callback used by
+    // the auto-meter scheduler. Re-attach forwarders and re-register the
+    // meter-send callback whenever the CP reconnects so remote
+    // subscribers keep getting events, and auto-meter values keep
+    // reaching the CSMS, across reconnects.
     this._unsubscribes.push(
       this._chargePoint.events.on("connected", () => {
         this.detachConnectorEventForwarders();
         this.attachConnectorEventForwarders();
+        this.setupMeterValueCallbacks();
       }),
     );
 

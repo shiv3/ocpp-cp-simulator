@@ -1,43 +1,66 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
-import type { ConnectorSnapshot, ChargePointSnapshot, ChargePointEvent } from "../interfaces/ChargePointService";
+import type {
+  ChargePointEvent,
+  ChargePointSnapshot,
+  ConnectorSnapshot,
+} from "../interfaces/ChargePointService";
 import type { LogEntry } from "../../cp/shared/Logger";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { useDataContext } from "../providers/DataProvider";
 
 interface ChargePointViewState {
-  status: ChargePointSnapshot["status"];
+  status: OCPPStatus;
   error: string;
   connectors: Map<number, ConnectorSnapshot>;
   logs: LogEntry[];
   clearLogs: () => void;
 }
 
-const DEFAULT_STATUS = "Unavailable" as ChargePointSnapshot["status"];
+const DEFAULT_STATUS = OCPPStatus.Unavailable;
 
-export function useChargePointView(chargePoint: ChargePoint | null): ChargePointViewState {
+function emptyConnector(id: number): ConnectorSnapshot {
+  return {
+    id,
+    status: DEFAULT_STATUS,
+    availability: "Operative",
+    meterValue: 0,
+    transactionId: null,
+    soc: null,
+    mode: "manual",
+    autoResetToAvailable: true,
+    autoMeterValueConfig: null,
+    evSettings: null,
+    chargingProfile: null,
+    chargingProfiles: [],
+    transactionStartTime: null,
+    transactionTagId: null,
+    transactionBatteryCapacityKwh: null,
+  };
+}
+
+function patchConnector(
+  prev: Map<number, ConnectorSnapshot>,
+  connectorId: number,
+  patch: Partial<ConnectorSnapshot>,
+): Map<number, ConnectorSnapshot> {
+  const next = new Map(prev);
+  const existing = next.get(connectorId) ?? emptyConnector(connectorId);
+  next.set(connectorId, { ...existing, ...patch });
+  return next;
+}
+
+export function useChargePointView(cpId: string | null): ChargePointViewState {
   const { chargePointService } = useDataContext();
-  const chargePointId = chargePoint?.id ?? null;
-  const [status, setStatus] = useState<ChargePointSnapshot["status"]>(chargePoint?.status ?? DEFAULT_STATUS);
-  const [error, setError] = useState<string>(chargePoint?.error ?? "");
-  const [connectors, setConnectors] = useState<Map<number, ConnectorSnapshot>>(() => {
-    if (!chargePoint) return new Map();
-    const entries: [number, ConnectorSnapshot][] = Array.from(chargePoint.connectors.values()).map((connector) => [
-      connector.id,
-      {
-        id: connector.id,
-        status: connector.status as ConnectorSnapshot["status"],
-        availability: connector.availability,
-        meterValue: connector.meterValue,
-        transactionId: connector.transaction?.id ?? null,
-      },
-    ]);
-    return new Map(entries);
-  });
+  const [status, setStatus] = useState<OCPPStatus>(DEFAULT_STATUS);
+  const [error, setError] = useState<string>("");
+  const [connectors, setConnectors] = useState<Map<number, ConnectorSnapshot>>(
+    new Map(),
+  );
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   useEffect(() => {
-    if (!chargePointId) {
+    if (!cpId) {
       setStatus(DEFAULT_STATUS);
       setError("");
       setConnectors(new Map());
@@ -49,138 +72,132 @@ export function useChargePointView(chargePoint: ChargePoint | null): ChargePoint
     let unsubscribe: (() => void) | null = null;
 
     const applySnapshot = (snapshot: ChargePointSnapshot | null) => {
+      if (cancelled) return;
       if (!snapshot) {
         setStatus(DEFAULT_STATUS);
         setError("");
         setConnectors(new Map());
         return;
       }
-
       setStatus(snapshot.status);
       setError(snapshot.error ?? "");
-      setConnectors(new Map(snapshot.connectors.map((connector) => [connector.id, connector])));
+      setConnectors(
+        new Map(snapshot.connectors.map((c) => [c.id, c] as const)),
+      );
     };
 
     chargePointService
-      .getChargePoint(chargePointId)
-      .then((snapshot) => {
-        if (!cancelled) {
-          applySnapshot(snapshot);
-        }
-      })
+      .getChargePoint(cpId)
+      .then(applySnapshot)
       .catch((err) => {
-        console.error(`Failed to fetch charge point snapshot for ${chargePointId}`, err);
+        console.error(`Failed to fetch snapshot for ${cpId}`, err);
       });
 
-    unsubscribe = chargePointService.subscribe(chargePointId, (event: ChargePointEvent) => {
-      switch (event.type) {
-        case "status":
-          setStatus(event.status);
-          break;
-        case "error":
-          setError(event.error);
-          break;
-        case "connector-status":
-          setConnectors((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(event.connectorId);
-            next.set(event.connectorId, {
-              id: event.connectorId,
-              status: event.status,
-              availability: existing?.availability ?? "Operative",
-              meterValue: existing?.meterValue ?? 0,
-              transactionId: existing?.transactionId ?? null,
-            });
-            return next;
-          });
-          break;
-        case "connector-availability":
-          setConnectors((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(event.connectorId);
-            next.set(event.connectorId, {
-              id: event.connectorId,
-              status: existing?.status ?? DEFAULT_STATUS,
-              availability: event.availability,
-              meterValue: existing?.meterValue ?? 0,
-              transactionId: existing?.transactionId ?? null,
-            });
-            return next;
-          });
-          break;
-        case "connector-meter":
-          setConnectors((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(event.connectorId);
-            next.set(event.connectorId, {
-              id: event.connectorId,
-              status: existing?.status ?? DEFAULT_STATUS,
-              availability: existing?.availability ?? "Operative",
-              meterValue: event.meterValue,
-              transactionId: existing?.transactionId ?? null,
-            });
-            return next;
-          });
-          break;
-        case "connector-transaction":
-          setConnectors((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(event.connectorId);
-            next.set(event.connectorId, {
-              id: event.connectorId,
-              status: existing?.status ?? DEFAULT_STATUS,
-              availability: existing?.availability ?? "Operative",
-              meterValue: existing?.meterValue ?? 0,
-              transactionId: event.transactionId,
-            });
-            return next;
-          });
-          break;
-        case "log":
-          setLogs((prev) => [...prev, event.entry]);
-          break;
-        default:
-          break;
-      }
-    });
+    unsubscribe = chargePointService.subscribe(
+      cpId,
+      (event: ChargePointEvent) => {
+        switch (event.type) {
+          case "status":
+            setStatus(event.status);
+            break;
+          case "error":
+            setError(event.error);
+            break;
+          case "connector-status":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, { status: event.status }),
+            );
+            break;
+          case "connector-availability":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                availability: event.availability,
+              }),
+            );
+            break;
+          case "connector-meter":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                meterValue: event.meterValue,
+              }),
+            );
+            break;
+          case "connector-transaction":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                transactionId: event.transactionId,
+              }),
+            );
+            break;
+          case "connector-soc":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, { soc: event.soc }),
+            );
+            break;
+          case "connector-mode":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, { mode: event.mode }),
+            );
+            break;
+          case "connector-auto-reset-to-available":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                autoResetToAvailable: event.enabled,
+              }),
+            );
+            break;
+          case "connector-auto-meter":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                autoMeterValueConfig: event.config,
+              }),
+            );
+            break;
+          case "connector-ev-settings":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                evSettings: event.settings,
+              }),
+            );
+            break;
+          case "connector-charging-profile":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                chargingProfile: event.profile,
+              }),
+            );
+            break;
+          case "connector-charging-profiles":
+            setConnectors((prev) =>
+              patchConnector(prev, event.connectorId, {
+                chargingProfiles: event.profiles,
+              }),
+            );
+            break;
+          case "log":
+            setLogs((prev) => [...prev, event.entry]);
+            break;
+          case "connected":
+            // status is updated via separate status event; nothing else to do.
+            break;
+          case "disconnected":
+            // ditto — UI shows reason via status snapshot.
+            break;
+          default:
+            break;
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      unsubscribe?.();
     };
-  }, [chargePointId, chargePointService]);
+  }, [cpId, chargePointService]);
 
   const clearLogs = useCallback(() => {
     setLogs([]);
-    if (chargePoint) {
-      chargePoint.logger.clearLogs();
-    }
-  }, [chargePoint]);
-
-  // keep connectors map in sync when hook receives a new chargePoint instance (local mode)
-  useEffect(() => {
-    if (!chargePoint) {
-      return;
-    }
-
-    setStatus(chargePoint.status);
-    setError(chargePoint.error);
-    setConnectors(() => {
-      const entries: [number, ConnectorSnapshot][] = Array.from(chargePoint.connectors.values()).map((connector) => [
-        connector.id,
-        {
-          id: connector.id,
-          status: connector.status as ConnectorSnapshot["status"],
-          availability: connector.availability,
-          meterValue: connector.meterValue,
-          transactionId: connector.transaction?.id ?? null,
-        },
-      ]);
-      return new Map(entries);
-    });
-  }, [chargePoint]);
+  }, []);
 
   const connectorsMemo = useMemo(() => new Map(connectors), [connectors]);
 

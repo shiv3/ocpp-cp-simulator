@@ -1,5 +1,4 @@
 import React, { useCallback, useState } from "react";
-import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import Connector from "./Connector.tsx";
 import { ConnectorSidePanel } from "./ConnectorSidePanel.tsx";
 import { LogViewer } from "./ui/log-viewer.tsx";
@@ -8,7 +7,7 @@ import { useChargePointView } from "../data/hooks/useChargePointView";
 import { useDataContext } from "../data/providers/DataProvider";
 
 interface ChargePointProps {
-  cp: OCPPChargePoint;
+  cpId: string;
   TagID: string;
 }
 
@@ -16,14 +15,15 @@ interface ChargePointProps {
 const PANEL_DEFAULT_WIDTH = 50; // 50vw default
 const PANEL_COLLAPSED_WIDTH_PX = 60; // px for collapsed
 
-const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
+const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
   const {
     status: cpStatus,
     error: cpError,
+    connectors,
     logs,
     clearLogs,
-  } = useChargePointView(cp);
-  const connectorIds = cp ? Array.from(cp.connectors.keys()) : [];
+  } = useChargePointView(cpId);
+  const connectorIds = Array.from(connectors.keys()).sort((a, b) => a - b);
 
   // Side panel state
   const [selectedConnector, setSelectedConnector] = useState<number | null>(
@@ -73,13 +73,17 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
               <CPStatus status={cpStatus} />
             </div>
             <div className="lg:col-span-3">
-              <SettingsView cp={cp} TagID={TagID} />
+              <SettingsView
+                cpId={cpId}
+                connectorCount={connectorIds.length}
+                TagID={TagID}
+              />
             </div>
           </div>
 
           <div className="mt-3">
             <ChargePointControls
-              chargePointId={cp?.id ?? null}
+              chargePointId={cpId}
               cpStatus={cpStatus}
               cpError={cpError}
               tagID={TagID}
@@ -91,7 +95,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
               <Connector
                 key={connectorId}
                 id={connectorId}
-                cp={cp}
+                cpId={cpId}
                 idTag={TagID}
                 isSelected={selectedConnector === connectorId}
                 onSelect={() => handleConnectorSelect(connectorId)}
@@ -120,7 +124,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cp, TagID }) => {
           }}
         >
           <ConnectorSidePanel
-            chargePoint={cp}
+            cpId={cpId}
             connectorId={selectedConnector}
             idTag={TagID}
             onClose={handleClosePanel}
@@ -280,7 +284,17 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   );
 };
 
-const SettingsView: React.FC<ChargePointProps> = ({ cp, TagID }) => {
+interface SettingsViewProps {
+  cpId: string;
+  connectorCount: number;
+  TagID: string;
+}
+
+const SettingsView: React.FC<SettingsViewProps> = ({
+  cpId,
+  connectorCount,
+  TagID,
+}) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -289,11 +303,11 @@ const SettingsView: React.FC<ChargePointProps> = ({ cp, TagID }) => {
         <div className="flex items-center gap-4 text-sm flex-wrap">
           <div className="flex items-center gap-2">
             <span className="text-muted text-xs">ID:</span>
-            <span className="font-semibold text-primary">{cp.id}</span>
+            <span className="font-semibold text-primary">{cpId}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-muted text-xs">Connectors:</span>
-            <span className="text-secondary">{cp.connectorNumber}</span>
+            <span className="text-secondary">{connectorCount}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-muted text-xs">Tag:</span>
@@ -311,14 +325,6 @@ const SettingsView: React.FC<ChargePointProps> = ({ cp, TagID }) => {
       {isExpanded && (
         <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
           <div className="grid grid-cols-2 gap-2">
-            <div>
-              <span className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
-                WebSocket URL
-              </span>
-              <span className="text-xs text-gray-900 dark:text-gray-100 font-mono break-all">
-                {cp.wsUrl}
-              </span>
-            </div>
             <div>
               <span className="text-xs text-gray-600 dark:text-gray-400 block mb-1">
                 OCPP Version

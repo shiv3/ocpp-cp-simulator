@@ -34,6 +34,15 @@ export interface ChargePointInitOptions {
     readonly username: string;
     readonly password: string;
   } | null;
+  readonly bootNotification?: {
+    readonly firmwareVersion?: string;
+    readonly chargePointSerialNumber?: string;
+    readonly chargeBoxSerialNumber?: string;
+    readonly meterSerialNumber?: string;
+    readonly meterType?: string;
+    readonly iccid?: string;
+    readonly imsi?: string;
+  };
 }
 
 export interface JsonCommand {
@@ -55,12 +64,25 @@ export interface JsonEvent {
   readonly timestamp: string;
 }
 
+// Re-exported for use across server/browser snapshots. The snapshot fields are
+// intentionally untyped beyond `unknown`/`Record` at this layer so the wire
+// shape stays JSON-friendly; consumers narrow them to their domain types.
 export interface ConnectorStatus {
   readonly id: number;
   readonly status: string;
   readonly availability: string;
   readonly meterValue: number;
   readonly transactionId: number | null;
+  readonly soc: number | null;
+  readonly mode: string;
+  readonly autoResetToAvailable: boolean;
+  readonly autoMeterValueConfig: Record<string, unknown> | null;
+  readonly evSettings: Record<string, unknown> | null;
+  readonly chargingProfile: Record<string, unknown> | null;
+  readonly chargingProfiles: ReadonlyArray<Record<string, unknown>>;
+  readonly transactionStartTime: string | null;
+  readonly transactionTagId: string | null;
+  readonly transactionBatteryCapacityKwh: number | null;
 }
 
 export interface ChargePointStatus {

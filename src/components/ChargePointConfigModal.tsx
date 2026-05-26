@@ -48,6 +48,11 @@ interface ChargePointConfigModalProps {
   onSave: (config: ChargePointConfig) => void;
   initialConfig?: ChargePointConfig;
   isNewChargePoint?: boolean;
+  /**
+   * Active runtime mode. Currently used only to label and disable a few
+   * fields that don't have a remote equivalent yet (e.g. the local tag list).
+   */
+  mode?: "local" | "remote";
 }
 
 export const defaultChargePointConfig: ChargePointConfig = {

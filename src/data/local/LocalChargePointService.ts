@@ -6,6 +6,8 @@ import type {
   ChargePointService,
   ChargePointSnapshot,
   ConnectorSnapshot,
+  ScenarioListItem,
+  ScenarioTemplateInfo,
 } from "../interfaces/ChargePointService";
 import {
   loadConnectorAutoMeterConfig,
@@ -14,17 +16,44 @@ import {
 } from "../../utils/connectorStorage";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
+import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
+import type {
+  ScenarioDefinition,
+  ScenarioExecutionContext,
+  ScenarioMode,
+} from "../../cp/application/scenario/ScenarioTypes";
+import type {
+  HistoryOptions,
+  StateHistoryEntry,
+} from "../../cp/application/services/types/StateSnapshot";
+import {
+  scenarioTemplates,
+  getTemplateById,
+} from "../../utils/scenarioTemplates";
 
 function toConnectorSnapshot(
   connector: ReturnType<ChargePoint["getConnector"]>,
 ): ConnectorSnapshot | null {
   if (!connector) return null;
+  const tx = connector.transaction;
   return {
     id: connector.id,
     status: connector.status as OCPPStatus,
     availability: connector.availability,
     meterValue: connector.meterValue,
-    transactionId: connector.transaction?.id ?? null,
+    transactionId: tx?.id ?? null,
+    soc: connector.soc,
+    mode: connector.mode,
+    autoResetToAvailable: connector.autoResetToAvailable,
+    autoMeterValueConfig: connector.autoMeterValueConfig,
+    evSettings: connector.evSettings,
+    chargingProfile: connector.chargingProfile,
+    chargingProfiles: [...connector.chargingProfiles],
+    transactionStartTime: tx?.startTime ?? null,
+    transactionTagId: tx?.tagId ?? null,
+    transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
   };
 }
 
@@ -110,6 +139,10 @@ export class LocalChargePointService implements ChargePointService {
     return this.chargePoints.get(id) ?? null;
   }
 
+  getLocalChargePoint(id: string): ChargePoint | null {
+    return this.getChargePointHandle(id);
+  }
+
   async connect(id: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).connect();
   }
@@ -171,6 +204,160 @@ export class LocalChargePointService implements ChargePointService {
 
   async sendMeterValue(id: string, connectorId: number): Promise<void> {
     this.getExistingChargePointOrThrow(id).sendMeterValue(connectorId);
+  }
+
+  async removeConnector(id: string, connectorId: number): Promise<void> {
+    this.getExistingChargePointOrThrow(id).removeConnector(connectorId);
+  }
+
+  async setEVSettings(
+    id: string,
+    connectorId: number,
+    settings: EVSettings,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.evSettings = settings;
+  }
+
+  async setAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.autoMeterValueConfig = config;
+  }
+
+  async setAutoResetToAvailable(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.autoResetToAvailable = enabled;
+  }
+
+  async setConnectorMode(
+    id: string,
+    connectorId: number,
+    mode: ScenarioMode,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.mode = mode;
+  }
+
+  async getChargingProfiles(
+    id: string,
+    connectorId: number,
+  ): Promise<ReadonlyArray<ActiveChargingProfile>> {
+    const connector = this.requireConnector(id, connectorId);
+    return [...connector.chargingProfiles];
+  }
+
+  async getStateHistory(
+    id: string,
+    options?: HistoryOptions,
+  ): Promise<StateHistoryEntry[]> {
+    const cp = this.chargePoints.get(id);
+    if (!cp) return [];
+    return cp.stateManager.history.getHistory(options);
+  }
+
+  async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
+    return scenarioTemplates.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+    }));
+  }
+
+  async loadScenarioTemplate(
+    id: string,
+    templateId: string,
+    connectorId: number,
+  ): Promise<{ scenarioId: string }> {
+    const connector = this.requireConnector(id, connectorId);
+    const template = getTemplateById(templateId);
+    if (!template) throw new Error(`Unknown template: ${templateId}`);
+    const definition = template.createScenario(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    manager.loadScenarios([definition]);
+    return { scenarioId: definition.id };
+  }
+
+  async loadScenario(
+    id: string,
+    connectorId: number,
+    definition: ScenarioDefinition,
+  ): Promise<{ scenarioId: string }> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    manager.loadScenarios([definition]);
+    return { scenarioId: definition.id };
+  }
+
+  async listScenarios(
+    id: string,
+    connectorId: number,
+  ): Promise<ScenarioListItem[]> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) return [];
+    const active = new Set(manager.getActiveScenarioIds());
+    return manager.getScenarios().map((s) => ({
+      scenarioId: s.id,
+      name: s.name,
+      active: active.has(s.id),
+    }));
+  }
+
+  async runScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    await manager.executeScenario(scenarioId, "oneshot");
+  }
+
+  async stopScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    manager?.stopScenario(scenarioId);
+  }
+
+  async stopAllScenarios(id: string, connectorId: number): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    manager?.stopAllScenarios();
+  }
+
+  async getScenarioStatus(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioExecutionContext | null> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) return null;
+    return manager.getScenarioExecutionContext(scenarioId) ?? null;
+  }
+
+  private requireConnector(id: string, connectorId: number) {
+    const cp = this.getExistingChargePointOrThrow(id);
+    const connector = cp.getConnector(connectorId);
+    if (!connector) {
+      throw new Error(`Connector ${connectorId} not found on ${id}`);
+    }
+    return connector;
   }
 
   subscribe(

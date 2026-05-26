@@ -152,6 +152,51 @@ const TopPage: React.FC = () => {
           },
           autoConnect: true,
         });
+        // The Add CP form exposes auto-meter settings, but the server's
+        // POST /v1/cp body has no field for them. Apply them per-connector
+        // after the CP exists so Remote-mode users get the same behaviour
+        // they saw in the form.
+        if (cpConfig.autoMeterValueEnabled) {
+          const presets = await chargePointService
+            .getChargePoint(cpConfig.cpId)
+            .catch(() => null);
+          const connectors = presets?.connectors ?? [];
+          await Promise.all(
+            connectors.map(async (c) => {
+              const base = c.autoMeterValueConfig;
+              if (!base) return;
+              try {
+                await chargePointService.setAutoMeterValueConfig(
+                  cpConfig.cpId,
+                  c.id,
+                  {
+                    ...base,
+                    enabled: true,
+                    intervalSeconds: cpConfig.autoMeterValueInterval,
+                    // The form's `autoMeterValue` is a single value; map it
+                    // to the existing curve's last point so we don't have to
+                    // restructure the schedule.
+                    curvePoints: base.curvePoints?.length
+                      ? base.curvePoints.map((p, i, arr) =>
+                          i === arr.length - 1
+                            ? { ...p, value: cpConfig.autoMeterValue }
+                            : p,
+                        )
+                      : [
+                          { time: 0, value: 0 },
+                          { time: 30, value: cpConfig.autoMeterValue },
+                        ],
+                  },
+                );
+              } catch (err) {
+                console.warn(
+                  `Failed to apply auto-meter config to ${cpConfig.cpId}/${c.id}`,
+                  err,
+                );
+              }
+            }),
+          );
+        }
         await refresh();
       } catch (err) {
         console.error("Failed to create remote CP", err);

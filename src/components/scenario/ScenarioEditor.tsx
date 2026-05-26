@@ -600,15 +600,20 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   const handleForceStep = useCallback(() => {
     if (executionState === "idle") {
+      if (localCp) {
+        // Local: ScenarioExecutor.start("step") returns a promise that
+        // resolves only after forceStep() is invoked, so we must NOT
+        // await handleStart here; fire it, then schedule forceStep.
+        void handleStart("step");
+        setTimeout(() => executorRef.current?.forceStep(), 0);
+        return;
+      }
+      // Remote: handleStart is a load+run HTTP round trip. Await it so
+      // the server's executor exists before we issue stepScenario,
+      // otherwise the step request races and fails with "not running".
       void (async () => {
-        // handleStart kicks off load+run; in remote mode that's two HTTP
-        // requests, so we must await the start before issuing step,
-        // otherwise the server's executor doesn't exist yet and step
-        // would respond "Scenario ... is not running".
         await handleStart("step");
-        if (localCp) {
-          executorRef.current?.forceStep();
-        } else if (connectorId != null) {
+        if (connectorId != null) {
           try {
             await chargePointService.stepScenario(
               cpId,

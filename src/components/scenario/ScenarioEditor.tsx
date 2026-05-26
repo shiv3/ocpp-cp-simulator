@@ -61,11 +61,12 @@ import {
   getTemplateById,
 } from "../../utils/scenarioTemplates";
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
-import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { createScenarioExecutorCallbacks } from "../../cp/application/scenario/ScenarioRuntime";
+import { useDataContext } from "../../data/providers/DataProvider";
 
 interface ScenarioEditorProps {
-  chargePoint: ChargePoint;
+  cpId: string;
   connectorId: number | null;
   scenario?: ScenarioDefinition | null;
   scenarioId?: string; // Optional: if provided, edit specific scenario
@@ -94,7 +95,7 @@ const nodeTypes: NodeTypes = {
 };
 
 const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
-  chargePoint,
+  cpId,
   connectorId,
   scenario: scenarioProp,
   scenarioId,
@@ -102,15 +103,21 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   nodeProgress: propsNodeProgress,
   onClose,
 }) => {
+  const { chargePointService, mode } = useDataContext();
+  const localCp: ChargePoint | null =
+    mode === "local" && chargePointService.getLocalChargePoint
+      ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
+      : null;
+
   const [scenario, setScenario] = useState<ScenarioDefinition>(() => {
     if (scenarioProp) {
       return scenarioProp;
     }
     if (scenarioId) {
-      const found = getScenarioById(chargePoint.id, connectorId, scenarioId);
+      const found = getScenarioById(cpId, connectorId, scenarioId);
       if (found) return found;
     }
-    return createDefaultScenario(chargePoint.id, connectorId);
+    return createDefaultScenario(cpId, connectorId);
   });
 
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);
@@ -162,7 +169,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
 
     if (scenarioId) {
-      const found = getScenarioById(chargePoint.id, connectorId, scenarioId);
+      const found = getScenarioById(cpId, connectorId, scenarioId);
       if (found) {
         setScenario(found);
         setNodes(found.nodes);
@@ -173,14 +180,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setScenarioEnabled(found.enabled !== false);
       }
     }
-  }, [
-    scenarioProp,
-    scenarioId,
-    chargePoint.id,
-    connectorId,
-    setNodes,
-    setEdges,
-  ]);
+  }, [scenarioProp, scenarioId, cpId, connectorId, setNodes, setEdges]);
 
   // Update execution context from props
   useEffect(() => {
@@ -277,39 +277,33 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     );
   }, [executionContext, nodeProgress, setNodes]);
 
-  // Subscribe to connector status changes
+  // Subscribe to connector status changes via the service event bus.
   useEffect(() => {
     if (!connectorId) return;
 
-    const connector = chargePoint.getConnector(connectorId);
-    if (!connector) return;
-
-    // Subscribe to connector events
-    const unsubStatus = connector.events.on("statusChange", (data) => {
-      setConnectorStatus(data.status);
+    const unsubscribe = chargePointService.subscribe(cpId, (event) => {
+      if ("connectorId" in event && event.connectorId !== connectorId) return;
+      if (event.type === "connector-status") {
+        setConnectorStatus(event.status);
+      } else if (event.type === "connector-meter") {
+        setMeterValue(event.meterValue);
+      } else if (event.type === "connector-transaction") {
+        setTransactionId(event.transactionId);
+      }
     });
 
-    const unsubMeterValue = connector.events.on("meterValueChange", (data) => {
-      setMeterValue(data.meterValue);
+    // Pull initial values from the snapshot.
+    void chargePointService.getChargePoint(cpId).then((snapshot) => {
+      if (!snapshot) return;
+      const connector = snapshot.connectors.find((c) => c.id === connectorId);
+      if (!connector) return;
+      setConnectorStatus(connector.status);
+      setMeterValue(connector.meterValue);
+      setTransactionId(connector.transactionId);
     });
 
-    const unsubTransactionId = connector.events.on(
-      "transactionIdChange",
-      (data) => {
-        setTransactionId(data.transactionId);
-      },
-    );
-
-    // Set initial values
-    setConnectorStatus(connector.status as OCPPStatus);
-    setMeterValue(connector.meterValue);
-
-    return () => {
-      unsubStatus();
-      unsubMeterValue();
-      unsubTransactionId();
-    };
-  }, [chargePoint, connectorId]);
+    return () => unsubscribe();
+  }, [chargePointService, cpId, connectorId]);
 
   // Auto-save to localStorage when nodes, edges, or metadata change
   useEffect(() => {
@@ -370,14 +364,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setScenario(updatedScenario);
     if (scenario.id) {
       // Auto-save to storage (but don't reload into ScenarioManager yet)
-      updateScenario(chargePoint.id, connectorId, scenario.id, updatedScenario);
+      updateScenario(cpId, connectorId, scenario.id, updatedScenario);
     }
 
-    // Keep ScenarioManager in sync while editing
-    const connector = chargePoint.getConnector(connectorId || 1);
-    if (connector?.scenarioManager) {
-      const allScenarios = loadScenarios(chargePoint.id, connectorId);
-      connector.scenarioManager.loadScenarios(allScenarios);
+    // Keep ScenarioManager in sync while editing (local mode only).
+    if (localCp) {
+      const connector = localCp.getConnector(connectorId || 1);
+      if (connector?.scenarioManager) {
+        const allScenarios = loadScenarios(cpId, connectorId);
+        connector.scenarioManager.loadScenarios(allScenarios);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scenario is intentionally excluded to avoid infinite loop (this effect updates scenario)
   }, [
@@ -389,9 +385,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEnabled,
     setEdges,
     scenario.id,
-    chargePoint.id,
+    cpId,
     connectorId,
-    chargePoint,
+    localCp,
   ]);
 
   const onConnect = useCallback(
@@ -466,12 +462,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [setNodes, nodes],
   );
 
-  // Execution control handlers
+  // Execution control handlers. In local mode we build a one-shot
+  // ScenarioExecutor in-process so the editor can highlight nodes; in remote
+  // mode we hand off to the server's scenario manager via the service.
   const handleStart = useCallback(
     async (mode: ScenarioExecutionMode) => {
-      if (chargePoint.status !== OCPPStatus.Available) {
+      if (connectorStatus !== OCPPStatus.Available) {
         console.warn(
-          `[ScenarioEditor] ChargePoint status is ${chargePoint.status}. Scenario execution skipped.`,
+          `[ScenarioEditor] ChargePoint status is ${connectorStatus}. Scenario execution skipped.`,
         );
         return;
       }
@@ -484,9 +482,33 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         edges,
       };
 
-      const connector = connectorId
-        ? chargePoint.getConnector(connectorId)
-        : null;
+      // Remote: delegate to the server.
+      if (!localCp) {
+        try {
+          if (connectorId != null) {
+            await chargePointService.loadScenario(
+              cpId,
+              connectorId,
+              currentScenario,
+            );
+            await chargePointService.runScenario(
+              cpId,
+              connectorId,
+              currentScenario.id,
+            );
+            setExecutionMode(mode);
+          }
+        } catch (err) {
+          console.error("Scenario execution error (remote):", err);
+          alert(
+            `Scenario error: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        return;
+      }
+
+      // Local: drive the in-browser executor with node-level callbacks.
+      const connector = connectorId ? localCp.getConnector(connectorId) : null;
 
       if (!connector) {
         console.warn("Connector not found. Scenario execution aborted.");
@@ -496,7 +518,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       executorRef.current = new ScenarioExecutor(
         currentScenario,
         createScenarioExecutorCallbacks({
-          chargePoint,
+          chargePoint: localCp,
           connector,
           hooks: {
             onStateChange: (context) => {
@@ -504,7 +526,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               setExecutionContext(context);
             },
             onNodeExecute: (nodeId) => {
-              // Highlight executing node
               setNodes((nds) =>
                 nds.map((n) => ({
                   ...n,
@@ -516,7 +537,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               );
             },
             onNodeProgress: (nodeId, remaining, total) => {
-              // Update node data with progress information
               setNodes((nds) =>
                 nds.map((n) =>
                   n.id === nodeId
@@ -542,7 +562,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setExecutionMode(mode);
       await executorRef.current.start(mode);
     },
-    [scenario, nodes, edges, chargePoint, connectorId, setNodes],
+    [
+      scenario,
+      nodes,
+      edges,
+      localCp,
+      connectorId,
+      connectorStatus,
+      cpId,
+      chargePointService,
+      setNodes,
+    ],
   );
 
   const handleForceStep = useCallback(() => {
@@ -589,9 +619,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       return;
     }
 
-    const connector = connectorId
-      ? chargePoint.getConnector(connectorId)
-      : null;
+    // Auto-start only applies when we can drive an in-process executor (local mode).
+    const connector =
+      localCp && connectorId ? localCp.getConnector(connectorId) : null;
     if (!connector) return;
 
     const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
@@ -622,7 +652,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEnabled,
     executionState,
     connectorId,
-    chargePoint,
+    localCp,
     handleStart,
   ]);
 
@@ -652,21 +682,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setEdges(imported.edges);
 
         // Check if scenario already exists
-        const existing = getScenarioById(
-          chargePoint.id,
-          connectorId,
-          imported.id,
-        );
+        const existing = getScenarioById(cpId, connectorId, imported.id);
         if (existing) {
-          updateScenario(chargePoint.id, connectorId, imported.id, imported);
+          updateScenario(cpId, connectorId, imported.id, imported);
         } else {
-          addScenario(chargePoint.id, connectorId, imported);
+          addScenario(cpId, connectorId, imported);
         }
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [chargePoint.id, connectorId, setNodes, setEdges],
+    [cpId, connectorId, setNodes, setEdges],
   );
 
   const handleLoadTemplate = useCallback(
@@ -684,18 +710,15 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return;
       }
 
-      const templateScenario = template.createScenario(
-        chargePoint.id,
-        connectorId,
-      );
+      const templateScenario = template.createScenario(cpId, connectorId);
       setScenario(templateScenario);
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
 
       // Templates are always new scenarios, so add them
-      addScenario(chargePoint.id, connectorId, templateScenario);
+      addScenario(cpId, connectorId, templateScenario);
     },
-    [chargePoint.id, connectorId, nodes.length, setNodes, setEdges],
+    [cpId, connectorId, nodes.length, setNodes, setEdges],
   );
 
   // Handle node double-click to open config panel
@@ -1284,7 +1307,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 Scenario Editor
               </h2>
               <p className="text-xs text-muted">
-                {chargePoint.id} -{" "}
+                {cpId} -{" "}
                 {connectorId ? `Connector ${connectorId}` : "ChargePoint"}
               </p>
             </div>

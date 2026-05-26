@@ -6,7 +6,7 @@ import React, {
   lazy,
   Suspense,
 } from "react";
-import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type {
@@ -17,6 +17,7 @@ import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
+import { useDataContext } from "../data/providers/DataProvider";
 import { EVSettingsPanel } from "./EVSettingsPanel";
 
 // Dynamic imports for heavy components (bundle-dynamic-imports)
@@ -35,7 +36,7 @@ import {
 } from "lucide-react";
 
 interface ConnectorSidePanelProps {
-  chargePoint: ChargePoint;
+  cpId: string;
   connectorId: number;
   idTag: string;
   onClose: () => void;
@@ -107,7 +108,7 @@ type TabType = "details" | "scenario" | "stateTransition";
 
 // Full Panel Content with Tabs
 const FullPanelContent: React.FC<{
-  chargePoint: ChargePoint;
+  cpId: string;
   connectorId: number;
   idTag: string;
   onCollapse: () => void;
@@ -115,7 +116,7 @@ const FullPanelContent: React.FC<{
   onResizeStart: (e: React.MouseEvent) => void;
   isResizing: boolean;
 }> = ({
-  chargePoint,
+  cpId,
   connectorId,
   idTag,
   onCollapse,
@@ -123,6 +124,12 @@ const FullPanelContent: React.FC<{
   onResizeStart,
   isResizing,
 }) => {
+  const { chargePointService, mode } = useDataContext();
+  const localCp: ChargePoint | null =
+    mode === "local" && chargePointService.getLocalChargePoint
+      ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
+      : null;
+
   const [activeTab, setActiveTab] = useState<TabType>("details");
   const {
     status: connectorStatus,
@@ -130,15 +137,17 @@ const FullPanelContent: React.FC<{
     meterValue: liveMeterValue,
     soc: liveSoc,
     transactionId,
+    transactionStartTime: transactionStartDate,
+    transactionTagId,
     autoMeterValueConfig,
     autoResetToAvailable,
     evSettings,
     chargingProfile,
     chargingProfiles,
-  } = useConnectorView(chargePoint, connectorId);
+  } = useConnectorView(cpId, connectorId);
 
-  const { scenarios } = useScenarios(chargePoint.id, connectorId);
-  const connector = chargePoint.getConnector(connectorId);
+  const { scenarios } = useScenarios(cpId, connectorId);
+  const connector = localCp ? localCp.getConnector(connectorId) : null;
   const [meterValueInput, setMeterValueInput] =
     useState<number>(liveMeterValue);
   const [tagIdInput, setTagIdInput] = useState<string>(idTag);
@@ -168,33 +177,28 @@ const FullPanelContent: React.FC<{
 
   // Track transaction duration
   useEffect(() => {
-    if (connectorStatus !== OCPPStatus.Charging || !connector?.transaction) {
+    if (connectorStatus !== OCPPStatus.Charging || !transactionStartDate) {
       setDuration("00:00:00");
       setTransactionStartTime("");
       return;
     }
 
-    const startTime = connector.transaction.startTime;
-    if (startTime) {
-      setTransactionStartTime(startTime.toLocaleTimeString());
-    }
+    setTransactionStartTime(transactionStartDate.toLocaleTimeString());
 
     const interval = setInterval(() => {
-      const currentConnector = chargePoint.getConnector(connectorId);
-      const txStartTime = currentConnector?.transaction?.startTime;
-      if (txStartTime) {
-        const elapsed = Date.now() - txStartTime.getTime();
-        const hours = Math.floor(elapsed / 3600000);
-        const minutes = Math.floor((elapsed % 3600000) / 60000);
-        const seconds = Math.floor((elapsed % 60000) / 1000);
-        setDuration(
-          `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
-        );
-      }
+      const elapsed = Date.now() - transactionStartDate.getTime();
+      const hours = Math.floor(elapsed / 3600000);
+      const minutes = Math.floor((elapsed % 3600000) / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+      setDuration(
+        `${hours.toString().padStart(2, "0")}:${minutes
+          .toString()
+          .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
+      );
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [connectorStatus, connector?.transaction, chargePoint, connectorId]);
+  }, [connectorStatus, transactionStartDate]);
 
   // Setup ScenarioManager
   useEffect(() => {
@@ -202,10 +206,10 @@ const FullPanelContent: React.FC<{
   }, [scenario]);
 
   useEffect(() => {
-    if (!connector) return;
+    if (!localCp || !connector) return;
 
     const callbacks = createScenarioExecutorCallbacks({
-      chargePoint,
+      chargePoint: localCp,
       connector,
       hooks: {
         onNodeProgress: (nodeId, remaining, total) => {
@@ -225,7 +229,7 @@ const FullPanelContent: React.FC<{
 
     const manager = new ScenarioManager(
       connector,
-      chargePoint,
+      localCp,
       callbacks,
       connector.scenarioEvents,
     );
@@ -252,7 +256,7 @@ const FullPanelContent: React.FC<{
       manager.destroy();
       scenarioManagerRef.current = null;
     };
-  }, [connector, chargePoint, connectorId]);
+  }, [connector, localCp, connectorId]);
 
   // Load scenarios
   useEffect(() => {
@@ -278,43 +282,46 @@ const FullPanelContent: React.FC<{
 
   // Handlers
   const handleStartTransaction = useCallback(() => {
-    chargePoint.startTransaction(tagIdInput, connectorId);
-  }, [chargePoint, connectorId, tagIdInput]);
+    void chargePointService.startTransaction(cpId, connectorId, tagIdInput);
+  }, [chargePointService, cpId, connectorId, tagIdInput]);
 
   const handleStopTransaction = useCallback(() => {
-    chargePoint.stopTransaction(connectorId);
-  }, [chargePoint, connectorId]);
+    void chargePointService.stopTransaction(cpId, connectorId);
+  }, [chargePointService, cpId, connectorId]);
 
   const handleIncreaseMeterValue = useCallback(() => {
     const nextValue = meterValueInput + 10;
     setMeterValueInput(nextValue);
-    chargePoint.setMeterValue(connectorId, nextValue);
-  }, [chargePoint, connectorId, meterValueInput]);
+    void chargePointService.setMeterValue(cpId, connectorId, nextValue);
+  }, [chargePointService, cpId, connectorId, meterValueInput]);
 
   const handleSendMeterValue = useCallback(() => {
-    chargePoint.setMeterValue(connectorId, meterValueInput);
-    chargePoint.sendMeterValue(connectorId);
-  }, [chargePoint, connectorId, meterValueInput]);
+    void chargePointService
+      .setMeterValue(cpId, connectorId, meterValueInput)
+      .then(() => chargePointService.sendMeterValue(cpId, connectorId));
+  }, [chargePointService, cpId, connectorId, meterValueInput]);
 
   const handleToggleAutoMeterValue = useCallback(() => {
-    if (!autoMeterValueConfig || !connector) return;
-    connector.autoMeterValueConfig = {
+    if (!autoMeterValueConfig) return;
+    void chargePointService.setAutoMeterValueConfig(cpId, connectorId, {
       ...autoMeterValueConfig,
       enabled: !autoMeterValueConfig.enabled,
-    };
-  }, [connector, autoMeterValueConfig]);
+    });
+  }, [chargePointService, cpId, connectorId, autoMeterValueConfig]);
 
   const handleToggleAutoResetToAvailable = useCallback(() => {
-    if (!connector) return;
-    connector.autoResetToAvailable = !connector.autoResetToAvailable;
-  }, [connector]);
+    void chargePointService.setAutoResetToAvailable(
+      cpId,
+      connectorId,
+      !autoResetToAvailable,
+    );
+  }, [chargePointService, cpId, connectorId, autoResetToAvailable]);
 
   const handleEVSettingsChange = useCallback(
     (settings: EVSettings) => {
-      if (!connector) return;
-      connector.evSettings = settings;
+      void chargePointService.setEVSettings(cpId, connectorId, settings);
     },
-    [connector],
+    [chargePointService, cpId, connectorId],
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;
@@ -399,7 +406,7 @@ const FullPanelContent: React.FC<{
                     Connector {connectorId}
                   </h2>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {chargePoint.id}
+                    {cpId}
                   </p>
                 </div>
               </div>
@@ -466,7 +473,7 @@ const FullPanelContent: React.FC<{
                         ID Tag:
                       </span>
                       <span className="font-mono font-medium text-green-800 dark:text-green-200">
-                        {connector?.transaction?.tagId || tagIdInput}
+                        {transactionTagId || tagIdInput}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -681,7 +688,8 @@ const FullPanelContent: React.FC<{
                   value=""
                   onChange={(e) => {
                     if (e.target.value) {
-                      chargePoint.updateConnectorStatus(
+                      void chargePointService.sendStatusNotification(
+                        cpId,
                         connectorId,
                         e.target.value as OCPPStatus,
                       );
@@ -771,7 +779,7 @@ const FullPanelContent: React.FC<{
               }
             >
               <ScenarioEditor
-                chargePoint={chargePoint}
+                cpId={cpId}
                 connectorId={connectorId}
                 scenario={scenario}
                 scenarioId={scenario?.id}
@@ -782,31 +790,39 @@ const FullPanelContent: React.FC<{
             </Suspense>
           ) : null}
 
-          {activeTab === "stateTransition" && connector ? (
-            <div className="h-full flex flex-col">
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                  State Transition Diagram
-                </h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  OCPP 1.6J Connector {connectorId}
-                </p>
+          {activeTab === "stateTransition" ? (
+            connector && localCp ? (
+              <div className="h-full flex flex-col">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                    State Transition Diagram
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    OCPP 1.6J Connector {connectorId}
+                  </p>
+                </div>
+                <div className="flex-1">
+                  <Suspense
+                    fallback={
+                      <div className="h-full flex items-center justify-center">
+                        <div className="text-muted">
+                          Loading State Diagram...
+                        </div>
+                      </div>
+                    }
+                  >
+                    <StateTransitionViewer
+                      connector={connector}
+                      chargePoint={localCp}
+                    />
+                  </Suspense>
+                </div>
               </div>
-              <div className="flex-1">
-                <Suspense
-                  fallback={
-                    <div className="h-full flex items-center justify-center">
-                      <div className="text-muted">Loading State Diagram...</div>
-                    </div>
-                  }
-                >
-                  <StateTransitionViewer
-                    connector={connector}
-                    chargePoint={chargePoint}
-                  />
-                </Suspense>
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted">
+                State transition diagram is available in local mode only.
               </div>
-            </div>
+            )
           ) : null}
         </div>
       </div>
@@ -815,7 +831,7 @@ const FullPanelContent: React.FC<{
 };
 
 export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
-  chargePoint,
+  cpId,
   connectorId,
   idTag,
   onClose,
@@ -824,7 +840,7 @@ export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
   panelWidth,
   onWidthChange,
 }) => {
-  const { status, soc } = useConnectorView(chargePoint, connectorId);
+  const { status, soc } = useConnectorView(cpId, connectorId);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartX = useRef(0);
   const resizeStartWidth = useRef(0);
@@ -881,7 +897,7 @@ export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
 
   return (
     <FullPanelContent
-      chargePoint={chargePoint}
+      cpId={cpId}
       connectorId={connectorId}
       idTag={idTag}
       onCollapse={onToggleCollapse}

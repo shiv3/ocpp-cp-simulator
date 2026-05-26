@@ -14,12 +14,10 @@ import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ScenarioRepository } from "../interfaces/ScenarioRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import type { ChargePointService } from "../interfaces/ChargePointService";
-import type { StateHistoryProvider } from "../interfaces/StateHistoryProvider";
 import { LocalConfigRepository } from "../local/LocalConfigRepository";
 import { LocalScenarioRepository } from "../local/LocalScenarioRepository";
 import { LocalConnectorSettingsRepository } from "../local/LocalConnectorSettingsRepository";
 import { LocalChargePointService } from "../local/LocalChargePointService";
-import { LocalStateHistoryProvider } from "../local/LocalStateHistoryProvider";
 import { RemoteChargePointService } from "../remote/RemoteChargePointService";
 
 const MODE_STORAGE_KEY = "ocpp-cp.runtime.mode";
@@ -53,7 +51,6 @@ interface DataContextValue {
   scenarioRepository: ScenarioRepository;
   connectorSettingsRepository: ConnectorSettingsRepository;
   chargePointService: ChargePointService;
-  stateHistoryProvider: StateHistoryProvider;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -135,10 +132,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
 
   const chargePointService: ChargePointService =
     remoteChargePointService ?? localChargePointService;
-  const stateHistoryProvider = useMemo<StateHistoryProvider>(
-    () => new LocalStateHistoryProvider(localChargePointService),
-    [localChargePointService],
-  );
 
   const value = useMemo(
     () => ({
@@ -150,7 +143,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
       scenarioRepository,
       connectorSettingsRepository,
       chargePointService,
-      stateHistoryProvider,
     }),
     [
       mode,
@@ -159,7 +151,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
       scenarioRepository,
       connectorSettingsRepository,
       chargePointService,
-      stateHistoryProvider,
     ],
   );
 

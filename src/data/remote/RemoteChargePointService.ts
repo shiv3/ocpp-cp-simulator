@@ -3,12 +3,27 @@ import type {
   ChargePointService,
   ChargePointSnapshot,
   ConnectorSnapshot,
+  CreateChargePointParams,
+  ScenarioListItem,
+  ScenarioTemplateInfo,
 } from "../interfaces/ChargePointService";
 import type {
   OCPPAvailability,
   OCPPStatus,
 } from "../../cp/domain/types/OcppTypes";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
+import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
+import type {
+  ScenarioDefinition,
+  ScenarioExecutionContext,
+  ScenarioMode,
+} from "../../cp/application/scenario/ScenarioTypes";
+import type {
+  HistoryOptions,
+  StateHistoryEntry,
+} from "../../cp/application/services/types/StateSnapshot";
 
 interface ServerCpListItem {
   cpId: string;
@@ -16,17 +31,29 @@ interface ServerCpListItem {
   connectors?: number;
 }
 
+interface ServerConnectorStatus {
+  id: number;
+  status: string;
+  availability: string;
+  meterValue: number;
+  transactionId: number | null;
+  soc?: number | null;
+  mode?: string;
+  autoResetToAvailable?: boolean;
+  autoMeterValueConfig?: Record<string, unknown> | null;
+  evSettings?: Record<string, unknown> | null;
+  chargingProfile?: Record<string, unknown> | null;
+  chargingProfiles?: Array<Record<string, unknown>>;
+  transactionStartTime?: string | null;
+  transactionTagId?: string | null;
+  transactionBatteryCapacityKwh?: number | null;
+}
+
 interface ServerCpStatus {
   id: string;
   status: string;
   error: string;
-  connectors: Array<{
-    id: number;
-    status: string;
-    availability: string;
-    meterValue: number;
-    transactionId: number | null;
-  }>;
+  connectors: ServerConnectorStatus[];
 }
 
 interface ServerEventEnvelope {
@@ -46,15 +73,29 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-function toConnectorSnapshot(
-  c: ServerCpStatus["connectors"][number],
-): ConnectorSnapshot {
+function toConnectorSnapshot(c: ServerConnectorStatus): ConnectorSnapshot {
   return {
     id: c.id,
     status: c.status as OCPPStatus,
     availability: c.availability as OCPPAvailability,
     meterValue: c.meterValue,
     transactionId: c.transactionId,
+    soc: c.soc ?? null,
+    mode: (c.mode as ScenarioMode) ?? "manual",
+    autoResetToAvailable: c.autoResetToAvailable ?? true,
+    autoMeterValueConfig:
+      (c.autoMeterValueConfig as unknown as AutoMeterValueConfig | null) ??
+      null,
+    evSettings: (c.evSettings as unknown as EVSettings | null) ?? null,
+    chargingProfile:
+      (c.chargingProfile as unknown as ActiveChargingProfile | null) ?? null,
+    chargingProfiles:
+      (c.chargingProfiles as unknown as ActiveChargingProfile[]) ?? [],
+    transactionStartTime: c.transactionStartTime
+      ? new Date(c.transactionStartTime)
+      : null,
+    transactionTagId: c.transactionTagId ?? null,
+    transactionBatteryCapacityKwh: c.transactionBatteryCapacityKwh ?? null,
   };
 }
 
@@ -156,8 +197,158 @@ function mapServerEventToChargePointEvent(
         entry: { timestamp: ts, level, type: typeStr, message },
       };
     }
+    case "connector_availability":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.availability === "string"
+      ) {
+        return {
+          type: "connector-availability",
+          connectorId: data.connectorId,
+          availability: data.availability as OCPPAvailability,
+        };
+      }
+      return null;
+    case "connector_soc":
+      if (typeof data.connectorId === "number") {
+        return {
+          type: "connector-soc",
+          connectorId: data.connectorId,
+          soc: typeof data.soc === "number" ? data.soc : null,
+        };
+      }
+      return null;
+    case "connector_mode":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.mode === "string"
+      ) {
+        return {
+          type: "connector-mode",
+          connectorId: data.connectorId,
+          mode: data.mode as ScenarioMode,
+        };
+      }
+      return null;
+    case "connector_auto_reset":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.enabled === "boolean"
+      ) {
+        return {
+          type: "connector-auto-reset-to-available",
+          connectorId: data.connectorId,
+          enabled: data.enabled,
+        };
+      }
+      return null;
+    case "connector_auto_meter":
+      if (typeof data.connectorId === "number" && isRecord(data.config)) {
+        return {
+          type: "connector-auto-meter",
+          connectorId: data.connectorId,
+          config: data.config as unknown as AutoMeterValueConfig,
+        };
+      }
+      return null;
+    case "connector_ev_settings":
+      if (typeof data.connectorId === "number" && isRecord(data.settings)) {
+        return {
+          type: "connector-ev-settings",
+          connectorId: data.connectorId,
+          settings: data.settings as unknown as EVSettings,
+        };
+      }
+      return null;
+    case "connector_charging_profile":
+      if (typeof data.connectorId === "number") {
+        return {
+          type: "connector-charging-profile",
+          connectorId: data.connectorId,
+          profile: isRecord(data.profile)
+            ? (data.profile as unknown as ActiveChargingProfile)
+            : null,
+        };
+      }
+      return null;
+    case "connector_charging_profiles":
+      if (
+        typeof data.connectorId === "number" &&
+        Array.isArray(data.profiles)
+      ) {
+        return {
+          type: "connector-charging-profiles",
+          connectorId: data.connectorId,
+          profiles: data.profiles as unknown as ActiveChargingProfile[],
+        };
+      }
+      return null;
+    case "scenario_started":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string"
+      ) {
+        return {
+          type: "scenario-started",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+        };
+      }
+      return null;
+    case "scenario_completed":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string"
+      ) {
+        return {
+          type: "scenario-completed",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+        };
+      }
+      return null;
+    case "scenario_error":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string" &&
+        typeof data.error === "string"
+      ) {
+        return {
+          type: "scenario-error",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+          error: data.error,
+        };
+      }
+      return null;
+    case "scenario_node_execute":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string" &&
+        typeof data.nodeId === "string"
+      ) {
+        return {
+          type: "scenario-node-execute",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+          nodeId: data.nodeId,
+        };
+      }
+      return null;
+    case "state_history_entry":
+      if (isRecord(data.entry)) {
+        const raw = data.entry as Record<string, unknown>;
+        const timestamp =
+          typeof raw.timestamp === "string"
+            ? new Date(raw.timestamp)
+            : new Date();
+        return {
+          type: "state-history-entry",
+          entry: { ...raw, timestamp } as unknown as StateHistoryEntry,
+        };
+      }
+      return null;
     default:
-      // scenario_* and other server-only events are not part of the browser event union
       return null;
   }
 }
@@ -268,6 +459,164 @@ export class RemoteChargePointService implements ChargePointService {
     await this.runCommand(id, "send_meter_value", { connector: connectorId });
   }
 
+  async removeConnector(id: string, connectorId: number): Promise<void> {
+    await this.runCommand(id, "remove_connector", { connector: connectorId });
+  }
+
+  async setEVSettings(
+    id: string,
+    connectorId: number,
+    settings: EVSettings,
+  ): Promise<void> {
+    await this.runCommand(id, "set_ev_settings", {
+      connector: connectorId,
+      settings,
+    });
+  }
+
+  async setAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    await this.runCommand(id, "set_auto_meter_config", {
+      connector: connectorId,
+      config,
+    });
+  }
+
+  async setAutoResetToAvailable(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.runCommand(id, "set_auto_reset_to_available", {
+      connector: connectorId,
+      enabled,
+    });
+  }
+
+  async setConnectorMode(
+    id: string,
+    connectorId: number,
+    mode: ScenarioMode,
+  ): Promise<void> {
+    await this.runCommand(id, "set_mode", { connector: connectorId, mode });
+  }
+
+  async getChargingProfiles(
+    id: string,
+    connectorId: number,
+  ): Promise<ReadonlyArray<ActiveChargingProfile>> {
+    const data = await this.runCommand(id, "get_charging_profiles", {
+      connector: connectorId,
+    });
+    return (data as ActiveChargingProfile[]) ?? [];
+  }
+
+  async getStateHistory(
+    id: string,
+    options?: HistoryOptions,
+  ): Promise<StateHistoryEntry[]> {
+    const data = await this.runCommand(
+      id,
+      "get_state_history",
+      options ? { options } : undefined,
+    );
+    const list = (data as Array<Record<string, unknown>>) ?? [];
+    return list.map((raw) => ({
+      ...raw,
+      timestamp:
+        typeof raw.timestamp === "string"
+          ? new Date(raw.timestamp)
+          : new Date(),
+    })) as unknown as StateHistoryEntry[];
+  }
+
+  async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
+    // The /v1/cp/:id/command endpoint requires a cpId; the templates list is
+    // CP-agnostic. We synthesize a request against the first CP in the
+    // registry, falling back to an empty list when no CP is registered.
+    const list = await this.listChargePoints().catch(() => []);
+    if (list.length === 0) return [];
+    const data = await this.runCommand(list[0].id, "list_scenario_templates");
+    return (data as ScenarioTemplateInfo[]) ?? [];
+  }
+
+  async loadScenarioTemplate(
+    id: string,
+    templateId: string,
+    connectorId: number,
+  ): Promise<{ scenarioId: string }> {
+    const data = await this.runCommand(id, "load_scenario_template", {
+      templateId,
+      connector: connectorId,
+    });
+    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+  }
+
+  async loadScenario(
+    id: string,
+    connectorId: number,
+    definition: ScenarioDefinition,
+  ): Promise<{ scenarioId: string }> {
+    const data = await this.runCommand(id, "load_scenario", {
+      connector: connectorId,
+      scenario: definition,
+    });
+    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+  }
+
+  async listScenarios(
+    id: string,
+    connectorId: number,
+  ): Promise<ScenarioListItem[]> {
+    const data = await this.runCommand(id, "list_scenarios", {
+      connector: connectorId,
+    });
+    return (data as ScenarioListItem[]) ?? [];
+  }
+
+  async runScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCommand(id, "run_scenario", {
+      connector: connectorId,
+      scenarioId,
+    });
+  }
+
+  async stopScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCommand(id, "stop_scenario", {
+      connector: connectorId,
+      scenarioId,
+    });
+  }
+
+  async stopAllScenarios(id: string, connectorId: number): Promise<void> {
+    await this.runCommand(id, "stop_all_scenarios", {
+      connector: connectorId,
+    });
+  }
+
+  async getScenarioStatus(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioExecutionContext | null> {
+    const data = await this.runCommand(id, "scenario_status", {
+      connector: connectorId,
+      scenarioId,
+    });
+    return (data as ScenarioExecutionContext | null) ?? null;
+  }
+
   subscribe(
     id: string,
     handler: (event: ChargePointEvent) => void,
@@ -364,30 +713,18 @@ export class RemoteChargePointService implements ChargePointService {
     };
   }
 
-  /**
-   * Server-side helpers — not part of ChargePointService, but useful when wiring up
-   * the browser UI. Lets callers create or destroy CPs on the connected server.
-   */
-  async createChargePoint(init: {
-    cpId: string;
-    wsUrl: string;
-    connectors?: number;
-    vendor?: string;
-    model?: string;
-    basicAuth?: { username: string; password: string } | null;
-    autoConnect?: boolean;
-  }): Promise<void> {
+  async createChargePoint(params: CreateChargePointParams): Promise<void> {
     const result = await this.fetchJson<ServerCommandResult>(
       "POST",
       "/v1/cp",
-      init,
+      params,
     );
     if (!result.ok) {
       throw new Error(result.error ?? "Failed to create charge point");
     }
   }
 
-  async deleteChargePoint(id: string): Promise<void> {
+  async removeChargePoint(id: string): Promise<void> {
     await this.fetchJson<unknown>("DELETE", `/v1/cp/${encodeURIComponent(id)}`);
   }
 

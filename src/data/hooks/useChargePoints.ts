@@ -1,65 +1,106 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { Config } from "../../store/store";
 import { DefaultBootNotification } from "../../cp/domain/types/OcppTypes";
 import { useDataContext } from "../providers/DataProvider";
-import { LocalChargePointService, type LocalChargePointDefinition } from "../local/LocalChargePointService";
+import {
+  LocalChargePointService,
+  type LocalChargePointDefinition,
+} from "../local/LocalChargePointService";
+import type { ChargePointSnapshot } from "../interfaces/ChargePointService";
 
 interface UseChargePointsOptions {
   isLoading?: boolean;
 }
 
+interface UseChargePointsResult {
+  chargePoints: ChargePointSnapshot[];
+  refresh: () => Promise<void>;
+}
+
+const REMOTE_POLL_INTERVAL_MS = 4000;
+
+/**
+ * Returns the active list of ChargePointSnapshot in the current mode.
+ * - Local: syncs LocalChargePointService against config and lists snapshots.
+ * - Remote: lists CPs from the connected server, with periodic polling.
+ */
 export function useChargePoints(
   config: Config | null,
   { isLoading = false }: UseChargePointsOptions = {},
-): ChargePoint[] {
-  const { chargePointService } = useDataContext();
-  const [chargePoints, setChargePoints] = useState<ChargePoint[]>([]);
+): UseChargePointsResult {
+  const { chargePointService, mode } = useDataContext();
+  const [chargePoints, setChargePoints] = useState<ChargePointSnapshot[]>([]);
+  const cancelledRef = useRef(false);
+
+  const fetchAndSet = useCallback(async () => {
+    try {
+      const list = await chargePointService.listChargePoints();
+      if (!cancelledRef.current) {
+        setChargePoints(list);
+      }
+    } catch (err) {
+      console.error("Failed to list charge points", err);
+      if (!cancelledRef.current) {
+        setChargePoints([]);
+      }
+    }
+  }, [chargePointService]);
 
   useEffect(() => {
-    if (isLoading) {
-      return;
-    }
+    cancelledRef.current = false;
+    if (isLoading) return;
 
-    const isLocalService = chargePointService instanceof LocalChargePointService;
+    if (mode === "local") {
+      const isLocalService =
+        chargePointService instanceof LocalChargePointService;
 
-    if (!config || !config.Experimental || config.Experimental.ChargePointIDs.length === 0) {
-      if (isLocalService) {
-        void chargePointService.syncLocalChargePoints([]);
+      if (
+        !isLocalService ||
+        !config ||
+        !config.Experimental ||
+        config.Experimental.ChargePointIDs.length === 0
+      ) {
+        if (isLocalService) {
+          void chargePointService.syncLocalChargePoints([]);
+        }
+        setChargePoints([]);
+        return;
       }
-      setChargePoints([]);
-      return;
-    }
 
-    if (isLocalService) {
-      const definitions: LocalChargePointDefinition[] = config.Experimental.ChargePointIDs.map((cp) => ({
-        id: cp.ChargePointID,
-        connectorNumber: cp.ConnectorNumber,
-        bootNotification: config.BootNotification ?? DefaultBootNotification,
-        wsUrl: config.wsURL,
-        basicAuth: config.basicAuthSettings?.enabled
-          ? {
-              username: config.basicAuthSettings.username,
-              password: config.basicAuthSettings.password,
-            }
-          : null,
-        autoMeterValueSetting: config.autoMeterValueSetting ?? null,
-      }));
+      const definitions: LocalChargePointDefinition[] =
+        config.Experimental.ChargePointIDs.map((cp) => ({
+          id: cp.ChargePointID,
+          connectorNumber: cp.ConnectorNumber,
+          bootNotification: config.BootNotification ?? DefaultBootNotification,
+          wsUrl: config.wsURL,
+          basicAuth: config.basicAuthSettings?.enabled
+            ? {
+                username: config.basicAuthSettings.username,
+                password: config.basicAuthSettings.password,
+              }
+            : null,
+          autoMeterValueSetting: config.autoMeterValueSetting ?? null,
+        }));
 
       chargePointService
         .syncLocalChargePoints(definitions)
-        .then((items) => setChargePoints(items))
-        .catch((error) => {
-          console.error("Failed to sync local charge points", error);
+        .then(() => fetchAndSet())
+        .catch((err) => {
+          console.error("Failed to sync local charge points", err);
           setChargePoints([]);
         });
       return;
     }
 
-    // TODO: fetch charge points via GraphQL once remote adapters are implemented
-    setChargePoints([]);
-  }, [chargePointService, config, isLoading]);
+    // Remote mode: poll the list periodically.
+    void fetchAndSet();
+    const interval = setInterval(fetchAndSet, REMOTE_POLL_INTERVAL_MS);
+    return () => {
+      cancelledRef.current = true;
+      clearInterval(interval);
+    };
+  }, [chargePointService, mode, config, isLoading, fetchAndSet]);
 
-  return chargePoints;
+  return { chargePoints, refresh: fetchAndSet };
 }

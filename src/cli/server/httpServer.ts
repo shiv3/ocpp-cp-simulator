@@ -336,5 +336,35 @@ function parseCreateBody(body: unknown): ChargePointInitOptions {
       basicAuth = { username, password };
     }
   }
-  return { cpId, wsUrl, connectors, vendor, model, basicAuth };
+  const bn = isRecord(body.bootNotification) ? body.bootNotification : null;
+  const bootNotification: ChargePointInitOptions["bootNotification"] = bn
+    ? {
+        ...(typeof bn.firmwareVersion === "string"
+          ? { firmwareVersion: bn.firmwareVersion }
+          : {}),
+        ...(typeof bn.chargePointSerialNumber === "string"
+          ? { chargePointSerialNumber: bn.chargePointSerialNumber }
+          : {}),
+        ...(typeof bn.chargeBoxSerialNumber === "string"
+          ? { chargeBoxSerialNumber: bn.chargeBoxSerialNumber }
+          : {}),
+        ...(typeof bn.meterSerialNumber === "string"
+          ? { meterSerialNumber: bn.meterSerialNumber }
+          : {}),
+        ...(typeof bn.meterType === "string"
+          ? { meterType: bn.meterType }
+          : {}),
+        ...(typeof bn.iccid === "string" ? { iccid: bn.iccid } : {}),
+        ...(typeof bn.imsi === "string" ? { imsi: bn.imsi } : {}),
+      }
+    : undefined;
+  return {
+    cpId,
+    wsUrl,
+    connectors,
+    vendor,
+    model,
+    basicAuth,
+    ...(bootNotification ? { bootNotification } : {}),
+  };
 }

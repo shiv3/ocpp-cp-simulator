@@ -4,7 +4,18 @@ import { CLIChargePointService } from "./service";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
-import type { ScenarioDefinition } from "../cp/application/scenario/ScenarioTypes";
+import type {
+  ScenarioDefinition,
+  ScenarioMode,
+} from "../cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
+
+const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
+  "manual",
+  "scenario",
+];
 
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
@@ -223,6 +234,73 @@ export async function handleJsonCommand(
       return { scenarioId };
     }
 
+    case "set_ev_settings": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const settings = requireObject(
+        params,
+        "settings",
+      ) as unknown as EVSettings;
+      service.setEVSettings(connectorId, settings);
+      return undefined;
+    }
+
+    case "get_ev_settings": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return service.getEVSettings(connectorId);
+    }
+
+    case "set_auto_meter_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const config = requireObject(
+        params,
+        "config",
+      ) as unknown as AutoMeterValueConfig;
+      service.setAutoMeterValueConfig(connectorId, config);
+      return undefined;
+    }
+
+    case "get_auto_meter_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return service.getAutoMeterValueConfig(connectorId);
+    }
+
+    case "set_auto_reset_to_available": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const enabled = requireBoolean(params, "enabled");
+      service.setAutoResetToAvailable(connectorId, enabled);
+      return undefined;
+    }
+
+    case "set_mode": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const mode = requireString(params, "mode");
+      if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
+        throw new Error(
+          `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
+        );
+      }
+      service.setConnectorMode(connectorId, mode as ScenarioMode);
+      return undefined;
+    }
+
+    case "get_charging_profiles": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return service.getChargingProfiles(connectorId);
+    }
+
+    case "remove_connector": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const removed = service.removeConnector(connectorId);
+      return { removed };
+    }
+
+    case "get_state_history": {
+      const options = (params.options ?? undefined) as
+        | HistoryOptions
+        | undefined;
+      return service.getStateHistory(options);
+    }
+
     default:
       throw new Error(`Unknown command: ${cmd.command}`);
   }
@@ -261,4 +339,26 @@ export function requireString(
     throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
   }
   return val;
+}
+
+export function requireBoolean(
+  params: Record<string, unknown>,
+  key: string,
+): boolean {
+  const val = params[key];
+  if (typeof val !== "boolean") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
+  }
+  return val;
+}
+
+export function requireObject(
+  params: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const val = params[key];
+  if (typeof val !== "object" || val === null || Array.isArray(val)) {
+    throw new Error(`Missing or invalid parameter: ${key} (expected object)`);
+  }
+  return val as Record<string, unknown>;
 }

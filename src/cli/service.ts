@@ -159,6 +159,10 @@ export type CLIEvent =
   | {
       readonly event: "state_history_entry";
       readonly data: { readonly entry: StateHistoryEntry };
+    }
+  | {
+      readonly event: "connector_removed";
+      readonly data: { readonly connectorId: number };
     };
 
 type EventHandler = (evt: CLIEvent) => void;
@@ -634,6 +638,12 @@ export class CLIChargePointService {
 
     this.attachConnectorEventForwarders();
     this.attachStateHistoryForwarder();
+
+    this._unsubscribes.push(
+      this._chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
+        this.emit({ event: "connector_removed", data: { connectorId } });
+      }),
+    );
   }
 
   private attachConnectorEventForwarders(): void {
@@ -643,6 +653,17 @@ export class CLIChargePointService {
           this.emit({
             event: "connector_availability",
             data: { connectorId, availability },
+          });
+        }),
+      );
+      // Manual meter changes and the auto-meter scheduler emit on the
+      // connector's event bus rather than the charge-point's. Forward
+      // those so remote subscribers see meter updates in real time.
+      this._unsubscribes.push(
+        connector.events.on("meterValueChange", ({ meterValue }) => {
+          this.emit({
+            event: "meter_value",
+            data: { connectorId, meterValue },
           });
         }),
       );

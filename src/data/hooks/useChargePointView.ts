@@ -174,6 +174,14 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
               }),
             );
             break;
+          case "connector-removed":
+            setConnectors((prev) => {
+              if (!prev.has(event.connectorId)) return prev;
+              const next = new Map(prev);
+              next.delete(event.connectorId);
+              return next;
+            });
+            break;
           case "log":
             setLogs((prev) => [...prev, event.entry]);
             break;

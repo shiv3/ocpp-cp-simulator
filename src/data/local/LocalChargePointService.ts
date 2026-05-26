@@ -541,6 +541,18 @@ export class LocalChargePointService implements ChargePointService {
     );
 
     chargePoint.connectors.forEach((connector) => {
+      // The ChargePoint never emits connectorMeterValueChange itself —
+      // only Connector.meterValueChange fires when set_meter_value /
+      // auto-meter scheduler run, so subscribe per-connector here.
+      unsubscribes.push(
+        connector.events.on("meterValueChange", ({ meterValue }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-meter",
+            connectorId: connector.id,
+            meterValue,
+          });
+        }),
+      );
       unsubscribes.push(
         connector.events.on("autoMeterValueChange", ({ config }) => {
           this.emit(chargePoint.id, {
@@ -617,6 +629,12 @@ export class LocalChargePointService implements ChargePointService {
         chargePoint.sendMeterValue(id);
       });
     });
+
+    unsubscribes.push(
+      chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
+        this.emit(chargePoint.id, { type: "connector-removed", connectorId });
+      }),
+    );
 
     unsubscribes.push(
       chargePoint.events.on("connected", () => {

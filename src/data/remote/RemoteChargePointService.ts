@@ -335,6 +335,14 @@ function mapServerEventToChargePointEvent(
         };
       }
       return null;
+    case "connector_removed":
+      if (typeof data.connectorId === "number") {
+        return {
+          type: "connector-removed",
+          connectorId: data.connectorId,
+        };
+      }
+      return null;
     case "state_history_entry":
       if (isRecord(data.entry)) {
         const raw = data.entry as Record<string, unknown>;

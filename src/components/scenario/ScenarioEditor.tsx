@@ -487,14 +487,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // Execution control handlers. In local mode we build a one-shot
   // ScenarioExecutor in-process so the editor can highlight nodes; in remote
   // mode we hand off to the server's scenario manager via the service.
+  //
+  // We intentionally do NOT gate on connectorStatus here. Some scenarios
+  // legitimately run while a connector is in Preparing / Charging / Faulted
+  // (recovery, stop-transaction, status drives, etc). ScenarioManager
+  // already enforces a charge-point-level "Available" check in local mode,
+  // and the remote server enforces its own state. Letting valid scenarios
+  // through here matches the pre-refactor behaviour, which keyed off the
+  // charge-point status rather than the per-connector status.
   const handleStart = useCallback(
     async (mode: ScenarioExecutionMode) => {
-      if (connectorStatus !== OCPPStatus.Available) {
-        console.warn(
-          `[ScenarioEditor] ChargePoint status is ${connectorStatus}. Scenario execution skipped.`,
-        );
-        return;
-      }
       executorRef.current?.stop();
       setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
 
@@ -591,7 +593,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       edges,
       localCp,
       connectorId,
-      connectorStatus,
       cpId,
       chargePointService,
       setNodes,
@@ -695,22 +696,21 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     // - Remote: just needs a connectorId; handleStart drives the service.
     if (connectorId == null) return;
     if (localCp && !localCp.getConnector(connectorId)) return;
-    // Wait until the connector reports Available — handleStart bails
-    // otherwise. If we consume the auto-start key before the first real
-    // status arrives, the effect won't retry once status changes.
-    if (connectorStatus !== OCPPStatus.Available) return;
 
     const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
     if (lastAutoStartKeyRef.current === autoStartKey) {
       return;
     }
-    lastAutoStartKeyRef.current = autoStartKey;
 
     if (autoStartTimerRef.current) {
       clearTimeout(autoStartTimerRef.current);
     }
 
+    // Consume the key inside the timer rather than ahead of time so a
+    // scenario isn't marked as "auto-started" until handleStart actually
+    // fires. handleStart itself no longer gates on connector status.
     autoStartTimerRef.current = setTimeout(() => {
+      lastAutoStartKeyRef.current = autoStartKey;
       handleStart(defaultExecutionMode);
     }, 300);
 
@@ -728,7 +728,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEnabled,
     executionState,
     connectorId,
-    connectorStatus,
     localCp,
     handleStart,
   ]);

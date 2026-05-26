@@ -13,10 +13,38 @@ import { useDataContext } from "../data/providers/DataProvider";
 import type { ChargePointSnapshot } from "../data/interfaces/ChargePointService";
 import type { Config } from "../store/store";
 
+const REMOTE_TAG_IDS_KEY = "ocpp-cp.remote.tagIds";
+const DEFAULT_TAG_ID = "TAG001";
+
+function readRemoteTagIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(REMOTE_TAG_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((v) => typeof v === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRemoteTagIds(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(REMOTE_TAG_IDS_KEY, JSON.stringify(ids));
+  } catch {
+    // best effort
+  }
+}
+
 const TopPage: React.FC = () => {
   const { mode, chargePointService } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
-  const [tagIDs, setTagIDs] = useState<string[]>([]);
+  const [tagIDs, setTagIDs] = useState<string[]>(() =>
+    typeof window === "undefined" ? [] : readRemoteTagIds(),
+  );
   const [chargePointConfigs, setChargePointConfigs] = useState<
     ChargePointConfig[]
   >([]);
@@ -89,6 +117,12 @@ const TopPage: React.FC = () => {
 
   const handleSaveChargePoint = async (cpConfig: ChargePointConfig) => {
     if (mode === "remote") {
+      // Remote mode: persist tag IDs locally so future sessions / Authorize
+      // / Start Transaction have a default to send.
+      if (cpConfig.tagIds.length > 0) {
+        setTagIDs(cpConfig.tagIds);
+        writeRemoteTagIds(cpConfig.tagIds);
+      }
       try {
         await chargePointService.createChargePoint?.({
           cpId: cpConfig.cpId,
@@ -207,12 +241,14 @@ const TopPage: React.FC = () => {
     updateConfig(newConfig);
   };
 
+  const effectiveTagIDs = tagIDs.length > 0 ? tagIDs : [DEFAULT_TAG_ID];
+
   return (
     <div className="px-8 pt-6 pb-8 mb-4">
       <ExperimentalView
         mode={mode}
         cps={chargePoints}
-        tagIDs={tagIDs}
+        tagIDs={effectiveTagIDs}
         onAddChargePoint={handleAddChargePoint}
         onEditChargePoint={handleEditChargePoint}
         onDeleteChargePoint={handleDeleteChargePoint}
@@ -451,7 +487,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
         </TabsList>
         {cps.map((cp) => (
           <TabsContent key={cp.id} value={cp.id}>
-            <ChargePoint cpId={cp.id} TagID={tagIDs[0]} />
+            <ChargePoint cpId={cp.id} TagID={tagIDs[0] ?? "TAG001"} />
           </TabsContent>
         ))}
       </Tabs>

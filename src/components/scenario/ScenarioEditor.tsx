@@ -587,10 +587,22 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   }, [executionState, handleStart]);
 
   const handleForceStop = useCallback(() => {
+    // Stop both in-process and remote executors. In local mode the executor
+    // ref is set; in remote mode the server holds state and we must call
+    // stopScenario / stopAllScenarios over the wire.
     executorRef.current?.stop();
+    if (!localCp && connectorId != null) {
+      void chargePointService
+        .stopScenario(cpId, connectorId, scenario.id)
+        .catch(() =>
+          chargePointService
+            .stopAllScenarios(cpId, connectorId)
+            .catch(() => {}),
+        );
+    }
     setExecutionState("idle");
     setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
-  }, [setNodes]);
+  }, [setNodes, localCp, connectorId, chargePointService, cpId, scenario.id]);
 
   const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAutoStartKeyRef = useRef<string | null>(null);

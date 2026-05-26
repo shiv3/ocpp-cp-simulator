@@ -103,7 +103,7 @@ interface ConnectorDetailsPanelProps {
   onSendMeterValue: () => void;
   onToggleAutoMeterValue: () => void;
   onOpenConfigModal: () => void;
-  onStatusNotification: () => void;
+  onStatusNotification: (status: ocpp.OCPPStatus) => void;
   onToggleAutoResetToAvailable: () => void;
 }
 
@@ -346,7 +346,7 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
             value=""
             onChange={(e) => {
               if (e.target.value) {
-                onStatusNotification();
+                onStatusNotification(e.target.value as ocpp.OCPPStatus);
                 e.target.value = "";
               }
             }}
@@ -363,8 +363,9 @@ const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
             <option value={ocpp.OCPPStatus.Faulted}>Faulted</option>
           </select>
           <button
-            onClick={onStatusNotification}
+            onClick={() => onStatusNotification(connectorStatus)}
             className="btn-secondary text-xs px-3"
+            title="Resend current status"
           >
             📤 Send
           </button>
@@ -615,12 +616,8 @@ const Connector: React.FC<ConnectorProps> = ({
     return () => unsubscribe();
   }, [mode, cpId, connector_id, chargePointService]);
 
-  const handleStatusNotification = () => {
-    void chargePointService.sendStatusNotification(
-      cpId,
-      connector_id,
-      connectorStatus,
-    );
+  const handleStatusNotification = (status: ocpp.OCPPStatus) => {
+    void chargePointService.sendStatusNotification(cpId, connector_id, status);
   };
 
   const handleStartTransaction = () => {

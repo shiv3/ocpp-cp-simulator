@@ -85,7 +85,21 @@ export function useChargePoints(
 
       chargePointService
         .syncLocalChargePoints(definitions)
-        .then(() => fetchAndSet())
+        .then(async () => {
+          // Preserve the config-defined order. listChargePoints() returns
+          // Map insertion order, which can desync from chargePointConfigs
+          // when an id is renamed.
+          const snapshots = await Promise.all(
+            definitions.map((d) =>
+              chargePointService.getChargePoint(d.id).catch(() => null),
+            ),
+          );
+          if (!cancelledRef.current) {
+            setChargePoints(
+              snapshots.filter((s): s is ChargePointSnapshot => s !== null),
+            );
+          }
+        })
         .catch((err) => {
           console.error("Failed to sync local charge points", err);
           setChargePoints([]);

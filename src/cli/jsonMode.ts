@@ -6,8 +6,14 @@ import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
   ScenarioDefinition,
+  ScenarioExecutionMode,
   ScenarioMode,
 } from "../cp/application/scenario/ScenarioTypes";
+
+const VALID_EXECUTION_MODES: ReadonlyArray<ScenarioExecutionMode> = [
+  "oneshot",
+  "step",
+];
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
@@ -195,7 +201,17 @@ export async function handleJsonCommand(
     case "run_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      service.runScenario(connectorId, scenarioId);
+      const modeRaw = typeof params.mode === "string" ? params.mode : "oneshot";
+      if (!VALID_EXECUTION_MODES.includes(modeRaw as ScenarioExecutionMode)) {
+        throw new Error(
+          `Invalid mode: ${modeRaw}. Valid: ${VALID_EXECUTION_MODES.join(", ")}`,
+        );
+      }
+      service.runScenario(
+        connectorId,
+        scenarioId,
+        modeRaw as ScenarioExecutionMode,
+      );
       return undefined;
     }
 
@@ -297,9 +313,7 @@ export async function handleJsonCommand(
     }
 
     case "get_state_history": {
-      const options = (params.options ?? undefined) as
-        | HistoryOptions
-        | undefined;
+      const options = parseHistoryOptions(params.options);
       return service.getStateHistory(options);
     }
 
@@ -376,4 +390,39 @@ export function requireObject(
     throw new Error(`Missing or invalid parameter: ${key} (expected object)`);
   }
   return val as Record<string, unknown>;
+}
+
+/**
+ * Convert a HistoryOptions object that arrived over JSON into the in-memory
+ * shape `StateHistory.getHistory` expects. fromTimestamp / toTimestamp are
+ * ISO strings on the wire but the comparator needs Date instances.
+ */
+function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: HistoryOptions = {};
+  if (typeof src.entity === "string") {
+    out.entity = src.entity as HistoryOptions["entity"];
+  }
+  if (typeof src.entityId === "number") {
+    out.entityId = src.entityId;
+  }
+  if (typeof src.transitionType === "string") {
+    out.transitionType = src.transitionType as HistoryOptions["transitionType"];
+  }
+  if (typeof src.limit === "number") {
+    out.limit = src.limit;
+  }
+  if (typeof src.fromTimestamp === "string") {
+    out.fromTimestamp = new Date(src.fromTimestamp);
+  } else if (src.fromTimestamp instanceof Date) {
+    out.fromTimestamp = src.fromTimestamp;
+  }
+  if (typeof src.toTimestamp === "string") {
+    out.toTimestamp = new Date(src.toTimestamp);
+  } else if (src.toTimestamp instanceof Date) {
+    out.toTimestamp = src.toTimestamp;
+  }
+  return out;
 }

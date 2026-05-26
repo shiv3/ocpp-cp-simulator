@@ -247,6 +247,7 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     scenarioId: string,
+    mode?: import("../../cp/application/scenario/ScenarioTypes").ScenarioExecutionMode,
   ): Promise<void>;
   stopScenario(
     id: string,

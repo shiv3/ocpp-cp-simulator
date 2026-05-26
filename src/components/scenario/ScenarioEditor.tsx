@@ -495,6 +495,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               cpId,
               connectorId,
               currentScenario.id,
+              mode,
             );
             setExecutionMode(mode);
           }

@@ -22,6 +22,7 @@ import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector"
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
+  ScenarioExecutionMode,
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type {
@@ -317,11 +318,12 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     scenarioId: string,
+    mode: ScenarioExecutionMode = "oneshot",
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
     const manager = connector.scenarioManager;
     if (!manager) throw new Error("Scenario manager not available");
-    await manager.executeScenario(scenarioId, "oneshot");
+    await manager.executeScenario(scenarioId, mode);
   }
 
   async stopScenario(

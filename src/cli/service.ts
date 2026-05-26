@@ -442,7 +442,11 @@ export class CLIChargePointService {
     return result;
   }
 
-  runScenario(connectorId: number, scenarioId: string): void {
+  runScenario(
+    connectorId: number,
+    scenarioId: string,
+    mode: import("../cp/application/scenario/ScenarioTypes").ScenarioExecutionMode = "oneshot",
+  ): void {
     const entry = this._scenarios.get(scenarioId);
     if (!entry) {
       throw new Error(`Scenario ${scenarioId} not found`);
@@ -493,7 +497,7 @@ export class CLIChargePointService {
 
     this.emit({ event: "scenario_started", data: { connectorId, scenarioId } });
 
-    executor.start("oneshot").finally(() => {
+    executor.start(mode).finally(() => {
       this._executors.delete(scenarioId);
     });
   }

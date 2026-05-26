@@ -530,13 +530,21 @@ export class CLIChargePointService {
     return executor.getContext();
   }
 
-  stopScenario(_connectorId: number, scenarioId: string): void {
+  stopScenario(connectorId: number, scenarioId: string): void {
     const executor = this._executors.get(scenarioId);
     if (!executor) {
       throw new Error(`Scenario ${scenarioId} is not running`);
     }
     executor.stop();
     this._executors.delete(scenarioId);
+    // Surface the stop to remote subscribers — executor.stop() bypasses
+    // the onStateChange("completed") path used by runScenario(), so the
+    // browser's active-scenario tracker would otherwise still believe
+    // this scenario is running.
+    this.emit({
+      event: "scenario_completed",
+      data: { connectorId, scenarioId },
+    });
   }
 
   stopAllScenarios(connectorId: number): void {
@@ -546,6 +554,10 @@ export class CLIChargePointService {
         if (executor) {
           executor.stop();
           this._executors.delete(scenarioId);
+          this.emit({
+            event: "scenario_completed",
+            data: { connectorId, scenarioId },
+          });
         }
       }
     }

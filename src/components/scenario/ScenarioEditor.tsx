@@ -600,16 +600,27 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   const handleForceStep = useCallback(() => {
     if (executionState === "idle") {
-      void handleStart("step");
-      setTimeout(() => {
+      void (async () => {
+        // handleStart kicks off load+run; in remote mode that's two HTTP
+        // requests, so we must await the start before issuing step,
+        // otherwise the server's executor doesn't exist yet and step
+        // would respond "Scenario ... is not running".
+        await handleStart("step");
         if (localCp) {
           executorRef.current?.forceStep();
         } else if (connectorId != null) {
-          void chargePointService
-            .stepScenario(cpId, connectorId, scenario.id, true)
-            .catch((err) => console.error("forceStep (remote) failed", err));
+          try {
+            await chargePointService.stepScenario(
+              cpId,
+              connectorId,
+              scenario.id,
+              true,
+            );
+          } catch (err) {
+            console.error("forceStep (remote) failed", err);
+          }
         }
-      }, 0);
+      })();
       return;
     }
     if (localCp) {

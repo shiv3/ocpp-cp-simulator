@@ -646,6 +646,28 @@ export class CLIChargePointService {
           });
         }),
       );
+      // When the CSMS confirms a StartTransaction, the connector's
+      // transactionId switches from the initial placeholder (0) to the real
+      // id. Re-emit transaction_started so remote subscribers see the
+      // accepted id. Also emit transaction_stopped when it clears (e.g.
+      // CSMS-driven stop), so remote clients see the change.
+      this._unsubscribes.push(
+        connector.events.on("transactionIdChange", ({ transactionId }) => {
+          if (transactionId == null) {
+            this.emit({
+              event: "transaction_stopped",
+              data: { connectorId, transactionId: 0 },
+            });
+            return;
+          }
+          if (transactionId === 0) return; // placeholder, already emitted on start
+          const tagId = connector.transaction?.tagId ?? "";
+          this.emit({
+            event: "transaction_started",
+            data: { connectorId, transactionId, tagId },
+          });
+        }),
+      );
       this._unsubscribes.push(
         connector.events.on("socChange", ({ soc }) => {
           this.emit({ event: "connector_soc", data: { connectorId, soc } });

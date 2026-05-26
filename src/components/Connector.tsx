@@ -24,6 +24,7 @@ const StateTransitionViewer = lazy(
 );
 import { GitBranch } from "lucide-react";
 import { saveConnectorAutoMeterConfig } from "../utils/connectorStorage";
+import { loadScenarios } from "../utils/scenarioStorage";
 import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { useScenarios } from "../data/hooks/useScenarios";
@@ -684,7 +685,25 @@ const Connector: React.FC<ConnectorProps> = ({
 
   const handleCloseScenarioEditor = useCallback(() => {
     setIsScenarioEditorOpen(false);
-  }, []);
+
+    // The editor saves scenarios directly to localStorage (not through the
+    // scenario repository's subscribe path), so refresh the local cache to
+    // pick up any edits/imports/templates the user made before closing.
+    const loaded = loadScenarios(cpId, connector_id);
+    if (loaded.length > 0) {
+      setScenario((current) => {
+        if (!current) return loaded[0];
+        const match = loaded.find((s) => s.id === current.id);
+        return match ?? loaded[0];
+      });
+      // Local mode also drives an in-browser ScenarioManager that needs to
+      // know about renamed / newly added scenarios.
+      if (localCp) {
+        const connector = localCp.getConnector(connector_id);
+        connector?.scenarioManager?.loadScenarios(loaded);
+      }
+    }
+  }, [cpId, connector_id, localCp]);
 
   // Resize handlers
   const handleResizeStart = (e: React.MouseEvent) => {

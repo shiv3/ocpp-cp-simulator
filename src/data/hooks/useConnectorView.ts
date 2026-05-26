@@ -143,6 +143,26 @@ export function useConnectorView(
               setTransactionStartTime(null);
               setTransactionTagId(null);
               setTransactionBatteryCapacityKwh(null);
+            } else {
+              // The event carries only the new id, not the start time / tag id
+              // / battery capacity. Refetch the snapshot so the active
+              // transaction panel ("Started", "ID Tag", duration) renders
+              // correctly without waiting for a remount.
+              void chargePointService
+                .getChargePoint(cpId)
+                .then((snapshot) => {
+                  if (cancelled || !snapshot) return;
+                  const connector = snapshot.connectors.find(
+                    (c) => c.id === connectorId,
+                  );
+                  if (!connector) return;
+                  setTransactionStartTime(connector.transactionStartTime);
+                  setTransactionTagId(connector.transactionTagId);
+                  setTransactionBatteryCapacityKwh(
+                    connector.transactionBatteryCapacityKwh,
+                  );
+                })
+                .catch(() => {});
             }
             break;
           case "connector-auto-meter":

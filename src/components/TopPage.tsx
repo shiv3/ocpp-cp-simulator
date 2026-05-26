@@ -357,15 +357,18 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
   };
 
   const handleAllStopTransaction = () => {
+    // We can't rely on cp.connectors[*].transactionId here — it's a
+    // snapshot from useChargePoints and lags behind in-flight transactions
+    // started via the adjacent "Start Transaction All" button. Fire stop
+    // unconditionally for every known connector; the service no-ops cleanly
+    // when nothing is active.
     cps.forEach((cp) => {
       cp.connectors.forEach((connector) => {
-        if (connector.transactionId != null) {
-          void chargePointService
-            .stopTransaction(cp.id, connector.id)
-            .catch((err) => {
-              console.error(`stopTransaction failed for ${cp.id}`, err);
-            });
-        }
+        void chargePointService
+          .stopTransaction(cp.id, connector.id)
+          .catch((err) => {
+            console.error(`stopTransaction failed for ${cp.id}`, err);
+          });
       });
     });
   };

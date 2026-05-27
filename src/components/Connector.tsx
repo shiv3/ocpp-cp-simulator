@@ -617,6 +617,69 @@ const Connector: React.FC<ConnectorProps> = ({
     return () => unsubscribe();
   }, [mode, cpId, connector_id, chargePointService]);
 
+  // Remote mode: hydrate the editor with whatever scenarios the daemon has
+  // loaded for this connector (e.g. via --scenario-template-file). Without
+  // this the ScenarioEditor only renders the localStorage default and the
+  // user can't see the running template.
+  useEffect(() => {
+    if (mode !== "remote") return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await chargePointService.listScenarios(cpId, connector_id);
+        if (cancelled || list.length === 0) return;
+        const defs = await Promise.all(
+          list.map((item) =>
+            chargePointService
+              .getScenario(cpId, connector_id, item.scenarioId)
+              .catch(() => null),
+          ),
+        );
+        if (cancelled) return;
+        const valid = defs.filter((d): d is ScenarioDefinition => d !== null);
+        if (valid.length === 0) return;
+        setScenario((current) => {
+          if (current) {
+            const match = valid.find((s) => s.id === current.id);
+            if (match) return match;
+          }
+          // Prefer an active scenario, otherwise the first loaded one.
+          const activeItem = list.find((item) => item.active);
+          const preferred = activeItem
+            ? valid.find((d) => d.id === activeItem.scenarioId)
+            : null;
+          const next = preferred ?? valid[0];
+          scenarioRef.current = next;
+          return next;
+        });
+      } catch (err) {
+        if (!cancelled) {
+          console.warn(
+            `[Connector] Failed to fetch remote scenarios for ${cpId}/${connector_id}`,
+            err,
+          );
+        }
+      }
+    };
+
+    void refresh();
+    // Re-fetch when scenario lifecycle events fire — the daemon may have
+    // loaded new ones via --scenario-template-file or load_scenario.
+    const unsub = chargePointService.subscribe(cpId, (event) => {
+      if (
+        (event.type === "scenario-started" ||
+          event.type === "scenario-completed") &&
+        event.connectorId === connector_id
+      ) {
+        void refresh();
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [mode, cpId, connector_id, chargePointService]);
+
   const handleStatusNotification = (status: ocpp.OCPPStatus) => {
     void chargePointService.sendStatusNotification(cpId, connector_id, status);
   };

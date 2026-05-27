@@ -560,6 +560,12 @@ const Connector: React.FC<ConnectorProps> = ({
   }, [connector_id, localCp]);
 
   useEffect(() => {
+    // In remote mode the editor is hydrated from the server (see the
+    // dedicated effect further down). Skip the localStorage-driven path
+    // entirely so it doesn't clobber the remote definition with the
+    // localStorage default scenario.
+    if (mode !== "local") return;
+
     if (scenarios.length > 0) {
       setScenario((current) => {
         const match = current
@@ -591,7 +597,7 @@ const Connector: React.FC<ConnectorProps> = ({
         }
       }
     }
-  }, [scenarios, localCp, connector_id]);
+  }, [mode, scenarios, localCp, connector_id]);
 
   // Remote mode: track active scenarios via service events.
   useEffect(() => {

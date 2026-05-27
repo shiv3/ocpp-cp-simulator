@@ -20,7 +20,9 @@ export interface ServerOptions {
   readonly startupScenario: {
     readonly scenario: string | null;
     readonly scenarioTemplate: string | null;
-    readonly scenarioConnector: number;
+    readonly scenarioTemplateFile: string | null;
+    /** "all" | "1" | "1,2,3" — resolved to a list of connector ids at startup. */
+    readonly scenarioConnector: string;
   } | null;
   readonly cors: CorsPolicy;
 }
@@ -93,9 +95,31 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       }
     }
     if (opts.startupScenario) {
-      runStartupScenario(svc, opts.startupScenario);
+      runStartupScenario(svc, opts.startupScenario, opts.bootstrap.connectors);
     }
   }
+}
+
+/**
+ * Resolve a `--scenario-connector` value ("all" | "1" | "1,2,3") to an
+ * explicit list of connector ids in [1..connectorCount]. Silently skips
+ * out-of-range values and de-duplicates.
+ */
+function resolveConnectorIds(raw: string, connectorCount: number): number[] {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed || trimmed === "all") {
+    const ids: number[] = [];
+    for (let i = 1; i <= connectorCount; i++) ids.push(i);
+    return ids;
+  }
+  const seen = new Set<number>();
+  for (const part of trimmed.split(",")) {
+    const n = parseInt(part, 10);
+    if (Number.isInteger(n) && n >= 1 && n <= connectorCount) {
+      seen.add(n);
+    }
+  }
+  return [...seen];
 }
 
 function removeStaleSocket(socketPath: string): void {
@@ -109,46 +133,130 @@ function removeStaleSocket(socketPath: string): void {
 function runStartupScenario(
   svc: CLIChargePointService,
   opt: NonNullable<ServerOptions["startupScenario"]>,
+  connectorCount: number,
 ): void {
-  const connectorId = opt.scenarioConnector;
+  const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
+  if (connectors.length === 0) {
+    process.stderr.write(
+      `[server] No matching connectors for --scenario-connector "${opt.scenarioConnector}"\n`,
+    );
+    return;
+  }
 
+  // 1) Built-in template by id — instantiate per connector.
   if (opt.scenarioTemplate) {
-    try {
-      const scenarioId = svc.loadScenarioTemplate(
-        opt.scenarioTemplate,
-        connectorId,
-      );
-      svc.runScenario(connectorId, scenarioId);
-      process.stderr.write(
-        `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
-      );
-    } catch (err) {
-      process.stderr.write(
-        `[server] Failed to start scenario template: ${
-          err instanceof Error ? err.message : err
-        }\n`,
-      );
+    for (const connectorId of connectors) {
+      try {
+        const scenarioId = svc.loadScenarioTemplate(
+          opt.scenarioTemplate,
+          connectorId,
+        );
+        svc.runScenario(connectorId, scenarioId);
+        process.stderr.write(
+          `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to start scenario template on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
     }
     return;
   }
 
-  if (opt.scenario) {
+  // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
+  if (opt.scenarioTemplateFile) {
+    let template: ScenarioDefinition;
     try {
-      const content = fs.readFileSync(opt.scenario, "utf-8");
-      const definition = JSON.parse(content) as ScenarioDefinition;
-      const scenarioId = svc.loadScenario(connectorId, definition);
-      svc.runScenario(connectorId, scenarioId);
-      process.stderr.write(
-        `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
-      );
+      template = JSON.parse(
+        fs.readFileSync(opt.scenarioTemplateFile, "utf-8"),
+      ) as ScenarioDefinition;
     } catch (err) {
       process.stderr.write(
-        `[server] Failed to start scenario file: ${
+        `[server] Failed to read scenario template file: ${
           err instanceof Error ? err.message : err
         }\n`,
       );
+      return;
+    }
+    for (const connectorId of connectors) {
+      try {
+        const instance = instantiateTemplate(template, connectorId);
+        const scenarioId = svc.loadScenario(connectorId, instance);
+        svc.runScenario(connectorId, scenarioId);
+        process.stderr.write(
+          `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to apply template file on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+    }
+    return;
+  }
+
+  // 3) Single scenario file — for fan-out, treat it like a template (rewrite
+  // ids per connector); for single-connector, behave as before.
+  if (opt.scenario) {
+    let definition: ScenarioDefinition;
+    try {
+      definition = JSON.parse(
+        fs.readFileSync(opt.scenario, "utf-8"),
+      ) as ScenarioDefinition;
+    } catch (err) {
+      process.stderr.write(
+        `[server] Failed to read scenario file: ${
+          err instanceof Error ? err.message : err
+        }\n`,
+      );
+      return;
+    }
+    for (const connectorId of connectors) {
+      try {
+        const instance =
+          connectors.length === 1 && connectorId === definition.targetId
+            ? definition
+            : instantiateTemplate(definition, connectorId);
+        const scenarioId = svc.loadScenario(connectorId, instance);
+        svc.runScenario(connectorId, scenarioId);
+        process.stderr.write(
+          `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to start scenario file on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
     }
   }
+}
+
+/**
+ * Produce a connector-specific copy of a scenario definition by rewriting
+ * targetType / targetId / id / name. Nodes and edges are deep-cloned so
+ * multiple connectors can run independent state machines from one file.
+ */
+function instantiateTemplate(
+  template: ScenarioDefinition,
+  connectorId: number,
+): ScenarioDefinition {
+  const cloned = JSON.parse(JSON.stringify(template)) as ScenarioDefinition;
+  return {
+    ...cloned,
+    id: `${cloned.id}-c${connectorId}-${Date.now()}`,
+    name: cloned.name
+      ? `${cloned.name} (Connector ${connectorId})`
+      : `Connector ${connectorId}`,
+    targetType: "connector",
+    targetId: connectorId,
+  };
 }
 
 export const DEFAULT_UNIX_SOCKET = "/tmp/ocpp-server.sock";

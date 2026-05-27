@@ -15,7 +15,12 @@ export interface CLIOptions {
   readonly model: string;
   readonly scenario: string | null;
   readonly scenarioTemplate: string | null;
-  readonly scenarioConnector: number;
+  /** Path to a JSON file containing a cpId-independent scenario template.
+   *  Each entry in `scenarioConnectors` instantiates an independent copy. */
+  readonly scenarioTemplateFile: string | null;
+  /** Raw connector selector: "all" | "1,2,3" | "1". Resolved at startup
+   *  once the bootstrap CP's connector count is known. */
+  readonly scenarioConnector: string;
   readonly httpPort: number | null;
   readonly httpHost: string;
   readonly unixSocket: string | null;

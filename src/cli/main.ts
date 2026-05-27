@@ -25,7 +25,8 @@ function parseArgs(argv: string[]): CLIOptions {
   let model = "CLI-Model";
   let scenario: string | null = null;
   let scenarioTemplate: string | null = null;
-  let scenarioConnector = 1;
+  let scenarioTemplateFile: string | null = null;
+  let scenarioConnector = "1";
   let httpPort: number | null = null;
   let httpHost = "127.0.0.1";
   let unixSocket: string | null = null;
@@ -91,8 +92,12 @@ function parseArgs(argv: string[]): CLIOptions {
         scenarioTemplate = next ?? "";
         i++;
         break;
+      case "--scenario-template-file":
+        scenarioTemplateFile = next ?? "";
+        i++;
+        break;
       case "--scenario-connector":
-        scenarioConnector = parseInt(next ?? "1", 10);
+        scenarioConnector = next ?? "1";
         i++;
         break;
       case "--http-port":
@@ -209,6 +214,7 @@ function parseArgs(argv: string[]): CLIOptions {
     model,
     scenario,
     scenarioTemplate,
+    scenarioTemplateFile,
     scenarioConnector,
     httpPort,
     httpHost,
@@ -251,9 +257,12 @@ Options:
   --basic-auth-pass <p>    Basic auth password
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
-  --scenario <file>        Run scenario from JSON file on startup
-  --scenario-template <id> Run built-in scenario template on startup
-  --scenario-connector <n> Connector for startup scenario (default: 1)
+  --scenario <file>            Run scenario from JSON file on startup
+  --scenario-template <id>     Run built-in scenario template on startup
+  --scenario-template-file <p> Load a cpId-independent template JSON and apply it
+                               to every connector listed in --scenario-connector
+  --scenario-connector <list>  Target connectors: "all", a single id ("1"),
+                               or a comma-separated list ("1,2,3"). Default: 1
   --http-port <port>       Enable HTTP/WebSocket server on this TCP port
   --http-host <addr>       Bind address for HTTP (default: 127.0.0.1)
   --unix-socket <path|none> Unix socket path; "none" disables it
@@ -328,6 +337,7 @@ async function main(): Promise<void> {
         ? {
             scenario: options.scenario,
             scenarioTemplate: options.scenarioTemplate,
+            scenarioTemplateFile: options.scenarioTemplateFile,
             scenarioConnector: options.scenarioConnector,
           }
         : null,

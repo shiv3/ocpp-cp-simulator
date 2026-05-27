@@ -266,6 +266,16 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null>;
+  /**
+   * Returns the loaded scenario definition (or null) for a given connector
+   * + scenarioId. Lets the browser inspect scenarios that the server
+   * loaded out-of-band (e.g. via `--scenario-template-file`).
+   */
+  getScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioDefinition | null>;
 
   // Event subscription
   subscribe(id: string, handler: (event: ChargePointEvent) => void): () => void;

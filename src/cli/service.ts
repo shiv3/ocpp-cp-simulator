@@ -519,6 +519,21 @@ export class CLIChargePointService {
     else executor.step();
   }
 
+  /**
+   * Returns the loaded scenario definition for a given connector + id, or
+   * null if the scenario is not loaded on this CP. Used by remote browser
+   * clients to see what the daemon has loaded (e.g. via
+   * --scenario-template-file).
+   */
+  getScenario(
+    connectorId: number,
+    scenarioId: string,
+  ): ScenarioDefinition | null {
+    const entry = this._scenarios.get(scenarioId);
+    if (!entry || entry.connectorId !== connectorId) return null;
+    return entry.definition;
+  }
+
   getScenarioStatus(
     _connectorId: number,
     scenarioId: string,

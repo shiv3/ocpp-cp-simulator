@@ -641,6 +641,18 @@ export class RemoteChargePointService implements ChargePointService {
     return (data as ScenarioExecutionContext | null) ?? null;
   }
 
+  async getScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioDefinition | null> {
+    const data = await this.runCommand(id, "get_scenario", {
+      connector: connectorId,
+      scenarioId,
+    });
+    return (data as ScenarioDefinition | null) ?? null;
+  }
+
   subscribe(
     id: string,
     handler: (event: ChargePointEvent) => void,

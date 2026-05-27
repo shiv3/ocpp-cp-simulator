@@ -376,6 +376,17 @@ export class LocalChargePointService implements ChargePointService {
     return manager.getScenarioExecutionContext(scenarioId) ?? null;
   }
 
+  async getScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioDefinition | null> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) return null;
+    return manager.getScenario(scenarioId) ?? null;
+  }
+
   private requireConnector(id: string, connectorId: number) {
     const cp = this.getExistingChargePointOrThrow(id);
     const connector = cp.getConnector(connectorId);

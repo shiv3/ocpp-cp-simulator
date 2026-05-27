@@ -6,13 +6,32 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
+import { useDataContext } from "../data/providers/DataProvider";
 
 const Settings: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
+  const { mode, serverUrl, setMode, setServerUrl } = useDataContext();
   const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
+  const [draftUrl, setDraftUrl] = useState<string>(serverUrl);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    setDraftUrl(serverUrl);
+  }, [serverUrl]);
+
+  const handleApplyServerUrl = () => {
+    const trimmed = draftUrl.trim();
+    if (!trimmed) {
+      setError("Remote server URL cannot be empty.");
+      setTimeout(() => setError(""), 5000);
+      return;
+    }
+    setServerUrl(trimmed);
+    setSuccess("Remote server URL updated.");
+    setTimeout(() => setSuccess(""), 3000);
+  };
 
   useEffect(() => {
     if (isLoading) return;
@@ -104,6 +123,80 @@ const Settings: React.FC = () => {
           </AlertDescription>
         </Alert>
       )}
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Runtime Mode</CardTitle>
+          <p className="text-muted-foreground text-sm mt-2">
+            Choose whether the simulator runs the charge points in the browser
+            (Local) or controls a long-running <code>cp-sim</code> daemon via
+            HTTP/WebSocket (Remote). The selection persists in localStorage.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <div className="text-sm font-semibold mb-2">Mode</div>
+            <div className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-md p-0.5">
+              <button
+                type="button"
+                onClick={() => setMode("local")}
+                className={`px-4 py-1.5 text-sm rounded transition-colors ${
+                  mode === "local"
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700"
+                }`}
+              >
+                Local
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("remote")}
+                className={`px-4 py-1.5 text-sm rounded transition-colors ${
+                  mode === "remote"
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700"
+                }`}
+              >
+                Remote
+              </button>
+            </div>
+            <p className="text-muted-foreground text-xs mt-2">
+              Current: <span className="font-semibold">{mode}</span>
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="remote-server-url"
+              className="block text-sm font-semibold mb-2"
+            >
+              Remote server URL
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="remote-server-url"
+                type="text"
+                value={draftUrl}
+                onChange={(e) => setDraftUrl(e.target.value)}
+                placeholder="http://127.0.0.1:9700"
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono"
+              />
+              <Button
+                onClick={handleApplyServerUrl}
+                disabled={draftUrl.trim() === serverUrl.trim()}
+                size="sm"
+              >
+                Apply
+              </Button>
+            </div>
+            <p className="text-muted-foreground text-xs mt-2">
+              Used when mode is set to <strong>Remote</strong>. Point this at a
+              running <code>cp-sim --http-port</code> daemon (default{" "}
+              <code>http://127.0.0.1:9700</code>).
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

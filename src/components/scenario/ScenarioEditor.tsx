@@ -667,8 +667,13 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAutoStartKeyRef = useRef<string | null>(null);
 
-  // Auto-start after save/changes (manual trigger only, no StatusTrigger node)
+  // Auto-start after save/changes (manual trigger only, no StatusTrigger node).
+  // Remote mode opts out entirely: the server controls scenario lifecycles
+  // (loaded via --scenario-template-file / load_scenario), and auto-pushing a
+  // browser-side default would create phantom "Scenario for ..." entries on
+  // the server that the user never asked for.
   useEffect(() => {
+    if (!localCp) return;
     if (!scenarioEnabled) {
       executorRef.current?.stop();
       setExecutionState("idle");

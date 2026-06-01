@@ -626,6 +626,14 @@ export class OCPPMessageHandler {
         continue;
       }
 
+      // §4.6: any outgoing CALL resets the heartbeat idle timer. Stamp
+      // lastSentAt only when the CALL is itself a Heartbeat — that way
+      // BootNotification/StatusNotification/etc. count as activity but
+      // don't pretend to be heartbeats in the UI.
+      this._chargePoint.notifyOutgoingCall(
+        head.action === OCPPAction.Heartbeat,
+      );
+
       const timer = setTimeout(
         () => this.handleSerialTimeout(head.id),
         OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS,

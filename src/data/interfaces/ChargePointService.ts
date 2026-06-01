@@ -39,6 +39,11 @@ export interface ChargePointSnapshot {
   status: OCPPStatus;
   error: string;
   connectors: ConnectorSnapshot[];
+  /** Current heartbeat configuration (§4.6). `intervalSeconds=0` = not yet
+   *  configured / disabled by ChangeConfiguration. `lastSentAt` is an ISO
+   *  string for remote-mode JSON safety; null if no Heartbeat.req has been
+   *  sent since the daemon started. */
+  heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
 }
 
 export interface CreateChargePointParams {
@@ -128,6 +133,15 @@ export type ChargePointEvent =
       connectorId: number;
       scenarioId: string;
       nodeId: string;
+    }
+  | {
+      /** §4.6 Heartbeat state. `intervalSeconds=0` means the CSMS has not
+       *  configured a heartbeat (or set it to 0 to disable). `lastSentAt` is
+       *  an ISO string so the same shape works over the remote-mode events
+       *  WebSocket. */
+      type: "heartbeat";
+      intervalSeconds: number;
+      lastSentAt: string | null;
     }
   | { type: "state-history-entry"; entry: StateHistoryEntry }
   | { type: "connector-removed"; connectorId: number }

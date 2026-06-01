@@ -9,10 +9,21 @@ import type { LogEntry } from "../../cp/shared/Logger";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { useDataContext } from "../providers/DataProvider";
 
+export interface HeartbeatView {
+  /** Configured interval in seconds (from BootNotification.conf.interval or
+   *  ChangeConfiguration HeartbeatInterval). 0 means not yet configured /
+   *  disabled. */
+  intervalSeconds: number;
+  /** Wall-clock time of the most recent Heartbeat.req we sent, or null if
+   *  none yet this session. */
+  lastSentAt: Date | null;
+}
+
 interface ChargePointViewState {
   status: OCPPStatus;
   error: string;
   connectors: Map<number, ConnectorSnapshot>;
+  heartbeat: HeartbeatView;
   logs: LogEntry[];
   clearLogs: () => void;
 }
@@ -58,6 +69,10 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
     new Map(),
   );
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [heartbeat, setHeartbeat] = useState<HeartbeatView>({
+    intervalSeconds: 0,
+    lastSentAt: null,
+  });
 
   useEffect(() => {
     if (!cpId) {
@@ -65,6 +80,7 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
       setError("");
       setConnectors(new Map());
       setLogs([]);
+      setHeartbeat({ intervalSeconds: 0, lastSentAt: null });
       return;
     }
 
@@ -77,6 +93,7 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
         setStatus(DEFAULT_STATUS);
         setError("");
         setConnectors(new Map());
+        setHeartbeat({ intervalSeconds: 0, lastSentAt: null });
         return;
       }
       setStatus(snapshot.status);
@@ -84,6 +101,14 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
       setConnectors(
         new Map(snapshot.connectors.map((c) => [c.id, c] as const)),
       );
+      if (snapshot.heartbeat) {
+        setHeartbeat({
+          intervalSeconds: snapshot.heartbeat.intervalSeconds,
+          lastSentAt: snapshot.heartbeat.lastSentAt
+            ? new Date(snapshot.heartbeat.lastSentAt)
+            : null,
+        });
+      }
     };
 
     chargePointService
@@ -185,6 +210,12 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
           case "log":
             setLogs((prev) => [...prev, event.entry]);
             break;
+          case "heartbeat":
+            setHeartbeat({
+              intervalSeconds: event.intervalSeconds,
+              lastSentAt: event.lastSentAt ? new Date(event.lastSentAt) : null,
+            });
+            break;
           case "connected":
             // status is updated via separate status event; nothing else to do.
             break;
@@ -213,6 +244,7 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
     status,
     error,
     connectors: connectorsMemo,
+    heartbeat,
     logs,
     clearLogs,
   };

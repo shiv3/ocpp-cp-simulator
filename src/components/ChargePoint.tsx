@@ -25,6 +25,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
     status: cpStatus,
     error: cpError,
     connectors,
+    heartbeat,
     logs,
     clearLogs,
   } = useChargePointView(cpId);
@@ -64,7 +65,15 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
   }, []);
 
   const handleToggleCollapse = useCallback(() => {
-    setIsPanelCollapsed((prev) => !prev);
+    setIsPanelCollapsed((prev) => {
+      const next = !prev;
+      // Collapsing while fullscreen would leave the panel covering the whole
+      // viewport with only a mini-strip of content (collapsed mode renders a
+      // tiny vertical bar), so step out of fullscreen first. Mirrors the
+      // un-collapse done by handleToggleFullscreen on enter.
+      if (next) setIsPanelFullscreen(false);
+      return next;
+    });
   }, []);
 
   const handleWidthChange = useCallback((newWidth: number) => {
@@ -112,6 +121,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
               cpStatus={cpStatus}
               cpError={cpError}
               tagID={TagID}
+              heartbeat={heartbeat}
             />
           </div>
 
@@ -250,11 +260,58 @@ const CPStatus: React.FC<{ status: string }> = ({ status }) => {
   );
 };
 
+/**
+ * Inline read-only display of the heartbeat configuration. The interval is
+ * owned by the CSMS (BootNotification.conf.interval / ChangeConfiguration);
+ * the simulator only echoes whatever the CSMS has set. Ticks every second
+ * so the "last sent" string stays fresh.
+ */
+const HeartbeatStatusChip: React.FC<{
+  heartbeat: { intervalSeconds: number; lastSentAt: Date | null };
+  isConnected: boolean;
+}> = ({ heartbeat, isConnected }) => {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!isConnected) {
+    return (
+      <span className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1 rounded bg-gray-100 dark:bg-gray-800">
+        Heartbeat: not connected
+      </span>
+    );
+  }
+
+  const interval =
+    heartbeat.intervalSeconds > 0
+      ? `${heartbeat.intervalSeconds}s`
+      : "not configured";
+
+  const lastSent = heartbeat.lastSentAt
+    ? `${Math.max(
+        0,
+        Math.floor((Date.now() - heartbeat.lastSentAt.getTime()) / 1000),
+      )}s ago`
+    : "never";
+
+  return (
+    <span
+      className="text-xs text-gray-700 dark:text-gray-300 px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 font-mono"
+      title="Heartbeat interval is set by BootNotification.conf.interval and updated by ChangeConfiguration HeartbeatInterval (§4.6). Any outgoing CALL resets the idle timer."
+    >
+      Heartbeat: {interval} · last sent {lastSent}
+    </span>
+  );
+};
+
 interface ChargePointControlsProps {
   chargePointId: string | null;
   cpStatus: string;
   cpError: string;
   tagID: string;
+  heartbeat: { intervalSeconds: number; lastSentAt: Date | null };
 }
 
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
@@ -262,8 +319,8 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   cpStatus,
   cpError,
   tagID,
+  heartbeat,
 }) => {
-  const [isHeartbeatEnabled, setIsHeartbeatEnabled] = useState<boolean>(false);
   const { chargePointService } = useDataContext();
 
   const handleConnect = () => {
@@ -278,16 +335,6 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   const handleHeartbeat = () => {
     if (!chargePointId) return;
     void chargePointService.sendHeartbeat(chargePointId);
-  };
-
-  const handleHeartbeatInterval = (isEnable: boolean) => {
-    setIsHeartbeatEnabled(isEnable);
-    if (!chargePointId) return;
-    if (isEnable) {
-      void chargePointService.startHeartbeat(chargePointId, 10);
-    } else {
-      void chargePointService.stopHeartbeat(chargePointId);
-    }
   };
 
   const handleAuthorize = () => {
@@ -338,15 +385,11 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
           onClick={handleHeartbeat}
           className="btn-info"
           disabled={!isConnected}
+          title="Send a Heartbeat.req now (§4.6). The CSMS replies with currentTime."
         >
-          Heartbeat
+          Send Heartbeat
         </button>
-        <button
-          className={isHeartbeatEnabled ? "btn-danger" : "btn-success"}
-          onClick={() => handleHeartbeatInterval(!isHeartbeatEnabled)}
-        >
-          {isHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat
-        </button>
+        <HeartbeatStatusChip heartbeat={heartbeat} isConnected={isConnected} />
         <button
           onClick={handleAuthorize}
           className="btn-success"

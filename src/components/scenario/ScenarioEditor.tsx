@@ -167,7 +167,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // themselves are unused inside this component — the panel-level header
   // owns the visible status display.
   const [, setConnectorStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
-  const [, setMeterValue] = useState<number>(0);
+  const [liveMeterValueWh, setMeterValue] = useState<number>(0);
   const [, setTransactionId] = useState<number | null>(null);
   const [, setCpStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
   const [nodeProgress, setNodeProgress] = useState<
@@ -370,6 +370,28 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       }),
     );
   }, [executionContext, nodeProgress, setNodes]);
+
+  // Push the connector's live meter reading into every MeterValue node's
+  // `data.currentValue` so the node face renders the running total instead
+  // of the static `data.value` from the scenario JSON. We don't mutate
+  // `data.value` (that's the configured starting value); MeterValueNode
+  // already prefers `currentValue` when present.
+  useEffect(() => {
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((node) => {
+        if (node.type !== "meterValue") return node;
+        const cur = (node.data as { currentValue?: number }).currentValue;
+        if (cur === liveMeterValueWh) return node;
+        changed = true;
+        return {
+          ...node,
+          data: { ...node.data, currentValue: liveMeterValueWh },
+        };
+      });
+      return changed ? next : nds;
+    });
+  }, [liveMeterValueWh, setNodes]);
 
   // In remote mode the in-browser executor is never set, so executionState
   // would stay "idle" forever and Force Step would keep re-running the

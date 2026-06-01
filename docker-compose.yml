@@ -5,15 +5,15 @@
 #
 # Override via environment variables — see the README under "Docker" for
 # the full flag list. Anything not covered here can be appended to the
-# `command:` block (those args are passed straight to cp-sim).
+# `command:` block (those args are passed straight to ocpp-cp-sim).
 
 services:
-  cp-sim:
+  ocpp-cp-sim:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cp-sim
-    container_name: cp-sim
+    image: ocpp-cp-sim
+    container_name: ocpp-cp-sim
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-9700}:9700"
@@ -23,6 +23,9 @@ services:
       # Mount the example scenarios read-only so you can point
       # --scenario-template-file at one from the command override.
       - ./docs/examples/scenarios:/scenarios:ro
+      # Persistent SQLite state — comment this volume out if you'd rather
+      # run the simulator in-memory (state is wiped on container exit).
+      - ./.state:/data
     # Args appended to the image's ENTRYPOINT. Tweak to your CSMS / cpId.
     # The Dockerfile already sets --http-host 0.0.0.0 --unix-socket none
     # and --http-port (from $HTTP_PORT).
@@ -33,6 +36,8 @@ services:
       - "${CONNECTORS:-1}"
       - --ws-url
       - "${WS_URL:-wss://example.invalid/chargepoint/}"
+      - --state-db
+      - /data/state.db
       # CORS: leave unset for "*" (any origin). To restrict, set
       # CORS_ORIGIN and uncomment the lines below.
       # - --cors-origin

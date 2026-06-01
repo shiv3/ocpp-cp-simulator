@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "cp-sim": "src/cli/main.ts"
+    "ocpp-cp-sim": "src/cli/main.ts"
   },
   "files": [
     "src/cli",
@@ -15,7 +15,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "vitest run",
+    "test": "vitest run && bun test bun.test",
+    "test:vitest": "vitest run",
+    "test:bun": "bun test bun.test",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "format": "prettier --write .",
@@ -43,6 +45,7 @@
     "eventemitter2": "^6.4.9",
     "flowbite": "^3.1.2",
     "flowbite-react": "^0.12.10",
+    "idb-keyval": "^6.2.4",
     "jotai": "^2.12.5",
     "jotai-location": "^0.5.5",
     "jotai-zustand": "^0.4.0",
@@ -52,6 +55,7 @@
     "react-robot": "^1.2.0",
     "react-router-dom": "^6.30.1",
     "robot3": "^1.2.0",
+    "sql.js": "^1.14.1",
     "zustand": "^4.5.7"
   },
   "devDependencies": {
@@ -60,6 +64,7 @@
     "@types/eventemitter2": "^2.2.1",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
+    "@types/sql.js": "^1.4.11",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",

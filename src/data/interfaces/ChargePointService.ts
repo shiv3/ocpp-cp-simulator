@@ -155,6 +155,23 @@ export interface ScenarioListItem {
   active: boolean;
 }
 
+/** Shape of one persisted log row as returned by `listStoredLogs` and
+ *  emitted by the daemon's JSON Lines log format. Kept flat so the file
+ *  is grep / jq-friendly. */
+export interface StoredLogEntry {
+  /** ISO-8601 timestamp in UTC. */
+  timestamp: string;
+  /** "DEBUG" | "INFO" | "WARN" | "ERROR" — string form of LogLevel for
+   *  stability across enum-renumbering. */
+  level: string;
+  /** LogType enum value (e.g., "WebSocket", "OCPP", "Scenario"). */
+  type: string;
+  /** Charge point id this entry belongs to. */
+  cpId: string;
+  /** Human-readable log line. */
+  message: string;
+}
+
 export interface ScenarioTemplateInfo {
   id: string;
   name: string;
@@ -186,6 +203,26 @@ export interface ChargePointService {
   createChargePoint?(params: CreateChargePointParams): Promise<void>;
   removeChargePoint?(id: string): Promise<void>;
   ping?(): Promise<{ ok: boolean; cps: number }>;
+
+  /** Wipe every simulator-owned table in the backing SQLite store
+   *  (scenarios, connector settings, charging profiles, configuration
+   *  overrides, pending messages, logs, …). Schema is preserved.
+   *
+   *  In local mode this clears the browser sql.js DB. In remote mode it
+   *  hits `POST /v1/state/reset` on the daemon. Callers should reload
+   *  the UI afterwards to drop in-memory caches. */
+  resetAllState?(): Promise<void>;
+
+  /** Delete all persisted log rows for the given CP from the SQLite store.
+   *  Does NOT touch the in-memory log buffer the UI is reading from — the
+   *  caller is expected to clear that separately so the user keeps control
+   *  over the screen-side state. */
+  clearStoredLogs?(cpId: string): Promise<void>;
+
+  /** Return every persisted log row for the given CP, oldest-first. Used
+   *  by the Download Logs button — the returned shape is what the JSONL
+   *  file ends up containing, one JSON object per line. */
+  listStoredLogs?(cpId: string): Promise<StoredLogEntry[]>;
 
   // Lifecycle
   connect(id: string): Promise<void>;

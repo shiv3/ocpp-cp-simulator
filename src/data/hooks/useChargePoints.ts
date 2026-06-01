@@ -92,6 +92,15 @@ export function useChargePoints(
       chargePointService
         .syncLocalChargePoints(definitions)
         .then(async () => {
+          // Replay the operator's previously-clicked Connect actions so a
+          // page reload comes back already connected. No-op for CPs that
+          // never had Connect pressed.
+          if (
+            chargePointService instanceof LocalChargePointService &&
+            !cancelled
+          ) {
+            await chargePointService.restoreConnections();
+          }
           // Preserve the config-defined order. listChargePoints() returns
           // Map insertion order, which can desync from chargePointConfigs
           // when an id is renamed.

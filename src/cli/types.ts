@@ -34,6 +34,16 @@ export interface CLIOptions {
    *  an HTTP listener on this port serving both the API and the UI. May
    *  share a port with `httpPort` (one listener) or use its own. */
   readonly webConsolePort: number | null;
+  /** Filesystem path for the SQLite state DB. When set, ConfigurationStore
+   *  overrides, charging-profile availability, scenario state, and the
+   *  pending-message queue all persist there across daemon restarts. When
+   *  `null`, the daemon runs entirely in memory (lost on exit) — useful
+   *  for tests and one-off CSMS probes. */
+  readonly stateDb: string | null;
+  /** Console log format. `"plain"` (default) writes the legacy
+   *  `[timestamp] [LEVEL] [TYPE] message` lines; `"json"` writes one JSON
+   *  object per line for structured-log collectors. */
+  readonly logFormat: "plain" | "json";
 }
 
 export interface ChargePointInitOptions {
@@ -102,4 +112,13 @@ export interface ChargePointStatus {
   readonly status: string;
   readonly error: string;
   readonly connectors: ReadonlyArray<ConnectorStatus>;
+  /** §4.6 Heartbeat state. `intervalSeconds=0` means the CSMS has not
+   *  configured a heartbeat (or set it to 0). `lastSentAt` is an ISO-8601
+   *  string, or null if no Heartbeat.req has been sent since the daemon
+   *  started. Included so the browser can show "last heartbeat 30s ago"
+   *  without a separate request. */
+  readonly heartbeat?: {
+    readonly intervalSeconds: number;
+    readonly lastSentAt: string | null;
+  };
 }

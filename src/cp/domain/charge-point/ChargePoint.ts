@@ -7,12 +7,9 @@ import type { ChargePointEvents } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import { OCPPMessageHandler } from "../../infrastructure/transport/OCPPMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
-import {
-  loadChargePointAvailability,
-  loadConnectorAvailability,
-  saveChargePointAvailability,
-  saveConnectorAvailability,
-} from "../../../utils/connectorStorage";
+import type { Database } from "../persistence/Database";
+import { LogRepository } from "../persistence/LogRepository";
+import type { OCPPAvailability } from "../types/OcppTypes";
 import {
   BootNotification,
   ChargePointStatus,
@@ -36,12 +33,15 @@ export interface AutoMeterValueSetting {
 
 export class ChargePoint {
   private readonly _connectors: Map<number, Connector> = new Map();
+  // cpId is injected later in the constructor body so the Logger can
+  // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket;
   private readonly _messageHandler: OCPPMessageHandler;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
+  private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
   private readonly _configuration: ConfigurationStore;
 
@@ -65,8 +65,14 @@ export class ChargePoint {
     wsUrl: string,
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
+    /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
+     *  and per-connector availability. `null` keeps everything in-memory —
+     *  used by the daemon's `:memory:` mode and by tests. */
+    private readonly _database: Database | null = null,
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
+    this._logger.setCpId(this._id);
+    this._logRepository = new LogRepository(this._database);
 
     // Setup logger callback to emit log events
     this._logger.loggingCallback = (entry) => {
@@ -76,6 +82,10 @@ export class ChargePoint {
         type: entry.type,
         message: entry.message,
       });
+      // Buffered SQLite write — LogRepository batches up to 50 entries
+      // before hitting the DB so high-frequency log lines don't thrash
+      // the IndexedDB flush in the browser.
+      this._logRepository.append(this._id, entry);
     };
 
     for (let connectorId = 1; connectorId <= connectorCount; connectorId++) {
@@ -83,7 +93,7 @@ export class ChargePoint {
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
-      const persisted = loadConnectorAvailability(this._id, connectorId);
+      const persisted = this.loadAvailability(connectorId);
       if (persisted) {
         connector.availability = persisted;
       }
@@ -172,17 +182,70 @@ export class ChargePoint {
     // (via the `defaultConfiguration(cp)` factory which reads
     // `cp.connectorNumber` / `cp.wsUrl`). Hot-reactive keys are wired here
     // so changes via ChangeConfiguration.req take effect immediately.
-    this._configuration = ConfigurationStore.forChargePoint(this);
+    this._configuration = ConfigurationStore.forChargePoint(
+      this,
+      this._database,
+    );
     this.wireConfigurationListeners();
 
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
     // We don't actually transition status here (no WebSocket yet); the
     // saved flag is reapplied when ChangeAvailability runs or when the
     // operator inspects the persisted state.
-    const persistedCp = loadChargePointAvailability(this._id);
+    const persistedCp = this.loadAvailability(0);
     if (persistedCp === "Inoperative") {
       this._status = OCPPStatus.Unavailable;
     }
+  }
+
+  /** Read a persisted Operative/Inoperative flag from the DB for the given
+   *  connector (`0` = CP-level). Returns `null` if no override is stored. */
+  private loadAvailability(connectorId: number): OCPPAvailability | null {
+    if (!this._database) return null;
+    const row = this._database.get<{ availability: string | null }>(
+      "SELECT availability FROM connector_settings WHERE cp_id = ? AND connector_id = ?",
+      [this._id, connectorId],
+    );
+    if (
+      row?.availability === "Operative" ||
+      row?.availability === "Inoperative"
+    ) {
+      return row.availability;
+    }
+    return null;
+  }
+
+  private saveAvailability(
+    connectorId: number,
+    availability: OCPPAvailability,
+  ): void {
+    if (!this._database) return;
+    this._database.run(
+      "INSERT INTO connector_settings (cp_id, connector_id, availability) " +
+        "VALUES (?, ?, ?) " +
+        "ON CONFLICT (cp_id, connector_id) DO UPDATE SET availability = excluded.availability",
+      [this._id, connectorId, availability],
+    );
+  }
+
+  /** Exposed so OCPPMessageHandler (PendingMessageQueue) can share the
+   *  same Database instance. `null` means the CP is running in-memory. */
+  get database(): Database | null {
+    return this._database;
+  }
+
+  /** Force any buffered log lines to be flushed to the DB. Used before
+   *  the Download Logs export so the file includes the last seconds of
+   *  activity the LogRepository hasn't pushed out yet. */
+  flushLogs(): void {
+    this._logRepository.flush();
+  }
+
+  /** In-memory log entries the Logger has accumulated this session,
+   *  oldest-first. Used by the Download Logs path when the daemon is
+   *  running without --state-db (no SQLite to read from). */
+  getInMemoryLogs(): import("../../shared/Logger").LogEntry[] {
+    return this._logger.getLogEntries();
   }
 
   /** Hook up subsystems that react to live Configuration changes. */
@@ -243,22 +306,31 @@ export class ChargePoint {
   }
 
   /**
-   * Snapshot every connector's (and the CP's) `availability` flag to
-   * localStorage so the §5.2 "Unavailable persists across reboots"
+   * Snapshot every connector's (and the CP's) `availability` flag to the
+   * configured DB so the §5.2 "Unavailable persists across reboots"
    * requirement is met. Called by ChangeAvailability after applying.
    */
   persistAvailability(): void {
-    saveChargePointAvailability(
-      this._id,
+    this.saveAvailability(
+      0,
       this._status === OCPPStatus.Unavailable ? "Inoperative" : "Operative",
     );
     this._connectors.forEach((connector) => {
-      saveConnectorAvailability(this._id, connector.id, connector.availability);
+      this.saveAvailability(connector.id, connector.availability);
     });
   }
 
   get status(): ChargePointStatus {
     return this._status;
+  }
+
+  /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
+   *  by LocalChargePointService.restoreConnections to avoid issuing a
+   *  second connect() against a CP whose first socket is still in its
+   *  async handshake — without the CONNECTING check we'd race and end up
+   *  with two sockets fighting for the same cpId. */
+  get isWebSocketConnected(): boolean {
+    return this._webSocket.isOpenOrConnecting();
   }
 
   get connectorNumber(): number {
@@ -324,6 +396,28 @@ export class ChargePoint {
   }
 
   connect(): void {
+    // Idempotent: if a socket is already open or mid-handshake, don't
+    // create a second one. The daemon's startServer can hit this twice
+    // when restoreFromDatabase() auto-connects and then the bootstrap
+    // path also calls svc.connect() on the same restored instance — each
+    // call would otherwise overwrite `_ws` with a fresh socket and the
+    // orphaned one's onClose would mark all connectors Unavailable on the
+    // CSMS side.
+    //
+    // Only synthesize a "connected" event when the socket is already OPEN;
+    // for CONNECTING we let the natural handshake fire it so callers that
+    // gate on "connected" don't unblock before BootNotification.req
+    // actually goes out.
+    if (this._webSocket.isOpenOrConnecting()) {
+      this._logger.info(
+        "connect() ignored: WebSocket is already open or connecting",
+        LogType.WEBSOCKET,
+      );
+      if (this._webSocket.isConnected()) {
+        this._events.emit("connected", undefined);
+      }
+      return;
+    }
     this._webSocket.connect(
       () => {
         this.boot();
@@ -471,6 +565,9 @@ export class ChargePoint {
     // WebSocket they target is gone. Transaction-related ones are already
     // persisted via PendingMessageQueue on prior send failures.
     this._messageHandler.onWebSocketClosed();
+    // Flush any buffered log lines so the operator can still see the
+    // last seconds of activity after the CP went down.
+    this._logRepository.flush();
   }
 
   reset(): void {

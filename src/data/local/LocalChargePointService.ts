@@ -1,5 +1,7 @@
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargePoint";
+import type { Database } from "../../cp/domain/persistence/Database";
+import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { BootNotification, OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,
@@ -8,6 +10,7 @@ import type {
   ConnectorSnapshot,
   ScenarioListItem,
   ScenarioTemplateInfo,
+  StoredLogEntry,
 } from "../interfaces/ChargePointService";
 import {
   loadConnectorAutoMeterConfig,
@@ -95,6 +98,11 @@ export class LocalChargePointService implements ChargePointService {
   >();
   private readonly eventSubscriptions = new Map<string, Array<() => void>>();
 
+  /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
+   *  and per-connector availability. Passed through to every ChargePoint we
+   *  build. `null` keeps everything in-memory (test / boot-before-DB). */
+  constructor(private readonly database: Database | null = null) {}
+
   registerChargePoint(chargePoint: ChargePoint): void {
     if (this.chargePoints.has(chargePoint.id)) {
       this.unregisterChargePoint(chargePoint.id);
@@ -149,12 +157,90 @@ export class LocalChargePointService implements ChargePointService {
     return this.getChargePointHandle(id);
   }
 
+  async resetAllState(): Promise<void> {
+    // Disconnect and forget every in-memory CP first so they don't write
+    // back to the DB while we're truncating it. The follow-up UI reload
+    // will rebuild them from the (now empty) Config + scenario tables.
+    const ids = Array.from(this.chargePoints.keys());
+    for (const id of ids) this.unregisterChargePoint(id);
+    if (this.database) {
+      resetSimulatorState(this.database);
+      await this.database.flush?.();
+    }
+  }
+
+  async clearStoredLogs(cpId: string): Promise<void> {
+    if (!this.database) return;
+    this.database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
+    await this.database.flush?.();
+  }
+
+  async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
+    if (!this.database) return [];
+    // Flush any pending in-memory log writes so the download includes the
+    // last seconds of activity the buffered LogRepository hasn't pushed
+    // out yet.
+    const cp = this.chargePoints.get(cpId);
+    cp?.flushLogs();
+    const rows = this.database.all<{
+      timestamp: string;
+      level: string;
+      log_type: string;
+      message: string;
+    }>(
+      "SELECT timestamp, level, log_type, message FROM logs " +
+        "WHERE cp_id = ? ORDER BY id ASC",
+      [cpId],
+    );
+    return rows.map((r) => ({
+      timestamp: r.timestamp,
+      level: r.level,
+      type: r.log_type,
+      cpId,
+      message: r.message,
+    }));
+  }
+
   async connect(id: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).connect();
+    // Remember the operator's intent so a reload re-connects this CP
+    // automatically. The actual WebSocket may not be open yet (open is
+    // async, may fail) — that's fine, the next boot will retry.
+    this.setDesiredConnected(id, true);
   }
 
   async disconnect(id: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).disconnect();
+    this.setDesiredConnected(id, false);
+  }
+
+  private setDesiredConnected(id: string, desired: boolean): void {
+    if (!this.database) return;
+    this.database.run(
+      "INSERT INTO charge_point_state (cp_id, desired_connected, updated_at) " +
+        "VALUES (?, ?, ?) " +
+        "ON CONFLICT (cp_id) DO UPDATE SET " +
+        "  desired_connected = excluded.desired_connected, " +
+        "  updated_at = excluded.updated_at",
+      [id, desired ? 1 : 0, new Date().toISOString()],
+    );
+  }
+
+  /** Re-issue connect() for every CP the operator previously had
+   *  connected. Called after `syncLocalChargePoints` so the CP instances
+   *  exist. Skips CPs whose WebSocket is already open — useChargePoints
+   *  re-runs on config changes and we don't want to orphan an existing
+   *  socket by issuing a duplicate connect. */
+  async restoreConnections(): Promise<void> {
+    if (!this.database) return;
+    const rows = this.database.all<{ cp_id: string }>(
+      "SELECT cp_id FROM charge_point_state WHERE desired_connected = 1",
+    );
+    for (const { cp_id } of rows) {
+      const cp = this.chargePoints.get(cp_id);
+      if (!cp || cp.isWebSocketConnected) continue;
+      cp.connect();
+    }
   }
 
   async reset(id: string): Promise<void> {
@@ -506,6 +592,7 @@ export class LocalChargePointService implements ChargePointService {
       definition.wsUrl,
       definition.basicAuth,
       definition.autoMeterValueSetting,
+      this.database,
     );
 
     // Restore connector-level settings from localStorage

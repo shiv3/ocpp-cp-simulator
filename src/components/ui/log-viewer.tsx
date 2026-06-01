@@ -7,9 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
+/** Where "Clear" should reach: just the in-memory log buffer the screen
+ *  is reading (`"screen"`), or also the persisted DB rows (`"all"`). */
+export type ClearLogsScope = "screen" | "all";
+
 interface LogViewerProps {
   logs: LogEntry[];
-  onClear?: () => void;
+  onClear?: (scope: ClearLogsScope) => void;
+  /** Hook for the "Download logs" button. The component invokes this when
+   *  the user clicks Download; ChargePoint.tsx pulls the persisted log
+   *  rows from the DB and writes a JSON Lines file. Omitting this prop
+   *  hides the button (used by demo / nested viewers without a CP id). */
+  onDownload?: () => void;
   maxHeight?: string;
   className?: string;
 }
@@ -48,6 +57,7 @@ function extractConnectorIds(message: string): number[] {
 export function LogViewer({
   logs,
   onClear,
+  onDownload,
   maxHeight = "500px",
   className,
 }: LogViewerProps) {
@@ -444,11 +454,38 @@ export function LogViewer({
               />
               Auto-scroll
             </label>
-            {onClear && (
-              <Button size="sm" variant="secondary" onClick={onClear}>
-                Clear Logs
-              </Button>
-            )}
+            <div className="flex items-center gap-1">
+              {onDownload && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onDownload}
+                  title="Download every persisted log row for this CP as a JSON Lines file."
+                >
+                  Download
+                </Button>
+              )}
+              {onClear && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onClear("screen")}
+                    title="Hide the currently-displayed log lines. Persisted history stays."
+                  >
+                    Clear screen
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => onClear("all")}
+                    title="Hide the displayed lines AND delete persisted log rows for this CP."
+                  >
+                    Clear screen + DB
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 

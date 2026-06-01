@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
 # Bun-based image for the OCPP CP simulator. Ships both:
-#   * the daemon (cp-sim) on HTTP
+#   * the daemon (ocpp-cp-sim) on HTTP
 #   * the React browser UI, built with Vite, served as static files from
 #     the same HTTP server (SPA-aware fallback to index.html).
 #
 # Build:
-#   docker build -t cp-sim .
+#   docker build -t ocpp-cp-sim .
 #
 # Run (HTTP on 9700, CSMS at wss://example/chargepoint/, cpId=cp1, 2 connectors):
-#   docker run --rm -p 9700:9700 cp-sim \
+#   docker run --rm -p 9700:9700 ocpp-cp-sim \
 #     --cp-id cp1 --connectors 2 \
 #     --ws-url wss://example/chargepoint/
 #
@@ -19,7 +19,7 @@
 # Run with a scenario template file mounted in:
 #   docker run --rm -p 9700:9700 \
 #     -v $PWD/docs/examples/scenarios:/scenarios:ro \
-#     cp-sim --cp-id cp1 --ws-url wss://example/chargepoint/ \
+#     ocpp-cp-sim --cp-id cp1 --ws-url wss://example/chargepoint/ \
 #       --scenario-template-file /scenarios/demo-charging.json \
 #       --scenario-connector all
 
@@ -85,7 +85,7 @@ EXPOSE 9700
 #   * --web-console $HTTP_PORT  (serves API + the bundled UI on the same port;
 #       --web-console auto-resolves /app/dist next to the CLI source)
 # Any user-supplied CMD args (cp-id, ws-url, scenario flags) append.
-ENTRYPOINT ["sh", "-c", "exec bun src/cli/main.ts --http-host 0.0.0.0 --unix-socket none --web-console \"${HTTP_PORT}\" \"$@\"", "cp-sim"]
+ENTRYPOINT ["sh", "-c", "exec bun src/cli/main.ts --http-host 0.0.0.0 --unix-socket none --web-console \"${HTTP_PORT}\" \"$@\"", "ocpp-cp-sim"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp
 # or pass `--cp-id ... --ws-url ...` to `docker run`.

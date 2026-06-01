@@ -181,6 +181,17 @@ export class OCPPWebSocket {
     return this._ws !== null && this._ws.readyState === WebSocket.OPEN;
   }
 
+  /** True when a WebSocket object exists in OPEN or CONNECTING state.
+   *  Used by the connection restore path to avoid kicking off a second
+   *  socket while the first one is still in its async handshake. */
+  public isOpenOrConnecting(): boolean {
+    return (
+      this._ws !== null &&
+      (this._ws.readyState === WebSocket.OPEN ||
+        this._ws.readyState === WebSocket.CONNECTING)
+    );
+  }
+
   private send(message: string): boolean {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       this._ws.send(message);

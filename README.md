@@ -22,27 +22,27 @@ npm run dev
 bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
-### Install as a global command (`cp-sim`)
+### Install as a global command (`ocpp-cp-sim`)
 
 ```bash
 # From a checkout
 bun link              # in this repo
-bun link ocpp-cp-simulator   # in any other project
+bun link ocpp-ocpp-cp-simulator   # in any other project
 
 # Or directly from git
-bun install -g github:shiv3/ocpp-cp-simulator
+bun install -g github:shiv3/ocpp-ocpp-cp-simulator
 ```
 
 Then run from anywhere:
 
 ```bash
-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
-cp-sim --daemon --http-port 9700        # server mode
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
+ocpp-cp-sim --daemon --http-port 9700        # server mode
 ```
 
 ## Doc
 
-https://deepwiki.com/shiv3/ocpp-cp-simulator
+https://deepwiki.com/shiv3/ocpp-ocpp-cp-simulator
 
 ## Contributing
 

@@ -9,6 +9,30 @@ import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
 import { createHttpHandlers, type CorsPolicy } from "./httpServer";
+import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "../../cp/domain/persistence/Database";
+import { getGlobalLogFormat } from "../../cp/shared/Logger";
+
+/**
+ * Setup-time chatter from the daemon ("[server] Listening on …",
+ * "[server] Connecting to CSMS…"). Plain mode keeps the legacy
+ * "[server] <msg>" prefix; JSON mode wraps each call in a one-line JSON
+ * object so the whole stderr stream is structured.
+ */
+function serverLog(message: string): void {
+  if (getGlobalLogFormat() === "json") {
+    process.stderr.write(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "INFO",
+        type: "Server",
+        message,
+      }) + "\n",
+    );
+    return;
+  }
+  process.stderr.write(`[server] ${message}\n`);
+}
 
 export interface ServerOptions {
   readonly httpPort: number | null;
@@ -38,6 +62,9 @@ export interface ServerOptions {
    * same origin).
    */
   readonly webConsolePort: number | null;
+  /** Filesystem path for the SQLite state DB. `null` means run in memory
+   *  — handy for tests / one-off CSMS probes; durable persistence is off. */
+  readonly stateDb: string | null;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -45,8 +72,30 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     removeStaleSocket(opts.unixSocket);
   }
 
+  // Open the persistent state DB up front so every CP we create (boot
+  // bootstrap or via POST /v1/cp) gets the same Database handle. Without
+  // --state-db we stay in-memory; the log line below makes the choice
+  // visible because a silent in-memory daemon would surprise the operator.
+  let database: Database | null = null;
+  if (opts.stateDb) {
+    database = BunSqliteDatabase.open(opts.stateDb);
+    serverLog(`State DB: ${opts.stateDb}`);
+  } else {
+    serverLog("State DB: in-memory (pass --state-db <path> to persist)");
+  }
+
   const bus = new EventBus();
-  const registry = new CPRegistry(bus);
+  const registry = new CPRegistry(bus, database);
+  // Re-create CPs that were registered before the previous daemon shut
+  // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
+  // re-run with the same --cp-id is treated as "update wsUrl/connectors"
+  // rather than "create + collide".
+  const restored = registry.restoreFromDatabase();
+  if (restored.length > 0) {
+    serverLog(
+      `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
+    );
+  }
   const lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
@@ -63,6 +112,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     bus,
     lifecycle,
     cors: opts.cors,
+    database,
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -71,10 +121,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         lifecycle,
         cors: opts.cors,
         staticDir: opts.staticDir,
+        database,
       })
     : apiHandlers;
   if (opts.staticDir) {
-    process.stderr.write(`[server] Web console: ${opts.staticDir}\n`);
+    serverLog(`Web console: ${opts.staticDir}`);
   }
   const servers: AnyServer[] = [];
 
@@ -86,7 +137,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     });
     servers.push(unixServer);
     lifecycle.attachServer(unixServer);
-    process.stderr.write(`[server] Listening on unix:${opts.unixSocket}\n`);
+    serverLog(`Listening on unix:${opts.unixSocket}`);
   }
 
   // --http-port and --web-console may share a port (single listener) or
@@ -105,9 +156,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     });
     servers.push(httpServer);
     lifecycle.attachServer(httpServer);
-    process.stderr.write(
-      `[server] Listening on http://${opts.httpHost}:${opts.httpPort}` +
-        (httpPortShared ? " (API + web console)\n" : " (API)\n"),
+    serverLog(
+      `Listening on http://${opts.httpHost}:${opts.httpPort}` +
+        (httpPortShared ? " (API + web console)" : " (API)"),
     );
   }
 
@@ -120,9 +171,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     });
     servers.push(consoleServer);
     lifecycle.attachServer(consoleServer);
-    process.stderr.write(
-      `[server] Web console on http://${opts.httpHost}:${opts.webConsolePort}\n`,
-    );
+    serverLog(`Web console on http://${opts.httpHost}:${opts.webConsolePort}`);
   }
 
   if (servers.length === 0) {
@@ -132,18 +181,26 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   lifecycle.installSignalHandlers();
 
   if (opts.bootstrap) {
-    const svc = registry.create(opts.bootstrap);
-    process.stderr.write(`[server] Bootstrapped CP "${opts.bootstrap.cpId}"\n`);
+    // The same cpId can already exist when --state-db restored it above.
+    // Reuse the restored instance in that case — re-creating would throw
+    // and we'd lose all of its persisted state.
+    const existing = registry.get(opts.bootstrap.cpId);
+    const svc = existing ?? registry.create(opts.bootstrap);
+    if (existing) {
+      serverLog(
+        `Bootstrap matches restored CP "${opts.bootstrap.cpId}"; reusing`,
+      );
+    } else {
+      serverLog(`Bootstrapped CP "${opts.bootstrap.cpId}"`);
+    }
     if (opts.autoConnect) {
-      process.stderr.write(`[server] Connecting to CSMS...\n`);
+      serverLog("Connecting to CSMS...");
       try {
         await svc.connect();
-        process.stderr.write(`[server] Connected.\n`);
+        serverLog("Connected.");
       } catch (err) {
-        process.stderr.write(
-          `[server] Connection failed: ${
-            err instanceof Error ? err.message : err
-          }\n`,
+        serverLog(
+          `Connection failed: ${err instanceof Error ? err.message : err}`,
         );
       }
     }

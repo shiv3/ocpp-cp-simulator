@@ -1,5 +1,6 @@
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
+import type { OCPPAvailability } from "../../cp/domain/types/OcppTypes";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
   loadConnectorAutoMeterConfig,
@@ -10,6 +11,12 @@ import {
   saveConnectorChargingProfiles,
   clearConnectorChargingProfiles,
   clearChargePointChargingProfiles,
+  loadConnectorAvailability,
+  saveConnectorAvailability,
+  loadChargePointAvailability,
+  saveChargePointAvailability,
+  loadSocMeterSyncEnabled,
+  saveSocMeterSyncEnabled,
 } from "../../utils/connectorStorage";
 
 export class LocalConnectorSettingsRepository
@@ -65,5 +72,34 @@ export class LocalConnectorSettingsRepository
 
   async clearAllChargingProfiles(chargePointId: string): Promise<void> {
     clearChargePointChargingProfiles(chargePointId);
+  }
+
+  async loadAvailability(
+    chargePointId: string,
+    connectorId: number,
+  ): Promise<OCPPAvailability | null> {
+    return connectorId === 0
+      ? loadChargePointAvailability(chargePointId)
+      : loadConnectorAvailability(chargePointId, connectorId);
+  }
+
+  async saveAvailability(
+    chargePointId: string,
+    connectorId: number,
+    availability: OCPPAvailability,
+  ): Promise<void> {
+    if (connectorId === 0) {
+      saveChargePointAvailability(chargePointId, availability);
+    } else {
+      saveConnectorAvailability(chargePointId, connectorId, availability);
+    }
+  }
+
+  async loadSocMeterSync(): Promise<boolean> {
+    return loadSocMeterSyncEnabled();
+  }
+
+  async saveSocMeterSync(enabled: boolean): Promise<void> {
+    saveSocMeterSyncEnabled(enabled);
   }
 }

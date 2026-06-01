@@ -209,7 +209,10 @@ export class OCPPMessageHandler {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
-    this._pendingQueue = new PendingMessageQueue(chargePoint.id);
+    this._pendingQueue = new PendingMessageQueue(
+      chargePoint.id,
+      chargePoint.database,
+    );
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
     this.initializeHandlers();

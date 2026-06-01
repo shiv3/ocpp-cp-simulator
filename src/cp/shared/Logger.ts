@@ -35,11 +35,41 @@ export interface LogFilter {
 
 import EventEmitter2 from "eventemitter2";
 
+/** Output format for the console line that {@link Logger} writes for
+ *  every entry. `plain` is the legacy
+ *  `[timestamp] [LEVEL] [TYPE] message` shape; `json` emits one JSON
+ *  object per line so daemon stdout can be piped into structured
+ *  log collectors (Loki, jq, etc.). Set once at process start via
+ *  {@link setGlobalLogFormat}; later writes pick up the new format
+ *  immediately. */
+export type LogFormat = "plain" | "json";
+
+let globalLogFormat: LogFormat = "plain";
+let globalCpId: string | null = null;
+
+export function setGlobalLogFormat(format: LogFormat): void {
+  globalLogFormat = format;
+}
+
+export function getGlobalLogFormat(): LogFormat {
+  return globalLogFormat;
+}
+
+/** When set, the JSON line includes a `"cpId"` field. Browser-side
+ *  Loggers leave this null; the daemon sets it from the CLI bootstrap
+ *  or per-CP at construction. */
+export function setGlobalLoggerCpId(cpId: string | null): void {
+  globalCpId = cpId;
+}
+
 export class Logger {
   private level: LogLevel;
   private logList: LogEntry[] = [];
   private enabledTypes: Set<LogType> = new Set(Object.values(LogType));
   private emitter: EventEmitter2;
+  /** Per-instance override for the cpId rendered into JSON output.
+   *  Falls back to {@link setGlobalLoggerCpId} when null. */
+  private cpId: string | null = null;
 
   // Keep for backward compatibility
   public _loggingCallback: ((entry: LogEntry) => void) | null = null;
@@ -58,13 +88,18 @@ export class Logger {
     }
   }
 
-  constructor(level: LogLevel = LogLevel.DEBUG) {
+  constructor(level: LogLevel = LogLevel.DEBUG, cpId: string | null = null) {
     this.level = level;
+    this.cpId = cpId;
     this.emitter = new EventEmitter2({
       wildcard: true,
       delimiter: ".",
       maxListeners: 50,
     });
+  }
+
+  setCpId(cpId: string | null): void {
+    this.cpId = cpId;
   }
 
   setLevel(level: LogLevel): void {
@@ -189,6 +224,22 @@ export class Logger {
     const timestamp = entry.timestamp.toISOString();
     const level = LogLevel[entry.level];
     const type = entry.type;
+    if (globalLogFormat === "json") {
+      const cpId = this.cpId ?? globalCpId;
+      // Use the same shape as the on-disk `logs` table and the browser
+      // download so all three sources of log data line up byte-for-byte
+      // (modulo field order). `cpId` is omitted when neither per-instance
+      // nor global override has been set, keeping browser-only loggers
+      // free of misleading null fields.
+      const obj: Record<string, unknown> = {
+        timestamp,
+        level,
+        type,
+        message: entry.message,
+      };
+      if (cpId) obj.cpId = cpId;
+      return JSON.stringify(obj);
+    }
     return `[${timestamp}] [${level}] [${type}] ${entry.message}`;
   }
 

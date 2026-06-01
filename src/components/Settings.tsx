@@ -18,27 +18,52 @@ const Settings: React.FC = () => {
   const {
     mode,
     serverUrl,
-    setMode,
-    setServerUrl,
     defaultEvSettings,
     setDefaultEvSettings,
+    chargePointService,
   } = useDataContext();
   const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
-  const [draftUrl, setDraftUrl] = useState<string>(serverUrl);
   const [draftEv, setDraftEv] = useState<EVSettings>(
     defaultEvSettings ?? { ...defaultEVSettings },
   );
   const navigate = useNavigate();
 
   useEffect(() => {
-    setDraftUrl(serverUrl);
-  }, [serverUrl]);
-
-  useEffect(() => {
     setDraftEv(defaultEvSettings ?? { ...defaultEVSettings });
   }, [defaultEvSettings]);
+
+  const [resetState, setResetState] = useState<"idle" | "running" | "error">(
+    "idle",
+  );
+  const [resetError, setResetError] = useState<string | null>(null);
+  const handleResetData = useCallback(async () => {
+    if (!chargePointService.resetAllState) {
+      setResetState("error");
+      setResetError("This runtime does not support state reset");
+      return;
+    }
+    const proceed = window.confirm(
+      "Reset all simulator data?\n\n" +
+        "Scenarios, configuration overrides, charging profiles, " +
+        "availability flags, pending messages and logs will be erased. " +
+        "The page will reload afterwards.",
+    );
+    if (!proceed) return;
+    setResetState("running");
+    setResetError(null);
+    try {
+      await chargePointService.resetAllState();
+      // Hard reload so every in-memory cache (Jotai store, repo
+      // subscriber state, useChargePoints snapshot) starts fresh against
+      // the now-empty DB.
+      window.location.reload();
+    } catch (err) {
+      setResetState("error");
+      setResetError(err instanceof Error ? err.message : String(err));
+    }
+  }, [chargePointService]);
 
   const handleApplyDefaultEv = () => {
     setDefaultEvSettings(draftEv);
@@ -57,18 +82,6 @@ const Settings: React.FC = () => {
   const evDirty =
     JSON.stringify(draftEv) !==
     JSON.stringify(defaultEvSettings ?? defaultEVSettings);
-
-  const handleApplyServerUrl = () => {
-    const trimmed = draftUrl.trim();
-    if (!trimmed) {
-      setError("Remote server URL cannot be empty.");
-      setTimeout(() => setError(""), 5000);
-      return;
-    }
-    setServerUrl(trimmed);
-    setSuccess("Remote server URL updated.");
-    setTimeout(() => setSuccess(""), 3000);
-  };
 
   useEffect(() => {
     if (isLoading) return;
@@ -165,73 +178,54 @@ const Settings: React.FC = () => {
         <CardHeader>
           <CardTitle>Runtime Mode</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            Choose whether the simulator runs the charge points in the browser
-            (Local) or controls a long-running <code>cp-sim</code> daemon via
-            HTTP/WebSocket (Remote). The selection persists in localStorage.
+            The simulator picks Local or Remote automatically based on where the
+            UI is served from. When opened via{" "}
+            <code>ocpp-cp-sim --web-console</code> (or the Docker image) the UI
+            talks to that daemon as Remote; when opened from a static build
+            (GitHub Pages, <code>bun run dev</code>) it runs the charge points
+            in-browser as Local. No manual toggle.
           </p>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <div className="text-sm font-semibold mb-2">Mode</div>
-            <div className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-md p-0.5">
-              <button
-                type="button"
-                onClick={() => setMode("local")}
-                className={`px-4 py-1.5 text-sm rounded transition-colors ${
-                  mode === "local"
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700"
-                }`}
-              >
-                Local
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("remote")}
-                className={`px-4 py-1.5 text-sm rounded transition-colors ${
-                  mode === "remote"
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700"
-                }`}
-              >
-                Remote
-              </button>
-            </div>
-            <p className="text-muted-foreground text-xs mt-2">
-              Current: <span className="font-semibold">{mode}</span>
-            </p>
+        <CardContent className="space-y-2">
+          <div className="text-sm">
+            Mode: <span className="font-semibold">{mode}</span>
           </div>
+          {mode === "remote" && (
+            <div className="text-xs text-muted-foreground font-mono">
+              Server: {serverUrl}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-          <div>
-            <label
-              htmlFor="remote-server-url"
-              className="block text-sm font-semibold mb-2"
-            >
-              Remote server URL
-            </label>
-            <div className="flex gap-2">
-              <input
-                id="remote-server-url"
-                type="text"
-                value={draftUrl}
-                onChange={(e) => setDraftUrl(e.target.value)}
-                placeholder="http://127.0.0.1:9700"
-                className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono"
-              />
-              <Button
-                onClick={handleApplyServerUrl}
-                disabled={draftUrl.trim() === serverUrl.trim()}
-                size="sm"
-              >
-                Apply
-              </Button>
-            </div>
-            <p className="text-muted-foreground text-xs mt-2">
-              Used when mode is set to <strong>Remote</strong>. Point this at a
-              running <code>cp-sim --http-port</code> daemon (default{" "}
-              <code>http://127.0.0.1:9700</code>).
-            </p>
-          </div>
+      <Card className="mb-6 border-destructive/40">
+        <CardHeader>
+          <CardTitle>Reset data</CardTitle>
+          <p className="text-muted-foreground text-sm mt-2">
+            Wipe every persisted simulator record — scenarios,
+            ChangeConfiguration overrides, charging profiles, availability
+            flags, pending transaction messages and any saved logs. Schema stays
+            intact; the next load starts from a clean DB. In remote mode this
+            also drops every charge point registered on the daemon.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button
+            variant="destructive"
+            disabled={resetState !== "idle"}
+            onClick={handleResetData}
+          >
+            {resetState === "running"
+              ? "Resetting…"
+              : "Reset all simulator data"}
+          </Button>
+          {resetState === "error" && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                {resetError ?? "Reset failed"}
+              </AlertDescription>
+            </Alert>
+          )}
         </CardContent>
       </Card>
 

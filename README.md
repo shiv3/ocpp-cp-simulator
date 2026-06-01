@@ -1,5 +1,7 @@
 # OCPP CP Simulator
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/shiv3/ocpp-cp-simulator)
+
 OCPP 1.6J charge point simulator with three interfaces: a browser-based UI, a legacy web version (v1), and a headless CLI for automation.
 
 | Interface     | Description                                              | Docs                               |

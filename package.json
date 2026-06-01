@@ -22,7 +22,7 @@
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky || true && vite build",
+    "prepare": "husky || true",
     "prepack": "vite build",
     "postinstall": "node -e \"try{require('fs').chmodSync('src/cli/main.ts',0o755)}catch(e){}\"",
     "tauri": "tauri",

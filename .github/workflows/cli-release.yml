@@ -70,30 +70,44 @@ jobs:
           # `npm pack` reads the `files` field of package.json which includes
           # `dist`, `src/cli`, `src/cp`, and `src/utils/scenarioTemplates.ts`.
           TARBALL=$(npm pack --silent)
+          # Also publish under a stable filename so consumers can pin
+          # `releases/latest/download/ocpp-cp-simulator.tgz` and always get
+          # the newest CLI without knowing the version string.
+          cp "${TARBALL}" ocpp-cp-simulator.tgz
           echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
-          ls -lh "${TARBALL}"
+          ls -lh "${TARBALL}" ocpp-cp-simulator.tgz
 
       - name: Create / update release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: CLI ${{ steps.version.outputs.tag }}
-          files: ${{ steps.pack.outputs.tarball }}
+          files: |
+            ${{ steps.pack.outputs.tarball }}
+            ocpp-cp-simulator.tgz
           generate_release_notes: true
           body: |
             Prebuilt CLI bundle including the web console (`dist/`).
 
             ### Install
 
+            Pin to this release:
+
             ```sh
             bun install -g https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/${{ steps.pack.outputs.tarball }}
+            ```
+
+            Or always pull the latest CLI release:
+
+            ```sh
+            bun install -g https://github.com/${{ github.repository }}/releases/latest/download/ocpp-cp-simulator.tgz
             ```
 
             Then run e.g.
 
             ```sh
-            cp-sim --http-port 5172 \
-                   --cp-id my-cp --connectors 5 \
-                   --web-console \
-                   --ws-url wss://example.com/chargepoint/
+            ocpp-cp-sim --http-port 5172 \
+                        --cp-id my-cp --connectors 5 \
+                        --web-console \
+                        --ws-url wss://example.com/chargepoint/
             ```

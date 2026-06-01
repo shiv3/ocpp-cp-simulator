@@ -24,17 +24,22 @@ npm run cli -- --ws-url ws://localhost:9000/ocpp --cp-id CP001
 The package exposes a `ocpp-cp-sim` bin so it can be invoked from anywhere once installed:
 
 ```bash
-# From a checkout
+# Prebuilt release tarball (recommended) — ships the web-console dist/
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
+
+# Or pin to a specific CLI release
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+
+# From a local checkout (dev)
 bun link
 bun link ocpp-cp-simulator    # in any consumer project
-
-# Or globally from git
-bun install -g github:shiv3/ocpp-cp-simulator
 
 # Then use ocpp-cp-sim anywhere
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ocpp-cp-sim --daemon --http-port 9700
 ```
+
+> A plain `bun install -g github:shiv3/ocpp-cp-simulator` is **not** supported: the web-console `dist/` is built at release time (not committed to git), and bun doesn't install devDependencies for global packages so it can't run `vite build` on install. Use the prebuilt tarball URL above.
 
 All flags described below apply to both `ocpp-cp-sim ...` and `bun src/cli/main.ts ...`.
 

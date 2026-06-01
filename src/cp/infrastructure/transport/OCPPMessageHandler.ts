@@ -7,9 +7,15 @@ import {
 } from "./OCPPWebSocket";
 import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Transaction } from "../../domain/connector/Transaction";
+import {
+  buildSampledValues,
+  type ReadingContext,
+} from "../../domain/connector/MeterValueBuilder";
+import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
+  ChargePointErrorCode,
   OCPPAction,
   OCPPErrorCode,
   OCPPMessageType,
@@ -45,6 +51,8 @@ import {
   MeterValuesResultHandler,
   StatusNotificationResultHandler,
   DataTransferResultHandler,
+  DataTransferHandler,
+  ChangeAvailabilityHandler,
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
@@ -111,6 +119,19 @@ interface OCPPRequest {
   connectorId?: number | null;
 }
 
+/**
+ * Predicate for "is this CALL a transaction-related message that must be
+ * queued on offline" (§4.7/§4.8/§4.10). MeterValues without a transaction
+ * id are informational and intentionally NOT queued — see §4.7.
+ */
+function isTransactionRelated(action: OCPPAction): boolean {
+  return (
+    action === OCPPAction.StartTransaction ||
+    action === OCPPAction.StopTransaction ||
+    action === OCPPAction.MeterValues
+  );
+}
+
 class RequestHistory {
   private _currentId: string = "";
   private _requests: Map<string, OCPPRequest> = new Map();
@@ -139,6 +160,46 @@ export class OCPPMessageHandler {
   private _logger: Logger;
   private _requests: RequestHistory = new RequestHistory();
   private _registry: MessageHandlerRegistry = new MessageHandlerRegistry();
+  // Stored as a field so scenarios / tests can register vendor responders
+  // after construction via `getDataTransferHandler().registerVendor(...)`.
+  private _dataTransferHandler: DataTransferHandler = new DataTransferHandler();
+
+  // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
+  // arrives we restrict outgoing CALLs. The BootNotification.req itself
+  // is exempt so the handshake can complete.
+  private _bootStatus:
+    | { status: "Idle" }
+    | { status: "Accepted" }
+    | { status: "Pending" }
+    | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
+
+  // §4.7/§4.8/§4.10 + errata 3.18: transaction-related messages that fail
+  // to deliver are queued and retried. Persists across reboots so power
+  // outages don't lose StartTransaction.req for an in-flight transaction.
+  private _pendingQueue: PendingMessageQueue;
+
+  // OCPP-J §4.1.1 (Synchronicity): "A Charge Point or Central System
+  // SHOULD NOT send a CALL message to the other party unless all the
+  // CALL messages it sent before have been responded to or have timed
+  // out." We serialize outgoing CALLs through this queue so only one is
+  // in-flight at a time. Without this, real CSMS implementations drop
+  // post-Boot StatusNotification fan-outs at the application layer and
+  // then issue TriggerMessage to recover (observed in dev env).
+  private _serialQueue: Array<{
+    action: OCPPAction;
+    id: string;
+    payload: OcppMessageRequestPayload;
+    connectorId?: number;
+  }> = [];
+  private _serialInFlight: {
+    action: OCPPAction;
+    id: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+  // §4.1.1 lets the implementation pick the CALL timeout. 30s is a common
+  // CSMS default and roughly matches Configuration's default
+  // TransactionMessageRetryInterval (60s).
+  private static readonly SERIAL_CALL_TIMEOUT_MS = 30_000;
 
   constructor(
     chargePoint: ChargePoint,
@@ -148,6 +209,10 @@ export class OCPPMessageHandler {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
+    this._pendingQueue = new PendingMessageQueue(
+      chargePoint.id,
+      chargePoint.database,
+    );
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
     this.initializeHandlers();
@@ -211,6 +276,19 @@ export class OCPPMessageHandler {
       OCPPAction.GetCompositeSchedule,
       new GetCompositeScheduleHandler(),
     );
+    // §4.3/§5.6: DataTransfer is a Core message. Without this handler the
+    // registry returns NotImplemented, which is wrong — CSMS-side
+    // DataTransfer should be answered with UnknownVendorId at minimum.
+    this._registry.registerCallHandler(
+      OCPPAction.DataTransfer,
+      this._dataTransferHandler,
+    );
+    // §5.2: ChangeAvailability is Core. Without this, CSMS can't put the
+    // CP or any connector into maintenance.
+    this._registry.registerCallHandler(
+      OCPPAction.ChangeAvailability,
+      new ChangeAvailabilityHandler(),
+    );
 
     // Register CALLRESULT handlers (incoming responses from central system)
     this._registry.registerCallResultHandler(
@@ -235,6 +313,52 @@ export class OCPPMessageHandler {
     );
   }
 
+  /** Expose the DataTransfer handler so scenarios can register vendor
+   *  responders without reaching into the private registry. */
+  public getDataTransferHandler(): DataTransferHandler {
+    return this._dataTransferHandler;
+  }
+
+  /** Update the boot gate. Called by BootNotificationResultHandler. */
+  public setBootStatus(
+    status:
+      | { status: "Accepted" }
+      | { status: "Pending" }
+      | { status: "Rejected"; retryAfter: Date },
+  ): void {
+    this._bootStatus = status;
+    if (status.status === "Accepted") {
+      // Drain anything that was queued behind the boot gate while we
+      // waited for BootNotification.conf. Microtask so the BootNotification
+      // CALLRESULT flow finishes settling before we start sending.
+      queueMicrotask(() => this.pumpSerialQueue());
+    }
+  }
+
+  /**
+   * §4.2: outgoing CALLs are restricted while BootNotification has not yet
+   * been Accepted. BootNotification itself + the CALLRESULT replies are
+   * always permitted (they're how the handshake unblocks).
+   *
+   * - Pending: only allow BootNotification (e.g. TriggerMessage-driven
+   *   resend). Other CALLs are dropped with a warning.
+   * - Rejected: nothing goes out at all until retryAfter elapses.
+   * - Idle (pre-handshake): allow BootNotification only.
+   */
+  private isCallAllowed(action: OCPPAction): boolean {
+    if (action === OCPPAction.BootNotification) return true;
+    switch (this._bootStatus.status) {
+      case "Accepted":
+        return true;
+      case "Pending":
+        return false;
+      case "Rejected":
+        return Date.now() >= this._bootStatus.retryAfter.getTime();
+      case "Idle":
+        return false;
+    }
+  }
+
   public authorize(tagId: string): void {
     const messageId = this.generateMessageId();
     const payload: request.AuthorizeRequest = { idTag: tagId };
@@ -248,6 +372,11 @@ export class OCPPMessageHandler {
       idTag: transaction.tagId,
       meterStart: transaction.meterStart,
       timestamp: transaction.startTime.toISOString(),
+      // §4.8 MUST: include reservationId when this transaction ends a
+      // reservation. Domain layer populates this on the Transaction.
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
     };
     this.sendRequest(
       OCPPAction.StartTransaction,
@@ -259,11 +388,17 @@ export class OCPPMessageHandler {
 
   public stopTransaction(transaction: Transaction, connectorId: number): void {
     const messageId = this.generateMessageId();
+    // §4.10: reason MAY be omitted when "Local" (the default), but SHOULD
+    // be set to a correct value otherwise. The domain layer assigns
+    // transaction.stopReason in non-default stop paths (Remote / Reset /
+    // EVDisconnected / UnlockCommand / DeAuthorized / …).
+    const reason = transaction.stopReason;
     const payload: request.StopTransactionRequest = {
       transactionId: transaction.id!,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
       timestamp: transaction.stopTime!.toISOString(),
+      ...(reason && reason !== "Local" ? { reason } : {}),
     };
     this.sendRequest(
       OCPPAction.StopTransaction,
@@ -285,55 +420,137 @@ export class OCPPMessageHandler {
     this.sendRequest(OCPPAction.Heartbeat, messageId, payload);
   }
 
+  /**
+   * §4.3 CP-initiated DataTransfer.req. The vendor / message id / payload
+   * semantics are entirely vendor-specific; the CP just packages them and
+   * lets the CSMS respond with Accepted / Rejected / UnknownVendorId /
+   * UnknownMessageId.
+   */
+  public sendDataTransfer(
+    vendorId: string,
+    messageId?: string,
+    data?: string,
+  ): void {
+    const id = this.generateMessageId();
+    const payload: request.DataTransferRequest = {
+      vendorId,
+      ...(messageId !== undefined ? { messageId } : {}),
+      ...(data !== undefined ? { data } : {}),
+    };
+    this.sendRequest(OCPPAction.DataTransfer, id, payload);
+  }
+
+  /**
+   * §4.4 DiagnosticsStatusNotification.req. `Idle` is sent only in
+   * response to TriggerMessage when no upload is in progress; other
+   * statuses (Uploading/Uploaded/UploadFailed) fire from GetDiagnostics
+   * progression.
+   */
+  public sendDiagnosticsStatusNotification(
+    status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: request.DiagnosticsStatusNotificationRequest = { status };
+    this.sendRequest(
+      OCPPAction.DiagnosticsStatusNotification,
+      messageId,
+      payload,
+    );
+  }
+
+  /**
+   * §4.5 FirmwareStatusNotification.req. Same semantics as
+   * DiagnosticsStatusNotification — `Idle` only in response to
+   * TriggerMessage; other statuses (Downloading/Downloaded/Installing/
+   * Installed/...) fire from UpdateFirmware progression.
+   */
+  public sendFirmwareStatusNotification(
+    status:
+      | "Downloaded"
+      | "DownloadFailed"
+      | "Downloading"
+      | "Idle"
+      | "InstallationFailed"
+      | "Installing"
+      | "Installed",
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: request.FirmwareStatusNotificationRequest = { status };
+    this.sendRequest(OCPPAction.FirmwareStatusNotification, messageId, payload);
+  }
+
+  /**
+   * §4.7 MeterValues.req. The measurand list is driven by the
+   * `MeterValuesSampledData` Configuration key (defaults to
+   * `Energy.Active.Import.Register`). Synthesized values are produced by
+   * `MeterValueBuilder` so CSMS sees Voltage / Current / Power / SoC etc.
+   * alongside the energy register.
+   */
   public sendMeterValue(
     transactionId: number | undefined,
     connectorId: number,
-    meterValue: number,
-    soc?: number,
+    context: ReadingContext = "Sample.Periodic",
   ): void {
     const messageId = this.generateMessageId();
-
-    // Build sampled values array
-    const sampledValue: Array<{
-      value: string;
-      measurand?: string;
-      unit?: string;
-    }> = [
-      {
-        value: meterValue.toString(),
-        measurand: "Energy.Active.Import.Register",
-        unit: "Wh",
-      },
-    ];
-
-    // Add SoC if available
-    if (soc !== undefined) {
-      sampledValue.push({
-        value: soc.toString(),
-        measurand: "SoC",
-        unit: "Percent",
-      });
+    const connector = this._chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this._logger.warn(
+        `sendMeterValue: connector ${connectorId} not found`,
+        LogType.METER_VALUE,
+      );
+      return;
     }
 
+    const measurands = this._chargePoint.configuration.getArray(
+      "MeterValuesSampledData",
+    ) ?? ["Energy.Active.Import.Register"];
+    const sampledValue = buildSampledValues(connector, measurands, context);
+
     const payload: request.MeterValuesRequest = {
-      transactionId: transactionId,
-      connectorId: connectorId,
+      transactionId,
+      connectorId,
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue,
+          // The builder produces a structurally-compatible SampledValue
+          // shape, but its `unit` is a plain `string` whereas ts-ocpp's
+          // generated type is a strict union. Cast at this boundary
+          // rather than mirror the entire enum.
+          sampledValue:
+            sampledValue as unknown as request.MeterValuesRequest["meterValue"][0]["sampledValue"],
         },
       ],
     };
     this.sendRequest(OCPPAction.MeterValues, messageId, payload);
   }
 
-  public sendStatusNotification(connectorId: number, status: OCPPStatus): void {
+  /**
+   * §4.9 StatusNotification.req. `errorCode` defaults to NoError when the
+   * status is Operative; for Faulted (or warnings during Preparing/Suspended
+   * /Finishing) pass the appropriate ChargePointErrorCode via `opts`.
+   */
+  public sendStatusNotification(
+    connectorId: number,
+    status: OCPPStatus,
+    opts?: {
+      errorCode?: ChargePointErrorCode;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+      timestamp?: Date;
+    },
+  ): void {
     const messageId = this.generateMessageId();
     const payload: request.StatusNotificationRequest = {
-      connectorId: connectorId,
-      errorCode: "NoError",
-      status: status,
+      connectorId,
+      errorCode: opts?.errorCode ?? "NoError",
+      status,
+      ...(opts?.info ? { info: opts.info } : {}),
+      ...(opts?.vendorErrorCode
+        ? { vendorErrorCode: opts.vendorErrorCode }
+        : {}),
+      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
+      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
     };
     this.sendRequest(OCPPAction.StatusNotification, messageId, payload);
   }
@@ -344,14 +561,162 @@ export class OCPPMessageHandler {
     payload: OcppMessageRequestPayload,
     connectorId?: number,
   ): void {
-    this._requests.add({
-      type: OCPPMessageType.CALL,
-      action,
-      id,
-      payload,
-      connectorId,
-    });
-    this._webSocket.sendAction(id, action, payload);
+    if (!this.isCallAllowed(action)) {
+      this._logger.warn(
+        `Suppressing ${action}: blocked by boot gate (status=${this._bootStatus.status})`,
+        LogType.OCPP,
+      );
+      return;
+    }
+    // §4.1.1: queue here, pumpSerialQueue does the actual `ws.sendAction`
+    // one CALL at a time. The previous CALL's CALLRESULT/CALLERROR (or
+    // timeout) releases the slot via `settleSerialInFlight`.
+    this._serialQueue.push({ action, id, payload, connectorId });
+    this.pumpSerialQueue();
+  }
+
+  /**
+   * Drain one CALL off `_serialQueue` and put it in flight. No-op when
+   * another CALL is already in flight; the eventual CALLRESULT/CALLERROR/
+   * timeout will pump us again.
+   */
+  private pumpSerialQueue(): void {
+    if (this._serialInFlight) return;
+    while (this._serialQueue.length > 0) {
+      const head = this._serialQueue[0];
+      if (!this.isCallAllowed(head.action)) {
+        // Boot gate currently blocks this action — leave it at the front
+        // of the queue. `setBootStatus` re-pumps us when the gate opens.
+        return;
+      }
+      this._serialQueue.shift();
+
+      this._requests.add({
+        type: OCPPMessageType.CALL,
+        action: head.action,
+        id: head.id,
+        payload: head.payload,
+        connectorId: head.connectorId,
+      });
+      const sent = this._webSocket.sendAction(
+        head.id,
+        head.action,
+        head.payload,
+      );
+      if (!sent) {
+        // WebSocket isn't open: transaction-related messages get retried
+        // via PendingMessageQueue on reconnect; others (Heartbeat /
+        // StatusNotification / DataTransfer / …) are informational and
+        // safe to drop. Loop to try the next entry — no point holding the
+        // queue if WS is gone, the next iteration will fail too and
+        // either retry or drop.
+        if (isTransactionRelated(head.action)) {
+          this._pendingQueue.enqueue({
+            action: head.action,
+            payload: head.payload,
+            connectorId: head.connectorId,
+          });
+          this._logger.warn(
+            `WS send failed; queued ${head.action} (PendingQueue size=${this._pendingQueue.size()})`,
+            LogType.OCPP,
+          );
+        } else {
+          this._logger.warn(
+            `WS send failed; dropping ${head.action} (informational)`,
+            LogType.OCPP,
+          );
+        }
+        continue;
+      }
+
+      // §4.6: any outgoing CALL resets the heartbeat idle timer. Stamp
+      // lastSentAt only when the CALL is itself a Heartbeat — that way
+      // BootNotification/StatusNotification/etc. count as activity but
+      // don't pretend to be heartbeats in the UI.
+      this._chargePoint.notifyOutgoingCall(
+        head.action === OCPPAction.Heartbeat,
+      );
+
+      const timer = setTimeout(
+        () => this.handleSerialTimeout(head.id),
+        OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS,
+      );
+      this._serialInFlight = { action: head.action, id: head.id, timer };
+      return;
+    }
+  }
+
+  /** Release the serialization slot when a response settles the in-flight
+   *  CALL. The caller is responsible for invoking this from
+   *  handleCallResult / handleCallError. */
+  private settleSerialInFlight(messageId: string): void {
+    const cur = this._serialInFlight;
+    if (!cur || cur.id !== messageId) return;
+    clearTimeout(cur.timer);
+    this._serialInFlight = null;
+    this.pumpSerialQueue();
+  }
+
+  /** Per-CALL watchdog. §4.1.1 says implementations choose the timeout;
+   *  on expiry we proceed to the next CALL so a stuck CSMS doesn't deadlock
+   *  the queue forever. The dead CALL is dropped (transaction-related
+   *  ones are also tracked via the persistent PendingMessageQueue). */
+  private handleSerialTimeout(messageId: string): void {
+    const cur = this._serialInFlight;
+    if (!cur || cur.id !== messageId) return;
+    this._logger.warn(
+      `CALL ${messageId} (${cur.action}) timed out after ${OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS}ms — releasing serialization slot`,
+      LogType.OCPP,
+    );
+    this._serialInFlight = null;
+    this.pumpSerialQueue();
+  }
+
+  /** Called by the ChargePoint after the WebSocket has closed. Cancels the
+   *  in-flight timer and discards anything still queued — those CALLs would
+   *  reference a dead connection. Transaction-related messages survive via
+   *  PendingMessageQueue (already persisted on send-fail). */
+  public onWebSocketClosed(): void {
+    if (this._serialInFlight) {
+      clearTimeout(this._serialInFlight.timer);
+      this._serialInFlight = null;
+    }
+    this._serialQueue = [];
+  }
+
+  /**
+   * Re-attempt delivery of every queued transaction-related message.
+   * Called from `ChargePoint.connect`'s onopen handler after a successful
+   * BootNotification round-trip. Respects `TransactionMessageAttempts`
+   * from Configuration; messages exceeding that count are dropped.
+   */
+  public flushPendingQueue(): void {
+    if (this._pendingQueue.size() === 0) return;
+    const maxAttempts =
+      this._chargePoint.configuration.getInteger(
+        "TransactionMessageAttempts",
+      ) ?? 3;
+    // Route flushed messages through `sendRequest` so they take the same
+    // §4.1.1 serialization path as fresh CALLs. The PendingMessageQueue's
+    // `flush` callback returns true for every entry (we're handing
+    // delivery to the serializer); it'll re-enqueue on actual send
+    // failure via the path in `pumpSerialQueue` below.
+    const delivered = this._pendingQueue.flush((message) => {
+      const messageId = this.generateMessageId();
+      this.sendRequest(
+        message.action,
+        messageId,
+        message.payload as OcppMessageRequestPayload,
+        message.connectorId,
+      );
+      return true;
+    }, maxAttempts);
+    if (delivered > 0) {
+      this._logger.info(
+        `Flushed ${delivered} queued transaction message(s)`,
+        LogType.OCPP,
+      );
+    }
   }
 
   private handleIncomingMessage(
@@ -466,6 +831,9 @@ export class OCPPMessageHandler {
     }
 
     this._requests.remove(messageId);
+    // §4.1.1: response received — release the serialization slot so the
+    // next queued CALL can go out.
+    this.settleSerialInFlight(messageId);
   }
 
   private handleCallError(
@@ -493,6 +861,8 @@ export class OCPPMessageHandler {
     }
 
     this._requests.remove(messageId);
+    // §4.1.1: CALLERROR also settles the in-flight CALL.
+    this.settleSerialInFlight(messageId);
   }
 
   // All handler methods have been moved to individual handler classes

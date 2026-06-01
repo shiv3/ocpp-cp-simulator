@@ -670,6 +670,75 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           </div>
         );
 
+      case ScenarioNodeType.START: {
+        // Trigger config: "connect" fires once the CP is Available
+        // (post-BootNotification); "status" gates on the bound connector
+        // reaching a specific status.
+        const triggerOn =
+          formData.triggerOn === "status" ? "status" : "connect";
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="start-label">Label</Label>
+              <Input
+                id="start-label"
+                type="text"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="start-trigger-on">Trigger</Label>
+              <select
+                id="start-trigger-on"
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                value={triggerOn}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    triggerOn: e.target.value as "connect" | "status",
+                  })
+                }
+              >
+                <option value="connect">
+                  On Connect (BootNotification Accepted)
+                </option>
+                <option value="status">On Connector Status</option>
+              </select>
+              <p className="text-xs text-muted-foreground mt-1">
+                "On Connect" fires as soon as the CSMS accepts BootNotification.
+                "On Connector Status" additionally waits for the bound connector
+                to reach the target status below.
+              </p>
+            </div>
+            {triggerOn === "status" && (
+              <div className="space-y-2">
+                <Label htmlFor="start-target-status">Target Status</Label>
+                <select
+                  id="start-target-status"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  value={formData.targetStatus || OCPPStatus.Available}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      targetStatus: e.target.value as OCPPStatus,
+                    })
+                  }
+                >
+                  {Object.values(OCPPStatus).map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       default:
         return (
           <div className="text-sm text-muted-foreground">
@@ -703,6 +772,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         return "Cancel Reservation";
       case ScenarioNodeType.RESERVATION_TRIGGER:
         return "Reservation Trigger";
+      case ScenarioNodeType.START:
+        return "Start";
       default:
         return "Node";
     }

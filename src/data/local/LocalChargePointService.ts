@@ -1,30 +1,57 @@
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargePoint";
+import type { Database } from "../../cp/domain/persistence/Database";
+import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { BootNotification, OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
   ConnectorSnapshot,
+  ScenarioListItem,
+  ScenarioTemplateInfo,
+  StoredLogEntry,
 } from "../interfaces/ChargePointService";
-import {
-  loadConnectorAutoMeterConfig,
-  loadConnectorChargingProfiles,
-  saveConnectorChargingProfiles,
-} from "../../utils/connectorStorage";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
+import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
+import type {
+  ScenarioDefinition,
+  ScenarioExecutionContext,
+  ScenarioMode,
+} from "../../cp/application/scenario/ScenarioTypes";
+import type {
+  HistoryOptions,
+  StateHistoryEntry,
+} from "../../cp/application/services/types/StateSnapshot";
+import {
+  scenarioTemplates,
+  getTemplateById,
+} from "../../utils/scenarioTemplates";
 
 function toConnectorSnapshot(
   connector: ReturnType<ChargePoint["getConnector"]>,
 ): ConnectorSnapshot | null {
   if (!connector) return null;
+  const tx = connector.transaction;
   return {
     id: connector.id,
     status: connector.status as OCPPStatus,
     availability: connector.availability,
     meterValue: connector.meterValue,
-    transactionId: connector.transaction?.id ?? null,
+    transactionId: tx?.id ?? null,
+    soc: connector.soc,
+    mode: connector.mode,
+    autoResetToAvailable: connector.autoResetToAvailable,
+    autoMeterValueConfig: connector.autoMeterValueConfig,
+    evSettings: connector.evSettings,
+    chargingProfile: connector.chargingProfile,
+    chargingProfiles: [...connector.chargingProfiles],
+    transactionStartTime: tx?.startTime ?? null,
+    transactionTagId: tx?.tagId ?? null,
+    transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
   };
 }
 
@@ -40,6 +67,12 @@ function toChargePointSnapshot(cp: ChargePoint): ChargePointSnapshot {
     status: cp.status,
     error: cp.error,
     connectors,
+    heartbeat: {
+      intervalSeconds: cp.heartbeat.intervalSeconds,
+      lastSentAt: cp.heartbeat.lastSentAt
+        ? cp.heartbeat.lastSentAt.toISOString()
+        : null,
+    },
   };
 }
 
@@ -59,6 +92,11 @@ export class LocalChargePointService implements ChargePointService {
     Set<(event: ChargePointEvent) => void>
   >();
   private readonly eventSubscriptions = new Map<string, Array<() => void>>();
+
+  /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
+   *  and per-connector availability. Passed through to every ChargePoint we
+   *  build. `null` keeps everything in-memory (test / boot-before-DB). */
+  constructor(private readonly database: Database | null = null) {}
 
   registerChargePoint(chargePoint: ChargePoint): void {
     if (this.chargePoints.has(chargePoint.id)) {
@@ -110,12 +148,94 @@ export class LocalChargePointService implements ChargePointService {
     return this.chargePoints.get(id) ?? null;
   }
 
+  getLocalChargePoint(id: string): ChargePoint | null {
+    return this.getChargePointHandle(id);
+  }
+
+  async resetAllState(): Promise<void> {
+    // Disconnect and forget every in-memory CP first so they don't write
+    // back to the DB while we're truncating it. The follow-up UI reload
+    // will rebuild them from the (now empty) Config + scenario tables.
+    const ids = Array.from(this.chargePoints.keys());
+    for (const id of ids) this.unregisterChargePoint(id);
+    if (this.database) {
+      resetSimulatorState(this.database);
+      await this.database.flush?.();
+    }
+  }
+
+  async clearStoredLogs(cpId: string): Promise<void> {
+    if (!this.database) return;
+    this.database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
+    await this.database.flush?.();
+  }
+
+  async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
+    if (!this.database) return [];
+    // Flush any pending in-memory log writes so the download includes the
+    // last seconds of activity the buffered LogRepository hasn't pushed
+    // out yet.
+    const cp = this.chargePoints.get(cpId);
+    cp?.flushLogs();
+    const rows = this.database.all<{
+      timestamp: string;
+      level: string;
+      log_type: string;
+      message: string;
+    }>(
+      "SELECT timestamp, level, log_type, message FROM logs " +
+        "WHERE cp_id = ? ORDER BY id ASC",
+      [cpId],
+    );
+    return rows.map((r) => ({
+      timestamp: r.timestamp,
+      level: r.level,
+      type: r.log_type,
+      cpId,
+      message: r.message,
+    }));
+  }
+
   async connect(id: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).connect();
+    // Remember the operator's intent so a reload re-connects this CP
+    // automatically. The actual WebSocket may not be open yet (open is
+    // async, may fail) — that's fine, the next boot will retry.
+    this.setDesiredConnected(id, true);
   }
 
   async disconnect(id: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).disconnect();
+    this.setDesiredConnected(id, false);
+  }
+
+  private setDesiredConnected(id: string, desired: boolean): void {
+    if (!this.database) return;
+    this.database.run(
+      "INSERT INTO charge_point_state (cp_id, desired_connected, updated_at) " +
+        "VALUES (?, ?, ?) " +
+        "ON CONFLICT (cp_id) DO UPDATE SET " +
+        "  desired_connected = excluded.desired_connected, " +
+        "  updated_at = excluded.updated_at",
+      [id, desired ? 1 : 0, new Date().toISOString()],
+    );
+  }
+
+  /** Re-issue connect() for every CP the operator previously had
+   *  connected. Called after `syncLocalChargePoints` so the CP instances
+   *  exist. Skips CPs whose WebSocket is already open — useChargePoints
+   *  re-runs on config changes and we don't want to orphan an existing
+   *  socket by issuing a duplicate connect. */
+  async restoreConnections(): Promise<void> {
+    if (!this.database) return;
+    const rows = this.database.all<{ cp_id: string }>(
+      "SELECT cp_id FROM charge_point_state WHERE desired_connected = 1",
+    );
+    for (const { cp_id } of rows) {
+      const cp = this.chargePoints.get(cp_id);
+      if (!cp || cp.isWebSocketConnected) continue;
+      cp.connect();
+    }
   }
 
   async reset(id: string): Promise<void> {
@@ -154,11 +274,22 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
+    opts?: {
+      errorCode?: string;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+    },
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).updateConnectorStatus(
-      connectorId,
-      status,
-    );
+    const cp = this.getExistingChargePointOrThrow(id);
+    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
+      // Use the raw sender so errorCode/info ride along with the
+      // StatusNotification.req without mutating the connector's runtime
+      // status field.
+      cp.sendStatusNotificationRaw(connectorId, status, opts);
+      return;
+    }
+    cp.updateConnectorStatus(connectorId, status);
   }
 
   async setMeterValue(
@@ -171,6 +302,212 @@ export class LocalChargePointService implements ChargePointService {
 
   async sendMeterValue(id: string, connectorId: number): Promise<void> {
     this.getExistingChargePointOrThrow(id).sendMeterValue(connectorId);
+  }
+
+  async removeConnector(id: string, connectorId: number): Promise<void> {
+    this.getExistingChargePointOrThrow(id).removeConnector(connectorId);
+  }
+
+  async setEVSettings(
+    id: string,
+    connectorId: number,
+    settings: EVSettings,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.evSettings = settings;
+  }
+
+  async setAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.autoMeterValueConfig = config;
+  }
+
+  async setAutoResetToAvailable(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.autoResetToAvailable = enabled;
+  }
+
+  async setConnectorMode(
+    id: string,
+    connectorId: number,
+    mode: ScenarioMode,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.mode = mode;
+  }
+
+  async setConnectorSoc(
+    id: string,
+    connectorId: number,
+    soc: number | null,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.soc = soc;
+  }
+
+  async setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.socMeterSyncEnabled = enabled;
+  }
+
+  async getChargingProfiles(
+    id: string,
+    connectorId: number,
+  ): Promise<ReadonlyArray<ActiveChargingProfile>> {
+    const connector = this.requireConnector(id, connectorId);
+    return [...connector.chargingProfiles];
+  }
+
+  async getStateHistory(
+    id: string,
+    options?: HistoryOptions,
+  ): Promise<StateHistoryEntry[]> {
+    const cp = this.chargePoints.get(id);
+    if (!cp) return [];
+    return cp.stateManager.history.getHistory(options);
+  }
+
+  async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
+    return scenarioTemplates.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+    }));
+  }
+
+  async loadScenarioTemplate(
+    id: string,
+    templateId: string,
+    connectorId: number,
+  ): Promise<{ scenarioId: string }> {
+    const connector = this.requireConnector(id, connectorId);
+    const template = getTemplateById(templateId);
+    if (!template) throw new Error(`Unknown template: ${templateId}`);
+    const definition = template.createScenario(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    manager.loadScenarios([definition]);
+    return { scenarioId: definition.id };
+  }
+
+  async loadScenario(
+    id: string,
+    connectorId: number,
+    definition: ScenarioDefinition,
+  ): Promise<{ scenarioId: string }> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    manager.loadScenarios([definition]);
+    return { scenarioId: definition.id };
+  }
+
+  async listScenarios(
+    id: string,
+    connectorId: number,
+  ): Promise<ScenarioListItem[]> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) return [];
+    const active = new Set(manager.getActiveScenarioIds());
+    return manager.getScenarios().map((s) => ({
+      scenarioId: s.id,
+      name: s.name,
+      active: active.has(s.id),
+    }));
+  }
+
+  async runScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    await manager.executeScenario(scenarioId);
+  }
+
+  async stopScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    manager?.stopScenario(scenarioId);
+  }
+
+  async stepScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    force = false,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    // ScenarioManager.stepScenario calls executor.step(); for forceStep we
+    // dip into the executor directly via the manager's context.
+    if (!force) {
+      manager.stepScenario(scenarioId);
+      return;
+    }
+    const ctx = manager.getScenarioExecutionContext(scenarioId);
+    if (!ctx) throw new Error(`Scenario ${scenarioId} is not running`);
+    const executor = (
+      manager as unknown as { executors: Map<string, { forceStep(): void }> }
+    ).executors.get(scenarioId);
+    executor?.forceStep();
+  }
+
+  async stopAllScenarios(id: string, connectorId: number): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    manager?.stopAllScenarios();
+  }
+
+  async getScenarioStatus(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioExecutionContext | null> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) return null;
+    return manager.getScenarioExecutionContext(scenarioId) ?? null;
+  }
+
+  async getScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioDefinition | null> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) return null;
+    return manager.getScenario(scenarioId) ?? null;
+  }
+
+  private requireConnector(id: string, connectorId: number) {
+    const cp = this.getExistingChargePointOrThrow(id);
+    const connector = cp.getConnector(connectorId);
+    if (!connector) {
+      throw new Error(`Connector ${connectorId} not found on ${id}`);
+    }
+    return connector;
   }
 
   subscribe(
@@ -250,34 +587,54 @@ export class LocalChargePointService implements ChargePointService {
       definition.wsUrl,
       definition.basicAuth,
       definition.autoMeterValueSetting,
+      this.database,
     );
 
-    // Restore connector-level settings from localStorage
-    for (
-      let connectorId = 1;
-      connectorId <= definition.connectorNumber;
-      connectorId++
-    ) {
-      const savedConfig = loadConnectorAutoMeterConfig(
-        definition.id,
-        connectorId,
-      );
-      if (savedConfig) {
-        const connector = chargePoint.getConnector(connectorId);
-        if (connector) {
-          connector.autoMeterValueConfig = savedConfig;
+    // Restore connector-level settings from the SQLite store. Sync reads
+    // are safe because both adapters expose `Database.get/all`
+    // synchronously; we're inside the per-CP construction path that runs
+    // once per registration.
+    if (this.database) {
+      for (
+        let connectorId = 1;
+        connectorId <= definition.connectorNumber;
+        connectorId++
+      ) {
+        const autoMeterRow = this.database.get<{ auto_meter: string | null }>(
+          "SELECT auto_meter FROM connector_settings " +
+            "WHERE cp_id = ? AND connector_id = ?",
+          [definition.id, connectorId],
+        );
+        if (autoMeterRow?.auto_meter) {
+          try {
+            const connector = chargePoint.getConnector(connectorId);
+            if (connector) {
+              connector.autoMeterValueConfig = JSON.parse(
+                autoMeterRow.auto_meter,
+              ) as AutoMeterValueConfig;
+            }
+          } catch {
+            // Corrupted JSON in the row — fall back to defaults.
+          }
         }
-      }
 
-      // Load charging profiles
-      const savedProfiles = loadConnectorChargingProfiles(
-        definition.id,
-        connectorId,
-      );
-      if (savedProfiles.length > 0) {
-        const connector = chargePoint.getConnector(connectorId);
-        if (connector) {
-          connector.setChargingProfiles(savedProfiles);
+        const profileRows = this.database.all<{ profile: string }>(
+          "SELECT profile FROM charging_profiles " +
+            "WHERE cp_id = ? AND connector_id = ? ORDER BY stack_level DESC",
+          [definition.id, connectorId],
+        );
+        const profiles = profileRows
+          .map((r) => {
+            try {
+              return JSON.parse(r.profile) as ActiveChargingProfile;
+            } catch {
+              return null;
+            }
+          })
+          .filter((p): p is ActiveChargingProfile => p !== null);
+        if (profiles.length > 0) {
+          const connector = chargePoint.getConnector(connectorId);
+          connector?.setChargingProfiles(profiles);
         }
       }
     }
@@ -354,6 +711,18 @@ export class LocalChargePointService implements ChargePointService {
     );
 
     chargePoint.connectors.forEach((connector) => {
+      // The ChargePoint never emits connectorMeterValueChange itself —
+      // only Connector.meterValueChange fires when set_meter_value /
+      // auto-meter scheduler run, so subscribe per-connector here.
+      unsubscribes.push(
+        connector.events.on("meterValueChange", ({ meterValue }) => {
+          this.emit(chargePoint.id, {
+            type: "connector-meter",
+            connectorId: connector.id,
+            meterValue,
+          });
+        }),
+      );
       unsubscribes.push(
         connector.events.on("autoMeterValueChange", ({ config }) => {
           this.emit(chargePoint.id, {
@@ -416,8 +785,28 @@ export class LocalChargePointService implements ChargePointService {
 
       unsubscribes.push(
         connector.events.on("chargingProfilesChange", ({ profiles }) => {
-          // Persist to localStorage whenever profiles change
-          saveConnectorChargingProfiles(chargePoint.id, connector.id, profiles);
+          // Persist via the SQLite repo so the next CP build picks them up.
+          if (this.database) {
+            this.database.run(
+              "DELETE FROM charging_profiles WHERE cp_id = ? AND connector_id = ?",
+              [chargePoint.id, connector.id],
+            );
+            for (const profile of profiles) {
+              this.database.run(
+                "INSERT INTO charging_profiles " +
+                  "(cp_id, connector_id, charging_profile_id, stack_level, purpose, profile) " +
+                  "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                  chargePoint.id,
+                  connector.id,
+                  profile.chargingProfileId,
+                  profile.stackLevel,
+                  profile.chargingProfilePurpose,
+                  JSON.stringify(profile),
+                ],
+              );
+            }
+          }
           this.emit(chargePoint.id, {
             type: "connector-charging-profiles",
             connectorId: connector.id,
@@ -432,6 +821,12 @@ export class LocalChargePointService implements ChargePointService {
     });
 
     unsubscribes.push(
+      chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
+        this.emit(chargePoint.id, { type: "connector-removed", connectorId });
+      }),
+    );
+
+    unsubscribes.push(
       chargePoint.events.on("connected", () => {
         this.emit(chargePoint.id, { type: "connected" });
       }),
@@ -441,6 +836,19 @@ export class LocalChargePointService implements ChargePointService {
       chargePoint.events.on("disconnected", ({ code, reason }) => {
         this.emit(chargePoint.id, { type: "disconnected", code, reason });
       }),
+    );
+
+    unsubscribes.push(
+      chargePoint.heartbeat.events.on(
+        "stateChange",
+        ({ intervalSeconds, lastSentAt }) => {
+          this.emit(chargePoint.id, {
+            type: "heartbeat",
+            intervalSeconds,
+            lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
+          });
+        },
+      ),
     );
 
     unsubscribes.push(

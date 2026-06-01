@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 
-import type { HistoryOptions, StateHistoryEntry } from "../../cp/application/services/types/StateSnapshot";
+import type {
+  HistoryOptions,
+  StateHistoryEntry,
+} from "../../cp/application/services/types/StateSnapshot";
 import { useDataContext } from "../providers/DataProvider";
 
 interface UseStateHistoryOptions {
   autoRefresh?: boolean;
   historyOptions?: HistoryOptions;
+  intervalMs?: number;
 }
 
 interface UseStateHistoryResult {
@@ -13,11 +17,17 @@ interface UseStateHistoryResult {
   isLoading: boolean;
 }
 
+const DEFAULT_POLL_INTERVAL_MS = 1000;
+
 export function useStateHistory(
   chargePointId: string | null,
-  { autoRefresh = true, historyOptions }: UseStateHistoryOptions = {},
+  {
+    autoRefresh = true,
+    historyOptions,
+    intervalMs = DEFAULT_POLL_INTERVAL_MS,
+  }: UseStateHistoryOptions = {},
 ): UseStateHistoryResult {
-  const { stateHistoryProvider } = useDataContext();
+  const { chargePointService } = useDataContext();
   const [history, setHistory] = useState<StateHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(chargePointId));
 
@@ -28,33 +38,52 @@ export function useStateHistory(
       return;
     }
 
-    let unsubscribe: (() => void) | null = null;
     let cancelled = false;
 
-    stateHistoryProvider
-      .getHistory(chargePointId, historyOptions)
-      .then((entries) => {
+    const fetchHistory = async () => {
+      try {
+        const entries = await chargePointService.getStateHistory(
+          chargePointId,
+          historyOptions,
+        );
         if (!cancelled) {
           setHistory(entries);
           setIsLoading(false);
         }
-      })
-      .catch((error) => {
-        console.error("Failed to fetch state history", error);
-        setIsLoading(false);
-      });
+      } catch (err) {
+        console.error("Failed to fetch state history", err);
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    void fetchHistory();
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let unsubscribe: (() => void) | null = null;
 
     if (autoRefresh) {
-      unsubscribe = stateHistoryProvider.subscribe(chargePointId, setHistory, historyOptions);
+      // Trigger an immediate refetch on relevant push events too — the polling
+      // interval is a safety net for cases without push events.
+      unsubscribe = chargePointService.subscribe(chargePointId, (event) => {
+        if (event.type === "state-history-entry") {
+          void fetchHistory();
+        }
+      });
+      interval = setInterval(fetchHistory, intervalMs);
     }
 
     return () => {
       cancelled = true;
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      if (interval) clearInterval(interval);
+      unsubscribe?.();
     };
-  }, [autoRefresh, chargePointId, historyOptions, stateHistoryProvider]);
+  }, [
+    autoRefresh,
+    chargePointId,
+    historyOptions,
+    intervalMs,
+    chargePointService,
+  ]);
 
   return { history, isLoading };
 }

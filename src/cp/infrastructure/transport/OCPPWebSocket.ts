@@ -1,4 +1,5 @@
 import { Logger, LogType } from "../../shared/Logger";
+import { openOcppWebSocket } from "./wsUrlWithBasic";
 import {
   OCPPAction,
   OCPPErrorCode,
@@ -92,15 +93,11 @@ export class OCPPWebSocket {
 
     this._isManualDisconnect = false;
 
-    const url = new URL(this._url);
-    if (this?._basicAuth) {
-      url.username = this._basicAuth.username;
-      url.password = this._basicAuth.password;
-    }
-    this._ws = new WebSocket(`${url.toString()}${this._chargePointId}`, [
-      "ocpp1.6",
-      "ocpp1.5",
-    ]);
+    this._ws = openOcppWebSocket({
+      baseUrl: this._url,
+      chargePointId: this._chargePointId,
+      basicAuth: this._basicAuth,
+    });
     this._ws.onopen = () => {
       this.handleOpen();
       if (this._onOpenCallback) {
@@ -142,14 +139,14 @@ export class OCPPWebSocket {
     messageId: string,
     action: OCPPAction,
     payload: OcppMessageRequestPayload,
-  ): void {
+  ): boolean {
     const message = JSON.stringify([
       OCPPMessageType.CALL,
       messageId,
       action,
       payload,
     ]);
-    this.send(message);
+    return this.send(message);
   }
 
   public sendResult(
@@ -176,13 +173,30 @@ export class OCPPWebSocket {
     this.send(message);
   }
 
-  private send(message: string): void {
+  /** True when the underlying socket is open and ready to transmit. */
+  public isConnected(): boolean {
+    return this._ws !== null && this._ws.readyState === WebSocket.OPEN;
+  }
+
+  /** True when a WebSocket object exists in OPEN or CONNECTING state.
+   *  Used by the connection restore path to avoid kicking off a second
+   *  socket while the first one is still in its async handshake. */
+  public isOpenOrConnecting(): boolean {
+    return (
+      this._ws !== null &&
+      (this._ws.readyState === WebSocket.OPEN ||
+        this._ws.readyState === WebSocket.CONNECTING)
+    );
+  }
+
+  private send(message: string): boolean {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       this._ws.send(message);
       this._logger.info(`Sent: ${message}`, LogType.WEBSOCKET);
-    } else {
-      this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
+      return true;
     }
+    this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
+    return false;
   }
 
   public setMessageHandler(handler: MessageHandler): void {

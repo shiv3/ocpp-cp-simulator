@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import {
@@ -18,6 +17,9 @@ interface ConnectorViewState {
   meterValue: number;
   soc: number | null;
   transactionId: number | null;
+  transactionStartTime: Date | null;
+  transactionTagId: string | null;
+  transactionBatteryCapacityKwh: number | null;
   logs: string[];
   autoMeterValueConfig: AutoMeterValueConfig | null;
   mode: ScenarioMode;
@@ -32,55 +34,48 @@ const DEFAULT_AVAILABILITY: OCPPAvailability = "Operative";
 const DEFAULT_MODE: ScenarioMode = "manual";
 
 export function useConnectorView(
-  chargePoint: ChargePoint | null,
+  cpId: string | null,
   connectorId: number,
 ): ConnectorViewState {
   const { chargePointService } = useDataContext();
-  const chargePointId = chargePoint?.id ?? null;
-  const initialConnector = chargePoint?.getConnector(connectorId) ?? null;
 
-  const [status, setStatus] = useState<OCPPStatus>(
-    (initialConnector?.status as OCPPStatus) ?? DEFAULT_STATUS,
+  const [status, setStatus] = useState<OCPPStatus>(DEFAULT_STATUS);
+  const [availability, setAvailability] =
+    useState<OCPPAvailability>(DEFAULT_AVAILABILITY);
+  const [meterValue, setMeterValue] = useState<number>(0);
+  const [soc, setSoc] = useState<number | null>(null);
+  const [transactionId, setTransactionId] = useState<number | null>(null);
+  const [transactionStartTime, setTransactionStartTime] = useState<Date | null>(
+    null,
   );
-  const [availability, setAvailability] = useState<OCPPAvailability>(
-    initialConnector?.availability ?? DEFAULT_AVAILABILITY,
-  );
-  const [meterValue, setMeterValue] = useState<number>(
-    initialConnector?.meterValue ?? 0,
-  );
-  const [soc, setSoc] = useState<number | null>(initialConnector?.soc ?? null);
-  const [transactionId, setTransactionId] = useState<number | null>(
-    initialConnector?.transaction?.id ?? null,
-  );
+  const [transactionTagId, setTransactionTagId] = useState<string | null>(null);
+  const [transactionBatteryCapacityKwh, setTransactionBatteryCapacityKwh] =
+    useState<number | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [autoMeterValueConfig, setAutoMeterValueConfig] =
-    useState<AutoMeterValueConfig | null>(
-      initialConnector?.autoMeterValueConfig ?? null,
-    );
-  const [mode, setMode] = useState<ScenarioMode>(
-    initialConnector?.mode ?? DEFAULT_MODE,
-  );
-  const [autoResetToAvailable, setAutoResetToAvailable] = useState<boolean>(
-    initialConnector?.autoResetToAvailable ?? true,
-  );
-  const [evSettings, setEvSettings] = useState<EVSettings>(
-    initialConnector?.evSettings ?? { ...defaultEVSettings },
-  );
+    useState<AutoMeterValueConfig | null>(null);
+  const [mode, setMode] = useState<ScenarioMode>(DEFAULT_MODE);
+  const [autoResetToAvailable, setAutoResetToAvailable] =
+    useState<boolean>(true);
+  const [evSettings, setEvSettings] = useState<EVSettings>({
+    ...defaultEVSettings,
+  });
   const [chargingProfile, setChargingProfile] =
-    useState<ActiveChargingProfile | null>(
-      initialConnector?.chargingProfile ?? null,
-    );
+    useState<ActiveChargingProfile | null>(null);
   const [chargingProfiles, setChargingProfiles] = useState<
     ActiveChargingProfile[]
-  >(initialConnector?.chargingProfiles ?? []);
+  >([]);
 
   useEffect(() => {
-    if (!chargePointId) {
+    if (!cpId) {
       setStatus(DEFAULT_STATUS);
       setAvailability(DEFAULT_AVAILABILITY);
       setMeterValue(0);
       setSoc(null);
       setTransactionId(null);
+      setTransactionStartTime(null);
+      setTransactionTagId(null);
+      setTransactionBatteryCapacityKwh(null);
       setAutoMeterValueConfig(null);
       setMode(DEFAULT_MODE);
       setAutoResetToAvailable(true);
@@ -91,79 +86,102 @@ export function useConnectorView(
       return;
     }
 
-    const connector = chargePoint?.getConnector(connectorId);
-    if (connector) {
-      setStatus(connector.status as OCPPStatus);
-      setAvailability(connector.availability);
-      setMeterValue(connector.meterValue);
-      setSoc(connector.soc);
-      setTransactionId(connector.transaction?.id ?? null);
-      setAutoMeterValueConfig(connector.autoMeterValueConfig ?? null);
-      setMode(connector.mode);
-      setAutoResetToAvailable(connector.autoResetToAvailable);
-      setEvSettings(connector.evSettings);
-      setChargingProfile(connector.chargingProfile ?? null);
-      setChargingProfiles(connector.chargingProfiles ?? []);
-    }
+    let cancelled = false;
+
+    chargePointService
+      .getChargePoint(cpId)
+      .then((snapshot) => {
+        if (cancelled || !snapshot) return;
+        const connector = snapshot.connectors.find((c) => c.id === connectorId);
+        if (!connector) return;
+        setStatus(connector.status);
+        setAvailability(connector.availability);
+        setMeterValue(connector.meterValue);
+        setSoc(connector.soc);
+        setTransactionId(connector.transactionId);
+        setTransactionStartTime(connector.transactionStartTime);
+        setTransactionTagId(connector.transactionTagId);
+        setTransactionBatteryCapacityKwh(
+          connector.transactionBatteryCapacityKwh,
+        );
+        setAutoMeterValueConfig(connector.autoMeterValueConfig);
+        setMode(connector.mode);
+        setAutoResetToAvailable(connector.autoResetToAvailable);
+        if (connector.evSettings) setEvSettings(connector.evSettings);
+        setChargingProfile(connector.chargingProfile);
+        setChargingProfiles([...connector.chargingProfiles]);
+      })
+      .catch((err) => {
+        console.error(
+          `Failed to fetch connector snapshot for ${cpId}/${connectorId}`,
+          err,
+        );
+      });
 
     const unsubscribe = chargePointService.subscribe(
-      chargePointId,
+      cpId,
       (event: ChargePointEvent) => {
+        if ("connectorId" in event && event.connectorId !== connectorId) {
+          return;
+        }
         switch (event.type) {
           case "connector-status":
-            if (event.connectorId === connectorId) {
-              setStatus(event.status);
-            }
+            setStatus(event.status);
             break;
           case "connector-availability":
-            if (event.connectorId === connectorId) {
-              setAvailability(event.availability);
-            }
+            setAvailability(event.availability);
             break;
           case "connector-meter":
-            if (event.connectorId === connectorId) {
-              setMeterValue(event.meterValue);
-            }
+            setMeterValue(event.meterValue);
             break;
           case "connector-soc":
-            if (event.connectorId === connectorId) {
-              setSoc(event.soc);
-            }
+            setSoc(event.soc);
             break;
           case "connector-transaction":
-            if (event.connectorId === connectorId) {
-              setTransactionId(event.transactionId);
+            setTransactionId(event.transactionId);
+            if (event.transactionId == null) {
+              setTransactionStartTime(null);
+              setTransactionTagId(null);
+              setTransactionBatteryCapacityKwh(null);
+            } else {
+              // The event carries only the new id, not the start time / tag id
+              // / battery capacity. Refetch the snapshot so the active
+              // transaction panel ("Started", "ID Tag", duration) renders
+              // correctly without waiting for a remount.
+              void chargePointService
+                .getChargePoint(cpId)
+                .then((snapshot) => {
+                  if (cancelled || !snapshot) return;
+                  const connector = snapshot.connectors.find(
+                    (c) => c.id === connectorId,
+                  );
+                  if (!connector) return;
+                  setTransactionStartTime(connector.transactionStartTime);
+                  setTransactionTagId(connector.transactionTagId);
+                  setTransactionBatteryCapacityKwh(
+                    connector.transactionBatteryCapacityKwh,
+                  );
+                })
+                .catch(() => {});
             }
             break;
           case "connector-auto-meter":
-            if (event.connectorId === connectorId) {
-              setAutoMeterValueConfig(event.config);
-            }
+            setAutoMeterValueConfig(event.config);
             break;
           case "connector-mode":
-            if (event.connectorId === connectorId) {
-              setMode(event.mode);
-            }
+            setMode(event.mode);
             break;
           case "connector-auto-reset-to-available":
-            if (event.connectorId === connectorId) {
-              setAutoResetToAvailable(event.enabled);
-            }
+            setAutoResetToAvailable(event.enabled);
             break;
           case "connector-ev-settings":
-            if (event.connectorId === connectorId) {
-              setEvSettings(event.settings);
-            }
+            setEvSettings(event.settings);
             break;
           case "connector-charging-profile":
-            if (event.connectorId === connectorId) {
-              setChargingProfile(event.profile);
-            }
+            setChargingProfile(event.profile);
             break;
           case "connector-charging-profiles":
-            if (event.connectorId === connectorId) {
-              setChargingProfiles(event.profiles);
-            }
+            setChargingProfiles(event.profiles);
             break;
           case "log":
             setLogs((prev) => [
@@ -178,11 +196,10 @@ export function useConnectorView(
     );
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      cancelled = true;
+      unsubscribe?.();
     };
-  }, [chargePoint, chargePointId, connectorId, chargePointService]);
+  }, [cpId, connectorId, chargePointService]);
 
   const logsMemo = useMemo(() => [...logs], [logs]);
 
@@ -192,6 +209,9 @@ export function useConnectorView(
     meterValue,
     soc,
     transactionId,
+    transactionStartTime,
+    transactionTagId,
+    transactionBatteryCapacityKwh,
     logs: logsMemo,
     autoMeterValueConfig,
     mode,

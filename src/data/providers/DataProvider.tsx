@@ -1,27 +1,86 @@
-import React, { createContext, useContext, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { Provider as JotaiProvider } from "jotai";
 import { createStore } from "jotai/vanilla";
 
-import { resolveRuntimeMode, type RuntimeMode } from "../RuntimeMode";
+import type { RuntimeMode } from "../RuntimeMode";
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ScenarioRepository } from "../interfaces/ScenarioRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import type { ChargePointService } from "../interfaces/ChargePointService";
-import type { StateHistoryProvider } from "../interfaces/StateHistoryProvider";
-import { LocalConfigRepository } from "../local/LocalConfigRepository";
-import { LocalScenarioRepository } from "../local/LocalScenarioRepository";
-import { LocalConnectorSettingsRepository } from "../local/LocalConnectorSettingsRepository";
 import { LocalChargePointService } from "../local/LocalChargePointService";
-import { LocalStateHistoryProvider } from "../local/LocalStateHistoryProvider";
+import { RemoteChargePointService } from "../remote/RemoteChargePointService";
+import type { Database } from "../../cp/domain/persistence/Database";
+// SqlJsDatabase intentionally NOT imported eagerly — see the mode-gated
+// dynamic import below. Remote mode never needs it, so we keep the
+// ~650 KB WASM wrapper out of that path entirely.
+import { SqliteScenarioRepository } from "../sqlite/SqliteScenarioRepository";
+import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
+import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
+import {
+  type EVSettings,
+  defaultEVSettings,
+  setUserDefaultEVSettings,
+} from "../../cp/domain/connector/EVSettings";
+
+const DEFAULT_EV_STORAGE_KEY = "ocpp-cp.default-ev-settings";
+const DEFAULT_SERVER_URL = "http://127.0.0.1:9700";
+
+function loadDefaultEvFromStorage(): EVSettings | null {
+  const raw = readStorage(DEFAULT_EV_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<EVSettings>;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.batteryCapacityKwh === "number"
+    ) {
+      return { ...defaultEVSettings, ...parsed };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+// Seed the in-memory user override before any Connector is constructed. The
+// module-level effect runs once at import time so charge points created at
+// app boot already see the user's preferred default.
+if (typeof window !== "undefined") {
+  const stored = loadDefaultEvFromStorage();
+  if (stored) setUserDefaultEVSettings(stored);
+}
+
+function readStorage(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
 
 interface DataContextValue {
+  /** Current runtime mode — auto-detected from the page origin's /healthz
+   *  probe, no manual toggle. `remote` when served by the daemon's
+   *  --web-console; `local` for static builds. */
   mode: RuntimeMode;
+  serverUrl: string;
+  /** Browser-side user-configured default EV settings.
+   *  `null` means "no override — fall back to the built-in defaults". */
+  defaultEvSettings: EVSettings | null;
+  setDefaultEvSettings: (s: EVSettings | null) => void;
   configRepository: ConfigRepository;
   scenarioRepository: ScenarioRepository;
   connectorSettingsRepository: ConnectorSettingsRepository;
   chargePointService: ChargePointService;
-  stateHistoryProvider: StateHistoryProvider;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -29,39 +88,210 @@ const DataContext = createContext<DataContextValue | null>(null);
 interface DataProviderProps {
   children: ReactNode;
   modeOverride?: RuntimeMode;
+  serverUrlOverride?: string;
 }
 
-export const DataProvider: React.FC<DataProviderProps> = ({ children, modeOverride }) => {
-  const runtimeMode = useMemo(() => resolveRuntimeMode(modeOverride), [modeOverride]);
+export const DataProvider: React.FC<DataProviderProps> = ({
+  children,
+  modeOverride,
+  serverUrlOverride,
+}) => {
+  // Mode resolution. We never assume a mode at first render — `mode` is
+  // null until /healthz tells us whether we're local or remote. That gate
+  // is important because we only spin up sql.js (~650 KB WASM + IndexedDB
+  // read) for the local path; remote mode talks to the daemon's own
+  // SQLite via the API and has no use for a browser-side store.
+  const initialMode = useMemo<RuntimeMode | null>(() => {
+    if (modeOverride) return modeOverride;
+    return null;
+  }, [modeOverride]);
+
+  // Server URL: prefer the explicit prop, else the current page origin.
+  // The legacy localStorage value is intentionally ignored — Remote mode is
+  // only entered through origin auto-detection, which sets the URL to the
+  // origin that successfully answered /healthz.
+  const initialServerUrl = useMemo<string>(() => {
+    if (serverUrlOverride) return serverUrlOverride;
+    if (typeof window !== "undefined") return window.location.origin;
+    return DEFAULT_SERVER_URL;
+  }, [serverUrlOverride]);
+
+  const [mode, setModeState] = useState<RuntimeMode | null>(initialMode);
+  const [serverUrl, setServerUrlState] = useState<string>(initialServerUrl);
+  const [defaultEvSettings, setDefaultEvSettingsState] =
+    useState<EVSettings | null>(() => loadDefaultEvFromStorage());
+
+  const setDefaultEvSettings = (next: EVSettings | null) => {
+    setDefaultEvSettingsState(next);
+    setUserDefaultEVSettings(next);
+    if (typeof window !== "undefined") {
+      try {
+        if (next) {
+          window.localStorage.setItem(
+            DEFAULT_EV_STORAGE_KEY,
+            JSON.stringify(next),
+          );
+        } else {
+          window.localStorage.removeItem(DEFAULT_EV_STORAGE_KEY);
+        }
+      } catch {
+        // best effort
+      }
+    }
+  };
+
+  // Origin-based mode detection: the only way the UI ever enters Remote
+  // mode. If /healthz at the current origin answers ok, the UI was served
+  // by `ocpp-cp-sim --web-console` (or the Docker image) and we point the
+  // RemoteChargePointService at that same origin. Otherwise we stay Local
+  // — true for static builds (GitHub Pages, `bun run dev`, Tauri). No
+  // persistence: dropping the daemon flips back to Local on next reload.
+  useEffect(() => {
+    if (modeOverride) return;
+    if (typeof window === "undefined") return;
+
+    let cancelled = false;
+    const origin = window.location.origin;
+    fetch(`${origin}/healthz`, { method: "GET", cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled || !body || typeof body !== "object") return;
+        if ("ok" in body && (body as { ok?: unknown }).ok === true) {
+          setModeState("remote");
+          setServerUrlState(origin);
+        } else {
+          setModeState("local");
+        }
+      })
+      .catch(() => {
+        // No daemon at this origin — Local.
+        if (!cancelled) setModeState("local");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [modeOverride]);
+
   const jotaiStore = useMemo(() => createStore(), []);
 
-  const configRepository = useMemo<ConfigRepository>(() => new LocalConfigRepository(jotaiStore), [jotaiStore]);
-  const scenarioRepository = useMemo<ScenarioRepository>(() => new LocalScenarioRepository(), []);
-  const connectorSettingsRepository = useMemo<ConnectorSettingsRepository>(
-    () => new LocalConnectorSettingsRepository(),
-    [],
+  // sql.js takes a moment to load (WASM fetch + parse + IndexedDB read),
+  // so we only open it when we KNOW we're in local mode — remote mode
+  // has nothing to store locally (the daemon owns persistence).
+  const [database, setDatabase] = useState<Database | null>(null);
+  const [dbReady, setDbReady] = useState(false);
+  useEffect(() => {
+    if (mode !== "local") {
+      setDatabase(null);
+      setDbReady(true);
+      return;
+    }
+    setDbReady(false);
+    let cancelled = false;
+    let opened: Database | null = null;
+    // Dynamic import keeps sql.js (~650 KB WASM + JS glue) out of the
+    // remote-mode bundle; vite splits this into its own chunk.
+    void import("../sqlite/SqlJsDatabase")
+      .then(({ SqlJsDatabase }) => SqlJsDatabase.create())
+      .then((db) => {
+        if (cancelled) {
+          db.close();
+          return;
+        }
+        opened = db;
+        setDatabase(db);
+        setDbReady(true);
+      })
+      .catch((err) => {
+        console.error("Failed to initialise SQLite database", err);
+        setDbReady(true); // unblock the UI even if persistence is broken
+      });
+    return () => {
+      cancelled = true;
+      opened?.close();
+    };
+  }, [mode]);
+
+  // Repositories accept `database === null` (remote mode); they no-op
+  // writes and return empty/null reads. Local mode wires the real DB.
+  const configRepository = useMemo<ConfigRepository>(
+    () => new SqliteConfigRepository(database),
+    [database],
   );
-  const localChargePointService = useMemo(() => new LocalChargePointService(), []);
-  const chargePointService: ChargePointService = localChargePointService;
-  const stateHistoryProvider = useMemo<StateHistoryProvider>(
-    () => new LocalStateHistoryProvider(localChargePointService),
-    [localChargePointService],
+  const scenarioRepository = useMemo<ScenarioRepository>(
+    () => new SqliteScenarioRepository(database),
+    [database],
+  );
+  const connectorSettingsRepository = useMemo<ConnectorSettingsRepository>(
+    () => new SqliteConnectorSettingsRepository(database),
+    [database],
+  );
+  const localChargePointService = useMemo(
+    () => new LocalChargePointService(database),
+    [database],
+  );
+  const remoteChargePointService = useMemo<RemoteChargePointService | null>(
+    () => (mode === "remote" ? new RemoteChargePointService(serverUrl) : null),
+    [mode, serverUrl],
+  );
+  useEffect(() => {
+    return () => {
+      remoteChargePointService?.dispose();
+    };
+  }, [remoteChargePointService]);
+
+  // When the user flips to remote mode, drop any locally-registered charge
+  // points so their CSMS WebSocket connections don't keep running unmonitored
+  // in the background. Switching back to local will re-create them from config.
+  useEffect(() => {
+    if (mode === "remote") {
+      void localChargePointService.syncLocalChargePoints([]).catch((err) => {
+        console.error("Failed to release local charge points", err);
+      });
+    }
+  }, [mode, localChargePointService]);
+
+  const chargePointService: ChargePointService =
+    remoteChargePointService ?? localChargePointService;
+
+  // Wait for mode resolution (so we don't render local UI just to swap to
+  // remote a moment later) AND for the DB to be ready in local mode. In
+  // remote mode `dbReady` flips immediately because there's no DB to wait on.
+  const ready = mode !== null && dbReady;
+
+  const value = useMemo(
+    () =>
+      ready
+        ? {
+            mode: mode as RuntimeMode,
+            serverUrl,
+            defaultEvSettings,
+            setDefaultEvSettings,
+            configRepository,
+            scenarioRepository,
+            connectorSettingsRepository,
+            chargePointService,
+          }
+        : null,
+    [
+      ready,
+      mode,
+      serverUrl,
+      defaultEvSettings,
+      configRepository,
+      scenarioRepository,
+      connectorSettingsRepository,
+      chargePointService,
+    ],
   );
 
-  if (runtimeMode === "remote") {
-    console.warn(
-      "Remote runtime mode requested, but GraphQL adapters are not implemented yet. Falling back to local mode.",
+  if (!ready || !value) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
     );
   }
-
-  const value = useMemo(() => ({
-    mode: runtimeMode === "remote" ? "local" : runtimeMode,
-    configRepository,
-    scenarioRepository,
-    connectorSettingsRepository,
-    chargePointService,
-    stateHistoryProvider,
-  }), [runtimeMode, configRepository, scenarioRepository, connectorSettingsRepository, chargePointService, stateHistoryProvider]);
 
   return (
     <DataContext.Provider value={value}>

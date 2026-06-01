@@ -8,7 +8,31 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
-import { createHttpHandlers } from "./httpServer";
+import { createHttpHandlers, type CorsPolicy } from "./httpServer";
+import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "../../cp/domain/persistence/Database";
+import { getGlobalLogFormat } from "../../cp/shared/Logger";
+
+/**
+ * Setup-time chatter from the daemon ("[server] Listening on …",
+ * "[server] Connecting to CSMS…"). Plain mode keeps the legacy
+ * "[server] <msg>" prefix; JSON mode wraps each call in a one-line JSON
+ * object so the whole stderr stream is structured.
+ */
+function serverLog(message: string): void {
+  if (getGlobalLogFormat() === "json") {
+    process.stderr.write(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "INFO",
+        type: "Server",
+        message,
+      }) + "\n",
+    );
+    return;
+  }
+  process.stderr.write(`[server] ${message}\n`);
+}
 
 export interface ServerOptions {
   readonly httpPort: number | null;
@@ -20,8 +44,27 @@ export interface ServerOptions {
   readonly startupScenario: {
     readonly scenario: string | null;
     readonly scenarioTemplate: string | null;
-    readonly scenarioConnector: number;
+    readonly scenarioTemplateFile: string | null;
+    /** "all" | "1" | "1,2,3" — resolved to a list of connector ids at startup. */
+    readonly scenarioConnector: string;
   } | null;
+  readonly cors: CorsPolicy;
+  /**
+   * If set, every non-API GET is served from this directory (SPA aware).
+   * Lets you ship the daemon and the browser UI in one process.
+   */
+  readonly staticDir: string | null;
+  /**
+   * Optional second HTTP listener for the bundled web console. If equal
+   * to `httpPort`, a single listener serves both API and UI. If different,
+   * a second `Bun.serve` is bound to this port (the UI is also exposed on
+   * that port together with the API so the browser can reach both at the
+   * same origin).
+   */
+  readonly webConsolePort: number | null;
+  /** Filesystem path for the SQLite state DB. `null` means run in memory
+   *  — handy for tests / one-off CSMS probes; durable persistence is off. */
+  readonly stateDb: string | null;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -29,28 +72,82 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     removeStaleSocket(opts.unixSocket);
   }
 
+  // Open the persistent state DB up front so every CP we create (boot
+  // bootstrap or via POST /v1/cp) gets the same Database handle. Without
+  // --state-db we stay in-memory; the log line below makes the choice
+  // visible because a silent in-memory daemon would surprise the operator.
+  let database: Database | null = null;
+  if (opts.stateDb) {
+    database = BunSqliteDatabase.open(opts.stateDb);
+    serverLog(`State DB: ${opts.stateDb}`);
+  } else {
+    serverLog("State DB: in-memory (pass --state-db <path> to persist)");
+  }
+
   const bus = new EventBus();
-  const registry = new CPRegistry(bus);
+  const registry = new CPRegistry(bus, database);
+  // Re-create CPs that were registered before the previous daemon shut
+  // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
+  // re-run with the same --cp-id is treated as "update wsUrl/connectors"
+  // rather than "create + collide".
+  const restored = registry.restoreFromDatabase();
+  if (restored.length > 0) {
+    serverLog(
+      `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
+    );
+  }
   const lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
   });
 
-  const handlers = createHttpHandlers({ registry, bus, lifecycle });
+  // Two listener configurations:
+  //   * "api"  — no static fallback; what --http-port and the Unix socket
+  //     serve unless --web-console asks them to share a port.
+  //   * "console" — serves static files (UI) AND the full API; used by the
+  //     --web-console port. The API is exposed on this listener too so the
+  //     browser can talk to it at the same origin without CORS.
+  const apiHandlers = createHttpHandlers({
+    registry,
+    bus,
+    lifecycle,
+    cors: opts.cors,
+    database,
+  });
+  const consoleHandlers = opts.staticDir
+    ? createHttpHandlers({
+        registry,
+        bus,
+        lifecycle,
+        cors: opts.cors,
+        staticDir: opts.staticDir,
+        database,
+      })
+    : apiHandlers;
+  if (opts.staticDir) {
+    serverLog(`Web console: ${opts.staticDir}`);
+  }
   const servers: AnyServer[] = [];
 
   if (opts.unixSocket) {
     const unixServer = Bun.serve({
       unix: opts.unixSocket,
-      fetch: handlers.fetch,
-      websocket: handlers.websocket,
+      fetch: apiHandlers.fetch,
+      websocket: apiHandlers.websocket,
     });
     servers.push(unixServer);
     lifecycle.attachServer(unixServer);
-    process.stderr.write(`[server] Listening on unix:${opts.unixSocket}\n`);
+    serverLog(`Listening on unix:${opts.unixSocket}`);
   }
 
+  // --http-port and --web-console may share a port (single listener) or
+  // use different ports (two listeners). When they share, the listener
+  // gets the console handler (API + UI).
+  const httpPortShared =
+    opts.httpPort != null && opts.httpPort === opts.webConsolePort;
+
   if (opts.httpPort != null) {
+    const handlers = httpPortShared ? consoleHandlers : apiHandlers;
     const httpServer = Bun.serve({
       port: opts.httpPort,
       hostname: opts.httpHost,
@@ -59,9 +156,22 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     });
     servers.push(httpServer);
     lifecycle.attachServer(httpServer);
-    process.stderr.write(
-      `[server] Listening on http://${opts.httpHost}:${opts.httpPort}\n`,
+    serverLog(
+      `Listening on http://${opts.httpHost}:${opts.httpPort}` +
+        (httpPortShared ? " (API + web console)" : " (API)"),
     );
+  }
+
+  if (opts.webConsolePort != null && !httpPortShared) {
+    const consoleServer = Bun.serve({
+      port: opts.webConsolePort,
+      hostname: opts.httpHost,
+      fetch: consoleHandlers.fetch,
+      websocket: consoleHandlers.websocket,
+    });
+    servers.push(consoleServer);
+    lifecycle.attachServer(consoleServer);
+    serverLog(`Web console on http://${opts.httpHost}:${opts.webConsolePort}`);
   }
 
   if (servers.length === 0) {
@@ -71,25 +181,55 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   lifecycle.installSignalHandlers();
 
   if (opts.bootstrap) {
-    const svc = registry.create(opts.bootstrap);
-    process.stderr.write(`[server] Bootstrapped CP "${opts.bootstrap.cpId}"\n`);
+    // The same cpId can already exist when --state-db restored it above.
+    // Reuse the restored instance in that case — re-creating would throw
+    // and we'd lose all of its persisted state.
+    const existing = registry.get(opts.bootstrap.cpId);
+    const svc = existing ?? registry.create(opts.bootstrap);
+    if (existing) {
+      serverLog(
+        `Bootstrap matches restored CP "${opts.bootstrap.cpId}"; reusing`,
+      );
+    } else {
+      serverLog(`Bootstrapped CP "${opts.bootstrap.cpId}"`);
+    }
     if (opts.autoConnect) {
-      process.stderr.write(`[server] Connecting to CSMS...\n`);
+      serverLog("Connecting to CSMS...");
       try {
         await svc.connect();
-        process.stderr.write(`[server] Connected.\n`);
+        serverLog("Connected.");
       } catch (err) {
-        process.stderr.write(
-          `[server] Connection failed: ${
-            err instanceof Error ? err.message : err
-          }\n`,
+        serverLog(
+          `Connection failed: ${err instanceof Error ? err.message : err}`,
         );
       }
     }
     if (opts.startupScenario) {
-      runStartupScenario(svc, opts.startupScenario);
+      runStartupScenario(svc, opts.startupScenario, opts.bootstrap.connectors);
     }
   }
+}
+
+/**
+ * Resolve a `--scenario-connector` value ("all" | "1" | "1,2,3") to an
+ * explicit list of connector ids in [1..connectorCount]. Silently skips
+ * out-of-range values and de-duplicates.
+ */
+function resolveConnectorIds(raw: string, connectorCount: number): number[] {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed || trimmed === "all") {
+    const ids: number[] = [];
+    for (let i = 1; i <= connectorCount; i++) ids.push(i);
+    return ids;
+  }
+  const seen = new Set<number>();
+  for (const part of trimmed.split(",")) {
+    const n = parseInt(part, 10);
+    if (Number.isInteger(n) && n >= 1 && n <= connectorCount) {
+      seen.add(n);
+    }
+  }
+  return [...seen];
 }
 
 function removeStaleSocket(socketPath: string): void {
@@ -103,46 +243,130 @@ function removeStaleSocket(socketPath: string): void {
 function runStartupScenario(
   svc: CLIChargePointService,
   opt: NonNullable<ServerOptions["startupScenario"]>,
+  connectorCount: number,
 ): void {
-  const connectorId = opt.scenarioConnector;
+  const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
+  if (connectors.length === 0) {
+    process.stderr.write(
+      `[server] No matching connectors for --scenario-connector "${opt.scenarioConnector}"\n`,
+    );
+    return;
+  }
 
+  // 1) Built-in template by id — instantiate per connector.
   if (opt.scenarioTemplate) {
-    try {
-      const scenarioId = svc.loadScenarioTemplate(
-        opt.scenarioTemplate,
-        connectorId,
-      );
-      svc.runScenario(connectorId, scenarioId);
-      process.stderr.write(
-        `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
-      );
-    } catch (err) {
-      process.stderr.write(
-        `[server] Failed to start scenario template: ${
-          err instanceof Error ? err.message : err
-        }\n`,
-      );
+    for (const connectorId of connectors) {
+      try {
+        const scenarioId = svc.loadScenarioTemplate(
+          opt.scenarioTemplate,
+          connectorId,
+        );
+        svc.runScenario(connectorId, scenarioId);
+        process.stderr.write(
+          `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to start scenario template on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
     }
     return;
   }
 
-  if (opt.scenario) {
+  // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
+  if (opt.scenarioTemplateFile) {
+    let template: ScenarioDefinition;
     try {
-      const content = fs.readFileSync(opt.scenario, "utf-8");
-      const definition = JSON.parse(content) as ScenarioDefinition;
-      const scenarioId = svc.loadScenario(connectorId, definition);
-      svc.runScenario(connectorId, scenarioId);
-      process.stderr.write(
-        `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
-      );
+      template = JSON.parse(
+        fs.readFileSync(opt.scenarioTemplateFile, "utf-8"),
+      ) as ScenarioDefinition;
     } catch (err) {
       process.stderr.write(
-        `[server] Failed to start scenario file: ${
+        `[server] Failed to read scenario template file: ${
           err instanceof Error ? err.message : err
         }\n`,
       );
+      return;
+    }
+    for (const connectorId of connectors) {
+      try {
+        const instance = instantiateTemplate(template, connectorId);
+        const scenarioId = svc.loadScenario(connectorId, instance);
+        svc.runScenario(connectorId, scenarioId);
+        process.stderr.write(
+          `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to apply template file on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+    }
+    return;
+  }
+
+  // 3) Single scenario file — for fan-out, treat it like a template (rewrite
+  // ids per connector); for single-connector, behave as before.
+  if (opt.scenario) {
+    let definition: ScenarioDefinition;
+    try {
+      definition = JSON.parse(
+        fs.readFileSync(opt.scenario, "utf-8"),
+      ) as ScenarioDefinition;
+    } catch (err) {
+      process.stderr.write(
+        `[server] Failed to read scenario file: ${
+          err instanceof Error ? err.message : err
+        }\n`,
+      );
+      return;
+    }
+    for (const connectorId of connectors) {
+      try {
+        const instance =
+          connectors.length === 1 && connectorId === definition.targetId
+            ? definition
+            : instantiateTemplate(definition, connectorId);
+        const scenarioId = svc.loadScenario(connectorId, instance);
+        svc.runScenario(connectorId, scenarioId);
+        process.stderr.write(
+          `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to start scenario file on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
     }
   }
+}
+
+/**
+ * Produce a connector-specific copy of a scenario definition by rewriting
+ * targetType / targetId / id / name. Nodes and edges are deep-cloned so
+ * multiple connectors can run independent state machines from one file.
+ */
+function instantiateTemplate(
+  template: ScenarioDefinition,
+  connectorId: number,
+): ScenarioDefinition {
+  const cloned = JSON.parse(JSON.stringify(template)) as ScenarioDefinition;
+  return {
+    ...cloned,
+    id: `${cloned.id}-c${connectorId}-${Date.now()}`,
+    name: cloned.name
+      ? `${cloned.name} (Connector ${connectorId})`
+      : `Connector ${connectorId}`,
+    targetType: "connector",
+    targetId: connectorId,
+  };
 }
 
 export const DEFAULT_UNIX_SOCKET = "/tmp/ocpp-server.sock";

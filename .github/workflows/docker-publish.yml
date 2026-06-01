@@ -1,0 +1,72 @@
+name: Build & publish Docker image
+
+# Multi-arch (amd64 + arm64) build of the bundled daemon + web console
+# image, published to GitHub Container Registry under
+# ghcr.io/<owner>/<repo>. Triggers:
+#   - push to `main`                       → `main` + `sha-<short>` + `latest`
+#   - push to `feat/browser-remote-mode`   → branch-slug + `sha-<short>` (no `latest`)
+#   - manual via workflow_dispatch         → same as the triggering branch
+#
+# We deliberately do NOT build on every PR or every feature branch:
+# Docker layers take time + cache space, and the active branch already
+# rebuilds on every push. Tag-based releases can be re-added if/when
+# we cut versioned images.
+
+on:
+  push:
+    branches:
+      # Default branch — every merge produces a `latest` image.
+      - main
+      # Active feature branch — pushes here get an image tagged with the
+      # branch slug + commit sha so we can test changes without merging.
+      - feat/browser-remote-mode
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            # main      → `main` + `sha-<short>` + `latest`
+            # feat/...  → branch-slug + `sha-<short>` (no `latest`)
+            type=ref,event=branch
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Speed up rebuilds by sharing layers across runs. GitHub Actions
+          # cache is local to the repo so it's safe to write back.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

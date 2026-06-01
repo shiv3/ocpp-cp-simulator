@@ -1,5 +1,6 @@
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
+import type { Database } from "../cp/domain/persistence/Database";
 import type { BootNotification } from "../cp/domain/types/OcppTypes";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import type {
@@ -13,7 +14,15 @@ import { createScenarioExecutorCallbacks } from "../cp/application/scenario/Scen
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
+  ScenarioMode,
 } from "../cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";
+import type {
+  StateHistoryEntry,
+  HistoryOptions,
+} from "../cp/application/services/types/StateSnapshot";
 import { scenarioTemplates, getTemplateById } from "../utils/scenarioTemplates";
 
 export type CLIEvent =
@@ -94,6 +103,74 @@ export type CLIEvent =
         readonly scenarioId: string;
         readonly nodeId: string;
       };
+    }
+  | {
+      readonly event: "connector_availability";
+      readonly data: {
+        readonly connectorId: number;
+        readonly availability: string;
+      };
+    }
+  | {
+      readonly event: "connector_soc";
+      readonly data: {
+        readonly connectorId: number;
+        readonly soc: number | null;
+      };
+    }
+  | {
+      readonly event: "connector_mode";
+      readonly data: { readonly connectorId: number; readonly mode: string };
+    }
+  | {
+      readonly event: "connector_auto_reset";
+      readonly data: {
+        readonly connectorId: number;
+        readonly enabled: boolean;
+      };
+    }
+  | {
+      readonly event: "connector_auto_meter";
+      readonly data: {
+        readonly connectorId: number;
+        readonly config: AutoMeterValueConfig;
+      };
+    }
+  | {
+      readonly event: "connector_ev_settings";
+      readonly data: {
+        readonly connectorId: number;
+        readonly settings: EVSettings;
+      };
+    }
+  | {
+      readonly event: "connector_charging_profile";
+      readonly data: {
+        readonly connectorId: number;
+        readonly profile: ActiveChargingProfile | null;
+      };
+    }
+  | {
+      readonly event: "connector_charging_profiles";
+      readonly data: {
+        readonly connectorId: number;
+        readonly profiles: ReadonlyArray<ActiveChargingProfile>;
+      };
+    }
+  | {
+      readonly event: "state_history_entry";
+      readonly data: { readonly entry: StateHistoryEntry };
+    }
+  | {
+      readonly event: "connector_removed";
+      readonly data: { readonly connectorId: number };
+    }
+  | {
+      readonly event: "heartbeat";
+      readonly data: {
+        readonly intervalSeconds: number;
+        readonly lastSentAt: string | null;
+      };
     };
 
 type EventHandler = (evt: CLIEvent) => void;
@@ -102,23 +179,29 @@ export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _handlers: Set<EventHandler> = new Set();
   private _unsubscribes: Array<() => void> = [];
+  private _connectorUnsubscribes: Array<() => void> = [];
   private readonly _scenarios: Map<
     string,
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
 
-  constructor(init: ChargePointInitOptions) {
+  constructor(
+    init: ChargePointInitOptions,
+    /** Shared daemon DB. `null` means run in-memory (no `--state-db`). */
+    private readonly database: Database | null = null,
+  ) {
+    const overrides = init.bootNotification ?? {};
     const bootNotification: BootNotification = {
       chargePointVendor: init.vendor,
       chargePointModel: init.model,
-      chargePointSerialNumber: "CLI-001",
-      chargeBoxSerialNumber: "CLI-001",
-      firmwareVersion: "1.0.0",
-      iccid: "",
-      imsi: "",
-      meterSerialNumber: "CLI-M001",
-      meterType: "",
+      chargePointSerialNumber: overrides.chargePointSerialNumber ?? "CLI-001",
+      chargeBoxSerialNumber: overrides.chargeBoxSerialNumber ?? "CLI-001",
+      firmwareVersion: overrides.firmwareVersion ?? "1.0.0",
+      iccid: overrides.iccid ?? "",
+      imsi: overrides.imsi ?? "",
+      meterSerialNumber: overrides.meterSerialNumber ?? "CLI-M001",
+      meterType: overrides.meterType ?? "",
     };
 
     const autoMeterValue: AutoMeterValueSetting | null = null;
@@ -133,24 +216,31 @@ export class CLIChargePointService {
       baseUrl,
       init.basicAuth,
       autoMeterValue,
+      this.database,
     );
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
   }
 
-  static fromOptions(options: CLIOptions): CLIChargePointService {
+  static fromOptions(
+    options: CLIOptions,
+    database: Database | null = null,
+  ): CLIChargePointService {
     if (!options.cpId) {
       throw new Error("cpId is required");
     }
-    return new CLIChargePointService({
-      cpId: options.cpId,
-      wsUrl: options.wsUrl,
-      connectors: options.connectors,
-      vendor: options.vendor,
-      model: options.model,
-      basicAuth: options.basicAuth,
-    });
+    return new CLIChargePointService(
+      {
+        cpId: options.cpId,
+        wsUrl: options.wsUrl,
+        connectors: options.connectors,
+        vendor: options.vendor,
+        model: options.model,
+        basicAuth: options.basicAuth,
+      },
+      database,
+    );
   }
 
   onEvent(handler: EventHandler): () => void {
@@ -194,12 +284,29 @@ export class CLIChargePointService {
   getStatus(): ChargePointStatus {
     const connectors: ConnectorStatus[] = [];
     this._chargePoint.connectors.forEach((connector) => {
+      const tx = connector.transaction;
       connectors.push({
         id: connector.id,
         status: connector.status,
         availability: connector.availability,
         meterValue: connector.meterValue,
-        transactionId: connector.transaction?.id ?? null,
+        transactionId: tx?.id ?? null,
+        soc: connector.soc,
+        mode: connector.mode,
+        autoResetToAvailable: connector.autoResetToAvailable,
+        autoMeterValueConfig:
+          connector.autoMeterValueConfig as unknown as Record<string, unknown>,
+        evSettings: connector.evSettings as unknown as Record<string, unknown>,
+        chargingProfile:
+          (connector.chargingProfile as unknown as Record<string, unknown>) ??
+          null,
+        chargingProfiles:
+          connector.chargingProfiles as unknown as ReadonlyArray<
+            Record<string, unknown>
+          >,
+        transactionStartTime: tx?.startTime ? tx.startTime.toISOString() : null,
+        transactionTagId: tx?.tagId ?? null,
+        transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
       });
     });
 
@@ -208,6 +315,12 @@ export class CLIChargePointService {
       status: this._chargePoint.status,
       error: this._chargePoint.error,
       connectors,
+      heartbeat: {
+        intervalSeconds: this._chargePoint.heartbeat.intervalSeconds,
+        lastSentAt: this._chargePoint.heartbeat.lastSentAt
+          ? this._chargePoint.heartbeat.lastSentAt.toISOString()
+          : null,
+      },
     };
   }
 
@@ -245,6 +358,69 @@ export class CLIChargePointService {
 
   updateConnectorStatus(connectorId: number, status: OCPPStatus): void {
     this._chargePoint.updateConnectorStatus(connectorId, status);
+  }
+
+  setEVSettings(connectorId: number, settings: EVSettings): void {
+    const connector = this.requireConnector(connectorId);
+    connector.evSettings = settings;
+  }
+
+  getEVSettings(connectorId: number): EVSettings {
+    return this.requireConnector(connectorId).evSettings;
+  }
+
+  setAutoMeterValueConfig(
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): void {
+    const connector = this.requireConnector(connectorId);
+    connector.autoMeterValueConfig = config;
+  }
+
+  getAutoMeterValueConfig(connectorId: number): AutoMeterValueConfig {
+    return this.requireConnector(connectorId).autoMeterValueConfig;
+  }
+
+  setAutoResetToAvailable(connectorId: number, enabled: boolean): void {
+    const connector = this.requireConnector(connectorId);
+    connector.autoResetToAvailable = enabled;
+  }
+
+  setConnectorMode(connectorId: number, mode: ScenarioMode): void {
+    const connector = this.requireConnector(connectorId);
+    connector.mode = mode;
+  }
+
+  setConnectorSoc(connectorId: number, soc: number | null): void {
+    const connector = this.requireConnector(connectorId);
+    if (soc !== null) {
+      if (!Number.isFinite(soc) || soc < 0 || soc > 100) {
+        throw new Error(`SoC must be between 0 and 100 (got ${soc})`);
+      }
+    }
+    connector.soc = soc;
+  }
+
+  getChargingProfiles(
+    connectorId: number,
+  ): ReadonlyArray<ActiveChargingProfile> {
+    return this.requireConnector(connectorId).chargingProfiles;
+  }
+
+  removeConnector(connectorId: number): boolean {
+    return this._chargePoint.removeConnector(connectorId);
+  }
+
+  getStateHistory(options?: HistoryOptions): ReadonlyArray<StateHistoryEntry> {
+    return this._chargePoint.stateManager.history.getHistory(options);
+  }
+
+  private requireConnector(connectorId: number) {
+    const connector = this._chargePoint.connectors.get(connectorId);
+    if (!connector) {
+      throw new Error(`Connector ${connectorId} not found`);
+    }
+    return connector;
   }
 
   getScenarioTemplates(): ReadonlyArray<{
@@ -353,9 +529,40 @@ export class CLIChargePointService {
 
     this.emit({ event: "scenario_started", data: { connectorId, scenarioId } });
 
-    executor.start("oneshot").finally(() => {
+    executor.start().finally(() => {
       this._executors.delete(scenarioId);
     });
+  }
+
+  stepScenario(connectorId: number, scenarioId: string, force = false): void {
+    const entry = this._scenarios.get(scenarioId);
+    if (!entry) throw new Error(`Scenario ${scenarioId} not found`);
+    if (entry.connectorId !== connectorId) {
+      throw new Error(
+        `Scenario ${scenarioId} is not loaded for connector ${connectorId}`,
+      );
+    }
+    const executor = this._executors.get(scenarioId);
+    if (!executor) {
+      throw new Error(`Scenario ${scenarioId} is not running`);
+    }
+    if (force) executor.forceStep();
+    else executor.step();
+  }
+
+  /**
+   * Returns the loaded scenario definition for a given connector + id, or
+   * null if the scenario is not loaded on this CP. Used by remote browser
+   * clients to see what the daemon has loaded (e.g. via
+   * --scenario-template-file).
+   */
+  getScenario(
+    connectorId: number,
+    scenarioId: string,
+  ): ScenarioDefinition | null {
+    const entry = this._scenarios.get(scenarioId);
+    if (!entry || entry.connectorId !== connectorId) return null;
+    return entry.definition;
   }
 
   getScenarioStatus(
@@ -369,13 +576,21 @@ export class CLIChargePointService {
     return executor.getContext();
   }
 
-  stopScenario(_connectorId: number, scenarioId: string): void {
+  stopScenario(connectorId: number, scenarioId: string): void {
     const executor = this._executors.get(scenarioId);
     if (!executor) {
       throw new Error(`Scenario ${scenarioId} is not running`);
     }
     executor.stop();
     this._executors.delete(scenarioId);
+    // Surface the stop to remote subscribers — executor.stop() bypasses
+    // the onStateChange("completed") path used by runScenario(), so the
+    // browser's active-scenario tracker would otherwise still believe
+    // this scenario is running.
+    this.emit({
+      event: "scenario_completed",
+      data: { connectorId, scenarioId },
+    });
   }
 
   stopAllScenarios(connectorId: number): void {
@@ -385,9 +600,27 @@ export class CLIChargePointService {
         if (executor) {
           executor.stop();
           this._executors.delete(scenarioId);
+          this.emit({
+            event: "scenario_completed",
+            data: { connectorId, scenarioId },
+          });
         }
       }
     }
+  }
+
+  /** Drain any buffered log lines to the DB — called from the HTTP
+   *  GET /v1/cp/:cpId/logs handler so the download includes the last
+   *  seconds of activity that the LogRepository hasn't flushed yet. */
+  flushLogs(): void {
+    this._chargePoint.flushLogs();
+  }
+
+  /** In-memory log entries for this CP (Logger's session buffer).
+   *  Used by the GET /v1/cp/:cpId/logs endpoint when --state-db is off
+   *  so the daemon can still serve a useful download. */
+  getInMemoryLogs() {
+    return this._chargePoint.getInMemoryLogs();
   }
 
   cleanup(): void {
@@ -397,6 +630,7 @@ export class CLIChargePointService {
     this._executors.clear();
     this._scenarios.clear();
     this._chargePoint.disconnect();
+    this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {
       unsub();
     }
@@ -437,6 +671,21 @@ export class CLIChargePointService {
       this._chargePoint.events.on("disconnected", ({ code, reason }) => {
         this.emit({ event: "disconnected", data: { code, reason } });
       }),
+    );
+
+    this._unsubscribes.push(
+      this._chargePoint.heartbeat.events.on(
+        "stateChange",
+        ({ intervalSeconds, lastSentAt }) => {
+          this.emit({
+            event: "heartbeat",
+            data: {
+              intervalSeconds,
+              lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
+            },
+          });
+        },
+      ),
     );
 
     this._unsubscribes.push(
@@ -495,6 +744,154 @@ export class CLIChargePointService {
         });
       }),
     );
+
+    this.attachConnectorEventForwarders();
+    this.attachStateHistoryForwarder();
+
+    // ChargePoint.disconnect() calls connector.cleanup(), which clears
+    // every Connector-level listener AND the onMeterSend callback used by
+    // the auto-meter scheduler. Re-attach forwarders and re-register the
+    // meter-send callback whenever the CP reconnects so remote
+    // subscribers keep getting events, and auto-meter values keep
+    // reaching the CSMS, across reconnects.
+    this._unsubscribes.push(
+      this._chargePoint.events.on("connected", () => {
+        this.detachConnectorEventForwarders();
+        this.attachConnectorEventForwarders();
+        this.setupMeterValueCallbacks();
+      }),
+    );
+
+    this._unsubscribes.push(
+      this._chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
+        this.emit({ event: "connector_removed", data: { connectorId } });
+      }),
+    );
+  }
+
+  private attachConnectorEventForwarders(): void {
+    this._chargePoint.connectors.forEach((connector, connectorId) => {
+      this._connectorUnsubscribes.push(
+        connector.events.on("availabilityChange", ({ availability }) => {
+          this.emit({
+            event: "connector_availability",
+            data: { connectorId, availability },
+          });
+        }),
+      );
+      // Manual meter changes and the auto-meter scheduler emit on the
+      // connector's event bus rather than the charge-point's. Forward
+      // those so remote subscribers see meter updates in real time.
+      this._connectorUnsubscribes.push(
+        connector.events.on("meterValueChange", ({ meterValue }) => {
+          this.emit({
+            event: "meter_value",
+            data: { connectorId, meterValue },
+          });
+        }),
+      );
+      // When the CSMS confirms a StartTransaction, the connector's
+      // transactionId switches from the initial placeholder (0) to the real
+      // id. Re-emit transaction_started so remote subscribers see the
+      // accepted id. Also emit transaction_stopped when it clears (e.g.
+      // CSMS-driven stop), so remote clients see the change.
+      this._connectorUnsubscribes.push(
+        connector.events.on("transactionIdChange", ({ transactionId }) => {
+          if (transactionId == null) {
+            this.emit({
+              event: "transaction_stopped",
+              data: { connectorId, transactionId: 0 },
+            });
+            return;
+          }
+          if (transactionId === 0) return; // placeholder, already emitted on start
+          const tagId = connector.transaction?.tagId ?? "";
+          this.emit({
+            event: "transaction_started",
+            data: { connectorId, transactionId, tagId },
+          });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("socChange", ({ soc }) => {
+          this.emit({ event: "connector_soc", data: { connectorId, soc } });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("modeChange", ({ mode }) => {
+          this.emit({ event: "connector_mode", data: { connectorId, mode } });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("autoResetToAvailableChange", ({ enabled }) => {
+          this.emit({
+            event: "connector_auto_reset",
+            data: { connectorId, enabled },
+          });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("autoMeterValueChange", ({ config }) => {
+          this.emit({
+            event: "connector_auto_meter",
+            data: { connectorId, config },
+          });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("evSettingsChange", ({ settings }) => {
+          this.emit({
+            event: "connector_ev_settings",
+            data: { connectorId, settings },
+          });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("chargingProfileChange", ({ profile }) => {
+          this.emit({
+            event: "connector_charging_profile",
+            data: { connectorId, profile },
+          });
+        }),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("chargingProfilesChange", ({ profiles }) => {
+          this.emit({
+            event: "connector_charging_profiles",
+            data: { connectorId, profiles },
+          });
+        }),
+      );
+    });
+  }
+
+  private detachConnectorEventForwarders(): void {
+    for (const unsub of this._connectorUnsubscribes) {
+      try {
+        unsub();
+      } catch {
+        // ignore
+      }
+    }
+    this._connectorUnsubscribes = [];
+  }
+
+  private attachStateHistoryForwarder(): void {
+    const history = this._chargePoint.stateManager.history;
+    // StateHistory emits an "entry" event whenever a transition is recorded.
+    // Fall back to no-op if the underlying impl doesn't expose subscribe.
+    const subscribe = (
+      history as unknown as {
+        subscribe?: (cb: (entry: StateHistoryEntry) => void) => () => void;
+      }
+    ).subscribe;
+    if (typeof subscribe === "function") {
+      this._unsubscribes.push(
+        subscribe.call(history, (entry: StateHistoryEntry) => {
+          this.emit({ event: "state_history_entry", data: { entry } });
+        }),
+      );
+    }
   }
 
   private setupMeterValueCallbacks(): void {

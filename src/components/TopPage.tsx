@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState, useMemo } from "react";
 import ChargePoint from "./ChargePoint.tsx";
-import { ChargePoint as OCPPChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import ChargePointConfigModal, {
   ChargePointConfig,
   defaultChargePointConfig,
@@ -10,19 +9,51 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useConfig } from "../data/hooks/useConfig";
 import { useChargePoints } from "../data/hooks/useChargePoints";
+import { useDataContext } from "../data/providers/DataProvider";
+import type { ChargePointSnapshot } from "../data/interfaces/ChargePointService";
+import type { Config } from "../store/store";
+
+const REMOTE_TAG_IDS_KEY = "ocpp-cp.remote.tagIds";
+const DEFAULT_TAG_ID = "TAG001";
+
+function readRemoteTagIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(REMOTE_TAG_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((v) => typeof v === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRemoteTagIds(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(REMOTE_TAG_IDS_KEY, JSON.stringify(ids));
+  } catch {
+    // best effort
+  }
+}
 
 const TopPage: React.FC = () => {
+  const { mode, chargePointService } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
-  const [tagIDs, setTagIDs] = useState<string[]>([]);
+  const [tagIDs, setTagIDs] = useState<string[]>(() =>
+    typeof window === "undefined" ? [] : readRemoteTagIds(),
+  );
   const [chargePointConfigs, setChargePointConfigs] = useState<
     ChargePointConfig[]
   >([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const chargePoints = useChargePoints(config, { isLoading });
+  const { chargePoints, refresh } = useChargePoints(config, { isLoading });
 
   const updateConfig = useCallback(
-    (next: Parameters<typeof persistConfig>[0]) => {
+    (next: Config | null) => {
       void persistConfig(next);
     },
     [persistConfig],
@@ -35,16 +66,19 @@ const TopPage: React.FC = () => {
   );
 
   useEffect(() => {
+    // The local config drives the local tag list; in remote mode we keep
+    // whatever the user persisted via the Add CP modal so Authorize / Start
+    // Transaction still have a non-empty tag id after reload.
     if (isLoading || !config || !config.Experimental) {
-      // No config yet, just show empty state
-      setTagIDs([]);
+      if (mode === "local") setTagIDs([]);
       setChargePointConfigs([]);
       return;
     }
 
-    setTagIDs(config.Experimental.TagIDs ?? []);
+    if (mode === "local") {
+      setTagIDs(config.Experimental.TagIDs ?? []);
+    }
 
-    // Extract configs for modal editing
     const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map(
       (cp) => ({
         cpId: cp.ChargePointID,
@@ -74,7 +108,7 @@ const TopPage: React.FC = () => {
     );
     setChargePointConfigs(configs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configKey, isLoading]);
+  }, [configKey, isLoading, mode]);
 
   const handleAddChargePoint = () => {
     setEditingIndex(null);
@@ -86,24 +120,103 @@ const TopPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSaveChargePoint = (cpConfig: ChargePointConfig) => {
-    const updatedConfigs = [...chargePointConfigs];
-
-    if (editingIndex !== null) {
-      // Edit existing
-      updatedConfigs[editingIndex] = cpConfig;
-    } else {
-      // Add new
-      updatedConfigs.push(cpConfig);
+  const handleSaveChargePoint = async (cpConfig: ChargePointConfig) => {
+    if (mode === "remote") {
+      // Remote mode: persist tag IDs locally so future sessions / Authorize
+      // / Start Transaction have a default to send.
+      if (cpConfig.tagIds.length > 0) {
+        setTagIDs(cpConfig.tagIds);
+        writeRemoteTagIds(cpConfig.tagIds);
+      }
+      try {
+        await chargePointService.createChargePoint?.({
+          cpId: cpConfig.cpId,
+          wsUrl: cpConfig.wsURL,
+          connectors: cpConfig.connectorNumber,
+          vendor: cpConfig.chargePointVendor,
+          model: cpConfig.chargePointModel,
+          basicAuth: cpConfig.basicAuthEnabled
+            ? {
+                username: cpConfig.basicAuthUsername,
+                password: cpConfig.basicAuthPassword,
+              }
+            : null,
+          bootNotification: {
+            firmwareVersion: cpConfig.firmwareVersion,
+            chargeBoxSerialNumber: cpConfig.chargeBoxSerialNumber,
+            chargePointSerialNumber: cpConfig.chargePointSerialNumber,
+            meterSerialNumber: cpConfig.meterSerialNumber,
+            meterType: cpConfig.meterType,
+            iccid: cpConfig.iccid,
+            imsi: cpConfig.imsi,
+          },
+          autoConnect: true,
+        });
+        // The Add CP form exposes auto-meter settings, but the server's
+        // POST /v1/cp body has no field for them. Apply them per-connector
+        // after the CP exists so Remote-mode users get the same behaviour
+        // they saw in the form.
+        if (cpConfig.autoMeterValueEnabled) {
+          const presets = await chargePointService
+            .getChargePoint(cpConfig.cpId)
+            .catch(() => null);
+          const connectors = presets?.connectors ?? [];
+          await Promise.all(
+            connectors.map(async (c) => {
+              const base = c.autoMeterValueConfig;
+              if (!base) return;
+              try {
+                await chargePointService.setAutoMeterValueConfig(
+                  cpConfig.cpId,
+                  c.id,
+                  {
+                    ...base,
+                    enabled: true,
+                    intervalSeconds: cpConfig.autoMeterValueInterval,
+                    // The form's `autoMeterValue` is a single value; map it
+                    // to the existing curve's last point so we don't have to
+                    // restructure the schedule.
+                    curvePoints: base.curvePoints?.length
+                      ? base.curvePoints.map((p, i, arr) =>
+                          i === arr.length - 1
+                            ? { ...p, value: cpConfig.autoMeterValue }
+                            : p,
+                        )
+                      : [
+                          { time: 0, value: 0 },
+                          { time: 30, value: cpConfig.autoMeterValue },
+                        ],
+                  },
+                );
+              } catch (err) {
+                console.warn(
+                  `Failed to apply auto-meter config to ${cpConfig.cpId}/${c.id}`,
+                  err,
+                );
+              }
+            }),
+          );
+        }
+        await refresh();
+      } catch (err) {
+        console.error("Failed to create remote CP", err);
+        alert(
+          `Failed to create CP: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
     }
 
+    const updatedConfigs = [...chargePointConfigs];
+    if (editingIndex !== null) {
+      updatedConfigs[editingIndex] = cpConfig;
+    } else {
+      updatedConfigs.push(cpConfig);
+    }
     setChargePointConfigs(updatedConfigs);
-
-    // Update tagIDs state from config
     setTagIDs(cpConfig.tagIds);
 
-    // Update or create global config
-    const newConfig = {
+    const newConfig: Config = {
       ...(config || {}),
       wsURL: cpConfig.wsURL,
       connectorNumber: cpConfig.connectorNumber,
@@ -142,19 +255,30 @@ const TopPage: React.FC = () => {
     updateConfig(newConfig);
   };
 
-  const handleDeleteChargePoint = (index: number) => {
+  const handleDeleteChargePoint = async (cpId: string, index: number) => {
+    if (mode === "remote") {
+      try {
+        await chargePointService.removeChargePoint?.(cpId);
+        await refresh();
+      } catch (err) {
+        console.error("Failed to remove remote CP", err);
+        alert(
+          `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
+    }
+
     const updatedConfigs = [...chargePointConfigs];
     updatedConfigs.splice(index, 1);
     setChargePointConfigs(updatedConfigs);
 
     if (updatedConfigs.length === 0) {
-      // If no charge points left, clear config
       updateConfig(null);
       return;
     }
 
-    // Update global config
-    const newConfig = {
+    const newConfig: Config = {
       ...(config || {}),
       Experimental: {
         ChargePointIDs: updatedConfigs.map((cfg) => ({
@@ -167,11 +291,14 @@ const TopPage: React.FC = () => {
     updateConfig(newConfig);
   };
 
+  const effectiveTagIDs = tagIDs.length > 0 ? tagIDs : [DEFAULT_TAG_ID];
+
   return (
     <div className="px-8 pt-6 pb-8 mb-4">
       <ExperimentalView
+        mode={mode}
         cps={chargePoints}
-        tagIDs={tagIDs}
+        tagIDs={effectiveTagIDs}
         onAddChargePoint={handleAddChargePoint}
         onEditChargePoint={handleEditChargePoint}
         onDeleteChargePoint={handleDeleteChargePoint}
@@ -181,6 +308,7 @@ const TopPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveChargePoint}
+        mode={mode}
         initialConfig={
           editingIndex !== null
             ? chargePointConfigs[editingIndex]
@@ -193,30 +321,25 @@ const TopPage: React.FC = () => {
 };
 
 interface ExperimentalProps {
-  cps: OCPPChargePoint[];
+  mode: "local" | "remote";
+  cps: ChargePointSnapshot[];
   tagIDs: string[];
   onAddChargePoint: () => void;
   onEditChargePoint: (index: number) => void;
-  onDeleteChargePoint: (index: number) => void;
-}
-
-interface transactionInfo {
-  tagID: string;
-  transactionID: number;
-  cpID: string;
-  connectorID: number;
+  onDeleteChargePoint: (cpId: string, index: number) => void;
 }
 
 const ExperimentalView: React.FC<ExperimentalProps> = ({
+  mode,
   cps,
   tagIDs,
   onAddChargePoint,
   onEditChargePoint,
   onDeleteChargePoint,
 }) => {
+  const { chargePointService } = useDataContext();
   const [selectedTab, setSelectedTab] = useState<string>("");
 
-  // Auto-select first ChargePoint when cps change
   useEffect(() => {
     if (
       cps.length > 0 &&
@@ -227,71 +350,58 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
   }, [cps, selectedTab]);
 
   const handleAllConnect = () => {
-    console.log("Connecting all charge points");
-    const chunk = 100;
-    cps
-      .flatMap((_, i, a) => (i % chunk ? [] : [a.slice(i, i + chunk)]))
-      .forEach((cps) => {
-        Promise.all(cps.map((cp) => cp.connect()));
+    cps.forEach((cp) => {
+      void chargePointService.connect(cp.id).catch((err) => {
+        console.error(`connect failed for ${cp.id}`, err);
       });
+    });
   };
 
   const handleAllDisconnect = () => {
-    console.log("Disconnecting all charge points");
     cps.forEach((cp) => {
-      cp.disconnect();
+      void chargePointService.disconnect(cp.id).catch((err) => {
+        console.error(`disconnect failed for ${cp.id}`, err);
+      });
     });
   };
 
   const handleAllHeartbeat = () => {
-    console.log("Sending heartbeat to all charge points");
     cps.forEach((cp) => {
-      cp.sendHeartbeat();
+      void chargePointService.sendHeartbeat(cp.id).catch((err) => {
+        console.error(`heartbeat failed for ${cp.id}`, err);
+      });
     });
   };
 
-  const [isAllHeartbeatEnabled, setIsAllHeartbeatEnabled] =
-    useState<boolean>(false);
-
-  const handleAllHeartbeatInterval = (isEnalbe: boolean) => {
-    setIsAllHeartbeatEnabled(isEnalbe);
-    if (isEnalbe) {
-      cps.forEach((cp) => {
-        cp.startHeartbeat(10);
-      });
-    } else {
-      cps.forEach((cp) => {
-        cp.stopHeartbeat();
-      });
-    }
-  };
-
-  const transactions = [] as transactionInfo[];
   const handleAllStartTransaction = () => {
     for (let i = 0; i < Math.min(tagIDs.length, cps.length); i++) {
-      cps[i].setConnectorTransactionIDChangeCallback(1, (transactionId) => {
-        transactionId &&
-          transactions.push({
-            tagID: tagIDs[i],
-            transactionID: transactionId,
-            cpID: cps[i].id,
-            connectorID: 1,
-          } as transactionInfo);
+      const cp = cps[i];
+      const tagId = tagIDs[i];
+      void chargePointService.startTransaction(cp.id, 1, tagId).catch((err) => {
+        console.error(`startTransaction failed for ${cp.id}`, err);
       });
-      cps[i].startTransaction(tagIDs[i], 1);
     }
   };
 
   const handleAllStopTransaction = () => {
-    transactions.forEach((t) => {
-      cps.find((cp) => cp.id === t.cpID)?.stopTransaction(t.connectorID);
-      // transactions.splice(transactions.indexOf(t), 1);
+    // We can't rely on cp.connectors[*].transactionId here — it's a
+    // snapshot from useChargePoints and lags behind in-flight transactions
+    // started via the adjacent "Start Transaction All" button. Fire stop
+    // unconditionally for every known connector; the service no-ops cleanly
+    // when nothing is active.
+    cps.forEach((cp) => {
+      cp.connectors.forEach((connector) => {
+        void chargePointService
+          .stopTransaction(cp.id, connector.id)
+          .catch((err) => {
+            console.error(`stopTransaction failed for ${cp.id}`, err);
+          });
+      });
     });
   };
 
   return (
     <>
-      {/* rendering-conditional-render: use ternary to avoid potential issues with falsy values */}
       {cps.length >= 2 ? (
         <>
           <div className="flex flex-wrap gap-2 mb-3">
@@ -300,13 +410,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
               Disconnect All
             </Button>
             <Button onClick={handleAllHeartbeat} variant="info">
-              Heartbeat All
-            </Button>
-            <Button
-              variant={isAllHeartbeatEnabled ? "destructive" : "success"}
-              onClick={() => handleAllHeartbeatInterval(!isAllHeartbeatEnabled)}
-            >
-              {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
+              Send Heartbeat All
             </Button>
           </div>
 
@@ -339,35 +443,37 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
         <TabsList className="w-full justify-start flex-wrap h-auto">
           {cps.map((cp, key) => (
             <TabsTrigger
-              key={key}
+              key={cp.id}
               value={cp.id}
               className="flex items-center gap-2"
             >
               <span>{cp.id}</span>
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label="Edit Charge Point"
-                className={buttonVariants({
-                  variant: "ghost",
-                  size: "icon",
-                  className: "h-6 w-6",
-                })}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEditChargePoint(key);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
+              {mode === "local" && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Edit Charge Point"
+                  className={buttonVariants({
+                    variant: "ghost",
+                    size: "icon",
+                    className: "h-6 w-6",
+                  })}
+                  onClick={(e) => {
                     e.stopPropagation();
                     onEditChargePoint(key);
-                  }
-                }}
-                title="Edit Charge Point"
-              >
-                <Settings className="h-3 w-3" />
-              </span>
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onEditChargePoint(key);
+                    }
+                  }}
+                  title="Edit Charge Point"
+                >
+                  <Settings className="h-3 w-3" />
+                </span>
+              )}
               <span
                 role="button"
                 tabIndex={0}
@@ -380,7 +486,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
-                    onDeleteChargePoint(key);
+                    void onDeleteChargePoint(cp.id, key);
                   }
                 }}
                 onKeyDown={(e) => {
@@ -388,7 +494,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
                     e.preventDefault();
                     e.stopPropagation();
                     if (confirm(`Are you sure you want to delete ${cp.id}?`)) {
-                      onDeleteChargePoint(key);
+                      void onDeleteChargePoint(cp.id, key);
                     }
                   }
                 }}
@@ -408,9 +514,9 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
             <Plus className="h-4 w-4" />
           </Button>
         </TabsList>
-        {cps.map((cp, key) => (
-          <TabsContent key={key} value={cp.id}>
-            <ChargePoint cp={cp} TagID={tagIDs[0]} />
+        {cps.map((cp) => (
+          <TabsContent key={cp.id} value={cp.id}>
+            <ChargePoint cpId={cp.id} TagID={tagIDs[0] ?? "TAG001"} />
           </TabsContent>
         ))}
       </Tabs>

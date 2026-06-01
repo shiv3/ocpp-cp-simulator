@@ -1,0 +1,99 @@
+name: Release CLI
+
+# Builds the CLI + bundled web console and uploads an npm-style tarball
+# (`ocpp-cp-simulator-<version>.tgz`) to a GitHub Release. End users then
+# install with e.g.
+#
+#   bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+#
+# The tarball respects the `files` field in package.json, so it ships
+# `src/cli`, `src/cp`, the scenario templates utility, and the freshly-built
+# `dist/` directory. `dist/` is deliberately kept out of git — devDependencies
+# aren't installed for global bin packages, so a postinstall build isn't
+# viable, which is why we ship a prebuilt tarball instead.
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.1.0) — creates tag cli-v<version>"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node (for `npm pack`)
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            TAG="cli-v${VERSION}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#cli-v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web console (vite)
+        run: bun run build
+
+      - name: Stamp package version
+        run: npm version --no-git-tag-version --allow-same-version "${{ steps.version.outputs.version }}"
+
+      - name: Pack tarball
+        id: pack
+        run: |
+          # `npm pack` reads the `files` field of package.json which includes
+          # `dist`, `src/cli`, `src/cp`, and `src/utils/scenarioTemplates.ts`.
+          TARBALL=$(npm pack --silent)
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          ls -lh "${TARBALL}"
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: CLI ${{ steps.version.outputs.tag }}
+          files: ${{ steps.pack.outputs.tarball }}
+          generate_release_notes: true
+          body: |
+            Prebuilt CLI bundle including the web console (`dist/`).
+
+            ### Install
+
+            ```sh
+            bun install -g https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/${{ steps.pack.outputs.tarball }}
+            ```
+
+            Then run e.g.
+
+            ```sh
+            cp-sim --http-port 5172 \
+                   --cp-id my-cp --connectors 5 \
+                   --web-console \
+                   --ws-url wss://example.com/chargepoint/
+            ```

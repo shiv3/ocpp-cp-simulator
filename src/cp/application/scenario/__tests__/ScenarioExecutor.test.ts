@@ -64,7 +64,7 @@ describe("ScenarioExecutor StatusTrigger", () => {
       onSetMeterValue,
     });
 
-    const execution = executor.start("oneshot");
+    const execution = executor.start();
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSetMeterValue).not.toHaveBeenCalled();

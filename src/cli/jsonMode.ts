@@ -4,7 +4,18 @@ import { CLIChargePointService } from "./service";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
-import type { ScenarioDefinition } from "../cp/application/scenario/ScenarioTypes";
+import type {
+  ScenarioDefinition,
+  ScenarioMode,
+} from "../cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
+
+const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
+  "manual",
+  "scenario",
+];
 
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
@@ -136,7 +147,9 @@ export async function handleJsonCommand(
     }
 
     case "update_connector_status": {
-      const connectorId = requirePositiveInt(params, "connector");
+      // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
+      // any non-negative integer here, not just positive ones.
+      const connectorId = requireNonNegativeInt(params, "connector");
       const status = requireString(params, "status");
       if (!VALID_STATUSES.has(status as OCPPStatus)) {
         throw new Error(
@@ -182,6 +195,8 @@ export async function handleJsonCommand(
     case "run_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
+      // Legacy "mode" param is silently ignored — scenarios always run
+      // one-shot now. Kept tolerant so old clients don't break.
       service.runScenario(connectorId, scenarioId);
       return undefined;
     }
@@ -192,10 +207,24 @@ export async function handleJsonCommand(
       return service.getScenarioStatus(connectorId, scenarioId);
     }
 
+    case "get_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      return service.getScenario(connectorId, scenarioId);
+    }
+
     case "stop_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
       service.stopScenario(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "step_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const force = params.force === true;
+      service.stepScenario(connectorId, scenarioId, force);
       return undefined;
     }
 
@@ -223,6 +252,86 @@ export async function handleJsonCommand(
       return { scenarioId };
     }
 
+    case "set_ev_settings": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const settings = requireObject(
+        params,
+        "settings",
+      ) as unknown as EVSettings;
+      service.setEVSettings(connectorId, settings);
+      return undefined;
+    }
+
+    case "get_ev_settings": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return service.getEVSettings(connectorId);
+    }
+
+    case "set_auto_meter_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const config = requireObject(
+        params,
+        "config",
+      ) as unknown as AutoMeterValueConfig;
+      service.setAutoMeterValueConfig(connectorId, config);
+      return undefined;
+    }
+
+    case "get_auto_meter_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return service.getAutoMeterValueConfig(connectorId);
+    }
+
+    case "set_auto_reset_to_available": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const enabled = requireBoolean(params, "enabled");
+      service.setAutoResetToAvailable(connectorId, enabled);
+      return undefined;
+    }
+
+    case "set_mode": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const mode = requireString(params, "mode");
+      if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
+        throw new Error(
+          `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
+        );
+      }
+      service.setConnectorMode(connectorId, mode as ScenarioMode);
+      return undefined;
+    }
+
+    case "set_soc": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const raw = params?.soc;
+      const soc: number | null =
+        raw === null || raw === undefined
+          ? null
+          : typeof raw === "number"
+            ? raw
+            : (() => {
+                throw new Error("'soc' must be a number or null");
+              })();
+      service.setConnectorSoc(connectorId, soc);
+      return undefined;
+    }
+
+    case "get_charging_profiles": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return service.getChargingProfiles(connectorId);
+    }
+
+    case "remove_connector": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const removed = service.removeConnector(connectorId);
+      return { removed };
+    }
+
+    case "get_state_history": {
+      const options = parseHistoryOptions(params.options);
+      return service.getStateHistory(options);
+    }
+
     default:
       throw new Error(`Unknown command: ${cmd.command}`);
   }
@@ -236,6 +345,19 @@ export function requirePositiveInt(
   if (typeof val !== "number" || !Number.isInteger(val) || val < 1) {
     throw new Error(
       `Missing or invalid parameter: ${key} (expected positive integer)`,
+    );
+  }
+  return val;
+}
+
+export function requireNonNegativeInt(
+  params: Record<string, unknown>,
+  key: string,
+): number {
+  const val = params[key];
+  if (typeof val !== "number" || !Number.isInteger(val) || val < 0) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected non-negative integer)`,
     );
   }
   return val;
@@ -261,4 +383,61 @@ export function requireString(
     throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
   }
   return val;
+}
+
+export function requireBoolean(
+  params: Record<string, unknown>,
+  key: string,
+): boolean {
+  const val = params[key];
+  if (typeof val !== "boolean") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
+  }
+  return val;
+}
+
+export function requireObject(
+  params: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const val = params[key];
+  if (typeof val !== "object" || val === null || Array.isArray(val)) {
+    throw new Error(`Missing or invalid parameter: ${key} (expected object)`);
+  }
+  return val as Record<string, unknown>;
+}
+
+/**
+ * Convert a HistoryOptions object that arrived over JSON into the in-memory
+ * shape `StateHistory.getHistory` expects. fromTimestamp / toTimestamp are
+ * ISO strings on the wire but the comparator needs Date instances.
+ */
+function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: HistoryOptions = {};
+  if (typeof src.entity === "string") {
+    out.entity = src.entity as HistoryOptions["entity"];
+  }
+  if (typeof src.entityId === "number") {
+    out.entityId = src.entityId;
+  }
+  if (typeof src.transitionType === "string") {
+    out.transitionType = src.transitionType as HistoryOptions["transitionType"];
+  }
+  if (typeof src.limit === "number") {
+    out.limit = src.limit;
+  }
+  if (typeof src.fromTimestamp === "string") {
+    out.fromTimestamp = new Date(src.fromTimestamp);
+  } else if (src.fromTimestamp instanceof Date) {
+    out.fromTimestamp = src.fromTimestamp;
+  }
+  if (typeof src.toTimestamp === "string") {
+    out.toTimestamp = new Date(src.toTimestamp);
+  } else if (src.toTimestamp instanceof Date) {
+    out.toTimestamp = src.toTimestamp;
+  }
+  return out;
 }

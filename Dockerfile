@@ -71,12 +71,28 @@ COPY docs/examples/scenarios ./docs/examples/scenarios
 # The browser UI produced in stage 1.
 COPY --from=ui /app/dist ./dist
 
+# Persistent state lands at /data when the operator passes
+# `--state-db /data/state.db` (the docker-compose example wires this).
+# Pre-create the directory so the "bun" user can write to it even with
+# an anonymous volume.
+RUN mkdir -p /data
+
 # Drop privileges. oven/bun ships a non-root user named "bun".
-RUN chown -R bun:bun /app
+RUN chown -R bun:bun /app /data
 USER bun
+
+# Declare /data as a managed volume so `docker run` without `-v` still
+# carves out an anonymous volume — the simulator state survives container
+# restart/recreate. Mount a host directory (`docker run -v /host:/data`)
+# or named volume (`docker volume create ocpp-state`) for explicit
+# control / cross-host portability.
+VOLUME ["/data"]
 
 ENV NODE_ENV=production
 ENV HTTP_PORT=9700
+# Default state-db location inside the volume. Override at run time with
+# `--state-db <path>` (use `--state-db :memory:` to opt out entirely).
+ENV STATE_DB=/data/state.db
 EXPOSE 9700
 
 # The ENTRYPOINT bakes in:
@@ -84,8 +100,11 @@ EXPOSE 9700
 #   * --unix-socket none   (Unix socket isn't useful across the boundary)
 #   * --web-console $HTTP_PORT  (serves API + the bundled UI on the same port;
 #       --web-console auto-resolves /app/dist next to the CLI source)
+#   * --state-db $STATE_DB  (file path under /data by default; override
+#       with `-e STATE_DB=:memory:` for ephemeral, or `-e STATE_DB=` to
+#       drop the flag entirely)
 # Any user-supplied CMD args (cp-id, ws-url, scenario flags) append.
-ENTRYPOINT ["sh", "-c", "exec bun src/cli/main.ts --http-host 0.0.0.0 --unix-socket none --web-console \"${HTTP_PORT}\" \"$@\"", "ocpp-cp-sim"]
+ENTRYPOINT ["sh", "-c", "set -e; ARGS='--http-host 0.0.0.0 --unix-socket none --web-console '\"${HTTP_PORT}\"; [ -n \"${STATE_DB}\" ] && ARGS=\"$ARGS --state-db ${STATE_DB}\"; exec bun src/cli/main.ts $ARGS \"$@\"", "ocpp-cp-sim"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp
 # or pass `--cp-id ... --ws-url ...` to `docker run`.

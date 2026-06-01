@@ -124,7 +124,15 @@ So you can pipe daemon stdout into the same `jq` pipeline that consumes a downlo
 
 ## Docker
 
-A `Dockerfile` and `docker-compose.yml` ship at the repo root. The image is Bun-based and ships **both** the daemon and the React browser UI — Vite builds `dist/` in a build stage and the daemon serves it from the same HTTP port as the API (SPA-aware: unknown paths fall back to `index.html`).
+A `Dockerfile` and `docker-compose.yml` ship at the repo root, and a multi-arch image is published on every push to `main` / version tag at `ghcr.io/shiv3/ocpp-cp-simulator`. See [docs/docker.md](./docker.md) for the full reference (volumes, environment variables, compose recipes, structured-log piping). Quick path:
+
+```sh
+docker run --rm -p 9700:9700 -v "$PWD/.state:/data" \
+  ghcr.io/shiv3/ocpp-cp-simulator:latest \
+  --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
+```
+
+The image is Bun-based and ships **both** the daemon and the React browser UI — Vite builds `dist/` in a build stage and the daemon serves it from the same HTTP port as the API (SPA-aware: unknown paths fall back to `index.html`).
 
 ```bash
 # Build

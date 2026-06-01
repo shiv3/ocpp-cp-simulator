@@ -8,6 +8,7 @@ OCPP 1.6J charge point simulator with three interfaces: a browser-based UI, a le
 | **Legacy v1** | Original single-page web UI                              | [docs/v1.md](docs/v1.md)           |
 | **CLI**       | Headless mode for scripting, CI, and AI integration      | [docs/cli.md](docs/cli.md)         |
 | **Server**    | Long-running HTTP/WebSocket server, multi-CP per process | [docs/server.md](docs/server.md)   |
+| **Docker**    | Pre-built image (daemon + web console) on GHCR           | [docs/docker.md](docs/docker.md)   |
 
 ## Quick Start
 

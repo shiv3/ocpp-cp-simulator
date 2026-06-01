@@ -19,16 +19,22 @@ services:
       - "${HTTP_PORT:-9700}:9700"
     environment:
       HTTP_PORT: "9700"
+      # The image's ENTRYPOINT passes --state-db $STATE_DB to ocpp-cp-sim.
+      # Default is a file under the /data volume; set to ":memory:" to
+      # run fully ephemeral (state wiped on container exit).
+      STATE_DB: "/data/state.db"
     volumes:
       # Mount the example scenarios read-only so you can point
       # --scenario-template-file at one from the command override.
       - ./docs/examples/scenarios:/scenarios:ro
-      # Persistent SQLite state — comment this volume out if you'd rather
-      # run the simulator in-memory (state is wiped on container exit).
+      # Persistent SQLite state. Use a host bind mount for easy inspection
+      # (`sqlite3 ./.state/state.db ".tables"`) or swap for a named volume
+      # like `ocpp-state:/data` for cross-machine portability. Comment out
+      # both this AND `STATE_DB` above (set to `:memory:`) for ephemeral.
       - ./.state:/data
     # Args appended to the image's ENTRYPOINT. Tweak to your CSMS / cpId.
-    # The Dockerfile already sets --http-host 0.0.0.0 --unix-socket none
-    # and --http-port (from $HTTP_PORT).
+    # The Dockerfile already sets --http-host 0.0.0.0 --unix-socket none,
+    # --http-port (from $HTTP_PORT) and --state-db (from $STATE_DB).
     command:
       - --cp-id
       - "${CP_ID:-cp1}"
@@ -36,8 +42,6 @@ services:
       - "${CONNECTORS:-1}"
       - --ws-url
       - "${WS_URL:-wss://example.invalid/chargepoint/}"
-      - --state-db
-      - /data/state.db
       # CORS: leave unset for "*" (any origin). To restrict, set
       # CORS_ORIGIN and uncomment the lines below.
       # - --cors-origin
@@ -47,6 +51,9 @@ services:
       # - /scenarios/demo-charging.json
       # - --scenario-connector
       # - "all"
+      # Switch to structured JSON logs (uncomment to enable):
+      # - --log-format
+      # - json
     healthcheck:
       test:
         - CMD

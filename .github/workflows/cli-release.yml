@@ -69,7 +69,11 @@ jobs:
         run: |
           # `npm pack` reads the `files` field of package.json which includes
           # `dist`, `src/cli`, `src/cp`, and `src/utils/scenarioTemplates.ts`.
-          TARBALL=$(npm pack --silent)
+          # --ignore-scripts skips the `prepack` hook (vite build) — we
+          # already built dist/ in the previous step, and letting prepack
+          # run again pollutes the captured stdout with vite's build log,
+          # which breaks the $TARBALL capture below.
+          TARBALL=$(npm pack --silent --ignore-scripts)
           # Also publish under a stable filename so consumers can pin
           # `releases/latest/download/ocpp-cp-simulator.tgz` and always get
           # the newest CLI without knowing the version string.

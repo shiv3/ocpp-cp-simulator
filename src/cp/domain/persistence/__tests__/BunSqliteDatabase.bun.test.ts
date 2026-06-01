@@ -3,7 +3,11 @@
 // `bun:sqlite` built-in used by the SUT.
 import { describe, it, expect } from "bun:test";
 import { BunSqliteDatabase } from "../BunSqliteDatabase";
-import { SCHEMA_VERSION } from "../schema";
+import {
+  SCHEMA_VERSION,
+  SchemaVersionMismatchError,
+  runMigrations,
+} from "../schema";
 
 describe("BunSqliteDatabase", () => {
   it("opens an in-memory DB and applies the schema", () => {
@@ -71,6 +75,22 @@ describe("BunSqliteDatabase", () => {
         ["cp1"],
       );
       expect(row?.soc_meter_sync).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to open a DB whose schema version is newer than the build", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // Simulate a future-version DB by stamping a newer value before
+      // re-running migrations.
+      db.run(
+        "INSERT INTO schema_meta (key, value) VALUES ('version', ?) " +
+          "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [String(SCHEMA_VERSION + 1)],
+      );
+      expect(() => runMigrations(db)).toThrow(SchemaVersionMismatchError);
     } finally {
       db.close();
     }

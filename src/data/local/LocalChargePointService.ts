@@ -12,11 +12,6 @@ import type {
   ScenarioTemplateInfo,
   StoredLogEntry,
 } from "../interfaces/ChargePointService";
-import {
-  loadConnectorAutoMeterConfig,
-  loadConnectorChargingProfiles,
-  saveConnectorChargingProfiles,
-} from "../../utils/connectorStorage";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -595,32 +590,51 @@ export class LocalChargePointService implements ChargePointService {
       this.database,
     );
 
-    // Restore connector-level settings from localStorage
-    for (
-      let connectorId = 1;
-      connectorId <= definition.connectorNumber;
-      connectorId++
-    ) {
-      const savedConfig = loadConnectorAutoMeterConfig(
-        definition.id,
-        connectorId,
-      );
-      if (savedConfig) {
-        const connector = chargePoint.getConnector(connectorId);
-        if (connector) {
-          connector.autoMeterValueConfig = savedConfig;
+    // Restore connector-level settings from the SQLite store. Sync reads
+    // are safe because both adapters expose `Database.get/all`
+    // synchronously; we're inside the per-CP construction path that runs
+    // once per registration.
+    if (this.database) {
+      for (
+        let connectorId = 1;
+        connectorId <= definition.connectorNumber;
+        connectorId++
+      ) {
+        const autoMeterRow = this.database.get<{ auto_meter: string | null }>(
+          "SELECT auto_meter FROM connector_settings " +
+            "WHERE cp_id = ? AND connector_id = ?",
+          [definition.id, connectorId],
+        );
+        if (autoMeterRow?.auto_meter) {
+          try {
+            const connector = chargePoint.getConnector(connectorId);
+            if (connector) {
+              connector.autoMeterValueConfig = JSON.parse(
+                autoMeterRow.auto_meter,
+              ) as AutoMeterValueConfig;
+            }
+          } catch {
+            // Corrupted JSON in the row — fall back to defaults.
+          }
         }
-      }
 
-      // Load charging profiles
-      const savedProfiles = loadConnectorChargingProfiles(
-        definition.id,
-        connectorId,
-      );
-      if (savedProfiles.length > 0) {
-        const connector = chargePoint.getConnector(connectorId);
-        if (connector) {
-          connector.setChargingProfiles(savedProfiles);
+        const profileRows = this.database.all<{ profile: string }>(
+          "SELECT profile FROM charging_profiles " +
+            "WHERE cp_id = ? AND connector_id = ? ORDER BY stack_level DESC",
+          [definition.id, connectorId],
+        );
+        const profiles = profileRows
+          .map((r) => {
+            try {
+              return JSON.parse(r.profile) as ActiveChargingProfile;
+            } catch {
+              return null;
+            }
+          })
+          .filter((p): p is ActiveChargingProfile => p !== null);
+        if (profiles.length > 0) {
+          const connector = chargePoint.getConnector(connectorId);
+          connector?.setChargingProfiles(profiles);
         }
       }
     }
@@ -771,8 +785,28 @@ export class LocalChargePointService implements ChargePointService {
 
       unsubscribes.push(
         connector.events.on("chargingProfilesChange", ({ profiles }) => {
-          // Persist to localStorage whenever profiles change
-          saveConnectorChargingProfiles(chargePoint.id, connector.id, profiles);
+          // Persist via the SQLite repo so the next CP build picks them up.
+          if (this.database) {
+            this.database.run(
+              "DELETE FROM charging_profiles WHERE cp_id = ? AND connector_id = ?",
+              [chargePoint.id, connector.id],
+            );
+            for (const profile of profiles) {
+              this.database.run(
+                "INSERT INTO charging_profiles " +
+                  "(cp_id, connector_id, charging_profile_id, stack_level, purpose, profile) " +
+                  "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                  chargePoint.id,
+                  connector.id,
+                  profile.chargingProfileId,
+                  profile.stackLevel,
+                  profile.chargingProfilePurpose,
+                  JSON.stringify(profile),
+                ],
+              );
+            }
+          }
           this.emit(chargePoint.id, {
             type: "connector-charging-profiles",
             connectorId: connector.id,

@@ -13,7 +13,7 @@ import { createScenarioExecutorCallbacks } from "../cp/application/scenario/Scen
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useDataContext } from "../data/providers/DataProvider";
-import { createDefaultScenario } from "../utils/scenarioStorage";
+import { createDefaultScenario } from "../cp/application/scenario/defaultScenario";
 
 interface ConnectorProps {
   id: number;

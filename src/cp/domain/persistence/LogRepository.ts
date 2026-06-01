@@ -60,19 +60,43 @@ export class LogRepository {
     }
     if (!this.db || this.buffer.length === 0) return;
     const batch = this.buffer.splice(0, this.buffer.length);
-    for (const { cpId, entry } of batch) {
-      this.db.run(
-        "INSERT INTO logs (cp_id, timestamp, level, log_type, message) " +
-          "VALUES (?, ?, ?, ?, ?)",
-        [
-          cpId,
-          entry.timestamp.toISOString(),
-          LogLevel[entry.level] ?? "INFO",
-          entry.type,
-          entry.message,
-        ],
-      );
-      this.touchedCps.add(cpId);
+    // Wrap the batch in a single transaction. Critical on the sql.js
+    // path because every db.run triggers the SqlJsDatabase debounce
+    // flush schedule (and an eventual IndexedDB write of the whole
+    // dump); without BEGIN/COMMIT we'd serialise 50 separate flushes
+    // for a single log batch. bun:sqlite also benefits from the lower
+    // fsync count.
+    let inTx = false;
+    try {
+      this.db.exec("BEGIN");
+      inTx = true;
+      for (const { cpId, entry } of batch) {
+        this.db.run(
+          "INSERT INTO logs (cp_id, timestamp, level, log_type, message) " +
+            "VALUES (?, ?, ?, ?, ?)",
+          [
+            cpId,
+            entry.timestamp.toISOString(),
+            LogLevel[entry.level] ?? "INFO",
+            entry.type,
+            entry.message,
+          ],
+        );
+        this.touchedCps.add(cpId);
+      }
+      this.db.exec("COMMIT");
+      inTx = false;
+    } catch (err) {
+      if (inTx) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {
+          // best-effort
+        }
+      }
+      // Don't re-throw — losing a log batch is preferable to crashing
+      // the calling tick (every OCPP message goes through here).
+      console.error("[LogRepository] flush failed:", err);
     }
     this.rowsSinceLastTrim += batch.length;
     // Sweep retention occasionally — once every ~10 batches is plenty,

@@ -296,17 +296,30 @@ The bundled CLI client uses Node's `http.request({ socketPath, ... })` under the
 
 ## CORS
 
-The server returns `Access-Control-Allow-Origin: *` by default so the bundled browser UI can connect from any origin. **The control API is unauthenticated**, so combined with `*` any web page that loads in a browser pointed at the server can call `/v1/cp/:cpId/command` and even `/v1/shutdown`.
+The CORS policy depends on the bind address and any `--cors-origin` flags:
 
-For anything beyond localhost development, restrict CORS to the origins of your UI:
+| Bind                          | `--cors-origin` flag       | Effective policy                                                                                                                                                         |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Loopback (`127.0.0.1`, etc.)  | _(none)_                   | **`any`** — `*` echoed back. Safe because nothing off-host can reach loopback anyway.                                                                                    |
+| Non-loopback (`0.0.0.0`, LAN) | _(none)_                   | **`same-origin`** — only requests whose `Origin` matches the request `Host` are allowed (plus non-browser callers with no `Origin` header). A warning is logged at boot. |
+| Any                           | `--cors-origin <url>` (×N) | **`allowlist`** — only the listed origins are echoed back.                                                                                                               |
+| Any                           | `--cors-origin "*"`        | **`any`** — explicit opt-in to open CORS.                                                                                                                                |
 
-```bash
+Same-origin is the safe default when binding to `0.0.0.0` because **the control API is unauthenticated** — combined with `*` any web page in the operator's browser could call `/v1/cp/:cpId/command` or even `/v1/shutdown`. For browser UIs hosted on a different origin, allowlist them:
+
+```sh
 ocpp-cp-sim --daemon --http-port 9700 \
   --cors-origin http://localhost:5173 \
   --cors-origin https://ocpp-ui.example.com
 ```
 
-`--cors-origin` is repeatable. With one or more values, only matching `Origin` headers receive an `Access-Control-Allow-Origin` reply, so browser requests from other origins are blocked.
+Or opt back into open CORS deliberately (LAN test rigs, scripted integration tests):
+
+```sh
+ocpp-cp-sim --daemon --http-port 9700 --http-host 0.0.0.0 --cors-origin "*"
+```
+
+Non-browser callers (curl, the bundled CLI, server-to-server) don't send an `Origin` header and are always allowed regardless of policy — the policy only restricts cross-site browser access.
 
 ## Security
 

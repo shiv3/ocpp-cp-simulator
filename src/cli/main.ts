@@ -398,6 +398,49 @@ HTTP API (see docs/server.md):
 `);
 }
 
+/**
+ * Pick the CORS policy at startup.
+ *
+ * Rules:
+ *   - Explicit `--cors-origin <origin>` (one or more)   → `allowlist`.
+ *   - Explicit `--cors-origin "*"` (literal star)       → `any` (operator
+ *     deliberately opted into open CORS).
+ *   - No `--cors-origin` flag + binding to a loopback host (127.0.0.1
+ *     / ::1 / localhost) → `any`. Loopback can't be reached from anyone
+ *     else's browser, so open CORS is fine.
+ *   - No `--cors-origin` flag + binding to a non-loopback host
+ *     (0.0.0.0, LAN IP, hostname) → `same-origin` AND a warning to
+ *     stderr. The admin API is exposed on the LAN; defaulting to open
+ *     CORS would let any page in the operator's browser POST to it.
+ */
+function resolveCorsPolicy(
+  options: CLIOptions,
+):
+  | { kind: "any" }
+  | { kind: "allowlist"; origins: string[] }
+  | { kind: "same-origin" } {
+  if (options.corsOrigins.length > 0) {
+    if (options.corsOrigins.length === 1 && options.corsOrigins[0] === "*") {
+      return { kind: "any" };
+    }
+    return { kind: "allowlist", origins: [...options.corsOrigins] };
+  }
+  const host = options.httpHost;
+  const isLoopback =
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "localhost" ||
+    host.startsWith("127.");
+  if (isLoopback) return { kind: "any" };
+  process.stderr.write(
+    `[server] WARNING: binding to ${host} without --cors-origin; ` +
+      "applying same-origin-only CORS so cross-site browser requests are " +
+      'rejected. Pass `--cors-origin "*"` to opt back into open CORS, or ' +
+      "`--cors-origin https://your.ui` for an explicit allowlist.\n",
+  );
+  return { kind: "same-origin" };
+}
+
 function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
   if (!options.cpId) return null;
   return {
@@ -462,10 +505,7 @@ async function main(): Promise<void> {
             scenarioConnector: options.scenarioConnector,
           }
         : null,
-      cors:
-        options.corsOrigins.length === 0
-          ? { kind: "any" }
-          : { kind: "allowlist", origins: options.corsOrigins },
+      cors: resolveCorsPolicy(options),
       staticDir: options.serveStatic,
       webConsolePort: options.webConsolePort,
       stateDb: options.stateDb,

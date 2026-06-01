@@ -202,7 +202,8 @@ function buildStorageKey(
 }
 
 /**
- * Create default scenario
+ * Create default scenario — uses the demo-charging template
+ * (plug-in → RemoteStart → start-tx → auto-meter → stop → plug-out).
  */
 export function createDefaultScenario(
   chargePointId: string,
@@ -214,29 +215,114 @@ export function createDefaultScenario(
     name ||
     `Scenario for ${targetType === "chargePoint" ? chargePointId : `${chargePointId} Connector ${connectorId}`}`;
 
+  const now = new Date().toISOString();
   return {
     id: `${chargePointId}_${connectorId || "cp"}_${Date.now()}`,
     name: scenarioName,
-    description: "",
+    description:
+      "Demo charging flow: plug-in → wait for RemoteStartTransaction → start → auto-meter → stop → plug-out.",
     targetType,
     targetId: connectorId || undefined,
+    evSettings: {
+      modelName: "Tesla Model 3",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 250,
+      initialSoc: 20,
+      targetSoc: 80,
+    },
     nodes: [
       {
-        id: "start-1",
+        id: "start",
         type: "start",
-        position: { x: 250, y: 50 },
+        position: { x: 400, y: 0 },
         data: { label: "Start" },
       },
       {
-        id: "end-1",
+        id: "wait-boot",
+        type: "delay",
+        position: { x: 400, y: 100 },
+        data: { label: "Wait for BootNotification", delaySeconds: 2 },
+      },
+      {
+        id: "plug-in",
+        type: "connectorPlug",
+        position: { x: 400, y: 200 },
+        data: { label: "Plug in", action: "plugin" },
+      },
+      {
+        id: "wait-prepare",
+        type: "delay",
+        position: { x: 400, y: 300 },
+        data: { label: "Settle", delaySeconds: 1 },
+      },
+      {
+        id: "await-remote-start",
+        type: "remoteStartTrigger",
+        position: { x: 400, y: 400 },
+        data: {
+          label: "Wait for RemoteStartTransaction",
+          description:
+            "Block until the CSMS sends RemoteStartTransaction. The tagId from the request is forwarded to the next Transaction node.",
+          timeout: 0,
+        },
+      },
+      {
+        id: "start-tx",
+        type: "transaction",
+        position: { x: 400, y: 500 },
+        data: {
+          label: "StartTransaction (tagId from RemoteStart)",
+          action: "start",
+          tagId: "TAG001",
+        },
+      },
+      {
+        id: "auto-meter",
+        type: "meterValue",
+        position: { x: 400, y: 600 },
+        data: {
+          label:
+            "Auto MeterValue (1 kWh / 5s, stop when EV reaches target SoC)",
+          value: 0,
+          sendMessage: true,
+          autoIncrement: true,
+          incrementInterval: 5,
+          incrementAmount: 1000,
+          stopMode: "evSettings",
+        },
+      },
+      {
+        id: "stop-tx",
+        type: "transaction",
+        position: { x: 400, y: 700 },
+        data: { label: "StopTransaction", action: "stop" },
+      },
+      {
+        id: "plug-out",
+        type: "connectorPlug",
+        position: { x: 400, y: 800 },
+        data: { label: "Plug out", action: "plugout" },
+      },
+      {
+        id: "end",
         type: "end",
-        position: { x: 250, y: 300 },
+        position: { x: 400, y: 900 },
         data: { label: "End" },
       },
     ],
-    edges: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    edges: [
+      { id: "e1", source: "start", target: "wait-boot" },
+      { id: "e2", source: "wait-boot", target: "plug-in" },
+      { id: "e3", source: "plug-in", target: "wait-prepare" },
+      { id: "e4", source: "wait-prepare", target: "await-remote-start" },
+      { id: "e5", source: "await-remote-start", target: "start-tx" },
+      { id: "e6", source: "start-tx", target: "auto-meter" },
+      { id: "e7", source: "auto-meter", target: "stop-tx" },
+      { id: "e8", source: "stop-tx", target: "plug-out" },
+      { id: "e9", source: "plug-out", target: "end" },
+    ],
+    createdAt: now,
+    updatedAt: now,
     trigger: { type: "manual" },
     defaultExecutionMode: "oneshot",
     enabled: true,

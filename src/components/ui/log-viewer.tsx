@@ -14,6 +14,37 @@ interface LogViewerProps {
   className?: string;
 }
 
+/**
+ * "(none)" pseudo-value used in the Connector filter for log entries that
+ * don't reference any connector. `null` represents the real "no connector"
+ * case so we can keep the filter list as `(number | null)[]`.
+ */
+type ConnectorFilterValue = number | null;
+
+/**
+ * Best-effort: pull every connector id referenced by a log message.
+ *
+ * Matches:
+ *   - JSON payload field:           `"connectorId":3`
+ *   - Prose mentions:               `connector 4`, `Connector 0`
+ *   - Scenario template instances:  `Demo Charging (Connector 2)`
+ *
+ * Returns an empty array when no connector reference is detected (the log
+ * is treated as charge-point-level / "(none)").
+ */
+function extractConnectorIds(message: string): number[] {
+  const found = new Set<number>();
+  const jsonRe = /"connectorId"\s*:\s*(\d+)/g;
+  const proseRe = /\bconnector(?:s)?\s+(\d+)/gi;
+  for (const m of message.matchAll(jsonRe)) {
+    found.add(Number(m[1]));
+  }
+  for (const m of message.matchAll(proseRe)) {
+    found.add(Number(m[1]));
+  }
+  return [...found];
+}
+
 export function LogViewer({
   logs,
   onClear,
@@ -23,11 +54,23 @@ export function LogViewer({
   const [filter, setFilter] = useState("");
   const [logLevelFilter, setLogLevelFilter] = useState<LogLevel[]>([]);
   const [logTypeFilter, setLogTypeFilter] = useState<LogType[]>([]);
+  const [logConnectorFilter, setLogConnectorFilter] = useState<
+    ConnectorFilterValue[]
+  >([]);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [levelSearch, setLevelSearch] = useState("");
   const [typeSearch, setTypeSearch] = useState("");
+  const [connectorSearch, setConnectorSearch] = useState("");
   const [levelExpanded, setLevelExpanded] = useState(true);
   const [typeExpanded, setTypeExpanded] = useState(true);
+  const [connectorExpanded, setConnectorExpanded] = useState(true);
+
+  // Each log's set of referenced connector ids — memoized so we don't
+  // re-parse the message on every render or every filter toggle.
+  const logConnectors = useMemo(
+    () => logs.map((log) => extractConnectorIds(log.message)),
+    [logs],
+  );
 
   // Calculate statistics
   const stats = useMemo(() => {
@@ -38,17 +81,27 @@ export function LogViewer({
       [LogLevel.ERROR]: 0,
     };
     const typeCounts: Record<LogType, number> = {} as Record<LogType, number>;
+    const connectorCounts = new Map<ConnectorFilterValue, number>();
 
-    logs.forEach((log) => {
+    logs.forEach((log, idx) => {
       levelCounts[log.level] = (levelCounts[log.level] || 0) + 1;
       typeCounts[log.type] = (typeCounts[log.type] || 0) + 1;
+
+      const ids = logConnectors[idx];
+      if (ids.length === 0) {
+        connectorCounts.set(null, (connectorCounts.get(null) ?? 0) + 1);
+      } else {
+        for (const id of ids) {
+          connectorCounts.set(id, (connectorCounts.get(id) ?? 0) + 1);
+        }
+      }
     });
 
-    return { levelCounts, typeCounts };
-  }, [logs]);
+    return { levelCounts, typeCounts, connectorCounts };
+  }, [logs, logConnectors]);
 
   const filteredLogs = useMemo(() => {
-    return logs.filter((log) => {
+    return logs.filter((log, idx) => {
       if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
         return false;
       }
@@ -58,9 +111,24 @@ export function LogViewer({
       if (logTypeFilter.length > 0 && !logTypeFilter.includes(log.type)) {
         return false;
       }
+      if (logConnectorFilter.length > 0) {
+        const ids = logConnectors[idx];
+        const match =
+          ids.length === 0
+            ? logConnectorFilter.includes(null)
+            : ids.some((id) => logConnectorFilter.includes(id));
+        if (!match) return false;
+      }
       return true;
     });
-  }, [logs, filter, logLevelFilter, logTypeFilter]);
+  }, [
+    logs,
+    filter,
+    logLevelFilter,
+    logTypeFilter,
+    logConnectorFilter,
+    logConnectors,
+  ]);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -130,6 +198,36 @@ export function LogViewer({
       setLogTypeFilter([...logTypeFilter, type]);
     }
   };
+
+  const toggleLogConnector = (value: ConnectorFilterValue) => {
+    if (logConnectorFilter.includes(value)) {
+      setLogConnectorFilter(logConnectorFilter.filter((v) => v !== value));
+    } else {
+      setLogConnectorFilter([...logConnectorFilter, value]);
+    }
+  };
+
+  const connectorLabel = (value: ConnectorFilterValue): string =>
+    value === null
+      ? "(none)"
+      : value === 0
+        ? "0 (charge point)"
+        : `Connector ${value}`;
+
+  // Surface every connector id that's appeared in logs so far, sorted with
+  // (none) last. Filter by the search box (matches the rendered label).
+  const filteredConnectors = useMemo(() => {
+    const all: ConnectorFilterValue[] = [...stats.connectorCounts.keys()].sort(
+      (a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return a - b;
+      },
+    );
+    if (!connectorSearch) return all;
+    const q = connectorSearch.toLowerCase();
+    return all.filter((v) => connectorLabel(v).toLowerCase().includes(q));
+  }, [stats.connectorCounts, connectorSearch]);
 
   // Filtered level and type lists for search
   const filteredLevels = useMemo(() => {
@@ -259,6 +357,66 @@ export function LogViewer({
                       </Badge>
                     </label>
                   ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Connector Filter */}
+          <div className="border-b">
+            <button
+              onClick={() => setConnectorExpanded(!connectorExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Connector
+              </span>
+              {connectorExpanded ? (
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+            {connectorExpanded && (
+              <div className="px-3 pb-3 space-y-2">
+                <Input
+                  placeholder="Filter values"
+                  value={connectorSearch}
+                  onChange={(e) => setConnectorSearch(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {filteredConnectors.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic px-1">
+                      No connector references yet
+                    </p>
+                  ) : (
+                    filteredConnectors.map((value) => {
+                      const key = value === null ? "none" : `c${value}`;
+                      return (
+                        <label
+                          key={key}
+                          className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <Checkbox
+                              checked={logConnectorFilter.includes(value)}
+                              onCheckedChange={() => toggleLogConnector(value)}
+                            />
+                            <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
+                              {connectorLabel(value)}
+                            </span>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className="ml-2 text-[10px] px-1.5 py-0"
+                          >
+                            {stats.connectorCounts.get(value) || 0}
+                          </Badge>
+                        </label>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}

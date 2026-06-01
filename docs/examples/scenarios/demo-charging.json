@@ -1,9 +1,16 @@
 {
   "id": "demo-charging",
   "name": "Demo Charging",
-  "description": "Self-contained demo: plug-in -> start transaction -> auto-meter -> stop -> plug-out. Use with --scenario-template-file to apply to every connector of a multi-connector CP.",
+  "description": "Self-contained demo: plug-in -> wait for RemoteStartTransaction -> start transaction -> auto-meter -> stop -> plug-out. Use with --scenario-template-file to apply to every connector of a multi-connector CP.",
   "targetType": "connector",
   "targetId": 1,
+  "evSettings": {
+    "modelName": "Tesla Model 3",
+    "batteryCapacityKwh": 75,
+    "maxChargingPowerKw": 250,
+    "initialSoc": 20,
+    "targetSoc": 80
+  },
   "nodes": [
     {
       "id": "start",
@@ -30,48 +37,55 @@
       "data": { "label": "Settle", "delaySeconds": 1 }
     },
     {
-      "id": "start-tx",
-      "type": "transaction",
+      "id": "await-remote-start",
+      "type": "remoteStartTrigger",
       "position": { "x": 400, "y": 400 },
       "data": {
-        "label": "StartTransaction",
+        "label": "Wait for RemoteStartTransaction",
+        "description": "Block until the CSMS sends RemoteStartTransaction. The tagId from the request is forwarded to the next Transaction node.",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "start-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 500 },
+      "data": {
+        "label": "StartTransaction (tagId from RemoteStart)",
         "action": "start",
-        "tagId": "TAG001",
-        "batteryCapacityKwh": 60,
-        "initialSoc": 20
+        "tagId": "TAG001"
       }
     },
     {
       "id": "auto-meter",
       "type": "meterValue",
-      "position": { "x": 400, "y": 500 },
+      "position": { "x": 400, "y": 600 },
       "data": {
-        "label": "Auto MeterValue (1 kWh / 5s, max 20 kWh / 60s)",
+        "label": "Auto MeterValue (1 kWh / 5s, stop when EV reaches target SoC)",
         "value": 0,
         "sendMessage": true,
         "autoIncrement": true,
         "incrementInterval": 5,
         "incrementAmount": 1000,
-        "maxValue": 20000,
-        "maxTime": 60
+        "stopMode": "evSettings"
       }
     },
     {
       "id": "stop-tx",
       "type": "transaction",
-      "position": { "x": 400, "y": 600 },
+      "position": { "x": 400, "y": 700 },
       "data": { "label": "StopTransaction", "action": "stop" }
     },
     {
       "id": "plug-out",
       "type": "connectorPlug",
-      "position": { "x": 400, "y": 700 },
+      "position": { "x": 400, "y": 800 },
       "data": { "label": "Plug out", "action": "plugout" }
     },
     {
       "id": "end",
       "type": "end",
-      "position": { "x": 400, "y": 800 },
+      "position": { "x": 400, "y": 900 },
       "data": { "label": "End" }
     }
   ],
@@ -79,14 +93,15 @@
     { "id": "e1", "source": "start", "target": "wait-boot" },
     { "id": "e2", "source": "wait-boot", "target": "plug-in" },
     { "id": "e3", "source": "plug-in", "target": "wait-prepare" },
-    { "id": "e4", "source": "wait-prepare", "target": "start-tx" },
-    { "id": "e5", "source": "start-tx", "target": "auto-meter" },
-    { "id": "e6", "source": "auto-meter", "target": "stop-tx" },
-    { "id": "e7", "source": "stop-tx", "target": "plug-out" },
-    { "id": "e8", "source": "plug-out", "target": "end" }
+    { "id": "e4", "source": "wait-prepare", "target": "await-remote-start" },
+    { "id": "e5", "source": "await-remote-start", "target": "start-tx" },
+    { "id": "e6", "source": "start-tx", "target": "auto-meter" },
+    { "id": "e7", "source": "auto-meter", "target": "stop-tx" },
+    { "id": "e8", "source": "stop-tx", "target": "plug-out" },
+    { "id": "e9", "source": "plug-out", "target": "end" }
   ],
   "createdAt": "2026-05-27T00:00:00.000Z",
-  "updatedAt": "2026-05-27T00:00:00.000Z",
+  "updatedAt": "2026-05-28T00:00:00.000Z",
   "trigger": { "type": "manual" },
   "defaultExecutionMode": "oneshot",
   "enabled": true

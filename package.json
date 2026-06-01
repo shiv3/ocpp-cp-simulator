@@ -9,7 +9,8 @@
   "files": [
     "src/cli",
     "src/cp",
-    "src/utils/scenarioTemplates.ts"
+    "src/utils/scenarioTemplates.ts",
+    "dist"
   ],
   "scripts": {
     "dev": "vite",
@@ -19,7 +20,8 @@
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky",
+    "prepare": "husky || true && vite build",
+    "prepack": "vite build",
     "postinstall": "node -e \"try{require('fs').chmodSync('src/cli/main.ts',0o755)}catch(e){}\"",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

@@ -8,7 +8,6 @@ import React, {
 } from "react";
 import type { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
-import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -18,22 +17,114 @@ import { createScenarioExecutorCallbacks } from "../cp/application/scenario/Scen
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useDataContext } from "../data/providers/DataProvider";
-import { EVSettingsPanel } from "./EVSettingsPanel";
+import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import {
+  saveConnectorAutoMeterConfig,
+  loadSocMeterSyncEnabled,
+  saveSocMeterSyncEnabled,
+} from "../utils/connectorStorage";
 
 // Dynamic imports for heavy components (bundle-dynamic-imports)
 const StateTransitionViewer = lazy(
   () => import("./state-transition/StateTransitionViewer"),
 );
 const ScenarioEditor = lazy(() => import("./scenario/ScenarioEditor"));
+const MeterValueCurveModal = lazy(() => import("./MeterValueCurveModal"));
 import {
   ChevronRight,
   ChevronLeft,
   X,
   GitBranch,
-  Settings,
   Zap,
   Gauge,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
+
+/** Which view to render on the right side of the panel. The connector
+ *  controls always live on the left and are no longer a "tab". */
+type TabType = "scenario" | "stateTransition";
+
+/**
+ * Allowed-next-status table — exactly mirrors the OCPP 1.6 connector state
+ * diagram encoded in
+ * `src/cp/application/state/machines/ConnectorStateMachine.ts`. The Status
+ * Control panel only surfaces these targets so the user can't
+ * accidentally send a Charging notification from Available, etc.
+ *
+ * Keep in sync with the machine. If a transition is added there, mirror it
+ * here.
+ */
+const ALLOWED_STATUS_TRANSITIONS: Readonly<
+  Record<OCPPStatus, ReadonlyArray<OCPPStatus>>
+> = {
+  [OCPPStatus.Available]: [
+    OCPPStatus.Preparing,
+    OCPPStatus.Reserved,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Preparing]: [
+    OCPPStatus.Charging,
+    OCPPStatus.Available,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Charging]: [
+    OCPPStatus.SuspendedEV,
+    OCPPStatus.SuspendedEVSE,
+    OCPPStatus.Finishing,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.SuspendedEV]: [
+    OCPPStatus.Charging,
+    OCPPStatus.SuspendedEVSE,
+    OCPPStatus.Finishing,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.SuspendedEVSE]: [
+    OCPPStatus.Charging,
+    OCPPStatus.SuspendedEV,
+    OCPPStatus.Finishing,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Finishing]: [
+    OCPPStatus.Available,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Reserved]: [
+    OCPPStatus.Preparing,
+    OCPPStatus.Available,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Unavailable]: [OCPPStatus.Available, OCPPStatus.Faulted],
+  [OCPPStatus.Faulted]: [OCPPStatus.Available, OCPPStatus.Unavailable],
+};
+
+/** Per-target tint so the buttons hint at what the destination means. */
+const STATUS_BUTTON_STYLE: Readonly<Record<OCPPStatus, string>> = {
+  [OCPPStatus.Available]:
+    "border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60",
+  [OCPPStatus.Preparing]:
+    "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900/60",
+  [OCPPStatus.Charging]:
+    "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/60",
+  [OCPPStatus.SuspendedEV]:
+    "border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60",
+  [OCPPStatus.SuspendedEVSE]:
+    "border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/60",
+  [OCPPStatus.Finishing]:
+    "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60",
+  [OCPPStatus.Reserved]:
+    "border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/60",
+  [OCPPStatus.Unavailable]:
+    "border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700",
+  [OCPPStatus.Faulted]:
+    "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/60",
+};
 
 interface ConnectorSidePanelProps {
   cpId: string;
@@ -42,8 +133,16 @@ interface ConnectorSidePanelProps {
   onClose: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
   panelWidth: number;
   onWidthChange: (width: number) => void;
+  /** Override which tab is shown when the panel opens or when this value
+   *  changes (e.g. coming from the Connector's "Scenario Editor" button). */
+  initialTab?: TabType;
+  /** Increments when the caller wants to force the tab to re-apply
+   *  `initialTab` even if the panel was already open. */
+  tabResetNonce?: number;
 }
 
 // Helper component for status color
@@ -104,8 +203,6 @@ const CollapsedPanelView: React.FC<{
   );
 };
 
-type TabType = "details" | "scenario" | "stateTransition";
-
 // Full Panel Content with Tabs
 const FullPanelContent: React.FC<{
   cpId: string;
@@ -115,6 +212,10 @@ const FullPanelContent: React.FC<{
   onClose: () => void;
   onResizeStart: (e: React.MouseEvent) => void;
   isResizing: boolean;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  initialTab?: TabType;
+  tabResetNonce?: number;
 }> = ({
   cpId,
   connectorId,
@@ -123,6 +224,10 @@ const FullPanelContent: React.FC<{
   onClose,
   onResizeStart,
   isResizing,
+  isFullscreen,
+  onToggleFullscreen,
+  initialTab,
+  tabResetNonce,
 }) => {
   const { chargePointService, mode } = useDataContext();
   const localCp: ChargePoint | null =
@@ -130,7 +235,23 @@ const FullPanelContent: React.FC<{
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
       : null;
 
-  const [activeTab, setActiveTab] = useState<TabType>("details");
+  // Which view the right pane shows. Defaults to the Scenario editor; the
+  // caller can force State Transition through initialTab.
+  const [activeTab, setActiveTab] = useState<TabType>(
+    initialTab === "stateTransition" ? "stateTransition" : "scenario",
+  );
+  // When the caller bumps tabResetNonce (or changes initialTab), jump back to
+  // the requested tab. Lets the parent reopen the panel on a specific view.
+  useEffect(() => {
+    if (!initialTab) return;
+    if (initialTab === "stateTransition") {
+      setActiveTab("stateTransition");
+    } else {
+      // Legacy "details" / "scenario" both land on the scenario editor now.
+      setActiveTab("scenario");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab, tabResetNonce]);
   const {
     status: connectorStatus,
     availability,
@@ -140,10 +261,9 @@ const FullPanelContent: React.FC<{
     transactionStartTime: transactionStartDate,
     transactionTagId,
     autoMeterValueConfig,
-    autoResetToAvailable,
-    evSettings,
     chargingProfile,
     chargingProfiles,
+    evSettings,
   } = useConnectorView(cpId, connectorId);
 
   const { scenarios } = useScenarios(cpId, connectorId);
@@ -153,6 +273,78 @@ const FullPanelContent: React.FC<{
   const [tagIdInput, setTagIdInput] = useState<string>(idTag);
   const [duration, setDuration] = useState<string>("00:00:00");
   const [transactionStartTime, setTransactionStartTime] = useState<string>("");
+  const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
+  // When ON, moving the SoC slider also writes a derived meter value, and
+  // bumping the meter value writes back a derived SoC, using the EV
+  // battery capacity and `initialSoc` from evSettings. Persisted globally
+  // so the toggle survives reloads. Disabled automatically when capacity
+  // is 0 (would divide by zero).
+  const [autoSyncSocMeter, setAutoSyncSocMeter] = useState<boolean>(() =>
+    loadSocMeterSyncEnabled(),
+  );
+  const handleToggleAutoSync = useCallback(() => {
+    setAutoSyncSocMeter((prev) => {
+      const next = !prev;
+      saveSocMeterSyncEnabled(next);
+      return next;
+    });
+  }, []);
+
+  const capacityKwh = evSettings.batteryCapacityKwh;
+  const initialSoc = evSettings.initialSoc ?? 0;
+  const canAutoSync = autoSyncSocMeter && capacityKwh > 0;
+
+  const meterFromSoc = useCallback(
+    (soc: number): number => {
+      if (capacityKwh <= 0) return 0;
+      return Math.max(
+        0,
+        Math.round(((soc - initialSoc) / 100) * capacityKwh * 1000),
+      );
+    },
+    [capacityKwh, initialSoc],
+  );
+  const socFromMeter = useCallback(
+    (meterWh: number): number => {
+      if (capacityKwh <= 0) return 0;
+      const computed = initialSoc + (meterWh / 1000 / capacityKwh) * 100;
+      return Math.min(100, Math.max(0, computed));
+    },
+    [capacityKwh, initialSoc],
+  );
+  // Width of the left "Connector controls" column inside the Connector tab.
+  // The user can drag the gutter between the controls and the Scenario
+  // canvas to give more room to whichever side they're focused on.
+  const [connectorColPx, setConnectorColPx] = useState<number>(280);
+  const [isConnectorColResizing, setIsConnectorColResizing] = useState(false);
+  const connectorColResizeStartX = useRef(0);
+  const connectorColResizeStartWidth = useRef(280);
+
+  const handleConnectorColResizeStart = (e: React.MouseEvent) => {
+    setIsConnectorColResizing(true);
+    connectorColResizeStartX.current = e.clientX;
+    connectorColResizeStartWidth.current = connectorColPx;
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isConnectorColResizing) return;
+    const onMove = (e: MouseEvent) => {
+      const delta = e.clientX - connectorColResizeStartX.current;
+      const next = Math.min(
+        640,
+        Math.max(200, connectorColResizeStartWidth.current + delta),
+      );
+      setConnectorColPx(next);
+    };
+    const onUp = () => setIsConnectorColResizing(false);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isConnectorColResizing]);
   const profilesToDisplay =
     chargingProfiles.length > 0
       ? chargingProfiles
@@ -258,8 +450,12 @@ const FullPanelContent: React.FC<{
     };
   }, [connector, localCp, connectorId]);
 
-  // Load scenarios
+  // Load scenarios from localStorage (local mode). Remote mode is hydrated
+  // by the dedicated effect below — skip this path so the localStorage
+  // default doesn't clobber the server-loaded template.
   useEffect(() => {
+    if (mode !== "local") return;
+
     if (scenarios.length > 0) {
       setScenario((current) => {
         const match = current
@@ -278,7 +474,67 @@ const FullPanelContent: React.FC<{
     if (manager) {
       manager.loadScenarios(scenarios);
     }
-  }, [scenarios]);
+  }, [mode, scenarios]);
+
+  // Remote mode: hydrate the editor with scenarios the daemon has loaded
+  // (e.g. via --scenario-template-file). Refetch on scenario lifecycle
+  // events so newly loaded templates appear without a manual reload.
+  useEffect(() => {
+    if (mode !== "remote") return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await chargePointService.listScenarios(cpId, connectorId);
+        if (cancelled || list.length === 0) return;
+        const defs = await Promise.all(
+          list.map((item) =>
+            chargePointService
+              .getScenario(cpId, connectorId, item.scenarioId)
+              .catch(() => null),
+          ),
+        );
+        if (cancelled) return;
+        const valid = defs.filter((d): d is ScenarioDefinition => d !== null);
+        if (valid.length === 0) return;
+        setScenario((current) => {
+          if (current) {
+            const match = valid.find((s) => s.id === current.id);
+            if (match) return match;
+          }
+          // Prefer an active scenario, otherwise the first loaded one.
+          const activeItem = list.find((item) => item.active);
+          const preferred = activeItem
+            ? valid.find((d) => d.id === activeItem.scenarioId)
+            : null;
+          const next = preferred ?? valid[0];
+          scenarioRef.current = next;
+          return next;
+        });
+      } catch (err) {
+        if (!cancelled) {
+          console.warn(
+            `[ConnectorSidePanel] Failed to fetch remote scenarios for ${cpId}/${connectorId}`,
+            err,
+          );
+        }
+      }
+    };
+
+    void refresh();
+    const unsub = chargePointService.subscribe(cpId, (event) => {
+      if (
+        (event.type === "scenario-started" ||
+          event.type === "scenario-completed") &&
+        event.connectorId === connectorId
+      ) {
+        void refresh();
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [mode, cpId, connectorId, chargePointService]);
 
   // Handlers
   const handleStartTransaction = useCallback(() => {
@@ -293,56 +549,99 @@ const FullPanelContent: React.FC<{
     const nextValue = meterValueInput + 10;
     setMeterValueInput(nextValue);
     void chargePointService.setMeterValue(cpId, connectorId, nextValue);
-  }, [chargePointService, cpId, connectorId, meterValueInput]);
+    if (canAutoSync) {
+      void chargePointService.setConnectorSoc(
+        cpId,
+        connectorId,
+        socFromMeter(nextValue),
+      );
+    }
+  }, [
+    chargePointService,
+    cpId,
+    connectorId,
+    meterValueInput,
+    canAutoSync,
+    socFromMeter,
+  ]);
 
   const handleSendMeterValue = useCallback(() => {
     void chargePointService
       .setMeterValue(cpId, connectorId, meterValueInput)
       .then(() => chargePointService.sendMeterValue(cpId, connectorId));
-  }, [chargePointService, cpId, connectorId, meterValueInput]);
+    if (canAutoSync) {
+      void chargePointService.setConnectorSoc(
+        cpId,
+        connectorId,
+        socFromMeter(meterValueInput),
+      );
+    }
+  }, [
+    chargePointService,
+    cpId,
+    connectorId,
+    meterValueInput,
+    canAutoSync,
+    socFromMeter,
+  ]);
 
-  const handleToggleAutoMeterValue = useCallback(() => {
-    if (!autoMeterValueConfig) return;
-    void chargePointService.setAutoMeterValueConfig(cpId, connectorId, {
-      ...autoMeterValueConfig,
-      enabled: !autoMeterValueConfig.enabled,
-    });
-  }, [chargePointService, cpId, connectorId, autoMeterValueConfig]);
-
-  const handleToggleAutoResetToAvailable = useCallback(() => {
-    void chargePointService.setAutoResetToAvailable(
-      cpId,
-      connectorId,
-      !autoResetToAvailable,
-    );
-  }, [chargePointService, cpId, connectorId, autoResetToAvailable]);
-
-  const handleEVSettingsChange = useCallback(
-    (settings: EVSettings) => {
-      void chargePointService.setEVSettings(cpId, connectorId, settings);
+  // Sets SoC and, when auto-sync is enabled, mirrors a derived meter value
+  // (initialSoc + delta% × capacity). Passing `null` clears SoC; in that
+  // case we leave the meter alone since "no SoC sample" doesn't imply a
+  // meter reset.
+  const handleSetSoc = useCallback(
+    (next: number | null) => {
+      void chargePointService.setConnectorSoc(cpId, connectorId, next);
+      if (next !== null && canAutoSync) {
+        const derivedMeter = meterFromSoc(next);
+        setMeterValueInput(derivedMeter);
+        void chargePointService.setMeterValue(cpId, connectorId, derivedMeter);
+      }
     },
-    [chargePointService, cpId, connectorId],
+    [chargePointService, cpId, connectorId, canAutoSync, meterFromSoc],
+  );
+
+  // The Auto MeterValue curve editor still lives inside the scenario's
+  // MeterValue node (double-click → MeterValueCurveModal). The connector
+  // side keeps the saver so scenarios can persist a curve back to local
+  // storage when applicable.
+  const handleSaveAutoMeterValueConfig = useCallback(
+    (config: AutoMeterValueConfig) => {
+      void chargePointService.setAutoMeterValueConfig(
+        cpId,
+        connectorId,
+        config,
+      );
+      if (mode === "local") {
+        saveConnectorAutoMeterConfig(cpId, connectorId, config);
+      }
+    },
+    [chargePointService, cpId, connectorId, mode],
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;
 
   return (
     <div className="h-full flex flex-row bg-white dark:bg-gray-900">
-      {/* Resize Handle */}
-      <div
-        className={`w-2 bg-gray-200 dark:bg-gray-700 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-col-resize flex-shrink-0 transition-colors ${
-          isResizing ? "bg-blue-500 dark:bg-blue-400" : ""
-        }`}
-        onMouseDown={onResizeStart}
-      >
-        <div className="w-full h-full flex items-center justify-center">
-          <div className="w-0.5 h-12 bg-gray-400 dark:bg-gray-500 rounded-full" />
+      {/* Resize Handle — hidden in fullscreen since the panel covers 100vw. */}
+      {!isFullscreen && (
+        <div
+          className={`w-2 bg-gray-200 dark:bg-gray-700 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-col-resize flex-shrink-0 transition-colors ${
+            isResizing ? "bg-blue-500 dark:bg-blue-400" : ""
+          }`}
+          onMouseDown={onResizeStart}
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-0.5 h-12 bg-gray-400 dark:bg-gray-500 rounded-full" />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Tab Header */}
+        {/* Top action bar — collapse / spacer / fullscreen / close. The
+            connector controls always live on the left; right-pane view is
+            switched via the in-pane tab strip below. */}
         <div className="border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-gray-50 dark:bg-gray-800">
           <div className="flex items-center">
             <button
@@ -352,38 +651,23 @@ const FullPanelContent: React.FC<{
             >
               <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
             </button>
+            <div className="flex-1 px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-blue-500" />
+              Connector {connectorId}
+              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                · {cpId}
+              </span>
+            </div>
             <button
-              onClick={() => setActiveTab("details")}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-                activeTab === "details"
-                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
-              }`}
+              onClick={onToggleFullscreen}
+              className="p-3 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
             >
-              <Settings className="w-4 h-4" />
-              Details
-            </button>
-            <button
-              onClick={() => setActiveTab("scenario")}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-                activeTab === "scenario"
-                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              Scenario
-            </button>
-            <button
-              onClick={() => setActiveTab("stateTransition")}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-                activeTab === "stateTransition"
-                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
-              }`}
-            >
-              <GitBranch className="w-4 h-4" />
-              State
+              {isFullscreen ? (
+                <Minimize2 className="w-5 h-5" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
             </button>
             <button
               onClick={onClose}
@@ -395,10 +679,20 @@ const FullPanelContent: React.FC<{
           </div>
         </div>
 
-        {/* Tab Content */}
+        {/* Body — left column always shows connector controls, right
+            column switches between Scenario Editor and State Transition
+            via its own tab strip. */}
         <div className="flex-1 overflow-hidden">
-          {activeTab === "details" && (
-            <div className="h-full overflow-y-auto p-4 space-y-4">
+          <div
+            className={`h-full flex flex-row ${
+              isConnectorColResizing ? "select-none cursor-col-resize" : ""
+            }`}
+          >
+            {/* Left column: connector controls (resizable, scrollable). */}
+            <div
+              className="flex-shrink-0 overflow-y-auto p-3 space-y-3"
+              style={{ width: `${connectorColPx}px` }}
+            >
               {/* Header */}
               <div className="flex items-center justify-between">
                 <div>
@@ -411,48 +705,43 @@ const FullPanelContent: React.FC<{
                 </div>
               </div>
 
-              {/* Status Dashboard */}
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                <h3 className="text-sm font-semibold mb-3 text-gray-900 dark:text-white">
-                  Status Dashboard
-                </h3>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-white dark:bg-gray-700 rounded-lg p-3 text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Status
-                    </div>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <span
-                        className={`w-2 h-2 rounded-full ${getStatusColor(connectorStatus)}`}
-                      />
-                      <span className="text-sm font-bold text-gray-900 dark:text-white">
-                        {connectorStatus}
-                      </span>
-                    </div>
+              {/* Status strip — three compact pills. */}
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-gray-50 dark:bg-gray-800 rounded p-2">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Status
                   </div>
-                  <div className="bg-white dark:bg-gray-700 rounded-lg p-3 text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Meter
-                    </div>
-                    <div className="text-sm font-bold font-mono text-gray-900 dark:text-white">
-                      {liveMeterValue.toLocaleString()}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span
+                      className={`w-2 h-2 rounded-full ${getStatusColor(connectorStatus)}`}
+                    />
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {connectorStatus}
+                    </span>
+                  </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded p-2">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Meter
+                  </div>
+                  <div className="font-mono font-semibold text-gray-900 dark:text-white mt-0.5">
+                    {liveMeterValue.toLocaleString()}
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 ml-1">
                       Wh
-                    </div>
+                    </span>
                   </div>
-                  <div className="bg-white dark:bg-gray-700 rounded-lg p-3 text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Availability
-                    </div>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <span
-                        className={`w-2 h-2 rounded-full ${availability === "Operative" ? "bg-green-500" : "bg-red-500"}`}
-                      />
-                      <span className="text-sm font-bold text-gray-900 dark:text-white">
-                        {availability}
-                      </span>
-                    </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded p-2">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Availability
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span
+                      className={`w-2 h-2 rounded-full ${availability === "Operative" ? "bg-green-500" : "bg-red-500"}`}
+                    />
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {availability}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -504,173 +793,193 @@ const FullPanelContent: React.FC<{
                 </div>
               )}
 
-              {/* EV Settings */}
-              <EVSettingsPanel
-                settings={evSettings}
-                currentSoc={liveSoc}
-                meterValue={liveMeterValue}
-                isCharging={isCharging}
-                onChange={handleEVSettingsChange}
-              />
-
-              {/* Charging Profile */}
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                <h3 className="text-sm font-semibold mb-3 text-gray-900 dark:text-white flex items-center gap-2">
-                  <Gauge className="w-4 h-4 text-indigo-500" />
-                  Charging Profile
-                </h3>
-                {profilesToDisplay.length > 0 ? (
-                  <div className="space-y-4">
-                    {profilesToDisplay.map((profile) => {
-                      const isPaused = profile.chargingSchedulePeriods.every(
-                        (p) => p.limit === 0,
-                      );
-                      const isActive =
-                        activeProfileId === profile.chargingProfileId;
-                      return (
-                        <div key={profile.chargingProfileId}>
-                          <div
-                            className={`rounded-lg p-3 mb-3 ${
-                              isPaused
-                                ? "bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
-                                : "bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <span
-                                className={`text-xs font-bold ${
-                                  isPaused
-                                    ? "text-orange-700 dark:text-orange-300"
-                                    : "text-indigo-700 dark:text-indigo-300"
-                                }`}
-                              >
-                                {isPaused ? "⏸ Paused" : "⚡ Active"}
-                                {isActive ? " · Current" : " · Stored"}
-                              </span>
-                              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                #{profile.chargingProfileId}
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                              <span className="text-gray-500 dark:text-gray-400">
-                                Purpose
-                              </span>
-                              <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
-                                {profile.chargingProfilePurpose}
-                              </span>
-                              <span className="text-gray-500 dark:text-gray-400">
-                                Kind
-                              </span>
-                              <span className="font-medium text-gray-800 dark:text-gray-200">
-                                {profile.chargingProfileKind}
-                              </span>
-                              <span className="text-gray-500 dark:text-gray-400">
-                                Stack Level
-                              </span>
-                              <span className="font-medium text-gray-800 dark:text-gray-200">
-                                {profile.stackLevel}
-                              </span>
-                              <span className="text-gray-500 dark:text-gray-400">
-                                Unit
-                              </span>
-                              <span className="font-medium text-gray-800 dark:text-gray-200">
-                                {profile.chargingRateUnit}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                            Schedule Periods
-                          </div>
-                          <div className="space-y-1">
-                            {profile.chargingSchedulePeriods.map(
-                              (period, idx) => (
-                                <div
-                                  key={idx}
-                                  className="flex items-center justify-between bg-white dark:bg-gray-700 rounded px-2.5 py-1.5 text-xs"
-                                >
-                                  <span className="text-gray-500 dark:text-gray-400">
-                                    @{period.startPeriod}s
-                                  </span>
-                                  <span
-                                    className={`font-bold font-mono ${
-                                      period.limit === 0
-                                        ? "text-orange-600 dark:text-orange-400"
-                                        : "text-indigo-600 dark:text-indigo-400"
-                                    }`}
-                                  >
-                                    {period.limit} {profile.chargingRateUnit}
-                                  </span>
-                                  {period.numberPhases != null && (
-                                    <span className="text-gray-400 dark:text-gray-500">
-                                      {period.numberPhases}φ
-                                    </span>
-                                  )}
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-                    No charging profiles
-                  </div>
-                )}
+              {/* Transaction — full-width section so the Tag input and
+                  Start/Stop buttons have room to breathe. */}
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Transaction
+                </h4>
+                <input
+                  type="text"
+                  value={tagIdInput}
+                  onChange={(e) => setTagIdInput(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  placeholder="ID Tag"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={handleStartTransaction}
+                    disabled={isCharging}
+                    className="text-sm py-2 px-3 font-medium bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Start
+                  </button>
+                  <button
+                    onClick={handleStopTransaction}
+                    disabled={!isCharging}
+                    className="text-sm py-2 px-3 font-medium bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Stop
+                  </button>
+                </div>
               </div>
 
-              {/* Controls */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                  <h4 className="text-xs font-semibold mb-2 text-gray-500 dark:text-gray-400">
-                    Transaction
+              {/* Battery — unified card combining Live SoC (% — battery
+                  charge level reported in MeterValues SoC samples) and
+                  Meter Value (Wh — cumulative energy counter sent in
+                  MeterValues). They share this card because both feed into
+                  the same OCPP MeterValues message, just as different
+                  measurands. Vertical bar fills bottom-up with SoC; the
+                  target-SoC marker (from evSettings) crosses the bar. */}
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                    <span aria-hidden>🔋</span> Battery
                   </h4>
-                  <input
-                    type="text"
-                    value={tagIdInput}
-                    onChange={(e) => setTagIdInput(e.target.value)}
-                    className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 mb-2"
-                    placeholder="ID Tag"
-                  />
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={handleStartTransaction}
-                      disabled={isCharging}
-                      className="text-xs py-1.5 px-2 bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50"
-                    >
-                      Start
-                    </button>
-                    <button
-                      onClick={handleStopTransaction}
-                      disabled={!isCharging}
-                      className="text-xs py-1.5 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50"
-                    >
-                      Stop
-                    </button>
+                  <label
+                    className={`flex items-center gap-1 text-[10px] cursor-pointer select-none ${
+                      capacityKwh > 0
+                        ? "text-gray-600 dark:text-gray-300"
+                        : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                    }`}
+                    title={
+                      capacityKwh > 0
+                        ? "Keep SoC % and Meter Wh in sync using the EV battery capacity"
+                        : "Set evSettings.batteryCapacityKwh > 0 to enable sync"
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoSyncSocMeter && capacityKwh > 0}
+                      onChange={handleToggleAutoSync}
+                      disabled={capacityKwh <= 0}
+                      className="w-3 h-3"
+                    />
+                    Sync SoC ↔ Meter
+                  </label>
+                </div>
+                <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {liveSoc !== null
+                    ? `${liveSoc.toFixed(1)}%`
+                    : "SoC not reported"}
+                  {" · "}
+                  {(liveMeterValue / 1000).toFixed(2)} kWh
+                  {` · target ${evSettings.targetSoc}%`}
+                </div>
+
+                <div className="flex gap-3 items-stretch">
+                  {/* Vertical battery bar (fills bottom-up to SoC%). */}
+                  <div className="relative w-10 flex-shrink-0 rounded-md bg-gray-200 dark:bg-gray-700 overflow-hidden border border-gray-300 dark:border-gray-600">
+                    {/* fill */}
+                    <div
+                      className={`absolute left-0 right-0 bottom-0 transition-[height] duration-200 ${
+                        isCharging
+                          ? "bg-gradient-to-t from-green-500 to-emerald-400"
+                          : "bg-gradient-to-t from-blue-500 to-sky-400"
+                      }`}
+                      style={{ height: `${Math.round(liveSoc ?? 0)}%` }}
+                      aria-hidden
+                    />
+                    {/* target marker */}
+                    {evSettings.targetSoc != null && (
+                      <div
+                        className="absolute left-0 right-0 border-t-2 border-dashed border-amber-500"
+                        style={{
+                          bottom: `${evSettings.targetSoc}%`,
+                        }}
+                        title={`Target ${evSettings.targetSoc}%`}
+                        aria-hidden
+                      />
+                    )}
+                    {/* big SoC % overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[11px] font-bold font-mono text-gray-900 dark:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.6)] dark:drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
+                        {liveSoc !== null ? `${Math.round(liveSoc)}%` : "—"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Right side controls */}
+                  <div className="flex-1 min-w-0 space-y-2">
+                    {/* SoC slider + nudge buttons */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+                        <span>SoC</span>
+                        <span>%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Math.round(liveSoc ?? 0)}
+                        onChange={(e) =>
+                          handleSetSoc(parseInt(e.target.value, 10))
+                        }
+                        className="w-full"
+                      />
+                      <div className="grid grid-cols-5 gap-1">
+                        {[-10, -1, +1, +10].map((delta) => (
+                          <button
+                            key={delta}
+                            type="button"
+                            onClick={() => {
+                              const base = liveSoc ?? 0;
+                              const next = Math.min(
+                                100,
+                                Math.max(0, base + delta),
+                              );
+                              handleSetSoc(next);
+                            }}
+                            className="px-1 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                          >
+                            {delta > 0 ? `+${delta}` : delta}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => handleSetSoc(null)}
+                          title="Clear SoC (next MeterValue omits the SoC sample)"
+                          className="px-1 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                  <h4 className="text-xs font-semibold mb-2 text-gray-500 dark:text-gray-400">
-                    Meter Value
-                  </h4>
-                  <input
-                    type="number"
-                    value={meterValueInput}
-                    onChange={(e) => setMeterValueInput(Number(e.target.value))}
-                    className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono mb-2"
-                  />
-                  <div className="grid grid-cols-2 gap-1.5">
+                {/* Meter (Wh) — the cumulative energy counter. Sits inside
+                    the Battery card because it's the other half of the same
+                    MeterValues message. */}
+                <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+                    <span>Meter (energy counter)</span>
+                    <span>Wh</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={meterValueInput}
+                      onChange={(e) =>
+                        setMeterValueInput(Number(e.target.value))
+                      }
+                      className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono"
+                    />
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      Wh
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={handleIncreaseMeterValue}
-                      className="text-xs py-1.5 px-2 bg-blue-500 hover:bg-blue-600 text-white rounded"
+                      className="text-sm py-2 px-3 font-medium bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
                     >
                       +10 Wh
                     </button>
                     <button
                       onClick={handleSendMeterValue}
-                      className="text-xs py-1.5 px-2 bg-gray-500 hover:bg-gray-600 text-white rounded"
+                      className="text-sm py-2 px-3 font-medium bg-gray-500 hover:bg-gray-600 text-white rounded transition-colors"
                     >
                       Send
                     </button>
@@ -678,154 +987,301 @@ const FullPanelContent: React.FC<{
                 </div>
               </div>
 
-              {/* Status Control */}
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                <h4 className="text-xs font-semibold mb-2 text-gray-500 dark:text-gray-400">
-                  Status Control
-                </h4>
-                <select
-                  className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      void chargePointService.sendStatusNotification(
-                        cpId,
-                        connectorId,
-                        e.target.value as OCPPStatus,
-                      );
-                      e.target.value = "";
-                    }
-                  }}
-                >
-                  <option value="">Change Status...</option>
-                  <option value={OCPPStatus.Available}>Available</option>
-                  <option value={OCPPStatus.Preparing}>Preparing</option>
-                  <option value={OCPPStatus.Charging}>Charging</option>
-                  <option value={OCPPStatus.SuspendedEVSE}>
-                    SuspendedEVSE
-                  </option>
-                  <option value={OCPPStatus.SuspendedEV}>SuspendedEV</option>
-                  <option value={OCPPStatus.Finishing}>Finishing</option>
-                  <option value={OCPPStatus.Reserved}>Reserved</option>
-                  <option value={OCPPStatus.Unavailable}>Unavailable</option>
-                  <option value={OCPPStatus.Faulted}>Faulted</option>
-                </select>
+              {/* Status Control — only the next states reachable from the
+                  current status via the OCPP 1.6 connector state diagram
+                  (mirrors src/cp/application/state/machines/ConnectorStateMachine.ts).
+                  This stops users from sending invalid transitions like
+                  Available → Charging by accident. */}
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Status Control
+                  </h4>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                    next states
+                  </span>
+                </div>
+                {(() => {
+                  const allowedNext =
+                    ALLOWED_STATUS_TRANSITIONS[connectorStatus] ?? [];
+                  if (allowedNext.length === 0) {
+                    return (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 italic">
+                        No transitions defined from this state.
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {allowedNext.map((target) => (
+                        <button
+                          key={target}
+                          type="button"
+                          onClick={() =>
+                            void chargePointService.sendStatusNotification(
+                              cpId,
+                              connectorId,
+                              target,
+                            )
+                          }
+                          className={`px-2 py-1.5 text-xs font-medium rounded border transition-colors ${STATUS_BUTTON_STYLE[target]}`}
+                        >
+                          → {target}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
-              {/* Settings */}
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                <h4 className="text-xs font-semibold mb-3 text-gray-500 dark:text-gray-400">
-                  Settings
-                </h4>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between py-1">
-                    <span className="text-xs text-gray-600 dark:text-gray-400">
-                      Auto Available on Stop
-                    </span>
-                    <button
-                      onClick={handleToggleAutoResetToAvailable}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                        autoResetToAvailable
-                          ? "bg-green-500"
-                          : "bg-gray-300 dark:bg-gray-600"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                          autoResetToAvailable
-                            ? "translate-x-5"
-                            : "translate-x-1"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  {autoMeterValueConfig && (
-                    <div className="flex items-center justify-between py-1 border-t border-gray-200 dark:border-gray-700">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-600 dark:text-gray-400">
-                          Auto MeterValue
-                        </span>
-                        {autoMeterValueConfig.enabled && (
-                          <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                            Active
-                          </span>
-                        )}
+              {/* Charging Profile (collapsible, default closed) */}
+              <details className="bg-gray-50 dark:bg-gray-800 rounded-lg group">
+                <summary className="cursor-pointer p-3 text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2 select-none">
+                  <Gauge className="w-4 h-4 text-indigo-500" />
+                  Charging Profile
+                  <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                    {profilesToDisplay.length}
+                  </span>
+                </summary>
+                <div className="px-4 pb-4">
+                  {profilesToDisplay.length > 0 ? (
+                    <div className="space-y-4">
+                      {profilesToDisplay.map((profile) => {
+                        const isPaused = profile.chargingSchedulePeriods.every(
+                          (p) => p.limit === 0,
+                        );
+                        const isActive =
+                          activeProfileId === profile.chargingProfileId;
+                        return (
+                          <div key={profile.chargingProfileId}>
+                            <div
+                              className={`rounded-lg p-3 mb-3 ${
+                                isPaused
+                                  ? "bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
+                                  : "bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <span
+                                  className={`text-xs font-bold ${
+                                    isPaused
+                                      ? "text-orange-700 dark:text-orange-300"
+                                      : "text-indigo-700 dark:text-indigo-300"
+                                  }`}
+                                >
+                                  {isPaused ? "⏸ Paused" : "⚡ Active"}
+                                  {isActive ? " · Current" : " · Stored"}
+                                </span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                  #{profile.chargingProfileId}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  Purpose
+                                </span>
+                                <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
+                                  {profile.chargingProfilePurpose}
+                                </span>
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  Kind
+                                </span>
+                                <span className="font-medium text-gray-800 dark:text-gray-200">
+                                  {profile.chargingProfileKind}
+                                </span>
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  Stack Level
+                                </span>
+                                <span className="font-medium text-gray-800 dark:text-gray-200">
+                                  {profile.stackLevel}
+                                </span>
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  Unit
+                                </span>
+                                <span className="font-medium text-gray-800 dark:text-gray-200">
+                                  {profile.chargingRateUnit}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                              Schedule Periods
+                            </div>
+                            <div className="space-y-1">
+                              {profile.chargingSchedulePeriods.map(
+                                (period, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between bg-white dark:bg-gray-700 rounded px-2.5 py-1.5 text-xs"
+                                  >
+                                    <span className="text-gray-500 dark:text-gray-400">
+                                      @{period.startPeriod}s
+                                    </span>
+                                    <span
+                                      className={`font-bold font-mono ${
+                                        period.limit === 0
+                                          ? "text-orange-600 dark:text-orange-400"
+                                          : "text-indigo-600 dark:text-indigo-400"
+                                      }`}
+                                    >
+                                      {period.limit} {profile.chargingRateUnit}
+                                    </span>
+                                    {period.numberPhases != null && (
+                                      <span className="text-gray-400 dark:text-gray-500">
+                                        {period.numberPhases}φ
+                                      </span>
+                                    )}
+                                  </div>
+                                ),
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
+                      No charging profiles
+                    </div>
+                  )}
+                </div>
+              </details>
+            </div>
+            {/* Vertical resize handle between controls and canvas. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={handleConnectorColResizeStart}
+              className={`w-1 cursor-col-resize flex-shrink-0 transition-colors border-r border-gray-200 dark:border-gray-700 hover:bg-blue-500 dark:hover:bg-blue-400 ${
+                isConnectorColResizing
+                  ? "bg-blue-500 dark:bg-blue-400"
+                  : "bg-transparent"
+              }`}
+              title="Drag to resize"
+            />
+            {/* Right column: tab strip switching between the scenario
+                  editor and the OCPP state-transition diagram. */}
+            <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+              <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center">
+                <button
+                  onClick={() => setActiveTab("scenario")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 ${
+                    activeTab === "scenario"
+                      ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
+                      : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  Scenario Editor
+                </button>
+                <button
+                  onClick={() => setActiveTab("stateTransition")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 ${
+                    activeTab === "stateTransition"
+                      ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
+                      : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  <GitBranch className="w-4 h-4" />
+                  State Transition
+                </button>
+              </div>
+              {/* Both views stay mounted; only their visibility changes.
+                    Unmounting ScenarioEditor when the user peeks at State
+                    Transition would drop its in-component auto-start guard
+                    (a useRef) and the scenario would auto-start again on
+                    re-mount.
+
+                    `hidden` (display: none) is used instead of `invisible`
+                    because React Flow's internal nodes set
+                    `visibility: visible` explicitly, which beats parent
+                    `visibility: hidden` via CSS specificity. `display:
+                    none` collapses the inactive view's subtree entirely
+                    without unmounting the React component. */}
+              <div className="flex-1 min-h-0 overflow-hidden relative">
+                <div
+                  className={`absolute inset-0 ${
+                    activeTab === "scenario" ? "" : "hidden"
+                  }`}
+                  aria-hidden={activeTab !== "scenario"}
+                >
+                  <Suspense
+                    fallback={
+                      <div className="h-full flex items-center justify-center">
+                        <div className="text-muted">
+                          Loading Scenario Editor...
+                        </div>
                       </div>
-                      <button
-                        onClick={handleToggleAutoMeterValue}
-                        className={`text-xs px-2 py-1 rounded ${
-                          autoMeterValueConfig.enabled
-                            ? "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300"
-                            : "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300"
-                        }`}
-                      >
-                        {autoMeterValueConfig.enabled ? "Disable" : "Enable"}
-                      </button>
+                    }
+                  >
+                    <ScenarioEditor
+                      cpId={cpId}
+                      connectorId={connectorId}
+                      scenario={scenario}
+                      scenarioId={scenario?.id}
+                      executionContext={scenarioExecutionContext}
+                      nodeProgress={nodeProgress}
+                      onClose={() => setActiveTab("scenario")}
+                    />
+                  </Suspense>
+                </div>
+                <div
+                  className={`absolute inset-0 ${
+                    activeTab === "stateTransition" ? "" : "hidden"
+                  }`}
+                  aria-hidden={activeTab !== "stateTransition"}
+                >
+                  {connector && localCp ? (
+                    <div className="h-full flex flex-col">
+                      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          OCPP 1.6J state machine for Connector {connectorId}
+                        </p>
+                      </div>
+                      <div className="flex-1 min-h-0">
+                        <Suspense
+                          fallback={
+                            <div className="h-full flex items-center justify-center">
+                              <div className="text-muted">
+                                Loading State Diagram...
+                              </div>
+                            </div>
+                          }
+                        >
+                          <StateTransitionViewer
+                            connector={connector}
+                            chargePoint={localCp}
+                          />
+                        </Suspense>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-muted">
+                      State transition diagram is available in local mode only.
                     </div>
                   )}
                 </div>
               </div>
             </div>
-          )}
-
-          {/* rendering-conditional-render + bundle-dynamic-imports */}
-          {activeTab === "scenario" ? (
-            <Suspense
-              fallback={
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-muted">Loading Scenario Editor...</div>
-                </div>
-              }
-            >
-              <ScenarioEditor
-                cpId={cpId}
-                connectorId={connectorId}
-                scenario={scenario}
-                scenarioId={scenario?.id}
-                executionContext={scenarioExecutionContext}
-                nodeProgress={nodeProgress}
-                onClose={() => setActiveTab("details")}
-              />
-            </Suspense>
-          ) : null}
-
-          {activeTab === "stateTransition" ? (
-            connector && localCp ? (
-              <div className="h-full flex flex-col">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                    State Transition Diagram
-                  </h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    OCPP 1.6J Connector {connectorId}
-                  </p>
-                </div>
-                <div className="flex-1">
-                  <Suspense
-                    fallback={
-                      <div className="h-full flex items-center justify-center">
-                        <div className="text-muted">
-                          Loading State Diagram...
-                        </div>
-                      </div>
-                    }
-                  >
-                    <StateTransitionViewer
-                      connector={connector}
-                      chargePoint={localCp}
-                    />
-                  </Suspense>
-                </div>
-              </div>
-            ) : (
-              <div className="h-full flex items-center justify-center text-muted">
-                State transition diagram is available in local mode only.
-              </div>
-            )
-          ) : null}
+          </div>
         </div>
       </div>
+
+      {isCurveModalOpen && autoMeterValueConfig ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+              <div className="text-white">Loading...</div>
+            </div>
+          }
+        >
+          <MeterValueCurveModal
+            isOpen={isCurveModalOpen}
+            onClose={() => setIsCurveModalOpen(false)}
+            initialConfig={autoMeterValueConfig}
+            onSave={handleSaveAutoMeterValueConfig}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 };
@@ -837,8 +1293,12 @@ export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
   onClose,
   isCollapsed,
   onToggleCollapse,
+  isFullscreen,
+  onToggleFullscreen,
   panelWidth,
   onWidthChange,
+  initialTab,
+  tabResetNonce,
 }) => {
   const { status, soc } = useConnectorView(cpId, connectorId);
   const [isResizing, setIsResizing] = useState(false);
@@ -904,6 +1364,10 @@ export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
       onClose={onClose}
       onResizeStart={handleResizeStart}
       isResizing={isResizing}
+      isFullscreen={isFullscreen}
+      onToggleFullscreen={onToggleFullscreen}
+      initialTab={initialTab}
+      tabResetNonce={tabResetNonce}
     />
   );
 };

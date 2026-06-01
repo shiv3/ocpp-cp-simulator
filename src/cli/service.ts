@@ -366,6 +366,16 @@ export class CLIChargePointService {
     connector.mode = mode;
   }
 
+  setConnectorSoc(connectorId: number, soc: number | null): void {
+    const connector = this.requireConnector(connectorId);
+    if (soc !== null) {
+      if (!Number.isFinite(soc) || soc < 0 || soc > 100) {
+        throw new Error(`SoC must be between 0 and 100 (got ${soc})`);
+      }
+    }
+    connector.soc = soc;
+  }
+
   getChargingProfiles(
     connectorId: number,
   ): ReadonlyArray<ActiveChargingProfile> {
@@ -443,11 +453,7 @@ export class CLIChargePointService {
     return result;
   }
 
-  runScenario(
-    connectorId: number,
-    scenarioId: string,
-    mode: import("../cp/application/scenario/ScenarioTypes").ScenarioExecutionMode = "oneshot",
-  ): void {
+  runScenario(connectorId: number, scenarioId: string): void {
     const entry = this._scenarios.get(scenarioId);
     if (!entry) {
       throw new Error(`Scenario ${scenarioId} not found`);
@@ -498,7 +504,7 @@ export class CLIChargePointService {
 
     this.emit({ event: "scenario_started", data: { connectorId, scenarioId } });
 
-    executor.start(mode).finally(() => {
+    executor.start().finally(() => {
       this._executors.delete(scenarioId);
     });
   }

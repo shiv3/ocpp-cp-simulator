@@ -1,10 +1,56 @@
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
+import * as path from "path";
 import { handleJsonCommand } from "../jsonMode";
 import { toJsonResponse, toJsonEvent } from "../output";
 import type { JsonCommand, ChargePointInitOptions } from "../types";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
+
+/**
+ * Serve files out of a directory as a 404 fallback for the API router.
+ * SPA-friendly: requests with no file extension (`/`, `/settings`, ...)
+ * that don't match a real file fall back to `index.html` so the React
+ * router can take over.
+ *
+ * Returns null when there's no match — the caller emits the 404.
+ */
+async function serveStatic(
+  req: Request,
+  staticDir: string,
+): Promise<Response | null> {
+  if (req.method !== "GET" && req.method !== "HEAD") return null;
+
+  const url = new URL(req.url);
+  let pathname = decodeURIComponent(url.pathname);
+  pathname = pathname.replace(/^\/+/, "");
+  // Reject traversal attempts.
+  if (pathname.split("/").some((seg) => seg === "..")) return null;
+  if (pathname === "") pathname = "index.html";
+
+  const absoluteRoot = path.resolve(staticDir);
+  const resolved = path.resolve(absoluteRoot, pathname);
+  // Belt-and-braces: even if a path slips past the segment check, ensure
+  // the resolved path stays under the static root.
+  if (
+    resolved !== absoluteRoot &&
+    !resolved.startsWith(absoluteRoot + path.sep)
+  ) {
+    return null;
+  }
+
+  let file = Bun.file(resolved);
+  if (!(await file.exists())) {
+    // SPA fallback: only for "looks like a page" requests (no extension on
+    // the last path segment). Asset requests for missing files should
+    // honestly 404 so the browser doesn't render HTML for a JS bundle.
+    const last = pathname.split("/").pop() ?? "";
+    if (last.includes(".")) return null;
+    file = Bun.file(path.join(absoluteRoot, "index.html"));
+    if (!(await file.exists())) return null;
+  }
+  return new Response(file);
+}
 
 interface SocketData {
   scope: string;
@@ -73,9 +119,12 @@ export function createHttpHandlers(deps: {
   bus: EventBus;
   lifecycle: Lifecycle;
   cors?: CorsPolicy;
+  /** Absolute path of a directory served as a 404 fallback (SPA aware). */
+  staticDir?: string | null;
 }): HttpHandlers {
   const { registry, bus, lifecycle } = deps;
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
+  const staticDir = deps.staticDir ?? null;
 
   return {
     fetch(req, server) {
@@ -296,6 +345,14 @@ export function createHttpHandlers(deps: {
         );
     }
 
+    // Static file fallback (SPA aware). Disabled when --serve-static is
+    // not configured. Note: dispatch can return a Promise, so awaiting
+    // here is fine.
+    if (staticDir) {
+      return serveStatic(req, staticDir).then(
+        (res) => res ?? new Response("not found", { status: 404 }),
+      );
+    }
     return new Response("not found", { status: 404 });
   }
 }

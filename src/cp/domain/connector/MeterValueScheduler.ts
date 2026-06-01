@@ -66,7 +66,7 @@ export class MeterValueScheduler {
 
     const intervalMs = Math.max(1000, strategy.intervalSeconds * 1000);
     this.logger?.info?.(
-      `[MeterValueScheduler] Starting increment strategy for connector ${this.connectorId} interval=${intervalMs}ms increment=${strategy.incrementValue} maxTime=${strategy.maxTimeSeconds || 'unlimited'} maxValue=${strategy.maxValue || 'unlimited'}`,
+      `[MeterValueScheduler] Starting increment strategy for connector ${this.connectorId} interval=${intervalMs}ms increment=${strategy.incrementValue} maxTime=${strategy.maxTimeSeconds || "unlimited"} maxValue=${strategy.maxValue || "unlimited"}`,
     );
 
     this.startTimestamp = Date.now();
@@ -75,9 +75,15 @@ export class MeterValueScheduler {
     }, intervalMs);
   }
 
-  private tickIncrement(strategy: Extract<MeterValueStrategy, { kind: "increment" }>): void {
+  private tickIncrement(
+    strategy: Extract<MeterValueStrategy, { kind: "increment" }>,
+  ): void {
     // Check max time
-    if (strategy.maxTimeSeconds && strategy.maxTimeSeconds > 0 && this.startTimestamp) {
+    if (
+      strategy.maxTimeSeconds &&
+      strategy.maxTimeSeconds > 0 &&
+      this.startTimestamp
+    ) {
       const elapsedSeconds = (Date.now() - this.startTimestamp) / 1000;
       if (elapsedSeconds >= strategy.maxTimeSeconds) {
         this.logger?.info?.(
@@ -91,7 +97,11 @@ export class MeterValueScheduler {
     const current = this.callbacks.getCurrentValue();
 
     // Check max value before incrementing
-    if (strategy.maxValue && strategy.maxValue > 0 && current >= strategy.maxValue) {
+    if (
+      strategy.maxValue &&
+      strategy.maxValue > 0 &&
+      current >= strategy.maxValue
+    ) {
       this.logger?.info?.(
         `[MeterValueScheduler] Max value reached (${strategy.maxValue}Wh) for connector ${this.connectorId}, stopping`,
       );
@@ -102,9 +112,10 @@ export class MeterValueScheduler {
     const next = current + strategy.incrementValue;
 
     // Cap at maxValue if specified
-    const finalValue = strategy.maxValue && strategy.maxValue > 0
-      ? Math.min(next, strategy.maxValue)
-      : next;
+    const finalValue =
+      strategy.maxValue && strategy.maxValue > 0
+        ? Math.min(next, strategy.maxValue)
+        : next;
 
     this.callbacks.updateValue(finalValue);
     this.callbacks.onSend(this.connectorId);
@@ -131,8 +142,8 @@ export class MeterValueScheduler {
     if (!this.startTimestamp) return;
 
     const elapsedMs = Date.now() - this.startTimestamp;
-    const elapsedMinutes = elapsedMs / 1000 / 60;
-    const newValueKWh = getMeterValueAtTime(elapsedMinutes, config);
+    const elapsedSeconds = elapsedMs / 1000;
+    const newValueKWh = getMeterValueAtTime(elapsedSeconds, config);
     const newValueWh = Math.round(newValueKWh * 1000);
 
     this.callbacks.updateValue(newValueWh);

@@ -38,6 +38,40 @@ bun src/cli/main.ts --daemon --http-port 9700 \
 
 \* Default applies only with `--daemon`. Without `--daemon`, the Unix socket is **off** unless `--unix-socket <path>` is given explicitly.
 
+## Docker
+
+A `Dockerfile` and `docker-compose.yml` ship at the repo root. The image is Bun-based and ships **both** the daemon and the React browser UI — Vite builds `dist/` in a build stage and the daemon serves it from the same HTTP port as the API (SPA-aware: unknown paths fall back to `index.html`).
+
+```bash
+# Build
+docker build -t cp-sim .
+
+# Run, exposing HTTP on host port 9700, talking to a CSMS at wss://example/chargepoint/
+docker run --rm -p 9700:9700 cp-sim \
+  --cp-id cp1 --connectors 2 \
+  --ws-url wss://example/chargepoint/
+
+# Run with a scenario template mounted in read-only
+docker run --rm -p 9700:9700 \
+  -v "$PWD/docs/examples/scenarios:/scenarios:ro" \
+  cp-sim --cp-id cp1 --ws-url wss://example/chargepoint/ \
+    --scenario-template-file /scenarios/demo-charging.json \
+    --scenario-connector all
+```
+
+Or via Docker Compose — edit `command:` in `docker-compose.yml` for your CSMS / cpId, then:
+
+```bash
+docker compose up --build
+```
+
+Notes:
+
+- The ENTRYPOINT pins `--http-host 0.0.0.0 --unix-socket none --web-console $HTTP_PORT`. `--web-console` starts the HTTP server on the given port and serves the bundled UI from the same origin (resolved from the `dist/` shipped next to the CLI).
+- After `docker run …` open `http://localhost:9700/` to use the browser UI. It talks to the daemon on the same origin, so CORS / dev-server routing is a non-issue.
+- The image's `HEALTHCHECK` hits `/healthz`, so `docker ps` shows `healthy` / `unhealthy` once the daemon is up.
+- Override the bound port by setting the `HTTP_PORT` env var (e.g. `-e HTTP_PORT=8080`). The published host port via `-p` is independent.
+
 ## HTTP API
 
 All responses are JSON. Command responses follow the same `{ ok, data?, error? }` shape used by the JSON Lines mode.

@@ -22,7 +22,7 @@ import {
   ScenarioEvents,
 } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
-import { type EVSettings, defaultEVSettings } from "./EVSettings";
+import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
 
 export interface ChargingSchedulePeriod {
   startPeriod: number;
@@ -85,6 +85,10 @@ export interface ConnectorEvents {
   evSettingsChange: { settings: EVSettings };
   chargingProfileChange: { profile: ActiveChargingProfile | null };
   chargingProfilesChange: { profiles: ActiveChargingProfile[] };
+  /** Emitted when the auto-meter has reached an automatic stop condition
+   *  (currently: SoC >= EVSettings.targetSoc with stopAtTargetSoc). The
+   *  ChargePoint subscribes and ends the in-flight transaction. */
+  autoStopRequested: { reason: "targetSocReached" };
 }
 
 interface IncrementStrategyConfig {
@@ -113,7 +117,7 @@ export class Connector {
   private modeValue: ScenarioMode = "manual";
   private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
-  private _evSettings: EVSettings = { ...defaultEVSettings };
+  private _evSettings: EVSettings = getDefaultEVSettings();
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   constructor(
@@ -186,6 +190,7 @@ export class Connector {
   set soc(value: number | null) {
     this.socPercent = value;
     this.eventsEmitter.emit("socChange", { soc: value });
+    this.checkAutoStop();
   }
 
   get transaction(): Transaction | null {
@@ -472,5 +477,39 @@ export class Connector {
   private applyMeterValue(value: number): void {
     this.meterValueWh = value;
     this.eventsEmitter.emit("meterValueChange", { meterValue: value });
+    this.checkAutoStop();
+  }
+
+  /**
+   * Effective SoC used for the auto-stop check. Prefers the explicit
+   * `socPercent` (manual override, or values reported via MeterValue
+   * SoC samples) and falls back to the value implied by the meter
+   * (initialSoc + deliveredKWh / capacityKWh × 100).
+   */
+  private effectiveSocPercent(): number | null {
+    if (this.socPercent !== null) return this.socPercent;
+    const capacity = this._evSettings.batteryCapacityKwh;
+    if (!capacity || capacity <= 0) return null;
+    const initial = this._evSettings.initialSoc ?? 0;
+    const deliveredKWh = this.meterValueWh / 1000;
+    return initial + (deliveredKWh / capacity) * 100;
+  }
+
+  /**
+   * If `stopAtTargetSoc` is enabled and the connector has hit its target,
+   * stop the in-flight meter scheduler and fire `autoStopRequested` so
+   * the ChargePoint can end the transaction.
+   */
+  private checkAutoStop(): void {
+    if (!this.autoConfig.stopAtTargetSoc) return;
+    if (!this.transactionValue) return;
+    if (!this.meterScheduler.isActive()) return;
+    const current = this.effectiveSocPercent();
+    if (current === null) return;
+    if (current < this._evSettings.targetSoc) return;
+    this.meterScheduler.stop();
+    this.eventsEmitter.emit("autoStopRequested", {
+      reason: "targetSocReached",
+    });
   }
 }

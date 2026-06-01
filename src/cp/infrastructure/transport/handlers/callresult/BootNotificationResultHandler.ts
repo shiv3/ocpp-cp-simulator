@@ -28,6 +28,19 @@ export class BootNotificationResultHandler
         );
       });
       context.chargePoint.status = OCPPStatus.Available;
+
+      // OCPP 1.6J §4.2: honor BootNotification.conf.interval. >0 means "send
+      // a Heartbeat every N seconds"; 0 means the CSMS will pull via
+      // TriggerMessage so we shouldn't auto-emit.
+      if (typeof payload.interval === "number" && payload.interval > 0) {
+        context.chargePoint.startHeartbeat(payload.interval);
+        context.logger.info(
+          `Periodic Heartbeat enabled at ${payload.interval}s interval`,
+          LogType.HEARTBEAT,
+        );
+      } else {
+        context.chargePoint.stopHeartbeat();
+      }
     } else {
       context.logger.error("Boot notification failed", LogType.OCPP);
     }

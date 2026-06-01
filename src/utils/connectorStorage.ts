@@ -3,6 +3,31 @@ import { ActiveChargingProfile } from "../cp/domain/connector/Connector";
 
 const STORAGE_KEY_PREFIX = "connector_auto_meter_";
 const CHARGING_PROFILE_KEY_PREFIX = "connector_charging_profiles_";
+const SOC_METER_SYNC_KEY = "connector_soc_meter_sync";
+
+/**
+ * Whether the Battery card's SoC slider and Meter input should keep each
+ * other in sync (using `evSettings.batteryCapacityKwh` and `initialSoc`
+ * to convert between Wh and %). Persisted globally — same preference
+ * applies to every connector.
+ */
+export function loadSocMeterSyncEnabled(): boolean {
+  try {
+    const stored = localStorage.getItem(SOC_METER_SYNC_KEY);
+    if (stored === null) return true; // default ON
+    return stored === "true";
+  } catch {
+    return true;
+  }
+}
+
+export function saveSocMeterSyncEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(SOC_METER_SYNC_KEY, enabled ? "true" : "false");
+  } catch (error) {
+    console.error("Failed to save SoC↔Meter sync preference:", error);
+  }
+}
 
 /**
  * Save connector's auto MeterValue configuration to localStorage

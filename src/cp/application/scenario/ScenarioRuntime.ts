@@ -263,6 +263,14 @@ export const createScenarioExecutorCallbacks = (
     onStopAutoMeterValue: () => {
       connector.stopAutoMeterValue();
     },
+    onSetEVSettings: (settings) => {
+      // Merge — only specified fields land on the connector. The connector
+      // setter spreads `_evSettings = { ...settings }` and emits
+      // `evSettingsChange`, which surfaces to subscribers and (in remote
+      // mode) the browser via the `connector_ev_settings` event.
+      connector.evSettings = { ...connector.evSettings, ...settings };
+    },
+    onGetEVSettings: () => connector.evSettings,
     onSendNotification: async (messageType, payload) => {
       switch (messageType) {
         case "Heartbeat":

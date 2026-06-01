@@ -25,6 +25,19 @@ export interface ServerOptions {
     readonly scenarioConnector: string;
   } | null;
   readonly cors: CorsPolicy;
+  /**
+   * If set, every non-API GET is served from this directory (SPA aware).
+   * Lets you ship the daemon and the browser UI in one process.
+   */
+  readonly staticDir: string | null;
+  /**
+   * Optional second HTTP listener for the bundled web console. If equal
+   * to `httpPort`, a single listener serves both API and UI. If different,
+   * a second `Bun.serve` is bound to this port (the UI is also exposed on
+   * that port together with the API so the browser can reach both at the
+   * same origin).
+   */
+  readonly webConsolePort: number | null;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -39,26 +52,51 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     registry,
   });
 
-  const handlers = createHttpHandlers({
+  // Two listener configurations:
+  //   * "api"  — no static fallback; what --http-port and the Unix socket
+  //     serve unless --web-console asks them to share a port.
+  //   * "console" — serves static files (UI) AND the full API; used by the
+  //     --web-console port. The API is exposed on this listener too so the
+  //     browser can talk to it at the same origin without CORS.
+  const apiHandlers = createHttpHandlers({
     registry,
     bus,
     lifecycle,
     cors: opts.cors,
   });
+  const consoleHandlers = opts.staticDir
+    ? createHttpHandlers({
+        registry,
+        bus,
+        lifecycle,
+        cors: opts.cors,
+        staticDir: opts.staticDir,
+      })
+    : apiHandlers;
+  if (opts.staticDir) {
+    process.stderr.write(`[server] Web console: ${opts.staticDir}\n`);
+  }
   const servers: AnyServer[] = [];
 
   if (opts.unixSocket) {
     const unixServer = Bun.serve({
       unix: opts.unixSocket,
-      fetch: handlers.fetch,
-      websocket: handlers.websocket,
+      fetch: apiHandlers.fetch,
+      websocket: apiHandlers.websocket,
     });
     servers.push(unixServer);
     lifecycle.attachServer(unixServer);
     process.stderr.write(`[server] Listening on unix:${opts.unixSocket}\n`);
   }
 
+  // --http-port and --web-console may share a port (single listener) or
+  // use different ports (two listeners). When they share, the listener
+  // gets the console handler (API + UI).
+  const httpPortShared =
+    opts.httpPort != null && opts.httpPort === opts.webConsolePort;
+
   if (opts.httpPort != null) {
+    const handlers = httpPortShared ? consoleHandlers : apiHandlers;
     const httpServer = Bun.serve({
       port: opts.httpPort,
       hostname: opts.httpHost,
@@ -68,7 +106,22 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     servers.push(httpServer);
     lifecycle.attachServer(httpServer);
     process.stderr.write(
-      `[server] Listening on http://${opts.httpHost}:${opts.httpPort}\n`,
+      `[server] Listening on http://${opts.httpHost}:${opts.httpPort}` +
+        (httpPortShared ? " (API + web console)\n" : " (API)\n"),
+    );
+  }
+
+  if (opts.webConsolePort != null && !httpPortShared) {
+    const consoleServer = Bun.serve({
+      port: opts.webConsolePort,
+      hostname: opts.httpHost,
+      fetch: consoleHandlers.fetch,
+      websocket: consoleHandlers.websocket,
+    });
+    servers.push(consoleServer);
+    lifecycle.attachServer(consoleServer);
+    process.stderr.write(
+      `[server] Web console on http://${opts.httpHost}:${opts.webConsolePort}\n`,
     );
   }
 

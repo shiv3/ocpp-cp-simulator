@@ -72,14 +72,25 @@ COPY docs/examples/scenarios ./docs/examples/scenarios
 COPY --from=ui /app/dist ./dist
 
 # Persistent state lands at /data when the operator passes
-# `--state-db /data/state.db` (the docker-compose example wires this).
-# Pre-create the directory so the "bun" user can write to it even with
-# an anonymous volume.
-RUN mkdir -p /data
+# `--state-db /data/state.db` (the entrypoint wires this from $STATE_DB).
+# Pre-create the directory with bun ownership so anonymous / named
+# volumes inherit it. Host bind-mounts (`-v ./.state:/data`) re-mount the
+# host's ownership on top, which docker/entrypoint.sh fixes up at runtime.
+RUN mkdir -p /data && chown -R bun:bun /app /data
 
-# Drop privileges. oven/bun ships a non-root user named "bun".
-RUN chown -R bun:bun /app /data
-USER bun
+# `su-exec` is a 10 KB Alpine helper that drops to a non-root user
+# *without* fork/exec a full shell. We need root briefly at container
+# start to chown a bind-mounted /data, then drop to bun.
+RUN apk add --no-cache su-exec
+
+# Ship the entrypoint shim. Kept as a file (not inlined as `sh -c …`) so
+# it's easy to edit + grep without escaping quotes.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# IMPORTANT: stay as root so the entrypoint can chown /data. The shim
+# drops to `bun` via su-exec before exec'ing the simulator.
+USER root
 
 # Declare /data as a managed volume so `docker run` without `-v` still
 # carves out an anonymous volume — the simulator state survives container
@@ -91,20 +102,17 @@ VOLUME ["/data"]
 ENV NODE_ENV=production
 ENV HTTP_PORT=9700
 # Default state-db location inside the volume. Override at run time with
-# `--state-db <path>` (use `--state-db :memory:` to opt out entirely).
+# `-e STATE_DB=:memory:` for ephemeral, or `-e STATE_DB=` to drop the
+# flag entirely.
 ENV STATE_DB=/data/state.db
 EXPOSE 9700
 
-# The ENTRYPOINT bakes in:
-#   * --http-host 0.0.0.0  (so the host port mapping works)
-#   * --unix-socket none   (Unix socket isn't useful across the boundary)
-#   * --web-console $HTTP_PORT  (serves API + the bundled UI on the same port;
-#       --web-console auto-resolves /app/dist next to the CLI source)
-#   * --state-db $STATE_DB  (file path under /data by default; override
-#       with `-e STATE_DB=:memory:` for ephemeral, or `-e STATE_DB=` to
-#       drop the flag entirely)
-# Any user-supplied CMD args (cp-id, ws-url, scenario flags) append.
-ENTRYPOINT ["sh", "-c", "set -e; ARGS='--http-host 0.0.0.0 --unix-socket none --web-console '\"${HTTP_PORT}\"; [ -n \"${STATE_DB}\" ] && ARGS=\"$ARGS --state-db ${STATE_DB}\"; exec bun src/cli/main.ts $ARGS \"$@\"", "ocpp-cp-sim"]
+# Entrypoint:
+#   1. Fix up /data ownership when a host bind-mount overlayed root:root.
+#   2. Compose --http-host 0.0.0.0 --unix-socket none --web-console
+#      $HTTP_PORT [--state-db $STATE_DB] and append any user CMD args.
+#   3. Exec bun src/cli/main.ts as the non-root `bun` user.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp
 # or pass `--cp-id ... --ws-url ...` to `docker run`.

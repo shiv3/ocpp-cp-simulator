@@ -187,11 +187,22 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
+    opts?: {
+      errorCode?: string;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+    },
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).updateConnectorStatus(
-      connectorId,
-      status,
-    );
+    const cp = this.getExistingChargePointOrThrow(id);
+    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
+      // Use the raw sender so errorCode/info ride along with the
+      // StatusNotification.req without mutating the connector's runtime
+      // status field.
+      cp.sendStatusNotificationRaw(connectorId, status, opts);
+      return;
+    }
+    cp.updateConnectorStatus(connectorId, status);
   }
 
   async setMeterValue(
@@ -253,6 +264,15 @@ export class LocalChargePointService implements ChargePointService {
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
     connector.soc = soc;
+  }
+
+  async setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    connector.socMeterSyncEnabled = enabled;
   }
 
   async getChargingProfiles(

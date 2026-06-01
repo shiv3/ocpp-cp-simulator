@@ -1,8 +1,7 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
 import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
-import {
-  defaultConfiguration,
+import type {
   ConfigurationValue,
   StringConfigurationValue,
   BooleanConfigurationValue,
@@ -24,32 +23,19 @@ export class GetConfigurationHandler
     context: HandlerContext,
   ): response.GetConfigurationResponse {
     context.logger.info(
-      `Get configuration request received: ${JSON.stringify(payload.key)}`,
+      `GetConfiguration request: ${JSON.stringify(payload.key ?? "<all>")}`,
       LogType.CONFIGURATION,
     );
 
-    const configuration = this.mapConfiguration(
-      defaultConfiguration(context.chargePoint),
-    );
-
-    if (!payload.key || payload.key.length === 0) {
-      return {
-        configurationKey: configuration,
-      };
+    const store = context.chargePoint.configuration;
+    const { known, unknown } = store.read(payload.key ?? []);
+    const configurationKey = this.mapConfiguration(known);
+    // §5.8 says unknownKey is optional; only include it when non-empty so
+    // the response is the smallest legal payload.
+    if (unknown.length === 0) {
+      return { configurationKey };
     }
-
-    const filteredConfig = configuration.filter((c) =>
-      payload.key?.includes(c.key),
-    );
-    const configurationKeys = configuration.map((c) => c.key);
-    const unknownKeys = payload.key.filter(
-      (c) => !configurationKeys.includes(c),
-    );
-
-    return {
-      configurationKey: filteredConfig,
-      unknownKey: unknownKeys,
-    };
+    return { configurationKey, unknownKey: unknown };
   }
 
   private mapConfiguration(

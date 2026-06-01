@@ -217,7 +217,14 @@ export function createDefaultScenario(
 
   const now = new Date().toISOString();
   return {
-    id: `${chargePointId}_${connectorId || "cp"}_${Date.now()}`,
+    // Deterministic id derived from (cpId, connectorId). The previous
+    // `Date.now()` formulation produced a fresh id every time
+    // `createDefaultScenario` was called, which happens on every
+    // ScenarioEditor mount when `scenarioProp` hasn't loaded yet —
+    // breaking auto-start dedup (each mount looked like a different
+    // scenario). Storage is single-scenario-per-connector so the stable
+    // id can't collide.
+    id: `${chargePointId}_${connectorId || "cp"}_default`,
     name: scenarioName,
     description:
       "Demo charging flow: plug-in → wait for RemoteStartTransaction → start → auto-meter → stop → plug-out.",

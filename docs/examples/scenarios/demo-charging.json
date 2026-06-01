@@ -1,7 +1,7 @@
 {
   "id": "demo-charging",
-  "name": "Demo Charging",
-  "description": "Self-contained demo: plug-in -> wait for RemoteStartTransaction -> start transaction -> auto-meter -> stop -> plug-out. Use with --scenario-template-file to apply to every connector of a multi-connector CP.",
+  "name": "Demo Charging (OCPP 1.6)",
+  "description": "Self-contained OCPP 1.6 §4.9 connector lifecycle demo. Walks the connector through Available → Preparing → Charging → Finishing → Available, with a remote-start authorization step and a periodic Sample.Periodic MeterValue stream that stops when the EV reaches its target SoC. Use with --scenario-template-file to apply to every connector of a multi-connector CP.",
   "targetType": "connector",
   "targetId": 1,
   "evSettings": {
@@ -16,25 +16,40 @@
       "id": "start",
       "type": "start",
       "position": { "x": 400, "y": 0 },
-      "data": { "label": "Start" }
+      "data": {
+        "label": "Start on connect",
+        "triggerOn": "connect"
+      }
     },
     {
       "id": "wait-boot",
       "type": "delay",
       "position": { "x": 400, "y": 100 },
-      "data": { "label": "Wait for BootNotification", "delaySeconds": 2 }
+      "data": {
+        "label": "Wait for BootNotification.conf",
+        "description": "Give the CSMS time to Accept the BootNotification before exercising the connector. §4.2 — only Accepted boots may send StartTransaction.req.",
+        "delaySeconds": 2
+      }
     },
     {
-      "id": "plug-in",
-      "type": "connectorPlug",
+      "id": "ev-plug-in",
+      "type": "statusChange",
       "position": { "x": 400, "y": 200 },
-      "data": { "label": "Plug in", "action": "plugin" }
+      "data": {
+        "label": "EV plug in → Preparing",
+        "description": "§4.9 A2: cable inserted, EV pilot detected. The connector advertises Preparing to the CSMS while it waits for an idTag / RemoteStart.",
+        "status": "Preparing"
+      }
     },
     {
-      "id": "wait-prepare",
+      "id": "ev-handshake",
       "type": "delay",
       "position": { "x": 400, "y": 300 },
-      "data": { "label": "Settle", "delaySeconds": 1 }
+      "data": {
+        "label": "EV / cable handshake",
+        "description": "ISO 15118 / cable continuity check on a real CP. We model it as a brief settle so Preparing is visible on the CSMS side.",
+        "delaySeconds": 3
+      }
     },
     {
       "id": "await-remote-start",
@@ -42,7 +57,7 @@
       "position": { "x": 400, "y": 400 },
       "data": {
         "label": "Wait for RemoteStartTransaction",
-        "description": "Block until the CSMS sends RemoteStartTransaction. The tagId from the request is forwarded to the next Transaction node.",
+        "description": "§5.11: CSMS authorises the session by sending RemoteStartTransaction.req. The forwarded idTag flows into the next Transaction node.",
         "timeout": 0
       }
     },
@@ -51,7 +66,8 @@
       "type": "transaction",
       "position": { "x": 400, "y": 500 },
       "data": {
-        "label": "StartTransaction (tagId from RemoteStart)",
+        "label": "StartTransaction.req",
+        "description": "§4.7 — sends StartTransaction.req with the idTag from RemoteStart. The domain transitions Preparing → Charging when the CSMS responds Accepted.",
         "action": "start",
         "tagId": "TAG001"
       }
@@ -61,12 +77,13 @@
       "type": "meterValue",
       "position": { "x": 400, "y": 600 },
       "data": {
-        "label": "Auto MeterValue (1 kWh / 5s, stop when EV reaches target SoC)",
+        "label": "MeterValues (Sample.Periodic, stop at target SoC)",
+        "description": "§5.9 — periodic MeterValues.req with Energy.Active.Import.Register. Increment matches an accelerated 150 kW DC fast-charge curve (1.25 kWh per 30 s). Stops automatically when the EV reaches evSettings.targetSoc.",
         "value": 0,
         "sendMessage": true,
         "autoIncrement": true,
-        "incrementInterval": 5,
-        "incrementAmount": 1000,
+        "incrementInterval": 30,
+        "incrementAmount": 1250,
         "stopMode": "evSettings"
       }
     },
@@ -74,34 +91,53 @@
       "id": "stop-tx",
       "type": "transaction",
       "position": { "x": 400, "y": 700 },
-      "data": { "label": "StopTransaction", "action": "stop" }
+      "data": {
+        "label": "StopTransaction.req (reason=Local)",
+        "description": "§4.8 / §7.36 — StopTransaction.req. The domain transitions Charging → Finishing automatically; autoResetToAvailable then drops the connector to Available once the EV is unplugged.",
+        "action": "stop"
+      }
     },
     {
-      "id": "plug-out",
-      "type": "connectorPlug",
+      "id": "finishing-settle",
+      "type": "delay",
       "position": { "x": 400, "y": 800 },
-      "data": { "label": "Plug out", "action": "plugout" }
+      "data": {
+        "label": "Finishing (EV detaching)",
+        "description": "§4.9 C → Finishing: transaction stopped, cable still attached. Real CPs stay here until the EV disconnects.",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "ev-plug-out",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 900 },
+      "data": {
+        "label": "EV unplug → Available",
+        "description": "§4.9 A1: cable removed, connector returns to Available and is ready for the next session.",
+        "status": "Available"
+      }
     },
     {
       "id": "end",
       "type": "end",
-      "position": { "x": 400, "y": 900 },
+      "position": { "x": 400, "y": 1000 },
       "data": { "label": "End" }
     }
   ],
   "edges": [
     { "id": "e1", "source": "start", "target": "wait-boot" },
-    { "id": "e2", "source": "wait-boot", "target": "plug-in" },
-    { "id": "e3", "source": "plug-in", "target": "wait-prepare" },
-    { "id": "e4", "source": "wait-prepare", "target": "await-remote-start" },
+    { "id": "e2", "source": "wait-boot", "target": "ev-plug-in" },
+    { "id": "e3", "source": "ev-plug-in", "target": "ev-handshake" },
+    { "id": "e4", "source": "ev-handshake", "target": "await-remote-start" },
     { "id": "e5", "source": "await-remote-start", "target": "start-tx" },
     { "id": "e6", "source": "start-tx", "target": "auto-meter" },
     { "id": "e7", "source": "auto-meter", "target": "stop-tx" },
-    { "id": "e8", "source": "stop-tx", "target": "plug-out" },
-    { "id": "e9", "source": "plug-out", "target": "end" }
+    { "id": "e8", "source": "stop-tx", "target": "finishing-settle" },
+    { "id": "e9", "source": "finishing-settle", "target": "ev-plug-out" },
+    { "id": "e10", "source": "ev-plug-out", "target": "end" }
   ],
   "createdAt": "2026-05-27T00:00:00.000Z",
-  "updatedAt": "2026-05-28T00:00:00.000Z",
+  "updatedAt": "2026-06-01T00:00:00.000Z",
   "trigger": { "type": "manual" },
   "defaultExecutionMode": "oneshot",
   "enabled": true

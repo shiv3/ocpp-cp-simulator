@@ -1,6 +1,7 @@
 import type {
-  OCPPStatus,
+  ChargePointStatus,
   OCPPAvailability,
+  OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import type { Transaction } from "../../../domain/connector/Transaction";
 
@@ -30,7 +31,7 @@ export interface TransitionContext {
  * ChargePoint state snapshot
  */
 export interface ChargePointStateSnapshot {
-  status: OCPPStatus;
+  status: ChargePointStatus;
   error: string;
   timestamp: Date;
 }

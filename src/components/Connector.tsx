@@ -5,14 +5,15 @@ import { OCPPAvailability } from "../cp/domain/types/OcppTypes";
 import {
   ScenarioDefinition,
   ScenarioExecutionContext,
+  ScenarioNodeType,
 } from "../cp/application/scenario/ScenarioTypes";
 
-import { GitBranch } from "lucide-react";
 import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useDataContext } from "../data/providers/DataProvider";
+import { createDefaultScenario } from "../utils/scenarioStorage";
 
 interface ConnectorProps {
   id: number;
@@ -20,9 +21,6 @@ interface ConnectorProps {
   idTag: string;
   isSelected?: boolean;
   onSelect?: () => void;
-  /** Called when the user clicks "Scenario Editor". Parent uses this to open
-   *  ConnectorSidePanel pre-pinned to the Scenario tab. */
-  onOpenScenario?: () => void;
 }
 
 // Helper Components (rerender-memo)
@@ -73,7 +71,6 @@ const Connector: React.FC<ConnectorProps> = ({
   cpId,
   isSelected = false,
   onSelect,
-  onOpenScenario,
 }) => {
   const { chargePointService, mode } = useDataContext();
   const localCp: ChargePoint | null =
@@ -90,7 +87,35 @@ const Connector: React.FC<ConnectorProps> = ({
     transactionBatteryCapacityKwh,
     evSettings,
   } = useConnectorView(cpId, connector_id);
-  const { scenarios } = useScenarios(cpId ?? null, connector_id);
+  const {
+    scenarios,
+    isLoading: scenariosLoading,
+    saveScenario,
+  } = useScenarios(cpId ?? null, connector_id);
+
+  // Auto-seed a default scenario for this connector if storage has none.
+  // Without this, only the connector whose side panel has been opened
+  // (where the editor creates a default in its useState init) gets a
+  // scenario — every other connector silently sits with no scenario and
+  // can't auto-start. Local mode only; remote mode is server-driven.
+  // Use `saveScenario` from the hook so the repository's subscribers
+  // (including this hook's listener) get notified and the local
+  // `scenarios` state updates without a refresh.
+  useEffect(() => {
+    if (mode !== "local") return;
+    if (scenariosLoading) return;
+    if (scenarios.length > 0) return;
+    if (!cpId) return;
+    const seeded = createDefaultScenario(cpId, connector_id);
+    void saveScenario(seeded);
+  }, [
+    mode,
+    scenariosLoading,
+    scenarios.length,
+    cpId,
+    connector_id,
+    saveScenario,
+  ]);
 
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
   const [, setScenarioExecutionContext] =
@@ -98,15 +123,41 @@ const Connector: React.FC<ConnectorProps> = ({
   const [, setNodeProgress] = useState<
     Record<string, { remaining: number; total: number }>
   >({});
+  // CP-level status — gate for auto-start. We mirror this in card state so
+  // the auto-start effect runs in this always-mounted component (the side
+  // panel may not be open). Initially Unavailable; flips to Available when
+  // BootNotification is accepted.
+  const [cpStatus, setCpStatus] = useState<ocpp.OCPPStatus>(
+    ocpp.OCPPStatus.Unavailable,
+  );
 
   // Local-only: set up the in-browser ScenarioManager with progress hooks.
   // Remote mode lets the server's scenario manager drive things via events.
   const scenarioManagerRef = useRef<ScenarioManager | null>(null);
   const scenarioRef = useRef<ScenarioDefinition | null>(null);
+  const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     scenarioRef.current = scenario;
   }, [scenario]);
+
+  // Track CP-level status so auto-start can wait for BootNotification.Accepted.
+  // The CP starts in Unavailable and flips to Available only after the boot
+  // result arrives. Disconnect / reset events drop it back to Unavailable.
+  useEffect(() => {
+    const unsubscribe = chargePointService.subscribe(cpId, (event) => {
+      if (event.type === "status") {
+        setCpStatus(event.status);
+      } else if (event.type === "disconnected") {
+        setCpStatus(ocpp.OCPPStatus.Unavailable);
+      }
+    });
+    void chargePointService.getChargePoint(cpId).then((snapshot) => {
+      if (!snapshot) return;
+      setCpStatus(snapshot.status);
+    });
+    return () => unsubscribe();
+  }, [chargePointService, cpId]);
 
   useEffect(() => {
     if (!localCp) return;
@@ -208,6 +259,94 @@ const Connector: React.FC<ConnectorProps> = ({
       }
     }
   }, [mode, scenarios, localCp, connector_id]);
+
+  // Auto-start scenarios for THIS connector. Lives in the always-mounted
+  // connector card (not the side panel) so:
+  //  1. The scenario fires regardless of whether the user has the side
+  //     panel open.
+  //  2. Every connector's scenario gets auto-started independently — the
+  //     side panel only ever covers one connector at a time, so putting
+  //     auto-start there meant only the currently-viewed connector ever
+  //     auto-fired.
+  //  3. Opening / closing the side panel doesn't restart the scenario;
+  //     the dedup key lives on the Connector domain and survives mounts.
+  //
+  // Remote mode opts out — the server drives scenario lifecycles, and we
+  // shouldn't fire from the browser there.
+  useEffect(() => {
+    if (mode !== "local") return;
+    if (!localCp || !scenario) return;
+    const connector = localCp.getConnector(connector_id);
+    if (!connector) return;
+    if (scenario.enabled === false) {
+      connector.lastAutoStartedScenarioKey = null;
+      return;
+    }
+    // Status-trigger scenarios are driven by status events, not boot.
+    const hasStatusTriggerNode = scenario.nodes.some(
+      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
+    );
+    if (scenario.trigger?.type !== "manual" || hasStatusTriggerNode) {
+      connector.lastAutoStartedScenarioKey = null;
+      return;
+    }
+    if (cpStatus !== ocpp.OCPPStatus.Available) return;
+
+    // Start node may gate auto-start on the connector reaching a specific
+    // status before firing (e.g. "Charging"). When absent, default to
+    // firing on connect (boot-accepted).
+    const startNode = scenario.nodes.find(
+      (node) => node.type === ScenarioNodeType.START,
+    );
+    const startData = startNode?.data as
+      | { triggerOn?: "connect" | "status"; targetStatus?: ocpp.OCPPStatus }
+      | undefined;
+    const triggerOn = startData?.triggerOn ?? "connect";
+    if (triggerOn === "status") {
+      const target = startData?.targetStatus;
+      if (!target) return;
+      if (connectorStatus !== target) return;
+    }
+
+    // Belt-and-braces: skip if anything is already running on this
+    // connector's manager. Catches races where the dedup key gets stale.
+    const manager = scenarioManagerRef.current;
+    if (manager && manager.getActiveScenarioIds().length > 0) return;
+
+    // Key encodes the trigger config + a structural hash of the scenario.
+    // We DON'T include scenario.updatedAt — the editor's auto-save bumps
+    // it on every panel mount, which would defeat the dedup.
+    const structuralKey = JSON.stringify({
+      n: scenario.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        data: n.data,
+      })),
+      e: scenario.edges.map((e) => ({
+        id: e.id,
+        s: e.source,
+        t: e.target,
+      })),
+    });
+    const autoStartKey = `${scenario.id}:${structuralKey}:${triggerOn}:${startData?.targetStatus ?? ""}`;
+    if (connector.lastAutoStartedScenarioKey === autoStartKey) return;
+
+    if (autoStartTimerRef.current) {
+      clearTimeout(autoStartTimerRef.current);
+    }
+    autoStartTimerRef.current = setTimeout(() => {
+      const activeManager = scenarioManagerRef.current;
+      if (!activeManager) return;
+      connector.lastAutoStartedScenarioKey = autoStartKey;
+      void activeManager.executeScenario(scenario.id);
+    }, 300);
+
+    return () => {
+      if (autoStartTimerRef.current) {
+        clearTimeout(autoStartTimerRef.current);
+      }
+    };
+  }, [mode, localCp, scenario, cpStatus, connectorStatus, connector_id]);
 
   const handleRemoveConnector = () => {
     if (
@@ -332,22 +471,6 @@ const Connector: React.FC<ConnectorProps> = ({
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-gray-700">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          Click to open details panel
-        </span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenScenario?.();
-          }}
-          className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
-        >
-          <GitBranch className="h-3 w-3" />
-          Scenario Editor
-        </button>
       </div>
     </div>
   );

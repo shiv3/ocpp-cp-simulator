@@ -16,7 +16,11 @@ import type {
   ConnectorStateSnapshot,
 } from "./types/StateTransition";
 import type { HistoryOptions, StateHistoryEntry } from "./types/StateSnapshot";
-import { OCPPStatus, LogType } from "../../domain/types/OcppTypes";
+import {
+  ChargePointStatus,
+  LogType,
+  OCPPStatus,
+} from "../../domain/types/OcppTypes";
 
 interface ConnectorGetter {
   (id: number):
@@ -31,7 +35,7 @@ interface ConnectorGetter {
 
 interface ChargePointGetter {
   (): {
-    status: OCPPStatus;
+    status: ChargePointStatus;
     error: string;
   };
 }
@@ -303,7 +307,7 @@ export class StateManager {
    * @returns Transition result
    */
   transitionChargePointStatus(
-    status: OCPPStatus,
+    status: ChargePointStatus,
     context: TransitionContext,
   ): StateTransitionResult {
     const chargePoint = this.chargePointGetter();

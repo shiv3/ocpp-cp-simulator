@@ -23,6 +23,15 @@ interface MeterValueSchedulerCallbacks {
   getCurrentValue(): number;
   updateValue(value: number): void;
   onSend(connectorId: number): void;
+  /**
+   * Optional cap (in watts) the active OCPP charging profile imposes at the
+   * current instant. Recomputed every tick so a Recurring/Absolute schedule
+   * that changes period mid-transaction is respected. Return `Infinity` for
+   * "uncapped" (no profile active). Return `0` to pause delivery (the
+   * connector will continue ticking but won't add energy — the surrounding
+   * domain handles the SuspendedEVSE transition).
+   */
+  getScheduleLimitWatts?(): number;
 }
 
 export class MeterValueScheduler {
@@ -109,7 +118,22 @@ export class MeterValueScheduler {
       return;
     }
 
-    const next = current + strategy.incrementValue;
+    // Apply the OCPP charging profile limit (§5.16 / §5.10) as a per-tick
+    // cap. Configured increment is what the scenario WOULD draw; the schedule
+    // throttles down to whatever the profile allows right now. limit=0 means
+    // paused (we still tick so a later period can resume delivery).
+    const cap = this.callbacks.getScheduleLimitWatts?.() ?? Infinity;
+    let effectiveIncrement = strategy.incrementValue;
+    if (cap !== Infinity) {
+      const allowedIncrementWh = (cap * strategy.intervalSeconds) / 3600; // P×t → energy (Wh)
+      effectiveIncrement = Math.min(
+        strategy.incrementValue,
+        allowedIncrementWh,
+      );
+      if (effectiveIncrement < 0) effectiveIncrement = 0;
+    }
+
+    const next = current + effectiveIncrement;
 
     // Cap at maxValue if specified
     const finalValue =
@@ -144,7 +168,23 @@ export class MeterValueScheduler {
     const elapsedMs = Date.now() - this.startTimestamp;
     const elapsedSeconds = elapsedMs / 1000;
     const newValueKWh = getMeterValueAtTime(elapsedSeconds, config);
-    const newValueWh = Math.round(newValueKWh * 1000);
+    let newValueWh = Math.round(newValueKWh * 1000);
+
+    // Apply the OCPP charging profile cap by clamping the per-tick delta. The
+    // bezier curve dictates an "ideal" trajectory; if the schedule says we
+    // can only deliver P watts right now, the actual delta must not exceed
+    // P × interval / 3600 Wh.
+    const cap = this.callbacks.getScheduleLimitWatts?.() ?? Infinity;
+    if (cap !== Infinity) {
+      const intervalSec = config.autoCalculateInterval
+        ? this.calculateAutoInterval(config) / 1000
+        : Math.max(1, config.intervalSeconds);
+      const current = this.callbacks.getCurrentValue();
+      const maxIncrement = Math.max(0, (cap * intervalSec) / 3600);
+      const clampedNext =
+        current + Math.min(newValueWh - current, maxIncrement);
+      newValueWh = Math.max(current, Math.round(clampedNext));
+    }
 
     this.callbacks.updateValue(newValueWh);
     this.callbacks.onSend(this.connectorId);

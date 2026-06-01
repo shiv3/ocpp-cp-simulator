@@ -15,16 +15,17 @@ export class RemoteStopTransactionHandler
     context: HandlerContext,
   ): response.RemoteStopTransactionResponse {
     const { transactionId } = payload;
-    const connector = Array.from(
-      context.chargePoint.connectors.values(),
-    ).find((c) => c.transaction && c.transaction.id === transactionId);
+    const connector = Array.from(context.chargePoint.connectors.values()).find(
+      (c) => c.transaction && c.transaction.id === transactionId,
+    );
 
     if (connector) {
       context.chargePoint.updateConnectorStatus(
         connector.id,
         OCPPStatus.SuspendedEVSE,
       );
-      context.chargePoint.stopTransaction(connector);
+      // §7.36: stopped via RemoteStopTransaction.req → reason="Remote".
+      context.chargePoint.stopTransaction(connector, "Remote");
       return { status: "Accepted" };
     } else {
       return { status: "Rejected" };

@@ -1,6 +1,4 @@
-import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
-import { atomWithHash } from "jotai-location";
 import { BootNotification } from "../cp/domain/types/OcppTypes";
 
 export interface Config {
@@ -38,18 +36,6 @@ interface ExperimentalChargePoint {
 }
 
 const key = "config";
-const configHashAtom = atomWithHash<Config | null>(key, null);
-const configStorageAtom = atomWithStorage<Config | null>(key, null, undefined, {
+export const configAtom = atomWithStorage<Config | null>(key, null, undefined, {
   getOnInit: true,
 });
-export const configAtom = atom(
-  (get) => {
-    const hashValue = get(configHashAtom);
-    const storageValue = get(configStorageAtom);
-    return hashValue ?? storageValue;
-  },
-  (_, set, update: Config | null) => {
-    set(configHashAtom, update);
-    set(configStorageAtom, update);
-  },
-);

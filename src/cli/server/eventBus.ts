@@ -11,7 +11,6 @@ export class EventBus {
   private readonly sinks = new Map<string, Set<EventSink>>();
 
   publish(cpId: string, evt: CLIEvent): void {
-    if (evt.event === "log") return;
     const env: EventEnvelope = { cpId, evt };
     this.deliver(cpId, env);
     this.deliver("*", env);

@@ -9,9 +9,14 @@ interface ExtendedDelayNodeData extends DelayNodeData {
   };
 }
 
-const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({ data, selected }) => {
+const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({
+  data,
+  selected,
+}) => {
   const progress = data.progress;
-  const progressPercent = progress ? ((progress.total - progress.remaining) / progress.total) * 100 : 0;
+  const progressPercent = progress
+    ? ((progress.total - progress.remaining) / progress.total) * 100
+    : 0;
 
   return (
     <div
@@ -27,7 +32,9 @@ const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({ data, selected 
       <div className="flex items-center gap-2">
         <div className="text-2xl">⏱️</div>
         <div className="flex-1">
-          <div className="font-bold text-sm text-primary">{data.delaySeconds}s</div>
+          <div className="font-bold text-sm text-primary">
+            {data.delaySeconds}s
+          </div>
           {progress && progress.remaining > 0 ? (
             <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold">
               {progress.remaining.toFixed(1)}s remaining
@@ -48,10 +55,6 @@ const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({ data, selected 
             ></div>
           </div>
         </div>
-      )}
-
-      {data.description && (
-        <div className="text-xs text-muted mt-1">{data.description}</div>
       )}
 
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />

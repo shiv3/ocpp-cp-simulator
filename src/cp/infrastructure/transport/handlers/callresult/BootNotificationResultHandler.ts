@@ -3,6 +3,18 @@ import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
+/**
+ * §4.2 BootNotification.conf handling:
+ *
+ * - **Accepted**: turn on heartbeats, fan out StatusNotification.req for
+ *   connector 0 + every individual connector, mark CP Available.
+ * - **Pending**: leave heartbeat off; CP MAY respond to CSMS calls but
+ *   MUST NOT send unsolicited CALLs (RemoteStartTransaction /
+ *   RemoteStopTransaction are also forbidden during Pending). We mark
+ *   the boot status on the message handler so its `sendRequest` can gate.
+ * - **Rejected**: heartbeat off, no further messages for `interval`
+ *   seconds, then auto-retry BootNotification.
+ */
 export class BootNotificationResultHandler
   implements CallResultHandler<response.BootNotificationResponse>
 {
@@ -10,26 +22,67 @@ export class BootNotificationResultHandler
     payload: response.BootNotificationResponse,
     context: HandlerContext,
   ): void {
-    if (payload.status === "Accepted") {
-      context.logger.info("Boot notification successful", LogType.OCPP);
-      // Send connector 0 (charge point level) status first
-      context.chargePoint.updateConnectorStatus(0, OCPPStatus.Available);
-      context.chargePoint.connectors.forEach((connector) => {
-        if (connector.autoResetToAvailable) {
+    const interval =
+      typeof payload.interval === "number" && payload.interval > 0
+        ? payload.interval
+        : 0;
+
+    switch (payload.status) {
+      case "Accepted": {
+        context.logger.info("Boot notification accepted", LogType.OCPP);
+        context.chargePoint.markBootAccepted();
+        // Send connector 0 (charge point level) status first
+        context.chargePoint.updateConnectorStatus(0, OCPPStatus.Available);
+        context.chargePoint.connectors.forEach((connector) => {
+          if (connector.autoResetToAvailable) {
+            context.chargePoint.updateConnectorStatus(
+              connector.id,
+              OCPPStatus.Available,
+            );
+            return;
+          }
           context.chargePoint.updateConnectorStatus(
             connector.id,
-            OCPPStatus.Available,
+            connector.status,
           );
-          return;
+        });
+        context.chargePoint.status = OCPPStatus.Available;
+
+        if (interval > 0) {
+          context.chargePoint.startHeartbeat(interval);
+          context.logger.info(
+            `Periodic Heartbeat enabled at ${interval}s interval`,
+            LogType.HEARTBEAT,
+          );
+        } else {
+          context.chargePoint.stopHeartbeat();
         }
-        context.chargePoint.updateConnectorStatus(
-          connector.id,
-          connector.status,
+        break;
+      }
+      case "Pending": {
+        context.logger.warn(
+          `BootNotification Pending — only CSMS-initiated traffic allowed${
+            interval > 0 ? `, retry interval=${interval}s` : ""
+          }`,
+          LogType.OCPP,
         );
-      });
-      context.chargePoint.status = OCPPStatus.Available;
-    } else {
-      context.logger.error("Boot notification failed", LogType.OCPP);
+        context.chargePoint.markBootPending();
+        context.chargePoint.stopHeartbeat();
+        // Spec: stay quiet but keep the WebSocket open. No retry timer here;
+        // CSMS can move us to Accepted/Rejected via subsequent flow.
+        break;
+      }
+      case "Rejected":
+      default: {
+        const wait = interval > 0 ? interval : 60;
+        context.logger.error(
+          `BootNotification Rejected — silent for ${wait}s before retry`,
+          LogType.OCPP,
+        );
+        context.chargePoint.markBootRejected(wait);
+        context.chargePoint.stopHeartbeat();
+        break;
+      }
     }
   }
 }

@@ -1,14 +1,38 @@
 #!/usr/bin/env bun
+import * as path from "path";
+import * as fs from "fs";
 import type { CLIOptions, ChargePointInitOptions } from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
+import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "../cp/domain/persistence/Database";
+import { setGlobalLogFormat } from "../cp/shared/Logger";
 import {
   startServer,
   DEFAULT_UNIX_SOCKET,
   DEFAULT_PID_PATH,
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
+
+/**
+ * Locate the bundled web console (Vite-built `dist/`) shipped alongside
+ * the CLI. The published package layout is `<pkg>/src/cli/main.ts` +
+ * `<pkg>/dist/`, so we walk up from this file's directory. Returns null
+ * when the build isn't present — typical when running from a fresh
+ * checkout where `bun run build` hasn't been invoked yet.
+ */
+function resolveBundledDist(): string | null {
+  const candidate = path.resolve(import.meta.dir, "../../dist");
+  try {
+    if (fs.statSync(path.join(candidate, "index.html")).isFile()) {
+      return candidate;
+    }
+  } catch {
+    // not built / not present
+  }
+  return null;
+}
 
 function parseArgs(argv: string[]): CLIOptions {
   let wsUrl = "";
@@ -25,13 +49,22 @@ function parseArgs(argv: string[]): CLIOptions {
   let model = "CLI-Model";
   let scenario: string | null = null;
   let scenarioTemplate: string | null = null;
-  let scenarioConnector = 1;
+  let scenarioTemplateFile: string | null = null;
+  let scenarioConnector = "1";
   let httpPort: number | null = null;
   let httpHost = "127.0.0.1";
   let unixSocket: string | null = null;
   let unixSocketExplicit = false;
   let httpUrl: string | null = null;
   let allEvents = false;
+  let serveStatic: string | null = null;
+  // --web-console: enabled flag + optional explicit port. When the port is
+  // omitted (`--web-console` alone), the UI shares the --http-port listener.
+  let webConsoleEnabled = false;
+  let webConsoleExplicitPort: number | null = null;
+  let stateDb: string | null = null;
+  let logFormat: "plain" | "json" = "plain";
+  const corsOrigins: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -90,8 +123,12 @@ function parseArgs(argv: string[]): CLIOptions {
         scenarioTemplate = next ?? "";
         i++;
         break;
+      case "--scenario-template-file":
+        scenarioTemplateFile = next ?? "";
+        i++;
+        break;
       case "--scenario-connector":
-        scenarioConnector = parseInt(next ?? "1", 10);
+        scenarioConnector = next ?? "1";
         i++;
         break;
       case "--http-port":
@@ -114,6 +151,45 @@ function parseArgs(argv: string[]): CLIOptions {
       case "--all":
         allEvents = true;
         break;
+      case "--cors-origin":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --cors-origin requires a value (refusing to fall back to open CORS)\n",
+          );
+          process.exit(1);
+        }
+        corsOrigins.push(next);
+        i++;
+        break;
+      case "--state-db":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --state-db requires a path (or ':memory:')\n",
+          );
+          process.exit(1);
+        }
+        stateDb = next;
+        i++;
+        break;
+      case "--log-format":
+        if (next !== "plain" && next !== "json") {
+          process.stderr.write(
+            "Error: --log-format must be 'plain' or 'json'\n",
+          );
+          process.exit(1);
+        }
+        logFormat = next;
+        i++;
+        break;
+      case "--web-console":
+        webConsoleEnabled = true;
+        // Optional port: only consume `next` when it looks like a number.
+        // If `next` is missing or another flag, the UI shares --http-port.
+        if (next && !next.startsWith("--") && /^\d+$/.test(next)) {
+          webConsoleExplicitPort = parseInt(next, 10);
+          i++;
+        }
+        break;
       case "--help":
       case "-h":
         printUsage();
@@ -129,7 +205,44 @@ function parseArgs(argv: string[]): CLIOptions {
   }
 
   const isClientMode = send !== null || events || stop;
-  const isServerMode = daemon || httpPort != null;
+
+  let webConsolePort: number | null = null;
+  if (webConsoleEnabled) {
+    if (
+      webConsoleExplicitPort != null &&
+      (isNaN(webConsoleExplicitPort) || webConsoleExplicitPort < 1)
+    ) {
+      process.stderr.write(
+        "Error: --web-console port must be a positive integer\n",
+      );
+      process.exit(1);
+    }
+    // Port resolution: explicit > --http-port > error.
+    webConsolePort = webConsoleExplicitPort ?? httpPort;
+    if (webConsolePort == null) {
+      process.stderr.write(
+        "Error: --web-console without a port requires --http-port " +
+          "(the UI shares that listener). Pass a port to --web-console, " +
+          "or add --http-port <port>.\n",
+      );
+      process.exit(1);
+    }
+    const bundled = resolveBundledDist();
+    if (!bundled) {
+      process.stderr.write(
+        "Error: --web-console requires the bundled UI to be built. " +
+          "Run `bun run build` in the repo first " +
+          "(or use an installed package which ships dist/).\n",
+      );
+      process.exit(1);
+    }
+    serveStatic = bundled;
+    // --web-console alone is enough to put the daemon into server mode —
+    // even without --http-port, the web-console port carries the full API
+    // alongside the UI on the same origin.
+  }
+
+  const isServerMode = daemon || httpPort != null || webConsoleEnabled;
 
   if (isClientMode) {
     if ((send !== null || events) && !cpId && !allEvents) {
@@ -198,18 +311,24 @@ function parseArgs(argv: string[]): CLIOptions {
     model,
     scenario,
     scenarioTemplate,
+    scenarioTemplateFile,
     scenarioConnector,
     httpPort,
     httpHost,
     unixSocket,
     httpUrl,
     allEvents,
+    corsOrigins,
+    serveStatic,
+    webConsolePort,
+    stateDb,
+    logFormat,
   };
 }
 
 function printUsage(): void {
   process.stderr.write(`
-Usage: cp-sim [options]    (or "bun src/cli/main.ts [options]" from a checkout)
+Usage: ocpp-cp-sim [options]    (or "bun src/cli/main.ts [options]" from a checkout)
 
 Local modes (single CP, no server):
   --cp-id <id> --ws-url <url>                Interactive REPL (default)
@@ -239,14 +358,31 @@ Options:
   --basic-auth-pass <p>    Basic auth password
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
-  --scenario <file>        Run scenario from JSON file on startup
-  --scenario-template <id> Run built-in scenario template on startup
-  --scenario-connector <n> Connector for startup scenario (default: 1)
+  --scenario <file>            Run scenario from JSON file on startup
+  --scenario-template <id>     Run built-in scenario template on startup
+  --scenario-template-file <p> Load a cpId-independent template JSON and apply it
+                               to every connector listed in --scenario-connector
+  --scenario-connector <list>  Target connectors: "all", a single id ("1"),
+                               or a comma-separated list ("1,2,3"). Default: 1
   --http-port <port>       Enable HTTP/WebSocket server on this TCP port
   --http-host <addr>       Bind address for HTTP (default: 127.0.0.1)
   --unix-socket <path|none> Unix socket path; "none" disables it
   --http-url <url>         Client target: TCP HTTP base URL
   --all                    Use the global event stream (--events only)
+  --cors-origin <origin>   Restrict CORS to this origin (repeatable). Default: any origin (*)
+  --web-console [<port>]   Serve the bundled browser UI alongside the API.
+                           With <port>: opens a second listener on that port.
+                           Without <port>: shares the --http-port listener.
+                           Requires the UI to be built (run "bun run build",
+                           or use an installed package which ships dist/).
+  --state-db <path>        Persist Configuration overrides, charging-profile
+                           state, scenarios, and pending transaction
+                           messages to a SQLite file (or ":memory:").
+                           Without this flag the daemon is fully in-memory
+                           and forgets everything at exit.
+  --log-format <fmt>       "plain" (default) or "json" — output one JSON
+                           object per stderr line for structured-log
+                           collectors (Loki, jq, etc.).
   -h, --help               Show this help
 
 HTTP API (see docs/server.md):
@@ -260,6 +396,49 @@ HTTP API (see docs/server.md):
   WS     /v1/events
   POST   /v1/shutdown
 `);
+}
+
+/**
+ * Pick the CORS policy at startup.
+ *
+ * Rules:
+ *   - Explicit `--cors-origin <origin>` (one or more)   → `allowlist`.
+ *   - Explicit `--cors-origin "*"` (literal star)       → `any` (operator
+ *     deliberately opted into open CORS).
+ *   - No `--cors-origin` flag + binding to a loopback host (127.0.0.1
+ *     / ::1 / localhost) → `any`. Loopback can't be reached from anyone
+ *     else's browser, so open CORS is fine.
+ *   - No `--cors-origin` flag + binding to a non-loopback host
+ *     (0.0.0.0, LAN IP, hostname) → `same-origin` AND a warning to
+ *     stderr. The admin API is exposed on the LAN; defaulting to open
+ *     CORS would let any page in the operator's browser POST to it.
+ */
+function resolveCorsPolicy(
+  options: CLIOptions,
+):
+  | { kind: "any" }
+  | { kind: "allowlist"; origins: string[] }
+  | { kind: "same-origin" } {
+  if (options.corsOrigins.length > 0) {
+    if (options.corsOrigins.length === 1 && options.corsOrigins[0] === "*") {
+      return { kind: "any" };
+    }
+    return { kind: "allowlist", origins: [...options.corsOrigins] };
+  }
+  const host = options.httpHost;
+  const isLoopback =
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "localhost" ||
+    host.startsWith("127.");
+  if (isLoopback) return { kind: "any" };
+  process.stderr.write(
+    `[server] WARNING: binding to ${host} without --cors-origin; ` +
+      "applying same-origin-only CORS so cross-site browser requests are " +
+      'rejected. Pass `--cors-origin "*"` to opt back into open CORS, or ' +
+      "`--cors-origin https://your.ui` for an explicit allowlist.\n",
+  );
+  return { kind: "same-origin" };
 }
 
 function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
@@ -276,6 +455,10 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv);
+  // Apply log format BEFORE constructing any service / charge point so
+  // every line that follows respects it — including "[server] xxx" setup
+  // chatter via serverLog.
+  setGlobalLogFormat(options.logFormat);
 
   const clientLoc = {
     httpUrl: options.httpUrl,
@@ -301,7 +484,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const isServerMode = options.daemon || options.httpPort != null;
+  const isServerMode =
+    options.daemon ||
+    options.httpPort != null ||
+    options.webConsolePort != null;
 
   if (isServerMode) {
     await startServer({
@@ -315,14 +501,26 @@ async function main(): Promise<void> {
         ? {
             scenario: options.scenario,
             scenarioTemplate: options.scenarioTemplate,
+            scenarioTemplateFile: options.scenarioTemplateFile,
             scenarioConnector: options.scenarioConnector,
           }
         : null,
+      cors: resolveCorsPolicy(options),
+      staticDir: options.serveStatic,
+      webConsolePort: options.webConsolePort,
+      stateDb: options.stateDb,
     });
     return;
   }
 
-  const service = CLIChargePointService.fromOptions(options);
+  // REPL / JSON mode: still honour --state-db so single-CP sessions can
+  // persist ChangeConfiguration overrides and queued transaction messages
+  // across reruns the same way the daemon does.
+  let replDatabase: Database | null = null;
+  if (options.stateDb) {
+    replDatabase = BunSqliteDatabase.open(options.stateDb);
+  }
+  const service = CLIChargePointService.fromOptions(options, replDatabase);
 
   let shuttingDown = false;
   const shutdown = () => {

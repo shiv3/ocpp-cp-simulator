@@ -2,10 +2,14 @@ import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { ConnectorPlugNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const ConnectorPlugNode: React.FC<NodeProps<ConnectorPlugNodeData>> = ({ data, selected }) => {
+const ConnectorPlugNode: React.FC<NodeProps<ConnectorPlugNodeData>> = ({
+  data,
+  selected,
+}) => {
   const actionIcon = data.action === "plugin" ? "🔌" : "🔓";
   const actionText = data.action === "plugin" ? "Plug In" : "Plug Out";
-  const actionColor = data.action === "plugin" ? "text-green-600" : "text-red-600";
+  const actionColor =
+    data.action === "plugin" ? "text-green-600" : "text-red-600";
 
   return (
     <div
@@ -25,10 +29,6 @@ const ConnectorPlugNode: React.FC<NodeProps<ConnectorPlugNodeData>> = ({ data, s
           <div className="text-xs text-muted">Cable action</div>
         </div>
       </div>
-      {data.description && (
-        <div className="text-xs text-muted mt-1">{data.description}</div>
-      )}
-
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
     </div>
   );

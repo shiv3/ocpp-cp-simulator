@@ -396,19 +396,95 @@ export type ArrayConfigurationValue = ConfigurationValue<"array", string[]>;
 
 export type Configuration = ConfigurationValue[];
 
+/**
+ * Builds the full set of standard Configuration Keys with sensible defaults.
+ *
+ * OCPP 1.6 §9 requires every `required: true` key to be returned by
+ * GetConfiguration.req — without them CSMS will reject the CP as
+ * non-conformant. Profile-specific keys are included for every profile we
+ * actually implement (Core / Reservation / SmartCharging / RemoteTrigger),
+ * and `SupportedFeatureProfiles` advertises exactly that set.
+ */
 export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
   cp,
-) => [
-  {
-    key: ConfigurationKeys.Core.SupportedFeatureProfiles,
-    value: [OcppFeatureProfile.Core],
-  } as ArrayConfigurationValue,
-  {
-    key: ConfigurationKeys.Core.NumberOfConnectors,
-    value: cp.connectorNumber,
-  } as IntegerConfigurationValue,
-  {
-    key: ConfigurationKeys.Custom.OcppServer,
-    value: cp.wsUrl,
-  } as StringConfigurationValue,
-];
+) => {
+  const intVal = (
+    key: IntegerConfigurationKey,
+    value: number,
+  ): IntegerConfigurationValue => ({ key, value });
+  const boolVal = (
+    key: BooleanConfigurationKey,
+    value: boolean,
+  ): BooleanConfigurationValue => ({ key, value });
+  const arrVal = (
+    key: ArrayConfigurationKey,
+    value: string[],
+  ): ArrayConfigurationValue => ({ key, value });
+  const strVal = (
+    key: StringConfigurationKey,
+    value: string,
+  ): StringConfigurationValue => ({ key, value });
+
+  return [
+    // ── Core profile ────────────────────────────────────────────────────
+    boolVal(ConfigurationKeys.Core.AllowOfflineTxForUnknownId, false),
+    boolVal(ConfigurationKeys.Core.AuthorizationCacheEnabled, false),
+    boolVal(ConfigurationKeys.Core.AuthorizeRemoteTxRequests, false),
+    intVal(ConfigurationKeys.Core.ClockAlignedDataInterval, 0),
+    intVal(ConfigurationKeys.Core.ConnectionTimeOut, 60),
+    arrVal(ConfigurationKeys.Core.ConnectorPhaseRotation, ["NotApplicable"]),
+    intVal(ConfigurationKeys.Core.ConnectorPhaseRotationMaxLength, 1),
+    intVal(ConfigurationKeys.Core.GetConfigurationMaxKeys, 50),
+    intVal(ConfigurationKeys.Core.HeartbeatInterval, 300),
+    intVal(ConfigurationKeys.Core.LightIntensity, 100),
+    boolVal(ConfigurationKeys.Core.LocalAuthorizeOffline, true),
+    boolVal(ConfigurationKeys.Core.LocalPreAuthorize, false),
+    intVal(ConfigurationKeys.Core.MaxEnergyOnInvalidId, 0),
+    arrVal(ConfigurationKeys.Core.MeterValuesAlignedData, []),
+    intVal(ConfigurationKeys.Core.MeterValuesAlignedDataMaxLength, 8),
+    arrVal(ConfigurationKeys.Core.MeterValuesSampledData, [
+      "Energy.Active.Import.Register",
+    ]),
+    intVal(ConfigurationKeys.Core.MeterValuesSampledDataMaxLength, 8),
+    intVal(ConfigurationKeys.Core.MeterValueSampleInterval, 60),
+    intVal(ConfigurationKeys.Core.MinimumStatusDuration, 0),
+    intVal(ConfigurationKeys.Core.NumberOfConnectors, cp.connectorNumber),
+    intVal(ConfigurationKeys.Core.ResetRetries, 1),
+    boolVal(ConfigurationKeys.Core.StopTransactionOnEVSideDisconnect, true),
+    boolVal(ConfigurationKeys.Core.StopTransactionOnInvalidId, true),
+    arrVal(ConfigurationKeys.Core.StopTxnAlignedData, []),
+    intVal(ConfigurationKeys.Core.StopTxnAlignedDataMaxLength, 8),
+    arrVal(ConfigurationKeys.Core.StopTxnSampledData, []),
+    intVal(ConfigurationKeys.Core.StopTxnSampledDataMaxLength, 8),
+    arrVal(ConfigurationKeys.Core.SupportedFeatureProfiles, [
+      OcppFeatureProfile.Core,
+      OcppFeatureProfile.Reservation,
+      OcppFeatureProfile.SmartCharging,
+      OcppFeatureProfile.RemoteTrigger,
+    ]),
+    intVal(ConfigurationKeys.Core.SupportedFeatureProfilesMaxLength, 6),
+    intVal(ConfigurationKeys.Core.TransactionMessageAttempts, 3),
+    intVal(ConfigurationKeys.Core.TransactionMessageRetryInterval, 60),
+    boolVal(ConfigurationKeys.Core.UnlockConnectorOnEVSideDisconnect, true),
+    intVal(ConfigurationKeys.Core.WebSocketPingInterval, 0),
+
+    // ── Reservation profile ────────────────────────────────────────────
+    boolVal(ConfigurationKeys.Reservation.ReserveConnectorZeroSupported, false),
+
+    // ── SmartCharging profile ──────────────────────────────────────────
+    intVal(ConfigurationKeys.SmartCharging.ChargeProfileMaxStackLevel, 10),
+    arrVal(
+      ConfigurationKeys.SmartCharging.ChargingScheduleAllowedChargingRateUnit,
+      ["Current", "Power"],
+    ),
+    intVal(ConfigurationKeys.SmartCharging.ChargingScheduleMaxPeriods, 24),
+    boolVal(
+      ConfigurationKeys.SmartCharging.ConnectorSwitch3to1PhaseSupported,
+      false,
+    ),
+    intVal(ConfigurationKeys.SmartCharging.MaxChargingProfilesInstalled, 16),
+
+    // ── Custom (non-standard) ──────────────────────────────────────────
+    strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),
+  ];
+};

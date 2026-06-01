@@ -8,6 +8,7 @@ OCPP 1.6J charge point simulator with three interfaces: a browser-based UI, a le
 | **Legacy v1** | Original single-page web UI                              | [docs/v1.md](docs/v1.md)           |
 | **CLI**       | Headless mode for scripting, CI, and AI integration      | [docs/cli.md](docs/cli.md)         |
 | **Server**    | Long-running HTTP/WebSocket server, multi-CP per process | [docs/server.md](docs/server.md)   |
+| **Docker**    | Pre-built image (daemon + web console) on GHCR           | [docs/docker.md](docs/docker.md)   |
 
 ## Quick Start
 
@@ -22,7 +23,7 @@ npm run dev
 bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
-### Install as a global command (`cp-sim`)
+### Install as a global command (`ocpp-cp-sim`)
 
 ```bash
 # From a checkout
@@ -36,9 +37,26 @@ bun install -g github:shiv3/ocpp-cp-simulator
 Then run from anywhere:
 
 ```bash
-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
-cp-sim --daemon --http-port 9700        # server mode
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
+ocpp-cp-sim --daemon --http-port 9700        # server mode
+
+# Daemon with persistent state + structured logs
+ocpp-cp-sim --daemon --http-port 9700 \
+            --state-db ./state.db --log-format json
 ```
+
+## Persistence
+
+Both the browser UI and the daemon back their state with SQLite — sql.js + IndexedDB in the browser, `bun:sqlite` (via `--state-db <path>`) in the daemon. Scenarios, ChangeConfiguration overrides, charging profiles, availability flags, pending transaction messages, the daemon's CP registry and logs all survive reload / restart. See [docs/server.md → State persistence](docs/server.md#state-persistence).
+
+## Local vs Remote mode (browser)
+
+The browser UI auto-detects which mode to run in by probing `/healthz` at its own origin:
+
+- Served by `ocpp-cp-sim --web-console` (or the Docker image) → **Remote**: every operation is proxied to the daemon over HTTP/WS.
+- Static build (GitHub Pages, `bun run dev`, Tauri) → **Local**: charge points run entirely in-browser, persistence via sql.js.
+
+There is no toggle — the mode is decided once on page load and never overridden.
 
 ## Doc
 

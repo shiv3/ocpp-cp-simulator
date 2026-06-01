@@ -1,37 +1,23 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  lazy,
-  Suspense,
-  memo,
-} from "react";
-import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
+import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import type { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import * as ocpp from "../cp/domain/types/OcppTypes";
 import { OCPPAvailability } from "../cp/domain/types/OcppTypes";
-import { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import {
   ScenarioDefinition,
   ScenarioExecutionContext,
+  ScenarioNodeType,
 } from "../cp/application/scenario/ScenarioTypes";
 
-// Dynamic imports for heavy components (bundle-dynamic-imports)
-const MeterValueCurveModal = lazy(() => import("./MeterValueCurveModal"));
-const ScenarioEditor = lazy(() => import("./scenario/ScenarioEditor"));
-const StateTransitionViewer = lazy(
-  () => import("./state-transition/StateTransitionViewer"),
-);
-import { GitBranch } from "lucide-react";
-import { saveConnectorAutoMeterConfig } from "../utils/connectorStorage";
 import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useConnectorView } from "../data/hooks/useConnectorView";
+import { useDataContext } from "../data/providers/DataProvider";
+import { createDefaultScenario } from "../cp/application/scenario/defaultScenario";
 
 interface ConnectorProps {
   id: number;
-  cp: ChargePoint | null;
+  cpId: string;
   idTag: string;
   isSelected?: boolean;
   onSelect?: () => void;
@@ -80,468 +66,111 @@ const ConnectorAvailability = memo<{ availability: OCPPAvailability }>(
 );
 ConnectorAvailability.displayName = "ConnectorAvailability";
 
-interface ConnectorDetailsPanelProps {
-  cp: ChargePoint;
-  connectorId: number;
-  connectorStatus: ocpp.OCPPStatus;
-  transactionId: number | null;
-  meterValue: number;
-  setMeterValue: (value: number) => void;
-  tagId: string;
-  setIdTag: (tagId: string) => void;
-  availability: OCPPAvailability;
-  autoMeterValueConfig: AutoMeterValueConfig | null;
-  autoResetToAvailable: boolean;
-  onStartTransaction: () => void;
-  onStopTransaction: () => void;
-  onIncreaseMeterValue: () => void;
-  onSendMeterValue: () => void;
-  onToggleAutoMeterValue: () => void;
-  onOpenConfigModal: () => void;
-  onStatusNotification: () => void;
-  onToggleAutoResetToAvailable: () => void;
-}
-
-const ConnectorDetailsPanel: React.FC<ConnectorDetailsPanelProps> = ({
-  cp,
-  connectorId,
-  connectorStatus,
-  transactionId,
-  meterValue,
-  setMeterValue,
-  tagId,
-  setIdTag,
-  availability,
-  autoMeterValueConfig,
-  autoResetToAvailable,
-  onStartTransaction,
-  onStopTransaction,
-  onIncreaseMeterValue,
-  onSendMeterValue,
-  onToggleAutoMeterValue,
-  onOpenConfigModal,
-  onStatusNotification,
-  onToggleAutoResetToAvailable,
-}) => {
-  const connector = cp.getConnector(connectorId);
-  const scenarioManager = connector?.scenarioManager;
-
-  // Get scenario status with reactive polling
-  const [activeScenarioIds, setActiveScenarioIds] = useState<string[]>([]);
-  const [duration, setDuration] = useState<string>("00:00:00");
-  const [transactionStartTime, setTransactionStartTime] = useState<string>("");
-
-  useEffect(() => {
-    // Poll active scenarios every 500ms to keep UI reactive
-    const interval = setInterval(() => {
-      const ids = scenarioManager?.getActiveScenarioIds() || [];
-      setActiveScenarioIds(ids);
-    }, 500);
-
-    // Initial load
-    const ids = scenarioManager?.getActiveScenarioIds() || [];
-    setActiveScenarioIds(ids);
-
-    return () => clearInterval(interval);
-  }, [scenarioManager]);
-
-  // Track transaction duration
-  useEffect(() => {
-    if (
-      connectorStatus !== ocpp.OCPPStatus.Charging ||
-      !connector?.transaction
-    ) {
-      setDuration("00:00:00");
-      setTransactionStartTime("");
-      return;
-    }
-
-    const startTime = connector.transaction.startTime;
-    if (startTime) {
-      setTransactionStartTime(startTime.toLocaleTimeString());
-    }
-
-    const interval = setInterval(() => {
-      const currentConnector = cp.getConnector(connectorId);
-      const txStartTime = currentConnector?.transaction?.startTime;
-      if (txStartTime) {
-        const elapsed = Date.now() - txStartTime.getTime();
-        const hours = Math.floor(elapsed / 3600000);
-        const minutes = Math.floor((elapsed % 3600000) / 60000);
-        const seconds = Math.floor((elapsed % 60000) / 1000);
-        setDuration(
-          `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
-        );
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [connectorStatus, connector?.transaction, cp, connectorId]);
-
-  const hasActiveScenario = activeScenarioIds.length > 0;
-
-  // Helper function to get status color
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case ocpp.OCPPStatus.Available:
-        return "bg-green-500";
-      case ocpp.OCPPStatus.Charging:
-        return "bg-blue-500";
-      case ocpp.OCPPStatus.Preparing:
-        return "bg-yellow-500";
-      case ocpp.OCPPStatus.Faulted:
-        return "bg-red-500";
-      case ocpp.OCPPStatus.Unavailable:
-        return "bg-gray-500";
-      default:
-        return "bg-gray-400";
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      {/* Status Dashboard - 3 Column Cards */}
-      <div className="panel p-4">
-        <h3 className="text-sm font-semibold mb-3 text-primary">
-          📊 Status Dashboard
-        </h3>
-        <div className="grid grid-cols-3 gap-3">
-          {/* Status Card */}
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
-            <div className="text-xs text-muted mb-1">Status</div>
-            <div className="flex items-center justify-center gap-1.5">
-              <span
-                className={`inline-block w-2 h-2 rounded-full ${getStatusColor(connectorStatus)}`}
-              ></span>
-              <span className="text-sm font-bold text-primary">
-                {connectorStatus}
-              </span>
-            </div>
-          </div>
-          {/* Meter Card */}
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
-            <div className="text-xs text-muted mb-1">Meter</div>
-            <div className="text-sm font-bold font-mono text-primary">
-              {meterValue.toLocaleString()}
-            </div>
-            <div className="text-xs text-muted">Wh</div>
-          </div>
-          {/* Availability Card */}
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
-            <div className="text-xs text-muted mb-1">Availability</div>
-            <div className="flex items-center justify-center gap-1.5">
-              <span
-                className={`inline-block w-2 h-2 rounded-full ${availability === "Operative" ? "bg-green-500" : "bg-red-500"}`}
-              ></span>
-              <span className="text-sm font-bold text-primary">
-                {availability}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Active Transaction Panel - Only shown when charging (rendering-conditional-render) */}
-      {connectorStatus === ocpp.OCPPStatus.Charging &&
-      transactionId !== null &&
-      transactionId !== 0 ? (
-        <div className="panel p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/50 dark:to-emerald-950/50 border-l-4 border-green-500">
-          <h3 className="text-sm font-semibold mb-3 text-green-700 dark:text-green-300 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            Active Transaction
-          </h3>
-          <div className="text-2xl font-bold font-mono text-green-800 dark:text-green-200 mb-3">
-            #{transactionId}
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-green-600 dark:text-green-400">
-                ID Tag:
-              </span>
-              <span className="font-mono font-medium text-green-800 dark:text-green-200">
-                {connector?.transaction?.tagId || tagId}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-green-600 dark:text-green-400">
-                Started:
-              </span>
-              <span className="font-mono font-medium text-green-800 dark:text-green-200">
-                {transactionStartTime}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-green-600 dark:text-green-400">
-                Duration:
-              </span>
-              <span className="font-mono font-medium text-green-800 dark:text-green-200">
-                {duration}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-green-600 dark:text-green-400">
-                Energy:
-              </span>
-              <span className="font-mono font-medium text-green-800 dark:text-green-200">
-                {(meterValue / 1000).toFixed(2)} kWh
-              </span>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Scenario Status - Compact (rendering-conditional-render) */}
-      {hasActiveScenario ? (
-        <div className="panel p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50 border-l-4 border-blue-500">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-primary flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-              Scenario Running
-            </span>
-            <span className="text-xs text-muted">
-              {activeScenarioIds
-                .map((id) => scenarioManager?.getScenario(id)?.name || id)
-                .join(", ")}
-            </span>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Controls Section - 2 Column Layout */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Transaction Control Card */}
-        <div className="panel p-3">
-          <h4 className="text-xs font-semibold mb-2 text-muted flex items-center gap-1">
-            💳 Transaction
-          </h4>
-          <input
-            type="text"
-            value={tagId}
-            onChange={(e) => setIdTag(e.target.value)}
-            className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 mb-2"
-            placeholder="ID Tag"
-          />
-          <div className="grid grid-cols-2 gap-1.5">
-            <button
-              onClick={onStartTransaction}
-              disabled={connectorStatus === ocpp.OCPPStatus.Charging}
-              className="btn-success text-xs py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ▶️ Start
-            </button>
-            <button
-              onClick={onStopTransaction}
-              disabled={connectorStatus !== ocpp.OCPPStatus.Charging}
-              className="btn-warning text-xs py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ⏹️ Stop
-            </button>
-          </div>
-        </div>
-
-        {/* Meter Control Card */}
-        <div className="panel p-3">
-          <h4 className="text-xs font-semibold mb-2 text-muted flex items-center gap-1">
-            ⚡ Meter Value
-          </h4>
-          <input
-            type="number"
-            value={meterValue}
-            onChange={(e) => setMeterValue(Number(e.target.value))}
-            className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono focus:ring-2 focus:ring-blue-500 mb-2"
-          />
-          <div className="grid grid-cols-2 gap-1.5">
-            <button
-              onClick={onIncreaseMeterValue}
-              className="btn-info text-xs py-1.5"
-            >
-              +10 Wh
-            </button>
-            <button
-              onClick={onSendMeterValue}
-              className="btn-secondary text-xs py-1.5"
-            >
-              📤 Send
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Status Control */}
-      <div className="panel p-3">
-        <h4 className="text-xs font-semibold mb-2 text-muted">
-          📡 Status Control
-        </h4>
-        <div className="flex gap-2">
-          <select
-            className="input-base text-xs flex-1 py-1.5"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) {
-                cp.updateConnectorStatus(
-                  connectorId,
-                  e.target.value as ocpp.OCPPStatus,
-                );
-                e.target.value = "";
-              }
-            }}
-          >
-            <option value="">Change Status...</option>
-            <option value={ocpp.OCPPStatus.Available}>Available</option>
-            <option value={ocpp.OCPPStatus.Preparing}>Preparing</option>
-            <option value={ocpp.OCPPStatus.Charging}>Charging</option>
-            <option value={ocpp.OCPPStatus.SuspendedEVSE}>SuspendedEVSE</option>
-            <option value={ocpp.OCPPStatus.SuspendedEV}>SuspendedEV</option>
-            <option value={ocpp.OCPPStatus.Finishing}>Finishing</option>
-            <option value={ocpp.OCPPStatus.Reserved}>Reserved</option>
-            <option value={ocpp.OCPPStatus.Unavailable}>Unavailable</option>
-            <option value={ocpp.OCPPStatus.Faulted}>Faulted</option>
-          </select>
-          <button
-            onClick={onStatusNotification}
-            className="btn-secondary text-xs px-3"
-          >
-            📤 Send
-          </button>
-        </div>
-      </div>
-
-      {/* Settings Section */}
-      <div className="panel p-3">
-        <h3 className="text-xs font-semibold mb-3 text-muted">⚙️ Settings</h3>
-        <div className="space-y-2">
-          {/* Auto Reset Toggle */}
-          <div className="flex items-center justify-between py-1">
-            <span className="text-xs text-gray-600 dark:text-gray-400">
-              Auto Available on Stop
-            </span>
-            <button
-              onClick={onToggleAutoResetToAvailable}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                autoResetToAvailable
-                  ? "bg-green-500"
-                  : "bg-gray-300 dark:bg-gray-600"
-              }`}
-            >
-              <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                  autoResetToAvailable ? "translate-x-5" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Auto Meter Value Config (rendering-conditional-render) */}
-          {autoMeterValueConfig ? (
-            <div className="flex items-center justify-between py-1 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-600 dark:text-gray-400">
-                  Auto MeterValue
-                </span>
-                {autoMeterValueConfig.enabled ? (
-                  <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                    Active
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={onToggleAutoMeterValue}
-                  className={`text-xs px-2 py-1 rounded ${
-                    autoMeterValueConfig.enabled
-                      ? "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300"
-                      : "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300"
-                  }`}
-                >
-                  {autoMeterValueConfig.enabled ? "Disable" : "Enable"}
-                </button>
-                <button
-                  onClick={onOpenConfigModal}
-                  className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
-                >
-                  ⚙️
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const Connector: React.FC<ConnectorProps> = ({
   id: connector_id,
-  cp,
-  idTag,
+  cpId,
   isSelected = false,
   onSelect,
 }) => {
+  const { chargePointService, mode } = useDataContext();
+  const localCp: ChargePoint | null =
+    mode === "local" && chargePointService.getLocalChargePoint
+      ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
+      : null;
+
   const {
     status: connectorStatus,
     availability,
     meterValue: liveMeterValue,
     soc: liveSoc,
     transactionId,
-    autoMeterValueConfig,
-    autoResetToAvailable,
-  } = useConnectorView(cp, connector_id);
-  const { scenarios } = useScenarios(cp?.id ?? null, connector_id);
-  const [meterValueInput, setMeterValueInput] =
-    useState<number>(liveMeterValue);
-  useEffect(() => {
-    setMeterValueInput(liveMeterValue);
-  }, [liveMeterValue]);
-  const [tagId, setIdTag] = useState<string>(idTag);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [isScenarioEditorOpen, setIsScenarioEditorOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<
-    "connector" | "scenario" | "stateTransition"
-  >("connector");
-  const [panelWidth, setPanelWidth] = useState(50); // Default 50vw
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeStartX = useRef(0);
-  const resizeStartWidth = useRef(0);
+    transactionBatteryCapacityKwh,
+    evSettings,
+  } = useConnectorView(cpId, connector_id);
+  const {
+    scenarios,
+    isLoading: scenariosLoading,
+    saveScenario,
+  } = useScenarios(cpId ?? null, connector_id);
 
-  // Scenario state (single scenario per connector)
+  // Auto-seed a default scenario for this connector if storage has none.
+  // Without this, only the connector whose side panel has been opened
+  // (where the editor creates a default in its useState init) gets a
+  // scenario — every other connector silently sits with no scenario and
+  // can't auto-start. Local mode only; remote mode is server-driven.
+  // Use `saveScenario` from the hook so the repository's subscribers
+  // (including this hook's listener) get notified and the local
+  // `scenarios` state updates without a refresh.
+  useEffect(() => {
+    if (mode !== "local") return;
+    if (scenariosLoading) return;
+    if (scenarios.length > 0) return;
+    if (!cpId) return;
+    const seeded = createDefaultScenario(cpId, connector_id);
+    void saveScenario(seeded);
+  }, [
+    mode,
+    scenariosLoading,
+    scenarios.length,
+    cpId,
+    connector_id,
+    saveScenario,
+  ]);
+
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
-  const [scenarioExecutionContext, setScenarioExecutionContext] =
+  const [, setScenarioExecutionContext] =
     useState<ScenarioExecutionContext | null>(null);
-  const [nodeProgress, setNodeProgress] = useState<
+  const [, setNodeProgress] = useState<
     Record<string, { remaining: number; total: number }>
   >({});
+  // CP-level status — gate for auto-start. We mirror this in card state so
+  // the auto-start effect runs in this always-mounted component (the side
+  // panel may not be open). Initially Unavailable; flips to Available when
+  // BootNotification is accepted.
+  const [cpStatus, setCpStatus] = useState<ocpp.OCPPStatus>(
+    ocpp.OCPPStatus.Unavailable,
+  );
 
-  useEffect(() => {
-    if (!cp) return;
-
-    const connector = cp.getConnector(connector_id);
-    if (!connector) return;
-
-    connector.setOnMeterValueSend((connId) => {
-      cp.sendMeterValue(connId);
-    });
-
-    return () => {
-      connector.setOnMeterValueSend(() => {});
-    };
-  }, [connector_id, cp]);
-
+  // Local-only: set up the in-browser ScenarioManager with progress hooks.
+  // Remote mode lets the server's scenario manager drive things via events.
   const scenarioManagerRef = useRef<ScenarioManager | null>(null);
   const scenarioRef = useRef<ScenarioDefinition | null>(null);
+  const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     scenarioRef.current = scenario;
   }, [scenario]);
 
+  // Track CP-level status so auto-start can wait for BootNotification.Accepted.
+  // The CP starts in Unavailable and flips to Available only after the boot
+  // result arrives. Disconnect / reset events drop it back to Unavailable.
   useEffect(() => {
-    if (!cp) return;
+    const unsubscribe = chargePointService.subscribe(cpId, (event) => {
+      if (event.type === "status") {
+        setCpStatus(event.status);
+      } else if (event.type === "disconnected") {
+        setCpStatus(ocpp.OCPPStatus.Unavailable);
+      }
+    });
+    void chargePointService.getChargePoint(cpId).then((snapshot) => {
+      if (!snapshot) return;
+      setCpStatus(snapshot.status);
+    });
+    return () => unsubscribe();
+  }, [chargePointService, cpId]);
 
-    const connector = cp.getConnector(connector_id);
+  useEffect(() => {
+    if (!localCp) return;
+
+    const connector = localCp.getConnector(connector_id);
     if (!connector) return;
 
+    connector.setOnMeterValueSend((connId) => {
+      localCp.sendMeterValue(connId);
+    });
+
     const callbacks = createScenarioExecutorCallbacks({
-      chargePoint: cp,
+      chargePoint: localCp,
       connector,
       hooks: {
         onNodeProgress: (nodeId, remaining, total) => {
@@ -551,7 +180,6 @@ const Connector: React.FC<ConnectorProps> = ({
           }));
         },
         onStateChange: (context) => {
-          // Update execution context when scenario state changes
           const currentScenario = scenarioRef.current;
           if (currentScenario && context.scenarioId === currentScenario.id) {
             setScenarioExecutionContext(context);
@@ -562,7 +190,7 @@ const Connector: React.FC<ConnectorProps> = ({
 
     const manager = new ScenarioManager(
       connector,
-      cp,
+      localCp,
       callbacks,
       connector.scenarioEvents,
     );
@@ -572,7 +200,6 @@ const Connector: React.FC<ConnectorProps> = ({
     const intervalId = setInterval(() => {
       const activeManager = scenarioManagerRef.current;
       if (!activeManager) return;
-
       const activeIds = activeManager.getActiveScenarioIds();
       const currentScenario = scenarioRef.current;
       if (currentScenario && activeIds.includes(currentScenario.id)) {
@@ -587,14 +214,20 @@ const Connector: React.FC<ConnectorProps> = ({
 
     return () => {
       clearInterval(intervalId);
+      connector.setOnMeterValueSend(() => {});
       manager.destroy();
       scenarioManagerRef.current = null;
     };
-  }, [connector_id, cp]);
+  }, [connector_id, localCp]);
 
   useEffect(() => {
+    // In remote mode the editor is hydrated from the server (see the
+    // dedicated effect further down). Skip the localStorage-driven path
+    // entirely so it doesn't clobber the remote definition with the
+    // localStorage default scenario.
+    if (mode !== "local") return;
+
     if (scenarios.length > 0) {
-      console.debug("[Connector] Loaded scenarios", scenarios);
       setScenario((current) => {
         const match = current
           ? scenarios.find((item) => item.id === current.id)
@@ -610,14 +243,10 @@ const Connector: React.FC<ConnectorProps> = ({
 
     const manager = scenarioManagerRef.current;
     if (manager) {
-      console.debug(
-        "[Connector] Refreshing ScenarioManager with scenarios",
-        scenarios,
-      );
       manager.loadScenarios(scenarios);
 
-      if (cp) {
-        const latestEntry = cp.stateManager.history.getLatestEntry(
+      if (localCp) {
+        const latestEntry = localCp.stateManager.history.getLatestEntry(
           "connector",
           connector_id,
         );
@@ -629,203 +258,126 @@ const Connector: React.FC<ConnectorProps> = ({
         }
       }
     }
-  }, [scenarios, cp, connector_id]);
+  }, [mode, scenarios, localCp, connector_id]);
 
-  // Implement connector logic here...
-  const handleStatusNotification = () => {
-    if (cp) {
-      cp.updateConnectorStatus(connector_id, connectorStatus);
-    }
-  };
-
-  const handleStartTransaction = () => {
-    if (cp) {
-      cp.startTransaction(tagId, connector_id);
-    }
-  };
-
-  const handleStopTransaction = () => {
-    if (cp) {
-      cp.stopTransaction(connector_id);
-    }
-  };
-
-  const handleIncreaseMeterValue = () => {
-    if (cp) {
-      const nextValue = meterValueInput + 10;
-      setMeterValueInput(nextValue);
-      cp.setMeterValue(connector_id, nextValue);
-    }
-  };
-
-  const handleSendMeterValue = () => {
-    if (cp) {
-      cp.setMeterValue(connector_id, meterValueInput);
-      cp.sendMeterValue(connector_id);
-    }
-  };
-
-  const handleToggleAutoMeterValue = () => {
-    if (!cp || !autoMeterValueConfig) return;
-
-    const connector = cp.getConnector(connector_id);
+  // Auto-start scenarios for THIS connector. Lives in the always-mounted
+  // connector card (not the side panel) so:
+  //  1. The scenario fires regardless of whether the user has the side
+  //     panel open.
+  //  2. Every connector's scenario gets auto-started independently — the
+  //     side panel only ever covers one connector at a time, so putting
+  //     auto-start there meant only the currently-viewed connector ever
+  //     auto-fired.
+  //  3. Opening / closing the side panel doesn't restart the scenario;
+  //     the dedup key lives on the Connector domain and survives mounts.
+  //
+  // Remote mode opts out — the server drives scenario lifecycles, and we
+  // shouldn't fire from the browser there.
+  useEffect(() => {
+    if (mode !== "local") return;
+    if (!localCp || !scenario) return;
+    const connector = localCp.getConnector(connector_id);
     if (!connector) return;
+    if (scenario.enabled === false) {
+      connector.lastAutoStartedScenarioKey = null;
+      return;
+    }
+    // Status-trigger scenarios are driven by status events, not boot.
+    const hasStatusTriggerNode = scenario.nodes.some(
+      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
+    );
+    if (scenario.trigger?.type !== "manual" || hasStatusTriggerNode) {
+      connector.lastAutoStartedScenarioKey = null;
+      return;
+    }
+    if (cpStatus !== ocpp.OCPPStatus.Available) return;
 
-    const newConfig = {
-      ...autoMeterValueConfig,
-      enabled: !autoMeterValueConfig.enabled,
+    // Start node may gate auto-start on the connector reaching a specific
+    // status before firing (e.g. "Charging"). When absent, default to
+    // firing on connect (boot-accepted).
+    const startNode = scenario.nodes.find(
+      (node) => node.type === ScenarioNodeType.START,
+    );
+    const startData = startNode?.data as
+      | { triggerOn?: "connect" | "status"; targetStatus?: ocpp.OCPPStatus }
+      | undefined;
+    const triggerOn = startData?.triggerOn ?? "connect";
+    if (triggerOn === "status") {
+      const target = startData?.targetStatus;
+      if (!target) return;
+      if (connectorStatus !== target) return;
+    }
+
+    // Belt-and-braces: skip if anything is already running on this
+    // connector's manager. Catches races where the dedup key gets stale.
+    const manager = scenarioManagerRef.current;
+    if (manager && manager.getActiveScenarioIds().length > 0) return;
+
+    // Key encodes the trigger config + a structural hash of the scenario.
+    // We DON'T include scenario.updatedAt — the editor's auto-save bumps
+    // it on every panel mount, which would defeat the dedup.
+    const structuralKey = JSON.stringify({
+      n: scenario.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        data: n.data,
+      })),
+      e: scenario.edges.map((e) => ({
+        id: e.id,
+        s: e.source,
+        t: e.target,
+      })),
+    });
+    const autoStartKey = `${scenario.id}:${structuralKey}:${triggerOn}:${startData?.targetStatus ?? ""}`;
+    if (connector.lastAutoStartedScenarioKey === autoStartKey) return;
+
+    if (autoStartTimerRef.current) {
+      clearTimeout(autoStartTimerRef.current);
+    }
+    autoStartTimerRef.current = setTimeout(() => {
+      const activeManager = scenarioManagerRef.current;
+      if (!activeManager) return;
+      connector.lastAutoStartedScenarioKey = autoStartKey;
+      void activeManager.executeScenario(scenario.id);
+    }, 300);
+
+    return () => {
+      if (autoStartTimerRef.current) {
+        clearTimeout(autoStartTimerRef.current);
+      }
     };
-
-    connector.autoMeterValueConfig = newConfig;
-  };
-
-  const handleSaveAutoMeterValueConfig = (config: AutoMeterValueConfig) => {
-    if (!cp) return;
-
-    const connector = cp.getConnector(connector_id);
-    if (!connector) return;
-
-    connector.autoMeterValueConfig = config;
-
-    // Save to localStorage
-    saveConnectorAutoMeterConfig(cp.id, connector_id, config);
-  };
-
-  const handleToggleAutoResetToAvailable = () => {
-    if (!cp) return;
-
-    const connector = cp.getConnector(connector_id);
-    if (!connector) return;
-
-    connector.autoResetToAvailable = !connector.autoResetToAvailable;
-  };
-
-  const handleOpenScenarioEditor = () => {
-    setIsScenarioEditorOpen(true);
-  };
+  }, [mode, localCp, scenario, cpStatus, connectorStatus, connector_id]);
 
   const handleRemoveConnector = () => {
-    if (!cp) return;
-
     if (
       window.confirm(
         `Are you sure you want to remove Connector ${connector_id}?`,
       )
     ) {
-      cp.removeConnector(connector_id);
+      void chargePointService.removeConnector(cpId, connector_id);
     }
   };
 
-  // Scenario handlers (multi-scenario support)
-  const handleCloseScenarioEditor = useCallback(() => {
-    setIsScenarioEditorOpen(false);
-
-    // Reload all scenarios from storage
-    if (cp) {
-      const loadedScenarios = loadScenarios(cp.id, connector_id);
-      if (loadedScenarios.length > 0) {
-        // Keep the current scenario in editor, or switch to first if not found
-        const currentScenario = scenario
-          ? loadedScenarios.find((s) => s.id === scenario.id)
-          : null;
-        setScenario(currentScenario || loadedScenarios[0]);
-
-        // Reload all scenarios in ScenarioManager
-        const connector = cp.getConnector(connector_id);
-        if (connector?.scenarioManager) {
-          connector.scenarioManager.loadScenarios(loadedScenarios);
-        }
-      }
-    }
-  }, [cp, connector_id, scenario]);
-
-  // Resize handlers
-  const handleResizeStart = (e: React.MouseEvent) => {
-    setIsResizing(true);
-    resizeStartX.current = e.clientX;
-    resizeStartWidth.current = panelWidth;
-    e.preventDefault();
-  };
-
-  useEffect(() => {
-    if (!isResizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = resizeStartX.current - e.clientX;
-      const viewportWidth = window.innerWidth;
-      const deltaVw = (deltaX / viewportWidth) * 100;
-      const newWidth = Math.min(
-        95,
-        Math.max(30, resizeStartWidth.current + deltaVw),
-      );
-      setPanelWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isResizing]);
-
-  // Handle Escape key to close panel
-  useEffect(() => {
-    if (!isScenarioEditorOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsScenarioEditorOpen(false);
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isScenarioEditorOpen]);
-
-  // Get battery capacity from transaction or use default
-  const connector = cp?.getConnector(connector_id);
-  const batteryCapacityKwh = connector?.transaction?.batteryCapacityKwh ?? 100; // Default 100kWh
-
-  // Calculate charging level percentage (0-100%)
-  // Prefer SoC if available, otherwise calculate from energy and battery capacity
+  // Battery visualization derived from snapshot.
+  const batteryCapacityKwh = transactionBatteryCapacityKwh ?? 100;
   const chargingLevel =
     liveSoc !== null
       ? Math.min(100, Math.max(0, liveSoc))
       : Math.min(100, (liveMeterValue / (batteryCapacityKwh * 1000)) * 100);
+  const isCharging = connectorStatus === ocpp.OCPPStatus.Charging;
+  const isFaulted = connectorStatus === ocpp.OCPPStatus.Faulted;
+  const isUnavailable = connectorStatus === ocpp.OCPPStatus.Unavailable;
 
-  // Get battery color based on status and level
-  const getBatteryColor = () => {
-    if (connectorStatus === ocpp.OCPPStatus.Faulted)
-      return "text-red-500 dark:text-red-400";
-    if (connectorStatus === ocpp.OCPPStatus.Unavailable)
-      return "text-gray-400 dark:text-gray-600";
-    if (connectorStatus === ocpp.OCPPStatus.Charging)
-      return "text-green-500 dark:text-green-400";
-    if (connectorStatus === ocpp.OCPPStatus.Available)
-      return "text-blue-500 dark:text-blue-400";
-    return "text-yellow-500 dark:text-yellow-400";
-  };
+  // Bar fill gradient — same palette as the side panel Battery card so the
+  // list view and detail view read consistently.
+  const barFillClass = isFaulted
+    ? "bg-gradient-to-t from-red-500 to-rose-400"
+    : isUnavailable
+      ? "bg-gradient-to-t from-gray-400 to-gray-300 dark:from-gray-600 dark:to-gray-500"
+      : isCharging
+        ? "bg-gradient-to-t from-green-500 to-emerald-400"
+        : "bg-gradient-to-t from-blue-500 to-sky-400";
 
-  const getBatteryFillColor = () => {
-    if (connectorStatus === ocpp.OCPPStatus.Faulted)
-      return "bg-red-500 dark:bg-red-400";
-    if (connectorStatus === ocpp.OCPPStatus.Charging)
-      return "bg-green-500 dark:bg-green-400";
-    if (chargingLevel > 80) return "bg-green-500 dark:bg-green-400";
-    if (chargingLevel > 20) return "bg-yellow-500 dark:bg-yellow-400";
-    return "bg-red-500 dark:bg-red-400";
-  };
-
-  // Handle card click - open side panel
   const handleCardClick = useCallback(() => {
     if (onSelect) {
       onSelect();
@@ -858,25 +410,40 @@ const Connector: React.FC<ConnectorProps> = ({
           </div>
         </div>
 
-        {/* Charging Visualization */}
-        <div className="flex items-center gap-4 mb-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-          {/* Battery Icon */}
-          <div className="relative flex-shrink-0">
-            <div className={`text-5xl ${getBatteryColor()}`}>🔋</div>
-            {connectorStatus === ocpp.OCPPStatus.Charging ? (
-              <div className="absolute -top-1 -right-1 text-xl animate-pulse">
+        <div className="flex items-stretch gap-4 mb-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+          {/* Vertical battery bar — same component family as the side
+              panel Battery card. Fill is the SoC % (or meter-derived %
+              when SoC is unreported), target-SoC marker shows as a
+              dashed amber line. */}
+          <div className="relative w-14 flex-shrink-0 rounded-md bg-gray-200 dark:bg-gray-700 overflow-hidden border border-gray-300 dark:border-gray-600">
+            <div
+              className={`absolute left-0 right-0 bottom-0 transition-[height] duration-300 ease-out ${barFillClass}`}
+              style={{ height: `${chargingLevel}%` }}
+              aria-hidden
+            />
+            <div
+              className="absolute left-0 right-0 border-t-2 border-dashed border-amber-500"
+              style={{ bottom: `${evSettings.targetSoc}%` }}
+              title={`Target ${evSettings.targetSoc}%`}
+              aria-hidden
+            />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-xs font-bold font-mono text-gray-900 dark:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.6)] dark:drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
+                {liveSoc !== null ? `${Math.round(liveSoc)}%` : "—"}
+              </span>
+            </div>
+            {isCharging ? (
+              <div className="absolute top-0.5 right-0.5 text-xs animate-pulse">
                 ⚡
               </div>
             ) : null}
           </div>
 
-          {/* Status and Meter Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm font-semibold text-primary">
                 <ConnectorStatus status={connectorStatus} />
               </span>
-              {/* rendering-conditional-render: use ternary to avoid 0 being rendered */}
               {transactionId != null && transactionId !== 0 ? (
                 <span className="text-xs text-muted font-mono">
                   TX:{transactionId}
@@ -884,31 +451,20 @@ const Connector: React.FC<ConnectorProps> = ({
               ) : null}
             </div>
 
-            {/* Meter Value Progress Bar */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
-                <span>{liveSoc !== null ? "Battery SoC" : "Energy"}</span>
+                <span>Energy</span>
                 <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">
-                  {liveSoc !== null
-                    ? `${liveSoc.toFixed(1)}%`
-                    : `${(liveMeterValue / 1000).toFixed(2)} kWh`}
+                  {(liveMeterValue / 1000).toFixed(2)} kWh
                 </span>
               </div>
-              {liveSoc !== null ? (
-                <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${getBatteryFillColor()} transition-all duration-300 ease-out`}
-                    style={{ width: `${chargingLevel}%` }}
-                  ></div>
-                </div>
-              ) : null}
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-600 dark:text-gray-400">
                   <ConnectorAvailability availability={availability} />
                 </span>
                 {liveSoc !== null ? (
-                  <span className="text-gray-600 dark:text-gray-400">
-                    {(liveMeterValue / 1000).toFixed(2)} kWh charged
+                  <span className="text-gray-600 dark:text-gray-400 font-mono">
+                    SoC {liveSoc.toFixed(1)}%
                   </span>
                 ) : null}
               </div>
@@ -916,207 +472,6 @@ const Connector: React.FC<ConnectorProps> = ({
           </div>
         </div>
       </div>
-
-      <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-gray-700">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          Click to open details panel
-        </span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handleOpenScenarioEditor();
-          }}
-          className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
-        >
-          <GitBranch className="h-3 w-3" />
-          Scenario Editor
-        </button>
-      </div>
-
-      {/* MeterValue Curve Config Modal */}
-      {isConfigModalOpen && autoMeterValueConfig ? (
-        <Suspense
-          fallback={
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
-              <div className="text-white">Loading...</div>
-            </div>
-          }
-        >
-          <MeterValueCurveModal
-            isOpen={isConfigModalOpen}
-            onClose={() => setIsConfigModalOpen(false)}
-            initialConfig={autoMeterValueConfig}
-            onSave={handleSaveAutoMeterValueConfig}
-          />
-        </Suspense>
-      ) : null}
-
-      {/* Side Panel with Tabs */}
-      {isScenarioEditorOpen && cp ? (
-        <div className="fixed inset-0 z-[9999] flex justify-end pointer-events-none">
-          {/* Semi-transparent overlay on the left - visual effect only, clicks pass through */}
-          <div className="flex-1 bg-black bg-opacity-20 pointer-events-none" />
-
-          {/* Side Panel */}
-          <div
-            className="bg-white dark:bg-gray-900 shadow-2xl h-full flex flex-row pointer-events-auto"
-            style={{ width: `${panelWidth}vw` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Resize Handle - Full Height */}
-            <div
-              className={`w-2 bg-gray-300 dark:bg-gray-600 hover:bg-blue-500 dark:hover:bg-blue-400 cursor-col-resize flex-shrink-0 transition-colors ${
-                isResizing ? "bg-blue-500 dark:bg-blue-400" : ""
-              }`}
-              onMouseDown={handleResizeStart}
-              style={{ cursor: "col-resize" }}
-            >
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="w-1 h-12 bg-gray-400 dark:bg-gray-500 rounded-full"></div>
-              </div>
-            </div>
-
-            {/* Content Area */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Tab Header */}
-              <div className="border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-                <div className="flex items-start">
-                  <button
-                    onClick={() => setActiveTab("connector")}
-                    className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                      activeTab === "connector"
-                        ? "bg-white dark:bg-gray-800 text-primary dark:text-white border-b-2 border-blue-500"
-                        : "bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
-                    }`}
-                  >
-                    🔌 Connector Details
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("scenario")}
-                    className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                      activeTab === "scenario"
-                        ? "bg-white dark:bg-gray-800 text-primary dark:text-white border-b-2 border-blue-500"
-                        : "bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
-                    }`}
-                  >
-                    ⚙️ Scenario
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("stateTransition")}
-                    className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                      activeTab === "stateTransition"
-                        ? "bg-white dark:bg-gray-800 text-primary dark:text-white border-b-2 border-blue-500"
-                        : "bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
-                    }`}
-                  >
-                    <GitBranch className="h-4 w-4" /> State Transition
-                  </button>
-                  {/* Close Button - Always visible in tab header */}
-                  <button
-                    onClick={() => setIsScenarioEditorOpen(false)}
-                    className="px-4 py-3 text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center"
-                    title="Close Panel"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              {/* Panel Content */}
-              <div className="flex-1 overflow-hidden">
-                {activeTab === "connector" ? (
-                  <div className="h-full flex flex-col">
-                    {/* Connector Details Header */}
-                    <div className="panel p-3 border-b border-gray-200 dark:border-gray-700">
-                      <h2 className="text-lg font-bold text-primary">
-                        Connector {connector_id} Details
-                      </h2>
-                      <p className="text-xs text-muted">{cp.id}</p>
-                    </div>
-                    {/* Connector Details Content */}
-                    <div className="flex-1 overflow-y-auto p-4">
-                      <ConnectorDetailsPanel
-                        cp={cp}
-                        connectorId={connector_id}
-                        connectorStatus={connectorStatus}
-                        transactionId={transactionId}
-                        meterValue={meterValueInput}
-                        setMeterValue={setMeterValueInput}
-                        tagId={tagId}
-                        setIdTag={setIdTag}
-                        availability={availability}
-                        autoMeterValueConfig={autoMeterValueConfig}
-                        autoResetToAvailable={autoResetToAvailable}
-                        onStartTransaction={handleStartTransaction}
-                        onStopTransaction={handleStopTransaction}
-                        onIncreaseMeterValue={handleIncreaseMeterValue}
-                        onSendMeterValue={handleSendMeterValue}
-                        onToggleAutoMeterValue={handleToggleAutoMeterValue}
-                        onOpenConfigModal={() => setIsConfigModalOpen(true)}
-                        onStatusNotification={handleStatusNotification}
-                        onToggleAutoResetToAvailable={
-                          handleToggleAutoResetToAvailable
-                        }
-                      />
-                    </div>
-                  </div>
-                ) : activeTab === "scenario" ? (
-                  <Suspense
-                    fallback={
-                      <div className="h-full flex items-center justify-center">
-                        <div className="text-muted">
-                          Loading Scenario Editor...
-                        </div>
-                      </div>
-                    }
-                  >
-                    <ScenarioEditor
-                      chargePoint={cp}
-                      connectorId={connector_id}
-                      scenario={scenario}
-                      scenarioId={scenario?.id}
-                      executionContext={scenarioExecutionContext}
-                      nodeProgress={nodeProgress}
-                      onClose={handleCloseScenarioEditor}
-                    />
-                  </Suspense>
-                ) : (
-                  <div className="h-full flex flex-col">
-                    {/* State Transition Viewer Header */}
-                    <div className="panel p-3 border-b border-gray-200 dark:border-gray-700">
-                      <h2 className="text-lg font-bold text-primary">
-                        State Transition Diagram (OCPP 1.6J)
-                      </h2>
-                      <p className="text-xs text-muted">
-                        Connector {connector_id}
-                      </p>
-                    </div>
-                    {/* State Transition Viewer Content */}
-                    <div className="flex-1 overflow-hidden">
-                      {cp.getConnector(connector_id) ? (
-                        <Suspense
-                          fallback={
-                            <div className="h-full flex items-center justify-center">
-                              <div className="text-muted">
-                                Loading State Diagram...
-                              </div>
-                            </div>
-                          }
-                        >
-                          <StateTransitionViewer
-                            connector={cp.getConnector(connector_id)!}
-                            chargePoint={cp}
-                          />
-                        </Suspense>
-                      ) : null}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 };

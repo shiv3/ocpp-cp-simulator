@@ -1,0 +1,100 @@
+{
+  "id": "demo-charging",
+  "name": "Demo Charging (OCPP 1.6)",
+  "description": "OCPP 1.6 §4.9 lifecycle demo. Stays in Available after boot until the CSMS sends RemoteStartTransaction; from there the domain auto-drives Preparing → Charging → Finishing → Available. Use with --scenario-template-file to apply to every connector of a multi-connector CP.",
+  "targetType": "connector",
+  "targetId": 1,
+  "evSettings": {
+    "modelName": "Tesla Model 3",
+    "batteryCapacityKwh": 75,
+    "maxChargingPowerKw": 250,
+    "initialSoc": 20,
+    "targetSoc": 80
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 400, "y": 0 },
+      "data": {
+        "label": "Start on connect",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "wait-boot",
+      "type": "delay",
+      "position": { "x": 400, "y": 100 },
+      "data": {
+        "label": "Wait for BootNotification.conf",
+        "description": "§4.2 — give the CSMS time to Accept the BootNotification before exercising the connector. Until then the connector stays Unavailable.",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "await-remote-start",
+      "type": "remoteStartTrigger",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "Wait for RemoteStartTransaction",
+        "description": "§5.11 — connector sits in Available until the CSMS sends RemoteStartTransaction.req. The forwarded idTag flows into the next Transaction node.",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "start-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 300 },
+      "data": {
+        "label": "StartTransaction.req",
+        "description": "§4.7 — sends StartTransaction.req with the idTag from RemoteStart. The domain auto-transitions Available → Preparing on send, then Preparing → Charging when the CSMS responds Accepted.",
+        "action": "start",
+        "tagId": "TAG001"
+      }
+    },
+    {
+      "id": "auto-meter",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 400 },
+      "data": {
+        "label": "MeterValues (Sample.Periodic, stop at target SoC)",
+        "description": "§5.9 — periodic MeterValues.req with Energy.Active.Import.Register. Increment matches an accelerated 150 kW DC fast-charge curve (1.25 kWh per 30 s). Stops automatically when the EV reaches evSettings.targetSoc.",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 30,
+        "incrementAmount": 1250,
+        "stopMode": "evSettings"
+      }
+    },
+    {
+      "id": "stop-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 500 },
+      "data": {
+        "label": "StopTransaction.req (reason=Local)",
+        "description": "§4.8 / §7.36 — StopTransaction.req. The domain transitions Charging → Finishing automatically; autoResetToAvailable then drops the connector back to Available.",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 400, "y": 600 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "wait-boot" },
+    { "id": "e2", "source": "wait-boot", "target": "await-remote-start" },
+    { "id": "e3", "source": "await-remote-start", "target": "start-tx" },
+    { "id": "e4", "source": "start-tx", "target": "auto-meter" },
+    { "id": "e5", "source": "auto-meter", "target": "stop-tx" },
+    { "id": "e6", "source": "stop-tx", "target": "end" }
+  ],
+  "createdAt": "2026-05-27T00:00:00.000Z",
+  "updatedAt": "2026-06-01T00:00:00.000Z",
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true
+}

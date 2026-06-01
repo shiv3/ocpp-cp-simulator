@@ -56,6 +56,19 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Let the browser draw native form controls (checkbox, radio, etc.) in
+     dark mode so their default "white box" doesn't blend into the dark
+     surface. Combined with accent-color this gives a visible unchecked
+     state plus a clearly-coloured checked state. */
+  .dark {
+    color-scheme: dark;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: hsl(var(--primary));
+  }
 }
 
 @layer components {

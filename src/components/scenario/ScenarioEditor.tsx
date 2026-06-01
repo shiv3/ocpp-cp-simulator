@@ -1,6 +1,7 @@
 import React, {
   useState,
   useCallback,
+  useMemo,
   useRef,
   useEffect,
   lazy,
@@ -10,15 +11,26 @@ import {
   ReactFlow,
   Background,
   Controls,
+  ControlButton,
   MiniMap,
   addEdge,
   useNodesState,
   useEdgesState,
   Connection,
   Node,
+  Edge,
   NodeTypes,
+  ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 import {
   ScenarioDefinition,
@@ -29,6 +41,10 @@ import {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import {
+  type EVSettings,
+  EV_PRESETS,
+} from "../../cp/domain/connector/EVSettings";
 
 // Dynamic import for heavy component (bundle-dynamic-imports)
 const MeterValueCurveModal = lazy(() => import("../MeterValueCurveModal"));
@@ -46,26 +62,27 @@ import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
 import ReservationTriggerNode from "./nodes/ReservationTriggerNode";
 import StartEndNode from "./nodes/StartEndNode";
+import StatusNotificationNode from "./nodes/StatusNotificationNode";
+import UnlockOutcomeNode from "./nodes/UnlockOutcomeNode";
+import ConfigSetNode from "./nodes/ConfigSetNode";
+import DataTransferNode from "./nodes/DataTransferNode";
 
 import {
-  loadScenarios,
-  updateScenario,
-  addScenario,
-  getScenarioById,
   exportScenarioToJSON,
   importScenarioFromJSON,
-  createDefaultScenario,
-} from "../../utils/scenarioStorage";
+} from "../../utils/scenarioFile";
+import { createDefaultScenario } from "../../cp/application/scenario/defaultScenario";
 import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
-import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
-import { createScenarioExecutorCallbacks } from "../../cp/application/scenario/ScenarioRuntime";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import { useDataContext } from "../../data/providers/DataProvider";
+import { useDarkMode } from "../../contexts/DarkModeContext";
 
 interface ScenarioEditorProps {
-  chargePoint: ChargePoint;
+  cpId: string;
   connectorId: number | null;
   scenario?: ScenarioDefinition | null;
   scenarioId?: string; // Optional: if provided, edit specific scenario
@@ -87,6 +104,10 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
   [ScenarioNodeType.RESERVATION_TRIGGER]: ReservationTriggerNode,
+  [ScenarioNodeType.STATUS_NOTIFICATION]: StatusNotificationNode,
+  [ScenarioNodeType.UNLOCK_OUTCOME]: UnlockOutcomeNode,
+  [ScenarioNodeType.CONFIG_SET]: ConfigSetNode,
+  [ScenarioNodeType.DATA_TRANSFER]: DataTransferNode,
   [ScenarioNodeType.START]: (props) => (
     <StartEndNode {...props} nodeType="start" />
   ),
@@ -94,41 +115,58 @@ const nodeTypes: NodeTypes = {
 };
 
 const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
-  chargePoint,
+  cpId,
   connectorId,
   scenario: scenarioProp,
   scenarioId,
   executionContext: propsExecutionContext,
   nodeProgress: propsNodeProgress,
-  onClose,
+  // onClose is still required by the props interface for back-compat with
+  // callers, but the editor itself no longer self-closes — the parent
+  // panel owns its visibility now. Intentionally not destructured.
 }) => {
-  const [scenario, setScenario] = useState<ScenarioDefinition>(() => {
-    if (scenarioProp) {
-      return scenarioProp;
-    }
-    if (scenarioId) {
-      const found = getScenarioById(chargePoint.id, connectorId, scenarioId);
-      if (found) return found;
-    }
-    return createDefaultScenario(chargePoint.id, connectorId);
-  });
+  const { chargePointService, mode, defaultEvSettings, scenarioRepository } =
+    useDataContext();
+  const { isDark } = useDarkMode();
+  const localCp: ChargePoint | null =
+    mode === "local" && chargePointService.getLocalChargePoint
+      ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
+      : null;
+
+  // Initial scenario: when the caller hands us one via `scenarioProp`,
+  // use it; otherwise start from the default and async-hydrate from the
+  // repository in the effect below if a `scenarioId` was supplied. The
+  // brief default-state flash before the async load completes is
+  // acceptable for first-mount; the editor doesn't render different DOM
+  // for a "loaded" vs "loading" scenario.
+  const [scenario, setScenario] = useState<ScenarioDefinition>(
+    () => scenarioProp ?? createDefaultScenario(cpId, connectorId),
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(scenario.edges);
   const [executionState, setExecutionState] =
     useState<ScenarioExecutionState>("idle");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [executionMode, setExecutionMode] =
-    useState<ScenarioExecutionMode>("oneshot");
+  // executionMode is no longer surfaced — scenarios always run one-shot.
+  // We keep a no-op setter so the existing call sites (which still pass a
+  // ScenarioExecutionMode through ScenarioExecutor / ScenarioControlPanel)
+  // continue to compile without surgery.
+  const setExecutionMode = (_mode: ScenarioExecutionMode): void => {
+    /* no-op */
+  };
   const [executionContext, setExecutionContext] =
     useState<ScenarioExecutionContext | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
-  const [connectorStatus, setConnectorStatus] = useState<OCPPStatus>(
-    OCPPStatus.Unavailable,
-  );
-  const [meterValue, setMeterValue] = useState<number>(0);
-  const [transactionId, setTransactionId] = useState<number | null>(null);
+  // Connector status / meter / transactionId / CP status used to drive the
+  // now-removed toolbar status strip. We still take the setters from useState
+  // so the existing event handlers don't need rewiring, but the values
+  // themselves are unused inside this component — the panel-level header
+  // owns the visible status display.
+  const [, setConnectorStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
+  const [liveMeterValueWh, setMeterValue] = useState<number>(0);
+  const [, setTransactionId] = useState<number | null>(null);
+  const [, setCpStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
   const [nodeProgress, setNodeProgress] = useState<
     Record<string, { remaining: number; total: number }>
   >({});
@@ -144,12 +182,61 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [scenarioEnabled, setScenarioEnabled] = useState(
     scenario.enabled !== false,
   );
+  // Scenario-level EV settings — applied to the target connector at scenario
+  // start (see ScenarioExecutor.start). Partial: only filled fields are
+  // written; the others keep the connector's current values.
+  const [scenarioEvSettings, setScenarioEvSettings] = useState<
+    Partial<EVSettings>
+  >(scenario.evSettings ?? {});
+  const [isEvSettingsExpanded, setIsEvSettingsExpanded] = useState(true);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   const executorRef = useRef<ScenarioExecutor | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Captured from `<ReactFlow onInit>` so handleAutoLayout can call
+  // fitView() to re-frame the graph immediately after re-positioning.
+  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+
+  // ── Undo / Redo history ───────────────────────────────────────────────
+  // History is structural — we only push a new past entry when the graph
+  // shape or node data changes. Pure position drags update the latest
+  // snapshot in place so a subsequent undo still restores the right node
+  // positions, but they don't pollute the stack.
+  type HistorySnapshot = { nodes: Node[]; edges: Edge[] };
+  const historyRef = useRef<{
+    past: HistorySnapshot[];
+    future: HistorySnapshot[];
+  }>({ past: [], future: [] });
+  const prevSnapshotRef = useRef<HistorySnapshot | null>(null);
+  const lastStructuralKeyRef = useRef<string>("");
+  const skipHistoryRef = useRef<boolean>(false);
+  const [historyTick, setHistoryTick] = useState(0);
+  const [saveFeedback, setSaveFeedback] = useState<"idle" | "saved">("idle");
+  const saveFeedbackTimerRef = useRef<number | null>(null);
+
+  const structuralKey = useCallback((ns: Node[], es: Edge[]): string => {
+    return JSON.stringify({
+      n: ns.map((n) => ({ id: n.id, type: n.type, data: n.data })),
+      e: es.map((e) => ({
+        id: e.id,
+        s: e.source,
+        t: e.target,
+        sh: e.sourceHandle ?? null,
+        th: e.targetHandle ?? null,
+        l: e.label ?? null,
+      })),
+    });
+  }, []);
 
   // Reload scenario when props change
   useEffect(() => {
+    const resetHistory = () => {
+      historyRef.current = { past: [], future: [] };
+      prevSnapshotRef.current = null;
+      lastStructuralKeyRef.current = "";
+      skipHistoryRef.current = true;
+      setHistoryTick((t) => t + 1);
+    };
     if (scenarioProp) {
       setScenario(scenarioProp);
       setNodes(scenarioProp.nodes);
@@ -158,12 +245,30 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setScenarioDescription(scenarioProp.description || "");
       setDefaultExecutionMode(scenarioProp.defaultExecutionMode || "oneshot");
       setScenarioEnabled(scenarioProp.enabled !== false);
+      setScenarioEvSettings(scenarioProp.evSettings ?? {});
+      resetHistory();
       return;
     }
 
     if (scenarioId) {
-      const found = getScenarioById(chargePoint.id, connectorId, scenarioId);
-      if (found) {
+      // Async lookup via the scenario repository (replaces the legacy
+      // sync getScenarioById helper backed by localStorage). The
+      // cancellation flag prevents a stale fetch from overwriting state
+      // after the effect re-runs.
+      let cancelled = false;
+      void scenarioRepository.list(cpId).then((all) => {
+        if (cancelled) return;
+        const found = all.find(
+          (s) =>
+            s.id === scenarioId &&
+            // Same filter `getScenarioById` used: prefer the scenario
+            // targeted at this (cp, connector). null connector means
+            // "CP-level scenarios only".
+            (connectorId === null
+              ? s.targetType !== "connector"
+              : s.targetType !== "connector" || s.targetId === connectorId),
+        );
+        if (!found) return;
         setScenario(found);
         setNodes(found.nodes);
         setEdges(found.edges);
@@ -171,13 +276,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setScenarioDescription(found.description || "");
         setDefaultExecutionMode(found.defaultExecutionMode || "oneshot");
         setScenarioEnabled(found.enabled !== false);
-      }
+        setScenarioEvSettings(found.evSettings ?? {});
+        resetHistory();
+      });
+      return () => {
+        cancelled = true;
+      };
     }
   }, [
     scenarioProp,
     scenarioId,
-    chargePoint.id,
+    cpId,
     connectorId,
+    scenarioRepository,
     setNodes,
     setEdges,
   ]);
@@ -200,6 +311,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodeProgress(propsNodeProgress);
     }
   }, [propsNodeProgress]);
+
+  // Stable key over the node ID set — recomputes when nodes are added /
+  // removed / replaced, but stays equal across pure style/position updates.
+  // The highlight effect below uses this so that re-hydrating the editor
+  // with a new scenario (e.g. opening the side panel mid-run, when the
+  // graph swaps from the placeholder default to the running scenario)
+  // forces the executing-node CSS to re-apply against the freshly loaded
+  // node ids. Without this, the executor's context is the same object
+  // ref each poll tick, the prop effect short-circuits, and the highlight
+  // never gets a chance to run against the real nodes.
+  const nodeIdKey = useMemo(() => nodes.map((n) => n.id).join("|"), [nodes]);
 
   // Update node styles based on execution context and progress
   useEffect(() => {
@@ -245,10 +367,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             boxShadow: "0 0 10px rgba(16, 185, 129, 0.5)",
           };
         } else if (isExecuted) {
-          // Mark executed nodes with gray background
-          className = `${className} executed-node`;
+          // Mark executed nodes with gray background. Clear any previous
+          // executing-node border/boxShadow explicitly — without this they
+          // stick around because the previous branch left them set.
+          className =
+            `${className.replace(/executing-node/g, "")} executed-node`
+              .replace(/\s+/g, " ")
+              .trim();
           style = {
             ...style,
+            border: undefined,
+            boxShadow: undefined,
             opacity: 0.6,
           };
         } else {
@@ -275,41 +404,100 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         };
       }),
     );
-  }, [executionContext, nodeProgress, setNodes]);
+  }, [executionContext, nodeProgress, setNodes, nodeIdKey]);
 
-  // Subscribe to connector status changes
+  // Push the connector's live meter reading into every MeterValue node's
+  // `data.currentValue` so the node face renders the running total instead
+  // of the static `data.value` from the scenario JSON. We don't mutate
+  // `data.value` (that's the configured starting value); MeterValueNode
+  // already prefers `currentValue` when present.
+  useEffect(() => {
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((node) => {
+        if (node.type !== "meterValue") return node;
+        const cur = (node.data as { currentValue?: number }).currentValue;
+        if (cur === liveMeterValueWh) return node;
+        changed = true;
+        return {
+          ...node,
+          data: { ...node.data, currentValue: liveMeterValueWh },
+        };
+      });
+      return changed ? next : nds;
+    });
+  }, [liveMeterValueWh, setNodes]);
+
+  // In remote mode the in-browser executor is never set, so executionState
+  // would stay "idle" forever and Force Step would keep re-running the
+  // scenario. Sync executionState from scenario_* events instead.
+  useEffect(() => {
+    if (localCp) return;
+    const unsub = chargePointService.subscribe(cpId, (event) => {
+      if (
+        event.type === "scenario-started" &&
+        event.scenarioId === scenario.id
+      ) {
+        setExecutionState("running");
+      } else if (
+        (event.type === "scenario-completed" ||
+          event.type === "scenario-error") &&
+        event.scenarioId === scenario.id
+      ) {
+        setExecutionState("idle");
+      }
+    });
+    return () => unsub();
+  }, [localCp, chargePointService, cpId, scenario.id]);
+
+  // Subscribe to connector status changes via the service event bus.
   useEffect(() => {
     if (!connectorId) return;
 
-    const connector = chargePoint.getConnector(connectorId);
-    if (!connector) return;
-
-    // Subscribe to connector events
-    const unsubStatus = connector.events.on("statusChange", (data) => {
-      setConnectorStatus(data.status);
+    const unsubscribe = chargePointService.subscribe(cpId, (event) => {
+      if ("connectorId" in event && event.connectorId !== connectorId) return;
+      if (event.type === "connector-status") {
+        setConnectorStatus(event.status);
+      } else if (event.type === "connector-meter") {
+        setMeterValue(event.meterValue);
+      } else if (event.type === "connector-transaction") {
+        setTransactionId(event.transactionId);
+      }
     });
 
-    const unsubMeterValue = connector.events.on("meterValueChange", (data) => {
-      setMeterValue(data.meterValue);
+    // Pull initial values from the snapshot.
+    void chargePointService.getChargePoint(cpId).then((snapshot) => {
+      if (!snapshot) return;
+      const connector = snapshot.connectors.find((c) => c.id === connectorId);
+      if (!connector) return;
+      setConnectorStatus(connector.status);
+      setMeterValue(connector.meterValue);
+      setTransactionId(connector.transactionId);
     });
 
-    const unsubTransactionId = connector.events.on(
-      "transactionIdChange",
-      (data) => {
-        setTransactionId(data.transactionId);
-      },
-    );
+    return () => unsubscribe();
+  }, [chargePointService, cpId, connectorId]);
 
-    // Set initial values
-    setConnectorStatus(connector.status as OCPPStatus);
-    setMeterValue(connector.meterValue);
+  // Track CP-level status so we can hold the auto-start until the CSMS is
+  // connected and BootNotification has been accepted. The CP starts in
+  // Unavailable and flips to Available only after the boot result arrives.
+  // Disconnect / reset events drop it back to Unavailable.
+  useEffect(() => {
+    const unsubscribe = chargePointService.subscribe(cpId, (event) => {
+      if (event.type === "status") {
+        setCpStatus(event.status);
+      } else if (event.type === "disconnected") {
+        setCpStatus(OCPPStatus.Unavailable);
+      }
+    });
 
-    return () => {
-      unsubStatus();
-      unsubMeterValue();
-      unsubTransactionId();
-    };
-  }, [chargePoint, connectorId]);
+    void chargePointService.getChargePoint(cpId).then((snapshot) => {
+      if (!snapshot) return;
+      setCpStatus(snapshot.status);
+    });
+
+    return () => unsubscribe();
+  }, [chargePointService, cpId]);
 
   // Auto-save to localStorage when nodes, edges, or metadata change
   useEffect(() => {
@@ -356,6 +544,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setEdges(cleanedEdges);
     }
 
+    // Drop empty / blank fields so we don't serialize useless `{}` blobs.
+    const cleanedEvSettings: Partial<EVSettings> = {};
+    (
+      Object.entries(scenarioEvSettings) as [keyof EVSettings, unknown][]
+    ).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === "") return;
+      // @ts-expect-error narrowed by key
+      cleanedEvSettings[k] = v;
+    });
+
     const updatedScenario: ScenarioDefinition = {
       ...scenario,
       name: scenarioName,
@@ -365,19 +563,34 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       trigger,
       defaultExecutionMode,
       enabled: scenarioEnabled,
+      evSettings:
+        Object.keys(cleanedEvSettings).length > 0
+          ? cleanedEvSettings
+          : undefined,
       updatedAt: new Date().toISOString(),
     };
     setScenario(updatedScenario);
     if (scenario.id) {
-      // Auto-save to storage (but don't reload into ScenarioManager yet)
-      updateScenario(chargePoint.id, connectorId, scenario.id, updatedScenario);
+      // Auto-save through the repository (upsert). Fire-and-forget; if it
+      // fails we log to console rather than block the in-flight edit.
+      void scenarioRepository
+        .save(cpId, connectorId, updatedScenario)
+        .catch((err) => console.error("Failed to autosave scenario", err));
     }
 
-    // Keep ScenarioManager in sync while editing
-    const connector = chargePoint.getConnector(connectorId || 1);
-    if (connector?.scenarioManager) {
-      const allScenarios = loadScenarios(chargePoint.id, connectorId);
-      connector.scenarioManager.loadScenarios(allScenarios);
+    // Keep ScenarioManager in sync while editing (local mode only).
+    if (localCp) {
+      const connector = localCp.getConnector(connectorId || 1);
+      if (connector?.scenarioManager) {
+        void scenarioRepository.list(cpId).then((all) => {
+          const scoped = all.filter((s) =>
+            connectorId === null
+              ? s.targetType !== "connector"
+              : s.targetType !== "connector" || s.targetId === connectorId,
+          );
+          connector.scenarioManager?.loadScenarios(scoped);
+        });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scenario is intentionally excluded to avoid infinite loop (this effect updates scenario)
   }, [
@@ -387,12 +600,143 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioDescription,
     defaultExecutionMode,
     scenarioEnabled,
+    scenarioEvSettings,
     setEdges,
     scenario.id,
-    chargePoint.id,
+    cpId,
     connectorId,
-    chargePoint,
+    localCp,
   ]);
+
+  // Track structural changes for undo/redo. Position-only changes update
+  // the latest snapshot silently so dragging doesn't fill the stack but
+  // undo still restores the correct positions.
+  useEffect(() => {
+    const key = structuralKey(nodes, edges);
+
+    if (skipHistoryRef.current) {
+      skipHistoryRef.current = false;
+      prevSnapshotRef.current = { nodes, edges };
+      lastStructuralKeyRef.current = key;
+      return;
+    }
+
+    if (prevSnapshotRef.current === null) {
+      prevSnapshotRef.current = { nodes, edges };
+      lastStructuralKeyRef.current = key;
+      return;
+    }
+
+    if (lastStructuralKeyRef.current !== key) {
+      const past = historyRef.current.past;
+      past.push(prevSnapshotRef.current);
+      if (past.length > 50) past.shift();
+      historyRef.current.future = [];
+      setHistoryTick((t) => t + 1);
+    }
+
+    prevSnapshotRef.current = { nodes, edges };
+    lastStructuralKeyRef.current = key;
+  }, [nodes, edges, structuralKey]);
+
+  const handleUndo = useCallback(() => {
+    const h = historyRef.current;
+    if (h.past.length === 0) return;
+    const prev = h.past.pop()!;
+    h.future.push({ nodes, edges });
+    skipHistoryRef.current = true;
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setHistoryTick((t) => t + 1);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  const handleRedo = useCallback(() => {
+    const h = historyRef.current;
+    if (h.future.length === 0) return;
+    const next = h.future.pop()!;
+    h.past.push({ nodes, edges });
+    skipHistoryRef.current = true;
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setHistoryTick((t) => t + 1);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  const handleManualSave = useCallback(() => {
+    const cleanedEvSettings: Partial<EVSettings> = {};
+    (
+      Object.entries(scenarioEvSettings) as [keyof EVSettings, unknown][]
+    ).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === "") return;
+      // @ts-expect-error narrowed by key
+      cleanedEvSettings[k] = v;
+    });
+    const trigger = scenario.trigger ?? { type: "manual" as const };
+    const updated: ScenarioDefinition = {
+      ...scenario,
+      name: scenarioName,
+      description: scenarioDescription,
+      nodes,
+      edges,
+      trigger,
+      defaultExecutionMode,
+      enabled: scenarioEnabled,
+      evSettings:
+        Object.keys(cleanedEvSettings).length > 0
+          ? cleanedEvSettings
+          : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    if (scenario.id) {
+      void scenarioRepository
+        .save(cpId, connectorId, updated)
+        .catch((err) => console.error("Failed to save scenario", err));
+    }
+    setScenario(updated);
+    setSaveFeedback("saved");
+    if (saveFeedbackTimerRef.current !== null) {
+      window.clearTimeout(saveFeedbackTimerRef.current);
+    }
+    saveFeedbackTimerRef.current = window.setTimeout(() => {
+      setSaveFeedback("idle");
+      saveFeedbackTimerRef.current = null;
+    }, 1500);
+  }, [
+    scenario,
+    scenarioName,
+    scenarioDescription,
+    nodes,
+    edges,
+    defaultExecutionMode,
+    scenarioEnabled,
+    scenarioEvSettings,
+    cpId,
+    connectorId,
+  ]);
+
+  // Keyboard shortcuts for undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+Y).
+  // Ignored when the user is typing in an input/textarea so text edits in
+  // node config / modals keep their own undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (target.isContentEditable) return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleUndo, handleRedo]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -466,165 +810,138 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [setNodes, nodes],
   );
 
-  // Execution control handlers
-  const handleStart = useCallback(
-    async (mode: ScenarioExecutionMode) => {
-      if (chargePoint.status !== OCPPStatus.Available) {
-        console.warn(
-          `[ScenarioEditor] ChargePoint status is ${chargePoint.status}. Scenario execution skipped.`,
-        );
-        return;
-      }
-      executorRef.current?.stop();
-      setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
+  // Scenario execution is owned by the connector card and ScenarioManager;
+  // the editor only renders the graph and reacts to executionContext from
+  // outside. The previous in-editor handleStart() useCallback lived here
+  // but was orphaned by that refactor — see Connector.tsx for the current
+  // start path.
 
-      const currentScenario: ScenarioDefinition = {
-        ...scenario,
-        nodes,
-        edges,
-      };
+  /**
+   * Lay nodes out top-to-bottom by topological depth. Roots (no incoming
+   * edges) sit at depth 0, their children at depth 1, etc. Nodes that
+   * share a depth are spread horizontally and centered around the canvas
+   * mid-line. Cycles (uncommon for scenarios) fall back to depth 0.
+   */
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return;
 
-      const connector = connectorId
-        ? chargePoint.getConnector(connectorId)
-        : null;
+    const COL = 280;
+    const ROW = 140;
+    const CENTER_X = 400;
 
-      if (!connector) {
-        console.warn("Connector not found. Scenario execution aborted.");
-        return;
-      }
-
-      executorRef.current = new ScenarioExecutor(
-        currentScenario,
-        createScenarioExecutorCallbacks({
-          chargePoint,
-          connector,
-          hooks: {
-            onStateChange: (context) => {
-              setExecutionState(context.state);
-              setExecutionContext(context);
-            },
-            onNodeExecute: (nodeId) => {
-              // Highlight executing node
-              setNodes((nds) =>
-                nds.map((n) => ({
-                  ...n,
-                  style:
-                    n.id === nodeId
-                      ? { boxShadow: "0 0 10px 3px #3b82f6" }
-                      : {},
-                })),
-              );
-            },
-            onNodeProgress: (nodeId, remaining, total) => {
-              // Update node data with progress information
-              setNodes((nds) =>
-                nds.map((n) =>
-                  n.id === nodeId
-                    ? {
-                        ...n,
-                        data: {
-                          ...n.data,
-                          progress: { remaining, total },
-                        },
-                      }
-                    : n,
-                ),
-              );
-            },
-            onError: (error) => {
-              console.error("Scenario execution error:", error);
-              alert(`Scenario error: ${error.message}`);
-            },
-          },
-        }),
-      );
-
-      setExecutionMode(mode);
-      await executorRef.current.start(mode);
-    },
-    [scenario, nodes, edges, chargePoint, connectorId, setNodes],
-  );
-
-  const handleForceStep = useCallback(() => {
-    if (executionState === "idle") {
-      void handleStart("step");
-      setTimeout(() => {
-        executorRef.current?.forceStep();
-      }, 0);
-      return;
+    const incoming = new Map<string, number>();
+    const outgoing = new Map<string, string[]>();
+    for (const n of nodes) {
+      incoming.set(n.id, 0);
+      outgoing.set(n.id, []);
     }
-    executorRef.current?.forceStep();
-  }, [executionState, handleStart]);
+    for (const e of edges) {
+      if (incoming.has(e.target)) {
+        incoming.set(e.target, (incoming.get(e.target) ?? 0) + 1);
+      }
+      if (outgoing.has(e.source)) {
+        outgoing.get(e.source)!.push(e.target);
+      }
+    }
+
+    const depth = new Map<string, number>();
+    const remaining = new Map(incoming);
+    const queue: string[] = [];
+    for (const [id, count] of incoming) {
+      if (count === 0) {
+        depth.set(id, 0);
+        queue.push(id);
+      }
+    }
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      const d = depth.get(id) ?? 0;
+      for (const next of outgoing.get(id) ?? []) {
+        const newDepth = Math.max(depth.get(next) ?? 0, d + 1);
+        depth.set(next, newDepth);
+        const r = (remaining.get(next) ?? 1) - 1;
+        remaining.set(next, r);
+        if (r === 0) queue.push(next);
+      }
+    }
+    // Any node not visited (cycle / disconnected) → park at depth 0.
+    for (const n of nodes) {
+      if (!depth.has(n.id)) depth.set(n.id, 0);
+    }
+
+    // Group by depth, stable in node order so re-layouts are deterministic.
+    const byDepth = new Map<number, string[]>();
+    for (const n of nodes) {
+      const d = depth.get(n.id) ?? 0;
+      if (!byDepth.has(d)) byDepth.set(d, []);
+      byDepth.get(d)!.push(n.id);
+    }
+
+    setNodes((prev) =>
+      prev.map((n) => {
+        const d = depth.get(n.id) ?? 0;
+        const cohort = byDepth.get(d) ?? [];
+        const idx = cohort.indexOf(n.id);
+        const cohortWidth = (cohort.length - 1) * COL;
+        return {
+          ...n,
+          position: {
+            x: CENTER_X - cohortWidth / 2 + idx * COL,
+            y: d * ROW,
+          },
+        };
+      }),
+    );
+
+    // Re-frame the canvas around the newly positioned nodes. React Flow
+    // needs the new positions to land first, so defer one frame. The
+    // animated transition makes the change feel like a smooth zoom rather
+    // than a jump.
+    requestAnimationFrame(() => {
+      rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 });
+    });
+  }, [nodes, edges, setNodes]);
 
   const handleForceStop = useCallback(() => {
+    // Stop both in-process and remote executors. In local mode the executor
+    // ref is set; in remote mode the server holds state and we must call
+    // stopScenario / stopAllScenarios over the wire.
     executorRef.current?.stop();
+    if (!localCp && connectorId != null) {
+      void chargePointService
+        .stopScenario(cpId, connectorId, scenario.id)
+        .catch(() =>
+          chargePointService
+            .stopAllScenarios(cpId, connectorId)
+            .catch(() => {}),
+        );
+    }
     setExecutionState("idle");
     setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
-  }, [setNodes]);
+  }, [setNodes, localCp, connectorId, chargePointService, cpId, scenario.id]);
 
-  const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const lastAutoStartKeyRef = useRef<string | null>(null);
-
-  // Auto-start after save/changes (manual trigger only, no StatusTrigger node)
+  // Auto-start now lives in `Connector.tsx` (the always-mounted card) so
+  // it fires for every connector independently of whether the side panel
+  // is open. The editor here only handles manual Start/Stop and visualizes
+  // the running state of the connector's ScenarioManager.
+  //
+  // Keep the !scenarioEnabled / non-manual-trigger reset so the editor
+  // still surfaces "scenario disabled" visually when the user toggles it.
   useEffect(() => {
+    if (!localCp) return;
     if (!scenarioEnabled) {
       executorRef.current?.stop();
       setExecutionState("idle");
-      lastAutoStartKeyRef.current = null;
       return;
     }
-
     const hasStatusTriggerNode = nodes.some(
       (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
     );
-
     if (scenario.trigger?.type !== "manual" || hasStatusTriggerNode) {
       executorRef.current?.stop();
       setExecutionState("idle");
-      lastAutoStartKeyRef.current = null;
-      return;
     }
-
-    if (executionState !== "idle") {
-      return;
-    }
-
-    const connector = connectorId
-      ? chargePoint.getConnector(connectorId)
-      : null;
-    if (!connector) return;
-
-    const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
-    if (lastAutoStartKeyRef.current === autoStartKey) {
-      return;
-    }
-    lastAutoStartKeyRef.current = autoStartKey;
-
-    if (autoStartTimerRef.current) {
-      clearTimeout(autoStartTimerRef.current);
-    }
-
-    autoStartTimerRef.current = setTimeout(() => {
-      handleStart(defaultExecutionMode);
-    }, 300);
-
-    return () => {
-      if (autoStartTimerRef.current) {
-        clearTimeout(autoStartTimerRef.current);
-      }
-    };
-  }, [
-    scenario.id,
-    scenario.updatedAt,
-    scenario.trigger?.type,
-    nodes,
-    defaultExecutionMode,
-    scenarioEnabled,
-    executionState,
-    connectorId,
-    chargePoint,
-    handleStart,
-  ]);
+  }, [scenarioEnabled, scenario.trigger?.type, nodes, localCp]);
 
   // File operations
   const handleExport = useCallback(() => {
@@ -651,22 +968,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setNodes(imported.nodes);
         setEdges(imported.edges);
 
-        // Check if scenario already exists
-        const existing = getScenarioById(
-          chargePoint.id,
-          connectorId,
-          imported.id,
-        );
-        if (existing) {
-          updateScenario(chargePoint.id, connectorId, imported.id, imported);
-        } else {
-          addScenario(chargePoint.id, connectorId, imported);
-        }
+        // Repository.save is upsert (`INSERT … ON CONFLICT DO UPDATE`),
+        // so we don't need to look the existing row up first.
+        await scenarioRepository.save(cpId, connectorId, imported);
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [chargePoint.id, connectorId, setNodes, setEdges],
+    [cpId, connectorId, scenarioRepository, setNodes, setEdges],
   );
 
   const handleLoadTemplate = useCallback(
@@ -684,18 +993,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return;
       }
 
-      const templateScenario = template.createScenario(
-        chargePoint.id,
-        connectorId,
-      );
+      const templateScenario = template.createScenario(cpId, connectorId);
       setScenario(templateScenario);
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
 
-      // Templates are always new scenarios, so add them
-      addScenario(chargePoint.id, connectorId, templateScenario);
+      // Templates are always new scenarios, so save them (upsert via repo).
+      void scenarioRepository
+        .save(cpId, connectorId, templateScenario)
+        .catch((err) => console.error("Failed to save template scenario", err));
     },
-    [chargePoint.id, connectorId, nodes.length, setNodes, setEdges],
+    [cpId, connectorId, scenarioRepository, nodes.length, setNodes, setEdges],
   );
 
   // Handle node double-click to open config panel
@@ -728,26 +1036,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     },
     [setNodes],
   );
-
-  // Get status color class
-  const getStatusColor = (status: OCPPStatus) => {
-    switch (status) {
-      case OCPPStatus.Available:
-        return "status-available";
-      case OCPPStatus.Preparing:
-        return "status-preparing";
-      case OCPPStatus.Charging:
-        return "status-charging";
-      case OCPPStatus.Finishing:
-        return "text-yellow-600 dark:text-yellow-400";
-      case OCPPStatus.Unavailable:
-        return "status-unavailable";
-      case OCPPStatus.Faulted:
-        return "status-error";
-      default:
-        return "text-secondary";
-    }
-  };
 
   // Get scenario state color class
   const getScenarioStateColor = (state: ScenarioExecutionState) => {
@@ -980,18 +1268,144 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 </label>
               </div>
               {formData.autoIncrement && (
-                <div className="ml-6 space-y-2">
-                  <button
-                    onClick={() => setIsCurveModalOpen(true)}
-                    className="btn-primary text-sm w-full"
-                  >
-                    ⚙️ Configure Auto Increment Curve
-                  </button>
-                  <p className="text-xs text-muted">
-                    {formData.curvePoints && formData.curvePoints.length > 0
-                      ? `Configured with ${formData.curvePoints.length} curve points`
-                      : "Click to configure meter value auto-increment curve"}
-                  </p>
+                <div className="ml-6 space-y-3">
+                  {/* Stop mode toggle. "manual" reads maxTime/maxValue
+                      from this node; "evSettings" derives the stop point
+                      from the scenario's EV settings. */}
+                  <div>
+                    <label className="block text-xs font-semibold text-primary mb-1">
+                      Stop Mode
+                    </label>
+                    <select
+                      className="input-base w-full text-sm"
+                      value={(formData.stopMode as string) || "manual"}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          stopMode: e.target.value as "manual" | "evSettings",
+                        })
+                      }
+                    >
+                      <option value="manual">
+                        Manual (use maxTime / maxValue below)
+                      </option>
+                      <option value="evSettings">
+                        EV Settings (delivered kWh from EV)
+                      </option>
+                    </select>
+                    {formData.stopMode === "evSettings" ? (
+                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                        Stops when delivered kWh ≥ capacity × (target − initial)
+                        / 100. Uses the scenario's EV settings (above) or the
+                        connector's current EV state if the scenario doesn't
+                        override.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {/* Manual-mode caps. Hidden in EV-settings mode. */}
+                  {formData.stopMode !== "evSettings" ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Increment Interval (s)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-sm"
+                          value={(formData.incrementInterval as number) ?? ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              incrementInterval:
+                                e.target.value === ""
+                                  ? undefined
+                                  : parseInt(e.target.value, 10),
+                            })
+                          }
+                          placeholder="10"
+                          min={1}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Increment Amount (Wh)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-sm"
+                          value={(formData.incrementAmount as number) ?? ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              incrementAmount:
+                                e.target.value === ""
+                                  ? undefined
+                                  : parseInt(e.target.value, 10),
+                            })
+                          }
+                          placeholder="1000"
+                          min={1}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Max Time (s, 0=∞)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-sm"
+                          value={(formData.maxTime as number) ?? ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              maxTime:
+                                e.target.value === ""
+                                  ? undefined
+                                  : parseInt(e.target.value, 10),
+                            })
+                          }
+                          placeholder="0"
+                          min={0}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Max Value (Wh, 0=∞)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-sm"
+                          value={(formData.maxValue as number) ?? ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              maxValue:
+                                e.target.value === ""
+                                  ? undefined
+                                  : parseInt(e.target.value, 10),
+                            })
+                          }
+                          placeholder="0"
+                          min={0}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
+                    <button
+                      onClick={() => setIsCurveModalOpen(true)}
+                      className="btn-primary text-sm w-full"
+                    >
+                      ⚙️ Configure Auto Increment Curve
+                    </button>
+                    <p className="text-xs text-muted mt-1">
+                      {formData.curvePoints && formData.curvePoints.length > 0
+                        ? `Configured with ${formData.curvePoints.length} curve points`
+                        : "Optional: configure meter value auto-increment curve"}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -1275,92 +1689,92 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         </Suspense>
       ) : null}
 
-      {/* Header */}
-      <div className="panel p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-4">
-            <div>
-              <h2 className="text-lg font-bold text-primary">
-                Scenario Editor
-              </h2>
-              <p className="text-xs text-muted">
-                {chargePoint.id} -{" "}
-                {connectorId ? `Connector ${connectorId}` : "ChargePoint"}
-              </p>
+      {/* Header — slim toolbar.
+          Connector status / meter / SoC etc. are rendered by the parent
+          (ConnectorSidePanel left column); we just show the scenario-level
+          state + action buttons. */}
+      <div className="panel px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 text-xs min-w-0 flex-1">
+            <span className="text-muted shrink-0">Scenario:</span>
+            <div className="flex items-center gap-1 shrink-0">
+              {getScenarioStateIndicator(executionState)}
+              <span
+                className={`font-semibold ${getScenarioStateColor(executionState)}`}
+              >
+                {executionState
+                  ? executionState.charAt(0).toUpperCase() +
+                    executionState.slice(1)
+                  : "Idle"}
+              </span>
             </div>
-            <div className="flex gap-2">
-              {connectorId && (
-                <div className="panel-border px-3 py-1">
-                  <div className="flex items-center gap-3 text-xs">
-                    <div>
-                      <span className="text-muted">Status: </span>
-                      <span
-                        className={`font-semibold ${getStatusColor(connectorStatus)}`}
-                      >
-                        {connectorStatus}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-muted">Meter: </span>
-                      <span className="font-mono text-secondary">
-                        {meterValue} Wh
-                      </span>
-                    </div>
-                    {transactionId && (
-                      <div>
-                        <span className="text-muted">TX: </span>
-                        <span className="font-mono text-secondary">
-                          {transactionId}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* Scenario Execution State */}
-              <div className="panel-border px-3 py-1">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-muted">Scenario State:</span>
-                  <div className="flex items-center gap-1">
-                    {getScenarioStateIndicator(executionState)}
-                    <span
-                      className={`font-semibold ${getScenarioStateColor(executionState)}`}
-                    >
-                      {executionState
-                        ? executionState.charAt(0).toUpperCase() +
-                          executionState.slice(1)
-                        : "Idle"}
-                    </span>
-                  </div>
-                  {executionContext && executionContext.currentNodeId && (
-                    <div className="border-l border-gray-300 dark:border-gray-600 pl-2">
-                      <span className="text-muted">Current Node: </span>
-                      <span className="font-mono text-blue-600 dark:text-blue-400">
-                        {nodes.find(
-                          (n) => n.id === executionContext.currentNodeId,
-                        )?.data?.label || executionContext.currentNodeId}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            {executionContext && executionContext.currentNodeId && (
+              <>
+                <span className="text-muted shrink-0">·</span>
+                <span className="font-mono text-blue-600 dark:text-blue-400 truncate min-w-0">
+                  {nodes.find((n) => n.id === executionContext.currentNodeId)
+                    ?.data?.label || executionContext.currentNodeId}
+                </span>
+              </>
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1 shrink-0">
+            <button
+              onClick={handleForceStop}
+              className="btn-danger text-xs px-2 py-1"
+              title="Stop running scenario"
+            >
+              ■ Stop
+            </button>
+            <button
+              onClick={handleUndo}
+              disabled={historyRef.current.past.length === 0}
+              className="btn-secondary text-xs px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="戻る (Undo · Cmd/Ctrl+Z)"
+              data-history-tick={historyTick}
+            >
+              ↶
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={historyRef.current.future.length === 0}
+              className="btn-secondary text-xs px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="進む (Redo · Cmd/Ctrl+Shift+Z)"
+              data-history-tick={historyTick}
+            >
+              ↷
+            </button>
+            <button
+              onClick={handleManualSave}
+              className={`text-xs px-2 py-1 ${
+                saveFeedback === "saved"
+                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                  : "btn-secondary"
+              }`}
+              title="Save scenario"
+            >
+              {saveFeedback === "saved" ? "✓ Saved" : "💾 Save"}
+            </button>
+            <button
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="btn-secondary text-xs px-2 py-1"
+              title="Scenario settings"
+            >
+              ⚙
+            </button>
             <button
               onClick={handleImport}
               className="btn-secondary text-xs px-2 py-1"
+              title="Import JSON"
             >
-              📥 Import
+              ↑
             </button>
             <button
               onClick={handleExport}
               className="btn-secondary text-xs px-2 py-1"
+              title="Export JSON"
             >
-              📤 Export
-            </button>
-            <button onClick={onClose} className="btn-danger text-xs px-2 py-1">
-              ✕ Close
+              ↓
             </button>
           </div>
           <input
@@ -1372,108 +1786,278 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           />
         </div>
 
-        {/* Template Selector */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-primary whitespace-nowrap">
-            📋 Template:
-          </label>
-          <select
-            className="input-base text-xs flex-1"
-            onChange={(e) => {
-              if (e.target.value) {
-                handleLoadTemplate(e.target.value);
-                e.target.value = ""; // Reset selection
-              }
-            }}
-            defaultValue=""
-          >
-            <option value="">Select a template...</option>
-            {scenarioTemplates.map((template) => (
-              <option key={template.id} value={template.id}>
-                {template.name} - {template.description}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Scenario settings modal — Template / Name / Description / Enabled / EV Settings */}
+        <Dialog
+          open={isSettingsModalOpen}
+          onOpenChange={(open) => !open && setIsSettingsModalOpen(false)}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Scenario Settings</DialogTitle>
+            </DialogHeader>
 
-        {/* Scenario Settings */}
-        <div className="grid grid-cols-2 gap-2 mt-2">
-          {/* Name */}
-          <div>
-            <label className="block text-xs font-semibold text-primary mb-1">
-              Scenario Name
-            </label>
-            <input
-              type="text"
-              className="input-base w-full text-xs"
-              value={scenarioName}
-              onChange={(e) => setScenarioName(e.target.value)}
-              placeholder="Enter scenario name"
-            />
-          </div>
+            {/* Template Selector */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-primary whitespace-nowrap">
+                📋 Template:
+              </label>
+              <select
+                className="input-base text-xs flex-1"
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleLoadTemplate(e.target.value);
+                    e.target.value = ""; // Reset selection
+                  }
+                }}
+                defaultValue=""
+              >
+                <option value="">Select a template...</option>
+                {scenarioTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} - {template.description}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Default Execution Mode */}
-          <div>
-            <label className="block text-xs font-semibold text-primary mb-1">
-              Execution Mode
-            </label>
-            <select
-              className="input-base w-full text-xs"
-              value={defaultExecutionMode}
-              onChange={(e) =>
-                setDefaultExecutionMode(e.target.value as ScenarioExecutionMode)
-              }
-            >
-              <option value="oneshot">One-shot</option>
-              <option value="step">Step</option>
-            </select>
-          </div>
+            {/* Scenario Settings */}
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {/* Name */}
+              <div>
+                <label className="block text-xs font-semibold text-primary mb-1">
+                  Scenario Name
+                </label>
+                <input
+                  type="text"
+                  className="input-base w-full text-xs"
+                  value={scenarioName}
+                  onChange={(e) => setScenarioName(e.target.value)}
+                  placeholder="Enter scenario name"
+                />
+              </div>
 
-          {/* Description */}
-          <div className="col-span-2">
-            <label className="block text-xs font-semibold text-primary mb-1">
-              Description
-            </label>
-            <input
-              type="text"
-              className="input-base w-full text-xs"
-              value={scenarioDescription}
-              onChange={(e) => setScenarioDescription(e.target.value)}
-              placeholder="Enter scenario description (optional)"
-            />
-          </div>
+              {/* Description */}
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-primary mb-1">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  className="input-base w-full text-xs"
+                  value={scenarioDescription}
+                  onChange={(e) => setScenarioDescription(e.target.value)}
+                  placeholder="Enter scenario description (optional)"
+                />
+              </div>
 
-          {/* Enabled Toggle */}
-          <div className="flex items-center">
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                className="mr-2"
-                checked={scenarioEnabled}
-                onChange={(e) => setScenarioEnabled(e.target.checked)}
-              />
-              <span className="text-xs font-semibold text-primary">
-                Enabled
-              </span>
-            </label>
-          </div>
+              {/* Enabled Toggle */}
+              <div className="flex items-center">
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mr-2"
+                    checked={scenarioEnabled}
+                    onChange={(e) => setScenarioEnabled(e.target.checked)}
+                  />
+                  <span className="text-xs font-semibold text-primary">
+                    Enabled
+                  </span>
+                </label>
+              </div>
 
-          {/* Force Step Controls */}
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={handleForceStep}
-              className="btn-info text-xs px-3 py-1.5"
-            >
-              Force Step
-            </button>
-            <button
-              onClick={handleForceStop}
-              className="btn-danger text-xs px-3 py-1.5"
-            >
-              Stop
-            </button>
-          </div>
-        </div>
+              {/* Scenario EV Settings — applied to the target connector when the
+              scenario starts. Partial — empty fields keep the connector's
+              current values. */}
+              <div className="col-span-2 mt-1 rounded border border-gray-200 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setIsEvSettingsExpanded((v) => !v)}
+                  className="w-full flex items-center justify-between px-2 py-1.5 text-xs font-semibold text-primary hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  <span>🚗 Scenario EV Settings</span>
+                  <span className="text-gray-500">
+                    {isEvSettingsExpanded ? "▾" : "▸"}
+                  </span>
+                </button>
+                {isEvSettingsExpanded ? (
+                  <div className="px-2 pb-2 space-y-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        EV Model preset
+                      </label>
+                      <select
+                        className="input-base w-full text-xs"
+                        value={scenarioEvSettings.modelName ?? ""}
+                        onChange={(e) => {
+                          const preset = e.target.value;
+                          if (!preset) {
+                            setScenarioEvSettings({});
+                            return;
+                          }
+                          if (preset === "Custom") {
+                            setScenarioEvSettings({
+                              ...scenarioEvSettings,
+                              modelName: "Custom",
+                            });
+                            return;
+                          }
+                          const presetValues = EV_PRESETS[preset] ?? {};
+                          setScenarioEvSettings({
+                            ...scenarioEvSettings,
+                            modelName: preset,
+                            ...presetValues,
+                          });
+                        }}
+                      >
+                        <option value="">
+                          (use default
+                          {defaultEvSettings
+                            ? `: ${defaultEvSettings.modelName}`
+                            : ""}
+                          )
+                        </option>
+                        {Object.keys(EV_PRESETS).map((preset) => (
+                          <option key={preset} value={preset}>
+                            {preset}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Battery (kWh)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-xs"
+                          placeholder={
+                            defaultEvSettings
+                              ? String(defaultEvSettings.batteryCapacityKwh)
+                              : "—"
+                          }
+                          value={scenarioEvSettings.batteryCapacityKwh ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setScenarioEvSettings({
+                              ...scenarioEvSettings,
+                              batteryCapacityKwh:
+                                v === ""
+                                  ? undefined
+                                  : Math.max(1, parseFloat(v)),
+                            });
+                          }}
+                          min={1}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Max Power (kW)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-xs"
+                          placeholder={
+                            defaultEvSettings
+                              ? String(defaultEvSettings.maxChargingPowerKw)
+                              : "—"
+                          }
+                          value={scenarioEvSettings.maxChargingPowerKw ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setScenarioEvSettings({
+                              ...scenarioEvSettings,
+                              maxChargingPowerKw:
+                                v === ""
+                                  ? undefined
+                                  : Math.max(1, parseFloat(v)),
+                            });
+                          }}
+                          min={1}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Initial SoC (%)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-xs"
+                          placeholder={
+                            defaultEvSettings
+                              ? String(defaultEvSettings.initialSoc)
+                              : "—"
+                          }
+                          value={scenarioEvSettings.initialSoc ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setScenarioEvSettings({
+                              ...scenarioEvSettings,
+                              initialSoc:
+                                v === ""
+                                  ? undefined
+                                  : Math.min(100, Math.max(0, parseInt(v, 10))),
+                            });
+                          }}
+                          min={0}
+                          max={100}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                          Target SoC (%)
+                        </label>
+                        <input
+                          type="number"
+                          className="input-base w-full text-xs"
+                          placeholder={
+                            defaultEvSettings
+                              ? String(defaultEvSettings.targetSoc)
+                              : "—"
+                          }
+                          value={scenarioEvSettings.targetSoc ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setScenarioEvSettings({
+                              ...scenarioEvSettings,
+                              targetSoc:
+                                v === ""
+                                  ? undefined
+                                  : Math.min(100, Math.max(0, parseInt(v, 10))),
+                            });
+                          }}
+                          min={0}
+                          max={100}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug">
+                      Empty fields fall back to{" "}
+                      {defaultEvSettings ? (
+                        <>
+                          the <strong>Default EV Settings</strong> (
+                          {defaultEvSettings.modelName}) configured in Settings.
+                        </>
+                      ) : (
+                        <>the connector's current value (built-in default).</>
+                      )}{" "}
+                      The auto-meter "Stop mode" inside MeterValue nodes can
+                      derive its stop condition from these settings.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="secondary"
+                onClick={() => setIsSettingsModalOpen(false)}
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="flex-1 flex gap-3 p-3 overflow-hidden min-h-0">
@@ -1544,6 +2128,26 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 label="RemoteStart"
                 icon="🎬"
               />
+              <NodePaletteItem
+                type={ScenarioNodeType.STATUS_NOTIFICATION}
+                label="StatusNotif"
+                icon="📡"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.UNLOCK_OUTCOME}
+                label="UnlockOutcome"
+                icon="🔓"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.CONFIG_SET}
+                label="ConfigSet"
+                icon="🔧"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.DATA_TRANSFER}
+                label="DataTransfer"
+                icon="📦"
+              />
             </div>
           </div>
 
@@ -1562,10 +2166,45 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               nodeTypes={nodeTypes}
               deleteKeyCode={["Backspace", "Delete"]}
               fitView
+              colorMode={isDark ? "dark" : "light"}
+              onInit={(instance) => {
+                rfInstanceRef.current = instance;
+              }}
             >
               <Background />
-              <Controls />
-              <MiniMap />
+              <Controls>
+                <ControlButton
+                  onClick={handleAutoLayout}
+                  title="Auto-arrange nodes top-to-bottom"
+                  aria-label="Auto-arrange nodes"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="7" height="5" rx="1" />
+                    <rect x="14" y="3" width="7" height="5" rx="1" />
+                    <rect x="3" y="11" width="18" height="5" rx="1" />
+                    <rect x="8" y="19" width="8" height="3" rx="1" />
+                  </svg>
+                </ControlButton>
+              </Controls>
+              <MiniMap
+                pannable
+                zoomable
+                maskColor={
+                  isDark ? "rgba(15, 23, 42, 0.6)" : "rgba(240, 240, 240, 0.6)"
+                }
+                style={{
+                  backgroundColor: isDark ? "#1f2937" : "#ffffff",
+                }}
+              />
             </ReactFlow>
           </div>
         </div>
@@ -1708,12 +2347,55 @@ function createNodeByType(
           timeout: 0,
         },
       };
+    case ScenarioNodeType.STATUS_NOTIFICATION:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Status Notification",
+          status: OCPPStatus.Faulted,
+          errorCode: "InternalError",
+        },
+      };
+    case ScenarioNodeType.UNLOCK_OUTCOME:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Unlock Outcome", outcome: "Unlocked" },
+      };
+    case ScenarioNodeType.CONFIG_SET:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "ConfigSet",
+          key: "MeterValueSampleInterval",
+          value: "30",
+        },
+      };
+    case ScenarioNodeType.DATA_TRANSFER:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "DataTransfer",
+          vendorId: "com.example",
+        },
+      };
     case ScenarioNodeType.START:
       return {
         id,
         type,
         position,
-        data: { label: "Start" },
+        // Default trigger is "connect" — matches the historical behaviour
+        // where the scenario fired as soon as CP became Available after
+        // BootNotification. Operators can switch to "status" via
+        // NodeConfigPanel to gate on connector state instead.
+        data: { label: "Start", triggerOn: "connect" },
       };
     case ScenarioNodeType.END:
       return {

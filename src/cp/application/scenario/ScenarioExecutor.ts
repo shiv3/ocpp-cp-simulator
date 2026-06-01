@@ -18,6 +18,10 @@ import {
   ReserveNowNodeData,
   CancelReservationNodeData,
   ReservationTriggerNodeData,
+  StatusNotificationNodeData,
+  UnlockOutcomeNodeData,
+  ConfigSetNodeData,
+  DataTransferNodeData,
 } from "./ScenarioTypes";
 import {
   createScenarioMachine,
@@ -88,10 +92,12 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Start scenario execution
+   * Start scenario execution. Execution mode is always one-shot — the
+   * step / loop variants were removed from the product surface.
    */
-  public async start(mode: ScenarioExecutionMode = "oneshot"): Promise<void> {
-    // Dispatch START event to transition to running/stepping state
+  public async start(): Promise<void> {
+    const mode: ScenarioExecutionMode = "oneshot";
+    // Dispatch START event to transition to running state
     this.service.send({ type: "START", mode });
     this.notifyStateChange();
 
@@ -108,6 +114,22 @@ export class ScenarioExecutor {
       `[${this.scenario.name}] Scenario execution started (mode: ${mode})`,
       "info",
     );
+
+    // Apply the scenario's declarative EV settings (if any) before the
+    // first node runs, so meterValue / battery visualization /
+    // checkAutoStop all see the scenario's intended EV from the get-go.
+    if (this.scenario.evSettings && this.callbacks.onSetEVSettings) {
+      try {
+        await this.callbacks.onSetEVSettings(this.scenario.evSettings);
+      } catch (err) {
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Failed to apply scenario evSettings: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          "warn",
+        );
+      }
+    }
 
     try {
       await this.executeFlow();
@@ -414,9 +436,89 @@ export class ScenarioExecutor {
         );
         break;
 
+      case ScenarioNodeType.STATUS_NOTIFICATION:
+        await this.executeStatusNotification(
+          node.data as StatusNotificationNodeData,
+        );
+        break;
+
+      case ScenarioNodeType.UNLOCK_OUTCOME:
+        await this.executeUnlockOutcome(node.data as UnlockOutcomeNodeData);
+        break;
+
+      case ScenarioNodeType.CONFIG_SET:
+        await this.executeConfigSet(node.data as ConfigSetNodeData);
+        break;
+
+      case ScenarioNodeType.DATA_TRANSFER:
+        await this.executeDataTransfer(node.data as DataTransferNodeData);
+        break;
+
       default:
         console.warn(`Unknown node type: ${node.type}`);
     }
+  }
+
+  /** Send a StatusNotification.req with the user-supplied payload. */
+  private async executeStatusNotification(
+    data: StatusNotificationNodeData,
+  ): Promise<void> {
+    // ScenarioRuntime resolves the bound connectorId for the runtime. When
+    // the node specifies an explicit connectorId we use that (e.g. 0 to
+    // target the CP main controller); otherwise the runtime fills in the
+    // scenario's bound connector.
+    if (!this.callbacks.onSendStatusNotification) return;
+    const targetConnectorId = data.connectorId ?? -1;
+    this.callbacks.onSendStatusNotification(targetConnectorId, data.status, {
+      errorCode: data.errorCode,
+      info: data.info,
+      vendorErrorCode: data.vendorErrorCode,
+      vendorId: data.vendorId,
+    });
+    this.callbacks.log?.(
+      `StatusNotification connector=${targetConnectorId} status=${data.status}${
+        data.errorCode ? ` errorCode=${data.errorCode}` : ""
+      }`,
+      "info",
+    );
+  }
+
+  /** Pre-arm the connector's next UnlockConnector.req response. */
+  private async executeUnlockOutcome(
+    data: UnlockOutcomeNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onSetUnlockOutcome) {
+      this.callbacks.log?.(
+        "UnlockOutcome: no onSetUnlockOutcome callback wired",
+        "warn",
+      );
+      return;
+    }
+    this.callbacks.onSetUnlockOutcome(data.outcome);
+    this.callbacks.log?.(`Connector unlockResponse → ${data.outcome}`, "info");
+  }
+
+  /** Apply a ChangeConfiguration locally via the ConfigurationStore. */
+  private async executeConfigSet(data: ConfigSetNodeData): Promise<void> {
+    if (!this.callbacks.onConfigSet) {
+      this.callbacks.log?.("ConfigSet: no onConfigSet callback wired", "warn");
+      return;
+    }
+    this.callbacks.onConfigSet(data.key, data.value);
+    this.callbacks.log?.(`ConfigSet ${data.key}='${data.value}'`, "info");
+  }
+
+  /** Send a CP-initiated DataTransfer.req with the user's vendor/message id. */
+  private async executeDataTransfer(data: DataTransferNodeData): Promise<void> {
+    if (!this.callbacks.onSendDataTransfer) {
+      this.callbacks.log?.(
+        "DataTransfer: no onSendDataTransfer callback wired",
+        "warn",
+      );
+      return;
+    }
+    this.callbacks.onSendDataTransfer(data.vendorId, data.messageId, data.data);
+    this.callbacks.log?.(`DataTransfer vendorId=${data.vendorId}`, "info");
   }
 
   /**
@@ -463,24 +565,59 @@ export class ScenarioExecutor {
 
     // Handle auto-increment mode - start AutoMeterValue manager
     if (data.autoIncrement && this.callbacks.onStartAutoMeterValue) {
-      this.callbacks.log?.(
-        `[${this.scenario.name}] Starting AutoMeterValue: interval=${data.incrementInterval || 10}s increment=${data.incrementAmount || 1000}Wh maxTime=${data.maxTime || "unlimited"} maxValue=${data.maxValue || "unlimited"}`,
-        "info",
-      );
+      // Resolve the stop conditions. Default is "manual" for back-compat,
+      // which reads the node's maxTime / maxValue. "evSettings" derives a
+      // maxValue from the connector's EV settings (capacity × ΔSoC).
+      let resolvedMaxTime: number | undefined = data.maxTime;
+      let resolvedMaxValue: number | undefined = data.maxValue;
+
+      if (data.stopMode === "evSettings") {
+        const settings = this.callbacks.onGetEVSettings?.() ?? null;
+        if (settings && settings.batteryCapacityKwh > 0) {
+          const delta = Math.max(
+            0,
+            (settings.targetSoc ?? 0) - (settings.initialSoc ?? 0),
+          );
+          // Wh delivered to move from initialSoc% to targetSoc% on a
+          // capacity-kWh battery: capacity_kWh × (Δ%/100) × 1000 Wh/kWh
+          resolvedMaxValue = Math.round(
+            settings.batteryCapacityKwh * delta * 10,
+          );
+          resolvedMaxTime = undefined; // EV-driven runs are value-bounded only
+          this.callbacks.log?.(
+            `[${this.scenario.name}] stopMode=evSettings → maxValue=${resolvedMaxValue}Wh ` +
+              `(capacity=${settings.batteryCapacityKwh}kWh, ` +
+              `${settings.initialSoc ?? 0}% → ${settings.targetSoc ?? 0}%)`,
+            "info",
+          );
+        } else {
+          this.callbacks.log?.(
+            `[${this.scenario.name}] stopMode=evSettings but EV settings unavailable; auto-meter will run unbounded`,
+            "warn",
+          );
+          resolvedMaxValue = undefined;
+          resolvedMaxTime = undefined;
+        }
+      } else {
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Starting AutoMeterValue: interval=${data.incrementInterval || 10}s increment=${data.incrementAmount || 1000}Wh maxTime=${resolvedMaxTime || "unlimited"} maxValue=${resolvedMaxValue || "unlimited"}`,
+          "info",
+        );
+      }
 
       this.callbacks.onStartAutoMeterValue({
         intervalSeconds: data.incrementInterval || 10,
         incrementValue: data.incrementAmount || 1000,
-        maxTimeSeconds: data.maxTime,
-        maxValue: data.maxValue,
+        maxTimeSeconds: resolvedMaxTime,
+        maxValue: resolvedMaxValue,
       });
 
-      if (data.maxTime && data.maxTime > 0) {
-        await this.waitWithProgress(nodeId, data.maxTime);
+      if (resolvedMaxTime && resolvedMaxTime > 0) {
+        await this.waitWithProgress(nodeId, resolvedMaxTime);
         this.callbacks.onStopAutoMeterValue?.();
-      } else if (data.maxValue && data.maxValue > 0) {
+      } else if (resolvedMaxValue && resolvedMaxValue > 0) {
         await this.waitWithOptionalForceSkip(
-          this.callbacks.onWaitForMeterValue?.(data.maxValue) ??
+          this.callbacks.onWaitForMeterValue?.(resolvedMaxValue) ??
             Promise.resolve(),
         );
         this.callbacks.onStopAutoMeterValue?.();

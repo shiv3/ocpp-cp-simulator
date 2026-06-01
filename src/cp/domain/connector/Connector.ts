@@ -9,6 +9,7 @@ import {
   type MeterValueStrategy,
 } from "./MeterValueScheduler";
 import {
+  ChargePointErrorCode,
   OCPPAvailability,
   OCPPStatus,
   ChargingProfilePurposeType,
@@ -22,7 +23,8 @@ import {
   ScenarioEvents,
 } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
-import { type EVSettings, defaultEVSettings } from "./EVSettings";
+import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
+import { resolveScheduleLimitWatts } from "./ChargingScheduleResolver";
 
 export interface ChargingSchedulePeriod {
   startPeriod: number;
@@ -85,6 +87,15 @@ export interface ConnectorEvents {
   evSettingsChange: { settings: EVSettings };
   chargingProfileChange: { profile: ActiveChargingProfile | null };
   chargingProfilesChange: { profiles: ActiveChargingProfile[] };
+  /** Emitted when the auto-meter has reached an automatic stop condition
+   *  (currently: SoC >= EVSettings.targetSoc with stopAtTargetSoc). The
+   *  ChargePoint subscribes and ends the in-flight transaction. */
+  autoStopRequested: { reason: "targetSocReached" };
+  /** Emitted when the resolved schedule limit crosses the paused boundary
+   *  (i.e. enters or leaves a limit=0 period of the active charging
+   *  profile). The ChargePoint listens and flips Charging ↔ SuspendedEVSE
+   *  accordingly. `watts` is the new effective cap. */
+  scheduleLimitChange: { paused: boolean; watts: number };
 }
 
 interface IncrementStrategyConfig {
@@ -102,6 +113,40 @@ export class Connector {
 
   private statusValue: OCPPStatus = OCPPStatus.Unavailable;
   private availabilityValue: OCPPAvailability = "Operative";
+  // §5.2: when ChangeAvailability arrives during an active transaction the
+  // CP returns `Scheduled` and applies the new availability after the
+  // transaction stops. We remember the pending value here so the
+  // ChargePoint can finalize it on StopTransaction.
+  private scheduledAvailabilityValue: OCPPAvailability | null = null;
+  // OCPP 1.6 §7.6: ChargePointErrorCode carried in StatusNotification.req.
+  // Defaults to NoError. Set this before transitioning to Faulted (or before
+  // sending a warning-grade StatusNotification while
+  // Preparing/SuspendedEV/SuspendedEVSE/Finishing).
+  private currentErrorCodeValue: ChargePointErrorCode = "NoError";
+  private currentErrorInfo: string | null = null;
+  private currentVendorErrorCode: string | null = null;
+  // §5.18 / §7.46: scenarios/tests can simulate broken cable retention by
+  // flipping this to "UnlockFailed", or absent connector lock by setting
+  // "NotSupported". UnlockConnector.req returns this value verbatim.
+  private unlockResponseValue: "Unlocked" | "UnlockFailed" | "NotSupported" =
+    "Unlocked";
+  // When true, any meter-value update (from UI, scenario auto-increment, or
+  // direct setter) also derives a SoC value from
+  // `initialSoc + (delivered Wh / 1000) / capacity × 100` and applies it.
+  // UI controls this via the "Sync SoC ↔ Meter" toggle. Without this in
+  // the domain layer, scenario-driven meter updates would never move SoC.
+  // Default ON to match the browser's default user preference. Matters for
+  // remote mode (daemon) where the UI cannot push the flag down until the
+  // user opens the side panel — without this default, connector cards
+  // would show "—" / "SoC not reported" until the first manual interaction.
+  private socMeterSyncEnabledValue = true;
+  // Tracks which scenario configuration last triggered an auto-start on
+  // this connector. Lives on the connector (long-lived) rather than in a
+  // React useRef so opening / closing the side panel doesn't reset it and
+  // re-fire the scenario from the beginning. The key encodes scenario id +
+  // updatedAt + execution mode + trigger config, so saving the scenario
+  // (which bumps updatedAt) will legitimately re-trigger auto-start.
+  private lastAutoStartedScenarioKeyValue: string | null = null;
   private meterValueWh = 0;
   private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
@@ -113,7 +158,7 @@ export class Connector {
   private modeValue: ScenarioMode = "manual";
   private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
-  private _evSettings: EVSettings = { ...defaultEVSettings };
+  private _evSettings: EVSettings = getDefaultEVSettings();
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   constructor(
@@ -130,10 +175,52 @@ export class Connector {
             this.onMeterSend(id);
           }
         },
+        // Re-evaluated every tick so a schedule that crosses a period
+        // boundary mid-transaction is honored immediately.
+        getScheduleLimitWatts: () => this.currentScheduleLimitWatts(),
       },
       this.logger,
     );
   }
+
+  /**
+   * Resolve the effective wattage cap from the active charging profile (if
+   * any) at the current instant, anchored to the in-flight transaction's
+   * start time. Returns `Infinity` when uncapped — i.e. no profile, or no
+   * transaction context to anchor a Relative schedule on.
+   *
+   * Side-effect: if the paused/active state flipped since the last call,
+   * emits `scheduleLimitChange` so the ChargePoint can move the connector
+   * between Charging and SuspendedEVSE. Mid-tick crossings of a period
+   * boundary inside a Recurring or Absolute profile are picked up this way
+   * without needing an extra timer.
+   */
+  currentScheduleLimitWatts(): number {
+    const profile = this.getActiveChargingProfile();
+    const start = this.transactionValue?.startTime ?? null;
+    const resolved = resolveScheduleLimitWatts(profile, start);
+    const paused = resolved.watts === 0;
+    const isCapped = resolved.watts !== Infinity;
+    if (
+      isCapped &&
+      (this.lastSchedulePaused === null || paused !== this.lastSchedulePaused)
+    ) {
+      this.lastSchedulePaused = paused;
+      this.eventsEmitter.emit("scheduleLimitChange", {
+        paused,
+        watts: resolved.watts,
+      });
+    } else if (!isCapped && this.lastSchedulePaused !== null) {
+      // Profile cleared — reset so we re-arm on the next SetChargingProfile.
+      this.lastSchedulePaused = null;
+    }
+    return resolved.watts;
+  }
+
+  /** Snapshot of the last resolved "paused" state, used to detect crossings
+   *  of the limit=0 boundary across schedule periods. `null` means we
+   *  haven't seen a capped schedule yet (or it was cleared). */
+  private lastSchedulePaused: boolean | null = null;
 
   get id(): number {
     return this.connectorId;
@@ -171,6 +258,82 @@ export class Connector {
     });
   }
 
+  /** Pending availability that should be applied once the in-flight
+   *  transaction ends (set by ChangeAvailability while charging). */
+  get scheduledAvailability(): OCPPAvailability | null {
+    return this.scheduledAvailabilityValue;
+  }
+
+  set scheduledAvailability(value: OCPPAvailability | null) {
+    this.scheduledAvailabilityValue = value;
+  }
+
+  get currentErrorCode(): ChargePointErrorCode {
+    return this.currentErrorCodeValue;
+  }
+
+  set currentErrorCode(code: ChargePointErrorCode) {
+    this.currentErrorCodeValue = code;
+  }
+
+  get errorInfo(): string | null {
+    return this.currentErrorInfo;
+  }
+
+  set errorInfo(info: string | null) {
+    this.currentErrorInfo = info;
+  }
+
+  get vendorErrorCode(): string | null {
+    return this.currentVendorErrorCode;
+  }
+
+  set vendorErrorCode(code: string | null) {
+    this.currentVendorErrorCode = code;
+  }
+
+  get unlockResponse(): "Unlocked" | "UnlockFailed" | "NotSupported" {
+    return this.unlockResponseValue;
+  }
+
+  set unlockResponse(value: "Unlocked" | "UnlockFailed" | "NotSupported") {
+    this.unlockResponseValue = value;
+  }
+
+  get socMeterSyncEnabled(): boolean {
+    return this.socMeterSyncEnabledValue;
+  }
+
+  set socMeterSyncEnabled(value: boolean) {
+    const wasOff = !this.socMeterSyncEnabledValue;
+    this.socMeterSyncEnabledValue = value;
+    // Flipping ON mid-session should immediately reflect any meter value
+    // that's already accumulated, so the UI doesn't sit on "SoC not
+    // reported" until the next meter tick. Keep the existing socPercent if
+    // an explicit value (MeterValue SoC sample, manual override) was set —
+    // we only derive from the meter when nothing else has populated it.
+    if (value && wasOff) {
+      const capacity = this._evSettings.batteryCapacityKwh;
+      if (capacity > 0) {
+        const initial = this._evSettings.initialSoc ?? 0;
+        const derived = initial + (this.meterValueWh / 1000 / capacity) * 100;
+        const clamped = Math.min(100, Math.max(0, derived));
+        if (this.socPercent !== clamped) {
+          this.socPercent = clamped;
+          this.eventsEmitter.emit("socChange", { soc: clamped });
+        }
+      }
+    }
+  }
+
+  get lastAutoStartedScenarioKey(): string | null {
+    return this.lastAutoStartedScenarioKeyValue;
+  }
+
+  set lastAutoStartedScenarioKey(value: string | null) {
+    this.lastAutoStartedScenarioKeyValue = value;
+  }
+
   get meterValue(): number {
     return this.meterValueWh;
   }
@@ -186,6 +349,7 @@ export class Connector {
   set soc(value: number | null) {
     this.socPercent = value;
     this.eventsEmitter.emit("socChange", { soc: value });
+    this.checkAutoStop();
   }
 
   get transaction(): Transaction | null {
@@ -472,5 +636,55 @@ export class Connector {
   private applyMeterValue(value: number): void {
     this.meterValueWh = value;
     this.eventsEmitter.emit("meterValueChange", { meterValue: value });
+    // Mirror the new meter value into SoC when the UI has flipped Sync on.
+    // We do it here (not just in UI handlers) so the scenario's auto-meter
+    // scheduler and any other domain caller also drive SoC. capacity=0 means
+    // we have no way to convert — leave SoC untouched in that case.
+    if (this.socMeterSyncEnabledValue) {
+      const capacity = this._evSettings.batteryCapacityKwh;
+      if (capacity > 0) {
+        const initial = this._evSettings.initialSoc ?? 0;
+        const derived = initial + (value / 1000 / capacity) * 100;
+        const clamped = Math.min(100, Math.max(0, derived));
+        if (this.socPercent !== clamped) {
+          this.socPercent = clamped;
+          this.eventsEmitter.emit("socChange", { soc: clamped });
+        }
+      }
+    }
+    this.checkAutoStop();
+  }
+
+  /**
+   * Effective SoC used for the auto-stop check. Prefers the explicit
+   * `socPercent` (manual override, or values reported via MeterValue
+   * SoC samples) and falls back to the value implied by the meter
+   * (initialSoc + deliveredKWh / capacityKWh × 100).
+   */
+  private effectiveSocPercent(): number | null {
+    if (this.socPercent !== null) return this.socPercent;
+    const capacity = this._evSettings.batteryCapacityKwh;
+    if (!capacity || capacity <= 0) return null;
+    const initial = this._evSettings.initialSoc ?? 0;
+    const deliveredKWh = this.meterValueWh / 1000;
+    return initial + (deliveredKWh / capacity) * 100;
+  }
+
+  /**
+   * If `stopAtTargetSoc` is enabled and the connector has hit its target,
+   * stop the in-flight meter scheduler and fire `autoStopRequested` so
+   * the ChargePoint can end the transaction.
+   */
+  private checkAutoStop(): void {
+    if (!this.autoConfig.stopAtTargetSoc) return;
+    if (!this.transactionValue) return;
+    if (!this.meterScheduler.isActive()) return;
+    const current = this.effectiveSocPercent();
+    if (current === null) return;
+    if (current < this._evSettings.targetSoc) return;
+    this.meterScheduler.stop();
+    this.eventsEmitter.emit("autoStopRequested", {
+      reason: "targetSocReached",
+    });
   }
 }

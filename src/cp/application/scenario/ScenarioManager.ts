@@ -3,7 +3,6 @@ import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { ScenarioExecutor } from "./ScenarioExecutor";
 import {
   ScenarioDefinition,
-  ScenarioExecutionMode,
   ScenarioExecutorCallbacks,
   ScenarioEvents,
 } from "./ScenarioTypes";
@@ -156,10 +155,7 @@ export class ScenarioManager {
     // Execute only the first matching scenario (one scenario per connector)
     if (matchingScenarios.length > 0) {
       const scenario = matchingScenarios[0];
-      this.executeScenario(
-        scenario.id,
-        scenario.defaultExecutionMode || "oneshot",
-      );
+      this.executeScenario(scenario.id);
 
       if (matchingScenarios.length > 1) {
         console.warn(
@@ -264,14 +260,10 @@ export class ScenarioManager {
   }
 
   /**
-   * Execute a specific scenario
+   * Execute a specific scenario (always one-shot).
    * @param scenarioId Scenario ID to execute
-   * @param mode Execution mode (oneshot, loop, step)
    */
-  async executeScenario(
-    scenarioId: string,
-    mode: ScenarioExecutionMode,
-  ): Promise<void> {
+  async executeScenario(scenarioId: string): Promise<void> {
     if (this.chargePoint.status !== OCPPStatus.Available) {
       console.warn(
         `[ScenarioManager] ChargePoint status is ${this.chargePoint.status}. Scenario execution skipped.`,
@@ -289,9 +281,7 @@ export class ScenarioManager {
       this.stopScenario(scenarioId);
     }
 
-    console.log(
-      `[ScenarioManager] Executing scenario: ${scenario.name} (${mode})`,
-    );
+    console.log(`[ScenarioManager] Executing scenario: ${scenario.name}`);
 
     // Create executor with event emitter
     const executor = new ScenarioExecutor(
@@ -302,7 +292,7 @@ export class ScenarioManager {
     this.executors.set(scenarioId, executor);
 
     try {
-      await executor.start(mode);
+      await executor.start();
     } catch (error) {
       console.error(`[ScenarioManager] Scenario execution error:`, error);
     } finally {
@@ -337,23 +327,17 @@ export class ScenarioManager {
   }
 
   /**
-   * Manual execution (from UI)
-   * Does not stop other running scenarios
+   * Manual execution (from UI). Does not stop other running scenarios.
    */
-  async manualExecute(
-    scenarioId: string,
-    mode: ScenarioExecutionMode,
-  ): Promise<void> {
+  async manualExecute(scenarioId: string): Promise<void> {
     const scenario = this.scenarios.get(scenarioId);
     if (!scenario) {
       throw new Error(`Scenario not found: ${scenarioId}`);
     }
 
-    console.log(
-      `[ScenarioManager] Manual execution: ${scenario.name} (${mode})`,
-    );
+    console.log(`[ScenarioManager] Manual execution: ${scenario.name}`);
 
-    await this.executeScenario(scenarioId, mode);
+    await this.executeScenario(scenarioId);
   }
 
   /**

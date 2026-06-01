@@ -3,7 +3,10 @@ import { Handle, Position, NodeProps } from "@xyflow/react";
 import { StatusChangeNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 
-const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({ data, selected }) => {
+const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({
+  data,
+  selected,
+}) => {
   const statusColor = (status: OCPPStatus) => {
     switch (status) {
       case OCPPStatus.Available:
@@ -31,13 +34,11 @@ const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({ data, sel
         Status Change
       </div>
       <div className="flex items-center gap-2">
-        <div className={`w-3 h-3 rounded-full ${statusColor(data.status)}`}></div>
+        <div
+          className={`w-3 h-3 rounded-full ${statusColor(data.status)}`}
+        ></div>
         <div className="font-bold text-sm text-primary">{data.status}</div>
       </div>
-      {data.description && (
-        <div className="text-xs text-muted mt-1">{data.description}</div>
-      )}
-
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
     </div>
   );

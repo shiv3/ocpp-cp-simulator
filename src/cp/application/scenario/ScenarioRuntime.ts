@@ -263,6 +263,14 @@ export const createScenarioExecutorCallbacks = (
     onStopAutoMeterValue: () => {
       connector.stopAutoMeterValue();
     },
+    onSetEVSettings: (settings) => {
+      // Merge — only specified fields land on the connector. The connector
+      // setter spreads `_evSettings = { ...settings }` and emits
+      // `evSettingsChange`, which surfaces to subscribers and (in remote
+      // mode) the browser via the `connector_ev_settings` event.
+      connector.evSettings = { ...connector.evSettings, ...settings };
+    },
+    onGetEVSettings: () => connector.evSettings,
     onSendNotification: async (messageType, payload) => {
       switch (messageType) {
         case "Heartbeat":
@@ -339,5 +347,21 @@ export const createScenarioExecutorCallbacks = (
     onNodeProgress: hooks?.onNodeProgress,
     onError: hooks?.onError,
     log: buildLogger(chargePoint, hooks),
+    // §4.9: connectorId === -1 sentinel means "use the scenario's bound
+    // connector"; otherwise the node specified an explicit target (0 for
+    // CP main controller, >0 for another connector).
+    onSendStatusNotification: (connectorId, status, opts) => {
+      const targetId = connectorId === -1 ? connector.id : connectorId;
+      chargePoint.sendStatusNotificationRaw(targetId, status, opts);
+    },
+    onSetUnlockOutcome: (outcome) => {
+      connector.unlockResponse = outcome;
+    },
+    onConfigSet: (key, value) => {
+      chargePoint.configuration.applyChange(key, value);
+    },
+    onSendDataTransfer: (vendorId, messageId, data) => {
+      chargePoint.sendDataTransfer(vendorId, messageId, data);
+    },
   };
 };

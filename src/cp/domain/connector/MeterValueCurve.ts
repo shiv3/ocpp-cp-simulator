@@ -2,7 +2,7 @@
  * Represents a point on the MeterValue curve
  */
 export interface CurvePoint {
-  /** Time in minutes from transaction start */
+  /** Time in **seconds** from transaction start */
   time: number;
   /** MeterValue in kWh */
   value: number;
@@ -20,15 +20,19 @@ export interface AutoMeterValueConfig {
   intervalSeconds: number;
   /** Whether to calculate interval automatically from curve duration */
   autoCalculateInterval: boolean;
+  /**
+   * When true, the auto-meter stops and the in-flight transaction is ended
+   * once the connector's SoC reaches `EVSettings.targetSoc`. The chart's
+   * max time / max value caps are ignored in this mode — the curve runs
+   * "until the battery is full".
+   */
+  stopAtTargetSoc?: boolean;
 }
 
 /**
  * Calculate a point on a cubic Bezier curve
  */
-export function calculateBezierPoint(
-  t: number,
-  points: CurvePoint[]
-): number {
+export function calculateBezierPoint(t: number, points: CurvePoint[]): number {
   if (points.length === 0) return 0;
   if (points.length === 1) return points[0].value;
   if (points.length === 2) {
@@ -58,8 +62,8 @@ export function calculateBezierPoint(
  * Get MeterValue at a specific time based on the curve
  */
 export function getMeterValueAtTime(
-  elapsedMinutes: number,
-  config: AutoMeterValueConfig
+  elapsedSeconds: number,
+  config: AutoMeterValueConfig,
 ): number {
   if (config.curvePoints.length === 0) return 0;
 
@@ -68,7 +72,7 @@ export function getMeterValueAtTime(
   const maxTime = sortedPoints[sortedPoints.length - 1].time;
 
   // Clamp elapsed time to curve range
-  const clampedTime = Math.max(minTime, Math.min(maxTime, elapsedMinutes));
+  const clampedTime = Math.max(minTime, Math.min(maxTime, elapsedSeconds));
 
   // Normalize t to [0, 1] range
   const t =
@@ -82,9 +86,11 @@ export function getMeterValueAtTime(
  */
 export const defaultAutoMeterValueConfig: AutoMeterValueConfig = {
   enabled: false,
+  // Curve time is in seconds. 1800s = 30 minutes; deliver 50 kWh over that
+  // window for a sensible "fast charge" default.
   curvePoints: [
     { time: 0, value: 0 },
-    { time: 30, value: 50 },
+    { time: 1800, value: 50 },
   ],
   intervalSeconds: 10,
   autoCalculateInterval: false,

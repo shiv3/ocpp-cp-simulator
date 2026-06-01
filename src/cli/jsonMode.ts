@@ -6,14 +6,8 @@ import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
   ScenarioDefinition,
-  ScenarioExecutionMode,
   ScenarioMode,
 } from "../cp/application/scenario/ScenarioTypes";
-
-const VALID_EXECUTION_MODES: ReadonlyArray<ScenarioExecutionMode> = [
-  "oneshot",
-  "step",
-];
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
@@ -201,17 +195,9 @@ export async function handleJsonCommand(
     case "run_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      const modeRaw = typeof params.mode === "string" ? params.mode : "oneshot";
-      if (!VALID_EXECUTION_MODES.includes(modeRaw as ScenarioExecutionMode)) {
-        throw new Error(
-          `Invalid mode: ${modeRaw}. Valid: ${VALID_EXECUTION_MODES.join(", ")}`,
-        );
-      }
-      service.runScenario(
-        connectorId,
-        scenarioId,
-        modeRaw as ScenarioExecutionMode,
-      );
+      // Legacy "mode" param is silently ignored — scenarios always run
+      // one-shot now. Kept tolerant so old clients don't break.
+      service.runScenario(connectorId, scenarioId);
       return undefined;
     }
 
@@ -312,6 +298,21 @@ export async function handleJsonCommand(
         );
       }
       service.setConnectorMode(connectorId, mode as ScenarioMode);
+      return undefined;
+    }
+
+    case "set_soc": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const raw = params?.soc;
+      const soc: number | null =
+        raw === null || raw === undefined
+          ? null
+          : typeof raw === "number"
+            ? raw
+            : (() => {
+                throw new Error("'soc' must be a number or null");
+              })();
+      service.setConnectorSoc(connectorId, soc);
       return undefined;
     }
 

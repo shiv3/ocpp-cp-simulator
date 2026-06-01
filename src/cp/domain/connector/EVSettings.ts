@@ -14,6 +14,30 @@ export const defaultEVSettings: EVSettings = {
   targetSoc: 80,
 };
 
+/**
+ * Browser-side user override for {@link defaultEVSettings}. Settings UI
+ * writes here; new Connectors call `getDefaultEVSettings()` so they pick
+ * up the user's preferred default at construction time.
+ *
+ * In the Bun daemon this stays null — the daemon process doesn't have
+ * localStorage and the override is a per-user-browser concept.
+ */
+let userDefaultEVSettings: EVSettings | null = null;
+
+export function getDefaultEVSettings(): EVSettings {
+  return userDefaultEVSettings
+    ? { ...userDefaultEVSettings }
+    : { ...defaultEVSettings };
+}
+
+export function setUserDefaultEVSettings(s: EVSettings | null): void {
+  userDefaultEVSettings = s ? { ...s } : null;
+}
+
+export function getUserDefaultEVSettings(): EVSettings | null {
+  return userDefaultEVSettings ? { ...userDefaultEVSettings } : null;
+}
+
 export const EV_PRESETS: Record<string, Partial<EVSettings>> = {
   "Tesla Model 3": { batteryCapacityKwh: 75, maxChargingPowerKw: 250 },
   "Tesla Model Y": { batteryCapacityKwh: 82, maxChargingPowerKw: 250 },

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import * as path from "path";
+import * as fs from "fs";
 import type { CLIOptions, ChargePointInitOptions } from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
@@ -9,6 +11,25 @@ import {
   DEFAULT_PID_PATH,
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
+
+/**
+ * Locate the bundled web console (Vite-built `dist/`) shipped alongside
+ * the CLI. The published package layout is `<pkg>/src/cli/main.ts` +
+ * `<pkg>/dist/`, so we walk up from this file's directory. Returns null
+ * when the build isn't present — typical when running from a fresh
+ * checkout where `bun run build` hasn't been invoked yet.
+ */
+function resolveBundledDist(): string | null {
+  const candidate = path.resolve(import.meta.dir, "../../dist");
+  try {
+    if (fs.statSync(path.join(candidate, "index.html")).isFile()) {
+      return candidate;
+    }
+  } catch {
+    // not built / not present
+  }
+  return null;
+}
 
 function parseArgs(argv: string[]): CLIOptions {
   let wsUrl = "";
@@ -33,6 +54,11 @@ function parseArgs(argv: string[]): CLIOptions {
   let unixSocketExplicit = false;
   let httpUrl: string | null = null;
   let allEvents = false;
+  let serveStatic: string | null = null;
+  // --web-console: enabled flag + optional explicit port. When the port is
+  // omitted (`--web-console` alone), the UI shares the --http-port listener.
+  let webConsoleEnabled = false;
+  let webConsoleExplicitPort: number | null = null;
   const corsOrigins: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
@@ -130,6 +156,15 @@ function parseArgs(argv: string[]): CLIOptions {
         corsOrigins.push(next);
         i++;
         break;
+      case "--web-console":
+        webConsoleEnabled = true;
+        // Optional port: only consume `next` when it looks like a number.
+        // If `next` is missing or another flag, the UI shares --http-port.
+        if (next && !next.startsWith("--") && /^\d+$/.test(next)) {
+          webConsoleExplicitPort = parseInt(next, 10);
+          i++;
+        }
+        break;
       case "--help":
       case "-h":
         printUsage();
@@ -145,7 +180,44 @@ function parseArgs(argv: string[]): CLIOptions {
   }
 
   const isClientMode = send !== null || events || stop;
-  const isServerMode = daemon || httpPort != null;
+
+  let webConsolePort: number | null = null;
+  if (webConsoleEnabled) {
+    if (
+      webConsoleExplicitPort != null &&
+      (isNaN(webConsoleExplicitPort) || webConsoleExplicitPort < 1)
+    ) {
+      process.stderr.write(
+        "Error: --web-console port must be a positive integer\n",
+      );
+      process.exit(1);
+    }
+    // Port resolution: explicit > --http-port > error.
+    webConsolePort = webConsoleExplicitPort ?? httpPort;
+    if (webConsolePort == null) {
+      process.stderr.write(
+        "Error: --web-console without a port requires --http-port " +
+          "(the UI shares that listener). Pass a port to --web-console, " +
+          "or add --http-port <port>.\n",
+      );
+      process.exit(1);
+    }
+    const bundled = resolveBundledDist();
+    if (!bundled) {
+      process.stderr.write(
+        "Error: --web-console requires the bundled UI to be built. " +
+          "Run `bun run build` in the repo first " +
+          "(or use an installed package which ships dist/).\n",
+      );
+      process.exit(1);
+    }
+    serveStatic = bundled;
+    // --web-console alone is enough to put the daemon into server mode —
+    // even without --http-port, the web-console port carries the full API
+    // alongside the UI on the same origin.
+  }
+
+  const isServerMode = daemon || httpPort != null || webConsoleEnabled;
 
   if (isClientMode) {
     if ((send !== null || events) && !cpId && !allEvents) {
@@ -222,6 +294,8 @@ function parseArgs(argv: string[]): CLIOptions {
     httpUrl,
     allEvents,
     corsOrigins,
+    serveStatic,
+    webConsolePort,
   };
 }
 
@@ -269,6 +343,11 @@ Options:
   --http-url <url>         Client target: TCP HTTP base URL
   --all                    Use the global event stream (--events only)
   --cors-origin <origin>   Restrict CORS to this origin (repeatable). Default: any origin (*)
+  --web-console [<port>]   Serve the bundled browser UI alongside the API.
+                           With <port>: opens a second listener on that port.
+                           Without <port>: shares the --http-port listener.
+                           Requires the UI to be built (run "bun run build",
+                           or use an installed package which ships dist/).
   -h, --help               Show this help
 
 HTTP API (see docs/server.md):
@@ -323,7 +402,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const isServerMode = options.daemon || options.httpPort != null;
+  const isServerMode =
+    options.daemon ||
+    options.httpPort != null ||
+    options.webConsolePort != null;
 
   if (isServerMode) {
     await startServer({
@@ -345,6 +427,8 @@ async function main(): Promise<void> {
         options.corsOrigins.length === 0
           ? { kind: "any" }
           : { kind: "allowlist", origins: options.corsOrigins },
+      staticDir: options.serveStatic,
+      webConsolePort: options.webConsolePort,
     });
     return;
   }

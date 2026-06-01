@@ -27,6 +27,13 @@ export interface CLIOptions {
   readonly httpUrl: string | null;
   readonly allEvents: boolean;
   readonly corsOrigins: ReadonlyArray<string>;
+  /** Absolute or relative path of a directory the daemon serves as static
+   *  files (SPA-aware). Null disables static hosting. */
+  readonly serveStatic: string | null;
+  /** TCP port for the bundled web console. When set, the daemon stands up
+   *  an HTTP listener on this port serving both the API and the UI. May
+   *  share a port with `httpPort` (one listener) or use its own. */
+  readonly webConsolePort: number | null;
 }
 
 export interface ChargePointInitOptions {

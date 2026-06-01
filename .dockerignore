@@ -1,0 +1,25 @@
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+.scratch
+.eslintcache
+
+node_modules
+dist
+build
+coverage
+
+# Tauri desktop bits aren't needed for either the UI build or the daemon.
+src-tauri
+
+# Tests / scratch / OS junk
+**/*.test.ts
+**/*.test.tsx
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log

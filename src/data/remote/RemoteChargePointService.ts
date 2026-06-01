@@ -18,7 +18,6 @@ import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector"
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
-  ScenarioExecutionMode,
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type {
@@ -513,6 +512,14 @@ export class RemoteChargePointService implements ChargePointService {
     await this.runCommand(id, "set_mode", { connector: connectorId, mode });
   }
 
+  async setConnectorSoc(
+    id: string,
+    connectorId: number,
+    soc: number | null,
+  ): Promise<void> {
+    await this.runCommand(id, "set_soc", { connector: connectorId, soc });
+  }
+
   async getChargingProfiles(
     id: string,
     connectorId: number,
@@ -590,12 +597,10 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     scenarioId: string,
-    mode?: ScenarioExecutionMode,
   ): Promise<void> {
     await this.runCommand(id, "run_scenario", {
       connector: connectorId,
       scenarioId,
-      ...(mode ? { mode } : {}),
     });
   }
 

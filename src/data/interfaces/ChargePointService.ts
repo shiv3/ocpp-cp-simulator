@@ -219,6 +219,15 @@ export interface ChargePointService {
     connectorId: number,
     mode: ScenarioMode,
   ): Promise<void>;
+  /**
+   * Override the connector's current State-of-Charge percentage. Pass null
+   * to clear the SoC (so subsequent meter values don't carry the field).
+   */
+  setConnectorSoc(
+    id: string,
+    connectorId: number,
+    soc: number | null,
+  ): Promise<void>;
   getChargingProfiles(
     id: string,
     connectorId: number,
@@ -247,7 +256,6 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     scenarioId: string,
-    mode?: import("../../cp/application/scenario/ScenarioTypes").ScenarioExecutionMode,
   ): Promise<void>;
   stopScenario(
     id: string,

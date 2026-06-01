@@ -68,6 +68,15 @@ export class ChargePoint {
           incrementValue: autoMeterValueSetting.value,
         });
       }
+      // When the connector signals an auto-stop (e.g. target SoC reached),
+      // end the in-flight transaction the same way the user would.
+      connector.events.on("autoStopRequested", ({ reason }) => {
+        this._logger.info(
+          `Connector ${connectorId} auto-stop requested (${reason})`,
+          LogType.TRANSACTION,
+        );
+        this.stopTransaction(connector);
+      });
       this._connectors.set(connectorId, connector);
     }
 
@@ -210,8 +219,10 @@ export class ChargePoint {
         this._events.emit("connected", undefined);
       },
       (ev: CloseEvent) => {
-        this.status = OCPPStatus.Unavailable;
-        this.updateAllConnectorsStatus(OCPPStatus.Unavailable);
+        // Same teardown as an explicit disconnect() — heartbeat, scenario
+        // state, connector listeners, etc. — so a CSMS-initiated close
+        // doesn't leave background timers firing against a dead socket.
+        this.teardownAfterClose();
         this._logger.error(
           `WebSocket closed code: ${ev.code} reason: ${ev.reason}`,
           LogType.WEBSOCKET,
@@ -225,26 +236,33 @@ export class ChargePoint {
   }
 
   boot(): void {
+    // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
+    // BootNotification has been Accepted. The connector-level
+    // StatusNotification fan-out happens in BootNotificationResultHandler
+    // after we get the Accepted response.
     this._messageHandler.sendBootNotification(this._bootNotification);
-    this.status = OCPPStatus.Available;
-    this._connectors.forEach((connector) => {
-      if (connector.autoResetToAvailable) {
-        this.updateConnectorStatus(connector.id, OCPPStatus.Available);
-        return;
-      }
-      this.updateConnectorStatus(connector.id, connector.status);
-    });
     this.error = "";
   }
 
   disconnect(): void {
     this._logger.info("Disconnecting from WebSocket", LogType.WEBSOCKET);
+    this.teardownAfterClose();
+    this._webSocket.disconnect();
+  }
+
+  /**
+   * Common teardown for both user-initiated disconnect() and the
+   * WebSocket's onclose path. Sets the CP+connector status to Unavailable,
+   * stops the heartbeat, cleans up connector listeners, and releases the
+   * reservation manager so no timers / event handlers keep running against
+   * a dead socket.
+   */
+  private teardownAfterClose(): void {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._scenarioHandledConnectors.clear();
-    this._webSocket.disconnect();
   }
 
   reset(): void {
@@ -259,8 +277,19 @@ export class ChargePoint {
   set status(newStatus: OCPPStatus) {
     this._status = newStatus;
     if (newStatus === OCPPStatus.Unavailable) {
+      // Cascade Unavailable to every connector AND fire the
+      // connectorStatusChange event so UI subscribers update each connector
+      // card. Without the event the per-connector status stays stale even
+      // though the underlying field flipped.
       this._connectors.forEach((connector) => {
+        const previousStatus = connector.status;
+        if (previousStatus === OCPPStatus.Unavailable) return;
         connector.status = OCPPStatus.Unavailable;
+        this._events.emit("connectorStatusChange", {
+          connectorId: connector.id,
+          status: OCPPStatus.Unavailable,
+          previousStatus,
+        });
       });
     }
     this._events.emit("statusChange", { status: newStatus });
@@ -481,5 +510,39 @@ export class ChargePoint {
       previousStatus,
     });
     this._messageHandler.sendStatusNotification(connectorId, status);
+  }
+
+  /**
+   * Sends a StatusNotification.req for the current state of the given
+   * connector (no domain mutation, no events). Used to satisfy
+   * TriggerMessage(StatusNotification) from the CSMS.
+   *
+   * connectorId 0 means the charge-point main controller.
+   * connectorId omitted means "fan out to connector 0 + every connector".
+   */
+  sendCurrentStatusNotification(connectorId?: number): void {
+    if (connectorId === undefined) {
+      this._messageHandler.sendStatusNotification(0, this._status);
+      this._connectors.forEach((connector) => {
+        this._messageHandler.sendStatusNotification(
+          connector.id,
+          connector.status,
+        );
+      });
+      return;
+    }
+    if (connectorId === 0) {
+      this._messageHandler.sendStatusNotification(0, this._status);
+      return;
+    }
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(
+        `Connector ${connectorId} not found (TriggerMessage)`,
+        LogType.SYSTEM,
+      );
+      return;
+    }
+    this._messageHandler.sendStatusNotification(connectorId, connector.status);
   }
 }

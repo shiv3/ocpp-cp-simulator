@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Dialog,
@@ -35,7 +35,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
 }) => {
   const [config, setConfig] = useState<AutoMeterValueConfig>(initialConfig);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(
-    null
+    null,
   );
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -46,9 +46,18 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
   const GRAPH_WIDTH = CANVAS_WIDTH - 2 * PADDING;
   const GRAPH_HEIGHT = CANVAS_HEIGHT - 2 * PADDING;
 
-  // Axis ranges
-  const [maxTime, setMaxTime] = useState(60); // minutes
-  const [maxValue, setMaxValue] = useState(100); // kWh
+  // Axis ranges derive from the curve points so the chart auto-fits to
+  // whatever's in `config.curvePoints`. We give a 10% headroom and clamp
+  // to sensible minimums so a single-point curve doesn't collapse the axes.
+  const { maxTime, maxValue } = useMemo(() => {
+    const points = config.curvePoints ?? [];
+    const tMax = points.reduce((m, p) => Math.max(m, p.time), 0);
+    const vMax = points.reduce((m, p) => Math.max(m, p.value), 0);
+    return {
+      maxTime: Math.max(60, Math.ceil(tMax * 1.1)),
+      maxValue: Math.max(10, Math.ceil(vMax * 1.1)),
+    };
+  }, [config.curvePoints]);
 
   useEffect(() => {
     setConfig(initialConfig);
@@ -134,7 +143,11 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
       const label = ((maxTime * i) / 10).toFixed(0);
       ctx.fillText(label, x - 10, PADDING + GRAPH_HEIGHT + 20);
     }
-    ctx.fillText("Time (min)", PADDING + GRAPH_WIDTH / 2 - 30, CANVAS_HEIGHT - 5);
+    ctx.fillText(
+      "Time (sec)",
+      PADDING + GRAPH_WIDTH / 2 - 30,
+      CANVAS_HEIGHT - 5,
+    );
 
     // Y-axis labels
     for (let i = 0; i <= 10; i++) {
@@ -151,7 +164,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
 
   const drawCurve = (ctx: CanvasRenderingContext2D) => {
     const sortedPoints = [...config.curvePoints].sort(
-      (a, b) => a.time - b.time
+      (a, b) => a.time - b.time,
     );
 
     ctx.strokeStyle = "#3b82f6"; // blue-500
@@ -184,11 +197,11 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
   const drawControlPoints = (ctx: CanvasRenderingContext2D) => {
     config.curvePoints.forEach((point, index) => {
       const x = PADDING + (point.time / maxTime) * GRAPH_WIDTH;
-      const y = PADDING + GRAPH_HEIGHT - (point.value / maxValue) * GRAPH_HEIGHT;
+      const y =
+        PADDING + GRAPH_HEIGHT - (point.value / maxValue) * GRAPH_HEIGHT;
 
       // Draw point
-      ctx.fillStyle =
-        index === selectedPointIndex ? "#ef4444" : "#10b981"; // red-500 or green-500
+      ctx.fillStyle = index === selectedPointIndex ? "#ef4444" : "#10b981"; // red-500 or green-500
       ctx.beginPath();
       ctx.arc(x, y, 6, 0, 2 * Math.PI);
       ctx.fill();
@@ -204,7 +217,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
       ctx.fillText(
         `(${point.time.toFixed(1)}, ${point.value.toFixed(1)})`,
         x + 10,
-        y - 10
+        y - 10,
       );
     });
   };
@@ -220,7 +233,8 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
     // Check if clicking on existing point
     const clickedPointIndex = config.curvePoints.findIndex((point) => {
       const px = PADDING + (point.time / maxTime) * GRAPH_WIDTH;
-      const py = PADDING + GRAPH_HEIGHT - (point.value / maxValue) * GRAPH_HEIGHT;
+      const py =
+        PADDING + GRAPH_HEIGHT - (point.value / maxValue) * GRAPH_HEIGHT;
       const distance = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
       return distance < 10;
     });
@@ -236,7 +250,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
         setConfig({
           ...config,
           curvePoints: [...config.curvePoints, { time, value }].sort(
-            (a, b) => a.time - b.time
+            (a, b) => a.time - b.time,
           ),
         });
       }
@@ -255,11 +269,14 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
 
     const time = Math.max(
       0,
-      Math.min(maxTime, ((x - PADDING) / GRAPH_WIDTH) * maxTime)
+      Math.min(maxTime, ((x - PADDING) / GRAPH_WIDTH) * maxTime),
     );
     const value = Math.max(
       0,
-      Math.min(maxValue, ((PADDING + GRAPH_HEIGHT - y) / GRAPH_HEIGHT) * maxValue)
+      Math.min(
+        maxValue,
+        ((PADDING + GRAPH_HEIGHT - y) / GRAPH_HEIGHT) * maxValue,
+      ),
     );
 
     const newPoints = [...config.curvePoints];
@@ -294,16 +311,17 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
 
     setConfig({
       ...config,
-      curvePoints: [...config.curvePoints, { time: newTime, value: newValue }].sort(
-        (a, b) => a.time - b.time
-      ),
+      curvePoints: [
+        ...config.curvePoints,
+        { time: newTime, value: newValue },
+      ].sort((a, b) => a.time - b.time),
     });
   };
 
   const handleUpdatePoint = (
     index: number,
     field: "time" | "value",
-    value: number
+    value: number,
   ) => {
     const newPoints = [...config.curvePoints];
     newPoints[index] = { ...newPoints[index], [field]: value };
@@ -320,29 +338,33 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
   };
 
   const handleLoadPreset = (preset: "linear" | "exponential" | "step") => {
+    // Preset duration / capacity are fixed defaults — the chart auto-fits
+    // from the resulting curve points, and the user can drag them around.
+    const presetTime = 1800; // seconds (= 30 minutes)
+    const presetValue = 50; // kWh
     let newPoints: CurvePoint[] = [];
 
     switch (preset) {
       case "linear":
         newPoints = [
           { time: 0, value: 0 },
-          { time: maxTime, value: maxValue },
+          { time: presetTime, value: presetValue },
         ];
         break;
       case "exponential":
         newPoints = [
           { time: 0, value: 0 },
-          { time: maxTime * 0.3, value: maxValue * 0.1 },
-          { time: maxTime * 0.6, value: maxValue * 0.4 },
-          { time: maxTime, value: maxValue },
+          { time: presetTime * 0.3, value: presetValue * 0.1 },
+          { time: presetTime * 0.6, value: presetValue * 0.4 },
+          { time: presetTime, value: presetValue },
         ];
         break;
       case "step":
         newPoints = [
           { time: 0, value: 0 },
-          { time: maxTime * 0.5, value: 0 },
-          { time: maxTime * 0.5, value: maxValue },
-          { time: maxTime, value: maxValue },
+          { time: presetTime * 0.5, value: 0 },
+          { time: presetTime * 0.5, value: presetValue },
+          { time: presetTime, value: presetValue },
         ];
         break;
     }
@@ -359,201 +381,210 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
             "fixed left-[50%] top-[50%] !z-[10001] grid w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200",
             "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]",
-            "data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg max-h-[90vh] overflow-y-auto"
+            "data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg max-h-[90vh] overflow-y-auto",
           )}
         >
           <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
-        <DialogHeader>
-          <DialogTitle>Configure Auto MeterValue</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          {/* Enable/Disable */}
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="autoEnabled"
-              checked={config.enabled}
-              onCheckedChange={(checked) =>
-                setConfig({ ...config, enabled: checked as boolean })
-              }
-            />
-            <Label htmlFor="autoEnabled">Enable Auto MeterValue</Label>
-          </div>
-
-          {/* Canvas */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-900">
-            <canvas
-              ref={canvasRef}
-              width={CANVAS_WIDTH}
-              height={CANVAS_HEIGHT}
-              onClick={handleCanvasClick}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onMouseLeave={handleCanvasMouseUp}
-              className="cursor-crosshair bg-white rounded"
-              style={{ display: 'block', margin: '0 auto' }}
-            />
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
-              Click to add control points, drag to move them
-            </p>
-          </div>
-
-          {/* Axis Range Controls */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="maxTime">Max Time (minutes)</Label>
-              <Input
-                id="maxTime"
-                type="number"
-                value={maxTime}
-                onChange={(e) => setMaxTime(Number(e.target.value))}
-                min={1}
-              />
-            </div>
-            <div>
-              <Label htmlFor="maxValue">Max Value (kWh)</Label>
-              <Input
-                id="maxValue"
-                type="number"
-                value={maxValue}
-                onChange={(e) => setMaxValue(Number(e.target.value))}
-                min={1}
-              />
-            </div>
-          </div>
-
-          {/* Presets */}
-          <div>
-            <Label>Presets</Label>
-            <div className="flex gap-2 mt-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => handleLoadPreset("linear")}
-              >
-                Linear
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => handleLoadPreset("exponential")}
-              >
-                Exponential
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => handleLoadPreset("step")}
-              >
-                Step
-              </Button>
-            </div>
-          </div>
-
-          {/* Interval Settings */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="intervalSeconds">Send Interval (seconds)</Label>
-              <Input
-                id="intervalSeconds"
-                type="number"
-                value={config.intervalSeconds}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    intervalSeconds: Number(e.target.value),
-                  })
-                }
-                min={1}
-                disabled={config.autoCalculateInterval}
-              />
-            </div>
-            <div className="flex items-center gap-2 mt-6">
+          <DialogHeader>
+            <DialogTitle>Configure Auto MeterValue</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {/* Enable/Disable */}
+            <div className="flex items-center gap-2">
               <Checkbox
-                id="autoCalculateInterval"
-                checked={config.autoCalculateInterval}
+                id="autoEnabled"
+                checked={config.enabled}
+                onCheckedChange={(checked) =>
+                  setConfig({ ...config, enabled: checked as boolean })
+                }
+              />
+              <Label htmlFor="autoEnabled">Enable Auto MeterValue</Label>
+            </div>
+
+            {/* Canvas */}
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-900">
+              <canvas
+                ref={canvasRef}
+                width={CANVAS_WIDTH}
+                height={CANVAS_HEIGHT}
+                onClick={handleCanvasClick}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
+                onMouseLeave={handleCanvasMouseUp}
+                className="cursor-crosshair bg-white rounded"
+                style={{ display: "block", margin: "0 auto" }}
+              />
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
+                Click to add control points, drag to move them
+              </p>
+            </div>
+
+            {/* "Stop at target SoC" mode. When checked, the auto-meter
+              ignores the chart caps above and runs until the connector's
+              SoC reaches EVSettings.targetSoc, then ends the transaction. */}
+            <div className="flex items-start gap-2 rounded border border-gray-200 dark:border-gray-700 p-2">
+              <Checkbox
+                id="stopAtTargetSoc"
+                checked={!!config.stopAtTargetSoc}
                 onCheckedChange={(checked) =>
                   setConfig({
                     ...config,
-                    autoCalculateInterval: checked as boolean,
+                    stopAtTargetSoc: checked as boolean,
                   })
                 }
               />
-              <Label htmlFor="autoCalculateInterval">Auto Calculate</Label>
+              <div className="flex flex-col">
+                <Label htmlFor="stopAtTargetSoc">
+                  Charge until battery full (stop at EV's target SoC)
+                </Label>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Ignores the chart's max time/value. Uses EV Settings → Target
+                  SoC. Once reached, the in-flight transaction is stopped.
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* Control Points List */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <Label>Control Points</Label>
-              <Button
-                size="sm"
-                variant="success"
-                onClick={handleAddPoint}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Point
-              </Button>
-            </div>
-            <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded p-2 bg-gray-50 dark:bg-gray-800">
-              {config.curvePoints.map((point, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 mb-2 p-2 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600"
+            {/* Presets */}
+            <div>
+              <Label>Presets</Label>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleLoadPreset("linear")}
                 >
-                  <div className="flex-1 grid grid-cols-2 gap-2">
-                    <div>
-                      <Input
-                        type="number"
-                        value={point.time.toFixed(2)}
-                        onChange={(e) =>
-                          handleUpdatePoint(index, "time", Number(e.target.value))
-                        }
-                        className="text-xs"
-                        step={0.1}
-                      />
-                      <span className="text-xs text-gray-600 dark:text-gray-400">min</span>
-                    </div>
-                    <div>
-                      <Input
-                        type="number"
-                        value={point.value.toFixed(2)}
-                        onChange={(e) =>
-                          handleUpdatePoint(index, "value", Number(e.target.value))
-                        }
-                        className="text-xs"
-                        step={0.1}
-                      />
-                      <span className="text-xs text-gray-600 dark:text-gray-400">kWh</span>
-                    </div>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => handleDeletePoint(index)}
-                    disabled={config.curvePoints.length <= 2}
-                    className="text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900"
+                  Linear
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleLoadPreset("exponential")}
+                >
+                  Exponential
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleLoadPreset("step")}
+                >
+                  Step
+                </Button>
+              </div>
+            </div>
+
+            {/* Interval Settings */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="intervalSeconds">Send Interval (seconds)</Label>
+                <Input
+                  id="intervalSeconds"
+                  type="number"
+                  value={config.intervalSeconds}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      intervalSeconds: Number(e.target.value),
+                    })
+                  }
+                  min={1}
+                  disabled={config.autoCalculateInterval}
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-6">
+                <Checkbox
+                  id="autoCalculateInterval"
+                  checked={config.autoCalculateInterval}
+                  onCheckedChange={(checked) =>
+                    setConfig({
+                      ...config,
+                      autoCalculateInterval: checked as boolean,
+                    })
+                  }
+                />
+                <Label htmlFor="autoCalculateInterval">Auto Calculate</Label>
+              </div>
+            </div>
+
+            {/* Control Points List */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>Control Points</Label>
+                <Button size="sm" variant="success" onClick={handleAddPoint}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Point
+                </Button>
+              </div>
+              <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded p-2 bg-gray-50 dark:bg-gray-800">
+                {config.curvePoints.map((point, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 mb-2 p-2 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600"
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+                    <div className="flex-1 grid grid-cols-2 gap-2">
+                      <div>
+                        <Input
+                          type="number"
+                          value={point.time.toFixed(2)}
+                          onChange={(e) =>
+                            handleUpdatePoint(
+                              index,
+                              "time",
+                              Number(e.target.value),
+                            )
+                          }
+                          className="text-xs"
+                          step={0.1}
+                        />
+                        <span className="text-xs text-gray-600 dark:text-gray-400">
+                          sec
+                        </span>
+                      </div>
+                      <div>
+                        <Input
+                          type="number"
+                          value={point.value.toFixed(2)}
+                          onChange={(e) =>
+                            handleUpdatePoint(
+                              index,
+                              "value",
+                              Number(e.target.value),
+                            )
+                          }
+                          className="text-xs"
+                          step={0.1}
+                        />
+                        <span className="text-xs text-gray-600 dark:text-gray-400">
+                          kWh
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => handleDeletePoint(index)}
+                      disabled={config.curvePoints.length <= 2}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>
-            <X className="mr-2 h-5 w-5" />
-            Cancel
-          </Button>
-          <Button onClick={handleSave}>
-            <Save className="mr-2 h-5 w-5" />
-            Save
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button variant="secondary" onClick={onClose}>
+              <X className="mr-2 h-5 w-5" />
+              Cancel
+            </Button>
+            <Button onClick={handleSave}>
+              <Save className="mr-2 h-5 w-5" />
+              Save
+            </Button>
+          </DialogFooter>
         </DialogPrimitive.Content>
       </DialogPortal>
     </Dialog>

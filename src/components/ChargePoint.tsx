@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Connector from "./Connector.tsx";
 import { ConnectorSidePanel } from "./ConnectorSidePanel.tsx";
 import { LogViewer } from "./ui/log-viewer.tsx";
@@ -12,7 +12,9 @@ interface ChargePointProps {
 }
 
 // Panel width constants (in vw)
-const PANEL_DEFAULT_WIDTH = 50; // 50vw default
+const PANEL_DEFAULT_WIDTH = 50; // 50vw default — keeps the home tab list
+// readable behind the panel. Users can drag the left edge of the panel
+// wider when they want more room for the scenario canvas.
 const PANEL_COLLAPSED_WIDTH_PX = 60; // px for collapsed
 
 const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
@@ -31,6 +33,13 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
   );
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const [panelWidthVw, setPanelWidthVw] = useState(PANEL_DEFAULT_WIDTH);
+  const [isPanelFullscreen, setIsPanelFullscreen] = useState(false);
+  const [initialPanelTab, setInitialPanelTab] = useState<
+    "details" | "scenario" | "stateTransition"
+  >("details");
+  // Bumped each time we want to force the panel back onto `initialPanelTab`
+  // even if it's already open on a different tab.
+  const [tabResetNonce, setTabResetNonce] = useState(0);
 
   const handleClearLogs = useCallback(() => {
     clearLogs();
@@ -38,6 +47,15 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
 
   const handleConnectorSelect = useCallback((connectorId: number) => {
     setSelectedConnector(connectorId);
+    setInitialPanelTab("details");
+    setTabResetNonce((n) => n + 1);
+    setIsPanelCollapsed(false);
+  }, []);
+
+  const handleOpenScenarioPanel = useCallback((connectorId: number) => {
+    setSelectedConnector(connectorId);
+    setInitialPanelTab("scenario");
+    setTabResetNonce((n) => n + 1);
     setIsPanelCollapsed(false);
   }, []);
 
@@ -53,11 +71,18 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
     setPanelWidthVw(newWidth);
   }, []);
 
+  const handleToggleFullscreen = useCallback(() => {
+    setIsPanelFullscreen((prev) => !prev);
+    setIsPanelCollapsed(false);
+  }, []);
+
   // Calculate margin for main content
   const mainContentMargin = selectedConnector
-    ? isPanelCollapsed
-      ? `${PANEL_COLLAPSED_WIDTH_PX}px`
-      : `${panelWidthVw}vw`
+    ? isPanelFullscreen
+      ? "100vw"
+      : isPanelCollapsed
+        ? `${PANEL_COLLAPSED_WIDTH_PX}px`
+        : `${panelWidthVw}vw`
     : "0";
 
   return (
@@ -90,18 +115,14 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-3">
-            {connectorIds.map((connectorId) => (
-              <Connector
-                key={connectorId}
-                id={connectorId}
-                cpId={cpId}
-                idTag={TagID}
-                isSelected={selectedConnector === connectorId}
-                onSelect={() => handleConnectorSelect(connectorId)}
-              />
-            ))}
-          </div>
+          <ConnectorGrid
+            connectorIds={connectorIds}
+            cpId={cpId}
+            TagID={TagID}
+            selectedConnector={selectedConnector}
+            onConnectorSelect={handleConnectorSelect}
+            onOpenScenarioPanel={handleOpenScenarioPanel}
+          />
 
           <div className="mt-4">
             <LogViewer
@@ -118,9 +139,11 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
         <div
           className="fixed right-0 top-0 bottom-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl z-50 transition-all duration-300 ease-in-out"
           style={{
-            width: isPanelCollapsed
-              ? `${PANEL_COLLAPSED_WIDTH_PX}px`
-              : `${panelWidthVw}vw`,
+            width: isPanelFullscreen
+              ? "100vw"
+              : isPanelCollapsed
+                ? `${PANEL_COLLAPSED_WIDTH_PX}px`
+                : `${panelWidthVw}vw`,
           }}
         >
           <ConnectorSidePanel
@@ -130,11 +153,78 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
             onClose={handleClosePanel}
             isCollapsed={isPanelCollapsed}
             onToggleCollapse={handleToggleCollapse}
+            isFullscreen={isPanelFullscreen}
+            onToggleFullscreen={handleToggleFullscreen}
             panelWidth={panelWidthVw}
             onWidthChange={handleWidthChange}
+            initialTab={initialPanelTab}
+            tabResetNonce={tabResetNonce}
           />
         </div>
       )}
+    </div>
+  );
+};
+
+// Container-width-based grid for the connector cards. The fixed
+// `xl:grid-cols-4` we had before keyed off the viewport width, which
+// stayed wide even when the side panel ate half the screen — so the
+// cards squeezed into tiny columns. ResizeObserver picks the column
+// count from the actual width of this wrapper, so the grid reflows as
+// the panel opens/closes.
+interface ConnectorGridProps {
+  connectorIds: number[];
+  cpId: string;
+  TagID: string;
+  selectedConnector: number | null;
+  onConnectorSelect: (connectorId: number) => void;
+  onOpenScenarioPanel: (connectorId: number) => void;
+}
+
+const COLUMN_CLASS: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+};
+
+const ConnectorGrid: React.FC<ConnectorGridProps> = ({
+  connectorIds,
+  cpId,
+  TagID,
+  selectedConnector,
+  onConnectorSelect,
+  onOpenScenarioPanel,
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(4);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      // Breakpoints chosen so a card stays >= ~220px before it wraps.
+      const next = w < 480 ? 1 : w < 720 ? 2 : w < 1024 ? 3 : 4;
+      setCols(next);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={`grid ${COLUMN_CLASS[cols]} gap-4 mt-3`}>
+      {connectorIds.map((connectorId) => (
+        <Connector
+          key={connectorId}
+          id={connectorId}
+          cpId={cpId}
+          idTag={TagID}
+          isSelected={selectedConnector === connectorId}
+          onSelect={() => onConnectorSelect(connectorId)}
+          onOpenScenario={() => onOpenScenarioPanel(connectorId)}
+        />
+      ))}
     </div>
   );
 };

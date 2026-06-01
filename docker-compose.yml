@@ -1,0 +1,54 @@
+# OCPP CP simulator daemon in Docker.
+#
+# Quick start:
+#   docker compose up --build
+#
+# Override via environment variables — see the README under "Docker" for
+# the full flag list. Anything not covered here can be appended to the
+# `command:` block (those args are passed straight to cp-sim).
+
+services:
+  cp-sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cp-sim
+    container_name: cp-sim
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-9700}:9700"
+    environment:
+      HTTP_PORT: "9700"
+    volumes:
+      # Mount the example scenarios read-only so you can point
+      # --scenario-template-file at one from the command override.
+      - ./docs/examples/scenarios:/scenarios:ro
+    # Args appended to the image's ENTRYPOINT. Tweak to your CSMS / cpId.
+    # The Dockerfile already sets --http-host 0.0.0.0 --unix-socket none
+    # and --http-port (from $HTTP_PORT).
+    command:
+      - --cp-id
+      - "${CP_ID:-cp1}"
+      - --connectors
+      - "${CONNECTORS:-1}"
+      - --ws-url
+      - "${WS_URL:-wss://example.invalid/chargepoint/}"
+      # CORS: leave unset for "*" (any origin). To restrict, set
+      # CORS_ORIGIN and uncomment the lines below.
+      # - --cors-origin
+      # - "${CORS_ORIGIN}"
+      # Scenario template (optional) — uncomment + adjust:
+      # - --scenario-template-file
+      # - /scenarios/demo-charging.json
+      # - --scenario-connector
+      # - "all"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - "http://127.0.0.1:9700/healthz"
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3

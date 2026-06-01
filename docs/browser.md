@@ -6,7 +6,19 @@ React + TypeScript web application with Flowbite/Tailwind UI. Also available as 
 
 https://shiv3.github.io/ocpp-cp-simulator/
 
+The hosted web version runs in **Local mode** — every charge point lives in the browser tab, persisting to IndexedDB via sql.js. Closing the tab keeps the data; clearing site data drops it.
+
 ## Desktop Application
+
+The desktop app is **not** a wrapper around the static Local-mode build. On launch it spins up the bundled simulator daemon as a sidecar, waits for `/healthz`, then opens the full web console served by that daemon — so you get the same Remote-mode UX as `ocpp-cp-sim --web-console`, without having to install anything else.
+
+- State (`state.db`) is written to the OS-standard app data dir:
+  - macOS: `~/Library/Application Support/com.ocpp.cp-simulator/state.db`
+  - Linux: `~/.local/share/com.ocpp.cp-simulator/state.db`
+  - Windows: `%APPDATA%\com.ocpp.cp-simulator\state.db`
+- The daemon binds an ephemeral port on `127.0.0.1` — no firewall prompt.
+- Closing the window terminates the daemon (SIGTERM) so the next launch starts from a clean process.
+- Multiple-launch is squashed by `tauri-plugin-single-instance`: the second invocation focuses the existing window instead of starting a second daemon.
 
 ### Download
 
@@ -60,16 +72,23 @@ npm install
 # Web dev server
 npm run dev
 
-# Desktop dev mode (requires Rust)
+# Desktop dev mode (requires Rust + Bun)
+#   In debug builds the desktop shell spawns `bun src/cli/main.ts ...`
+#   directly, so iteration on the daemon stays fast — no need to
+#   re-compile the sidecar between edits.
 npm run tauri:dev
 
 # Production build
+#   The beforeBuildCommand chains `npm run build` and
+#   `scripts/build-tauri-sidecar.sh`, so `dist/` + the Bun-compiled
+#   sidecar both land in `src-tauri/` before tauri bundles the app.
 npm run tauri:build
 ```
 
 ### Prerequisites
 
 - Node.js (v18 or later)
+- Bun (used to compile the CLI sidecar for `tauri:build`; needed for `tauri:dev` too since the desktop shell spawns `bun src/cli/main.ts`)
 - Rust (latest stable, desktop only)
 - Platform-specific dependencies:
   - **Linux**: `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`

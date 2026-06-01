@@ -6,14 +6,16 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && bash scripts/build-tauri-sidecar.sh",
     "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "OCPP Charge Point Simulator",
+        "url": "splash.html",
         "width": 1200,
         "height": 800,
         "resizable": true,
@@ -27,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/ocpp-cp-sim"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -67,12 +67,6 @@ import ConfigSetNode from "./nodes/ConfigSetNode";
 import DataTransferNode from "./nodes/DataTransferNode";
 
 import {
-  loadScenarios,
-  updateScenario,
-  addScenario,
-  getScenarioById,
-} from "../../utils/scenarioStorage";
-import {
   exportScenarioToJSON,
   importScenarioFromJSON,
 } from "../../utils/scenarioFile";
@@ -130,23 +124,23 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // callers, but the editor itself no longer self-closes — the parent
   // panel owns its visibility now. Intentionally not destructured.
 }) => {
-  const { chargePointService, mode, defaultEvSettings } = useDataContext();
+  const { chargePointService, mode, defaultEvSettings, scenarioRepository } =
+    useDataContext();
   const { isDark } = useDarkMode();
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
       : null;
 
-  const [scenario, setScenario] = useState<ScenarioDefinition>(() => {
-    if (scenarioProp) {
-      return scenarioProp;
-    }
-    if (scenarioId) {
-      const found = getScenarioById(cpId, connectorId, scenarioId);
-      if (found) return found;
-    }
-    return createDefaultScenario(cpId, connectorId);
-  });
+  // Initial scenario: when the caller hands us one via `scenarioProp`,
+  // use it; otherwise start from the default and async-hydrate from the
+  // repository in the effect below if a `scenarioId` was supplied. The
+  // brief default-state flash before the async load completes is
+  // acceptable for first-mount; the editor doesn't render different DOM
+  // for a "loaded" vs "loading" scenario.
+  const [scenario, setScenario] = useState<ScenarioDefinition>(
+    () => scenarioProp ?? createDefaultScenario(cpId, connectorId),
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(scenario.edges);
@@ -256,8 +250,24 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
 
     if (scenarioId) {
-      const found = getScenarioById(cpId, connectorId, scenarioId);
-      if (found) {
+      // Async lookup via the scenario repository (replaces the legacy
+      // sync getScenarioById helper backed by localStorage). The
+      // cancellation flag prevents a stale fetch from overwriting state
+      // after the effect re-runs.
+      let cancelled = false;
+      void scenarioRepository.list(cpId).then((all) => {
+        if (cancelled) return;
+        const found = all.find(
+          (s) =>
+            s.id === scenarioId &&
+            // Same filter `getScenarioById` used: prefer the scenario
+            // targeted at this (cp, connector). null connector means
+            // "CP-level scenarios only".
+            (connectorId === null
+              ? s.targetType !== "connector"
+              : s.targetType !== "connector" || s.targetId === connectorId),
+        );
+        if (!found) return;
         setScenario(found);
         setNodes(found.nodes);
         setEdges(found.edges);
@@ -267,9 +277,20 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setScenarioEnabled(found.enabled !== false);
         setScenarioEvSettings(found.evSettings ?? {});
         resetHistory();
-      }
+      });
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [scenarioProp, scenarioId, cpId, connectorId, setNodes, setEdges]);
+  }, [
+    scenarioProp,
+    scenarioId,
+    cpId,
+    connectorId,
+    scenarioRepository,
+    setNodes,
+    setEdges,
+  ]);
 
   // Update execution context from props
   useEffect(() => {
@@ -538,16 +559,25 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     };
     setScenario(updatedScenario);
     if (scenario.id) {
-      // Auto-save to storage (but don't reload into ScenarioManager yet)
-      updateScenario(cpId, connectorId, scenario.id, updatedScenario);
+      // Auto-save through the repository (upsert). Fire-and-forget; if it
+      // fails we log to console rather than block the in-flight edit.
+      void scenarioRepository
+        .save(cpId, connectorId, updatedScenario)
+        .catch((err) => console.error("Failed to autosave scenario", err));
     }
 
     // Keep ScenarioManager in sync while editing (local mode only).
     if (localCp) {
       const connector = localCp.getConnector(connectorId || 1);
       if (connector?.scenarioManager) {
-        const allScenarios = loadScenarios(cpId, connectorId);
-        connector.scenarioManager.loadScenarios(allScenarios);
+        void scenarioRepository.list(cpId).then((all) => {
+          const scoped = all.filter((s) =>
+            connectorId === null
+              ? s.targetType !== "connector"
+              : s.targetType !== "connector" || s.targetId === connectorId,
+          );
+          connector.scenarioManager?.loadScenarios(scoped);
+        });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scenario is intentionally excluded to avoid infinite loop (this effect updates scenario)
@@ -645,7 +675,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       updatedAt: new Date().toISOString(),
     };
     if (scenario.id) {
-      updateScenario(cpId, connectorId, scenario.id, updated);
+      void scenarioRepository
+        .save(cpId, connectorId, updated)
+        .catch((err) => console.error("Failed to save scenario", err));
     }
     setScenario(updated);
     setSaveFeedback("saved");
@@ -924,18 +956,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setNodes(imported.nodes);
         setEdges(imported.edges);
 
-        // Check if scenario already exists
-        const existing = getScenarioById(cpId, connectorId, imported.id);
-        if (existing) {
-          updateScenario(cpId, connectorId, imported.id, imported);
-        } else {
-          addScenario(cpId, connectorId, imported);
-        }
+        // Repository.save is upsert (`INSERT … ON CONFLICT DO UPDATE`),
+        // so we don't need to look the existing row up first.
+        await scenarioRepository.save(cpId, connectorId, imported);
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [cpId, connectorId, setNodes, setEdges],
+    [cpId, connectorId, scenarioRepository, setNodes, setEdges],
   );
 
   const handleLoadTemplate = useCallback(
@@ -958,10 +986,12 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
 
-      // Templates are always new scenarios, so add them
-      addScenario(cpId, connectorId, templateScenario);
+      // Templates are always new scenarios, so save them (upsert via repo).
+      void scenarioRepository
+        .save(cpId, connectorId, templateScenario)
+        .catch((err) => console.error("Failed to save template scenario", err));
     },
-    [cpId, connectorId, nodes.length, setNodes, setEdges],
+    [cpId, connectorId, scenarioRepository, nodes.length, setNodes, setEdges],
   );
 
   // Handle node double-click to open config panel

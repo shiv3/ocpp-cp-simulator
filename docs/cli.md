@@ -26,10 +26,10 @@ The package exposes a `ocpp-cp-sim` bin so it can be invoked from anywhere once 
 ```bash
 # From a checkout
 bun link
-bun link ocpp-ocpp-cp-simulator    # in any consumer project
+bun link ocpp-cp-simulator    # in any consumer project
 
 # Or globally from git
-bun install -g github:shiv3/ocpp-ocpp-cp-simulator
+bun install -g github:shiv3/ocpp-cp-simulator
 
 # Then use ocpp-cp-sim anywhere
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001

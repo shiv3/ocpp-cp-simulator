@@ -24,6 +24,14 @@ Commands:
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
 export async function startRepl(service: CLIChargePointService): Promise<void> {
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      "Interactive REPL requires a TTY on stdin. " +
+        "Run from a real terminal, or use --json for scripts and CI.\n",
+    );
+    process.exit(1);
+  }
+
   service.onEvent((evt) => {
     if (evt.event === "log") return;
     const line = formatEvent(evt.event, evt.data);

@@ -5,6 +5,9 @@ import type { CLIOptions, ChargePointInitOptions } from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
+import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "../cp/domain/persistence/Database";
+import { setGlobalLogFormat } from "../cp/shared/Logger";
 import {
   startServer,
   DEFAULT_UNIX_SOCKET,
@@ -59,6 +62,8 @@ function parseArgs(argv: string[]): CLIOptions {
   // omitted (`--web-console` alone), the UI shares the --http-port listener.
   let webConsoleEnabled = false;
   let webConsoleExplicitPort: number | null = null;
+  let stateDb: string | null = null;
+  let logFormat: "plain" | "json" = "plain";
   const corsOrigins: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
@@ -154,6 +159,26 @@ function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         corsOrigins.push(next);
+        i++;
+        break;
+      case "--state-db":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --state-db requires a path (or ':memory:')\n",
+          );
+          process.exit(1);
+        }
+        stateDb = next;
+        i++;
+        break;
+      case "--log-format":
+        if (next !== "plain" && next !== "json") {
+          process.stderr.write(
+            "Error: --log-format must be 'plain' or 'json'\n",
+          );
+          process.exit(1);
+        }
+        logFormat = next;
         i++;
         break;
       case "--web-console":
@@ -296,12 +321,14 @@ function parseArgs(argv: string[]): CLIOptions {
     corsOrigins,
     serveStatic,
     webConsolePort,
+    stateDb,
+    logFormat,
   };
 }
 
 function printUsage(): void {
   process.stderr.write(`
-Usage: cp-sim [options]    (or "bun src/cli/main.ts [options]" from a checkout)
+Usage: ocpp-cp-sim [options]    (or "bun src/cli/main.ts [options]" from a checkout)
 
 Local modes (single CP, no server):
   --cp-id <id> --ws-url <url>                Interactive REPL (default)
@@ -348,6 +375,14 @@ Options:
                            Without <port>: shares the --http-port listener.
                            Requires the UI to be built (run "bun run build",
                            or use an installed package which ships dist/).
+  --state-db <path>        Persist Configuration overrides, charging-profile
+                           state, scenarios, and pending transaction
+                           messages to a SQLite file (or ":memory:").
+                           Without this flag the daemon is fully in-memory
+                           and forgets everything at exit.
+  --log-format <fmt>       "plain" (default) or "json" — output one JSON
+                           object per stderr line for structured-log
+                           collectors (Loki, jq, etc.).
   -h, --help               Show this help
 
 HTTP API (see docs/server.md):
@@ -377,6 +412,10 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv);
+  // Apply log format BEFORE constructing any service / charge point so
+  // every line that follows respects it — including "[server] xxx" setup
+  // chatter via serverLog.
+  setGlobalLogFormat(options.logFormat);
 
   const clientLoc = {
     httpUrl: options.httpUrl,
@@ -429,11 +468,19 @@ async function main(): Promise<void> {
           : { kind: "allowlist", origins: options.corsOrigins },
       staticDir: options.serveStatic,
       webConsolePort: options.webConsolePort,
+      stateDb: options.stateDb,
     });
     return;
   }
 
-  const service = CLIChargePointService.fromOptions(options);
+  // REPL / JSON mode: still honour --state-db so single-CP sessions can
+  // persist ChangeConfiguration overrides and queued transaction messages
+  // across reruns the same way the daemon does.
+  let replDatabase: Database | null = null;
+  if (options.stateDb) {
+    replDatabase = BunSqliteDatabase.open(options.stateDb);
+  }
+  const service = CLIChargePointService.fromOptions(options, replDatabase);
 
   let shuttingDown = false;
   const shutdown = () => {

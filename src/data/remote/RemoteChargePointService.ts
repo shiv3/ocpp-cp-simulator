@@ -6,6 +6,7 @@ import type {
   CreateChargePointParams,
   ScenarioListItem,
   ScenarioTemplateInfo,
+  StoredLogEntry,
 } from "../interfaces/ChargePointService";
 import type {
   OCPPAvailability,
@@ -818,6 +819,24 @@ export class RemoteChargePointService implements ChargePointService {
 
   async ping(): Promise<{ ok: boolean; cps: number }> {
     return this.fetchJson<{ ok: boolean; cps: number }>("GET", "/healthz");
+  }
+
+  async resetAllState(): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>("POST", "/v1/state/reset");
+  }
+
+  async clearStoredLogs(cpId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      "POST",
+      `/v1/cp/${encodeURIComponent(cpId)}/logs/clear`,
+    );
+  }
+
+  async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
+    return this.fetchJson<StoredLogEntry[]>(
+      "GET",
+      `/v1/cp/${encodeURIComponent(cpId)}/logs`,
+    );
   }
 
   /** Close all internal WebSocket subscriptions. */

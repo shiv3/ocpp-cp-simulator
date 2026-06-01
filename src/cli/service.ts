@@ -1,5 +1,6 @@
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
+import type { Database } from "../cp/domain/persistence/Database";
 import type { BootNotification } from "../cp/domain/types/OcppTypes";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import type {
@@ -185,7 +186,11 @@ export class CLIChargePointService {
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
 
-  constructor(init: ChargePointInitOptions) {
+  constructor(
+    init: ChargePointInitOptions,
+    /** Shared daemon DB. `null` means run in-memory (no `--state-db`). */
+    private readonly database: Database | null = null,
+  ) {
     const overrides = init.bootNotification ?? {};
     const bootNotification: BootNotification = {
       chargePointVendor: init.vendor,
@@ -211,24 +216,31 @@ export class CLIChargePointService {
       baseUrl,
       init.basicAuth,
       autoMeterValue,
+      this.database,
     );
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
   }
 
-  static fromOptions(options: CLIOptions): CLIChargePointService {
+  static fromOptions(
+    options: CLIOptions,
+    database: Database | null = null,
+  ): CLIChargePointService {
     if (!options.cpId) {
       throw new Error("cpId is required");
     }
-    return new CLIChargePointService({
-      cpId: options.cpId,
-      wsUrl: options.wsUrl,
-      connectors: options.connectors,
-      vendor: options.vendor,
-      model: options.model,
-      basicAuth: options.basicAuth,
-    });
+    return new CLIChargePointService(
+      {
+        cpId: options.cpId,
+        wsUrl: options.wsUrl,
+        connectors: options.connectors,
+        vendor: options.vendor,
+        model: options.model,
+        basicAuth: options.basicAuth,
+      },
+      database,
+    );
   }
 
   onEvent(handler: EventHandler): () => void {
@@ -595,6 +607,20 @@ export class CLIChargePointService {
         }
       }
     }
+  }
+
+  /** Drain any buffered log lines to the DB — called from the HTTP
+   *  GET /v1/cp/:cpId/logs handler so the download includes the last
+   *  seconds of activity that the LogRepository hasn't flushed yet. */
+  flushLogs(): void {
+    this._chargePoint.flushLogs();
+  }
+
+  /** In-memory log entries for this CP (Logger's session buffer).
+   *  Used by the GET /v1/cp/:cpId/logs endpoint when --state-db is off
+   *  so the daemon can still serve a useful download. */
+  getInMemoryLogs() {
+    return this._chargePoint.getInMemoryLogs();
   }
 
   cleanup(): void {

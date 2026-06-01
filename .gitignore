@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Persistent simulator state from `ocpp-cp-sim --state-db` /
+# docker-compose. Ignored so a local dev run doesn't accidentally commit
+# scenario history or queued-message rows.
+.state/
+*.db
+*.db-wal
+*.db-shm
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

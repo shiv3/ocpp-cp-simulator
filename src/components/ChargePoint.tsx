@@ -29,6 +29,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
     logs,
     clearLogs,
   } = useChargePointView(cpId);
+  const { chargePointService } = useDataContext();
   const connectorIds = Array.from(connectors.keys()).sort((a, b) => a - b);
 
   // Side panel state
@@ -45,9 +46,47 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
   // even if it's already open on a different tab.
   const [tabResetNonce, setTabResetNonce] = useState(0);
 
-  const handleClearLogs = useCallback(() => {
-    clearLogs();
-  }, [clearLogs]);
+  const handleClearLogs = useCallback(
+    (scope: "screen" | "all") => {
+      clearLogs();
+      if (scope === "all" && chargePointService.clearStoredLogs) {
+        // Fire-and-forget: the on-screen list is already cleared; if the
+        // DB delete fails we'll log it but don't block the UI.
+        void chargePointService.clearStoredLogs(cpId).catch((err) => {
+          console.error("Failed to clear stored logs", err);
+        });
+      }
+    },
+    [chargePointService, clearLogs, cpId],
+  );
+
+  const handleDownloadLogs = useCallback(async () => {
+    if (!chargePointService.listStoredLogs) {
+      console.warn("This runtime does not expose persisted logs for download");
+      return;
+    }
+    try {
+      const rows = await chargePointService.listStoredLogs(cpId);
+      // JSON Lines: one entry per line. Plays well with `jq -c`, grep, and
+      // log analyzers; smaller than a JSON array because lines are
+      // independently parseable.
+      const body = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+      const blob = new Blob([body], { type: "application/x-ndjson" });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ocpp-logs-${cpId}-${stamp}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Schedule revoke on the next tick so Safari has time to start the
+      // download — revoking too early aborts it.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      console.error("Failed to download logs", err);
+    }
+  }, [chargePointService, cpId]);
 
   const handleConnectorSelect = useCallback((connectorId: number) => {
     // Toggle: clicking the already-selected connector closes the panel.
@@ -137,6 +176,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
             <LogViewer
               logs={logs}
               onClear={handleClearLogs}
+              onDownload={handleDownloadLogs}
               maxHeight="500px"
             />
           </div>

@@ -6,6 +6,9 @@ import type { JsonCommand, ChargePointInitOptions } from "../types";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
+import type { Database } from "../../cp/domain/persistence/Database";
+import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
+import { LogLevel } from "../../cp/shared/Logger";
 
 /**
  * Serve files out of a directory as a 404 fallback for the API router.
@@ -121,10 +124,13 @@ export function createHttpHandlers(deps: {
   cors?: CorsPolicy;
   /** Absolute path of a directory served as a 404 fallback (SPA aware). */
   staticDir?: string | null;
+  /** Daemon state DB; needed so POST /v1/state/reset can truncate it. */
+  database?: Database | null;
 }): HttpHandlers {
   const { registry, bus, lifecycle } = deps;
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
   const staticDir = deps.staticDir ?? null;
+  const database = deps.database ?? null;
 
   return {
     fetch(req, server) {
@@ -220,6 +226,91 @@ export function createHttpHandlers(deps: {
     if (req.method === "POST" && url.pathname === "/v1/shutdown") {
       // Defer shutdown so the response body has time to flush to the client.
       setTimeout(() => lifecycle.requestShutdown(), 100);
+      return Response.json({ ok: true });
+    }
+
+    // POST /v1/cp/:cpId/logs/clear — drop the persisted log rows for one
+    // CP, leaving the rest of the DB intact. The browser also clears its
+    // own in-memory log buffer; this is the "and DB too" half.
+    if (
+      req.method === "POST" &&
+      segs.length === 5 &&
+      segs[0] === "v1" &&
+      segs[1] === "cp" &&
+      segs[3] === "logs" &&
+      segs[4] === "clear"
+    ) {
+      const cpId = decodeURIComponent(segs[2]);
+      if (database) {
+        database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
+        void database.flush?.();
+      }
+      return Response.json({ ok: true });
+    }
+
+    // GET /v1/cp/:cpId/logs — list log entries for one CP, oldest-first.
+    // Prefers the persisted `logs` table (full session-spanning history
+    // when --state-db is set), and falls back to the Logger's in-memory
+    // list for daemons running without persistence. Backs the browser's
+    // "Download logs" button in remote mode.
+    if (
+      req.method === "GET" &&
+      segs.length === 4 &&
+      segs[0] === "v1" &&
+      segs[1] === "cp" &&
+      segs[3] === "logs"
+    ) {
+      const cpId = decodeURIComponent(segs[2]);
+      const svc = registry.get(cpId);
+      svc?.flushLogs();
+      if (database) {
+        const rows = database.all<{
+          timestamp: string;
+          level: string;
+          log_type: string;
+          message: string;
+        }>(
+          "SELECT timestamp, level, log_type, message FROM logs " +
+            "WHERE cp_id = ? ORDER BY id ASC",
+          [cpId],
+        );
+        if (rows.length > 0) {
+          return Response.json(
+            rows.map((r) => ({
+              timestamp: r.timestamp,
+              level: r.level,
+              type: r.log_type,
+              cpId,
+              message: r.message,
+            })),
+          );
+        }
+      }
+      // No DB or DB empty — fall back to whatever the Logger has buffered
+      // in memory for this CP's process lifetime.
+      const memEntries = svc?.getInMemoryLogs() ?? [];
+      return Response.json(
+        memEntries.map((e) => ({
+          timestamp: e.timestamp.toISOString(),
+          level: LogLevel[e.level] ?? "INFO",
+          type: e.type,
+          cpId,
+          message: e.message,
+        })),
+      );
+    }
+
+    // POST /v1/state/reset — drop every CP, then truncate the state DB.
+    // Called by the UI "Reset all simulator data" button when in remote
+    // mode (browser sends this via RemoteChargePointService.resetAllState).
+    if (req.method === "POST" && url.pathname === "/v1/state/reset") {
+      for (const cpId of [...registry.list()]) registry.remove(cpId);
+      if (database) {
+        resetSimulatorState(database);
+        // database.flush is a no-op on bun:sqlite; call without await so
+        // the fetch handler stays sync (matches the rest of the routes).
+        void database.flush?.();
+      }
       return Response.json({ ok: true });
     }
 

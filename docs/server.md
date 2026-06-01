@@ -4,7 +4,7 @@ The simulator can run as a long-lived process exposing an HTTP/WebSocket API. A 
 
 The same HTTP/WS handlers are exposed over both a TCP port and a Unix domain socket, so local tools can use the Unix socket for lower-overhead IPC while remote clients use TCP.
 
-> All examples below show `bun src/cli/main.ts` for clarity when working from a checkout. If you've installed the package (`bun link` or `bun install -g`), `cp-sim` is interchangeable everywhere.
+> All examples below show `bun src/cli/main.ts` for clarity when working from a checkout. If you've installed the package (`bun link` or `bun install -g`), `ocpp-cp-sim` is interchangeable everywhere.
 
 ## Starting the Server
 
@@ -29,14 +29,36 @@ bun src/cli/main.ts --daemon --http-port 9700 \
   --cp-id CP001 --ws-url ws://localhost:9000/ocpp &
 ```
 
-| Flag                         | Default                   | Description                                           |
-| ---------------------------- | ------------------------- | ----------------------------------------------------- |
-| `--daemon`                   | -                         | Background server. Unix socket enabled by default.    |
-| `--http-port <port>`         | -                         | TCP port for HTTP/WebSocket.                          |
-| `--http-host <addr>`         | `127.0.0.1`               | TCP bind address. Use `0.0.0.0` to expose externally. |
-| `--unix-socket <path\|none>` | `/tmp/ocpp-server.sock`\* | Unix socket path. `none` disables Unix socket.        |
+| Flag                         | Default                   | Description                                                                                                                                                                                   |
+| ---------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--daemon`                   | -                         | Background server. Unix socket enabled by default.                                                                                                                                            |
+| `--http-port <port>`         | -                         | TCP port for HTTP/WebSocket.                                                                                                                                                                  |
+| `--http-host <addr>`         | `127.0.0.1`               | TCP bind address. Use `0.0.0.0` to expose externally.                                                                                                                                         |
+| `--unix-socket <path\|none>` | `/tmp/ocpp-server.sock`\* | Unix socket path. `none` disables Unix socket.                                                                                                                                                |
+| `--state-db <path>`          | _(in-memory)_             | Persist scenarios, ChangeConfiguration overrides, charging profile state, availability flags and pending transaction messages to a SQLite file (see [State persistence](#state-persistence)). |
 
 \* Default applies only with `--daemon`. Without `--daemon`, the Unix socket is **off** unless `--unix-socket <path>` is given explicitly.
+
+## State persistence
+
+The daemon keeps everything in memory by default. Pass `--state-db <path>` to write to a SQLite file instead — useful for survive-restart use cases (long-running CSMS integration tests, simulated EVs that should keep their `MeterValueSampleInterval` override or their `Inoperative` flag across reboots).
+
+```bash
+# Persist to a file in the current directory
+ocpp-cp-sim --daemon --http-port 9700 \
+            --cp-id CP001 --ws-url ws://localhost:9000/ocpp \
+            --state-db ./state.db
+
+# Inspect the DB
+sqlite3 ./state.db ".tables"
+# charging_profiles   connector_settings  pending_messages    schema_meta
+# configuration       kv                  scenarios
+
+# In-memory (default)
+ocpp-cp-sim --daemon ...
+```
+
+Browser mode uses the same schema, backed by sql.js + IndexedDB. Each browser profile keeps one DB blob under the `ocpp-cp-simulator` IndexedDB database; clearing site data wipes simulator state.
 
 ## Docker
 
@@ -44,17 +66,17 @@ A `Dockerfile` and `docker-compose.yml` ship at the repo root. The image is Bun-
 
 ```bash
 # Build
-docker build -t cp-sim .
+docker build -t ocpp-cp-sim .
 
 # Run, exposing HTTP on host port 9700, talking to a CSMS at wss://example/chargepoint/
-docker run --rm -p 9700:9700 cp-sim \
+docker run --rm -p 9700:9700 ocpp-cp-sim \
   --cp-id cp1 --connectors 2 \
   --ws-url wss://example/chargepoint/
 
 # Run with a scenario template mounted in read-only
 docker run --rm -p 9700:9700 \
   -v "$PWD/docs/examples/scenarios:/scenarios:ro" \
-  cp-sim --cp-id cp1 --ws-url wss://example/chargepoint/ \
+  ocpp-cp-sim --cp-id cp1 --ws-url wss://example/chargepoint/ \
     --scenario-template-file /scenarios/demo-charging.json \
     --scenario-connector all
 ```
@@ -209,7 +231,7 @@ The server returns `Access-Control-Allow-Origin: *` by default so the bundled br
 For anything beyond localhost development, restrict CORS to the origins of your UI:
 
 ```bash
-cp-sim --daemon --http-port 9700 \
+ocpp-cp-sim --daemon --http-port 9700 \
   --cors-origin http://localhost:5173 \
   --cors-origin https://ocpp-ui.example.com
 ```

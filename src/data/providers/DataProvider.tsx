@@ -153,10 +153,27 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     let cancelled = false;
     const origin = window.location.origin;
     fetch(`${origin}/healthz`, { method: "GET", cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        // `fetch` does NOT reject on HTTP error status — a 404 (e.g. when
+        // the UI is served from GitHub Pages where no /healthz endpoint
+        // exists) resolves with res.ok=false. Treat any non-2xx as
+        // "no daemon here → Local" so we don't sit in the null-mode
+        // initialization gate forever.
+        if (!res.ok) return null;
+        try {
+          return (await res.json()) as unknown;
+        } catch {
+          return null;
+        }
+      })
       .then((body) => {
-        if (cancelled || !body || typeof body !== "object") return;
-        if ("ok" in body && (body as { ok?: unknown }).ok === true) {
+        if (cancelled) return;
+        if (
+          body &&
+          typeof body === "object" &&
+          "ok" in body &&
+          (body as { ok?: unknown }).ok === true
+        ) {
           setModeState("remote");
           setServerUrlState(origin);
         } else {
@@ -164,7 +181,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({
         }
       })
       .catch(() => {
-        // No daemon at this origin — Local.
+        // Network error (CORS, offline, DNS, …) — also Local.
         if (!cancelled) setModeState("local");
       });
 

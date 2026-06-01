@@ -4,6 +4,12 @@
  * when `CSMS_OCPP_CP_QUERY_PASSWORD_PARAM` matches this name (default `ocpp_ws_secret`).
  */
 export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
+export const OCPP_WEBSOCKET_PROTOCOL = "ocpp1.6";
+
+export interface BasicAuthSettings {
+  username: string;
+  password: string;
+}
 
 export function isBrowserRuntime(): boolean {
   return (
@@ -15,24 +21,38 @@ export function isBrowserRuntime(): boolean {
 export function buildOcppWebSocketUrl(params: {
   baseUrl: string;
   chargePointId: string;
-  basicAuth: { username: string; password: string } | null;
+  basicAuth: BasicAuthSettings | null;
 }): string {
   const url = new URL(params.baseUrl);
-  let appendQuerySecret = false;
-  if (params.basicAuth?.password) {
-    if (isBrowserRuntime()) {
-      appendQuerySecret = true;
-      url.username = "";
-      url.password = "";
-    } else {
-      url.username = params.basicAuth.username;
-      url.password = params.basicAuth.password;
-    }
+  if (isBrowserRuntime() && params.basicAuth?.password) {
+    url.searchParams.set(
+      OCPP_BROWSER_WS_SECRET_QUERY_PARAM,
+      params.basicAuth.password,
+    );
   }
-  let full = `${url.toString()}${params.chargePointId}`;
-  if (appendQuerySecret && params.basicAuth) {
-    const sep = full.includes("?") ? "&" : "?";
-    full += `${sep}${OCPP_BROWSER_WS_SECRET_QUERY_PARAM}=${encodeURIComponent(params.basicAuth.password)}`;
+  url.pathname += params.chargePointId;
+  return url.toString();
+}
+
+export function buildOcppBasicAuthorization(
+  basicAuth: BasicAuthSettings,
+): string {
+  return `Basic ${btoa(`${basicAuth.username}:${basicAuth.password}`)}`;
+}
+
+export function openOcppWebSocket(params: {
+  baseUrl: string;
+  chargePointId: string;
+  basicAuth: BasicAuthSettings | null;
+}): WebSocket {
+  const url = buildOcppWebSocketUrl(params);
+  if (!isBrowserRuntime() && params.basicAuth?.password) {
+    return new WebSocket(url, {
+      protocols: [OCPP_WEBSOCKET_PROTOCOL],
+      headers: {
+        Authorization: buildOcppBasicAuthorization(params.basicAuth),
+      },
+    });
   }
-  return full;
+  return new WebSocket(url, [OCPP_WEBSOCKET_PROTOCOL]);
 }

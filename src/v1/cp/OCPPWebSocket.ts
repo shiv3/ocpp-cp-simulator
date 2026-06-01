@@ -1,4 +1,4 @@
-import { buildOcppWebSocketUrl } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import { openOcppWebSocket } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { Logger } from "./Logger";
 import { OCPPAction, OCPPErrorCode, OCPPMessageType } from "./OcppTypes";
 import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
@@ -79,12 +79,11 @@ export class OCPPWebSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null,
   ): void {
-    const wsUrl = buildOcppWebSocketUrl({
+    this._ws = openOcppWebSocket({
       baseUrl: this._url,
       chargePointId: this._chargePointId,
       basicAuth: this._basicAuth,
     });
-    this._ws = new WebSocket(wsUrl, ["ocpp1.6", "ocpp1.5"]);
     this._ws.onopen = () => {
       if (onopen) {
         onopen();

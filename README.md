@@ -27,10 +27,10 @@ bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```bash
 # From a checkout
 bun link              # in this repo
-bun link ocpp-ocpp-cp-simulator   # in any other project
+bun link ocpp-cp-simulator   # in any other project
 
 # Or directly from git
-bun install -g github:shiv3/ocpp-ocpp-cp-simulator
+bun install -g github:shiv3/ocpp-cp-simulator
 ```
 
 Then run from anywhere:
@@ -38,11 +38,28 @@ Then run from anywhere:
 ```bash
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ocpp-cp-sim --daemon --http-port 9700        # server mode
+
+# Daemon with persistent state + structured logs
+ocpp-cp-sim --daemon --http-port 9700 \
+            --state-db ./state.db --log-format json
 ```
+
+## Persistence
+
+Both the browser UI and the daemon back their state with SQLite — sql.js + IndexedDB in the browser, `bun:sqlite` (via `--state-db <path>`) in the daemon. Scenarios, ChangeConfiguration overrides, charging profiles, availability flags, pending transaction messages, the daemon's CP registry and logs all survive reload / restart. See [docs/server.md → State persistence](docs/server.md#state-persistence).
+
+## Local vs Remote mode (browser)
+
+The browser UI auto-detects which mode to run in by probing `/healthz` at its own origin:
+
+- Served by `ocpp-cp-sim --web-console` (or the Docker image) → **Remote**: every operation is proxied to the daemon over HTTP/WS.
+- Static build (GitHub Pages, `bun run dev`, Tauri) → **Local**: charge points run entirely in-browser, persistence via sql.js.
+
+There is no toggle — the mode is decided once on page load and never overridden.
 
 ## Doc
 
-https://deepwiki.com/shiv3/ocpp-ocpp-cp-simulator
+https://deepwiki.com/shiv3/ocpp-cp-simulator
 
 ## Contributing
 

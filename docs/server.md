@@ -29,13 +29,14 @@ bun src/cli/main.ts --daemon --http-port 9700 \
   --cp-id CP001 --ws-url ws://localhost:9000/ocpp &
 ```
 
-| Flag                         | Default                   | Description                                                                                                                                                                                   |
-| ---------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--daemon`                   | -                         | Background server. Unix socket enabled by default.                                                                                                                                            |
-| `--http-port <port>`         | -                         | TCP port for HTTP/WebSocket.                                                                                                                                                                  |
-| `--http-host <addr>`         | `127.0.0.1`               | TCP bind address. Use `0.0.0.0` to expose externally.                                                                                                                                         |
-| `--unix-socket <path\|none>` | `/tmp/ocpp-server.sock`\* | Unix socket path. `none` disables Unix socket.                                                                                                                                                |
-| `--state-db <path>`          | _(in-memory)_             | Persist scenarios, ChangeConfiguration overrides, charging profile state, availability flags and pending transaction messages to a SQLite file (see [State persistence](#state-persistence)). |
+| Flag                         | Default                   | Description                                                                                                                                                                                                         |
+| ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--daemon`                   | -                         | Background server. Unix socket enabled by default.                                                                                                                                                                  |
+| `--http-port <port>`         | -                         | TCP port for HTTP/WebSocket.                                                                                                                                                                                        |
+| `--http-host <addr>`         | `127.0.0.1`               | TCP bind address. Use `0.0.0.0` to expose externally.                                                                                                                                                               |
+| `--unix-socket <path\|none>` | `/tmp/ocpp-server.sock`\* | Unix socket path. `none` disables Unix socket.                                                                                                                                                                      |
+| `--state-db <path>`          | _(in-memory)_             | Persist scenarios, ChangeConfiguration overrides, charging profile state, availability flags, pending transaction messages, registered CPs and logs to a SQLite file (see [State persistence](#state-persistence)). |
+| `--log-format <fmt>`         | `plain`                   | `plain` writes the legacy `[ts] [LEVEL] [TYPE] message` lines; `json` writes one JSON Lines object per line for structured-log collectors (see [Log format](#log-format)).                                          |
 
 \* Default applies only with `--daemon`. Without `--daemon`, the Unix socket is **off** unless `--unix-socket <path>` is given explicitly.
 
@@ -51,14 +52,75 @@ ocpp-cp-sim --daemon --http-port 9700 \
 
 # Inspect the DB
 sqlite3 ./state.db ".tables"
-# charging_profiles   connector_settings  pending_messages    schema_meta
-# configuration       kv                  scenarios
+# charge_point_state  charging_profiles   connector_settings  kv
+# charge_points       configuration       logs                pending_messages
+# scenarios           schema_meta
 
 # In-memory (default)
 ocpp-cp-sim --daemon ...
 ```
 
-Browser mode uses the same schema, backed by sql.js + IndexedDB. Each browser profile keeps one DB blob under the `ocpp-cp-simulator` IndexedDB database; clearing site data wipes simulator state.
+### Tables
+
+| Table                | Holds                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_meta`        | Single row stamping the schema version. Used by future migrations.                                                                                      |
+| `scenarios`          | Scenario definitions (per CP/connector). Browser saves go through here.                                                                                 |
+| `connector_settings` | `auto_meter`, `availability` and `soc_meter_sync` per `(cp_id, connector_id)`. `connector_id=0` represents the CP main controller.                      |
+| `charging_profiles`  | One row per active `SetChargingProfile.req`, keyed by `(cp_id, connector_id, charging_profile_id)`.                                                     |
+| `configuration`      | Per-CP overrides written by `ChangeConfiguration.req` (§5.3). The OCPP defaults are computed at boot; only operator/CSMS-set values land here.          |
+| `pending_messages`   | Transaction-related CALLs queued while offline (§4.7 / §4.8 errata 3.18). Retried with backoff on reconnect.                                            |
+| `logs`               | Persisted log entries — every OCPP message, scenario step, state transition. Batched writes (50 entries / 500 ms) and trimmed to 10 k rows per CP.      |
+| `charge_points`      | Daemon-side CP registry. Re-created on restart by `CPRegistry.restoreFromDatabase` and **auto-connected**, so the CSMS sees BootNotification fly again. |
+| `charge_point_state` | Per-CP runtime flags (currently `desired_connected`). Browser local mode writes this on Connect/Disconnect so a reload restores the WebSocket.          |
+| `kv`                 | App-level prefs (global config, SoC↔Meter sync, etc.).                                                                                                 |
+
+### Reset
+
+The browser ships a **Reset all simulator data** button (Settings page) that wipes every table while leaving the schema intact. The daemon endpoint is:
+
+```bash
+curl -X POST http://127.0.0.1:9700/v1/state/reset
+```
+
+Both paths also drop every in-memory CP first so live WebSockets don't keep writing to the (about-to-be-empty) DB.
+
+### Browser
+
+Browser mode uses the same schema, backed by sql.js + IndexedDB. Each browser profile keeps one DB blob under the `ocpp-cp-simulator` IndexedDB database; clearing site data wipes simulator state. sql.js is only loaded when the page determines it's in Local mode (via `/healthz` probe at the page origin) — Remote mode skips the WASM download entirely.
+
+## Log format
+
+By default the daemon writes human-readable log lines:
+
+```
+[2026-06-01T11:18:38.409Z] [INFO] [OCPP] Boot notification accepted
+[2026-06-01T11:18:38.409Z] [INFO] [WebSocket] Sent: [2,"…","StatusNotification",{"connectorId":0,"errorCode":"NoError","status":"Available"}]
+```
+
+Pass `--log-format json` to switch to JSON Lines — one object per line, including the `[server] xxx` setup chatter:
+
+```json
+{"timestamp":"2026-06-01T11:18:38.373Z","level":"INFO","type":"Server","message":"Listening on http://127.0.0.1:9700 (API)"}
+{"timestamp":"2026-06-01T11:18:38.409Z","level":"INFO","type":"OCPP","message":"Boot notification accepted","cpId":"CP001"}
+{"timestamp":"2026-06-01T11:18:38.409Z","level":"INFO","type":"WebSocket","message":"Sent: [2,…]","cpId":"CP001"}
+```
+
+The shape (`timestamp` / `level` / `type` / `message` / optional `cpId`) is identical to:
+
+- the rows persisted in the `logs` table,
+- the JSON Lines file produced by the browser's "Download" button in the log viewer,
+- the response of `GET /v1/cp/:cpId/logs` (see below).
+
+So you can pipe daemon stdout into the same `jq` pipeline that consumes a downloaded log file.
+
+### Endpoints
+
+| Method | Path                      | Returns                                                                                                                 |
+| ------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/cp/:cpId/logs`       | All persisted log rows for the CP, oldest-first. Falls back to the in-memory Logger buffer when `--state-db` isn't set. |
+| POST   | `/v1/cp/:cpId/logs/clear` | Delete the persisted log rows for the CP.                                                                               |
+| POST   | `/v1/state/reset`         | Truncate every simulator-owned table, then disconnect/forget every in-memory CP. Schema is preserved.                   |
 
 ## Docker
 

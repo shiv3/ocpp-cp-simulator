@@ -579,18 +579,23 @@ const FullPanelContent: React.FC<{
     };
   }, [mode, cpId, connectorId, scenario?.id, chargePointService]);
 
-  // Load scenarios from localStorage (local mode). Remote mode is hydrated
-  // by the dedicated effect below — skip this path so the localStorage
-  // default doesn't clobber the server-loaded template.
+  // Load scenarios from the repository (local mode). Remote mode is hydrated
+  // by the dedicated effect below — skip this path so the local default
+  // doesn't clobber the server-loaded template.
   useEffect(() => {
     if (mode !== "local") return;
 
     if (scenarios.length > 0) {
       setScenario((current) => {
-        const match = current
-          ? scenarios.find((s) => s.id === current.id)
-          : null;
-        const next = match ?? scenarios[0];
+        // If the currently-selected scenario is still present, keep the
+        // *existing* reference. ScenarioEditor owns its working state and
+        // re-hydrates whenever this prop ref changes; pushing a fresh
+        // object of the same id here would clobber in-flight edits and
+        // trigger an auto-save → repository-notify → setScenario loop.
+        if (current && scenarios.some((s) => s.id === current.id)) {
+          return current;
+        }
+        const next = scenarios[0];
         scenarioRef.current = next;
         return next;
       });

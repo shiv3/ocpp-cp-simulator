@@ -147,7 +147,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // We keep a no-op setter so the existing call sites (which still pass a
   // ScenarioExecutionMode through ScenarioExecutor / ScenarioControlPanel)
   // continue to compile without surgery.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const setExecutionMode = (_mode: ScenarioExecutionMode): void => {
     /* no-op */
   };

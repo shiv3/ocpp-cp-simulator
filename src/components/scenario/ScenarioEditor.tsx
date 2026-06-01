@@ -1,6 +1,7 @@
 import React, {
   useState,
   useCallback,
+  useMemo,
   useRef,
   useEffect,
   lazy,
@@ -311,6 +312,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
   }, [propsNodeProgress]);
 
+  // Stable key over the node ID set — recomputes when nodes are added /
+  // removed / replaced, but stays equal across pure style/position updates.
+  // The highlight effect below uses this so that re-hydrating the editor
+  // with a new scenario (e.g. opening the side panel mid-run, when the
+  // graph swaps from the placeholder default to the running scenario)
+  // forces the executing-node CSS to re-apply against the freshly loaded
+  // node ids. Without this, the executor's context is the same object
+  // ref each poll tick, the prop effect short-circuits, and the highlight
+  // never gets a chance to run against the real nodes.
+  const nodeIdKey = useMemo(() => nodes.map((n) => n.id).join("|"), [nodes]);
+
   // Update node styles based on execution context and progress
   useEffect(() => {
     // Reset styles if no execution context
@@ -392,7 +404,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         };
       }),
     );
-  }, [executionContext, nodeProgress, setNodes]);
+  }, [executionContext, nodeProgress, setNodes, nodeIdKey]);
 
   // Push the connector's live meter reading into every MeterValue node's
   // `data.currentValue` so the node face renders the running total instead

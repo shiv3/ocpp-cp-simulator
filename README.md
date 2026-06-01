@@ -42,13 +42,28 @@ bun link ocpp-cp-simulator   # in any other project
 Then run from anywhere:
 
 ```bash
+# Interactive REPL against a CSMS
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
-ocpp-cp-sim --daemon --http-port 9700        # server mode
 
-# Daemon with persistent state + structured logs
-ocpp-cp-sim --daemon --http-port 9700 \
+# Headless daemon (HTTP/WS control API only)
+ocpp-cp-sim --daemon --http-port 9700
+
+# Daemon + bundled browser UI on the same origin
+#   open http://127.0.0.1:5172 to drive the daemon from the web console
+ocpp-cp-sim --http-port 5172 --web-console \
+            --cp-id CP001 --connectors 2 \
+            --ws-url wss://csms.example.com/ocpp/
+
+# Full kitchen-sink: persistent SQLite, JSON-line logs, demo scenario auto-loaded
+ocpp-cp-sim --http-port 5172 --web-console \
+            --cp-id CP001 --connectors 5 \
+            --ws-url wss://csms.example.com/ocpp/ \
+            --scenario-template-file docs/examples/scenarios/demo-charging.json \
+            --scenario-connector all \
             --state-db ./state.db --log-format json
 ```
+
+`--web-console` serves the browser UI (built into `dist/` and shipped inside the release tarball) from the same HTTP port as the control API, so a single port is all you need to expose. See [docs/cli.md](docs/cli.md) for the full flag reference and [docs/server.md](docs/server.md) for the HTTP / WebSocket protocol.
 
 ## Persistence
 

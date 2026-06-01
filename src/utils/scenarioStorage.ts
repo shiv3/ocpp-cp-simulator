@@ -1,3 +1,21 @@
+/**
+ * ⚠️ LEGACY localStorage-backed scenario store.
+ *
+ * The canonical persistence path is the SQLite `scenarios` table accessed
+ * via `SqliteScenarioRepository` (and surfaced to React through
+ * `useScenarios`). This module is kept *only* because `ScenarioEditor.tsx`
+ * still calls `getScenarioById` / `addScenario` / `updateScenario` /
+ * `loadScenarios` synchronously at mount and from its
+ * import-from-file path; switching those to the async repository
+ * requires a non-trivial editor refactor that's out of scope here.
+ *
+ * Anything you'd add to scenario persistence going forward goes through
+ * the repository — do NOT extend this file.
+ *
+ * Pure helpers (file export/import + createDefaultScenario) have already
+ * been lifted out to `src/utils/scenarioFile.ts` and
+ * `src/cp/application/scenario/defaultScenario.ts`.
+ */
 import {
   ScenarioDefinition,
   ConnectorScenariosCollection,

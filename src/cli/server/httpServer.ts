@@ -68,13 +68,41 @@ const COMMON_CORS_HEADERS: Record<string, string> = {
 
 export type CorsPolicy =
   | { kind: "any" }
-  | { kind: "allowlist"; origins: ReadonlyArray<string> };
+  | { kind: "allowlist"; origins: ReadonlyArray<string> }
+  /**
+   * "same-origin": browsers with a cross-site Origin header are rejected.
+   * Requests with no Origin (curl, CLI clients, server-to-server) and
+   * same-origin browser requests (Origin matches the request's Host) are
+   * allowed. Used as the safe default when the daemon binds to 0.0.0.0
+   * without an explicit `--cors-origin`, so a LAN-exposed daemon doesn't
+   * silently accept admin-API calls from any third-party page in the
+   * operator's browser.
+   */
+  | { kind: "same-origin" };
 
 function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
   if (policy.kind === "any") return "*";
   const origin = req.headers.get("origin");
-  if (origin && policy.origins.includes(origin)) return origin;
-  return null;
+  if (!origin) return null;
+  if (policy.kind === "allowlist") {
+    return policy.origins.includes(origin) ? origin : null;
+  }
+  // same-origin: echo back Origin iff it matches the request's host.
+  return isSameOriginRequest(req, origin) ? origin : null;
+}
+
+/** True when the request's Origin header points at the same scheme+host+port
+ *  as the request itself. Used by the "same-origin" CORS policy. */
+function isSameOriginRequest(req: Request, origin: string): boolean {
+  try {
+    const reqUrl = new URL(req.url);
+    const originUrl = new URL(origin);
+    return (
+      originUrl.protocol === reqUrl.protocol && originUrl.host === reqUrl.host
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -89,8 +117,10 @@ function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
 function isOriginAllowed(req: Request, policy: CorsPolicy): boolean {
   if (policy.kind === "any") return true;
   const origin = req.headers.get("origin");
-  if (!origin) return true;
-  return policy.origins.includes(origin);
+  if (!origin) return true; // non-browser caller (curl / CLI / server-to-server)
+  if (policy.kind === "allowlist") return policy.origins.includes(origin);
+  // same-origin: only the simulator's own served origin can call its API.
+  return isSameOriginRequest(req, origin);
 }
 
 function applyCors(res: Response, req: Request, policy: CorsPolicy): Response {

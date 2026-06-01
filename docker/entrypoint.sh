@@ -22,7 +22,12 @@
 set -e
 
 if [ -d /data ] && [ "$(stat -c %u /data 2>/dev/null)" != "1000" ]; then
-  chown -R bun:bun /data
+  # Only chown the mount point itself, not its contents. Any existing
+  # files were either written by a previous run (already bun-owned) or
+  # belong to whoever owned the host bind-mount; recursive chown across
+  # a multi-MB logs / WAL tree adds noticeable startup latency for no
+  # gain — bun can write new files once the directory is writable.
+  chown bun:bun /data
 fi
 
 ARGS="--http-host 0.0.0.0 --unix-socket none --web-console ${HTTP_PORT}"

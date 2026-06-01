@@ -130,13 +130,54 @@ CREATE TABLE IF NOT EXISTS charge_point_state (
 import type { Database } from "./Database";
 
 /**
+ * Thrown when the on-disk DB was written by a future / forward-incompatible
+ * build of the simulator. We refuse to open it rather than silently
+ * dropping or rewriting data the older code doesn't understand.
+ */
+export class SchemaVersionMismatchError extends Error {
+  constructor(
+    public readonly stored: number,
+    public readonly supported: number,
+  ) {
+    super(
+      `Refusing to open state DB: stored schema version ${stored} is newer ` +
+        `than the simulator's supported version ${supported}. ` +
+        `Upgrade the simulator or point --state-db at a fresh path.`,
+    );
+    this.name = "SchemaVersionMismatchError";
+  }
+}
+
+/**
  * Apply pending schema changes. Idempotent — running on an up-to-date DB
  * is a no-op aside from re-stamping schema_meta. Always call once when a
  * `Database` is opened.
+ *
+ * Version handling:
+ *   - DB version  < SCHEMA_VERSION → run all forward migrations (none
+ *     defined yet because we're at v1; the CREATE TABLE IF NOT EXISTS
+ *     in SCHEMA_SQL handles the "fresh DB" case).
+ *   - DB version == SCHEMA_VERSION → no-op aside from re-stamping.
+ *   - DB version  > SCHEMA_VERSION → throw {@link SchemaVersionMismatchError}.
+ *     Older simulator running against a DB the newer simulator wrote;
+ *     bail out instead of corrupting it.
  */
 export function runMigrations(db: Database): void {
+  // schema_meta itself has to exist before we can read the stored
+  // version, so run the table-create pass first. It's a no-op on an
+  // already-migrated DB.
   db.exec(SCHEMA_SQL);
-  // No version-conditional branches yet — schema is v1.
+
+  const row = db.get<{ value: string }>(
+    "SELECT value FROM schema_meta WHERE key = 'version'",
+  );
+  const stored = row ? Number(row.value) : 0;
+  if (Number.isFinite(stored) && stored > SCHEMA_VERSION) {
+    throw new SchemaVersionMismatchError(stored, SCHEMA_VERSION);
+  }
+
+  // (Place future forward migrations here, gated on `stored < N`.)
+
   db.run(
     "INSERT INTO schema_meta (key, value) VALUES ('version', ?) " +
       "ON CONFLICT (key) DO UPDATE SET value = excluded.value",

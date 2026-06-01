@@ -29,11 +29,6 @@ import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useDataContext } from "../data/providers/DataProvider";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
-import {
-  saveConnectorAutoMeterConfig,
-  loadSocMeterSyncEnabled,
-  saveSocMeterSyncEnabled,
-} from "../utils/connectorStorage";
 
 // Dynamic imports for heavy components (bundle-dynamic-imports)
 const StateTransitionViewer = lazy(
@@ -240,7 +235,8 @@ const FullPanelContent: React.FC<{
   initialTab,
   tabResetNonce,
 }) => {
-  const { chargePointService, mode } = useDataContext();
+  const { chargePointService, mode, connectorSettingsRepository } =
+    useDataContext();
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
@@ -292,11 +288,22 @@ const FullPanelContent: React.FC<{
   // When ON, moving the SoC slider also writes a derived meter value, and
   // bumping the meter value writes back a derived SoC, using the EV
   // battery capacity and `initialSoc` from evSettings. Persisted globally
-  // so the toggle survives reloads. Disabled automatically when capacity
-  // is 0 (would divide by zero).
-  const [autoSyncSocMeter, setAutoSyncSocMeter] = useState<boolean>(() =>
-    loadSocMeterSyncEnabled(),
-  );
+  // (one flag per browser, not per CP/connector) via the SQLite kv table
+  // through `connectorSettingsRepository.loadSocMeterSync` /
+  // `saveSocMeterSync`. Disabled automatically when capacity is 0.
+  const [autoSyncSocMeter, setAutoSyncSocMeter] = useState<boolean>(true);
+  // One-shot async load on mount: the repo is async (sql.js DB roundtrip),
+  // but the toggle UI needs a sync initial value. We start at `true`
+  // (legacy default) and overwrite once the repo resolves.
+  useEffect(() => {
+    let cancelled = false;
+    void connectorSettingsRepository.loadSocMeterSync().then((value) => {
+      if (!cancelled) setAutoSyncSocMeter(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectorSettingsRepository]);
   // Push the persisted flag down to the connector on mount so the domain's
   // applyMeterValue (scenario auto-meter, direct setters) honours it. Also
   // re-apply when cpId / connectorId changes.
@@ -310,10 +317,10 @@ const FullPanelContent: React.FC<{
   const handleToggleAutoSync = useCallback(() => {
     setAutoSyncSocMeter((prev) => {
       const next = !prev;
-      saveSocMeterSyncEnabled(next);
+      void connectorSettingsRepository.saveSocMeterSync(next);
       return next;
     });
-  }, []);
+  }, [connectorSettingsRepository]);
 
   const capacityKwh = evSettings.batteryCapacityKwh;
   const initialSoc = evSettings.initialSoc ?? 0;
@@ -735,10 +742,17 @@ const FullPanelContent: React.FC<{
         config,
       );
       if (mode === "local") {
-        saveConnectorAutoMeterConfig(cpId, connectorId, config);
+        // Persist through the repository so the next ChargePoint
+        // construction picks it up out of SQLite (handled by
+        // LocalChargePointService.buildChargePoint).
+        void connectorSettingsRepository.saveAutoMeterValueConfig(
+          cpId,
+          connectorId,
+          config,
+        );
       }
     },
-    [chargePointService, cpId, connectorId, mode],
+    [chargePointService, connectorSettingsRepository, cpId, connectorId, mode],
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;

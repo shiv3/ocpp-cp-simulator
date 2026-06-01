@@ -71,10 +71,12 @@ import {
   updateScenario,
   addScenario,
   getScenarioById,
+} from "../../utils/scenarioStorage";
+import {
   exportScenarioToJSON,
   importScenarioFromJSON,
-  createDefaultScenario,
-} from "../../utils/scenarioStorage";
+} from "../../utils/scenarioFile";
+import { createDefaultScenario } from "../../cp/application/scenario/defaultScenario";
 import {
   scenarioTemplates,
   getTemplateById,

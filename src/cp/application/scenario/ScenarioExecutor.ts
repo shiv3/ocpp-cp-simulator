@@ -18,6 +18,10 @@ import {
   ReserveNowNodeData,
   CancelReservationNodeData,
   ReservationTriggerNodeData,
+  StatusNotificationNodeData,
+  UnlockOutcomeNodeData,
+  ConfigSetNodeData,
+  DataTransferNodeData,
 } from "./ScenarioTypes";
 import {
   createScenarioMachine,
@@ -432,9 +436,89 @@ export class ScenarioExecutor {
         );
         break;
 
+      case ScenarioNodeType.STATUS_NOTIFICATION:
+        await this.executeStatusNotification(
+          node.data as StatusNotificationNodeData,
+        );
+        break;
+
+      case ScenarioNodeType.UNLOCK_OUTCOME:
+        await this.executeUnlockOutcome(node.data as UnlockOutcomeNodeData);
+        break;
+
+      case ScenarioNodeType.CONFIG_SET:
+        await this.executeConfigSet(node.data as ConfigSetNodeData);
+        break;
+
+      case ScenarioNodeType.DATA_TRANSFER:
+        await this.executeDataTransfer(node.data as DataTransferNodeData);
+        break;
+
       default:
         console.warn(`Unknown node type: ${node.type}`);
     }
+  }
+
+  /** Send a StatusNotification.req with the user-supplied payload. */
+  private async executeStatusNotification(
+    data: StatusNotificationNodeData,
+  ): Promise<void> {
+    // ScenarioRuntime resolves the bound connectorId for the runtime. When
+    // the node specifies an explicit connectorId we use that (e.g. 0 to
+    // target the CP main controller); otherwise the runtime fills in the
+    // scenario's bound connector.
+    if (!this.callbacks.onSendStatusNotification) return;
+    const targetConnectorId = data.connectorId ?? -1;
+    this.callbacks.onSendStatusNotification(targetConnectorId, data.status, {
+      errorCode: data.errorCode,
+      info: data.info,
+      vendorErrorCode: data.vendorErrorCode,
+      vendorId: data.vendorId,
+    });
+    this.callbacks.log?.(
+      `StatusNotification connector=${targetConnectorId} status=${data.status}${
+        data.errorCode ? ` errorCode=${data.errorCode}` : ""
+      }`,
+      "info",
+    );
+  }
+
+  /** Pre-arm the connector's next UnlockConnector.req response. */
+  private async executeUnlockOutcome(
+    data: UnlockOutcomeNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onSetUnlockOutcome) {
+      this.callbacks.log?.(
+        "UnlockOutcome: no onSetUnlockOutcome callback wired",
+        "warn",
+      );
+      return;
+    }
+    this.callbacks.onSetUnlockOutcome(data.outcome);
+    this.callbacks.log?.(`Connector unlockResponse → ${data.outcome}`, "info");
+  }
+
+  /** Apply a ChangeConfiguration locally via the ConfigurationStore. */
+  private async executeConfigSet(data: ConfigSetNodeData): Promise<void> {
+    if (!this.callbacks.onConfigSet) {
+      this.callbacks.log?.("ConfigSet: no onConfigSet callback wired", "warn");
+      return;
+    }
+    this.callbacks.onConfigSet(data.key, data.value);
+    this.callbacks.log?.(`ConfigSet ${data.key}='${data.value}'`, "info");
+  }
+
+  /** Send a CP-initiated DataTransfer.req with the user's vendor/message id. */
+  private async executeDataTransfer(data: DataTransferNodeData): Promise<void> {
+    if (!this.callbacks.onSendDataTransfer) {
+      this.callbacks.log?.(
+        "DataTransfer: no onSendDataTransfer callback wired",
+        "warn",
+      );
+      return;
+    }
+    this.callbacks.onSendDataTransfer(data.vendorId, data.messageId, data.data);
+    this.callbacks.log?.(`DataTransfer vendorId=${data.vendorId}`, "info");
   }
 
   /**

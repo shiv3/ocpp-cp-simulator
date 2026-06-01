@@ -7,7 +7,18 @@ import React, {
   Suspense,
 } from "react";
 import type { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
-import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import {
+  ALL_CHARGE_POINT_ERROR_CODES,
+  OCPPStatus,
+} from "../cp/domain/types/OcppTypes";
+
+/** True when the §4.9 transition table allows moving from `current` to Faulted.
+ *  Used to decide whether to render the errorCode picker. */
+function allowedNextIncludesFaulted(current: OCPPStatus): boolean {
+  return (
+    ALLOWED_STATUS_TRANSITIONS[current]?.includes(OCPPStatus.Faulted) ?? false
+  );
+}
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -274,6 +285,10 @@ const FullPanelContent: React.FC<{
   const [duration, setDuration] = useState<string>("00:00:00");
   const [transactionStartTime, setTransactionStartTime] = useState<string>("");
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
+  // Selected ChargePointErrorCode applied when the operator clicks the
+  // → Faulted button (§7.6). Defaults to InternalError because it's the
+  // most generic non-NoError value.
+  const [faultErrorCode, setFaultErrorCode] = useState<string>("InternalError");
   // When ON, moving the SoC slider also writes a derived meter value, and
   // bumping the meter value writes back a derived SoC, using the EV
   // battery capacity and `initialSoc` from evSettings. Persisted globally
@@ -282,6 +297,16 @@ const FullPanelContent: React.FC<{
   const [autoSyncSocMeter, setAutoSyncSocMeter] = useState<boolean>(() =>
     loadSocMeterSyncEnabled(),
   );
+  // Push the persisted flag down to the connector on mount so the domain's
+  // applyMeterValue (scenario auto-meter, direct setters) honours it. Also
+  // re-apply when cpId / connectorId changes.
+  useEffect(() => {
+    void chargePointService.setConnectorSocMeterSync(
+      cpId,
+      connectorId,
+      autoSyncSocMeter,
+    );
+  }, [chargePointService, cpId, connectorId, autoSyncSocMeter]);
   const handleToggleAutoSync = useCallback(() => {
     setAutoSyncSocMeter((prev) => {
       const next = !prev;
@@ -400,34 +425,48 @@ const FullPanelContent: React.FC<{
   useEffect(() => {
     if (!localCp || !connector) return;
 
-    const callbacks = createScenarioExecutorCallbacks({
-      chargePoint: localCp,
-      connector,
-      hooks: {
-        onNodeProgress: (nodeId, remaining, total) => {
-          setNodeProgress((prev) => ({
-            ...prev,
-            [nodeId]: { remaining, total },
-          }));
+    // Reuse the existing ScenarioManager if the connector card already
+    // created one. Replacing it would kill any in-flight scenario AND
+    // reset the auto-start dedup key, which is exactly the bug the user
+    // saw when opening the side panel mid-scenario. We only create a new
+    // manager when none exists (e.g. remote mode, or a connector that
+    // somehow lost its manager).
+    let manager = connector.scenarioManager;
+    let ownsManager = false;
+    if (!manager) {
+      const callbacks = createScenarioExecutorCallbacks({
+        chargePoint: localCp,
+        connector,
+        hooks: {
+          onNodeProgress: (nodeId, remaining, total) => {
+            setNodeProgress((prev) => ({
+              ...prev,
+              [nodeId]: { remaining, total },
+            }));
+          },
+          onStateChange: (context) => {
+            const currentScenario = scenarioRef.current;
+            if (currentScenario && context.scenarioId === currentScenario.id) {
+              setScenarioExecutionContext(context);
+            }
+          },
         },
-        onStateChange: (context) => {
-          const currentScenario = scenarioRef.current;
-          if (currentScenario && context.scenarioId === currentScenario.id) {
-            setScenarioExecutionContext(context);
-          }
-        },
-      },
-    });
-
-    const manager = new ScenarioManager(
-      connector,
-      localCp,
-      callbacks,
-      connector.scenarioEvents,
-    );
+      });
+      manager = new ScenarioManager(
+        connector,
+        localCp,
+        callbacks,
+        connector.scenarioEvents,
+      );
+      connector.setScenarioManager(manager);
+      ownsManager = true;
+    }
     scenarioManagerRef.current = manager;
-    connector.setScenarioManager(manager);
 
+    // Per-tick poll keeps the side-panel UI in sync with whichever scenario
+    // is currently running. Works regardless of whether the manager was
+    // created here or by the connector card — `getScenarioExecutionContext`
+    // is the same on both.
     const intervalId = setInterval(() => {
       const activeManager = scenarioManagerRef.current;
       if (!activeManager) return;
@@ -445,10 +484,93 @@ const FullPanelContent: React.FC<{
 
     return () => {
       clearInterval(intervalId);
-      manager.destroy();
+      // Only destroy the manager if THIS effect created it. If we reused
+      // the connector's existing manager (created by the connector card),
+      // leave it alive — the card still depends on it.
+      if (ownsManager) {
+        manager.destroy();
+      }
       scenarioManagerRef.current = null;
     };
   }, [connector, localCp, connectorId]);
+
+  // Remote mode: the scenario runs on the daemon, so there is no local
+  // ScenarioManager to poll. The daemon streams `scenario-node-execute`
+  // events over the events WebSocket — replay them into a synthetic
+  // ScenarioExecutionContext so the editor highlights the same way as in
+  // local mode. We also seed the context from `getScenarioStatus` on mount
+  // / scenario change so an already-running scenario shows up immediately.
+  useEffect(() => {
+    if (mode !== "remote") return;
+    const targetScenarioId = scenario?.id;
+    if (!targetScenarioId) {
+      setScenarioExecutionContext(null);
+      return;
+    }
+
+    let cancelled = false;
+    void chargePointService
+      .getScenarioStatus(cpId, connectorId, targetScenarioId)
+      .then((ctx) => {
+        if (cancelled) return;
+        setScenarioExecutionContext(ctx);
+      })
+      .catch(() => {
+        // Daemon may not have started this scenario yet — that's fine,
+        // we'll pick it up on the next scenario-started event.
+      });
+
+    const unsub = chargePointService.subscribe(cpId, (event) => {
+      if (!("connectorId" in event) || event.connectorId !== connectorId) {
+        return;
+      }
+      if (event.type === "scenario-started") {
+        if (event.scenarioId !== targetScenarioId) return;
+        setScenarioExecutionContext({
+          scenarioId: event.scenarioId,
+          state: "running",
+          mode: "oneshot",
+          currentNodeId: null,
+          executedNodes: [],
+          loopCount: 0,
+        });
+      } else if (event.type === "scenario-node-execute") {
+        if (event.scenarioId !== targetScenarioId) return;
+        setScenarioExecutionContext((prev) => {
+          const base: ScenarioExecutionContext =
+            prev && prev.scenarioId === targetScenarioId
+              ? prev
+              : {
+                  scenarioId: targetScenarioId,
+                  state: "running",
+                  mode: "oneshot",
+                  currentNodeId: null,
+                  executedNodes: [],
+                  loopCount: 0,
+                };
+          const executed = base.executedNodes.includes(event.nodeId)
+            ? base.executedNodes
+            : [...base.executedNodes, event.nodeId];
+          return {
+            ...base,
+            currentNodeId: event.nodeId,
+            executedNodes: executed,
+          };
+        });
+      } else if (
+        event.type === "scenario-completed" ||
+        event.type === "scenario-error"
+      ) {
+        if (event.scenarioId !== targetScenarioId) return;
+        setScenarioExecutionContext(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [mode, cpId, connectorId, scenario?.id, chargePointService]);
 
   // Load scenarios from localStorage (local mode). Remote mode is hydrated
   // by the dedicated effect below — skip this path so the localStorage
@@ -756,36 +878,39 @@ const FullPanelContent: React.FC<{
                   <div className="text-2xl font-bold font-mono text-green-800 dark:text-green-200 mb-3">
                     #{transactionId}
                   </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-green-600 dark:text-green-400">
-                        ID Tag:
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs text-green-600 dark:text-green-400">
+                        ID Tag
                       </span>
-                      <span className="font-mono font-medium text-green-800 dark:text-green-200">
-                        {transactionTagId || tagIdInput}
+                      <span
+                        className="font-mono font-medium text-green-800 dark:text-green-200 truncate"
+                        title={transactionTagId || tagIdInput}
+                      >
+                        {transactionTagId || tagIdInput || "—"}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-green-600 dark:text-green-400">
-                        Started:
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs text-green-600 dark:text-green-400">
+                        Started
                       </span>
-                      <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                      <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
                         {transactionStartTime}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-green-600 dark:text-green-400">
-                        Duration:
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs text-green-600 dark:text-green-400">
+                        Duration
                       </span>
-                      <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                      <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
                         {duration}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-green-600 dark:text-green-400">
-                        Energy:
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs text-green-600 dark:text-green-400">
+                        Energy
                       </span>
-                      <span className="font-mono font-medium text-green-800 dark:text-green-200">
+                      <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
                         {(liveMeterValue / 1000).toFixed(2)} kWh
                       </span>
                     </div>
@@ -991,7 +1116,8 @@ const FullPanelContent: React.FC<{
                   current status via the OCPP 1.6 connector state diagram
                   (mirrors src/cp/application/state/machines/ConnectorStateMachine.ts).
                   This stops users from sending invalid transitions like
-                  Available → Charging by accident. */}
+                  Available → Charging by accident. The Faulted button picks
+                  up the errorCode from the picker below. */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -1022,6 +1148,9 @@ const FullPanelContent: React.FC<{
                               cpId,
                               connectorId,
                               target,
+                              target === OCPPStatus.Faulted
+                                ? { errorCode: faultErrorCode }
+                                : undefined,
                             )
                           }
                           className={`px-2 py-1.5 text-xs font-medium rounded border transition-colors ${STATUS_BUTTON_STYLE[target]}`}
@@ -1032,6 +1161,26 @@ const FullPanelContent: React.FC<{
                     </div>
                   );
                 })()}
+                {allowedNextIncludesFaulted(connectorStatus) && (
+                  <div className="flex items-center gap-1 pt-1">
+                    <label className="text-[10px] text-gray-500 dark:text-gray-400">
+                      Fault errorCode:
+                    </label>
+                    <select
+                      className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      value={faultErrorCode}
+                      onChange={(e) => setFaultErrorCode(e.target.value)}
+                    >
+                      {ALL_CHARGE_POINT_ERROR_CODES.filter(
+                        (c) => c !== "NoError",
+                      ).map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Charging Profile (collapsible, default closed) */}
@@ -1139,8 +1288,13 @@ const FullPanelContent: React.FC<{
                       })}
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-                      No charging profiles
+                    <div className="text-xs text-gray-500 dark:text-gray-400 py-1 space-y-1">
+                      <div className="italic">No active charging profile.</div>
+                      <div className="text-gray-400 dark:text-gray-500">
+                        The connector charges at its unrestricted auto-meter
+                        rate until a SetChargingProfile.req arrives from the
+                        CSMS.
+                      </div>
                     </div>
                   )}
                 </div>

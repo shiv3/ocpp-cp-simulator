@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Connector from "./Connector.tsx";
 import { ConnectorSidePanel } from "./ConnectorSidePanel.tsx";
 import { LogViewer } from "./ui/log-viewer.tsx";
-import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import {
+  ALL_CHARGE_POINT_ERROR_CODES,
+  OCPPStatus,
+} from "../cp/domain/types/OcppTypes";
 import { useChargePointView } from "../data/hooks/useChargePointView";
 import { useDataContext } from "../data/providers/DataProvider";
 
@@ -46,15 +49,12 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
   }, [clearLogs]);
 
   const handleConnectorSelect = useCallback((connectorId: number) => {
-    setSelectedConnector(connectorId);
+    // Toggle: clicking the already-selected connector closes the panel.
+    // Clicking a different connector switches to it and (re-)opens the panel.
+    setSelectedConnector((current) =>
+      current === connectorId ? null : connectorId,
+    );
     setInitialPanelTab("details");
-    setTabResetNonce((n) => n + 1);
-    setIsPanelCollapsed(false);
-  }, []);
-
-  const handleOpenScenarioPanel = useCallback((connectorId: number) => {
-    setSelectedConnector(connectorId);
-    setInitialPanelTab("scenario");
     setTabResetNonce((n) => n + 1);
     setIsPanelCollapsed(false);
   }, []);
@@ -121,7 +121,6 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
             TagID={TagID}
             selectedConnector={selectedConnector}
             onConnectorSelect={handleConnectorSelect}
-            onOpenScenarioPanel={handleOpenScenarioPanel}
           />
 
           <div className="mt-4">
@@ -178,7 +177,6 @@ interface ConnectorGridProps {
   TagID: string;
   selectedConnector: number | null;
   onConnectorSelect: (connectorId: number) => void;
-  onOpenScenarioPanel: (connectorId: number) => void;
 }
 
 const COLUMN_CLASS: Record<number, string> = {
@@ -194,7 +192,6 @@ const ConnectorGrid: React.FC<ConnectorGridProps> = ({
   TagID,
   selectedConnector,
   onConnectorSelect,
-  onOpenScenarioPanel,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(4);
@@ -222,7 +219,6 @@ const ConnectorGrid: React.FC<ConnectorGridProps> = ({
           idTag={TagID}
           isSelected={selectedConnector === connectorId}
           onSelect={() => onConnectorSelect(connectorId)}
-          onOpenScenario={() => onOpenScenarioPanel(connectorId)}
         />
       ))}
     </div>
@@ -299,9 +295,21 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
     void chargePointService.authorize(chargePointId, tagID);
   };
 
+  // Faulted requires picking a ChargePointErrorCode; other statuses ignore
+  // the picker. We hold the selected errorCode here so the operator can pick
+  // it before hitting Send.
+  const [pendingFaultErrorCode, setPendingFaultErrorCode] =
+    useState<string>("InternalError");
+
   const handleCPStatusChange = (status: OCPPStatus) => {
     if (!chargePointId) return;
-    void chargePointService.sendStatusNotification(chargePointId, 0, status);
+    if (status === OCPPStatus.Faulted) {
+      void chargePointService.sendStatusNotification(chargePointId, 0, status, {
+        errorCode: pendingFaultErrorCode,
+      });
+    } else {
+      void chargePointService.sendStatusNotification(chargePointId, 0, status);
+    }
   };
 
   const isConnected = cpStatus !== OCPPStatus.Unavailable;
@@ -367,6 +375,20 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
             <option value={OCPPStatus.Available}>Available</option>
             <option value={OCPPStatus.Unavailable}>Unavailable</option>
             <option value={OCPPStatus.Faulted}>Faulted</option>
+          </select>
+          {/* §7.6 errorCode picker — paired with the Faulted option of the
+              status select. Selecting a code arms the next Send Faulted. */}
+          <select
+            className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800 text-primary"
+            value={pendingFaultErrorCode}
+            onChange={(e) => setPendingFaultErrorCode(e.target.value)}
+            title="errorCode used when Send → Faulted"
+          >
+            {ALL_CHARGE_POINT_ERROR_CODES.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
           </select>
         </div>
       </div>

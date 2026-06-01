@@ -142,14 +142,14 @@ export class OCPPWebSocket {
     messageId: string,
     action: OCPPAction,
     payload: OcppMessageRequestPayload,
-  ): void {
+  ): boolean {
     const message = JSON.stringify([
       OCPPMessageType.CALL,
       messageId,
       action,
       payload,
     ]);
-    this.send(message);
+    return this.send(message);
   }
 
   public sendResult(
@@ -176,13 +176,19 @@ export class OCPPWebSocket {
     this.send(message);
   }
 
-  private send(message: string): void {
+  /** True when the underlying socket is open and ready to transmit. */
+  public isConnected(): boolean {
+    return this._ws !== null && this._ws.readyState === WebSocket.OPEN;
+  }
+
+  private send(message: string): boolean {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       this._ws.send(message);
       this._logger.info(`Sent: ${message}`, LogType.WEBSOCKET);
-    } else {
-      this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
+      return true;
     }
+    this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
+    return false;
   }
 
   public setMessageHandler(handler: MessageHandler): void {

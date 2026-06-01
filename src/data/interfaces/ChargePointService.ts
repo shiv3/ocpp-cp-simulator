@@ -193,6 +193,12 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
+    opts?: {
+      errorCode?: string;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+    },
   ): Promise<void>;
   setMeterValue(id: string, connectorId: number, value: number): Promise<void>;
   sendMeterValue(id: string, connectorId: number): Promise<void>;
@@ -227,6 +233,19 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     soc: number | null,
+  ): Promise<void>;
+  /**
+   * Enable/disable SoC ↔ Meter auto-sync for a connector. When on, any
+   * meter-value update (UI, scenario auto-meter, etc.) derives a SoC value
+   * from EV-settings (initialSoc + delivered_kWh / capacity_kWh × 100) and
+   * pushes it into the connector. UI persists the preference globally via
+   * `connectorStorage.saveSocMeterSyncEnabled`; pushing it down the service
+   * makes it stick on every connector instance.
+   */
+  setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
   ): Promise<void>;
   getChargingProfiles(
     id: string,

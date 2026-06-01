@@ -22,7 +22,83 @@ export enum OCPPStatus {
   Faulted = "Faulted",
 }
 
+/**
+ * Subset of `OCPPStatus` valid for `connectorId = 0` (the Charge Point main
+ * controller), per OCPP 1.6J §7.7:
+ *
+ * > Status for the Charge Point main controller is a subset of the
+ * > enumeration: Available, Unavailable or Faulted.
+ *
+ * Type-narrowing `ChargePoint._status` to this triplet stops the rest of
+ * the code from accidentally driving the CP into `Charging` / `Preparing` /
+ * `Reserved` etc. — those belong to individual connectors (id > 0).
+ */
+export type ChargePointStatus =
+  | OCPPStatus.Available
+  | OCPPStatus.Unavailable
+  | OCPPStatus.Faulted;
+
+/**
+ * Returns `true` if `status` is a valid `ChargePointStatus`. Useful when
+ * narrowing untyped input (e.g. a status value coming in via
+ * `updateConnectorStatus(0, …)` whose signature still has to accept the
+ * wider `OCPPStatus` for back-compat).
+ */
+export function isChargePointStatus(
+  status: OCPPStatus,
+): status is ChargePointStatus {
+  return (
+    status === OCPPStatus.Available ||
+    status === OCPPStatus.Unavailable ||
+    status === OCPPStatus.Faulted
+  );
+}
+
 export type OCPPAvailability = "Operative" | "Inoperative";
+
+/**
+ * Charge Point error codes — used in StatusNotification.req errorCode field
+ * (OCPP 1.6 §7.6). `NoError` is the default when no fault is present;
+ * other values are paired with `ChargePointStatus.Faulted` or used as a
+ * warning while the connector is in Preparing/SuspendedEV/SuspendedEVSE/
+ * Finishing (e.g. `EVCommunicationError`).
+ */
+export type ChargePointErrorCode =
+  | "ConnectorLockFailure"
+  | "EVCommunicationError"
+  | "GroundFailure"
+  | "HighTemperature"
+  | "InternalError"
+  | "LocalListConflict"
+  | "NoError"
+  | "OtherError"
+  | "OverCurrentFailure"
+  | "OverVoltage"
+  | "PowerMeterFailure"
+  | "PowerSwitchFailure"
+  | "ReaderFailure"
+  | "ResetFailure"
+  | "UnderVoltage"
+  | "WeakSignal";
+
+export const ALL_CHARGE_POINT_ERROR_CODES: ChargePointErrorCode[] = [
+  "ConnectorLockFailure",
+  "EVCommunicationError",
+  "GroundFailure",
+  "HighTemperature",
+  "InternalError",
+  "LocalListConflict",
+  "NoError",
+  "OtherError",
+  "OverCurrentFailure",
+  "OverVoltage",
+  "PowerMeterFailure",
+  "PowerSwitchFailure",
+  "ReaderFailure",
+  "ResetFailure",
+  "UnderVoltage",
+  "WeakSignal",
+];
 
 // Re-export MessageType from ts-ocpp for convenience
 export { MessageType as OCPPMessageType };

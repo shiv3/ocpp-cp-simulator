@@ -14,12 +14,15 @@ export class ChangeConfigurationHandler
     payload: request.ChangeConfigurationRequest,
     context: HandlerContext,
   ): response.ChangeConfigurationResponse {
+    const status = context.chargePoint.configuration.applyChange(
+      payload.key,
+      payload.value,
+    );
     context.logger.info(
-      `Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`,
+      `ChangeConfiguration ${payload.key}='${payload.value}' → ${status}`,
       LogType.CONFIGURATION,
     );
-    // Currently not supported - can be extended in the future
-    return { status: "NotSupported" };
+    return { status };
   }
 }
 
@@ -70,11 +73,25 @@ export class TriggerMessageHandler
       }
 
       case "BootNotification":
+        // §5.17 + §4.2: re-send BootNotification. This is permitted even
+        // while the boot gate is Pending/Rejected — TriggerMessage is one
+        // of the few CSMS-driven escapes from those states.
+        queueMicrotask(() => context.chargePoint.boot());
+        return { status: "Accepted" };
+
       case "DiagnosticsStatusNotification":
+        // §4.4: when not busy uploading diagnostics, respond Idle.
+        queueMicrotask(() =>
+          context.chargePoint.sendDiagnosticsStatusNotification("Idle"),
+        );
+        return { status: "Accepted" };
+
       case "FirmwareStatusNotification":
-        // Not implemented yet — let the CSMS know we won't honor these
-        // rather than silently swallowing them.
-        return { status: "NotImplemented" };
+        // §4.5: same shape as DiagnosticsStatus — Idle if not busy.
+        queueMicrotask(() =>
+          context.chargePoint.sendFirmwareStatusNotification("Idle"),
+        );
+        return { status: "Accepted" };
 
       default:
         return { status: "NotImplemented" };
@@ -98,6 +115,12 @@ export class ClearCacheHandler
   }
 }
 
+/**
+ * §5.18: if a transaction is running on the target connector, finish it
+ * first (reason=UnlockCommand per §7.36), then return the connector's
+ * configured unlock response. The default is `Unlocked`; scenarios can
+ * flip this to `UnlockFailed` or `NotSupported` to verify CSMS error paths.
+ */
 export class UnlockConnectorHandler
   implements
     CallHandler<
@@ -109,10 +132,30 @@ export class UnlockConnectorHandler
     payload: request.UnlockConnectorRequest,
     context: HandlerContext,
   ): response.UnlockConnectorResponse {
+    const { connectorId } = payload;
+    const connector = context.chargePoint.getConnector(connectorId);
+    if (!connector) {
+      context.logger.warn(
+        `UnlockConnector: unknown connectorId=${connectorId}`,
+        LogType.OCPP,
+      );
+      // §7.46: NotSupported also covers the "unknown ConnectorId" case
+      // (errata 3.87).
+      return { status: "NotSupported" };
+    }
+
+    if (connector.transaction) {
+      context.logger.info(
+        `UnlockConnector: stopping in-flight transaction on connector ${connectorId}`,
+        LogType.OCPP,
+      );
+      context.chargePoint.stopTransaction(connector, "UnlockCommand");
+    }
+
     context.logger.info(
-      `Unlock connector request received: ${JSON.stringify(payload)}`,
+      `UnlockConnector connector=${connectorId} → ${connector.unlockResponse}`,
       LogType.OCPP,
     );
-    return { status: "NotSupported" };
+    return { status: connector.unlockResponse };
   }
 }

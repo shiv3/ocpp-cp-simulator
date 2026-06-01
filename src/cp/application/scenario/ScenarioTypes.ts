@@ -40,6 +40,18 @@ export enum ScenarioNodeType {
   RESERVATION_TRIGGER = "reservationTrigger",
   START = "start",
   END = "end",
+  // §4.9: send a StatusNotification.req with explicit errorCode / info /
+  // vendorErrorCode (e.g. Faulted + GroundFailure). Separate from
+  // STATUS_CHANGE which only mutates connector.status.
+  STATUS_NOTIFICATION = "statusNotification",
+  // §5.18 / §7.46: configure the connector's next UnlockConnector
+  // response without sending anything immediately.
+  UNLOCK_OUTCOME = "unlockOutcome",
+  // §5.3 ChangeConfiguration locally — useful for "shrink
+  // MeterValueSampleInterval to 5s for this scenario".
+  CONFIG_SET = "configSet",
+  // §4.3 DataTransfer.req (CP → CSMS, vendor-specific).
+  DATA_TRANSFER = "dataTransfer",
 }
 
 /**
@@ -156,6 +168,71 @@ export interface ReservationTriggerNodeData extends BaseNodeData {
 }
 
 /**
+ * Start Node Data — configures when the scenario auto-starts.
+ *
+ * - `triggerOn: "connect"` (default): fire as soon as the CP is connected
+ *   and BootNotification has been Accepted (i.e. `ChargePoint.status === Available`).
+ * - `triggerOn: "status"`: fire when the bound connector reaches
+ *   `targetStatus`. Also requires the CP to be Available — the connector
+ *   status check is layered on top of the boot gate, not a substitute.
+ *
+ * The default is "connect" so existing scenarios (which carry no Start
+ * node data beyond `label`) keep the previous auto-start behavior.
+ */
+export interface StartNodeData extends BaseNodeData {
+  triggerOn?: "connect" | "status";
+  targetStatus?: OCPPStatus;
+}
+
+/**
+ * Status Notification Node Data — sends a full StatusNotification.req with
+ * arbitrary errorCode / info / vendorErrorCode so scenarios can drive the
+ * Faulted-with-context paths CSMS implementations care about (§4.9).
+ *
+ * Setting `connectorId` to 0 targets the CP main controller, in which
+ * case `status` must be Available / Unavailable / Faulted (§7.7).
+ */
+export interface StatusNotificationNodeData extends BaseNodeData {
+  status: OCPPStatus;
+  errorCode?: string; // ChargePointErrorCode
+  info?: string;
+  vendorErrorCode?: string;
+  vendorId?: string;
+  /** Override which connector this targets. Defaults to the scenario's
+   *  bound connector (or 0 for chargePoint-targeted scenarios). */
+  connectorId?: number;
+}
+
+/**
+ * Unlock Outcome Node Data — sets the connector's next UnlockConnector.req
+ * response (§5.18 / §7.46). Does not emit any CSMS-bound message itself;
+ * it's a pre-arm for the upcoming Central System call.
+ */
+export interface UnlockOutcomeNodeData extends BaseNodeData {
+  outcome: "Unlocked" | "UnlockFailed" | "NotSupported";
+}
+
+/**
+ * Config Set Node Data — applies a ChangeConfiguration locally (without
+ * round-tripping through CSMS). Useful for tightening
+ * MeterValueSampleInterval / changing MeterValuesSampledData mid-scenario.
+ */
+export interface ConfigSetNodeData extends BaseNodeData {
+  key: string;
+  value: string; // string form, parsed by ConfigurationStore per the key's type
+}
+
+/**
+ * Data Transfer Node Data — issues a CP-initiated DataTransfer.req
+ * (§4.3). Vendor / message id / payload are all user-controlled.
+ */
+export interface DataTransferNodeData extends BaseNodeData {
+  vendorId: string;
+  messageId?: string;
+  data?: string;
+}
+
+/**
  * Union type for all node data
  */
 export type ScenarioNodeData =
@@ -170,6 +247,11 @@ export type ScenarioNodeData =
   | ReserveNowNodeData
   | CancelReservationNodeData
   | ReservationTriggerNodeData
+  | StatusNotificationNodeData
+  | UnlockOutcomeNodeData
+  | ConfigSetNodeData
+  | DataTransferNodeData
+  | StartNodeData
   | BaseNodeData;
 
 /**
@@ -291,6 +373,29 @@ export interface ScenarioExecutorCallbacks {
   onNodeProgress?: (nodeId: string, remaining: number, total: number) => void; // Progress updates for long-running nodes
   onError?: (error: Error) => void;
   log?: (message: string, level?: "debug" | "info" | "warn" | "error") => void; // Logger callback
+  /** §4.9: send a StatusNotification.req with explicit errorCode/info. */
+  onSendStatusNotification?: (
+    connectorId: number,
+    status: OCPPStatus,
+    opts: {
+      errorCode?: string;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+    },
+  ) => void;
+  /** §5.18 / §7.46: pre-arm the next UnlockConnector.req response. */
+  onSetUnlockOutcome?: (
+    outcome: "Unlocked" | "UnlockFailed" | "NotSupported",
+  ) => void;
+  /** §5.3: apply a Configuration key change locally. */
+  onConfigSet?: (key: string, value: string) => void;
+  /** §4.3: send CP-initiated DataTransfer.req. */
+  onSendDataTransfer?: (
+    vendorId: string,
+    messageId?: string,
+    data?: string,
+  ) => void;
 }
 
 /**

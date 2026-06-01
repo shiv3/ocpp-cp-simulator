@@ -1,12 +1,19 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { BaseNodeData } from "../../../cp/application/scenario/ScenarioTypes";
+import {
+  BaseNodeData,
+  StartNodeData,
+} from "../../../cp/application/scenario/ScenarioTypes";
 
 interface StartEndNodeProps extends NodeProps<BaseNodeData> {
   nodeType: "start" | "end";
 }
 
-const StartEndNode: React.FC<StartEndNodeProps> = ({ selected, nodeType }) => {
+const StartEndNode: React.FC<StartEndNodeProps> = ({
+  data,
+  selected,
+  nodeType,
+}) => {
   const isStart = nodeType === "start";
   const bgColor = isStart
     ? "bg-green-100 dark:bg-green-900"
@@ -15,6 +22,16 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({ selected, nodeType }) => {
   const textColor = isStart
     ? "text-green-700 dark:text-green-300"
     : "text-red-700 dark:text-red-300";
+
+  // Show the Start trigger config inline so the operator sees at a glance
+  // what fires the scenario without opening NodeConfigPanel. Missing
+  // `triggerOn` defaults to "connect" (matches the auto-start gate).
+  const startData = isStart ? (data as StartNodeData | undefined) : undefined;
+  const triggerOn = startData?.triggerOn ?? "connect";
+  const triggerLabel =
+    triggerOn === "status"
+      ? `on ${startData?.targetStatus ?? "<status>"}`
+      : "on connect";
 
   return (
     <div
@@ -29,6 +46,13 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({ selected, nodeType }) => {
       <div className={`text-center font-bold ${textColor}`}>
         {isStart ? "🟢 Start" : "🔴 End"}
       </div>
+      {isStart && (
+        <div
+          className={`text-center text-[10px] mt-0.5 ${textColor} opacity-80`}
+        >
+          {triggerLabel}
+        </div>
+      )}
 
       {isStart && (
         <Handle type="source" position={Position.Bottom} className="w-3 h-3" />

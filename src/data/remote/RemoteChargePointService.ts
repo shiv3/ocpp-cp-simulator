@@ -445,7 +445,23 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
+    opts?: {
+      errorCode?: string;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+    },
   ): Promise<void> {
+    // Remote mode currently only carries `connector` + `status` over the
+    // server JSON channel. errorCode/info/vendorErrorCode will be wired
+    // through a follow-up server protocol bump; for now we drop them
+    // with a console warning so the UI doesn't silently throw.
+    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
+      console.warn(
+        "Remote mode: StatusNotification errorCode/info/vendorErrorCode not yet supported; dropping",
+        opts,
+      );
+    }
     await this.runCommand(id, "update_connector_status", {
       connector: connectorId,
       status,
@@ -518,6 +534,20 @@ export class RemoteChargePointService implements ChargePointService {
     soc: number | null,
   ): Promise<void> {
     await this.runCommand(id, "set_soc", { connector: connectorId, soc });
+  }
+
+  async setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    // Remote daemon doesn't have a JSON-mode command for this yet; preference
+    // lives in the browser localStorage. Future server protocol bump can
+    // wire this through — log so it's visible the flag isn't crossing the
+    // service boundary in remote mode.
+    console.info(
+      `Remote mode: SoC↔Meter sync (${enabled}) for ${id}/${connectorId} is browser-local; not pushed to server`,
+    );
   }
 
   async getChargingProfiles(

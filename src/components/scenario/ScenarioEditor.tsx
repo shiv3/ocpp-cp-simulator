@@ -61,6 +61,10 @@ import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
 import ReservationTriggerNode from "./nodes/ReservationTriggerNode";
 import StartEndNode from "./nodes/StartEndNode";
+import StatusNotificationNode from "./nodes/StatusNotificationNode";
+import UnlockOutcomeNode from "./nodes/UnlockOutcomeNode";
+import ConfigSetNode from "./nodes/ConfigSetNode";
+import DataTransferNode from "./nodes/DataTransferNode";
 
 import {
   loadScenarios,
@@ -77,7 +81,6 @@ import {
 } from "../../utils/scenarioTemplates";
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
-import { createScenarioExecutorCallbacks } from "../../cp/application/scenario/ScenarioRuntime";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 
@@ -104,6 +107,10 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
   [ScenarioNodeType.RESERVATION_TRIGGER]: ReservationTriggerNode,
+  [ScenarioNodeType.STATUS_NOTIFICATION]: StatusNotificationNode,
+  [ScenarioNodeType.UNLOCK_OUTCOME]: UnlockOutcomeNode,
+  [ScenarioNodeType.CONFIG_SET]: ConfigSetNode,
+  [ScenarioNodeType.DATA_TRANSFER]: DataTransferNode,
   [ScenarioNodeType.START]: (props) => (
     <StartEndNode {...props} nodeType="start" />
   ),
@@ -154,17 +161,15 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     useState<ScenarioExecutionContext | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
-  // Connector status / meter / transactionId used to drive the now-removed
-  // toolbar status strip. We still take the setters from useState so the
-  // existing event handlers don't need rewiring, but the values themselves
-  // are unused inside this component — the panel-level header owns the
-  // visible status display.
+  // Connector status / meter / transactionId / CP status used to drive the
+  // now-removed toolbar status strip. We still take the setters from useState
+  // so the existing event handlers don't need rewiring, but the values
+  // themselves are unused inside this component — the panel-level header
+  // owns the visible status display.
   const [, setConnectorStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
   const [, setMeterValue] = useState<number>(0);
   const [, setTransactionId] = useState<number | null>(null);
-  // CP-level status — used to gate scenario auto-start on a completed
-  // BootNotification. CSMS-connected + boot-accepted flips this to Available.
-  const [cpStatus, setCpStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
+  const [, setCpStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
   const [nodeProgress, setNodeProgress] = useState<
     Record<string, { remaining: number; total: number }>
   >({});
@@ -327,10 +332,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             boxShadow: "0 0 10px rgba(16, 185, 129, 0.5)",
           };
         } else if (isExecuted) {
-          // Mark executed nodes with gray background
-          className = `${className} executed-node`;
+          // Mark executed nodes with gray background. Clear any previous
+          // executing-node border/boxShadow explicitly — without this they
+          // stick around because the previous branch left them set.
+          className =
+            `${className.replace(/executing-node/g, "")} executed-node`
+              .replace(/\s+/g, " ")
+              .trim();
           style = {
             ...style,
+            border: undefined,
+            boxShadow: undefined,
             opacity: 0.6,
           };
         } else {
@@ -730,122 +742,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [setNodes, nodes],
   );
 
-  // Execution control handlers. In local mode we build a one-shot
-  // ScenarioExecutor in-process so the editor can highlight nodes; in remote
-  // mode we hand off to the server's scenario manager via the service.
-  //
-  // We intentionally do NOT gate on connectorStatus here. Some scenarios
-  // legitimately run while a connector is in Preparing / Charging / Faulted
-  // (recovery, stop-transaction, status drives, etc). ScenarioManager
-  // already enforces a charge-point-level "Available" check in local mode,
-  // and the remote server enforces its own state. Letting valid scenarios
-  // through here matches the pre-refactor behaviour, which keyed off the
-  // charge-point status rather than the per-connector status.
-  const handleStart = useCallback(
-    async (mode: ScenarioExecutionMode) => {
-      executorRef.current?.stop();
-      setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
-
-      const currentScenario: ScenarioDefinition = {
-        ...scenario,
-        nodes,
-        edges,
-      };
-
-      // Remote: delegate to the server.
-      if (!localCp) {
-        try {
-          if (connectorId != null) {
-            await chargePointService.loadScenario(
-              cpId,
-              connectorId,
-              currentScenario,
-            );
-            await chargePointService.runScenario(
-              cpId,
-              connectorId,
-              currentScenario.id,
-            );
-            setExecutionMode(mode);
-          }
-        } catch (err) {
-          console.error("Scenario execution error (remote):", err);
-          alert(
-            `Scenario error: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        return;
-      }
-
-      // Local: drive the in-browser executor with node-level callbacks.
-      const connector = connectorId ? localCp.getConnector(connectorId) : null;
-
-      if (!connector) {
-        console.warn("Connector not found. Scenario execution aborted.");
-        return;
-      }
-
-      executorRef.current = new ScenarioExecutor(
-        currentScenario,
-        createScenarioExecutorCallbacks({
-          chargePoint: localCp,
-          connector,
-          hooks: {
-            onStateChange: (context) => {
-              setExecutionState(context.state);
-              setExecutionContext(context);
-            },
-            onNodeExecute: (nodeId) => {
-              setNodes((nds) =>
-                nds.map((n) => ({
-                  ...n,
-                  style:
-                    n.id === nodeId
-                      ? { boxShadow: "0 0 10px 3px #3b82f6" }
-                      : {},
-                })),
-              );
-            },
-            onNodeProgress: (nodeId, remaining, total) => {
-              setNodes((nds) =>
-                nds.map((n) =>
-                  n.id === nodeId
-                    ? {
-                        ...n,
-                        data: {
-                          ...n.data,
-                          progress: { remaining, total },
-                        },
-                      }
-                    : n,
-                ),
-              );
-            },
-            onError: (error) => {
-              console.error("Scenario execution error:", error);
-              alert(`Scenario error: ${error.message}`);
-            },
-          },
-        }),
-      );
-
-      setExecutionMode(mode);
-      await executorRef.current.start();
-    },
-    [
-      scenario,
-      nodes,
-      edges,
-      localCp,
-      connectorId,
-      cpId,
-      chargePointService,
-      setNodes,
-    ],
-  );
-
-  // (Force Step removed — scenarios always run one-shot now. If step-mode
-  // debugging is re-introduced, restore the previous useCallback handler.)
+  // Scenario execution is owned by the connector card and ScenarioManager;
+  // the editor only renders the graph and reacts to executionContext from
+  // outside. The previous in-editor handleStart() useCallback lived here
+  // but was orphaned by that refactor — see Connector.tsx for the current
+  // start path.
 
   /**
    * Lay nodes out top-to-bottom by topological depth. Roots (no incoming
@@ -951,84 +852,28 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
   }, [setNodes, localCp, connectorId, chargePointService, cpId, scenario.id]);
 
-  const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const lastAutoStartKeyRef = useRef<string | null>(null);
-
-  // Auto-start after save/changes (manual trigger only, no StatusTrigger node).
-  // Remote mode opts out entirely: the server controls scenario lifecycles
-  // (loaded via --scenario-template-file / load_scenario), and auto-pushing a
-  // browser-side default would create phantom "Scenario for ..." entries on
-  // the server that the user never asked for.
+  // Auto-start now lives in `Connector.tsx` (the always-mounted card) so
+  // it fires for every connector independently of whether the side panel
+  // is open. The editor here only handles manual Start/Stop and visualizes
+  // the running state of the connector's ScenarioManager.
+  //
+  // Keep the !scenarioEnabled / non-manual-trigger reset so the editor
+  // still surfaces "scenario disabled" visually when the user toggles it.
   useEffect(() => {
     if (!localCp) return;
     if (!scenarioEnabled) {
       executorRef.current?.stop();
       setExecutionState("idle");
-      lastAutoStartKeyRef.current = null;
       return;
     }
-
     const hasStatusTriggerNode = nodes.some(
       (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
     );
-
     if (scenario.trigger?.type !== "manual" || hasStatusTriggerNode) {
       executorRef.current?.stop();
       setExecutionState("idle");
-      lastAutoStartKeyRef.current = null;
-      return;
     }
-
-    if (executionState !== "idle") {
-      return;
-    }
-
-    // Auto-start works for both modes:
-    // - Local: requires a real connector so the in-browser executor can find it.
-    // - Remote: just needs a connectorId; handleStart drives the service.
-    if (connectorId == null) return;
-    if (localCp && !localCp.getConnector(connectorId)) return;
-
-    // Hold the auto-start until the CSMS is connected and BootNotification
-    // has been accepted. The CP-level status flips to Available exactly
-    // once that handshake completes.
-    if (cpStatus !== OCPPStatus.Available) return;
-
-    const autoStartKey = `${scenario.id}:${scenario.updatedAt || ""}:${defaultExecutionMode}`;
-    if (lastAutoStartKeyRef.current === autoStartKey) {
-      return;
-    }
-
-    if (autoStartTimerRef.current) {
-      clearTimeout(autoStartTimerRef.current);
-    }
-
-    // Consume the key inside the timer rather than ahead of time so a
-    // scenario isn't marked as "auto-started" until handleStart actually
-    // fires. handleStart itself no longer gates on connector status.
-    autoStartTimerRef.current = setTimeout(() => {
-      lastAutoStartKeyRef.current = autoStartKey;
-      handleStart(defaultExecutionMode);
-    }, 300);
-
-    return () => {
-      if (autoStartTimerRef.current) {
-        clearTimeout(autoStartTimerRef.current);
-      }
-    };
-  }, [
-    scenario.id,
-    scenario.updatedAt,
-    scenario.trigger?.type,
-    nodes,
-    defaultExecutionMode,
-    scenarioEnabled,
-    executionState,
-    connectorId,
-    localCp,
-    cpStatus,
-    handleStart,
-  ]);
+  }, [scenarioEnabled, scenario.trigger?.type, nodes, localCp]);
 
   // File operations
   const handleExport = useCallback(() => {
@@ -2217,6 +2062,26 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 label="RemoteStart"
                 icon="🎬"
               />
+              <NodePaletteItem
+                type={ScenarioNodeType.STATUS_NOTIFICATION}
+                label="StatusNotif"
+                icon="📡"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.UNLOCK_OUTCOME}
+                label="UnlockOutcome"
+                icon="🔓"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.CONFIG_SET}
+                label="ConfigSet"
+                icon="🔧"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.DATA_TRANSFER}
+                label="DataTransfer"
+                icon="📦"
+              />
             </div>
           </div>
 
@@ -2416,12 +2281,55 @@ function createNodeByType(
           timeout: 0,
         },
       };
+    case ScenarioNodeType.STATUS_NOTIFICATION:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Status Notification",
+          status: OCPPStatus.Faulted,
+          errorCode: "InternalError",
+        },
+      };
+    case ScenarioNodeType.UNLOCK_OUTCOME:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Unlock Outcome", outcome: "Unlocked" },
+      };
+    case ScenarioNodeType.CONFIG_SET:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "ConfigSet",
+          key: "MeterValueSampleInterval",
+          value: "30",
+        },
+      };
+    case ScenarioNodeType.DATA_TRANSFER:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "DataTransfer",
+          vendorId: "com.example",
+        },
+      };
     case ScenarioNodeType.START:
       return {
         id,
         type,
         position,
-        data: { label: "Start" },
+        // Default trigger is "connect" — matches the historical behaviour
+        // where the scenario fired as soon as CP became Available after
+        // BootNotification. Operators can switch to "status" via
+        // NodeConfigPanel to gate on connector state instead.
+        data: { label: "Start", triggerOn: "connect" },
       };
     case ScenarioNodeType.END:
       return {

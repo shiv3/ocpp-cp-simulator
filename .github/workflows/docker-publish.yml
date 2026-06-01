@@ -2,32 +2,24 @@ name: Build & publish Docker image
 
 # Multi-arch (amd64 + arm64) build of the bundled daemon + web console
 # image, published to GitHub Container Registry under
-# ghcr.io/<owner>/<repo>. Tags emitted by docker/metadata-action:
-#   - main          → `latest` + `main` + `sha-<short>`
-#   - cli-v1.2.3    → `1.2.3`  + `1.2`  + `1` + `sha-<short>`
-#   - v*            → semver (full / minor / major) + `sha-<short>`
-#   - other branch  → `<branch-slug>` + `sha-<short>` (no `latest`)
+# ghcr.io/<owner>/<repo>. Triggers:
+#   - push to `main`                       → `main` + `sha-<short>` + `latest`
+#   - push to `feat/browser-remote-mode`   → branch-slug + `sha-<short>` (no `latest`)
+#   - manual via workflow_dispatch         → same as the triggering branch
 #
-# Pull-request builds run too but don't push, so a PR can verify its own
-# Dockerfile change before merge.
+# We deliberately do NOT build on every PR or every feature branch:
+# Docker layers take time + cache space, and the active branch already
+# rebuilds on every push. Tag-based releases can be re-added if/when
+# we cut versioned images.
 
 on:
   push:
     branches:
+      # Default branch — every merge produces a `latest` image.
       - main
-      - "feat/**"
-    tags:
-      - "v*"
-      - "cli-v*"
-  pull_request:
-    paths:
-      - Dockerfile
-      - docker-compose.yml
-      - .github/workflows/docker-publish.yml
-      - package.json
-      - bun.lock
-      - "src/**"
-      - "public/**"
+      # Active feature branch — pushes here get an image tagged with the
+      # branch slug + commit sha so we can test changes without merging.
+      - feat/browser-remote-mode
   workflow_dispatch:
 
 permissions:
@@ -47,7 +39,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -60,16 +51,10 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            # `latest` only on the default branch
+            # main      → `main` + `sha-<short>` + `latest`
+            # feat/...  → branch-slug + `sha-<short>` (no `latest`)
             type=ref,event=branch
-            type=ref,event=pr
             type=sha,format=short
-            # v1.2.3 → 1.2.3 / 1.2 / 1
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            # cli-v1.2.3 → 1.2.3 (strip the prefix)
-            type=match,pattern=cli-v(.*),group=1
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build & push
@@ -78,7 +63,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Speed up rebuilds by sharing layers across runs. GitHub Actions

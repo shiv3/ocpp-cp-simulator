@@ -69,6 +69,12 @@ function toChargePointSnapshot(cp: ChargePoint): ChargePointSnapshot {
     status: cp.status,
     error: cp.error,
     connectors,
+    heartbeat: {
+      intervalSeconds: cp.heartbeat.intervalSeconds,
+      lastSentAt: cp.heartbeat.lastSentAt
+        ? cp.heartbeat.lastSentAt.toISOString()
+        : null,
+    },
   };
 }
 
@@ -709,6 +715,19 @@ export class LocalChargePointService implements ChargePointService {
       chargePoint.events.on("disconnected", ({ code, reason }) => {
         this.emit(chargePoint.id, { type: "disconnected", code, reason });
       }),
+    );
+
+    unsubscribes.push(
+      chargePoint.heartbeat.events.on(
+        "stateChange",
+        ({ intervalSeconds, lastSentAt }) => {
+          this.emit(chargePoint.id, {
+            type: "heartbeat",
+            intervalSeconds,
+            lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
+          });
+        },
+      ),
     );
 
     unsubscribes.push(

@@ -672,6 +672,18 @@ export class ChargePoint {
     this._heartbeat.sendHeartbeat();
   }
 
+  /** §4.6: any outgoing CALL counts as activity for the heartbeat idle
+   *  timer. The transport calls this for every send; if the CALL is a
+   *  Heartbeat itself, lastSentAt is also stamped. */
+  notifyOutgoingCall(isHeartbeat: boolean): void {
+    this._heartbeat.notifyOutgoingCall();
+    if (isHeartbeat) this._heartbeat.markHeartbeatSent();
+  }
+
+  get heartbeat(): HeartbeatService {
+    return this._heartbeat;
+  }
+
   setMeterValue(connectorId: number, value: number): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {

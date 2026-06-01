@@ -2,8 +2,12 @@ import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { TransactionNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const TransactionNode: React.FC<NodeProps<TransactionNodeData>> = ({ data, selected }) => {
-  const actionColor = data.action === "start" ? "bg-green-600" : "bg-orange-600";
+const TransactionNode: React.FC<NodeProps<TransactionNodeData>> = ({
+  data,
+  selected,
+}) => {
+  const actionColor =
+    data.action === "start" ? "bg-green-600" : "bg-orange-600";
   const actionIcon = data.action === "start" ? "▶" : "■";
 
   return (
@@ -18,7 +22,9 @@ const TransactionNode: React.FC<NodeProps<TransactionNodeData>> = ({ data, selec
         Transaction
       </div>
       <div className="flex items-center gap-2">
-        <div className={`w-6 h-6 rounded ${actionColor} flex items-center justify-center text-white text-xs`}>
+        <div
+          className={`w-6 h-6 rounded ${actionColor} flex items-center justify-center text-white text-xs`}
+        >
           {actionIcon}
         </div>
         <div className="font-bold text-sm text-primary">
@@ -28,10 +34,6 @@ const TransactionNode: React.FC<NodeProps<TransactionNodeData>> = ({ data, selec
       {data.action === "start" && data.tagId && (
         <div className="text-xs text-muted mt-1">Tag: {data.tagId}</div>
       )}
-      {data.description && (
-        <div className="text-xs text-muted mt-1">{data.description}</div>
-      )}
-
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
     </div>
   );

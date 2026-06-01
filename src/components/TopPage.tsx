@@ -373,24 +373,6 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
     });
   };
 
-  const [isAllHeartbeatEnabled, setIsAllHeartbeatEnabled] =
-    useState<boolean>(false);
-
-  const handleAllHeartbeatInterval = (isEnabled: boolean) => {
-    setIsAllHeartbeatEnabled(isEnabled);
-    cps.forEach((cp) => {
-      if (isEnabled) {
-        void chargePointService.startHeartbeat(cp.id, 10).catch((err) => {
-          console.error(`startHeartbeat failed for ${cp.id}`, err);
-        });
-      } else {
-        void chargePointService.stopHeartbeat(cp.id).catch((err) => {
-          console.error(`stopHeartbeat failed for ${cp.id}`, err);
-        });
-      }
-    });
-  };
-
   const handleAllStartTransaction = () => {
     for (let i = 0; i < Math.min(tagIDs.length, cps.length); i++) {
       const cp = cps[i];
@@ -428,13 +410,7 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
               Disconnect All
             </Button>
             <Button onClick={handleAllHeartbeat} variant="info">
-              Heartbeat All
-            </Button>
-            <Button
-              variant={isAllHeartbeatEnabled ? "destructive" : "success"}
-              onClick={() => handleAllHeartbeatInterval(!isAllHeartbeatEnabled)}
-            >
-              {isAllHeartbeatEnabled ? "Disable" : "Enable"} Heartbeat All
+              Send Heartbeat All
             </Button>
           </div>
 

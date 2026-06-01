@@ -163,6 +163,13 @@ export type CLIEvent =
   | {
       readonly event: "connector_removed";
       readonly data: { readonly connectorId: number };
+    }
+  | {
+      readonly event: "heartbeat";
+      readonly data: {
+        readonly intervalSeconds: number;
+        readonly lastSentAt: string | null;
+      };
     };
 
 type EventHandler = (evt: CLIEvent) => void;
@@ -296,6 +303,12 @@ export class CLIChargePointService {
       status: this._chargePoint.status,
       error: this._chargePoint.error,
       connectors,
+      heartbeat: {
+        intervalSeconds: this._chargePoint.heartbeat.intervalSeconds,
+        lastSentAt: this._chargePoint.heartbeat.lastSentAt
+          ? this._chargePoint.heartbeat.lastSentAt.toISOString()
+          : null,
+      },
     };
   }
 
@@ -632,6 +645,21 @@ export class CLIChargePointService {
       this._chargePoint.events.on("disconnected", ({ code, reason }) => {
         this.emit({ event: "disconnected", data: { code, reason } });
       }),
+    );
+
+    this._unsubscribes.push(
+      this._chargePoint.heartbeat.events.on(
+        "stateChange",
+        ({ intervalSeconds, lastSentAt }) => {
+          this.emit({
+            event: "heartbeat",
+            data: {
+              intervalSeconds,
+              lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
+            },
+          });
+        },
+      ),
     );
 
     this._unsubscribes.push(

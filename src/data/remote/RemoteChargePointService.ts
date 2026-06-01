@@ -54,6 +54,7 @@ interface ServerCpStatus {
   status: string;
   error: string;
   connectors: ServerConnectorStatus[];
+  heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
 }
 
 interface ServerEventEnvelope {
@@ -105,6 +106,12 @@ function toChargePointSnapshot(s: ServerCpStatus): ChargePointSnapshot {
     status: s.status as OCPPStatus,
     error: s.error ?? "",
     connectors: (s.connectors ?? []).map(toConnectorSnapshot),
+    heartbeat: s.heartbeat
+      ? {
+          intervalSeconds: s.heartbeat.intervalSeconds,
+          lastSentAt: s.heartbeat.lastSentAt,
+        }
+      : undefined,
   };
 }
 
@@ -340,6 +347,16 @@ function mapServerEventToChargePointEvent(
         return {
           type: "connector-removed",
           connectorId: data.connectorId,
+        };
+      }
+      return null;
+    case "heartbeat":
+      if (typeof data.intervalSeconds === "number") {
+        return {
+          type: "heartbeat",
+          intervalSeconds: data.intervalSeconds,
+          lastSentAt:
+            typeof data.lastSentAt === "string" ? data.lastSentAt : null,
         };
       }
       return null;

@@ -10,10 +10,23 @@ interface ExtendedMeterValueNodeData extends MeterValueNodeData {
   currentValue?: number;
 }
 
-const MeterValueNode: React.FC<NodeProps<ExtendedMeterValueNodeData>> = ({ data, selected }) => {
+function formatMeterReading(valueWh: number): string {
+  if (valueWh >= 1000) {
+    return `${(valueWh / 1000).toFixed(2)} kWh`;
+  }
+  return `${Math.round(valueWh)} Wh`;
+}
+
+const MeterValueNode: React.FC<NodeProps<ExtendedMeterValueNodeData>> = ({
+  data,
+  selected,
+}) => {
   const progress = data.progress;
-  const progressPercent = progress ? ((progress.total - progress.remaining) / progress.total) * 100 : 0;
-  const displayValue = data.currentValue !== undefined ? data.currentValue : data.value;
+  const progressPercent = progress
+    ? ((progress.total - progress.remaining) / progress.total) * 100
+    : 0;
+  const displayValue =
+    data.currentValue !== undefined ? data.currentValue : data.value;
 
   return (
     <div
@@ -29,20 +42,19 @@ const MeterValueNode: React.FC<NodeProps<ExtendedMeterValueNodeData>> = ({ data,
       <div className="flex items-center gap-2">
         <div className="text-2xl">⚡</div>
         <div className="flex-1">
-          <div className="font-bold text-sm text-primary">{displayValue} Wh</div>
+          <div className="font-bold text-sm text-primary">
+            {formatMeterReading(displayValue)}
+          </div>
           <div className="text-xs text-muted">
             {data.sendMessage ? "Send message" : "Set value only"}
           </div>
         </div>
       </div>
 
-      {data.description && (
-        <div className="text-xs text-muted mt-1">{data.description}</div>
-      )}
-
       {data.autoIncrement && (
         <div className="text-xs text-green-600 dark:text-green-400 mt-1 font-semibold">
-          ⚡ Auto +{data.incrementAmount || 1000}Wh / {data.incrementInterval || 10}s
+          ⚡ Auto +{data.incrementAmount || 1000}Wh /{" "}
+          {data.incrementInterval || 10}s
           {progress && progress.remaining > 0 && (
             <span className="ml-1">({progress.remaining.toFixed(1)}s)</span>
           )}

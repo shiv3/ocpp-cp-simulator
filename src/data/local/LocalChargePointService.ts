@@ -2,7 +2,7 @@ import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
-import { SqliteScenarioRepository } from "../sqlite/SqliteScenarioRepository";
+import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { BootNotification, OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,

@@ -1,13 +1,10 @@
-import type { Transaction } from "../../cp/domain/connector/Transaction";
-import type { Database } from "../../cp/domain/persistence/Database";
-import type {
-  OCPPAvailability,
-  OCPPStatus,
-} from "../../cp/domain/types/OcppTypes";
+import type { Transaction } from "../connector/Transaction";
+import type { Database } from "./Database";
+import type { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
 import type {
   ConnectorRuntimeRepository,
   ConnectorRuntimeSnapshot,
-} from "../interfaces/ConnectorRuntimeRepository";
+} from "./ConnectorRuntimeRepository";
 
 interface ConnectorRuntimeRow {
   status: string;

@@ -10,6 +10,7 @@
     "src/cli",
     "src/cp",
     "src/utils/scenarioTemplates.ts",
+    "src/utils/scenarios",
     "dist"
   ],
   "scripts": {

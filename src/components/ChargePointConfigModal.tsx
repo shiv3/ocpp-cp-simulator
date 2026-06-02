@@ -132,6 +132,14 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   value={config.cpId}
                   onChange={(e) => updateConfig("cpId", e.target.value)}
                   required
+                  // cpId is the primary key for both local-mode config and
+                  // the daemon's CP registry; changing it on an existing CP
+                  // would be "delete + recreate" semantics, not "edit". Lock
+                  // it down in edit mode so the operator doesn't accidentally
+                  // strand the previous CP — they can delete + re-add if
+                  // they really need a different id.
+                  readOnly={!isNewChargePoint}
+                  disabled={!isNewChargePoint}
                   className="logger-input"
                 />
               </div>

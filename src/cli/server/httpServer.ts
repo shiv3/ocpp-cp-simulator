@@ -156,11 +156,15 @@ export function createHttpHandlers(deps: {
   staticDir?: string | null;
   /** Daemon state DB; needed so POST /v1/state/reset can truncate it. */
   database?: Database | null;
+  /** Absolute URL path the health-check JSON is served on. Defaults to
+   *  `/v1/healthz`. */
+  healthPath?: string;
 }): HttpHandlers {
   const { registry, bus, lifecycle } = deps;
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
   const staticDir = deps.staticDir ?? null;
   const database = deps.database ?? null;
+  const healthPath = deps.healthPath ?? "/v1/healthz";
 
   return {
     fetch(req, server) {
@@ -247,8 +251,8 @@ export function createHttpHandlers(deps: {
       return ok ? undefined : new Response("upgrade failed", { status: 400 });
     }
 
-    // GET /healthz
-    if (req.method === "GET" && url.pathname === "/healthz") {
+    // GET <healthPath>  (default /v1/healthz; configurable via --health-path)
+    if (req.method === "GET" && url.pathname === healthPath) {
       return Response.json({ ok: true, cps: registry.list().length });
     }
 

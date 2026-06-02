@@ -11,7 +11,7 @@
 //!      exist yet; fall back to `bun src/cli/main.ts` so devs can
 //!      iterate without re-running the build script.
 //!   3. Splash window (`splash.html`) opens immediately, asks Rust for
-//!      the daemon URL via `get_daemon_url`, polls `/healthz`, then
+//!      the daemon URL via `get_daemon_url`, polls `/v1/healthz`, then
 //!      navigates the same webview to `http://127.0.0.1:<port>/`.
 //!   4. On window close the child is killed.
 

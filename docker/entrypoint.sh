@@ -16,9 +16,15 @@
 #   4. Compose the CLI flag bundle:
 #        --http-host 0.0.0.0 --unix-socket none --web-console $HTTP_PORT
 #        (--state-db $STATE_DB only when STATE_DB is non-empty).
+#        (--health-path $HEALTH_PATH only when HEALTH_PATH is non-empty).
 #
 # Set STATE_DB=:memory: at runtime to opt out of persistence; set it to
 # the empty string to drop the flag entirely.
+#
+# HEALTH_PATH must match the value passed at image build time as
+# `--build-arg HEALTH_PATH=…` because the UI bundle inlines it as
+# VITE_HEALTH_PATH; setting only the runtime env will move the daemon
+# endpoint but leave the browser probe targeting the build-time default.
 set -e
 
 if [ -d /data ] && [ "$(stat -c %u /data 2>/dev/null)" != "1000" ]; then
@@ -33,6 +39,9 @@ fi
 ARGS="--http-host 0.0.0.0 --unix-socket none --web-console ${HTTP_PORT}"
 if [ -n "${STATE_DB}" ]; then
   ARGS="${ARGS} --state-db ${STATE_DB}"
+fi
+if [ -n "${HEALTH_PATH}" ]; then
+  ARGS="${ARGS} --health-path ${HEALTH_PATH}"
 fi
 
 exec su-exec bun:bun bun src/cli/main.ts ${ARGS} "$@"

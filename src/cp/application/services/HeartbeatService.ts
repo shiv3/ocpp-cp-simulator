@@ -117,9 +117,26 @@ export class HeartbeatService {
     this.emitState();
   }
 
+  /**
+   * Stop the idle timer. Called from `ChargePoint.teardownAfterClose` on
+   * WebSocket close so a stale timer doesn't try to send a Heartbeat onto
+   * a half-open connection.
+   *
+   * Note we deliberately do NOT clear `_sendHeartbeatCallback`: that
+   * callback is set ONCE in the `ChargePoint` constructor and is wired
+   * to the stable `OCPPMessageHandler` instance, which lives for the
+   * lifetime of the `ChargePoint`. Nulling it here would break the
+   * reconnect path — `BootNotificationResultHandler` calls
+   * `startHeartbeat(interval)` on the very same `HeartbeatService`
+   * instance, the timer rearms, fires after `interval` seconds, calls
+   * `sendHeartbeat()`, and would crash with "Heartbeat callback not
+   * set" because nothing re-installs the callback. The CSMS then
+   * disconnects on its PingWait (60s with no inbound traffic) and the
+   * cycle repeats every minute. See shiv3-cp7's logs around
+   * 2026-06-02T09:25-09:31 for the symptom.
+   */
   cleanup(): void {
     this.clearTimer();
-    this._sendHeartbeatCallback = null;
   }
 
   private armTimer(): void {

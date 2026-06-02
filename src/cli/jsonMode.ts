@@ -234,6 +234,13 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "remove_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const removed = service.removeScenario(connectorId, scenarioId);
+      return { removed };
+    }
+
     case "run_scenario_file": {
       const connectorId = requirePositiveInt(params, "connector");
       const filePath = requireString(params, "file");

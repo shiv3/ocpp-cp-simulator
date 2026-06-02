@@ -65,6 +65,16 @@ export class CPRegistry {
       // Use the internal create path WITHOUT re-inserting into the DB —
       // these rows already exist.
       const svc = this.instantiate(init);
+      // Rehydrate every scenario the operator had loaded against this CP
+      // before the restart. statusChange-trigger scenarios re-arm via the
+      // connector subscription set up in CLIChargePointService — nothing
+      // to do here beyond loading them.
+      const restoredScenarios = svc.restoreScenariosFromDatabase();
+      if (restoredScenarios > 0) {
+        console.log(
+          `[CPRegistry] Restored ${restoredScenarios} scenario(s) for CP "${row.cp_id}"`,
+        );
+      }
       // Kick the WebSocket open so BootNotification + StatusNotification
       // fly to the CSMS automatically. Fire-and-forget — connect() is
       // synchronous from JS's POV (returns immediately, opens in
@@ -139,6 +149,10 @@ export class CPRegistry {
   private persistRemove(cpId: string): void {
     if (!this.database) return;
     this.database.run("DELETE FROM charge_points WHERE cp_id = ?", [cpId]);
+    // Cascade: orphan scenario rows would survive a CP delete and reappear
+    // if the same cpId is re-created. There's no FK in the schema, so the
+    // cleanup is explicit.
+    this.database.run("DELETE FROM scenarios WHERE cp_id = ?", [cpId]);
   }
 
   remove(cpId: string): boolean {

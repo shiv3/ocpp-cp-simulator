@@ -143,53 +143,63 @@ const waitForRemoteStart = (
 /** Mirror of waitForRemoteStart, but for the CSMS-initiated stop side.
  *  Registers a scenario-stop handler on the CP so the default
  *  RemoteStopTransactionHandler defers, then waits for the emitted
- *  `remoteStopReceived` event. Resolves with the transactionId from the
- *  CSMS request. Rejects on disconnect or timeout. */
+ *  `remoteStopReceived` event. Resolves with the transactionId AND the
+ *  OCPP §6.21 stop reason ("Remote" for the CSMS-initiated path) so the
+ *  subsequent Transaction Stop node can pass it through to
+ *  StopTransaction.req. Rejects on disconnect or timeout. */
 const waitForRemoteStop = (
   chargePoint: ChargePoint,
   connector: Connector,
   timeout?: number,
-): CancellableWait<number> => {
+): CancellableWait<{ transactionId: number; reason: string }> => {
   chargePoint.registerScenarioStopHandler(connector.id);
 
   let cleanupFn: (() => void) | null = null;
 
-  const promise = new Promise<number>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
-    let settled = false;
+  const promise = new Promise<{ transactionId: number; reason: string }>(
+    (resolve, reject) => {
+      let timeoutId: NodeJS.Timeout | null = null;
+      let settled = false;
 
-    const cleanup = () => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      chargePoint.events.off("remoteStopReceived", handler);
-      chargePoint.events.off("disconnected", disconnectHandler);
-      chargePoint.unregisterScenarioStopHandler(connector.id);
-    };
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        chargePoint.events.off("remoteStopReceived", handler);
+        chargePoint.events.off("disconnected", disconnectHandler);
+        chargePoint.unregisterScenarioStopHandler(connector.id);
+      };
 
-    cleanupFn = cleanup;
+      cleanupFn = cleanup;
 
-    const handler = (data: { connectorId: number; transactionId: number }) => {
-      if (data.connectorId !== connector.id) return;
-      cleanup();
-      resolve(data.transactionId);
-    };
-
-    const disconnectHandler = () => {
-      cleanup();
-      reject(new Error("Disconnected while waiting for remote stop"));
-    };
-
-    chargePoint.events.on("remoteStopReceived", handler);
-    chargePoint.events.on("disconnected", disconnectHandler);
-
-    if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
+      const handler = (data: {
+        connectorId: number;
+        transactionId: number;
+      }) => {
+        if (data.connectorId !== connector.id) return;
         cleanup();
-        reject(new Error(`Timeout waiting for remote stop (${timeout}s)`));
-      }, timeout * 1000);
-    }
-  });
+        // §6.21: CSMS-initiated stop → reason="Remote". Hard-code here
+        // since the request payload itself doesn't carry a reason field;
+        // the handler is what knows the provenance.
+        resolve({ transactionId: data.transactionId, reason: "Remote" });
+      };
+
+      const disconnectHandler = () => {
+        cleanup();
+        reject(new Error("Disconnected while waiting for remote stop"));
+      };
+
+      chargePoint.events.on("remoteStopReceived", handler);
+      chargePoint.events.on("disconnected", disconnectHandler);
+
+      if (timeout && timeout > 0) {
+        timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error(`Timeout waiting for remote stop (${timeout}s)`));
+        }, timeout * 1000);
+      }
+    },
+  );
 
   return {
     promise,
@@ -299,8 +309,15 @@ export const createScenarioExecutorCallbacks = (
         initialSoc,
       );
     },
-    onStopTransaction: async () => {
-      chargePoint.stopTransaction(connector.id);
+    onStopTransaction: async (reason) => {
+      // The cast keeps stopTransaction's StopTransactionReason union
+      // happy without dragging the enum import into the callbacks
+      // declaration. ChargePoint.stopTransaction safely no-ops if there
+      // is no active transaction, so we don't guard here either.
+      chargePoint.stopTransaction(
+        connector.id,
+        reason as Parameters<typeof chargePoint.stopTransaction>[1],
+      );
     },
     onSetMeterValue: (value) => {
       chargePoint.setMeterValue(connector.id, value);

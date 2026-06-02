@@ -145,6 +145,14 @@ export class CPRegistry {
     if (!existing) {
       throw new Error(`cpId not found: ${init.cpId}`);
     }
+    // Snapshot the existing in-memory scenarios BEFORE cleanup wipes
+    // them. Without --state-db there's no `scenarios` table to rehydrate
+    // from, so `restoreScenariosFromDatabase` returns 0 and the operator
+    // loses every seeded / hand-loaded scenario each time they touch
+    // the CP's Edit form. With --state-db, restoreScenariosFromDatabase
+    // covers it too; the snapshot is still safe to feed in because
+    // loadScenario is an upsert keyed on scenario.id.
+    const scenarioSnapshot = existing.snapshotScenarios();
     existing.cleanup();
     this.unsubscribes.get(init.cpId)?.();
     this.unsubscribes.delete(init.cpId);
@@ -155,6 +163,17 @@ export class CPRegistry {
     // re-created service picks up the same set without the operator
     // having to reload them.
     svc.restoreScenariosFromDatabase();
+    for (const { connectorId, definition } of scenarioSnapshot) {
+      try {
+        svc.loadScenario(connectorId, definition);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[CPRegistry] Failed to re-attach scenario ${definition.id} to ${init.cpId}/connector ${connectorId} during update:`,
+          err,
+        );
+      }
+    }
     return svc;
   }
 

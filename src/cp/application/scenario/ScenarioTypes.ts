@@ -350,7 +350,15 @@ export interface ScenarioExecutorCallbacks {
     batteryCapacityKwh?: number,
     initialSoc?: number,
   ) => Promise<void>;
-  onStopTransaction?: () => Promise<void>;
+  onStopTransaction?: (
+    /** Optional OCPP §6.21 reason string. When a preceding
+     *  RemoteStopTrigger node captured a CSMS-initiated stop, the
+     *  scenario forwards "Remote" so StopTransaction.req carries the
+     *  same reason the daemon would have set on the default
+     *  RemoteStopTransactionHandler path. Other call sites can omit it
+     *  and the connector / charge point default applies. */
+    reason?: string,
+  ) => Promise<void>;
   onSetMeterValue?: (value: number) => void;
   onSendMeterValue?: () => Promise<void>;
   onStartAutoMeterValue?: (config: {
@@ -375,7 +383,12 @@ export interface ScenarioExecutorCallbacks {
    * RemoteStopTransactionHandler delegates instead of stopping the
    * transaction itself.
    */
-  onWaitForRemoteStop?: (timeout?: number) => Promise<number>;
+  /** Resolves with `{ transactionId, reason }` so the next Transaction
+   *  Stop node can pass the CSMS-supplied reason (defaults to "Remote")
+   *  through to StopTransaction.req. */
+  onWaitForRemoteStop?: (
+    timeout?: number,
+  ) => Promise<{ transactionId: number; reason: string }>;
   onWaitForStatus?: (
     targetStatus: OCPPStatus,
     timeout?: number,

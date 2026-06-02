@@ -736,9 +736,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       updatedAt: new Date().toISOString(),
     };
     if (scenario.id) {
-      void scenarioRepository
-        .save(cpId, connectorId, updated)
-        .catch((err) => console.error("Failed to save scenario", err));
+      // Remote mode talks to the daemon (the browser-side sql.js path is
+      // a no-op there). Local mode keeps the sql.js path.
+      if (mode === "remote") {
+        void chargePointService
+          .loadScenario(cpId, connectorId, updated)
+          .catch((err) =>
+            console.error("Failed to save scenario to daemon", err),
+          );
+      } else {
+        void scenarioRepository
+          .save(cpId, connectorId, updated)
+          .catch((err) => console.error("Failed to save scenario", err));
+      }
     }
     setScenario(updated);
     setSaveFeedback("saved");
@@ -760,6 +770,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEvSettings,
     cpId,
     connectorId,
+    mode,
+    chargePointService,
+    scenarioRepository,
   ]);
 
   // Keyboard shortcuts for undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+Y).
@@ -1047,12 +1060,60 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
 
-      // Templates are always new scenarios, so save them (upsert via repo).
-      void scenarioRepository
-        .save(cpId, connectorId, templateScenario)
-        .catch((err) => console.error("Failed to save template scenario", err));
+      void (async () => {
+        // Remote mode: scenarioRepository.save no-ops (sql.js isn't loaded),
+        // so a save here would vanish on reload — the daemon would still
+        // hand us the previous scenario via listScenarios on next mount.
+        // Push through chargePointService.loadScenario instead, and clean
+        // up the prior scenarios so listScenarios doesn't keep returning
+        // them at index 0 (the daemon orders by insertion / updated_at).
+        if (mode === "remote") {
+          try {
+            const existing = await chargePointService.listScenarios(
+              cpId,
+              connectorId,
+            );
+            await Promise.all(
+              existing
+                .filter((item) => item.scenarioId !== templateScenario.id)
+                .map((item) =>
+                  chargePointService
+                    .removeScenario(cpId, connectorId, item.scenarioId)
+                    .catch((err) =>
+                      console.warn(
+                        `Failed to remove stale scenario ${item.scenarioId}`,
+                        err,
+                      ),
+                    ),
+                ),
+            );
+            await chargePointService.loadScenario(
+              cpId,
+              connectorId,
+              templateScenario,
+            );
+          } catch (err) {
+            console.error("Failed to persist template scenario", err);
+          }
+          return;
+        }
+        try {
+          await scenarioRepository.save(cpId, connectorId, templateScenario);
+        } catch (err) {
+          console.error("Failed to save template scenario", err);
+        }
+      })();
     },
-    [cpId, connectorId, scenarioRepository, nodes.length, setNodes, setEdges],
+    [
+      cpId,
+      connectorId,
+      mode,
+      chargePointService,
+      scenarioRepository,
+      nodes.length,
+      setNodes,
+      setEdges,
+    ],
   );
 
   // Handle node double-click to open config panel

@@ -708,6 +708,17 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async removeScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCommand(id, "remove_scenario", {
+      connector: connectorId,
+      scenarioId,
+    });
+  }
+
   async getScenarioStatus(
     id: string,
     connectorId: number,

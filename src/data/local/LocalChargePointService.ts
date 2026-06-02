@@ -2,6 +2,7 @@ import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
+import { SqliteScenarioRepository } from "../sqlite/SqliteScenarioRepository";
 import { BootNotification, OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,
@@ -477,6 +478,29 @@ export class LocalChargePointService implements ChargePointService {
     const connector = this.requireConnector(id, connectorId);
     const manager = connector.scenarioManager;
     manager?.stopAllScenarios();
+  }
+
+  async removeScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    manager?.removeScenario(scenarioId);
+    // Drop the persisted row too so reloads don't resurrect it. We
+    // bypass the shared scenarioRepository instance the UI uses
+    // (LocalChargePointService doesn't take one in its constructor) and
+    // talk to the same sql.js DB directly via a fresh repository handle
+    // — both ultimately go through the same `scenarios` table.
+    if (this.database) {
+      new SqliteScenarioRepository(this.database).deleteOne(
+        id,
+        connectorId,
+        scenarioId,
+      );
+      await this.database.flush?.();
+    }
   }
 
   async getScenarioStatus(

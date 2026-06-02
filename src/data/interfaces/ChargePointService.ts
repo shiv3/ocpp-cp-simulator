@@ -366,6 +366,14 @@ export interface ChargePointService {
     force?: boolean,
   ): Promise<void>;
   stopAllScenarios(id: string, connectorId: number): Promise<void>;
+  /** Drop a single scenario from the runtime + persistence. Used by the
+   *  editor when the operator switches templates so stale ones don't
+   *  keep coming back on next reload. */
+  removeScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void>;
   getScenarioStatus(
     id: string,
     connectorId: number,

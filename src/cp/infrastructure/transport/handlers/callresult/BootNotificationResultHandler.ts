@@ -34,7 +34,20 @@ export class BootNotificationResultHandler
         // Send connector 0 (charge point level) status first
         context.chargePoint.updateConnectorStatus(0, OCPPStatus.Available);
         context.chargePoint.connectors.forEach((connector) => {
-          if (connector.autoResetToAvailable) {
+          // Reset to Available only when this is a fresh post-boot state —
+          // i.e. autoReset is enabled AND no transaction is in flight. A
+          // connector that was restored from `connector_runtime` with an
+          // active transaction must keep its persisted status (typically
+          // Preparing → Charging) so the CSMS-side view stays consistent
+          // with the resumed transaction id; otherwise the CSMS sees us
+          // bounce Charging → Available and the transaction is orphaned.
+          // (See `restoreConnectorRuntimeFromDatabase` for the persisted
+          // shape and `Connector.restoreRuntimeSnapshot` for how the
+          // private fields are restored ahead of this StatusNotification.)
+          if (
+            connector.autoResetToAvailable &&
+            connector.transaction === null
+          ) {
             context.chargePoint.updateConnectorStatus(
               connector.id,
               OCPPStatus.Available,

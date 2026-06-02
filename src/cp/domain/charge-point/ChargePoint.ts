@@ -620,6 +620,17 @@ export class ChargePoint {
       this._connectors.forEach((connector) => {
         const previousStatus = connector.status;
         if (previousStatus === OCPPStatus.Unavailable) return;
+        // Don't clobber a connector mid-transaction. The most common
+        // caller is `teardownAfterClose` (WebSocket close), and writing
+        // Unavailable here would race with the connector_runtime
+        // persistence hook — the last snapshot before shutdown would
+        // record Unavailable, and on the next daemon restart the
+        // restore would resurrect the transaction inside an Unavailable
+        // shell, divergent from the CSMS view that still thinks
+        // Charging. Leave the per-connector status alone; the eventual
+        // StopTransaction (CSMS-issued or scenario-driven) will move
+        // it through Finishing → Available normally.
+        if (connector.transaction !== null) return;
         connector.status = OCPPStatus.Unavailable;
         this._events.emit("connectorStatusChange", {
           connectorId: connector.id,

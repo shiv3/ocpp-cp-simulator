@@ -112,6 +112,34 @@ export class CPRegistry {
     return this.instantiate(init);
   }
 
+  /**
+   * Replace an existing CP's in-memory service with one built from `init`.
+   * Used by the "edit CP" flow in the web console: the existing OCPP
+   * WebSocket is closed (via cleanup), the persisted row is updated
+   * in-place, and a fresh CLIChargePointService is constructed with the
+   * new wsUrl / vendor / etc. Scenarios persisted under the same `cp_id`
+   * survive because `persistRemove` is NOT called — we update the row,
+   * we don't delete it. The caller is expected to follow up with
+   * `svc.connect()` so the new config takes effect.
+   */
+  update(init: ChargePointInitOptions): CLIChargePointService {
+    const existing = this.services.get(init.cpId);
+    if (!existing) {
+      throw new Error(`cpId not found: ${init.cpId}`);
+    }
+    existing.cleanup();
+    this.unsubscribes.get(init.cpId)?.();
+    this.unsubscribes.delete(init.cpId);
+    this.services.delete(init.cpId);
+    this.persistCreate(init); // ON CONFLICT UPDATE — leaves scenarios intact
+    const svc = this.instantiate(init);
+    // Re-attach scenarios that the previous instance had loaded so the
+    // re-created service picks up the same set without the operator
+    // having to reload them.
+    svc.restoreScenariosFromDatabase();
+    return svc;
+  }
+
   /** Construct + register the in-memory CLIChargePointService without
    *  touching the DB. Used by both create() (after DB insert) and
    *  restoreFromDatabase() (DB row already exists). */

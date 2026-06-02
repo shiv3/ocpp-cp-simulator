@@ -121,4 +121,28 @@ export interface ChargePointStatus {
     readonly intervalSeconds: number;
     readonly lastSentAt: string | null;
   };
+  /** Snapshot of the init the CP was constructed with. Surfaced so the
+   *  web console can prefill the "Edit CP" modal in Remote mode without
+   *  needing a second roundtrip — local-mode persistence is already in
+   *  the browser, so this field is only meaningful when talking to the
+   *  daemon. Optional for back-compat with older daemons. */
+  readonly config?: {
+    readonly wsUrl: string;
+    readonly connectors: number;
+    readonly vendor: string;
+    readonly model: string;
+    readonly basicAuth: {
+      readonly username: string;
+      readonly password: string;
+    } | null;
+    readonly bootNotification: {
+      readonly firmwareVersion?: string;
+      readonly chargePointSerialNumber?: string;
+      readonly chargeBoxSerialNumber?: string;
+      readonly meterSerialNumber?: string;
+      readonly meterType?: string;
+      readonly iccid?: string;
+      readonly imsi?: string;
+    } | null;
+  };
 }

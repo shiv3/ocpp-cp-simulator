@@ -44,6 +44,26 @@ export interface ChargePointSnapshot {
    *  string for remote-mode JSON safety; null if no Heartbeat.req has been
    *  sent since the daemon started. */
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
+  /** Init the CP was constructed with — exposed in Remote mode so the web
+   *  console can prefill the "Edit CP" modal. Undefined in Local mode
+   *  (the browser already owns the config) and on older daemons that
+   *  don't ship this field. */
+  config?: {
+    wsUrl: string;
+    connectors: number;
+    vendor: string;
+    model: string;
+    basicAuth: { username: string; password: string } | null;
+    bootNotification: {
+      firmwareVersion?: string;
+      chargePointSerialNumber?: string;
+      chargeBoxSerialNumber?: string;
+      meterSerialNumber?: string;
+      meterType?: string;
+      iccid?: string;
+      imsi?: string;
+    } | null;
+  };
 }
 
 export interface CreateChargePointParams {
@@ -201,6 +221,12 @@ export interface ChargePointService {
 
   // Registry (mainly relevant for remote mode; local always returns false / no-ops cleanly)
   createChargePoint?(params: CreateChargePointParams): Promise<void>;
+  /** Replace the configuration of an existing CP. Remote only — the daemon
+   *  tears down the existing WebSocket, persists the new row in-place
+   *  (preserving any loaded scenarios), and re-instantiates the CP. The
+   *  local-mode store edits its config directly without needing this
+   *  method, so the interface keeps it optional. */
+  updateChargePoint?(params: CreateChargePointParams): Promise<void>;
   removeChargePoint?(id: string): Promise<void>;
   ping?(): Promise<{ ok: boolean; cps: number }>;
 

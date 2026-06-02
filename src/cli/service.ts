@@ -15,7 +15,9 @@ import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioMode,
+  StartNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
 import { SqliteScenarioRepository } from "../data/sqlite/SqliteScenarioRepository";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
@@ -187,12 +189,18 @@ export class CLIChargePointService {
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
   private readonly _scenarioRepo: SqliteScenarioRepository;
+  // Keep the original init so the web console can prefill the "Edit CP"
+  // modal without us having to round-trip the persisted SQL row back into
+  // ChargePointInitOptions shape. Exposed via getInit() and the
+  // `config` block of getStatus().
+  private readonly _init: ChargePointInitOptions;
 
   constructor(
     init: ChargePointInitOptions,
     /** Shared daemon DB. `null` means run in-memory (no `--state-db`). */
     private readonly database: Database | null = null,
   ) {
+    this._init = init;
     this._scenarioRepo = new SqliteScenarioRepository(database);
     const overrides = init.bootNotification ?? {};
     const bootNotification: BootNotification = {
@@ -324,7 +332,21 @@ export class CLIChargePointService {
           ? this._chargePoint.heartbeat.lastSentAt.toISOString()
           : null,
       },
+      config: {
+        wsUrl: this._init.wsUrl,
+        connectors: this._init.connectors,
+        vendor: this._init.vendor,
+        model: this._init.model,
+        basicAuth: this._init.basicAuth,
+        bootNotification: this._init.bootNotification ?? null,
+      },
     };
+  }
+
+  /** Original init the CP was constructed from. Used by the PUT /v1/cp
+   *  flow to surface current config to the web console's edit modal. */
+  getInit(): ChargePointInitOptions {
+    return this._init;
   }
 
   startTransaction(connectorId: number, tagId: string): void {
@@ -469,6 +491,14 @@ export class CLIChargePointService {
           }\n`,
         );
       });
+    // Scenarios may be loaded after the CP is already connected (e.g. via
+    // the JSON `load_scenario` command on a long-running daemon). The CP
+    // statusChange event won't refire, so kick the auto-start gate here
+    // too — it's idempotent thanks to the dedup key.
+    if (this._chargePoint.status === OCPPStatus.Available) {
+      this.tryAutoStartForConnector(connectorId, "connect", null);
+      this.tryAutoStartForConnector(connectorId, "status", connector.status);
+    }
     return definition.id;
   }
 
@@ -712,6 +742,18 @@ export class CLIChargePointService {
     this._unsubscribes.push(
       this._chargePoint.events.on("statusChange", ({ status }) => {
         this.emit({ event: "status_change", data: { status } });
+        // Mirror the browser's "auto-start on connect" gate from
+        // src/components/Connector.tsx: when the CP reaches Available
+        // (post-BootNotification.Accepted) fire any loaded manual-trigger
+        // scenarios whose Start node opts into `triggerOn: "connect"`.
+        // Without this, Remote-mode operators have to hit the "Start"
+        // button by hand for every scenario — the Connector.tsx auto-start
+        // opts out in Remote mode on the assumption the server drives
+        // lifecycles, and historically this side only handled the
+        // statusChange-trigger case.
+        if ((status as OCPPStatus) === OCPPStatus.Available) {
+          this.handleConnectAutoStart();
+        }
       }),
     );
 
@@ -927,7 +969,9 @@ export class CLIChargePointService {
       // scan loaded scenarios for matches and auto-run the first one.
       // Mirrors ScenarioManager.handleStatusChange used by the browser,
       // inlined here to avoid duplicating the (cp, executors) state the
-      // service already owns.
+      // service already owns. Also drives the manual-trigger +
+      // StartNode.triggerOn === "status" case (mirror of Connector.tsx),
+      // since the browser opts out of that path in Remote mode.
       this._connectorUnsubscribes.push(
         connector.events.on("statusChange", ({ status, previousStatus }) => {
           this.handleStatusChangeAutoTrigger(
@@ -935,9 +979,119 @@ export class CLIChargePointService {
             previousStatus as OCPPStatus,
             status as OCPPStatus,
           );
+          if ((status as OCPPStatus) !== previousStatus) {
+            this.handleStatusAutoStart(connectorId, status as OCPPStatus);
+          }
         }),
       );
     });
+  }
+
+  /**
+   * Mirror of the auto-start useEffect in src/components/Connector.tsx for
+   * `triggerOn: "connect"` (the default). Called when the CP reaches
+   * Available; runs the first matching loaded scenario per connector.
+   */
+  private handleConnectAutoStart(): void {
+    for (const connector of this._chargePoint.connectors.values()) {
+      this.tryAutoStartForConnector(connector.id, "connect", null);
+    }
+  }
+
+  /**
+   * Mirror for `triggerOn: "status"`: fires when the bound connector reaches
+   * a specific status (e.g. Charging). Connector statusChange events feed in.
+   */
+  private handleStatusAutoStart(
+    connectorId: number,
+    toStatus: OCPPStatus,
+  ): void {
+    this.tryAutoStartForConnector(connectorId, "status", toStatus);
+  }
+
+  /**
+   * Shared auto-start engine: walks loaded scenarios for `connectorId`,
+   * picks the first manual-trigger scenario whose Start node's `triggerOn`
+   * matches `mode` (and `targetStatus` for the "status" case), and runs it
+   * via runScenario(). Dedup uses Connector.lastAutoStartedScenarioKey so a
+   * status oscillation (or a reconnect that re-fires Available) doesn't
+   * restart an already-fired scenario. Matches the browser-side gate
+   * exactly.
+   */
+  private tryAutoStartForConnector(
+    connectorId: number,
+    mode: "connect" | "status",
+    connectorStatus: OCPPStatus | null,
+  ): void {
+    if (this._chargePoint.status !== OCPPStatus.Available) return;
+    const connector = this._chargePoint.connectors.get(connectorId);
+    if (!connector) return;
+
+    for (const [scenarioId, entry] of this._scenarios) {
+      if (entry.connectorId !== connectorId) continue;
+      const def = entry.definition;
+      if (def.enabled === false) {
+        connector.lastAutoStartedScenarioKey = null;
+        continue;
+      }
+      // Status-trigger scenarios go through handleStatusChangeAutoTrigger;
+      // the browser equally skips them here so they don't double-fire.
+      const hasStatusTriggerNode = def.nodes.some(
+        (n) => n.type === ScenarioNodeType.STATUS_TRIGGER,
+      );
+      if (hasStatusTriggerNode) continue;
+      // Browser checks `trigger?.type !== "manual"` — i.e. require an
+      // explicit "manual" or no trigger at all. `statusChange`-typed
+      // triggers are owned by handleStatusChangeAutoTrigger.
+      if (def.trigger && def.trigger.type !== "manual") continue;
+
+      const startNode = def.nodes.find(
+        (n) => n.type === ScenarioNodeType.START,
+      );
+      const startData = startNode?.data as StartNodeData | undefined;
+      const triggerOn = startData?.triggerOn ?? "connect";
+      if (triggerOn !== mode) continue;
+      if (mode === "status") {
+        const target = startData?.targetStatus;
+        if (!target || connectorStatus !== target) continue;
+      }
+
+      // Skip if anything is already running for this connector — matches
+      // ScenarioManager.handleStatusChange's one-scenario-at-a-time rule.
+      let active = false;
+      for (const [otherId, otherEntry] of this._scenarios) {
+        if (otherEntry.connectorId !== connectorId) continue;
+        if (this._executors.has(otherId)) {
+          active = true;
+          break;
+        }
+      }
+      if (active) return;
+
+      // Dedup key encodes the trigger config + a structural hash of the
+      // scenario. Matches Connector.tsx so re-emitting Available (e.g.
+      // after a CSMS reconnect) doesn't restart the scenario.
+      const structuralKey = JSON.stringify({
+        n: def.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
+        e: def.edges.map((e) => ({ id: e.id, s: e.source, t: e.target })),
+      });
+      const autoStartKey = `${def.id}:${structuralKey}:${triggerOn}:${startData?.targetStatus ?? ""}`;
+      if (connector.lastAutoStartedScenarioKey === autoStartKey) return;
+
+      try {
+        connector.lastAutoStartedScenarioKey = autoStartKey;
+        this.runScenario(connectorId, scenarioId);
+      } catch (err) {
+        connector.lastAutoStartedScenarioKey = null;
+        process.stderr.write(
+          `[CLI] connect/status auto-start failed for ${scenarioId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+      // One scenario per connector per trigger — matches the browser.
+      return;
+    }
   }
 
   /**

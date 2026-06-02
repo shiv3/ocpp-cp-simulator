@@ -12,7 +12,7 @@ import { createStore } from "jotai/vanilla";
 import type { RuntimeMode } from "../RuntimeMode";
 import { HEALTH_PATH } from "../healthPath";
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
-import type { ScenarioRepository } from "../interfaces/ScenarioRepository";
+import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import type { ChargePointService } from "../interfaces/ChargePointService";
 import { LocalChargePointService } from "../local/LocalChargePointService";
@@ -21,7 +21,7 @@ import type { Database } from "../../cp/domain/persistence/Database";
 // SqlJsDatabase intentionally NOT imported eagerly — see the mode-gated
 // dynamic import below. Remote mode never needs it, so we keep the
 // ~650 KB WASM wrapper out of that path entirely.
-import { SqliteScenarioRepository } from "../sqlite/SqliteScenarioRepository";
+import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
 import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
 import {

@@ -65,6 +65,20 @@ export class CPRegistry {
       // Use the internal create path WITHOUT re-inserting into the DB —
       // these rows already exist.
       const svc = this.instantiate(init);
+      // Restore per-connector runtime state (OCPP status, in-flight
+      // transaction, meter, soc) BEFORE wiring the WebSocket so the
+      // first StatusNotification we send carries the resumed status
+      // rather than a fresh Available. The snapshot is applied via
+      // Connector.restoreRuntimeSnapshot, which writes private fields
+      // without emitting statusChange — so the listeners on the new
+      // service won't trigger a duplicate persist or notification.
+      const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
+      if (restoredConnectors > 0) {
+        console.log(
+          `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
+            `snapshot(s) for CP "${row.cp_id}"`,
+        );
+      }
       // Rehydrate every scenario the operator had loaded against this CP
       // before the restart. statusChange-trigger scenarios re-arm via the
       // connector subscription set up in CLIChargePointService — nothing
@@ -214,10 +228,11 @@ export class CPRegistry {
   private persistRemove(cpId: string): void {
     if (!this.database) return;
     this.database.run("DELETE FROM charge_points WHERE cp_id = ?", [cpId]);
-    // Cascade: orphan scenario rows would survive a CP delete and reappear
-    // if the same cpId is re-created. There's no FK in the schema, so the
-    // cleanup is explicit.
+    // Cascade: orphan rows in dependent tables would survive a CP delete
+    // and reappear if the same cpId is re-created. There's no FK in the
+    // schema, so the cleanup is explicit.
     this.database.run("DELETE FROM scenarios WHERE cp_id = ?", [cpId]);
+    this.database.run("DELETE FROM connector_runtime WHERE cp_id = ?", [cpId]);
   }
 
   remove(cpId: string): boolean {

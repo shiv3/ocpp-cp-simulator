@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -125,6 +125,35 @@ CREATE TABLE IF NOT EXISTS charge_point_state (
   desired_connected INTEGER NOT NULL DEFAULT 0,
   updated_at        TEXT NOT NULL
 );
+
+-- Per-connector runtime state needed to survive a daemon restart in the
+-- middle of an OCPP transaction. Without this, a pod restart on
+-- Kubernetes (or any --state-db host where the process can die
+-- mid-charge) leaves the CSMS holding a Charging transaction while the
+-- simulator comes back up with every connector pinned to Available, and
+-- StatusNotification / MeterValues stop arriving until an operator
+-- manually intervenes.
+--
+-- Scope is deliberately small: just the OCPP-visible state plus the
+-- in-flight transaction JSON and the meter accumulator. Scenario
+-- execution position is NOT persisted yet (see follow-up), so a
+-- restored Charging connector won't keep advancing through scenario
+-- nodes on its own. It will, however, accept RemoteStopTransaction
+-- through the daemon's default handler and emit a correctly-numbered
+-- StopTransaction.req.
+CREATE TABLE IF NOT EXISTS connector_runtime (
+  cp_id                            TEXT NOT NULL,
+  connector_id                     INTEGER NOT NULL,
+  status                           TEXT NOT NULL,
+  availability                     TEXT NOT NULL,
+  scheduled_availability           TEXT,
+  transaction_json                 TEXT,
+  meter_value_wh                   INTEGER NOT NULL DEFAULT 0,
+  soc_percent                      REAL,
+  last_auto_started_scenario_key   TEXT,
+  updated_at                       TEXT NOT NULL,
+  PRIMARY KEY (cp_id, connector_id)
+);
 `;
 
 import type { Database } from "./Database";
@@ -154,9 +183,10 @@ export class SchemaVersionMismatchError extends Error {
  * `Database` is opened.
  *
  * Version handling:
- *   - DB version  < SCHEMA_VERSION → run all forward migrations (none
- *     defined yet because we're at v1; the CREATE TABLE IF NOT EXISTS
- *     in SCHEMA_SQL handles the "fresh DB" case).
+ *   - DB version  < SCHEMA_VERSION → run all forward migrations. The
+ *     v1 → v2 case (adding `connector_runtime`) needs no dedicated
+ *     branch because SCHEMA_SQL re-runs every call and uses
+ *     `CREATE TABLE IF NOT EXISTS`.
  *   - DB version == SCHEMA_VERSION → no-op aside from re-stamping.
  *   - DB version  > SCHEMA_VERSION → throw {@link SchemaVersionMismatchError}.
  *     Older simulator running against a DB the newer simulator wrote;

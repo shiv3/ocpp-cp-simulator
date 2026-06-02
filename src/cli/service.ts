@@ -1056,6 +1056,15 @@ export class CLIChargePointService {
         connector.lastAutoStartedScenarioKey = null;
         continue;
       }
+      // Defensive: a misshapen scenario (wrong JSON shape, half-parsed
+      // wire payload, …) shouldn't take down the statusChange listener.
+      // Skip silently so other scenarios still get a chance.
+      if (!Array.isArray(def.nodes)) {
+        process.stderr.write(
+          `[CLI] tryAutoStartForConnector: scenario ${scenarioId} has no nodes array; skipping\n`,
+        );
+        continue;
+      }
       // Status-trigger scenarios go through handleStatusChangeAutoTrigger;
       // the browser equally skips them here so they don't double-fire.
       const hasStatusTriggerNode = def.nodes.some(

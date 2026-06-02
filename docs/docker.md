@@ -72,14 +72,15 @@ HTTP_PORT=5172 CP_ID=my-cp CONNECTORS=5 \
 
 Variables read by the compose file (all optional):
 
-| Variable      | Default                              | Purpose                       |
-| ------------- | ------------------------------------ | ----------------------------- |
-| `HTTP_PORT`   | `9700`                               | Host port forwarded to 9700/c |
-| `CP_ID`       | `cp1`                                | Bootstrap charge point id     |
-| `CONNECTORS`  | `1`                                  | Number of connectors          |
-| `WS_URL`      | `wss://example.invalid/chargepoint/` | CSMS WebSocket URL            |
-| `CORS_ORIGIN` | _(empty → any origin)_               | Restrict CORS (see comments)  |
-| `STATE_DB`    | `/data/state.db`                     | SQLite path inside container  |
+| Variable      | Default                              | Purpose                                                                                                                                                                                                                                                                                        |
+| ------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_PORT`   | `9700`                               | Host port forwarded to 9700/c                                                                                                                                                                                                                                                                  |
+| `CP_ID`       | `cp1`                                | Bootstrap charge point id                                                                                                                                                                                                                                                                      |
+| `CONNECTORS`  | `1`                                  | Number of connectors                                                                                                                                                                                                                                                                           |
+| `WS_URL`      | `wss://example.invalid/chargepoint/` | CSMS WebSocket URL                                                                                                                                                                                                                                                                             |
+| `CORS_ORIGIN` | _(empty → any origin)_               | Restrict CORS (see comments)                                                                                                                                                                                                                                                                   |
+| `STATE_DB`    | `/data/state.db`                     | SQLite path inside container                                                                                                                                                                                                                                                                   |
+| `HEALTH_PATH` | `/v1/healthz`                        | Daemon health endpoint path. Compose passes it both as `--build-arg` (baked into the UI bundle as `VITE_HEALTH_PATH`) and as a runtime env (forwarded to `--health-path`). Set both sides when a fronting proxy reserves the default — e.g. Cloud Run / GFE returning 404 on the default path. |
 
 ## Mounting a scenario template
 
@@ -116,7 +117,7 @@ See [server.md → Log format](server.md#log-format) for the schema and the rela
 | Default user      | `bun` (non-root)                                                                                                        |
 | Exposed port      | `9700`                                                                                                                  |
 | Volumes           | `/data` (state DB)                                                                                                      |
-| Healthcheck       | `GET /healthz` every 30s                                                                                                |
+| Healthcheck       | `GET $HEALTH_PATH` every 30s (default `/v1/healthz`; override via build-arg + env)                                      |
 | Bundled scenarios | `/app/docs/examples/scenarios/` (point `--scenario-template-file` at one of these or mount your own under `/scenarios`) |
 
 The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the browser UI in a separate stage and only `dist/` ships in the runtime layer.
@@ -130,3 +131,23 @@ docker run --rm -p 9700:9700 -v "$PWD/.state:/data" ocpp-cp-sim:dev \
 ```
 
 The build is fully self-contained (no host node_modules required); first build ≈ 60 s, subsequent rebuilds hit the Bun install cache for ≈ 10 s.
+
+## Custom health-check path
+
+The daemon's health endpoint defaults to `/v1/healthz`. Override the path when deploying behind a reverse proxy that reserves the default — e.g. Google Front End in front of Cloud Run returning 404 directly on certain paths before the request reaches the container. The same value must be set both at build time (it's inlined into the UI bundle for the browser's Remote-mode auto-detect probe) and at runtime (forwarded to the daemon's `--health-path`):
+
+```sh
+# 1) Build with the custom path baked into the UI bundle.
+docker build \
+  --build-arg HEALTH_PATH=/internal/healthz \
+  -t ocpp-cp-sim:custom-health .
+
+# 2) Run with the same path exported as env so the entrypoint passes
+#    `--health-path /internal/healthz` to ocpp-cp-sim.
+docker run --rm -p 9700:9700 \
+  -e HEALTH_PATH=/internal/healthz \
+  ocpp-cp-sim:custom-health \
+  --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
+```
+
+With compose, the same `HEALTH_PATH` env on the host machine flows to both the build args and the container env (see [`docker-compose.yml`](../docker-compose.yml)).

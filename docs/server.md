@@ -87,7 +87,7 @@ Both paths also drop every in-memory CP first so live WebSockets don't keep writ
 
 ### Browser
 
-Browser mode uses the same schema, backed by sql.js + IndexedDB. Each browser profile keeps one DB blob under the `ocpp-cp-simulator` IndexedDB database; clearing site data wipes simulator state. sql.js is only loaded when the page determines it's in Local mode (via `/healthz` probe at the page origin) — Remote mode skips the WASM download entirely.
+Browser mode uses the same schema, backed by sql.js + IndexedDB. Each browser profile keeps one DB blob under the `ocpp-cp-simulator` IndexedDB database; clearing site data wipes simulator state. sql.js is only loaded when the page determines it's in Local mode (via a `/v1/healthz` probe at the page origin — path configurable, see [Health endpoint](#health)) — Remote mode skips the WASM download entirely.
 
 ## Log format
 
@@ -161,7 +161,7 @@ Notes:
 
 - The ENTRYPOINT pins `--http-host 0.0.0.0 --unix-socket none --web-console $HTTP_PORT`. `--web-console` starts the HTTP server on the given port and serves the bundled UI from the same origin (resolved from the `dist/` shipped next to the CLI).
 - After `docker run …` open `http://localhost:9700/` to use the browser UI. It talks to the daemon on the same origin, so CORS / dev-server routing is a non-issue.
-- The image's `HEALTHCHECK` hits `/healthz`, so `docker ps` shows `healthy` / `unhealthy` once the daemon is up.
+- The image's `HEALTHCHECK` hits `$HEALTH_PATH` (default `/v1/healthz`), so `docker ps` shows `healthy` / `unhealthy` once the daemon is up.
 - Override the bound port by setting the `HTTP_PORT` env var (e.g. `-e HTTP_PORT=8080`). The published host port via `-p` is independent.
 
 ## HTTP API
@@ -171,9 +171,11 @@ All responses are JSON. Command responses follow the same `{ ok, data?, error? }
 ### Health
 
 ```
-GET /healthz
+GET /v1/healthz
 → { "ok": true, "cps": 2 }
 ```
+
+The path is configurable via `--health-path <path>` (default `/v1/healthz`). Change it when a reverse proxy in front of the daemon reserves the default path — e.g. Google Front End in front of Cloud Run will return 404 directly on certain reserved paths before the request hits the container. The browser UI's Remote-mode auto-detect and the `RemoteChargePointService.ping` poll both target the path that was inlined at UI build time via the `VITE_HEALTH_PATH` env var (same default); the two values must match for the UI's "Remote" green-dot status to light up.
 
 ### Charge Point Registry
 

@@ -64,6 +64,7 @@ function parseArgs(argv: string[]): CLIOptions {
   let webConsoleExplicitPort: number | null = null;
   let stateDb: string | null = null;
   let logFormat: "plain" | "json" = "plain";
+  let healthPath = "/v1/healthz";
   const corsOrigins: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
@@ -179,6 +180,16 @@ function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         logFormat = next;
+        i++;
+        break;
+      case "--health-path":
+        if (!next || next.startsWith("--") || !next.startsWith("/")) {
+          process.stderr.write(
+            "Error: --health-path requires an absolute path starting with '/'\n",
+          );
+          process.exit(1);
+        }
+        healthPath = next;
         i++;
         break;
       case "--web-console":
@@ -323,6 +334,7 @@ function parseArgs(argv: string[]): CLIOptions {
     webConsolePort,
     stateDb,
     logFormat,
+    healthPath,
   };
 }
 
@@ -383,10 +395,16 @@ Options:
   --log-format <fmt>       "plain" (default) or "json" — output one JSON
                            object per stderr line for structured-log
                            collectors (Loki, jq, etc.).
+  --health-path <path>     Absolute path the health-check JSON is served on
+                           (default: /v1/healthz). Change this when running
+                           behind a proxy that reserves the default path
+                           (e.g. Cloud Run / GFE). The browser UI build must
+                           be given the matching VITE_HEALTH_PATH so its
+                           remote-mode auto-detect probe lines up.
   -h, --help               Show this help
 
 HTTP API (see docs/server.md):
-  GET    /healthz
+  GET    /v1/healthz       (or whatever --health-path is set to)
   GET    /v1/cp
   POST   /v1/cp
   GET    /v1/cp/:cpId
@@ -509,6 +527,7 @@ async function main(): Promise<void> {
       staticDir: options.serveStatic,
       webConsolePort: options.webConsolePort,
       stateDb: options.stateDb,
+      healthPath: options.healthPath,
     });
     return;
   }

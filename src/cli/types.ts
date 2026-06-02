@@ -44,6 +44,13 @@ export interface CLIOptions {
    *  `[timestamp] [LEVEL] [TYPE] message` lines; `"json"` writes one JSON
    *  object per line for structured-log collectors. */
   readonly logFormat: "plain" | "json";
+  /** Absolute path the daemon serves the health-check JSON on. Default
+   *  `/v1/healthz`. Made configurable so deployments behind a proxy that
+   *  reserves specific paths (e.g. Google Front End in front of Cloud Run)
+   *  can move the endpoint off a conflicting path. The same value must be
+   *  set as `VITE_HEALTH_PATH` at UI build time so the browser auto-detect
+   *  probe targets the same endpoint. */
+  readonly healthPath: string;
 }
 
 export interface ChargePointInitOptions {

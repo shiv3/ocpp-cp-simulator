@@ -44,6 +44,15 @@ export interface ChargePointEvents {
     connectorId: number;
     tagId: string;
   };
+  /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
+   *  has registered as the stop-side handler for this connector. The
+   *  default handler delegates instead of calling stopTransaction itself,
+   *  so it's up to the scenario's next node (typically Transaction Stop)
+   *  to actually emit StopTransaction.req. */
+  remoteStopReceived: {
+    connectorId: number;
+    transactionId: number;
+  };
   transactionStarted: {
     connectorId: number;
     transactionId: number;

@@ -57,6 +57,7 @@ import DelayNode from "./nodes/DelayNode";
 import NotificationNode from "./nodes/NotificationNode";
 import ConnectorPlugNode from "./nodes/ConnectorPlugNode";
 import RemoteStartTriggerNode from "./nodes/RemoteStartTriggerNode";
+import RemoteStopTriggerNode from "./nodes/RemoteStopTriggerNode";
 import StatusTriggerNode from "./nodes/StatusTriggerNode";
 import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
@@ -147,6 +148,7 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.NOTIFICATION]: NotificationNode,
   [ScenarioNodeType.CONNECTOR_PLUG]: ConnectorPlugNode,
   [ScenarioNodeType.REMOTE_START_TRIGGER]: RemoteStartTriggerNode,
+  [ScenarioNodeType.REMOTE_STOP_TRIGGER]: RemoteStopTriggerNode,
   [ScenarioNodeType.STATUS_TRIGGER]: StatusTriggerNode,
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
@@ -1145,6 +1147,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return "Connector Plug";
       case ScenarioNodeType.REMOTE_START_TRIGGER:
         return "Remote Start Trigger";
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        return "Remote Stop Trigger";
       case ScenarioNodeType.STATUS_TRIGGER:
         return "Status Trigger";
       default:
@@ -1619,6 +1623,45 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               />
               <p className="text-xs text-muted mt-1">
                 0 = No timeout (wait indefinitely for RemoteStartTransaction)
+              </p>
+            </div>
+          </div>
+        );
+
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
+              <input
+                type="text"
+                className="input-base w-full text-sm"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Timeout (seconds)
+              </label>
+              <input
+                type="number"
+                className="input-base w-full text-sm"
+                value={formData.timeout || 0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
+                min="0"
+              />
+              <p className="text-xs text-muted mt-1">
+                0 = No timeout (wait indefinitely for RemoteStopTransaction)
               </p>
             </div>
           </div>
@@ -2176,6 +2219,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 icon="🎬"
               />
               <NodePaletteItem
+                type={ScenarioNodeType.REMOTE_STOP_TRIGGER}
+                label="RemoteStop"
+                icon="⏹"
+              />
+              <NodePaletteItem
                 type={ScenarioNodeType.STATUS_NOTIFICATION}
                 label="StatusNotif"
                 icon="📡"
@@ -2382,6 +2430,13 @@ function createNodeByType(
         type,
         position,
         data: { label: "Wait for RemoteStart", timeout: 0 },
+      };
+    case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Wait for RemoteStop", timeout: 0 },
       };
     case ScenarioNodeType.STATUS_TRIGGER:
       return {

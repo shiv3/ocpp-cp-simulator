@@ -75,8 +75,8 @@ Both the browser UI and the daemon back their state with SQLite — sql.js + Ind
 
 The browser UI auto-detects which mode to run in by probing `/healthz` at its own origin:
 
-- Served by `ocpp-cp-sim --web-console` (or the Docker image) → **Remote**: every operation is proxied to the daemon over HTTP/WS.
-- Static build (GitHub Pages, `bun run dev`, Tauri) → **Local**: charge points run entirely in-browser, persistence via sql.js.
+- Served by `ocpp-cp-sim --web-console`, the Docker image, or the **Tauri desktop app** (which bundles the daemon as a sidecar) → **Remote**: every operation is proxied to the daemon over HTTP/WS.
+- Static build (GitHub Pages, `bun run dev`) → **Local**: charge points run entirely in-browser, persistence via sql.js.
 
 There is no toggle — the mode is decided once on page load and never overridden.
 

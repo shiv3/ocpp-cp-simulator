@@ -63,6 +63,7 @@ COPY package.json bun.lock ./
 # Only the files the CLI / daemon needs at runtime.
 COPY src/cli ./src/cli
 COPY src/cp ./src/cp
+COPY src/data ./src/data
 COPY src/utils/scenarioTemplates.ts ./src/utils/scenarioTemplates.ts
 
 # Built-in scenario examples — kept handy under /app/docs.

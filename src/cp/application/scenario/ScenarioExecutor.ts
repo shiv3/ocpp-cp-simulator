@@ -41,6 +41,11 @@ export class ScenarioExecutor {
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private forceSkipResolve: (() => void) | null = null;
   private remoteStartTagId: string | null = null;
+  // Reason captured from the most recent RemoteStopTrigger node, forwarded
+  // to the next Transaction Stop's StopTransaction.req so the CSMS sees
+  // "Remote" (§6.21) for RemoteStop-driven stops instead of a blank
+  // reason. Cleared as soon as the stop node consumes it.
+  private remoteStopReason: string | null = null;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -555,7 +560,9 @@ export class ScenarioExecutor {
       }
     } else if (data.action === "stop") {
       if (this.callbacks.onStopTransaction) {
-        await this.callbacks.onStopTransaction();
+        const reason = this.remoteStopReason ?? undefined;
+        this.remoteStopReason = null;
+        await this.callbacks.onStopTransaction(reason);
       }
     }
   }
@@ -815,8 +822,14 @@ export class ScenarioExecutor {
     if (!this.callbacks.onWaitForRemoteStop) return;
 
     const timeout = data.timeout || 0;
+    // Wrap the resolved {transactionId, reason} so the next Transaction
+    // Stop node can pass `reason` through to StopTransaction.req. The
+    // runtime hard-codes "Remote" for the CSMS path (§6.21); we keep
+    // the wrapping here so it survives waitWithOptionalForceSkip.
     const wait = (): Promise<void> =>
-      this.callbacks.onWaitForRemoteStop!(timeout).then(() => undefined);
+      this.callbacks.onWaitForRemoteStop!(timeout).then((res) => {
+        this.remoteStopReason = res?.reason ?? null;
+      });
 
     if (!timeout || timeout === 0) {
       await this.waitWithOptionalForceSkip(wait());

@@ -136,6 +136,9 @@ interface ConnectorSidePanelProps {
   cpId: string;
   connectorId: number;
   idTag: string;
+  /** RFID tag IDs configured for this CP. Drives the Transaction TagID
+   *  picker; falls back to a single-item list of `idTag` when empty. */
+  tagIds?: string[];
   onClose: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -214,6 +217,7 @@ const FullPanelContent: React.FC<{
   cpId: string;
   connectorId: number;
   idTag: string;
+  tagIds?: string[];
   onCollapse: () => void;
   onClose: () => void;
   onResizeStart: (e: React.MouseEvent) => void;
@@ -226,6 +230,7 @@ const FullPanelContent: React.FC<{
   cpId,
   connectorId,
   idTag,
+  tagIds,
   onCollapse,
   onClose,
   onResizeStart,
@@ -277,7 +282,21 @@ const FullPanelContent: React.FC<{
   const connector = localCp ? localCp.getConnector(connectorId) : null;
   const [meterValueInput, setMeterValueInput] =
     useState<number>(liveMeterValue);
-  const [tagIdInput, setTagIdInput] = useState<string>(idTag);
+  // Transaction TagID is always picked from the CP profile's configured
+  // tagIds. Falls back to the single `idTag` when the parent didn't pass a
+  // list (older callers / standalone usage).
+  const availableTagIds =
+    tagIds && tagIds.length > 0 ? tagIds : idTag ? [idTag] : [];
+  const [tagIdInput, setTagIdInput] = useState<string>(
+    availableTagIds[0] ?? idTag ?? "",
+  );
+  useEffect(() => {
+    if (availableTagIds.length === 0) return;
+    if (!availableTagIds.includes(tagIdInput)) {
+      setTagIdInput(availableTagIds[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableTagIds.join("|")]);
   const [duration, setDuration] = useState<string>("00:00:00");
   const [transactionStartTime, setTransactionStartTime] = useState<string>("");
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
@@ -670,14 +689,19 @@ const FullPanelContent: React.FC<{
     };
   }, [mode, cpId, connectorId, chargePointService]);
 
-  // Handlers
-  const handleStartTransaction = useCallback(() => {
-    void chargePointService.startTransaction(cpId, connectorId, tagIdInput);
-  }, [chargePointService, cpId, connectorId, tagIdInput]);
-
-  const handleStopTransaction = useCallback(() => {
-    void chargePointService.stopTransaction(cpId, connectorId);
-  }, [chargePointService, cpId, connectorId]);
+  // Handlers — single toggle drives both directions to match the connector
+  // card. We read the live `isCharging` at click time (passed in) so the
+  // label and action stay consistent if state changed elsewhere.
+  const handleTransactionToggle = useCallback(
+    (isChargingNow: boolean) => {
+      if (isChargingNow) {
+        void chargePointService.stopTransaction(cpId, connectorId);
+      } else if (tagIdInput) {
+        void chargePointService.startTransaction(cpId, connectorId, tagIdInput);
+      }
+    },
+    [chargePointService, cpId, connectorId, tagIdInput],
+  );
 
   const handleIncreaseMeterValue = useCallback(() => {
     const nextValue = meterValueInput + 10;
@@ -937,35 +961,46 @@ const FullPanelContent: React.FC<{
                 </div>
               )}
 
-              {/* Transaction — full-width section so the Tag input and
-                  Start/Stop buttons have room to breathe. */}
+              {/* Transaction — TagID is always a select sourced from the CP
+                  profile's `tagIds`, and one toggle button covers Start/Stop
+                  (label/style flips with isCharging). Matches the connector
+                  card so operators get the same controls in both surfaces. */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   Transaction
                 </h4>
-                <input
-                  type="text"
-                  value={tagIdInput}
+                <select
+                  value={
+                    availableTagIds.includes(tagIdInput)
+                      ? tagIdInput
+                      : (availableTagIds[0] ?? "")
+                  }
                   onChange={(e) => setTagIdInput(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  placeholder="ID Tag"
-                />
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={handleStartTransaction}
-                    disabled={isCharging}
-                    className="text-sm py-2 px-3 font-medium bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Start
-                  </button>
-                  <button
-                    onClick={handleStopTransaction}
-                    disabled={!isCharging}
-                    className="text-sm py-2 px-3 font-medium bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Stop
-                  </button>
-                </div>
+                  disabled={isCharging || availableTagIds.length === 0}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 disabled:opacity-60"
+                  title="Switch RFID tag profile before starting a transaction"
+                >
+                  {availableTagIds.length === 0 ? (
+                    <option value="">No TagIDs configured</option>
+                  ) : (
+                    availableTagIds.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  onClick={() => handleTransactionToggle(isCharging)}
+                  disabled={!isCharging && !tagIdInput}
+                  className={`w-full text-sm py-2 px-3 font-medium text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                    isCharging
+                      ? "bg-yellow-500 hover:bg-yellow-600"
+                      : "bg-green-500 hover:bg-green-600"
+                  }`}
+                >
+                  {isCharging ? "Stop" : "Start"}
+                </button>
               </div>
 
               {/* Battery — unified card combining Live SoC (% — battery
@@ -1463,6 +1498,7 @@ export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
   cpId,
   connectorId,
   idTag,
+  tagIds,
   onClose,
   isCollapsed,
   onToggleCollapse,
@@ -1533,6 +1569,7 @@ export const ConnectorSidePanel: React.FC<ConnectorSidePanelProps> = ({
       cpId={cpId}
       connectorId={connectorId}
       idTag={idTag}
+      tagIds={tagIds}
       onCollapse={onToggleCollapse}
       onClose={onClose}
       onResizeStart={handleResizeStart}

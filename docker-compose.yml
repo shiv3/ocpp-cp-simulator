@@ -12,6 +12,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # HEALTH_PATH is baked into the UI bundle at build time and
+        # re-applied at runtime as the daemon's --health-path. Override
+        # both here (build) and in `environment` below when deploying
+        # behind a proxy that reserves the default path — e.g. Google
+        # Front End in front of Cloud Run.
+        HEALTH_PATH: "${HEALTH_PATH:-/v1/healthz}"
     image: ocpp-cp-sim
     container_name: ocpp-cp-sim
     restart: unless-stopped
@@ -23,6 +30,10 @@ services:
       # Default is a file under the /data volume; set to ":memory:" to
       # run fully ephemeral (state wiped on container exit).
       STATE_DB: "/data/state.db"
+      # The image's ENTRYPOINT passes --health-path $HEALTH_PATH to
+      # ocpp-cp-sim. Must match the build-time arg above so the static UI
+      # bundle's auto-detect probe lines up with the daemon endpoint.
+      HEALTH_PATH: "${HEALTH_PATH:-/v1/healthz}"
     volumes:
       # Mount the example scenarios read-only so you can point
       # --scenario-template-file at one from the command override.
@@ -55,11 +66,12 @@ services:
       # - --log-format
       # - json
     healthcheck:
+      # CMD-SHELL so the $$HEALTH_PATH (escaped from compose-time) expands
+      # at container runtime against the image's env, matching whatever
+      # the daemon was told to serve.
       test:
-        - CMD
-        - wget
-        - -qO-
-        - "http://127.0.0.1:9700/healthz"
+        - CMD-SHELL
+        - 'wget -qO- "http://127.0.0.1:9700$$HEALTH_PATH" >/dev/null 2>&1 || exit 1'
       interval: 30s
       timeout: 3s
       start_period: 5s

@@ -65,6 +65,9 @@ export interface ServerOptions {
   /** Filesystem path for the SQLite state DB. `null` means run in memory
    *  — handy for tests / one-off CSMS probes; durable persistence is off. */
   readonly stateDb: string | null;
+  /** Absolute URL path the health-check JSON is served on. Defaults to
+   *  `/v1/healthz` (set by the CLI). */
+  readonly healthPath: string;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -113,6 +116,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     lifecycle,
     cors: opts.cors,
     database,
+    healthPath: opts.healthPath,
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -122,11 +126,13 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         cors: opts.cors,
         staticDir: opts.staticDir,
         database,
+        healthPath: opts.healthPath,
       })
     : apiHandlers;
   if (opts.staticDir) {
     serverLog(`Web console: ${opts.staticDir}`);
   }
+  serverLog(`Health endpoint: GET ${opts.healthPath}`);
   const servers: AnyServer[] = [];
 
   if (opts.unixSocket) {

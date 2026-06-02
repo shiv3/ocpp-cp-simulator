@@ -24,10 +24,19 @@
 #       --scenario-connector all
 
 ARG BUN_VERSION=1
+# Health-check URL path. Same value is baked into the UI bundle at build
+# time (as VITE_HEALTH_PATH) and re-applied at runtime as the daemon's
+# --health-path flag, so the browser's remote-mode auto-detect probe and
+# the platform's HTTP liveness probe hit the same endpoint. Override with
+# `docker build --build-arg HEALTH_PATH=/your/path .` when deploying
+# behind a proxy that reserves the default (e.g. Google Front End in
+# front of Cloud Run returning 404 on certain reserved paths).
+ARG HEALTH_PATH=/v1/healthz
 
 
 # ----- Stage 1: build the browser UI (Vite -> dist/) -----------------
 FROM oven/bun:${BUN_VERSION}-alpine AS ui
+ARG HEALTH_PATH
 WORKDIR /app
 
 # Need every dep (including devDependencies: vite, plugins, tailwind).
@@ -42,6 +51,10 @@ COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY src ./src
 
+# VITE_HEALTH_PATH is read by src/data/healthPath.ts at build time and
+# inlined into the bundle so the static UI knows which path to probe for
+# Remote-mode auto-detect (and for the Navbar's health poll).
+ENV VITE_HEALTH_PATH=$HEALTH_PATH
 RUN bun run build
 
 
@@ -106,6 +119,13 @@ ENV HTTP_PORT=9700
 # `-e STATE_DB=:memory:` for ephemeral, or `-e STATE_DB=` to drop the
 # flag entirely.
 ENV STATE_DB=/data/state.db
+# Re-export the build-time HEALTH_PATH as a runtime env so the entrypoint
+# can forward it to `--health-path` and so this default is documented next
+# to HTTP_PORT / STATE_DB. Override at run time with
+# `-e HEALTH_PATH=/your/path` IF the UI bundle was built with the same
+# value — they must match for the browser's auto-detect probe to land.
+ARG HEALTH_PATH
+ENV HEALTH_PATH=$HEALTH_PATH
 EXPOSE 9700
 
 # Entrypoint:
@@ -120,4 +140,4 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD []
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${HTTP_PORT}/healthz" >/dev/null 2>&1 || exit 1
+  CMD wget -qO- "http://127.0.0.1:${HTTP_PORT}${HEALTH_PATH}" >/dev/null 2>&1 || exit 1

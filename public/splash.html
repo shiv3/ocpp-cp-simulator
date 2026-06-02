@@ -68,17 +68,21 @@
 
     <script>
       // The splash page lives at tauri://localhost/splash.html. Once the
-      // bundled daemon answers /healthz we redirect the same webview to
-      // http://127.0.0.1:<port>/ where the full web console takes over.
+      // bundled daemon answers its health endpoint we redirect the same
+      // webview to http://127.0.0.1:<port>/ where the full web console
+      // takes over. The path must match the daemon's --health-path
+      // (default /v1/healthz); the sidecar is spawned without that flag,
+      // so the default applies.
       const POLL_INTERVAL_MS = 200;
       const POLL_TIMEOUT_MS = 30_000;
+      const HEALTH_PATH = "/v1/healthz";
 
       async function waitForDaemon() {
         const url = await window.__TAURI__.core.invoke("get_daemon_url");
         const started = Date.now();
         while (Date.now() - started < POLL_TIMEOUT_MS) {
           try {
-            const res = await fetch(`${url}/healthz`, { cache: "no-store" });
+            const res = await fetch(`${url}${HEALTH_PATH}`, { cache: "no-store" });
             if (res.ok) {
               const body = await res.json().catch(() => null);
               if (body && body.ok === true) {
@@ -102,7 +106,7 @@
         sub.classList.add("error");
         sub.innerHTML =
           `The bundled daemon at <code>${url}</code> didn't answer ` +
-          `<code>/healthz</code> within 30 s. ` +
+          `<code>${HEALTH_PATH}</code> within 30 s. ` +
           "Check the app log for spawn failures.";
       }
 

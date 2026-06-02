@@ -13,8 +13,10 @@ const Navbar: React.FC = () => {
   const isRemote = mode === "remote";
   const [health, setHealth] = useState<RemoteHealth>("checking");
 
-  // Poll the daemon's /healthz every 5s while we're in remote mode. Local
-  // mode has no remote to watch, so skip the timer entirely.
+  // Poll the daemon's health endpoint every 5s while we're in remote mode
+  // (the path is whatever the build / daemon were configured with — see
+  // src/data/healthPath.ts). Local mode has no remote to watch, so skip
+  // the timer entirely.
   useEffect(() => {
     if (!isRemote || !chargePointService.ping) {
       setHealth("checking");

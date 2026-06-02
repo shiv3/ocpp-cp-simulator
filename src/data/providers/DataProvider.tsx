@@ -10,6 +10,7 @@ import { Provider as JotaiProvider } from "jotai";
 import { createStore } from "jotai/vanilla";
 
 import type { RuntimeMode } from "../RuntimeMode";
+import { HEALTH_PATH } from "../healthPath";
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ScenarioRepository } from "../interfaces/ScenarioRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
@@ -68,9 +69,10 @@ function readStorage(key: string): string | null {
 }
 
 interface DataContextValue {
-  /** Current runtime mode — auto-detected from the page origin's /healthz
-   *  probe, no manual toggle. `remote` when served by the daemon's
-   *  --web-console; `local` for static builds. */
+  /** Current runtime mode — auto-detected from the page origin's health
+   *  probe (see HEALTH_PATH; default `/v1/healthz`), no manual toggle.
+   *  `remote` when served by the daemon's --web-console; `local` for
+   *  static builds. */
   mode: RuntimeMode;
   serverUrl: string;
   /** Browser-side user-configured default EV settings.
@@ -97,7 +99,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({
   serverUrlOverride,
 }) => {
   // Mode resolution. We never assume a mode at first render — `mode` is
-  // null until /healthz tells us whether we're local or remote. That gate
+  // null until the health probe tells us whether we're local or remote. That gate
   // is important because we only spin up sql.js (~650 KB WASM + IndexedDB
   // read) for the local path; remote mode talks to the daemon's own
   // SQLite via the API and has no use for a browser-side store.
@@ -109,7 +111,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({
   // Server URL: prefer the explicit prop, else the current page origin.
   // The legacy localStorage value is intentionally ignored — Remote mode is
   // only entered through origin auto-detection, which sets the URL to the
-  // origin that successfully answered /healthz.
+  // origin that successfully answered the health probe (HEALTH_PATH).
   const initialServerUrl = useMemo<string>(() => {
     if (serverUrlOverride) return serverUrlOverride;
     if (typeof window !== "undefined") return window.location.origin;
@@ -141,7 +143,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({
   };
 
   // Origin-based mode detection: the only way the UI ever enters Remote
-  // mode. If /healthz at the current origin answers ok, the UI was served
+  // mode. If HEALTH_PATH at the current origin answers ok, the UI was served
   // by `ocpp-cp-sim --web-console` (or the Docker image) and we point the
   // RemoteChargePointService at that same origin. Otherwise we stay Local
   // — true for static builds (GitHub Pages, `bun run dev`, Tauri). No
@@ -152,10 +154,10 @@ export const DataProvider: React.FC<DataProviderProps> = ({
 
     let cancelled = false;
     const origin = window.location.origin;
-    fetch(`${origin}/healthz`, { method: "GET", cache: "no-store" })
+    fetch(`${origin}${HEALTH_PATH}`, { method: "GET", cache: "no-store" })
       .then(async (res) => {
         // `fetch` does NOT reject on HTTP error status — a 404 (e.g. when
-        // the UI is served from GitHub Pages where no /healthz endpoint
+        // the UI is served from GitHub Pages where no health endpoint
         // exists) resolves with res.ok=false. Treat any non-2xx as
         // "no daemon here → Local" so we don't sit in the null-mode
         // initialization gate forever.

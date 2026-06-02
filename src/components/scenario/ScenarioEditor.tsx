@@ -71,11 +71,58 @@ import {
   exportScenarioToJSON,
   importScenarioFromJSON,
 } from "../../utils/scenarioFile";
-import { createDefaultScenario } from "../../cp/application/scenario/defaultScenario";
 import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
+
+/**
+ * Minimal Start → End scenario used as the editor's fallback when no
+ * scenario has been loaded yet. The previous fallback (createDefaultScenario)
+ * carried the full "plug-in → RemoteStart → auto-meter → plug-out" flow,
+ * which auto-seeded itself back into storage after every Reset and made
+ * the "Reset all simulator data" button feel like a no-op. Operators now
+ * pick the canonical demo flow explicitly from the template picker (the
+ * "Essential CP Behavior" template).
+ */
+function createEmptyScenario(
+  chargePointId: string,
+  connectorId: number | null,
+): ScenarioDefinition {
+  const targetType: "chargePoint" | "connector" =
+    connectorId === null ? "chargePoint" : "connector";
+  const now = new Date().toISOString();
+  return {
+    id: `${chargePointId}_${connectorId ?? "cp"}_empty`,
+    name:
+      targetType === "chargePoint"
+        ? `Scenario for ${chargePointId}`
+        : `Scenario for ${chargePointId} Connector ${connectorId}`,
+    description: "",
+    targetType,
+    targetId: connectorId ?? undefined,
+    nodes: [
+      {
+        id: "start",
+        type: "start",
+        position: { x: 400, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "end",
+        type: "end",
+        position: { x: 400, y: 200 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [{ id: "e-start-end", source: "start", target: "end" }],
+    createdAt: now,
+    updatedAt: now,
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+  };
+}
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { useDataContext } from "../../data/providers/DataProvider";
@@ -140,7 +187,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // acceptable for first-mount; the editor doesn't render different DOM
   // for a "loaded" vs "loading" scenario.
   const [scenario, setScenario] = useState<ScenarioDefinition>(
-    () => scenarioProp ?? createDefaultScenario(cpId, connectorId),
+    () => scenarioProp ?? createEmptyScenario(cpId, connectorId),
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);

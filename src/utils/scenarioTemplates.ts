@@ -1,8 +1,18 @@
 import {
   ScenarioDefinition,
-  ScenarioNodeType,
+  ScenarioNode,
+  ScenarioTrigger,
+  ScenarioExecutionMode,
 } from "../cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import type { Edge } from "@xyflow/react";
+
+import essentialCpBehaviorJson from "./scenarios/essential-cp-behavior.json";
+import fullChargingCycleJson from "./scenarios/full-charging-cycle.json";
+import smartChargingJson from "./scenarios/smart-charging.json";
+import multiStatusMonitorJson from "./scenarios/multi-status-monitor.json";
+import statusTriggeredActionsJson from "./scenarios/status-triggered-actions.json";
+import remoteStartAutoMeterJson from "./scenarios/remote-start-auto-meter.json";
 
 export interface ScenarioTemplate {
   id: string;
@@ -16,748 +26,81 @@ export interface ScenarioTemplate {
 }
 
 /**
- * Template: Smart Charging with Auto MeterValue
- * Practical scenario that automatically increases MeterValue triggered by status changes
+ * Shape of every JSON file under ./scenarios/. The `scenario` block is a
+ * ScenarioDefinition without the runtime fields — `id`, `targetId`,
+ * `createdAt`, `updatedAt` are synthesized at instantiation time so each
+ * load yields a distinct, persistable instance.
  */
-const smartChargingTemplate: ScenarioTemplate = {
-  id: "smart-charging",
-  name: "Smart Charging (Auto MeterValue)",
-  description: "Auto-increment MeterValue when Charging, stop when Finishing",
-  targetType: "connector",
-  createScenario: (chargePointId, connectorId) => ({
-    id: `scenario-${Date.now()}`,
-    name: "Smart Charging",
-    description: "Auto MeterValue with status triggers",
-    targetType: "connector",
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start-1",
-        type: ScenarioNodeType.START,
-        position: { x: 400, y: 50 },
-        data: { label: "Start" },
-      },
-      // Wait for Charging to start
-      {
-        id: "trigger-charging",
-        type: ScenarioNodeType.STATUS_TRIGGER,
-        position: { x: 400, y: 150 },
-        data: {
-          label: "Wait for Charging",
-          targetStatus: OCPPStatus.Charging,
-          timeout: 0,
-        },
-      },
-      // Start AutoMeterValue (1kW/10sec, max 30kWh)
-      {
-        id: "meter-auto",
-        type: ScenarioNodeType.METER_VALUE,
-        position: { x: 400, y: 250 },
-        data: {
-          label: "Start Auto MeterValue",
-          value: 0,
-          sendMessage: true,
-          autoIncrement: true,
-          incrementInterval: 10,
-          incrementAmount: 1000,
-          maxValue: 30000,
-          maxTime: 0,
-        },
-      },
-      // Wait for Finishing/Available to stop AutoMeterValue
-      {
-        id: "trigger-finish",
-        type: ScenarioNodeType.STATUS_TRIGGER,
-        position: { x: 400, y: 350 },
-        data: {
-          label: "Wait for Finishing",
-          targetStatus: OCPPStatus.Finishing,
-          timeout: 0,
-        },
-      },
-      {
-        id: "end-1",
-        type: ScenarioNodeType.END,
-        position: { x: 400, y: 450 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [
-      { id: "e-start-charging", source: "start-1", target: "trigger-charging" },
-      {
-        id: "e-charging-meter",
-        source: "trigger-charging",
-        target: "meter-auto",
-      },
-      { id: "e-meter-finish", source: "meter-auto", target: "trigger-finish" },
-      { id: "e-finish-end", source: "trigger-finish", target: "end-1" },
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    trigger: {
-      type: "manual",
-    },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  }),
-};
+interface TemplateJson {
+  templateId: string;
+  templateName: string;
+  templateDescription: string;
+  scenario: {
+    name: string;
+    description?: string;
+    targetType: "chargePoint" | "connector";
+    nodes: ScenarioNode[];
+    edges: Edge[];
+    trigger?: ScenarioTrigger;
+    defaultExecutionMode?: ScenarioExecutionMode;
+    enabled?: boolean;
+    evSettings?: Partial<EVSettings>;
+  };
+}
 
 /**
- * Template: Multi-Status Monitor (Parallel)
- * Monitor multiple statuses simultaneously using parallel execution
+ * Wrap a JSON template into the ScenarioTemplate interface the editor
+ * and CLI registry consume. `createScenario`:
+ *  - Generates a unique scenario id that bakes in the template id, cpId
+ *    and connectorId so the daemon's per-connector seed loop in
+ *    CPRegistry.create doesn't collide on Date.now() and overwrite
+ *    earlier connectors' `_scenarios` entries.
+ *  - Deep-clones nodes/edges so each instance can be mutated
+ *    independently by the editor without leaking back to the JSON.
  */
-const multiStatusMonitorTemplate: ScenarioTemplate = {
-  id: "multi-status-monitor",
-  name: "Multi-Status Monitor (Parallel)",
-  description:
-    "Monitor multiple statuses in parallel and execute different actions",
-  targetType: "connector",
-  createScenario: (chargePointId, connectorId) => ({
-    id: `scenario-${Date.now()}`,
-    name: "Multi-Status Monitor",
-    description: "Parallel status monitoring",
-    targetType: "connector",
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start-1",
-        type: ScenarioNodeType.START,
-        position: { x: 400, y: 50 },
-        data: { label: "Start" },
-      },
-      // Branch 1: Available -> Send Heartbeat
-      {
-        id: "trigger-available",
-        type: ScenarioNodeType.STATUS_TRIGGER,
-        position: { x: 150, y: 200 },
-        data: {
-          label: "Wait: Available",
-          targetStatus: OCPPStatus.Available,
-          timeout: 0,
-        },
-      },
-      {
-        id: "notify-available",
-        type: ScenarioNodeType.NOTIFICATION,
-        position: { x: 150, y: 300 },
-        data: {
-          label: "Send Heartbeat",
-          messageType: "Heartbeat",
-          payload: {},
-        },
-      },
-      {
-        id: "end-available",
-        type: ScenarioNodeType.END,
-        position: { x: 150, y: 400 },
-        data: { label: "End" },
-      },
-      // Branch 2: Charging -> Start AutoMeterValue
-      {
-        id: "trigger-charging",
-        type: ScenarioNodeType.STATUS_TRIGGER,
-        position: { x: 400, y: 200 },
-        data: {
-          label: "Wait: Charging",
-          targetStatus: OCPPStatus.Charging,
-          timeout: 0,
-        },
-      },
-      {
-        id: "meter-charging",
-        type: ScenarioNodeType.METER_VALUE,
-        position: { x: 400, y: 300 },
-        data: {
-          label: "Auto MeterValue",
-          value: 0,
-          sendMessage: true,
-          autoIncrement: true,
-          incrementInterval: 10,
-          incrementAmount: 1000,
-          maxValue: 20000,
-          maxTime: 0,
-        },
-      },
-      {
-        id: "end-charging",
-        type: ScenarioNodeType.END,
-        position: { x: 400, y: 400 },
-        data: { label: "End" },
-      },
-      // Branch 3: Faulted -> Send Error Log
-      {
-        id: "trigger-faulted",
-        type: ScenarioNodeType.STATUS_TRIGGER,
-        position: { x: 650, y: 200 },
-        data: {
-          label: "Wait: Faulted",
-          targetStatus: OCPPStatus.Faulted,
-          timeout: 0,
-        },
-      },
-      {
-        id: "notify-faulted",
-        type: ScenarioNodeType.NOTIFICATION,
-        position: { x: 650, y: 300 },
-        data: {
-          label: "Send Status",
-          messageType: "StatusNotification",
-          payload: { status: "Faulted" },
-        },
-      },
-      {
-        id: "end-faulted",
-        type: ScenarioNodeType.END,
-        position: { x: 650, y: 400 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [
-      // Branch 1
-      {
-        id: "e-start-available",
-        source: "start-1",
-        target: "trigger-available",
-      },
-      {
-        id: "e-available-notify",
-        source: "trigger-available",
-        target: "notify-available",
-      },
-      {
-        id: "e-notify-end1",
-        source: "notify-available",
-        target: "end-available",
-      },
-      // Branch 2
-      { id: "e-start-charging", source: "start-1", target: "trigger-charging" },
-      {
-        id: "e-charging-meter",
-        source: "trigger-charging",
-        target: "meter-charging",
-      },
-      { id: "e-meter-end2", source: "meter-charging", target: "end-charging" },
-      // Branch 3
-      { id: "e-start-faulted", source: "start-1", target: "trigger-faulted" },
-      {
-        id: "e-faulted-notify",
-        source: "trigger-faulted",
-        target: "notify-faulted",
-      },
-      { id: "e-notify-end3", source: "notify-faulted", target: "end-faulted" },
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    trigger: {
-      type: "manual",
+function templateFromJson(json: TemplateJson): ScenarioTemplate {
+  return {
+    id: json.templateId,
+    name: json.templateName,
+    description: json.templateDescription,
+    targetType: json.scenario.targetType,
+    createScenario: (chargePointId, connectorId) => {
+      const now = new Date().toISOString();
+      const suffix = Math.random().toString(36).slice(2, 8);
+      return {
+        ...json.scenario,
+        id: `${json.templateId}-${chargePointId}-c${connectorId ?? "cp"}-${Date.now()}-${suffix}`,
+        targetType: json.scenario.targetType,
+        targetId: connectorId ?? undefined,
+        nodes: structuredClone(json.scenario.nodes),
+        edges: structuredClone(json.scenario.edges),
+        trigger: json.scenario.trigger ?? { type: "manual" },
+        defaultExecutionMode: json.scenario.defaultExecutionMode ?? "oneshot",
+        enabled: json.scenario.enabled ?? true,
+        evSettings: json.scenario.evSettings
+          ? structuredClone(json.scenario.evSettings)
+          : undefined,
+        createdAt: now,
+        updatedAt: now,
+      };
     },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  }),
-};
-
-/**
- * Template: Full Charging Cycle
- * Complete charging cycle: Available → Preparing → Charging(AutoMeterValue) → Finishing → Available
- */
-const fullChargingCycleTemplate: ScenarioTemplate = {
-  id: "full-charging-cycle",
-  name: "Full Charging Cycle",
-  description: "Complete charging cycle with AutoMeterValue",
-  targetType: "connector",
-  createScenario: (chargePointId, connectorId) => ({
-    id: `scenario-${Date.now()}`,
-    name: "Full Charging Cycle",
-    description: "Complete charging cycle",
-    targetType: "connector",
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start-1",
-        type: ScenarioNodeType.START,
-        position: { x: 400, y: 50 },
-        data: { label: "Start" },
-      },
-      {
-        id: "status-available",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 150 },
-        data: { label: "Set Available", status: OCPPStatus.Available },
-      },
-      {
-        id: "status-preparing",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 250 },
-        data: { label: "Set Preparing", status: OCPPStatus.Preparing },
-      },
-      {
-        id: "transaction-start",
-        type: ScenarioNodeType.TRANSACTION,
-        position: { x: 400, y: 350 },
-        data: {
-          label: "Start Transaction",
-          action: "start",
-          tagId: "USER001",
-          batteryCapacityKwh: 60,
-          initialSoc: 20,
-        },
-      },
-      {
-        id: "status-charging",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 450 },
-        data: { label: "Set Charging", status: OCPPStatus.Charging },
-      },
-      {
-        id: "meter-auto",
-        type: ScenarioNodeType.METER_VALUE,
-        position: { x: 400, y: 550 },
-        data: {
-          label: "Auto MeterValue",
-          value: 0,
-          sendMessage: true,
-          autoIncrement: true,
-          incrementInterval: 5,
-          incrementAmount: 500,
-          maxValue: 25000, // 25kWh
-          maxTime: 300, // 5 minutes
-        },
-      },
-      {
-        id: "delay-charging",
-        type: ScenarioNodeType.DELAY,
-        position: { x: 400, y: 650 },
-        data: { label: "Charging Complete", delaySeconds: 5 },
-      },
-      {
-        id: "transaction-stop",
-        type: ScenarioNodeType.TRANSACTION,
-        position: { x: 400, y: 750 },
-        data: { label: "Stop Transaction", action: "stop" },
-      },
-      {
-        id: "status-finishing",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 850 },
-        data: { label: "Set Finishing", status: OCPPStatus.Finishing },
-      },
-      {
-        id: "status-available2",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 950 },
-        data: { label: "Set Available", status: OCPPStatus.Available },
-      },
-      {
-        id: "end-1",
-        type: ScenarioNodeType.END,
-        position: { x: 400, y: 1050 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [
-      {
-        id: "e-start-available",
-        source: "start-1",
-        target: "status-available",
-      },
-      {
-        id: "e-available-preparing",
-        source: "status-available",
-        target: "status-preparing",
-      },
-      {
-        id: "e-preparing-txstart",
-        source: "status-preparing",
-        target: "transaction-start",
-      },
-      {
-        id: "e-txstart-charging",
-        source: "transaction-start",
-        target: "status-charging",
-      },
-      {
-        id: "e-charging-meter",
-        source: "status-charging",
-        target: "meter-auto",
-      },
-      { id: "e-meter-delay", source: "meter-auto", target: "delay-charging" },
-      {
-        id: "e-delay-txstop",
-        source: "delay-charging",
-        target: "transaction-stop",
-      },
-      {
-        id: "e-txstop-finishing",
-        source: "transaction-stop",
-        target: "status-finishing",
-      },
-      {
-        id: "e-finishing-available2",
-        source: "status-finishing",
-        target: "status-available2",
-      },
-      { id: "e-available2-end", source: "status-available2", target: "end-1" },
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    trigger: {
-      type: "manual",
-    },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  }),
-};
-
-/**
- * Template: Status-Triggered Auto Actions
- * Parallel actions automatically executed on status change
- */
-const statusTriggeredActionsTemplate: ScenarioTemplate = {
-  id: "status-triggered-actions",
-  name: "Status-Triggered Auto Actions",
-  description: "Auto-execute on status change (Heartbeat loop when Available)",
-  targetType: "connector",
-  createScenario: (chargePointId, connectorId) => ({
-    id: `scenario-${Date.now()}`,
-    name: "Auto Heartbeat",
-    description: "Periodic Heartbeat sender",
-    targetType: "connector",
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start-1",
-        type: ScenarioNodeType.START,
-        position: { x: 400, y: 50 },
-        data: { label: "Start" },
-      },
-      {
-        id: "trigger-available",
-        type: ScenarioNodeType.STATUS_TRIGGER,
-        position: { x: 400, y: 150 },
-        data: {
-          label: "Wait for Available",
-          targetStatus: OCPPStatus.Available,
-          timeout: 0,
-        },
-      },
-      {
-        id: "notification-heartbeat",
-        type: ScenarioNodeType.NOTIFICATION,
-        position: { x: 400, y: 250 },
-        data: {
-          label: "Send Heartbeat",
-          messageType: "Heartbeat",
-          payload: {},
-        },
-      },
-      {
-        id: "delay-10s",
-        type: ScenarioNodeType.DELAY,
-        position: { x: 400, y: 350 },
-        data: { label: "Wait 10s", delaySeconds: 10 },
-      },
-      {
-        id: "end-1",
-        type: ScenarioNodeType.END,
-        position: { x: 400, y: 450 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [
-      { id: "e-start-trigger", source: "start-1", target: "trigger-available" },
-      {
-        id: "e-trigger-notify",
-        source: "trigger-available",
-        target: "notification-heartbeat",
-      },
-      {
-        id: "e-notify-delay",
-        source: "notification-heartbeat",
-        target: "delay-10s",
-      },
-      {
-        id: "e-delay-notify",
-        source: "delay-10s",
-        target: "notification-heartbeat",
-      }, // Loop back
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    trigger: {
-      type: "statusChange",
-      conditions: {
-        toStatus: OCPPStatus.Available,
-      },
-    },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  }),
-};
-
-/**
- * Template: Remote Start with Auto MeterValue
- * Start charging + AutoMeterValue triggered by RemoteStart
- */
-const remoteStartAutoMeterTemplate: ScenarioTemplate = {
-  id: "remote-start-auto-meter",
-  name: "Remote Start + Auto MeterValue",
-  description: "Wait RemoteStartTransaction → Start charging → AutoMeterValue",
-  targetType: "connector",
-  createScenario: (chargePointId, connectorId) => ({
-    id: `scenario-${Date.now()}`,
-    name: "Remote Start + Auto Meter",
-    description: "Remote start with automatic meter value",
-    targetType: "connector",
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start-1",
-        type: ScenarioNodeType.START,
-        position: { x: 400, y: 50 },
-        data: { label: "Start" },
-      },
-      {
-        id: "trigger-remote",
-        type: ScenarioNodeType.REMOTE_START_TRIGGER,
-        position: { x: 400, y: 150 },
-        data: { label: "Wait RemoteStart", timeout: 0 },
-      },
-      {
-        id: "status-preparing",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 250 },
-        data: { label: "Set Preparing", status: OCPPStatus.Preparing },
-      },
-      {
-        id: "transaction-start",
-        type: ScenarioNodeType.TRANSACTION,
-        position: { x: 400, y: 350 },
-        data: {
-          label: "Start Transaction",
-          action: "start",
-          tagId: "REMOTE001",
-        },
-      },
-      {
-        id: "status-charging",
-        type: ScenarioNodeType.STATUS_CHANGE,
-        position: { x: 400, y: 450 },
-        data: { label: "Set Charging", status: OCPPStatus.Charging },
-      },
-      {
-        id: "meter-auto",
-        type: ScenarioNodeType.METER_VALUE,
-        position: { x: 400, y: 550 },
-        data: {
-          label: "Auto MeterValue",
-          value: 0,
-          sendMessage: true,
-          autoIncrement: true,
-          incrementInterval: 10,
-          incrementAmount: 1000,
-          maxValue: 0, // unlimited
-          maxTime: 0, // unlimited
-        },
-      },
-      {
-        id: "end-1",
-        type: ScenarioNodeType.END,
-        position: { x: 400, y: 650 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [
-      { id: "e-start-remote", source: "start-1", target: "trigger-remote" },
-      {
-        id: "e-remote-preparing",
-        source: "trigger-remote",
-        target: "status-preparing",
-      },
-      {
-        id: "e-preparing-tx",
-        source: "status-preparing",
-        target: "transaction-start",
-      },
-      {
-        id: "e-tx-charging",
-        source: "transaction-start",
-        target: "status-charging",
-      },
-      {
-        id: "e-charging-meter",
-        source: "status-charging",
-        target: "meter-auto",
-      },
-      { id: "e-meter-end", source: "meter-auto", target: "end-1" },
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    trigger: {
-      type: "manual",
-    },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  }),
-};
-
-/**
- * Template: Essential CP behavior — the canonical "do nothing weird,
- * just respond to a CSMS-initiated transaction" flow operators want for
- * 90% of integration testing:
- *
- *   Start (on connect) → wait 2s → Plug In → wait 1s
- *     → wait for RemoteStartTransaction (no timeout)
- *     → StartTransaction (TAG001)
- *     → MeterValue 0 Wh, autoIncrement +1000 Wh / 5s
- *     → StopTransaction
- *     → Plug Out → End
- *
- * Auto-starts on connect (matches the default `Start.triggerOn`), so a
- * fresh CP rendered with this template loaded behaves the same as a
- * real CP that's quietly waiting for the CSMS to remote-start it.
- * Drop it onto a new CP and you have a working e2e flow without
- * hand-wiring auto-meter-value config and a scenario yourself.
- */
-const essentialCpBehaviorTemplate: ScenarioTemplate = {
-  id: "essential-cp-behavior",
-  name: "Essential CP Behavior",
-  description:
-    "Auto-start on connect: plug in, wait for RemoteStart, run a transaction with auto-meter, then plug out.",
-  targetType: "connector",
-  createScenario: (chargePointId, connectorId) => ({
-    // `connectorId` baked in so the seed loop in CPRegistry.create
-    // (one call per connector, all within the same millisecond) doesn't
-    // collide on `Date.now()` and overwrite earlier connectors' rows in
-    // `_scenarios`. The trailing random suffix guards against the same
-    // operator instantiating the template twice for the same connector.
-    id: `essential-${chargePointId}-c${connectorId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: "Essential CP Behavior",
-    description:
-      "Standard plug-in / RemoteStart / charge / RemoteStop / plug-out cycle",
-    targetType: "connector",
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start-1",
-        type: ScenarioNodeType.START,
-        position: { x: 400, y: 50 },
-        data: { label: "Start", triggerOn: "connect" },
-      },
-      {
-        id: "delay-2s",
-        type: ScenarioNodeType.DELAY,
-        position: { x: 400, y: 150 },
-        data: { label: "Wait 2s", delaySeconds: 2 },
-      },
-      {
-        id: "plug-in",
-        type: ScenarioNodeType.CONNECTOR_PLUG,
-        position: { x: 400, y: 250 },
-        data: { label: "Plug In", action: "plugin" },
-      },
-      {
-        id: "delay-1s",
-        type: ScenarioNodeType.DELAY,
-        position: { x: 400, y: 350 },
-        data: { label: "Wait 1s", delaySeconds: 1 },
-      },
-      {
-        id: "trigger-remote-start",
-        type: ScenarioNodeType.REMOTE_START_TRIGGER,
-        position: { x: 400, y: 450 },
-        data: { label: "Wait for RemoteStartTransaction", timeout: 0 },
-      },
-      {
-        id: "tx-start",
-        type: ScenarioNodeType.TRANSACTION,
-        position: { x: 400, y: 550 },
-        data: {
-          label: "Start Transaction",
-          action: "start",
-          tagId: "TAG001",
-        },
-      },
-      {
-        id: "meter-auto",
-        type: ScenarioNodeType.METER_VALUE,
-        position: { x: 400, y: 650 },
-        data: {
-          label: "Auto MeterValue",
-          value: 0,
-          sendMessage: true,
-          autoIncrement: true,
-          incrementInterval: 5,
-          incrementAmount: 1000,
-          // Unbounded: maxValue/maxTime=0 means the node returns
-          // immediately and the auto-meter scheduler keeps ticking in the
-          // background. The follow-up RemoteStopTrigger parks the scenario
-          // until CSMS sends RemoteStopTransaction.req; Transaction Stop
-          // is what actually tears the scheduler down.
-          maxValue: 0,
-          maxTime: 0,
-        },
-      },
-      {
-        id: "trigger-remote-stop",
-        type: ScenarioNodeType.REMOTE_STOP_TRIGGER,
-        position: { x: 400, y: 750 },
-        data: { label: "Wait for RemoteStopTransaction", timeout: 0 },
-      },
-      {
-        id: "tx-stop",
-        type: ScenarioNodeType.TRANSACTION,
-        position: { x: 400, y: 850 },
-        data: { label: "Stop Transaction", action: "stop" },
-      },
-      {
-        id: "plug-out",
-        type: ScenarioNodeType.CONNECTOR_PLUG,
-        position: { x: 400, y: 950 },
-        data: { label: "Plug Out", action: "plugout" },
-      },
-      {
-        id: "end-1",
-        type: ScenarioNodeType.END,
-        position: { x: 400, y: 1050 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [
-      { id: "e1", source: "start-1", target: "delay-2s" },
-      { id: "e2", source: "delay-2s", target: "plug-in" },
-      { id: "e3", source: "plug-in", target: "delay-1s" },
-      { id: "e4", source: "delay-1s", target: "trigger-remote-start" },
-      { id: "e5", source: "trigger-remote-start", target: "tx-start" },
-      { id: "e6", source: "tx-start", target: "meter-auto" },
-      { id: "e7", source: "meter-auto", target: "trigger-remote-stop" },
-      { id: "e8", source: "trigger-remote-stop", target: "tx-stop" },
-      { id: "e9", source: "tx-stop", target: "plug-out" },
-      { id: "e10", source: "plug-out", target: "end-1" },
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    trigger: { type: "manual" },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  }),
-};
+  };
+}
 
 /**
  * All available templates. Essential first so it surfaces at the top of
- * the template picker — it's the one operators want by default.
+ * the template picker and also as the seed in CPRegistry.create —
+ * matches src/utils/scenarios/essential-cp-behavior.json.
  */
 export const scenarioTemplates: ScenarioTemplate[] = [
-  essentialCpBehaviorTemplate,
-  fullChargingCycleTemplate,
-  smartChargingTemplate,
-  multiStatusMonitorTemplate,
-  statusTriggeredActionsTemplate,
-  remoteStartAutoMeterTemplate,
+  templateFromJson(essentialCpBehaviorJson as TemplateJson),
+  templateFromJson(fullChargingCycleJson as TemplateJson),
+  templateFromJson(smartChargingJson as TemplateJson),
+  templateFromJson(multiStatusMonitorJson as TemplateJson),
+  templateFromJson(statusTriggeredActionsJson as TemplateJson),
+  templateFromJson(remoteStartAutoMeterJson as TemplateJson),
 ];
 
-/**
- * Get template by ID
- */
 export function getTemplateById(
   templateId: string,
 ): ScenarioTemplate | undefined {

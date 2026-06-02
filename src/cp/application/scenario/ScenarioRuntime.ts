@@ -140,6 +140,63 @@ const waitForRemoteStart = (
   };
 };
 
+/** Mirror of waitForRemoteStart, but for the CSMS-initiated stop side.
+ *  Registers a scenario-stop handler on the CP so the default
+ *  RemoteStopTransactionHandler defers, then waits for the emitted
+ *  `remoteStopReceived` event. Resolves with the transactionId from the
+ *  CSMS request. Rejects on disconnect or timeout. */
+const waitForRemoteStop = (
+  chargePoint: ChargePoint,
+  connector: Connector,
+  timeout?: number,
+): CancellableWait<number> => {
+  chargePoint.registerScenarioStopHandler(connector.id);
+
+  let cleanupFn: (() => void) | null = null;
+
+  const promise = new Promise<number>((resolve, reject) => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      chargePoint.events.off("remoteStopReceived", handler);
+      chargePoint.events.off("disconnected", disconnectHandler);
+      chargePoint.unregisterScenarioStopHandler(connector.id);
+    };
+
+    cleanupFn = cleanup;
+
+    const handler = (data: { connectorId: number; transactionId: number }) => {
+      if (data.connectorId !== connector.id) return;
+      cleanup();
+      resolve(data.transactionId);
+    };
+
+    const disconnectHandler = () => {
+      cleanup();
+      reject(new Error("Disconnected while waiting for remote stop"));
+    };
+
+    chargePoint.events.on("remoteStopReceived", handler);
+    chargePoint.events.on("disconnected", disconnectHandler);
+
+    if (timeout && timeout > 0) {
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timeout waiting for remote stop (${timeout}s)`));
+      }, timeout * 1000);
+    }
+  });
+
+  return {
+    promise,
+    cancel: () => cleanupFn?.(),
+  };
+};
+
 const waitForReservation = (
   chargePoint: ChargePoint,
   connector: Connector,
@@ -305,6 +362,18 @@ export const createScenarioExecutorCallbacks = (
         return await promise;
       } finally {
         // Ensure cleanup even if the promise is abandoned (e.g., force-skip, scenario stop)
+        cancel();
+      }
+    },
+    onWaitForRemoteStop: async (timeout) => {
+      const { promise, cancel } = waitForRemoteStop(
+        chargePoint,
+        connector,
+        timeout,
+      );
+      try {
+        return await promise;
+      } finally {
         cancel();
       }
     },

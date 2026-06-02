@@ -52,6 +52,12 @@ export class ChargePoint {
   private _error = "";
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
   private readonly _scenarioHandledConnectors: Set<number> = new Set();
+  // Mirror of _scenarioHandledConnectors but for the stop side. When a
+  // connector id is in this set, the RemoteStopTransaction default
+  // handler defers to the scenario instead of stopping the transaction
+  // itself — the scenario is parked on a RemoteStopTrigger node and will
+  // resume into its own Transaction Stop step.
+  private readonly _scenarioStopHandledConnectors: Set<number> = new Set();
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
@@ -391,6 +397,29 @@ export class ChargePoint {
     this._events.emit("remoteStartReceived", { connectorId, tagId });
   }
 
+  /**
+   * Counterpart of registerScenarioHandler for the stop side: a
+   * RemoteStopTrigger scenario node registers here so the next
+   * RemoteStopTransaction.req from CSMS gets routed into the scenario
+   * via `remoteStopReceived` instead of the default handler running
+   * stopTransaction() right away.
+   */
+  registerScenarioStopHandler(connectorId: number): void {
+    this._scenarioStopHandledConnectors.add(connectorId);
+  }
+
+  unregisterScenarioStopHandler(connectorId: number): void {
+    this._scenarioStopHandledConnectors.delete(connectorId);
+  }
+
+  isScenarioStopHandled(connectorId: number): boolean {
+    return this._scenarioStopHandledConnectors.has(connectorId);
+  }
+
+  notifyRemoteStopReceived(connectorId: number, transactionId: number): void {
+    this._events.emit("remoteStopReceived", { connectorId, transactionId });
+  }
+
   set loggingCallback(callback: (entry: LogEntry) => void) {
     this._logger._loggingCallback = callback;
   }
@@ -557,6 +586,7 @@ export class ChargePoint {
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._scenarioHandledConnectors.clear();
+    this._scenarioStopHandledConnectors.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
     this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));

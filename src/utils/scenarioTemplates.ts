@@ -683,30 +683,37 @@ const essentialCpBehaviorTemplate: ScenarioTemplate = {
           autoIncrement: true,
           incrementInterval: 5,
           incrementAmount: 1000,
-          // Unbounded: the scenario advances past this node immediately and
-          // the scheduler keeps ticking in the background until the next
-          // Stop Transaction node (or a RemoteStop / Plug Out) tears it
-          // down — which is exactly what real CPs do while charging.
+          // Unbounded: maxValue/maxTime=0 means the node returns
+          // immediately and the auto-meter scheduler keeps ticking in the
+          // background. The follow-up RemoteStopTrigger parks the scenario
+          // until CSMS sends RemoteStopTransaction.req; Transaction Stop
+          // is what actually tears the scheduler down.
           maxValue: 0,
           maxTime: 0,
         },
       },
       {
+        id: "trigger-remote-stop",
+        type: ScenarioNodeType.REMOTE_STOP_TRIGGER,
+        position: { x: 400, y: 750 },
+        data: { label: "Wait for RemoteStopTransaction", timeout: 0 },
+      },
+      {
         id: "tx-stop",
         type: ScenarioNodeType.TRANSACTION,
-        position: { x: 400, y: 750 },
+        position: { x: 400, y: 850 },
         data: { label: "Stop Transaction", action: "stop" },
       },
       {
         id: "plug-out",
         type: ScenarioNodeType.CONNECTOR_PLUG,
-        position: { x: 400, y: 850 },
+        position: { x: 400, y: 950 },
         data: { label: "Plug Out", action: "plugout" },
       },
       {
         id: "end-1",
         type: ScenarioNodeType.END,
-        position: { x: 400, y: 950 },
+        position: { x: 400, y: 1050 },
         data: { label: "End" },
       },
     ],
@@ -717,9 +724,10 @@ const essentialCpBehaviorTemplate: ScenarioTemplate = {
       { id: "e4", source: "delay-1s", target: "trigger-remote-start" },
       { id: "e5", source: "trigger-remote-start", target: "tx-start" },
       { id: "e6", source: "tx-start", target: "meter-auto" },
-      { id: "e7", source: "meter-auto", target: "tx-stop" },
-      { id: "e8", source: "tx-stop", target: "plug-out" },
-      { id: "e9", source: "plug-out", target: "end-1" },
+      { id: "e7", source: "meter-auto", target: "trigger-remote-stop" },
+      { id: "e8", source: "trigger-remote-stop", target: "tx-stop" },
+      { id: "e9", source: "tx-stop", target: "plug-out" },
+      { id: "e10", source: "plug-out", target: "end-1" },
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

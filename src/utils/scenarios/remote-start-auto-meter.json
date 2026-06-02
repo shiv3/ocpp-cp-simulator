@@ -1,0 +1,91 @@
+{
+  "id": "remote-start-auto-meter",
+  "name": "Remote Start + Auto MeterValue",
+  "description": "Wait RemoteStartTransaction → Start charging → AutoMeterValue",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "trigger-remote",
+      "type": "remoteStartTrigger",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Wait RemoteStart", "timeout": 0 }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "transaction-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "REMOTE001"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 10,
+        "incrementAmount": 1000,
+        "maxValue": 0,
+        "maxTime": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e-start-remote", "source": "start-1", "target": "trigger-remote" },
+    {
+      "id": "e-remote-preparing",
+      "source": "trigger-remote",
+      "target": "status-preparing"
+    },
+    {
+      "id": "e-preparing-tx",
+      "source": "status-preparing",
+      "target": "transaction-start"
+    },
+    {
+      "id": "e-tx-charging",
+      "source": "transaction-start",
+      "target": "status-charging"
+    },
+    {
+      "id": "e-charging-meter",
+      "source": "status-charging",
+      "target": "meter-auto"
+    },
+    { "id": "e-meter-end", "source": "meter-auto", "target": "end-1" }
+  ]
+}

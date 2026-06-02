@@ -4,13 +4,21 @@ import ChargePointConfigModal, {
   ChargePointConfig,
   defaultChargePointConfig,
 } from "./ChargePointConfigModal.tsx";
-import { Plus, Settings, Trash2 } from "lucide-react";
+import { Plus, Settings, Trash2, Layers } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { useConfig } from "../data/hooks/useConfig";
 import { useChargePoints } from "../data/hooks/useChargePoints";
 import { useDataContext } from "../data/providers/DataProvider";
 import type { ChargePointSnapshot } from "../data/interfaces/ChargePointService";
+import { getTemplateById } from "../utils/scenarioTemplates";
 import type { Config } from "../store/store";
 
 const REMOTE_TAG_IDS_KEY = "ocpp-cp.remote.tagIds";
@@ -40,7 +48,7 @@ function writeRemoteTagIds(ids: string[]): void {
 }
 
 const TopPage: React.FC = () => {
-  const { mode, chargePointService } = useDataContext();
+  const { mode, chargePointService, scenarioRepository } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
   const [tagIDs, setTagIDs] = useState<string[]>(() =>
     typeof window === "undefined" ? [] : readRemoteTagIds(),
@@ -65,19 +73,60 @@ const TopPage: React.FC = () => {
     [config],
   );
 
+  // Remote mode: the daemon owns CP configuration, so we derive the edit
+  // form's prefill from the snapshot's `config` block (POST/PUT /v1/cp echo)
+  // rather than the local config store. Keyed on chargePoints (the daemon's
+  // CP roster) so adding/editing/removing a CP updates the list immediately.
+  const chargePointsKey = useMemo(
+    () => chargePoints.map((c) => c.id).join("|"),
+    [chargePoints],
+  );
+
   useEffect(() => {
     // The local config drives the local tag list; in remote mode we keep
     // whatever the user persisted via the Add CP modal so Authorize / Start
     // Transaction still have a non-empty tag id after reload.
+    if (mode === "remote") {
+      // Remote: build config rows from the daemon snapshot. Fall back
+      // safely when the daemon predates the `config` snapshot field so an
+      // older deployment doesn't blank out the tab labels.
+      const remoteConfigs: ChargePointConfig[] = chargePoints.map((cp) => {
+        const c = cp.config;
+        const bn = c?.bootNotification ?? null;
+        return {
+          cpId: cp.id,
+          connectorNumber: c?.connectors ?? cp.connectors.length,
+          wsURL: c?.wsUrl ?? "",
+          ocppVersion: "OCPP-1.6J",
+          basicAuthEnabled: !!c?.basicAuth,
+          basicAuthUsername: c?.basicAuth?.username ?? "",
+          basicAuthPassword: c?.basicAuth?.password ?? "",
+          autoMeterValueEnabled: false,
+          autoMeterValueInterval: 30,
+          autoMeterValue: 10,
+          chargePointVendor: c?.vendor ?? "Vendor",
+          chargePointModel: c?.model ?? "Model",
+          firmwareVersion: bn?.firmwareVersion ?? "1.0",
+          chargeBoxSerialNumber: bn?.chargeBoxSerialNumber ?? "",
+          chargePointSerialNumber: bn?.chargePointSerialNumber ?? "",
+          meterSerialNumber: bn?.meterSerialNumber ?? "",
+          meterType: bn?.meterType ?? "",
+          iccid: bn?.iccid ?? "",
+          imsi: bn?.imsi ?? "",
+          tagIds: tagIDs.length > 0 ? tagIDs : ["123456"],
+        };
+      });
+      setChargePointConfigs(remoteConfigs);
+      return;
+    }
+
     if (isLoading || !config || !config.Experimental) {
-      if (mode === "local") setTagIDs([]);
+      setTagIDs([]);
       setChargePointConfigs([]);
       return;
     }
 
-    if (mode === "local") {
-      setTagIDs(config.Experimental.TagIDs ?? []);
-    }
+    setTagIDs(config.Experimental.TagIDs ?? []);
 
     const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map(
       (cp) => ({
@@ -108,7 +157,7 @@ const TopPage: React.FC = () => {
     );
     setChargePointConfigs(configs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configKey, isLoading, mode]);
+  }, [configKey, isLoading, mode, chargePointsKey]);
 
   const handleAddChargePoint = () => {
     setEditingIndex(null);
@@ -129,7 +178,12 @@ const TopPage: React.FC = () => {
         writeRemoteTagIds(cpConfig.tagIds);
       }
       try {
-        await chargePointService.createChargePoint?.({
+        // Re-use the same shape for create and update; the only difference
+        // is which daemon endpoint we hit. Editing an existing CP goes to
+        // PUT /v1/cp/:cpId so the daemon can preserve persisted scenarios
+        // (POST throws "cpId already exists" instead).
+        const isEdit = editingIndex !== null;
+        const params = {
           cpId: cpConfig.cpId,
           wsUrl: cpConfig.wsURL,
           connectors: cpConfig.connectorNumber,
@@ -151,7 +205,12 @@ const TopPage: React.FC = () => {
             imsi: cpConfig.imsi,
           },
           autoConnect: true,
-        });
+        };
+        if (isEdit && chargePointService.updateChargePoint) {
+          await chargePointService.updateChargePoint(params);
+        } else {
+          await chargePointService.createChargePoint?.(params);
+        }
         // The Add CP form exposes auto-meter settings, but the server's
         // POST /v1/cp body has no field for them. Apply them per-connector
         // after the CP exists so Remote-mode users get the same behaviour
@@ -253,6 +312,28 @@ const TopPage: React.FC = () => {
       },
     };
     updateConfig(newConfig);
+
+    // Brand-new CP (not an edit): seed the Essential CP Behavior template
+    // on every connector so the editor opens with the canonical demo
+    // flow already loaded, mirroring the daemon's CPRegistry.create
+    // path. Edits intentionally skip this — operators may have already
+    // tuned the scenario and we'd clobber it.
+    if (editingIndex === null) {
+      const essential = getTemplateById("essential-cp-behavior");
+      if (essential) {
+        for (let cId = 1; cId <= cpConfig.connectorNumber; cId++) {
+          const seeded = essential.createScenario(cpConfig.cpId, cId);
+          void scenarioRepository
+            .save(cpConfig.cpId, cId, seeded)
+            .catch((err) =>
+              console.warn(
+                `Failed to seed Essential CP Behavior for ${cpConfig.cpId}/connector ${cId}`,
+                err,
+              ),
+            );
+        }
+      }
+    }
   };
 
   const handleDeleteChargePoint = async (cpId: string, index: number) => {
@@ -296,7 +377,6 @@ const TopPage: React.FC = () => {
   return (
     <div className="px-8 pt-6 pb-8 mb-4">
       <ExperimentalView
-        mode={mode}
         cps={chargePoints}
         tagIDs={effectiveTagIDs}
         onAddChargePoint={handleAddChargePoint}
@@ -321,7 +401,6 @@ const TopPage: React.FC = () => {
 };
 
 interface ExperimentalProps {
-  mode: "local" | "remote";
   cps: ChargePointSnapshot[];
   tagIDs: string[];
   onAddChargePoint: () => void;
@@ -330,7 +409,6 @@ interface ExperimentalProps {
 }
 
 const ExperimentalView: React.FC<ExperimentalProps> = ({
-  mode,
   cps,
   tagIDs,
   onAddChargePoint,
@@ -339,6 +417,11 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
 }) => {
   const { chargePointService } = useDataContext();
   const [selectedTab, setSelectedTab] = useState<string>("");
+  // Multi-CP bulk-ops dialog. Used to live as a row of inline buttons + a
+  // Transaction-All panel above the tabs; that ate vertical space on every
+  // session with ≥2 CPs even though most operators reach for those buttons
+  // only occasionally. Folded behind a single header button instead.
+  const [isMultiCpOpen, setIsMultiCpOpen] = useState(false);
 
   useEffect(() => {
     if (
@@ -400,41 +483,10 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
     });
   };
 
+  const hasMultipleCps = cps.length >= 2;
+
   return (
     <>
-      {cps.length >= 2 ? (
-        <>
-          <div className="flex flex-wrap gap-2 mb-3">
-            <Button onClick={handleAllConnect}>Connect All</Button>
-            <Button onClick={handleAllDisconnect} variant="destructive">
-              Disconnect All
-            </Button>
-            <Button onClick={handleAllHeartbeat} variant="info">
-              Send Heartbeat All
-            </Button>
-          </div>
-
-          <div className="panel mb-3 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-sm font-bold">Transaction All</span>
-                <span className="text-muted-foreground text-xs ml-3">
-                  Tag IDs: {tagIDs.join(", ")}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleAllStartTransaction} variant="success">
-                  Start Transaction All
-                </Button>
-                <Button onClick={handleAllStopTransaction} variant="warning">
-                  Stop Transaction All
-                </Button>
-              </div>
-            </div>
-          </div>
-        </>
-      ) : null}
-
       <Tabs
         value={selectedTab}
         onValueChange={setSelectedTab}
@@ -448,32 +500,30 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
               className="flex items-center gap-2"
             >
               <span>{cp.id}</span>
-              {mode === "local" && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Edit Charge Point"
-                  className={buttonVariants({
-                    variant: "ghost",
-                    size: "icon",
-                    className: "h-6 w-6",
-                  })}
-                  onClick={(e) => {
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Edit Charge Point"
+                className={buttonVariants({
+                  variant: "ghost",
+                  size: "icon",
+                  className: "h-6 w-6",
+                })}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditChargePoint(key);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
                     e.stopPropagation();
                     onEditChargePoint(key);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onEditChargePoint(key);
-                    }
-                  }}
-                  title="Edit Charge Point"
-                >
-                  <Settings className="h-3 w-3" />
-                </span>
-              )}
+                  }
+                }}
+                title="Edit Charge Point"
+              >
+                <Settings className="h-3 w-3" />
+              </span>
               <span
                 role="button"
                 tabIndex={0}
@@ -513,6 +563,18 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
           >
             <Plus className="h-4 w-4" />
           </Button>
+          {hasMultipleCps && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9"
+              onClick={() => setIsMultiCpOpen(true)}
+              title="Multi-CP operations"
+              aria-label="Multi-CP operations"
+            >
+              <Layers className="h-4 w-4" />
+            </Button>
+          )}
         </TabsList>
         {cps.map((cp) => (
           <TabsContent key={cp.id} value={cp.id}>
@@ -520,6 +582,51 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
           </TabsContent>
         ))}
       </Tabs>
+
+      <Dialog
+        open={isMultiCpOpen}
+        onOpenChange={(open) => setIsMultiCpOpen(open)}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Multi-CP operations</DialogTitle>
+            <DialogDescription>
+              Applies to all {cps.length} registered charge points.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold">Connection</h3>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleAllConnect}>Connect All</Button>
+                <Button onClick={handleAllDisconnect} variant="destructive">
+                  Disconnect All
+                </Button>
+                <Button onClick={handleAllHeartbeat} variant="info">
+                  Send Heartbeat All
+                </Button>
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <h3 className="text-sm font-semibold">Transactions</h3>
+                <span className="text-muted-foreground text-xs">
+                  Tag IDs: {tagIDs.join(", ")}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleAllStartTransaction} variant="success">
+                  Start Transaction All
+                </Button>
+                <Button onClick={handleAllStopTransaction} variant="warning">
+                  Stop Transaction All
+                </Button>
+              </div>
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

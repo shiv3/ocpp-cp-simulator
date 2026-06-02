@@ -57,6 +57,22 @@ interface ServerCpStatus {
   error: string;
   connectors: ServerConnectorStatus[];
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
+  config?: {
+    wsUrl: string;
+    connectors: number;
+    vendor: string;
+    model: string;
+    basicAuth: { username: string; password: string } | null;
+    bootNotification: {
+      firmwareVersion?: string;
+      chargePointSerialNumber?: string;
+      chargeBoxSerialNumber?: string;
+      meterSerialNumber?: string;
+      meterType?: string;
+      iccid?: string;
+      imsi?: string;
+    } | null;
+  };
 }
 
 interface ServerEventEnvelope {
@@ -112,6 +128,16 @@ function toChargePointSnapshot(s: ServerCpStatus): ChargePointSnapshot {
       ? {
           intervalSeconds: s.heartbeat.intervalSeconds,
           lastSentAt: s.heartbeat.lastSentAt,
+        }
+      : undefined,
+    config: s.config
+      ? {
+          wsUrl: s.config.wsUrl,
+          connectors: s.config.connectors,
+          vendor: s.config.vendor,
+          model: s.config.model,
+          basicAuth: s.config.basicAuth ?? null,
+          bootNotification: s.config.bootNotification ?? null,
         }
       : undefined,
   };
@@ -683,6 +709,17 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async removeScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCommand(id, "remove_scenario", {
+      connector: connectorId,
+      scenarioId,
+    });
+  }
+
   async getScenarioStatus(
     id: string,
     connectorId: number,
@@ -811,6 +848,17 @@ export class RemoteChargePointService implements ChargePointService {
     );
     if (!result.ok) {
       throw new Error(result.error ?? "Failed to create charge point");
+    }
+  }
+
+  async updateChargePoint(params: CreateChargePointParams): Promise<void> {
+    const result = await this.fetchJson<ServerCommandResult>(
+      "PUT",
+      `/v1/cp/${encodeURIComponent(params.cpId)}`,
+      params,
+    );
+    if (!result.ok) {
+      throw new Error(result.error ?? "Failed to update charge point");
     }
   }
 

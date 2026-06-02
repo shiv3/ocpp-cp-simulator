@@ -1,0 +1,75 @@
+{
+  "id": "status-triggered-actions",
+  "name": "Status-Triggered Auto Actions",
+  "description": "Auto-execute on status change (Heartbeat loop when Available)",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "statusChange",
+    "conditions": { "toStatus": "Available" }
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "trigger-available",
+      "type": "statusTrigger",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Wait for Available",
+        "targetStatus": "Available",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "notification-heartbeat",
+      "type": "notification",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Send Heartbeat",
+        "messageType": "Heartbeat",
+        "payload": {}
+      }
+    },
+    {
+      "id": "delay-10s",
+      "type": "delay",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "Wait 10s", "delaySeconds": 10 }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-trigger",
+      "source": "start-1",
+      "target": "trigger-available"
+    },
+    {
+      "id": "e-trigger-notify",
+      "source": "trigger-available",
+      "target": "notification-heartbeat"
+    },
+    {
+      "id": "e-notify-delay",
+      "source": "notification-heartbeat",
+      "target": "delay-10s"
+    },
+    {
+      "id": "e-delay-notify",
+      "source": "delay-10s",
+      "target": "notification-heartbeat"
+    }
+  ]
+}

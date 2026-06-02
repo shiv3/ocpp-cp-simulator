@@ -475,6 +475,41 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           </div>
         );
 
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="remote-stop-label">Label</Label>
+              <Input
+                id="remote-stop-label"
+                type="text"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="remote-stop-timeout">Timeout (seconds)</Label>
+              <Input
+                id="remote-stop-timeout"
+                type="number"
+                value={formData.timeout || 0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
+                min="0"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                0 = No timeout (wait indefinitely for RemoteStopTransaction)
+              </p>
+            </div>
+          </div>
+        );
+
       case ScenarioNodeType.RESERVE_NOW:
         return (
           <div className="space-y-4">
@@ -764,6 +799,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         return "Connector Plug";
       case ScenarioNodeType.REMOTE_START_TRIGGER:
         return "Remote Start Trigger";
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        return "Remote Stop Trigger";
       case ScenarioNodeType.STATUS_TRIGGER:
         return "Status Trigger";
       case ScenarioNodeType.RESERVE_NOW:

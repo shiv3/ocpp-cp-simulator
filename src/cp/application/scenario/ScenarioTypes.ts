@@ -34,6 +34,7 @@ export enum ScenarioNodeType {
   NOTIFICATION = "notification",
   CONNECTOR_PLUG = "connectorPlug",
   REMOTE_START_TRIGGER = "remoteStartTrigger",
+  REMOTE_STOP_TRIGGER = "remoteStopTrigger",
   STATUS_TRIGGER = "statusTrigger",
   RESERVE_NOW = "reserveNow",
   CANCEL_RESERVATION = "cancelReservation",
@@ -129,6 +130,23 @@ export interface ConnectorPlugNodeData extends BaseNodeData {
  */
 export interface RemoteStartTriggerNodeData extends BaseNodeData {
   timeout?: number; // Optional timeout in seconds (0 = no timeout)
+}
+
+/**
+ * Remote Stop Trigger Node Data
+ *
+ * Counterpart of RemoteStartTrigger. Blocks the scenario until the CSMS
+ * sends RemoteStopTransaction.req for the currently-active transaction
+ * on this connector. While the scenario is parked on this node, the
+ * default RemoteStopTransactionHandler delegates the request to the
+ * scenario instead of stopping the transaction itself — the scenario's
+ * next node (typically a Transaction Stop) is what actually sends the
+ * StopTransaction.req. Lets templates model "wait for CSMS to remote-stop,
+ * then run the CP's stop-side cleanup" without racing the handler.
+ */
+export interface RemoteStopTriggerNodeData extends BaseNodeData {
+  /** Optional timeout in seconds. 0 (default) = wait forever. */
+  timeout?: number;
 }
 
 /**
@@ -243,6 +261,7 @@ export type ScenarioNodeData =
   | NotificationNodeData
   | ConnectorPlugNodeData
   | RemoteStartTriggerNodeData
+  | RemoteStopTriggerNodeData
   | StatusTriggerNodeData
   | ReserveNowNodeData
   | CancelReservationNodeData
@@ -348,6 +367,15 @@ export interface ScenarioExecutorCallbacks {
   onConnectorPlug?: (action: "plugin" | "plugout") => Promise<void>;
   onDelay?: (seconds: number) => Promise<void>;
   onWaitForRemoteStart?: (timeout?: number) => Promise<string>; // Returns tagId from RemoteStartTransaction
+  /**
+   * Block until CSMS sends RemoteStopTransaction.req for the currently
+   * active transaction. Returns the requested transactionId so callers
+   * can sanity-check it; if the timeout expires the promise rejects.
+   * Implementations register a scenario-side handler so the default
+   * RemoteStopTransactionHandler delegates instead of stopping the
+   * transaction itself.
+   */
+  onWaitForRemoteStop?: (timeout?: number) => Promise<number>;
   onWaitForStatus?: (
     targetStatus: OCPPStatus,
     timeout?: number,

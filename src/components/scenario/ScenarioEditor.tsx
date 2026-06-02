@@ -57,6 +57,7 @@ import DelayNode from "./nodes/DelayNode";
 import NotificationNode from "./nodes/NotificationNode";
 import ConnectorPlugNode from "./nodes/ConnectorPlugNode";
 import RemoteStartTriggerNode from "./nodes/RemoteStartTriggerNode";
+import RemoteStopTriggerNode from "./nodes/RemoteStopTriggerNode";
 import StatusTriggerNode from "./nodes/StatusTriggerNode";
 import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
@@ -71,11 +72,58 @@ import {
   exportScenarioToJSON,
   importScenarioFromJSON,
 } from "../../utils/scenarioFile";
-import { createDefaultScenario } from "../../cp/application/scenario/defaultScenario";
 import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
+
+/**
+ * Minimal Start → End scenario used as the editor's fallback when no
+ * scenario has been loaded yet. The previous fallback (createDefaultScenario)
+ * carried the full "plug-in → RemoteStart → auto-meter → plug-out" flow,
+ * which auto-seeded itself back into storage after every Reset and made
+ * the "Reset all simulator data" button feel like a no-op. Operators now
+ * pick the canonical demo flow explicitly from the template picker (the
+ * "Essential CP Behavior" template).
+ */
+function createEmptyScenario(
+  chargePointId: string,
+  connectorId: number | null,
+): ScenarioDefinition {
+  const targetType: "chargePoint" | "connector" =
+    connectorId === null ? "chargePoint" : "connector";
+  const now = new Date().toISOString();
+  return {
+    id: `${chargePointId}_${connectorId ?? "cp"}_empty`,
+    name:
+      targetType === "chargePoint"
+        ? `Scenario for ${chargePointId}`
+        : `Scenario for ${chargePointId} Connector ${connectorId}`,
+    description: "",
+    targetType,
+    targetId: connectorId ?? undefined,
+    nodes: [
+      {
+        id: "start",
+        type: "start",
+        position: { x: 400, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "end",
+        type: "end",
+        position: { x: 400, y: 200 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [{ id: "e-start-end", source: "start", target: "end" }],
+    createdAt: now,
+    updatedAt: now,
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+  };
+}
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { useDataContext } from "../../data/providers/DataProvider";
@@ -100,6 +148,7 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.NOTIFICATION]: NotificationNode,
   [ScenarioNodeType.CONNECTOR_PLUG]: ConnectorPlugNode,
   [ScenarioNodeType.REMOTE_START_TRIGGER]: RemoteStartTriggerNode,
+  [ScenarioNodeType.REMOTE_STOP_TRIGGER]: RemoteStopTriggerNode,
   [ScenarioNodeType.STATUS_TRIGGER]: StatusTriggerNode,
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
@@ -140,7 +189,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // acceptable for first-mount; the editor doesn't render different DOM
   // for a "loaded" vs "loading" scenario.
   const [scenario, setScenario] = useState<ScenarioDefinition>(
-    () => scenarioProp ?? createDefaultScenario(cpId, connectorId),
+    () => scenarioProp ?? createEmptyScenario(cpId, connectorId),
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);
@@ -428,6 +477,56 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     });
   }, [liveMeterValueWh, setNodes]);
 
+  // Re-fit the ReactFlow viewport whenever the scenario id changes. The
+  // editor opens with `createEmptyScenario` (just Start + End in a tight
+  // y-range), ReactFlow's `fitView` prop runs once against that, and
+  // when the real scenario hydrates moments later — typically 9+ nodes
+  // spanning y=50..1050 — there's no re-fit, so the user sees only the
+  // top of the flow. Manually re-fit on every load so the whole graph
+  // is in frame from the first paint.
+  useEffect(() => {
+    const instance = rfInstanceRef.current;
+    if (!instance) return;
+    // requestAnimationFrame so nodes/edges state has flushed before we
+    // measure — `fitView` reads the DOM-resolved node positions.
+    const handle = window.requestAnimationFrame(() => {
+      try {
+        instance.fitView({ padding: 0.2, duration: 0 });
+      } catch {
+        // First-mount races where the canvas isn't laid out yet — the
+        // ResizeObserver below covers those.
+      }
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [scenario.id]);
+
+  // ResizeObserver-driven re-fit on container resize. Handles the case
+  // where the tab becomes visible after the editor mounted (the tab
+  // strip uses `display: none` for the inactive tab), the side panel is
+  // dragged wider/narrower, or the window resizes.
+  const flowContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = flowContainerRef.current;
+    if (!el) return;
+    let lastWidth = el.clientWidth;
+    let lastHeight = el.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w === 0 || h === 0) return;
+      if (w === lastWidth && h === lastHeight) return;
+      lastWidth = w;
+      lastHeight = h;
+      try {
+        rfInstanceRef.current?.fitView({ padding: 0.2, duration: 0 });
+      } catch {
+        // best effort
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   // In remote mode the in-browser executor is never set, so executionState
   // would stay "idle" forever and Force Step would keep re-running the
   // scenario. Sync executionState from scenario_* events instead.
@@ -687,9 +786,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       updatedAt: new Date().toISOString(),
     };
     if (scenario.id) {
-      void scenarioRepository
-        .save(cpId, connectorId, updated)
-        .catch((err) => console.error("Failed to save scenario", err));
+      // Remote mode talks to the daemon (the browser-side sql.js path is
+      // a no-op there). Local mode keeps the sql.js path.
+      if (mode === "remote") {
+        void chargePointService
+          .loadScenario(cpId, connectorId, updated)
+          .catch((err) =>
+            console.error("Failed to save scenario to daemon", err),
+          );
+      } else {
+        void scenarioRepository
+          .save(cpId, connectorId, updated)
+          .catch((err) => console.error("Failed to save scenario", err));
+      }
     }
     setScenario(updated);
     setSaveFeedback("saved");
@@ -711,6 +820,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEvSettings,
     cpId,
     connectorId,
+    mode,
+    chargePointService,
+    scenarioRepository,
   ]);
 
   // Keyboard shortcuts for undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+Y).
@@ -998,12 +1110,60 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
 
-      // Templates are always new scenarios, so save them (upsert via repo).
-      void scenarioRepository
-        .save(cpId, connectorId, templateScenario)
-        .catch((err) => console.error("Failed to save template scenario", err));
+      void (async () => {
+        // Remote mode: scenarioRepository.save no-ops (sql.js isn't loaded),
+        // so a save here would vanish on reload — the daemon would still
+        // hand us the previous scenario via listScenarios on next mount.
+        // Push through chargePointService.loadScenario instead, and clean
+        // up the prior scenarios so listScenarios doesn't keep returning
+        // them at index 0 (the daemon orders by insertion / updated_at).
+        if (mode === "remote") {
+          try {
+            const existing = await chargePointService.listScenarios(
+              cpId,
+              connectorId,
+            );
+            await Promise.all(
+              existing
+                .filter((item) => item.scenarioId !== templateScenario.id)
+                .map((item) =>
+                  chargePointService
+                    .removeScenario(cpId, connectorId, item.scenarioId)
+                    .catch((err) =>
+                      console.warn(
+                        `Failed to remove stale scenario ${item.scenarioId}`,
+                        err,
+                      ),
+                    ),
+                ),
+            );
+            await chargePointService.loadScenario(
+              cpId,
+              connectorId,
+              templateScenario,
+            );
+          } catch (err) {
+            console.error("Failed to persist template scenario", err);
+          }
+          return;
+        }
+        try {
+          await scenarioRepository.save(cpId, connectorId, templateScenario);
+        } catch (err) {
+          console.error("Failed to save template scenario", err);
+        }
+      })();
     },
-    [cpId, connectorId, scenarioRepository, nodes.length, setNodes, setEdges],
+    [
+      cpId,
+      connectorId,
+      mode,
+      chargePointService,
+      scenarioRepository,
+      nodes.length,
+      setNodes,
+      setEdges,
+    ],
   );
 
   // Handle node double-click to open config panel
@@ -1098,6 +1258,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return "Connector Plug";
       case ScenarioNodeType.REMOTE_START_TRIGGER:
         return "Remote Start Trigger";
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        return "Remote Stop Trigger";
       case ScenarioNodeType.STATUS_TRIGGER:
         return "Status Trigger";
       default:
@@ -1572,6 +1734,45 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               />
               <p className="text-xs text-muted mt-1">
                 0 = No timeout (wait indefinitely for RemoteStartTransaction)
+              </p>
+            </div>
+          </div>
+        );
+
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Label
+              </label>
+              <input
+                type="text"
+                className="input-base w-full text-sm"
+                value={formData.label || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, label: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-primary mb-1">
+                Timeout (seconds)
+              </label>
+              <input
+                type="number"
+                className="input-base w-full text-sm"
+                value={formData.timeout || 0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    timeout: parseInt(e.target.value) || 0,
+                  })
+                }
+                min="0"
+              />
+              <p className="text-xs text-muted mt-1">
+                0 = No timeout (wait indefinitely for RemoteStopTransaction)
               </p>
             </div>
           </div>
@@ -2129,6 +2330,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 icon="🎬"
               />
               <NodePaletteItem
+                type={ScenarioNodeType.REMOTE_STOP_TRIGGER}
+                label="RemoteStop"
+                icon="⏹"
+              />
+              <NodePaletteItem
                 type={ScenarioNodeType.STATUS_NOTIFICATION}
                 label="StatusNotif"
                 icon="📡"
@@ -2152,7 +2358,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           </div>
 
           {/* React Flow Canvas */}
-          <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden min-h-0">
+          <div
+            ref={flowContainerRef}
+            className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden min-h-0"
+          >
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -2166,9 +2375,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               nodeTypes={nodeTypes}
               deleteKeyCode={["Backspace", "Delete"]}
               fitView
+              fitViewOptions={{ padding: 0.2 }}
               colorMode={isDark ? "dark" : "light"}
               onInit={(instance) => {
                 rfInstanceRef.current = instance;
+                // Fire one more fit on init — `fitView` prop fits before
+                // the instance is captured, so any subsequent
+                // node-set hydration that landed before this callback
+                // already had a fresh frame to land in.
+                try {
+                  instance.fitView({ padding: 0.2, duration: 0 });
+                } catch {
+                  // best effort
+                }
               }}
             >
               <Background />
@@ -2335,6 +2554,13 @@ function createNodeByType(
         type,
         position,
         data: { label: "Wait for RemoteStart", timeout: 0 },
+      };
+    case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Wait for RemoteStop", timeout: 0 },
       };
     case ScenarioNodeType.STATUS_TRIGGER:
       return {

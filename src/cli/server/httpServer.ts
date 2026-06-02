@@ -418,6 +418,55 @@ export function createHttpHandlers(deps: {
       return Response.json(svc.getStatus());
     }
 
+    // PUT /v1/cp/:cpId  (replace config — used by the web console "edit"
+    // flow). The body shape is identical to POST /v1/cp; the URL cpId must
+    // match `body.cpId`. The existing service is torn down and a fresh
+    // one with the new config is constructed; persisted scenarios survive
+    // because we update the row (ON CONFLICT) rather than removing it.
+    if (
+      req.method === "PUT" &&
+      segs.length === 3 &&
+      segs[0] === "v1" &&
+      segs[1] === "cp"
+    ) {
+      const cpId = decodeURIComponent(segs[2]);
+      if (!registry.has(cpId)) {
+        return new Response("unknown cpId", { status: 404 });
+      }
+      return req
+        .json()
+        .then(async (body: unknown) => {
+          try {
+            const init = parseCreateBody(body);
+            if (init.cpId !== cpId) {
+              return Response.json({
+                ok: false,
+                error: "URL cpId and body cpId do not match",
+              });
+            }
+            const autoConnect =
+              isRecord(body) && body.autoConnect === true ? true : false;
+            const svc = registry.update(init);
+            if (autoConnect) {
+              svc.connect().catch((err) => {
+                process.stderr.write(
+                  `[server] reconnect after update failed for ${init.cpId}: ${
+                    err instanceof Error ? err.message : err
+                  }\n`,
+                );
+              });
+            }
+            return Response.json({ ok: true, data: { cpId: init.cpId } });
+          } catch (err) {
+            return Response.json({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+        .catch(() => Response.json({ ok: false, error: "invalid JSON body" }));
+    }
+
     // DELETE /v1/cp/:cpId
     if (
       req.method === "DELETE" &&

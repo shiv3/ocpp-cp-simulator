@@ -460,6 +460,28 @@ export class CLIChargePointService {
     }));
   }
 
+  /**
+   * Instantiate the named template once per connector and run it through
+   * loadScenario so it gets persisted. Used by CPRegistry.create to seed
+   * a fresh CP with the canonical demo flow without each operator having
+   * to pick it from the editor's template picker. Silently swallows
+   * per-connector failures (e.g. template id changed since release) — a
+   * busted seed shouldn't block CP creation.
+   */
+  seedDefaultScenarios(templateId: string): void {
+    for (const connectorId of this._chargePoint.connectors.keys()) {
+      try {
+        this.loadScenarioTemplate(templateId, connectorId);
+      } catch (err) {
+        process.stderr.write(
+          `[CLI] seedDefaultScenarios(${templateId}) failed for connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+    }
+  }
+
   loadScenarioTemplate(templateId: string, connectorId: number): string {
     const template = getTemplateById(templateId);
     if (!template) {

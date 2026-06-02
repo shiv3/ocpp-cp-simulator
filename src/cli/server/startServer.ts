@@ -183,9 +183,18 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   if (opts.bootstrap) {
     // The same cpId can already exist when --state-db restored it above.
     // Reuse the restored instance in that case — re-creating would throw
-    // and we'd lose all of its persisted state.
+    // and we'd lose all of its persisted state. Skip the auto-seed for
+    // bootstrap CPs that arrive together with an explicit startup
+    // scenario; otherwise both would land on the connector and race for
+    // the auto-start slot.
     const existing = registry.get(opts.bootstrap.cpId);
-    const svc = existing ?? registry.create(opts.bootstrap);
+    const hasExplicitStartupScenario =
+      !!opts.startupScenario &&
+      (!!opts.startupScenario.scenario ||
+        !!opts.startupScenario.scenarioTemplate ||
+        !!opts.startupScenario.scenarioTemplateFile);
+    const seedDefault = !hasExplicitStartupScenario;
+    const svc = existing ?? registry.create(opts.bootstrap, { seedDefault });
     if (existing) {
       serverLog(
         `Bootstrap matches restored CP "${opts.bootstrap.cpId}"; reusing`,

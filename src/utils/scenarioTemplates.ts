@@ -625,7 +625,12 @@ const essentialCpBehaviorTemplate: ScenarioTemplate = {
     "Auto-start on connect: plug in, wait for RemoteStart, run a transaction with auto-meter, then plug out.",
   targetType: "connector",
   createScenario: (chargePointId, connectorId) => ({
-    id: `scenario-${Date.now()}`,
+    // `connectorId` baked in so the seed loop in CPRegistry.create
+    // (one call per connector, all within the same millisecond) doesn't
+    // collide on `Date.now()` and overwrite earlier connectors' rows in
+    // `_scenarios`. The trailing random suffix guards against the same
+    // operator instantiating the template twice for the same connector.
+    id: `essential-${chargePointId}-c${connectorId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: "Essential CP Behavior",
     description:
       "Standard plug-in / RemoteStart / charge / RemoteStop / plug-out cycle",

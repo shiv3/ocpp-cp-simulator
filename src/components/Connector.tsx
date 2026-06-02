@@ -13,7 +13,6 @@ import { createScenarioExecutorCallbacks } from "../cp/application/scenario/Scen
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useDataContext } from "../data/providers/DataProvider";
-import { createDefaultScenario } from "../cp/application/scenario/defaultScenario";
 
 interface ConnectorProps {
   id: number;
@@ -87,35 +86,15 @@ const Connector: React.FC<ConnectorProps> = ({
     transactionBatteryCapacityKwh,
     evSettings,
   } = useConnectorView(cpId, connector_id);
-  const {
-    scenarios,
-    isLoading: scenariosLoading,
-    saveScenario,
-  } = useScenarios(cpId ?? null, connector_id);
+  const { scenarios } = useScenarios(cpId ?? null, connector_id);
 
-  // Auto-seed a default scenario for this connector if storage has none.
-  // Without this, only the connector whose side panel has been opened
-  // (where the editor creates a default in its useState init) gets a
-  // scenario — every other connector silently sits with no scenario and
-  // can't auto-start. Local mode only; remote mode is server-driven.
-  // Use `saveScenario` from the hook so the repository's subscribers
-  // (including this hook's listener) get notified and the local
-  // `scenarios` state updates without a refresh.
-  useEffect(() => {
-    if (mode !== "local") return;
-    if (scenariosLoading) return;
-    if (scenarios.length > 0) return;
-    if (!cpId) return;
-    const seeded = createDefaultScenario(cpId, connector_id);
-    void saveScenario(seeded);
-  }, [
-    mode,
-    scenariosLoading,
-    scenarios.length,
-    cpId,
-    connector_id,
-    saveScenario,
-  ]);
+  // Note: this used to auto-seed a "default" scenario for each connector
+  // (createDefaultScenario), but that re-spawned the same scenario after
+  // every Reset and made "wipe all simulator data" feel like a no-op.
+  // The canonical demo flow now lives as the "Essential CP Behavior"
+  // template in scenarioTemplates — operators reach for it from the
+  // template picker when they want it, and a fresh connector starts with
+  // a genuinely empty canvas.
 
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
   const [, setScenarioExecutionContext] =

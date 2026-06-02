@@ -77,6 +77,15 @@ export interface ActiveChargingProfile {
 
 export interface ConnectorEvents {
   statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
+  /**
+   * Fires when `beginTransaction` or `stopTransaction` flips the
+   * `transactionValue` field, distinct from `transactionIdChange`
+   * (which only fires when the CSMS confirms a real id on an
+   * already-active transaction). Persistence listeners use this to
+   * catch the "transaction object just started" / "just cleared" edges
+   * without needing a polling read.
+   */
+  transactionChange: { transaction: Transaction | null };
   transactionIdChange: { transactionId: number | null };
   meterValueChange: { meterValue: number };
   socChange: { soc: number | null };
@@ -160,6 +169,63 @@ export class Connector {
   private _autoResetToAvailable = true;
   private _evSettings: EVSettings = getDefaultEVSettings();
   private _chargingProfiles: ActiveChargingProfile[] = [];
+
+  /**
+   * Capture the runtime state needed to resume this connector after a
+   * daemon restart. Paired with {@link restoreRuntimeSnapshot}. The
+   * returned shape is a structural copy: callers can persist it and
+   * round-trip it through JSON without aliasing live connector state.
+   */
+  snapshotRuntime(): {
+    status: OCPPStatus;
+    availability: OCPPAvailability;
+    scheduledAvailability: OCPPAvailability | null;
+    transaction: Transaction | null;
+    meterValueWh: number;
+    socPercent: number | null;
+    lastAutoStartedScenarioKey: string | null;
+  } {
+    return {
+      status: this.statusValue,
+      availability: this.availabilityValue,
+      scheduledAvailability: this.scheduledAvailabilityValue,
+      transaction: this.transactionValue ? { ...this.transactionValue } : null,
+      meterValueWh: this.meterValueWh,
+      socPercent: this.socPercent,
+      lastAutoStartedScenarioKey: this.lastAutoStartedScenarioKeyValue,
+    };
+  }
+
+  /**
+   * Apply a snapshot captured before a daemon restart. Writes the
+   * private fields directly so we do NOT emit `statusChange` /
+   * `meterChange` / etc. — emitting on restore would cause the
+   * ChargePoint to push a duplicate StatusNotification or MeterValues
+   * before the WebSocket is even up, and would cause the auto-start
+   * dedup key to be cleared by re-triggering its setter.
+   *
+   * Restore is idempotent on already-default values: nulls and
+   * `meterValueWh = 0` simply rewrite the existing zero state.
+   */
+  restoreRuntimeSnapshot(snapshot: {
+    status: OCPPStatus;
+    availability: OCPPAvailability;
+    scheduledAvailability: OCPPAvailability | null;
+    transaction: Transaction | null;
+    meterValueWh: number;
+    socPercent: number | null;
+    lastAutoStartedScenarioKey: string | null;
+  }): void {
+    this.statusValue = snapshot.status;
+    this.availabilityValue = snapshot.availability;
+    this.scheduledAvailabilityValue = snapshot.scheduledAvailability;
+    this.transactionValue = snapshot.transaction
+      ? { ...snapshot.transaction }
+      : null;
+    this.meterValueWh = snapshot.meterValueWh;
+    this.socPercent = snapshot.socPercent;
+    this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
+  }
 
   constructor(
     private readonly connectorId: number,
@@ -567,11 +633,13 @@ export class Connector {
   beginTransaction(transaction: Transaction): void {
     this.transactionValue = transaction;
     this.startConfiguredMeterValue();
+    this.eventsEmitter.emit("transactionChange", { transaction });
   }
 
   stopTransaction(): void {
     this.meterScheduler.stop();
     this.transactionValue = null;
+    this.eventsEmitter.emit("transactionChange", { transaction: null });
   }
 
   startManualMeterStrategy(strategy: MeterValueStrategy): void {

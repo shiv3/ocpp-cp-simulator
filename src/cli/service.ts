@@ -19,6 +19,11 @@ import type {
 } from "../cp/application/scenario/ScenarioTypes";
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
 import { SqliteScenarioRepository } from "../data/sqlite/SqliteScenarioRepository";
+import { SqliteConnectorRuntimeRepository } from "../data/sqlite/SqliteConnectorRuntimeRepository";
+import {
+  NoopConnectorRuntimeRepository,
+  type ConnectorRuntimeRepository,
+} from "../data/interfaces/ConnectorRuntimeRepository";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";
@@ -189,6 +194,7 @@ export class CLIChargePointService {
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
   private readonly _scenarioRepo: SqliteScenarioRepository;
+  private readonly _runtimeRepo: ConnectorRuntimeRepository;
   // Keep the original init so the web console can prefill the "Edit CP"
   // modal without us having to round-trip the persisted SQL row back into
   // ChargePointInitOptions shape. Exposed via getInit() and the
@@ -202,6 +208,9 @@ export class CLIChargePointService {
   ) {
     this._init = init;
     this._scenarioRepo = new SqliteScenarioRepository(database);
+    this._runtimeRepo = database
+      ? new SqliteConnectorRuntimeRepository(database)
+      : new NoopConnectorRuntimeRepository();
     const overrides = init.bootNotification ?? {};
     const bootNotification: BootNotification = {
       chargePointVendor: init.vendor,
@@ -926,8 +935,84 @@ export class CLIChargePointService {
     );
   }
 
+  /**
+   * Persist the connector's current runtime snapshot to the daemon DB.
+   * Called from every event listener that touches a persisted field
+   * (status, availability, transaction, meter, soc). No-op when the
+   * daemon is running without `--state-db`. Errors are swallowed and
+   * logged: a transient SQLite write failure should not crash an
+   * in-flight OCPP transaction.
+   */
+  private persistConnectorRuntime(
+    connector: ReturnType<typeof this._chargePoint.connectors.get>,
+    connectorId: number,
+  ): void {
+    if (!connector) return;
+    try {
+      this._runtimeRepo.save(
+        this._init.cpId,
+        connectorId,
+        connector.snapshotRuntime(),
+      );
+    } catch (err) {
+      console.warn(
+        `[service] failed to persist connector_runtime for ` +
+          `${this._init.cpId}:${connectorId}`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * Rehydrate every connector's runtime state from the DB. Called by
+   * the CP restore path after `instantiate()` but BEFORE the WebSocket
+   * is opened: the snapshot uses
+   * {@link Connector.restoreRuntimeSnapshot} which does NOT fire
+   * statusChange / meter events, so listeners on the new service won't
+   * accidentally push a duplicate StatusNotification to the CSMS the
+   * moment we connect.
+   *
+   * Returns the number of connectors that had a stored snapshot
+   * applied (i.e. were not at the default Available / 0 / null state).
+   */
+  restoreConnectorRuntimeFromDatabase(): number {
+    if (!this.database) return 0;
+    let restored = 0;
+    this._chargePoint.connectors.forEach((connector, connectorId) => {
+      const snapshot = this._runtimeRepo.load(this._init.cpId, connectorId);
+      if (!snapshot) return;
+      connector.restoreRuntimeSnapshot(snapshot);
+      restored += 1;
+    });
+    return restored;
+  }
+
   private attachConnectorEventForwarders(): void {
     this._chargePoint.connectors.forEach((connector, connectorId) => {
+      // Runtime persistence: every event that mutates a field in
+      // ConnectorRuntimeSnapshot triggers a full snapshot upsert.
+      // Snapshots are small (one row, ~10 columns) and writes are
+      // throttled naturally by event frequency, so we don't batch.
+      const persist = () =>
+        this.persistConnectorRuntime(connector, connectorId);
+      this._connectorUnsubscribes.push(
+        connector.events.on("statusChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("availabilityChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("transactionChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("transactionIdChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("meterValueChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("socChange", persist),
+      );
       this._connectorUnsubscribes.push(
         connector.events.on("availabilityChange", ({ availability }) => {
           this.emit({

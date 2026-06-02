@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useMemo, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -7,6 +7,8 @@ import {
   Node,
   Edge,
   NodeTypes,
+  ReactFlowProvider,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
@@ -33,14 +35,17 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
   className = "",
 }) => {
   const [currentStatus, setCurrentStatus] = useState<OCPPStatus>(
-    connector.status as OCPPStatus
+    connector.status as OCPPStatus,
   );
   const [currentHistoryIndex, setCurrentHistoryIndex] = useState<number>(-1);
-  const historyOptions = useMemo<HistoryOptions>(() => ({
-    entity: "connector",
-    entityId: connector.id,
-    transitionType: "status",
-  }), [connector.id]);
+  const historyOptions = useMemo<HistoryOptions>(
+    () => ({
+      entity: "connector",
+      entityId: connector.id,
+      transitionType: "status",
+    }),
+    [connector.id],
+  );
   const { history } = useStateHistory(chargePoint.id, {
     historyOptions,
   });
@@ -179,7 +184,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         },
       },
     ],
-    [displayStatus]
+    [displayStatus],
   );
 
   // Edge definitions (OCPP 1.6J compliant transitions, using smoothstep for better visibility)
@@ -571,41 +576,16 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         labelBgBorderRadius: 4,
       },
     ],
-    []
+    [],
   );
 
   return (
     <div className={`h-full w-full flex flex-col ${className}`}>
       {/* React Flow - Top */}
       <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          nodesDraggable={true}
-          fitView
-          attributionPosition="bottom-left"
-          minZoom={0.5}
-          maxZoom={2}
-          defaultEdgeOptions={{
-            markerEnd: {
-              type: "arrowclosed",
-              width: 20,
-              height: 20,
-            },
-          }}
-        >
-          <Background />
-          <Controls />
-          <MiniMap
-            nodeColor={(node) => {
-              if (node.data?.isCurrent) return "#3b82f6";
-              if (!node.data?.isOperative) return "#6b7280";
-              return "#22c55e";
-            }}
-            nodeStrokeWidth={3}
-          />
-        </ReactFlow>
+        <ReactFlowProvider>
+          <StateTransitionCanvas nodes={nodes} edges={edges} />
+        </ReactFlowProvider>
 
         {/* Legend */}
         <div className="absolute top-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg text-sm">
@@ -649,6 +629,82 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
           currentIndex={currentHistoryIndex}
         />
       </div>
+    </div>
+  );
+};
+
+/**
+ * Inner ReactFlow canvas. Lives behind a ReactFlowProvider so it can pull
+ * `useReactFlow().fitView()` and call it whenever its container actually
+ * gains a non-zero size — the tab strip in ConnectorSidePanel renders
+ * this view with `display: none` on first paint, so ReactFlow's initial
+ * `fitView` measures a 0×0 container and leaves the diagram floating
+ * off-center once the tab is finally shown. The ResizeObserver below
+ * catches that "first real layout" moment and refits exactly once;
+ * subsequent resizes (panel resize, window resize) also keep it framed.
+ */
+const StateTransitionCanvas: React.FC<{
+  nodes: Node[];
+  edges: Edge[];
+}> = ({ nodes, edges }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let lastWidth = el.clientWidth;
+    let lastHeight = el.clientHeight;
+    const refit = () => {
+      void fitView({ padding: 0.2, duration: 0 });
+    };
+    const observer = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w === 0 || h === 0) return;
+      if (w === lastWidth && h === lastHeight) return;
+      lastWidth = w;
+      lastHeight = h;
+      refit();
+    });
+    observer.observe(el);
+    // Initial fit once the element exists (covers the case where the
+    // container was already sized before this effect ran).
+    if (el.clientWidth > 0 && el.clientHeight > 0) refit();
+    return () => observer.disconnect();
+  }, [fitView]);
+
+  return (
+    <div ref={containerRef} className="h-full w-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        nodesDraggable={true}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        attributionPosition="bottom-left"
+        minZoom={0.5}
+        maxZoom={2}
+        defaultEdgeOptions={{
+          markerEnd: {
+            type: "arrowclosed",
+            width: 20,
+            height: 20,
+          },
+        }}
+      >
+        <Background />
+        <Controls />
+        <MiniMap
+          nodeColor={(node) => {
+            if (node.data?.isCurrent) return "#3b82f6";
+            if (!node.data?.isOperative) return "#6b7280";
+            return "#22c55e";
+          }}
+          nodeStrokeWidth={3}
+        />
+      </ReactFlow>
     </div>
   );
 };

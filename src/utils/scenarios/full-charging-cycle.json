@@ -1,0 +1,145 @@
+{
+  "id": "full-charging-cycle",
+  "name": "Full Charging Cycle",
+  "description": "Complete charging cycle with AutoMeterValue",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "transaction-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "USER001",
+        "batteryCapacityKwh": 60,
+        "initialSoc": 20
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxValue": 25000,
+        "maxTime": 300
+      }
+    },
+    {
+      "id": "delay-charging",
+      "type": "delay",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "Charging Complete", "delaySeconds": 5 }
+    },
+    {
+      "id": "transaction-stop",
+      "type": "transaction",
+      "position": { "x": 400, "y": 750 },
+      "data": { "label": "Stop Transaction", "action": "stop" }
+    },
+    {
+      "id": "status-finishing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 850 },
+      "data": { "label": "Set Finishing", "status": "Finishing" }
+    },
+    {
+      "id": "status-available2",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 950 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 1050 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-available",
+      "source": "start-1",
+      "target": "status-available"
+    },
+    {
+      "id": "e-available-preparing",
+      "source": "status-available",
+      "target": "status-preparing"
+    },
+    {
+      "id": "e-preparing-txstart",
+      "source": "status-preparing",
+      "target": "transaction-start"
+    },
+    {
+      "id": "e-txstart-charging",
+      "source": "transaction-start",
+      "target": "status-charging"
+    },
+    {
+      "id": "e-charging-meter",
+      "source": "status-charging",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e-meter-delay",
+      "source": "meter-auto",
+      "target": "delay-charging"
+    },
+    {
+      "id": "e-delay-txstop",
+      "source": "delay-charging",
+      "target": "transaction-stop"
+    },
+    {
+      "id": "e-txstop-finishing",
+      "source": "transaction-stop",
+      "target": "status-finishing"
+    },
+    {
+      "id": "e-finishing-available2",
+      "source": "status-finishing",
+      "target": "status-available2"
+    },
+    {
+      "id": "e-available2-end",
+      "source": "status-available2",
+      "target": "end-1"
+    }
+  ]
+}

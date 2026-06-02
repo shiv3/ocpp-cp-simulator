@@ -14,6 +14,7 @@ import {
   NotificationNodeData,
   ConnectorPlugNodeData,
   RemoteStartTriggerNodeData,
+  RemoteStopTriggerNodeData,
   StatusTriggerNodeData,
   ReserveNowNodeData,
   CancelReservationNodeData,
@@ -412,6 +413,13 @@ export class ScenarioExecutor {
         );
         break;
 
+      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
+        await this.executeRemoteStopTrigger(
+          node.id,
+          node.data as RemoteStopTriggerNodeData,
+        );
+        break;
+
       case ScenarioNodeType.STATUS_TRIGGER:
         await this.executeStatusTrigger(
           node.id,
@@ -783,6 +791,60 @@ export class ScenarioExecutor {
       }
 
       // Emit final progress event
+      this.eventEmitter?.emit("nodeProgress", {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining: 0,
+        total: timeout,
+      });
+    }
+  }
+
+  /**
+   * Execute remote stop trigger node. Mirror of executeRemoteStartTrigger
+   * but for the CSMS-initiated stop side. Parks the scenario until the
+   * runtime callback resolves (the runtime installs a scenario-stop
+   * handler on the CP so the default RemoteStopTransactionHandler defers
+   * to us). Returns the transactionId from the request; we don't surface
+   * it on the scenario yet but capture it for parity with the start node.
+   */
+  private async executeRemoteStopTrigger(
+    nodeId: string,
+    data: RemoteStopTriggerNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onWaitForRemoteStop) return;
+
+    const timeout = data.timeout || 0;
+    const wait = (): Promise<void> =>
+      this.callbacks.onWaitForRemoteStop!(timeout).then(() => undefined);
+
+    if (!timeout || timeout === 0) {
+      await this.waitWithOptionalForceSkip(wait());
+      return;
+    }
+
+    const startTime = Date.now();
+    const timeoutMs = timeout * 1000;
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
+      this.callbacks.onNodeProgress?.(nodeId, remaining, timeout);
+      const progressData = {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining,
+        total: timeout,
+      };
+      this.eventEmitter?.emit("nodeProgress", progressData);
+      this.eventEmitter?.emit("node.progress", progressData);
+      if (remaining <= 0) clearInterval(progressInterval);
+    }, 100);
+
+    try {
+      await this.waitWithOptionalForceSkip(wait());
+    } finally {
+      clearInterval(progressInterval);
+      this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
       this.eventEmitter?.emit("nodeProgress", {
         scenarioId: this.scenario.id,
         nodeId,

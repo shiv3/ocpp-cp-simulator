@@ -1,0 +1,77 @@
+{
+  "id": "smart-charging",
+  "name": "Smart Charging (Auto MeterValue)",
+  "description": "Auto-increment MeterValue when Charging, stop when Finishing",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "trigger-charging",
+      "type": "statusTrigger",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Wait for Charging",
+        "targetStatus": "Charging",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Start Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 10,
+        "incrementAmount": 1000,
+        "maxValue": 30000,
+        "maxTime": 0
+      }
+    },
+    {
+      "id": "trigger-finish",
+      "type": "statusTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for Finishing",
+        "targetStatus": "Finishing",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-charging",
+      "source": "start-1",
+      "target": "trigger-charging"
+    },
+    {
+      "id": "e-charging-meter",
+      "source": "trigger-charging",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e-meter-finish",
+      "source": "meter-auto",
+      "target": "trigger-finish"
+    },
+    { "id": "e-finish-end", "source": "trigger-finish", "target": "end-1" }
+  ]
+}

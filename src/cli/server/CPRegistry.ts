@@ -104,12 +104,58 @@ export class CPRegistry {
     return [...this.services.keys()];
   }
 
-  create(init: ChargePointInitOptions): CLIChargePointService {
+  /**
+   * Create + register a brand-new CP. Pass `opts.seedDefault: false` to
+   * skip the auto-seeded Essential CP Behavior template — used by the
+   * CLI bootstrap path when the operator supplied their own --scenario /
+   * --scenario-template / --scenario-template-file, so the two don't
+   * race for the connector's auto-start slot.
+   */
+  create(
+    init: ChargePointInitOptions,
+    opts: { seedDefault?: boolean } = {},
+  ): CLIChargePointService {
     if (this.services.has(init.cpId)) {
       throw new Error(`cpId already exists: ${init.cpId}`);
     }
     this.persistCreate(init);
-    return this.instantiate(init);
+    const svc = this.instantiate(init);
+    // Restore path (restoreFromDatabase) calls instantiate() directly and
+    // skips this seed — that path rehydrates whatever scenarios the
+    // operator had, so we don't override an explicitly-cleared slot with
+    // the default after a daemon restart.
+    if (opts.seedDefault !== false) {
+      svc.seedDefaultScenarios("essential-cp-behavior");
+    }
+    return svc;
+  }
+
+  /**
+   * Replace an existing CP's in-memory service with one built from `init`.
+   * Used by the "edit CP" flow in the web console: the existing OCPP
+   * WebSocket is closed (via cleanup), the persisted row is updated
+   * in-place, and a fresh CLIChargePointService is constructed with the
+   * new wsUrl / vendor / etc. Scenarios persisted under the same `cp_id`
+   * survive because `persistRemove` is NOT called — we update the row,
+   * we don't delete it. The caller is expected to follow up with
+   * `svc.connect()` so the new config takes effect.
+   */
+  update(init: ChargePointInitOptions): CLIChargePointService {
+    const existing = this.services.get(init.cpId);
+    if (!existing) {
+      throw new Error(`cpId not found: ${init.cpId}`);
+    }
+    existing.cleanup();
+    this.unsubscribes.get(init.cpId)?.();
+    this.unsubscribes.delete(init.cpId);
+    this.services.delete(init.cpId);
+    this.persistCreate(init); // ON CONFLICT UPDATE — leaves scenarios intact
+    const svc = this.instantiate(init);
+    // Re-attach scenarios that the previous instance had loaded so the
+    // re-created service picks up the same set without the operator
+    // having to reload them.
+    svc.restoreScenariosFromDatabase();
+    return svc;
   }
 
   /** Construct + register the in-memory CLIChargePointService without

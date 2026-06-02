@@ -77,7 +77,12 @@ COPY package.json bun.lock ./
 COPY src/cli ./src/cli
 COPY src/cp ./src/cp
 COPY src/data ./src/data
-COPY src/utils/scenarioTemplates.ts ./src/utils/scenarioTemplates.ts
+# scenarioTemplates.ts statically imports built-in templates from
+# src/utils/scenarios/*.json (extracted in PR #54). Copying the whole utils/
+# subtree keeps those imports resolvable at runtime — copying only
+# scenarioTemplates.ts left the daemon crashing on boot with
+# "Cannot find module './scenarios/essential-cp-behavior.json'".
+COPY src/utils ./src/utils
 
 # Built-in scenario examples — kept handy under /app/docs.
 COPY docs/examples/scenarios ./docs/examples/scenarios

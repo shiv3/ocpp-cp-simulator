@@ -8,6 +8,9 @@ import {
   SchemaVersionMismatchError,
   runMigrations,
 } from "../schema";
+import { SqliteConnectorRuntimeRepository } from "../../../../data/sqlite/SqliteConnectorRuntimeRepository";
+import type { ConnectorRuntimeSnapshot } from "../../../../data/interfaces/ConnectorRuntimeRepository";
+import { OCPPStatus } from "../../types/OcppTypes";
 
 describe("BunSqliteDatabase", () => {
   it("opens an in-memory DB and applies the schema", () => {
@@ -26,6 +29,7 @@ describe("BunSqliteDatabase", () => {
           "configuration",
           "pending_messages",
           "kv",
+          "connector_runtime",
         ]),
       );
     } finally {
@@ -75,6 +79,98 @@ describe("BunSqliteDatabase", () => {
         ["cp1"],
       );
       expect(row?.soc_meter_sync).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("round-trips a connector runtime snapshot with active transaction", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      const startTime = new Date("2026-06-02T08:00:00.000Z");
+      const snapshot: ConnectorRuntimeSnapshot = {
+        status: OCPPStatus.Charging,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: {
+          id: 1583,
+          connectorId: 1,
+          tagId: "TAG001",
+          meterStart: 0,
+          meterStop: null,
+          startTime,
+          stopTime: null,
+          meterSent: false,
+        },
+        meterValueWh: 12345,
+        socPercent: 42.5,
+        lastAutoStartedScenarioKey: "essential-cp-behavior@1|oneshot",
+      };
+      repo.save("shiv3-cp7", 1, snapshot);
+      const loaded = repo.load("shiv3-cp7", 1);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.status).toBe(OCPPStatus.Charging);
+      expect(loaded?.transaction?.id).toBe(1583);
+      expect(loaded?.transaction?.tagId).toBe("TAG001");
+      // Date round-trip: JSON.stringify reduces Date to ISO string;
+      // deserializeTransaction re-hydrates it. The instance identity
+      // changes (toMatchObject doesn't help) so just compare the epoch.
+      expect(loaded?.transaction?.startTime.getTime()).toBe(
+        startTime.getTime(),
+      );
+      expect(loaded?.meterValueWh).toBe(12345);
+      expect(loaded?.socPercent).toBe(42.5);
+      expect(loaded?.lastAutoStartedScenarioKey).toBe(
+        "essential-cp-behavior@1|oneshot",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("clears a connector runtime row when transaction ends", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      const base: ConnectorRuntimeSnapshot = {
+        status: OCPPStatus.Available,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: null,
+        meterValueWh: 0,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+      };
+      repo.save("shiv3-cp7", 1, base);
+      const loaded = repo.load("shiv3-cp7", 1);
+      expect(loaded?.transaction).toBeNull();
+      expect(loaded?.status).toBe(OCPPStatus.Available);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("deleteByCpId removes every connector row for that CP", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      const snap: ConnectorRuntimeSnapshot = {
+        status: OCPPStatus.Available,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: null,
+        meterValueWh: 0,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+      };
+      repo.save("cp-a", 1, snap);
+      repo.save("cp-a", 2, snap);
+      repo.save("cp-b", 1, snap);
+      repo.deleteByCpId("cp-a");
+      expect(repo.load("cp-a", 1)).toBeNull();
+      expect(repo.load("cp-a", 2)).toBeNull();
+      expect(repo.load("cp-b", 1)).not.toBeNull();
     } finally {
       db.close();
     }

@@ -100,6 +100,46 @@ export class SqliteScenarioRepository implements ScenarioRepository {
     return rows.map((r) => JSON.parse(r.definition) as ScenarioDefinition);
   }
 
+  /**
+   * List every scenario stored for a single (cp_id, connector_id) pair.
+   * Used by the daemon to rehydrate per-connector scenarios on startup
+   * and to expose `list_scenarios` over the JSON command channel.
+   * `connectorId = null` maps to the column value `0` (cp-level slot),
+   * matching `save()` / `delete()`.
+   */
+  listByConnector(
+    chargePointId: string,
+    connectorId: number | null,
+  ): ScenarioDefinition[] {
+    if (!this.db) return [];
+    const rows = this.db.all<{ definition: string }>(
+      "SELECT definition FROM scenarios " +
+        "WHERE cp_id = ? AND connector_id = ? " +
+        "ORDER BY updated_at DESC",
+      [chargePointId, connectorId ?? 0],
+    );
+    return rows.map((r) => JSON.parse(r.definition) as ScenarioDefinition);
+  }
+
+  /**
+   * Delete a single scenario row by composite key. The interface's
+   * `delete(cpId, connectorId)` wipes the whole connector slot, which is
+   * wrong for the daemon — operators expect "drop scenario X" to leave
+   * sibling scenarios on the same connector intact.
+   */
+  deleteOne(
+    chargePointId: string,
+    connectorId: number | null,
+    scenarioId: string,
+  ): void {
+    if (!this.db) return;
+    this.db.run(
+      "DELETE FROM scenarios " +
+        "WHERE cp_id = ? AND connector_id = ? AND scenario_id = ?",
+      [chargePointId, connectorId ?? 0, scenarioId],
+    );
+  }
+
   subscribe(
     chargePointId: string,
     connectorId: number | null,

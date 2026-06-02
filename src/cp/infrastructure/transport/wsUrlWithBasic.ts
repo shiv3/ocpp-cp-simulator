@@ -56,15 +56,34 @@ export function openOcppWebSocket(params: {
   baseUrl: string;
   chargePointId: string;
   basicAuth: BasicAuthSettings | null;
+  /** Extra raw HTTP headers attached to the WebSocket upgrade request.
+   *  Only emitted when running in the Bun/Node CLI runtime — the DOM
+   *  WebSocket constructor doesn't accept headers. Useful for CSMS in
+   *  front of a header-routing proxy (e.g. preview environments matching
+   *  on `X-Preview-Slug`). */
+  extraHeaders?: Record<string, string>;
+  /** Extra Sec-WebSocket-Protocol tokens appended to the OCPP version
+   *  subprotocol. OCPP servers pick the first recognised version token
+   *  and ignore the rest, so extras are safe to add and become visible
+   *  to upstream routers that match on subprotocol. */
+  extraSubprotocols?: ReadonlyArray<string>;
 }): WebSocket {
   const url = buildOcppWebSocketUrl(params);
-  if (!isBrowserRuntime() && params.basicAuth?.password) {
+  const protocols = [
+    OCPP_WEBSOCKET_PROTOCOL,
+    ...(params.extraSubprotocols ?? []),
+  ];
+  const extraHeaders = params.extraHeaders ?? {};
+  const hasExtraHeaders = Object.keys(extraHeaders).length > 0;
+  if (!isBrowserRuntime() && (params.basicAuth?.password || hasExtraHeaders)) {
+    const headers: Record<string, string> = { ...extraHeaders };
+    if (params.basicAuth?.password) {
+      headers.Authorization = buildOcppBasicAuthorization(params.basicAuth);
+    }
     return new (WebSocket as unknown as WebSocketWithHeaders)(url, {
-      protocols: [OCPP_WEBSOCKET_PROTOCOL],
-      headers: {
-        Authorization: buildOcppBasicAuthorization(params.basicAuth),
-      },
+      protocols,
+      headers,
     });
   }
-  return new WebSocket(url, [OCPP_WEBSOCKET_PROTOCOL]);
+  return new WebSocket(url, protocols);
 }

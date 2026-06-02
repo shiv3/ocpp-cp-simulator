@@ -16,6 +16,7 @@ import type {
   ScenarioExecutionContext,
   ScenarioMode,
 } from "../cp/application/scenario/ScenarioTypes";
+import { SqliteScenarioRepository } from "../data/sqlite/SqliteScenarioRepository";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";
@@ -185,12 +186,14 @@ export class CLIChargePointService {
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
+  private readonly _scenarioRepo: SqliteScenarioRepository;
 
   constructor(
     init: ChargePointInitOptions,
     /** Shared daemon DB. `null` means run in-memory (no `--state-db`). */
     private readonly database: Database | null = null,
   ) {
+    this._scenarioRepo = new SqliteScenarioRepository(database);
     const overrides = init.bootNotification ?? {};
     const bootNotification: BootNotification = {
       chargePointVendor: init.vendor,
@@ -453,7 +456,64 @@ export class CLIChargePointService {
       throw new Error(`Connector ${connectorId} not found`);
     }
     this._scenarios.set(definition.id, { definition, connectorId });
+    // Persist asynchronously — the sql.js writer batches, and a sync
+    // failure here would mask a successful in-memory load. `save` on the
+    // bun:sqlite path is effectively sync but typed Promise; either way
+    // a failure surfaces in stderr and the in-memory copy stays usable.
+    void this._scenarioRepo
+      .save(this._chargePoint.id, connectorId, definition)
+      .catch((err) => {
+        process.stderr.write(
+          `[CLI] Failed to persist scenario ${definition.id}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      });
     return definition.id;
+  }
+
+  /**
+   * Rehydrate all scenarios that were persisted for this CP under the
+   * given (cp_id, connector_id) by a previous daemon run. Called from
+   * CPRegistry.restoreFromDatabase() after a CP is re-instantiated, so a
+   * restart picks up every loaded scenario — and any statusChange-trigger
+   * scenarios re-arm automatically via attachStatusChangeAutoTrigger().
+   */
+  restoreScenariosFromDatabase(): number {
+    if (!this.database) return 0;
+    let total = 0;
+    this._chargePoint.connectors.forEach((_connector, connectorId) => {
+      const defs = this._scenarioRepo.listByConnector(
+        this._chargePoint.id,
+        connectorId,
+      );
+      for (const def of defs) {
+        // Skip already-loaded scenarios so calling this twice is a no-op.
+        if (this._scenarios.has(def.id)) continue;
+        this._scenarios.set(def.id, { definition: def, connectorId });
+        total += 1;
+      }
+    });
+    return total;
+  }
+
+  /**
+   * Drop a scenario from in-memory state AND the DB. The interface's
+   * `delete(cpId, connectorId)` would wipe every scenario on that
+   * connector — operators expect to delete just one, so we go through
+   * `deleteOne`.
+   */
+  removeScenario(connectorId: number, scenarioId: string): boolean {
+    const entry = this._scenarios.get(scenarioId);
+    if (!entry || entry.connectorId !== connectorId) return false;
+    const executor = this._executors.get(scenarioId);
+    if (executor) {
+      executor.stop();
+      this._executors.delete(scenarioId);
+    }
+    this._scenarios.delete(scenarioId);
+    this._scenarioRepo.deleteOne(this._chargePoint.id, connectorId, scenarioId);
+    return true;
   }
 
   listScenarios(connectorId: number): ReadonlyArray<{
@@ -862,7 +922,60 @@ export class CLIChargePointService {
           });
         }),
       );
+
+      // statusChange-triggered scenarios: when this connector transitions,
+      // scan loaded scenarios for matches and auto-run the first one.
+      // Mirrors ScenarioManager.handleStatusChange used by the browser,
+      // inlined here to avoid duplicating the (cp, executors) state the
+      // service already owns.
+      this._connectorUnsubscribes.push(
+        connector.events.on("statusChange", ({ status, previousStatus }) => {
+          this.handleStatusChangeAutoTrigger(
+            connectorId,
+            previousStatus as OCPPStatus,
+            status as OCPPStatus,
+          );
+        }),
+      );
     });
+  }
+
+  /**
+   * Inline mirror of ScenarioManager.handleStatusChange — finds the first
+   * loaded scenario whose `statusChange` trigger matches the transition
+   * and runs it via runScenario(). Skips scenarios that are disabled,
+   * already running, or whose ChargePoint isn't `Available` (matches the
+   * browser-side guard in ScenarioManager.executeScenario).
+   */
+  private handleStatusChangeAutoTrigger(
+    connectorId: number,
+    fromStatus: OCPPStatus,
+    toStatus: OCPPStatus,
+  ): void {
+    if (this._chargePoint.status !== OCPPStatus.Available) return;
+    for (const [scenarioId, entry] of this._scenarios) {
+      if (entry.connectorId !== connectorId) continue;
+      const def = entry.definition;
+      if (def.enabled === false) continue;
+      const trigger = def.trigger;
+      if (!trigger || trigger.type !== "statusChange") continue;
+      const cond = trigger.conditions;
+      if (cond?.fromStatus && cond.fromStatus !== fromStatus) continue;
+      if (cond?.toStatus && cond.toStatus !== toStatus) continue;
+      // Don't restart if it's currently running — let it finish first.
+      if (this._executors.has(scenarioId)) continue;
+      try {
+        this.runScenario(connectorId, scenarioId);
+      } catch (err) {
+        process.stderr.write(
+          `[CLI] statusChange auto-trigger failed for ${scenarioId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+      // One scenario per status transition — matches ScenarioManager.
+      return;
+    }
   }
 
   private detachConnectorEventForwarders(): void {

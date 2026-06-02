@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OCPP CP Simulator</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        background: #0b1220;
+        color: #e2e8f0;
+      }
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 4px solid #1e293b;
+        border-top-color: #38bdf8;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .title {
+        font-size: 1.05rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .subtitle {
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+      .error {
+        color: #f87171;
+        text-align: center;
+        max-width: 80%;
+        line-height: 1.4;
+      }
+      code {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #1e293b;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="spinner" id="spinner"></div>
+    <div class="title" id="title">Starting OCPP CP Simulator…</div>
+    <div class="subtitle" id="subtitle">Spinning up the daemon</div>
+
+    <script>
+      // The splash page lives at tauri://localhost/splash.html. Once the
+      // bundled daemon answers /healthz we redirect the same webview to
+      // http://127.0.0.1:<port>/ where the full web console takes over.
+      const POLL_INTERVAL_MS = 200;
+      const POLL_TIMEOUT_MS = 30_000;
+
+      async function waitForDaemon() {
+        const url = await window.__TAURI__.core.invoke("get_daemon_url");
+        const started = Date.now();
+        while (Date.now() - started < POLL_TIMEOUT_MS) {
+          try {
+            const res = await fetch(`${url}/healthz`, { cache: "no-store" });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              if (body && body.ok === true) {
+                window.location.replace(`${url}/`);
+                return;
+              }
+            }
+          } catch {
+            // network error, daemon not bound yet — keep polling
+          }
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        }
+        showError(url);
+      }
+
+      function showError(url) {
+        document.getElementById("spinner").style.display = "none";
+        document.getElementById("title").textContent =
+          "Daemon failed to start";
+        const sub = document.getElementById("subtitle");
+        sub.classList.add("error");
+        sub.innerHTML =
+          `The bundled daemon at <code>${url}</code> didn't answer ` +
+          `<code>/healthz</code> within 30 s. ` +
+          "Check the app log for spawn failures.";
+      }
+
+      // The splash boots inside the Tauri webview, so __TAURI__ is always
+      // present — but be defensive: if someone opens splash.html directly
+      // in a browser, fail loudly instead of silently hanging.
+      if (window.__TAURI__ && window.__TAURI__.core) {
+        waitForDaemon();
+      } else {
+        document.getElementById("spinner").style.display = "none";
+        document.getElementById("title").textContent =
+          "Splash page is for the Tauri shell only";
+        document.getElementById("subtitle").textContent =
+          "Run the desktop app or `bun run tauri dev`.";
+      }
+    </script>
+  </body>
+</html>

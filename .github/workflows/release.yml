@@ -57,6 +57,21 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Setup Bun (for sidecar compile)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build CLI sidecar (Bun --compile → src-tauri/binaries/)
+        # The Tauri build step below picks up the sidecar via
+        # `bundle.externalBin`. Tauri expects the suffix to match the
+        # rust target triple, which is what scripts/build-tauri-sidecar.sh
+        # produces. Bun handles cross-compile internally.
+        shell: bash
+        env:
+          TAURI_TARGET: ${{ matrix.target }}
+        run: bash scripts/build-tauri-sidecar.sh
+
       - name: Generate app icon
         run: |
           cd src-tauri

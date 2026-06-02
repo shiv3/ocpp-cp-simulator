@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Save, X } from "lucide-react";
+import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +40,6 @@ export interface ChargePointConfig {
   meterType: string;
   iccid: string;
   imsi: string;
-  tagIds: string[];
 }
 
 interface ChargePointConfigModalProps {
@@ -75,7 +75,6 @@ export const defaultChargePointConfig: ChargePointConfig = {
   meterType: "",
   iccid: "",
   imsi: "",
-  tagIds: ["123456"],
 };
 
 const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
@@ -106,6 +105,51 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   ) => {
     setConfig({ ...config, [key]: value });
   };
+
+  // Full WebSocket URL field — built from wsURL + basic auth on display,
+  // and parsed back into those fields on paste/Enter/blur. `fullUrlDraft`
+  // lets the user type without each keystroke fighting the composed value.
+  const composedFullUrl = useMemo(
+    () =>
+      buildFullOcppUrl(config.wsURL, {
+        enabled: config.basicAuthEnabled,
+        username: config.basicAuthUsername,
+        password: config.basicAuthPassword,
+      }),
+    [
+      config.wsURL,
+      config.basicAuthEnabled,
+      config.basicAuthUsername,
+      config.basicAuthPassword,
+    ],
+  );
+  const [fullUrlDraft, setFullUrlDraft] = useState<string | null>(null);
+  const [fullUrlError, setFullUrlError] = useState<string | null>(null);
+  const displayFullUrl = fullUrlDraft ?? composedFullUrl;
+
+  const applyFullUrl = useCallback((raw: string): boolean => {
+    const parsed = parseFullOcppUrl(raw);
+    if (!parsed) {
+      setFullUrlError(
+        "Invalid WebSocket URL. Use a full ws:// or wss:// URL (optionally with user:password@host for basic auth).",
+      );
+      return false;
+    }
+    setConfig((prev) => ({
+      ...prev,
+      wsURL: parsed.wsURL,
+      basicAuthEnabled: parsed.basicAuthEnabled || prev.basicAuthEnabled,
+      basicAuthUsername: parsed.basicAuthEnabled
+        ? parsed.basicAuthUsername
+        : prev.basicAuthUsername,
+      basicAuthPassword: parsed.basicAuthEnabled
+        ? parsed.basicAuthPassword
+        : prev.basicAuthPassword,
+    }));
+    setFullUrlDraft(null);
+    setFullUrlError(null);
+    return true;
+  }, []);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -161,6 +205,49 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 />
               </div>
               <div className="col-span-2">
+                <Label htmlFor="fullWsURL" className="mb-2 logger-label">
+                  Full WebSocket URL
+                </Label>
+                <Input
+                  id="fullWsURL"
+                  type="url"
+                  value={displayFullUrl}
+                  onChange={(e) => {
+                    setFullUrlDraft(e.target.value);
+                    setFullUrlError(null);
+                  }}
+                  onBlur={() => {
+                    if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const text = e.clipboardData.getData("text").trim();
+                    if (!text) return;
+                    e.preventDefault();
+                    setFullUrlDraft(text);
+                    applyFullUrl(text);
+                  }}
+                  placeholder="wss://user:password@host:8080/path/"
+                  className="logger-input font-mono text-sm"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted mt-1">
+                  Composed from WebSocket URL + Basic Auth below. Paste a full
+                  URL to autofill those fields (basic auth from
+                  user:password@host).
+                </p>
+                {fullUrlError && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fullUrlError}
+                  </p>
+                )}
+              </div>
+              <div className="col-span-2">
                 <Label htmlFor="wsURL" className="mb-2 logger-label">
                   WebSocket URL
                 </Label>
@@ -188,29 +275,6 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                     <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="col-span-2">
-                <Label htmlFor="tagIds" className="mb-2 logger-label">
-                  RFID Tag IDs (comma-separated)
-                </Label>
-                <Input
-                  id="tagIds"
-                  type="text"
-                  value={config.tagIds.join(", ")}
-                  onChange={(e) => {
-                    const tags = e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter((s) => s.length > 0);
-                    updateConfig("tagIds", tags.length > 0 ? tags : ["123456"]);
-                  }}
-                  placeholder="e.g., 123456, ABCDEF, TAG001"
-                  className="logger-input"
-                />
-                <p className="text-xs text-muted mt-1">
-                  Enter one or more RFID tag IDs separated by commas. These tags
-                  can be used for starting transactions.
-                </p>
               </div>
             </div>
           </div>

@@ -18,6 +18,8 @@ interface ConnectorProps {
   id: number;
   cpId: string;
   idTag: string;
+  /** All tag IDs configured on this CP. Drives the per-card TagID picker. */
+  tagIds?: string[];
   isSelected?: boolean;
   onSelect?: () => void;
 }
@@ -68,6 +70,8 @@ ConnectorAvailability.displayName = "ConnectorAvailability";
 const Connector: React.FC<ConnectorProps> = ({
   id: connector_id,
   cpId,
+  idTag,
+  tagIds,
   isSelected = false,
   onSelect,
 }) => {
@@ -95,6 +99,44 @@ const Connector: React.FC<ConnectorProps> = ({
   // template in scenarioTemplates — operators reach for it from the
   // template picker when they want it, and a fresh connector starts with
   // a genuinely empty canvas.
+
+  // Per-card TagID picker. Defaults to the CP-level idTag (which is the
+  // first configured tag from ChargePointConfig.tagIds). When the parent
+  // supplies a tagIds[] array, the card renders a select so the operator
+  // can switch between configured profiles before pressing Start.
+  const availableTagIds =
+    tagIds && tagIds.length > 0 ? tagIds : idTag ? [idTag] : [];
+  const [selectedTagId, setSelectedTagId] = useState<string>(
+    availableTagIds[0] ?? idTag ?? "",
+  );
+  // Keep the selection valid when the parent's tag list changes (CP config
+  // edited). Prefer to keep the user's pick if it's still in the new list.
+  useEffect(() => {
+    if (availableTagIds.length === 0) return;
+    if (!availableTagIds.includes(selectedTagId)) {
+      setSelectedTagId(availableTagIds[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableTagIds.join("|")]);
+
+  // One toggle button drives both directions. Reading `isCharging` from
+  // the live status keeps the label/style in sync if the transaction is
+  // started/stopped elsewhere (side panel, scenario, remote start).
+  const handleTransactionToggle = useCallback(
+    (e: React.MouseEvent, isChargingNow: boolean) => {
+      e.stopPropagation();
+      if (isChargingNow) {
+        void chargePointService.stopTransaction(cpId, connector_id);
+      } else if (selectedTagId) {
+        void chargePointService.startTransaction(
+          cpId,
+          connector_id,
+          selectedTagId,
+        );
+      }
+    },
+    [chargePointService, cpId, connector_id, selectedTagId],
+  );
 
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
   const [, setScenarioExecutionContext] =
@@ -449,6 +491,59 @@ const Connector: React.FC<ConnectorProps> = ({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Transaction controls — TagID is always a select sourced from the
+            CP profile's `tagIds`, and one toggle button covers Start/Stop
+            (label flips based on isCharging). stopPropagation keeps card
+            clicks from also fighting the controls. */}
+        <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor={`connector-tag-${cpId}-${connector_id}`}
+              className="text-xs text-muted whitespace-nowrap"
+            >
+              TagID
+            </label>
+            <select
+              id={`connector-tag-${cpId}-${connector_id}`}
+              value={
+                availableTagIds.includes(selectedTagId)
+                  ? selectedTagId
+                  : (availableTagIds[0] ?? "")
+              }
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setSelectedTagId(e.target.value);
+              }}
+              disabled={isCharging || availableTagIds.length === 0}
+              className="flex-1 min-w-0 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono disabled:opacity-60"
+              title="Switch RFID tag profile before starting a transaction"
+            >
+              {availableTagIds.length === 0 ? (
+                <option value="">No TagIDs configured</option>
+              ) : (
+                availableTagIds.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => handleTransactionToggle(e, isCharging)}
+            disabled={!isCharging && !selectedTagId}
+            className={`w-full text-sm py-1.5 px-3 font-medium text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+              isCharging
+                ? "bg-yellow-500 hover:bg-yellow-600"
+                : "bg-green-500 hover:bg-green-600"
+            }`}
+          >
+            {isCharging ? "Stop" : "Start"}
+          </button>
         </div>
       </div>
     </div>

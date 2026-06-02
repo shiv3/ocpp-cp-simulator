@@ -10,7 +10,7 @@ The hosted web version runs in **Local mode** — every charge point lives in th
 
 ## Desktop Application
 
-The desktop app is **not** a wrapper around the static Local-mode build. On launch it spins up the bundled simulator daemon as a sidecar, waits for `/healthz`, then opens the full web console served by that daemon — so you get the same Remote-mode UX as `ocpp-cp-sim --web-console`, without having to install anything else.
+The desktop app is **not** a wrapper around the static Local-mode build. On launch it spins up the bundled simulator daemon as a sidecar, waits for `/v1/healthz`, then opens the full web console served by that daemon — so you get the same Remote-mode UX as `ocpp-cp-sim --web-console`, without having to install anything else.
 
 - State (`state.db`) is written to the OS-standard app data dir:
   - macOS: `~/Library/Application Support/com.ocpp.cp-simulator/state.db`

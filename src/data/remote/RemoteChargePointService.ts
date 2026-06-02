@@ -25,6 +25,7 @@ import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
+import { HEALTH_PATH } from "../healthPath";
 
 interface ServerCpListItem {
   cpId: string;
@@ -818,7 +819,7 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async ping(): Promise<{ ok: boolean; cps: number }> {
-    return this.fetchJson<{ ok: boolean; cps: number }>("GET", "/healthz");
+    return this.fetchJson<{ ok: boolean; cps: number }>("GET", HEALTH_PATH);
   }
 
   async resetAllState(): Promise<void> {

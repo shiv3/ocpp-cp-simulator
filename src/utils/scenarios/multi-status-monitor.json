@@ -1,151 +1,148 @@
 {
-  "templateId": "multi-status-monitor",
-  "templateName": "Multi-Status Monitor (Parallel)",
-  "templateDescription": "Monitor multiple statuses in parallel and execute different actions",
-  "scenario": {
-    "name": "Multi-Status Monitor",
-    "description": "Parallel status monitoring",
-    "targetType": "connector",
-    "trigger": { "type": "manual" },
-    "defaultExecutionMode": "oneshot",
-    "enabled": true,
-    "nodes": [
-      {
-        "id": "start-1",
-        "type": "start",
-        "position": { "x": 400, "y": 50 },
-        "data": { "label": "Start" }
-      },
-      {
-        "id": "trigger-available",
-        "type": "statusTrigger",
-        "position": { "x": 150, "y": 200 },
-        "data": {
-          "label": "Wait: Available",
-          "targetStatus": "Available",
-          "timeout": 0
-        }
-      },
-      {
-        "id": "notify-available",
-        "type": "notification",
-        "position": { "x": 150, "y": 300 },
-        "data": {
-          "label": "Send Heartbeat",
-          "messageType": "Heartbeat",
-          "payload": {}
-        }
-      },
-      {
-        "id": "end-available",
-        "type": "end",
-        "position": { "x": 150, "y": 400 },
-        "data": { "label": "End" }
-      },
-      {
-        "id": "trigger-charging",
-        "type": "statusTrigger",
-        "position": { "x": 400, "y": 200 },
-        "data": {
-          "label": "Wait: Charging",
-          "targetStatus": "Charging",
-          "timeout": 0
-        }
-      },
-      {
-        "id": "meter-charging",
-        "type": "meterValue",
-        "position": { "x": 400, "y": 300 },
-        "data": {
-          "label": "Auto MeterValue",
-          "value": 0,
-          "sendMessage": true,
-          "autoIncrement": true,
-          "incrementInterval": 10,
-          "incrementAmount": 1000,
-          "maxValue": 20000,
-          "maxTime": 0
-        }
-      },
-      {
-        "id": "end-charging",
-        "type": "end",
-        "position": { "x": 400, "y": 400 },
-        "data": { "label": "End" }
-      },
-      {
-        "id": "trigger-faulted",
-        "type": "statusTrigger",
-        "position": { "x": 650, "y": 200 },
-        "data": {
-          "label": "Wait: Faulted",
-          "targetStatus": "Faulted",
-          "timeout": 0
-        }
-      },
-      {
-        "id": "notify-faulted",
-        "type": "notification",
-        "position": { "x": 650, "y": 300 },
-        "data": {
-          "label": "Send Status",
-          "messageType": "StatusNotification",
-          "payload": { "status": "Faulted" }
-        }
-      },
-      {
-        "id": "end-faulted",
-        "type": "end",
-        "position": { "x": 650, "y": 400 },
-        "data": { "label": "End" }
+  "id": "multi-status-monitor",
+  "name": "Multi-Status Monitor (Parallel)",
+  "description": "Monitor multiple statuses in parallel and execute different actions",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "trigger-available",
+      "type": "statusTrigger",
+      "position": { "x": 150, "y": 200 },
+      "data": {
+        "label": "Wait: Available",
+        "targetStatus": "Available",
+        "timeout": 0
       }
-    ],
-    "edges": [
-      {
-        "id": "e-start-available",
-        "source": "start-1",
-        "target": "trigger-available"
-      },
-      {
-        "id": "e-available-notify",
-        "source": "trigger-available",
-        "target": "notify-available"
-      },
-      {
-        "id": "e-notify-end1",
-        "source": "notify-available",
-        "target": "end-available"
-      },
-      {
-        "id": "e-start-charging",
-        "source": "start-1",
-        "target": "trigger-charging"
-      },
-      {
-        "id": "e-charging-meter",
-        "source": "trigger-charging",
-        "target": "meter-charging"
-      },
-      {
-        "id": "e-meter-end2",
-        "source": "meter-charging",
-        "target": "end-charging"
-      },
-      {
-        "id": "e-start-faulted",
-        "source": "start-1",
-        "target": "trigger-faulted"
-      },
-      {
-        "id": "e-faulted-notify",
-        "source": "trigger-faulted",
-        "target": "notify-faulted"
-      },
-      {
-        "id": "e-notify-end3",
-        "source": "notify-faulted",
-        "target": "end-faulted"
+    },
+    {
+      "id": "notify-available",
+      "type": "notification",
+      "position": { "x": 150, "y": 300 },
+      "data": {
+        "label": "Send Heartbeat",
+        "messageType": "Heartbeat",
+        "payload": {}
       }
-    ]
-  }
+    },
+    {
+      "id": "end-available",
+      "type": "end",
+      "position": { "x": 150, "y": 400 },
+      "data": { "label": "End" }
+    },
+    {
+      "id": "trigger-charging",
+      "type": "statusTrigger",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "Wait: Charging",
+        "targetStatus": "Charging",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "meter-charging",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 300 },
+      "data": {
+        "label": "Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 10,
+        "incrementAmount": 1000,
+        "maxValue": 20000,
+        "maxTime": 0
+      }
+    },
+    {
+      "id": "end-charging",
+      "type": "end",
+      "position": { "x": 400, "y": 400 },
+      "data": { "label": "End" }
+    },
+    {
+      "id": "trigger-faulted",
+      "type": "statusTrigger",
+      "position": { "x": 650, "y": 200 },
+      "data": {
+        "label": "Wait: Faulted",
+        "targetStatus": "Faulted",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "notify-faulted",
+      "type": "notification",
+      "position": { "x": 650, "y": 300 },
+      "data": {
+        "label": "Send Status",
+        "messageType": "StatusNotification",
+        "payload": { "status": "Faulted" }
+      }
+    },
+    {
+      "id": "end-faulted",
+      "type": "end",
+      "position": { "x": 650, "y": 400 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-available",
+      "source": "start-1",
+      "target": "trigger-available"
+    },
+    {
+      "id": "e-available-notify",
+      "source": "trigger-available",
+      "target": "notify-available"
+    },
+    {
+      "id": "e-notify-end1",
+      "source": "notify-available",
+      "target": "end-available"
+    },
+    {
+      "id": "e-start-charging",
+      "source": "start-1",
+      "target": "trigger-charging"
+    },
+    {
+      "id": "e-charging-meter",
+      "source": "trigger-charging",
+      "target": "meter-charging"
+    },
+    {
+      "id": "e-meter-end2",
+      "source": "meter-charging",
+      "target": "end-charging"
+    },
+    {
+      "id": "e-start-faulted",
+      "source": "start-1",
+      "target": "trigger-faulted"
+    },
+    {
+      "id": "e-faulted-notify",
+      "source": "trigger-faulted",
+      "target": "notify-faulted"
+    },
+    {
+      "id": "e-notify-end3",
+      "source": "notify-faulted",
+      "target": "end-faulted"
+    }
+  ]
 }

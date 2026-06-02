@@ -477,6 +477,56 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     });
   }, [liveMeterValueWh, setNodes]);
 
+  // Re-fit the ReactFlow viewport whenever the scenario id changes. The
+  // editor opens with `createEmptyScenario` (just Start + End in a tight
+  // y-range), ReactFlow's `fitView` prop runs once against that, and
+  // when the real scenario hydrates moments later — typically 9+ nodes
+  // spanning y=50..1050 — there's no re-fit, so the user sees only the
+  // top of the flow. Manually re-fit on every load so the whole graph
+  // is in frame from the first paint.
+  useEffect(() => {
+    const instance = rfInstanceRef.current;
+    if (!instance) return;
+    // requestAnimationFrame so nodes/edges state has flushed before we
+    // measure — `fitView` reads the DOM-resolved node positions.
+    const handle = window.requestAnimationFrame(() => {
+      try {
+        instance.fitView({ padding: 0.2, duration: 0 });
+      } catch {
+        // First-mount races where the canvas isn't laid out yet — the
+        // ResizeObserver below covers those.
+      }
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [scenario.id]);
+
+  // ResizeObserver-driven re-fit on container resize. Handles the case
+  // where the tab becomes visible after the editor mounted (the tab
+  // strip uses `display: none` for the inactive tab), the side panel is
+  // dragged wider/narrower, or the window resizes.
+  const flowContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = flowContainerRef.current;
+    if (!el) return;
+    let lastWidth = el.clientWidth;
+    let lastHeight = el.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w === 0 || h === 0) return;
+      if (w === lastWidth && h === lastHeight) return;
+      lastWidth = w;
+      lastHeight = h;
+      try {
+        rfInstanceRef.current?.fitView({ padding: 0.2, duration: 0 });
+      } catch {
+        // best effort
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   // In remote mode the in-browser executor is never set, so executionState
   // would stay "idle" forever and Force Step would keep re-running the
   // scenario. Sync executionState from scenario_* events instead.
@@ -2308,7 +2358,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           </div>
 
           {/* React Flow Canvas */}
-          <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden min-h-0">
+          <div
+            ref={flowContainerRef}
+            className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden min-h-0"
+          >
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -2322,9 +2375,19 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               nodeTypes={nodeTypes}
               deleteKeyCode={["Backspace", "Delete"]}
               fitView
+              fitViewOptions={{ padding: 0.2 }}
               colorMode={isDark ? "dark" : "light"}
               onInit={(instance) => {
                 rfInstanceRef.current = instance;
+                // Fire one more fit on init — `fitView` prop fits before
+                // the instance is captured, so any subsequent
+                // node-set hydration that landed before this callback
+                // already had a fresh frame to land in.
+                try {
+                  instance.fitView({ padding: 0.2, duration: 0 });
+                } catch {
+                  // best effort
+                }
               }}
             >
               <Background />

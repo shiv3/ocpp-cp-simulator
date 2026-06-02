@@ -525,6 +525,25 @@ export class CLIChargePointService {
   }
 
   /**
+   * Snapshot of every loaded (connectorId, ScenarioDefinition) pair. Used
+   * by CPRegistry.update to carry the in-memory scenarios across a
+   * cleanup() → new instantiate() rebuild when the daemon is running
+   * without --state-db (no `scenarios` table to rehydrate from). The
+   * definitions are returned by-reference because they are read-only
+   * snapshots of the operator's last load; the new service's
+   * loadScenario clones them as needed.
+   */
+  snapshotScenarios(): ReadonlyArray<{
+    readonly connectorId: number;
+    readonly definition: ScenarioDefinition;
+  }> {
+    return Array.from(this._scenarios.values()).map((entry) => ({
+      connectorId: entry.connectorId,
+      definition: entry.definition,
+    }));
+  }
+
+  /**
    * Rehydrate all scenarios that were persisted for this CP under the
    * given (cp_id, connector_id) by a previous daemon run. Called from
    * CPRegistry.restoreFromDatabase() after a CP is re-instantiated, so a
@@ -775,6 +794,20 @@ export class CLIChargePointService {
         // statusChange-trigger case.
         if ((status as OCPPStatus) === OCPPStatus.Available) {
           this.handleConnectAutoStart();
+          // Connector statusChange events fired during BootNotification
+          // handling race ahead of the CP-level Available transition, so
+          // `handleStatusAutoStart` returns early via the
+          // `chargePoint.status !== Available` gate and any
+          // `triggerOn: "status"` scenario targeting the connector's
+          // current state never starts. Re-evaluate every connector here
+          // now that the gate is open. Dedup via lastAutoStartedScenarioKey
+          // keeps repeats of this branch from re-firing what's already up.
+          for (const connector of this._chargePoint.connectors.values()) {
+            this.handleStatusAutoStart(
+              connector.id,
+              connector.status as OCPPStatus,
+            );
+          }
         }
       }),
     );

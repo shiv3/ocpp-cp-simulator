@@ -75,10 +75,17 @@ const TopPage: React.FC = () => {
 
   // Remote mode: the daemon owns CP configuration, so we derive the edit
   // form's prefill from the snapshot's `config` block (POST/PUT /v1/cp echo)
-  // rather than the local config store. Keyed on chargePoints (the daemon's
-  // CP roster) so adding/editing/removing a CP updates the list immediately.
+  // rather than the local config store. Keyed on the full snapshot of each
+  // CP's config (not just `id`) so a PUT edit that changes wsUrl / vendor /
+  // boot-notification fields without changing the cpId still invalidates
+  // the memo and rebuilds chargePointConfigs — otherwise the edit modal
+  // would reopen with the previous values and a follow-up save would
+  // silently revert the change.
   const chargePointsKey = useMemo(
-    () => chargePoints.map((c) => c.id).join("|"),
+    () =>
+      chargePoints
+        .map((c) => (c.config ? `${c.id}:${JSON.stringify(c.config)}` : c.id))
+        .join("|"),
     [chargePoints],
   );
 

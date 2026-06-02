@@ -8,8 +8,8 @@ import {
   SchemaVersionMismatchError,
   runMigrations,
 } from "../schema";
-import { SqliteConnectorRuntimeRepository } from "../../../../data/sqlite/SqliteConnectorRuntimeRepository";
-import type { ConnectorRuntimeSnapshot } from "../../../../data/interfaces/ConnectorRuntimeRepository";
+import { SqliteConnectorRuntimeRepository } from "../SqliteConnectorRuntimeRepository";
+import type { ConnectorRuntimeSnapshot } from "../ConnectorRuntimeRepository";
 import { OCPPStatus } from "../../types/OcppTypes";
 
 describe("BunSqliteDatabase", () => {

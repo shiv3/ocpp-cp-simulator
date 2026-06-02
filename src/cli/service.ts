@@ -18,12 +18,12 @@ import type {
   StartNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
-import { SqliteScenarioRepository } from "../data/sqlite/SqliteScenarioRepository";
-import { SqliteConnectorRuntimeRepository } from "../data/sqlite/SqliteConnectorRuntimeRepository";
+import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
+import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import {
   NoopConnectorRuntimeRepository,
   type ConnectorRuntimeRepository,
-} from "../data/interfaces/ConnectorRuntimeRepository";
+} from "../cp/domain/persistence/ConnectorRuntimeRepository";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";

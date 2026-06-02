@@ -1,8 +1,5 @@
-import type { Transaction } from "../../cp/domain/connector/Transaction";
-import type {
-  OCPPAvailability,
-  OCPPStatus,
-} from "../../cp/domain/types/OcppTypes";
+import type { Transaction } from "../connector/Transaction";
+import type { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
 
 /**
  * The slice of {@link Connector} runtime state we persist between daemon

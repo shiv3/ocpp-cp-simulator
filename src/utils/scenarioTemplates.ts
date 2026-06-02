@@ -601,9 +601,140 @@ const remoteStartAutoMeterTemplate: ScenarioTemplate = {
 };
 
 /**
- * All available templates
+ * Template: Essential CP behavior — the canonical "do nothing weird,
+ * just respond to a CSMS-initiated transaction" flow operators want for
+ * 90% of integration testing:
+ *
+ *   Start (on connect) → wait 2s → Plug In → wait 1s
+ *     → wait for RemoteStartTransaction (no timeout)
+ *     → StartTransaction (TAG001)
+ *     → MeterValue 0 Wh, autoIncrement +1000 Wh / 5s
+ *     → StopTransaction
+ *     → Plug Out → End
+ *
+ * Auto-starts on connect (matches the default `Start.triggerOn`), so a
+ * fresh CP rendered with this template loaded behaves the same as a
+ * real CP that's quietly waiting for the CSMS to remote-start it.
+ * Drop it onto a new CP and you have a working e2e flow without
+ * hand-wiring auto-meter-value config and a scenario yourself.
+ */
+const essentialCpBehaviorTemplate: ScenarioTemplate = {
+  id: "essential-cp-behavior",
+  name: "Essential CP Behavior",
+  description:
+    "Auto-start on connect: plug in, wait for RemoteStart, run a transaction with auto-meter, then plug out.",
+  targetType: "connector",
+  createScenario: (chargePointId, connectorId) => ({
+    id: `scenario-${Date.now()}`,
+    name: "Essential CP Behavior",
+    description:
+      "Standard plug-in / RemoteStart / charge / RemoteStop / plug-out cycle",
+    targetType: "connector",
+    targetId: connectorId ?? undefined,
+    nodes: [
+      {
+        id: "start-1",
+        type: ScenarioNodeType.START,
+        position: { x: 400, y: 50 },
+        data: { label: "Start", triggerOn: "connect" },
+      },
+      {
+        id: "delay-2s",
+        type: ScenarioNodeType.DELAY,
+        position: { x: 400, y: 150 },
+        data: { label: "Wait 2s", delaySeconds: 2 },
+      },
+      {
+        id: "plug-in",
+        type: ScenarioNodeType.CONNECTOR_PLUG,
+        position: { x: 400, y: 250 },
+        data: { label: "Plug In", action: "plugin" },
+      },
+      {
+        id: "delay-1s",
+        type: ScenarioNodeType.DELAY,
+        position: { x: 400, y: 350 },
+        data: { label: "Wait 1s", delaySeconds: 1 },
+      },
+      {
+        id: "trigger-remote-start",
+        type: ScenarioNodeType.REMOTE_START_TRIGGER,
+        position: { x: 400, y: 450 },
+        data: { label: "Wait for RemoteStartTransaction", timeout: 0 },
+      },
+      {
+        id: "tx-start",
+        type: ScenarioNodeType.TRANSACTION,
+        position: { x: 400, y: 550 },
+        data: {
+          label: "Start Transaction",
+          action: "start",
+          tagId: "TAG001",
+        },
+      },
+      {
+        id: "meter-auto",
+        type: ScenarioNodeType.METER_VALUE,
+        position: { x: 400, y: 650 },
+        data: {
+          label: "Auto MeterValue",
+          value: 0,
+          sendMessage: true,
+          autoIncrement: true,
+          incrementInterval: 5,
+          incrementAmount: 1000,
+          // Unbounded: the scenario advances past this node immediately and
+          // the scheduler keeps ticking in the background until the next
+          // Stop Transaction node (or a RemoteStop / Plug Out) tears it
+          // down — which is exactly what real CPs do while charging.
+          maxValue: 0,
+          maxTime: 0,
+        },
+      },
+      {
+        id: "tx-stop",
+        type: ScenarioNodeType.TRANSACTION,
+        position: { x: 400, y: 750 },
+        data: { label: "Stop Transaction", action: "stop" },
+      },
+      {
+        id: "plug-out",
+        type: ScenarioNodeType.CONNECTOR_PLUG,
+        position: { x: 400, y: 850 },
+        data: { label: "Plug Out", action: "plugout" },
+      },
+      {
+        id: "end-1",
+        type: ScenarioNodeType.END,
+        position: { x: 400, y: 950 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "start-1", target: "delay-2s" },
+      { id: "e2", source: "delay-2s", target: "plug-in" },
+      { id: "e3", source: "plug-in", target: "delay-1s" },
+      { id: "e4", source: "delay-1s", target: "trigger-remote-start" },
+      { id: "e5", source: "trigger-remote-start", target: "tx-start" },
+      { id: "e6", source: "tx-start", target: "meter-auto" },
+      { id: "e7", source: "meter-auto", target: "tx-stop" },
+      { id: "e8", source: "tx-stop", target: "plug-out" },
+      { id: "e9", source: "plug-out", target: "end-1" },
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+  }),
+};
+
+/**
+ * All available templates. Essential first so it surfaces at the top of
+ * the template picker — it's the one operators want by default.
  */
 export const scenarioTemplates: ScenarioTemplate[] = [
+  essentialCpBehaviorTemplate,
   fullChargingCycleTemplate,
   smartChargingTemplate,
   multiStatusMonitorTemplate,

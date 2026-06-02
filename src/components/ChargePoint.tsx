@@ -12,6 +12,12 @@ import { useDataContext } from "../data/providers/DataProvider";
 interface ChargePointProps {
   cpId: string;
   TagID: string;
+  /**
+   * All RFID tag IDs configured for this CP (from ChargePointConfig.tagIds).
+   * Drives the per-connector TagID picker on the connector list. Falls back
+   * to [TagID] when omitted to keep older callers working.
+   */
+  tagIDs?: string[];
 }
 
 // Panel width constants (in vw)
@@ -20,7 +26,9 @@ const PANEL_DEFAULT_WIDTH = 50; // 50vw default — keeps the home tab list
 // wider when they want more room for the scenario canvas.
 const PANEL_COLLAPSED_WIDTH_PX = 60; // px for collapsed
 
-const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
+const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID, tagIDs }) => {
+  const availableTagIds =
+    tagIDs && tagIDs.length > 0 ? tagIDs : TagID ? [TagID] : [];
   const {
     status: cpStatus,
     error: cpError,
@@ -168,6 +176,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
             connectorIds={connectorIds}
             cpId={cpId}
             TagID={TagID}
+            tagIDs={availableTagIds}
             selectedConnector={selectedConnector}
             onConnectorSelect={handleConnectorSelect}
           />
@@ -199,6 +208,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID }) => {
             cpId={cpId}
             connectorId={selectedConnector}
             idTag={TagID}
+            tagIds={availableTagIds}
             onClose={handleClosePanel}
             isCollapsed={isPanelCollapsed}
             onToggleCollapse={handleToggleCollapse}
@@ -225,6 +235,7 @@ interface ConnectorGridProps {
   connectorIds: number[];
   cpId: string;
   TagID: string;
+  tagIDs: string[];
   selectedConnector: number | null;
   onConnectorSelect: (connectorId: number) => void;
 }
@@ -240,6 +251,7 @@ const ConnectorGrid: React.FC<ConnectorGridProps> = ({
   connectorIds,
   cpId,
   TagID,
+  tagIDs,
   selectedConnector,
   onConnectorSelect,
 }) => {
@@ -267,6 +279,7 @@ const ConnectorGrid: React.FC<ConnectorGridProps> = ({
           id={connectorId}
           cpId={cpId}
           idTag={TagID}
+          tagIds={tagIDs}
           isSelected={selectedConnector === connectorId}
           onSelect={() => onConnectorSelect(connectorId)}
         />

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
+import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import { useDataContext } from "../data/providers/DataProvider";
 import {
   type EVSettings,
@@ -28,6 +29,30 @@ const Settings: React.FC = () => {
   const [draftEv, setDraftEv] = useState<EVSettings>(
     defaultEvSettings ?? { ...defaultEVSettings },
   );
+  const { tagIds: globalTagIds, setTagIds: persistGlobalTagIds } =
+    useGlobalTagIds();
+  // Draft string for the comma-separated input so the user can type literal
+  // commas/spaces without each keystroke being eaten by split→filter→join.
+  const [tagIdsDraft, setTagIdsDraft] = useState<string>("");
+  const [tagIdsDirty, setTagIdsDirty] = useState<boolean>(false);
+  useEffect(() => {
+    if (!tagIdsDirty) {
+      setTagIdsDraft(globalTagIds.join(", "));
+    }
+  }, [globalTagIds, tagIdsDirty]);
+  const parseTagIdsDraft = (raw: string): string[] =>
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  const handleApplyTagIds = async () => {
+    const tags = parseTagIdsDraft(tagIdsDraft);
+    await persistGlobalTagIds(tags);
+    setTagIdsDraft(tags.join(", "));
+    setTagIdsDirty(false);
+    setSuccess("RFID Tag IDs saved.");
+    setTimeout(() => setSuccess(""), 3000);
+  };
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -384,6 +409,60 @@ const Settings: React.FC = () => {
               ? "User override is active. New connectors will start from these values."
               : "No override. New connectors start from the built-in Generic EV defaults (75 kWh / 80 % target)."}
           </p>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>RFID Tag IDs</CardTitle>
+          <p className="text-muted-foreground text-sm mt-2">
+            Tag profiles shared across every charge point. Pick one from the
+            connector card's TagID dropdown before Start Transaction. Stored
+            globally — not per-CP.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label
+            htmlFor="global-tag-ids"
+            className="block text-sm font-semibold"
+          >
+            Tag IDs (comma-separated)
+          </label>
+          <input
+            id="global-tag-ids"
+            type="text"
+            value={tagIdsDraft}
+            onChange={(e) => {
+              setTagIdsDraft(e.target.value);
+              setTagIdsDirty(true);
+            }}
+            onBlur={() => {
+              const tags = parseTagIdsDraft(tagIdsDraft);
+              setTagIdsDraft(tags.join(", "));
+            }}
+            placeholder="e.g., 123456, ABCDEF, TAG001"
+            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => void handleApplyTagIds()}
+              size="sm"
+              disabled={
+                !tagIdsDirty &&
+                parseTagIdsDraft(tagIdsDraft).join("|") ===
+                  globalTagIds.join("|")
+              }
+            >
+              Apply
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {globalTagIds.length === 0
+                ? "No tags configured yet."
+                : `${globalTagIds.length} tag${
+                    globalTagIds.length === 1 ? "" : "s"
+                  } active.`}
+            </span>
+          </div>
         </CardContent>
       </Card>
 

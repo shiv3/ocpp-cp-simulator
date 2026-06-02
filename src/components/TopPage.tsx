@@ -17,42 +17,21 @@ import {
 import { useConfig } from "../data/hooks/useConfig";
 import { useChargePoints } from "../data/hooks/useChargePoints";
 import { useDataContext } from "../data/providers/DataProvider";
+import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import type { ChargePointSnapshot } from "../data/interfaces/ChargePointService";
 import { getTemplateById } from "../utils/scenarioTemplates";
 import type { Config } from "../store/store";
 
-const REMOTE_TAG_IDS_KEY = "ocpp-cp.remote.tagIds";
 const DEFAULT_TAG_ID = "TAG001";
-
-function readRemoteTagIds(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(REMOTE_TAG_IDS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((v) => typeof v === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeRemoteTagIds(ids: string[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(REMOTE_TAG_IDS_KEY, JSON.stringify(ids));
-  } catch {
-    // best effort
-  }
-}
 
 const TopPage: React.FC = () => {
   const { mode, chargePointService, scenarioRepository } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
-  const [tagIDs, setTagIDs] = useState<string[]>(() =>
-    typeof window === "undefined" ? [] : readRemoteTagIds(),
-  );
+  // Tag IDs live globally now — managed from the Settings page, not per-CP.
+  // useGlobalTagIds picks the right backing store (config.Experimental in
+  // local mode, a jotai atom in remote mode) and re-renders this tree when
+  // Settings writes a new list.
+  const { tagIds: tagIDs } = useGlobalTagIds();
   const [chargePointConfigs, setChargePointConfigs] = useState<
     ChargePointConfig[]
   >([]);
@@ -120,7 +99,6 @@ const TopPage: React.FC = () => {
           meterType: bn?.meterType ?? "",
           iccid: bn?.iccid ?? "",
           imsi: bn?.imsi ?? "",
-          tagIds: tagIDs.length > 0 ? tagIDs : ["123456"],
         };
       });
       setChargePointConfigs(remoteConfigs);
@@ -128,12 +106,9 @@ const TopPage: React.FC = () => {
     }
 
     if (isLoading || !config || !config.Experimental) {
-      setTagIDs([]);
       setChargePointConfigs([]);
       return;
     }
-
-    setTagIDs(config.Experimental.TagIDs ?? []);
 
     const configs: ChargePointConfig[] = config.Experimental.ChargePointIDs.map(
       (cp) => ({
@@ -159,7 +134,6 @@ const TopPage: React.FC = () => {
         meterType: config.BootNotification?.meterType || "",
         iccid: config.BootNotification?.iccid || "",
         imsi: config.BootNotification?.imsi || "",
-        tagIds: config.Experimental.TagIDs ?? ["123456"],
       }),
     );
     setChargePointConfigs(configs);
@@ -178,12 +152,6 @@ const TopPage: React.FC = () => {
 
   const handleSaveChargePoint = async (cpConfig: ChargePointConfig) => {
     if (mode === "remote") {
-      // Remote mode: persist tag IDs locally so future sessions / Authorize
-      // / Start Transaction have a default to send.
-      if (cpConfig.tagIds.length > 0) {
-        setTagIDs(cpConfig.tagIds);
-        writeRemoteTagIds(cpConfig.tagIds);
-      }
       try {
         // Re-use the same shape for create and update; the only difference
         // is which daemon endpoint we hit. Editing an existing CP goes to
@@ -280,14 +248,13 @@ const TopPage: React.FC = () => {
       updatedConfigs.push(cpConfig);
     }
     setChargePointConfigs(updatedConfigs);
-    setTagIDs(cpConfig.tagIds);
 
     const newConfig: Config = {
       ...(config || {}),
       wsURL: cpConfig.wsURL,
       connectorNumber: cpConfig.connectorNumber,
       ChargePointID: cpConfig.cpId,
-      tagID: cpConfig.tagIds[0] || "123456",
+      tagID: tagIDs[0] || "123456",
       ocppVersion: cpConfig.ocppVersion,
       basicAuthSettings: {
         enabled: cpConfig.basicAuthEnabled,
@@ -315,7 +282,7 @@ const TopPage: React.FC = () => {
           ChargePointID: cfg.cpId,
           ConnectorNumber: cfg.connectorNumber,
         })),
-        TagIDs: cpConfig.tagIds,
+        TagIDs: tagIDs,
       },
     };
     updateConfig(newConfig);
@@ -585,7 +552,11 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
         </TabsList>
         {cps.map((cp) => (
           <TabsContent key={cp.id} value={cp.id}>
-            <ChargePoint cpId={cp.id} TagID={tagIDs[0] ?? "TAG001"} />
+            <ChargePoint
+              cpId={cp.id}
+              TagID={tagIDs[0] ?? "TAG001"}
+              tagIDs={tagIDs}
+            />
           </TabsContent>
         ))}
       </Tabs>

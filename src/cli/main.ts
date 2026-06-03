@@ -45,6 +45,11 @@ function parseArgs(argv: string[]): CLIOptions {
   let stop = false;
   let basicAuthUser = "";
   let basicAuthPass = "";
+  // HTTP web-console Basic Auth credentials. Distinct from basicAuthUser /
+  // basicAuthPass above — those are sent on the *outgoing* CP → CSMS WS
+  // upgrade; these gate *incoming* HTTP requests to this daemon.
+  let webConsoleBasicAuthUser = "";
+  let webConsoleBasicAuthPass = "";
   let vendor = "CLI-Vendor";
   let model = "CLI-Model";
   let scenario: string | null = null;
@@ -108,6 +113,14 @@ function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--basic-auth-pass":
         basicAuthPass = next ?? "";
+        i++;
+        break;
+      case "--web-console-basic-auth-user":
+        webConsoleBasicAuthUser = next ?? "";
+        i++;
+        break;
+      case "--web-console-basic-auth-pass":
+        webConsoleBasicAuthPass = next ?? "";
         i++;
         break;
       case "--vendor":
@@ -342,6 +355,24 @@ function parseArgs(argv: string[]): CLIOptions {
       ? { username: basicAuthUser, password: basicAuthPass }
       : null;
 
+  // Both web-console flags must be supplied together. Half-configured auth
+  // (e.g. user without pass) would let everyone in or block everyone out,
+  // so we hard-fail at startup instead of silently picking one.
+  if ((webConsoleBasicAuthUser === "") !== (webConsoleBasicAuthPass === "")) {
+    process.stderr.write(
+      "Error: --web-console-basic-auth-user and --web-console-basic-auth-pass " +
+        "must be supplied together (or both omitted)\n",
+    );
+    process.exit(1);
+  }
+  const webConsoleBasicAuth =
+    webConsoleBasicAuthUser && webConsoleBasicAuthPass
+      ? {
+          username: webConsoleBasicAuthUser,
+          password: webConsoleBasicAuthPass,
+        }
+      : null;
+
   return {
     wsUrl,
     cpId,
@@ -352,6 +383,7 @@ function parseArgs(argv: string[]): CLIOptions {
     events,
     stop,
     basicAuth,
+    webConsoleBasicAuth,
     vendor,
     model,
     scenario,
@@ -402,8 +434,18 @@ Options:
   --cp-id <id>             Charge Point ID
   --ws-url <url>           WebSocket URL of CSMS
   --connectors <n>         Number of connectors (default: 1)
-  --basic-auth-user <u>    Basic auth username
-  --basic-auth-pass <p>    Basic auth password
+  --basic-auth-user <u>    Outgoing WS Basic auth username (CP → CSMS)
+  --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
+  --web-console-basic-auth-user <u>
+                           Basic auth user for INCOMING HTTP requests to
+                           this daemon (web console / JSON API / WS
+                           upgrades). Must be supplied together with
+                           --web-console-basic-auth-pass. Default: no auth.
+  --web-console-basic-auth-pass <p>
+                           Basic auth password for INCOMING HTTP. The
+                           configured health path (--health-path, default
+                           /v1/healthz) is always served without auth so
+                           k8s probes / load balancers keep working.
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
   --scenario <file>            Run scenario from JSON file on startup
@@ -566,6 +608,7 @@ async function main(): Promise<void> {
       webConsolePort: options.webConsolePort,
       stateDb: options.stateDb,
       healthPath: options.healthPath,
+      webConsoleBasicAuth: options.webConsoleBasicAuth,
     });
     return;
   }

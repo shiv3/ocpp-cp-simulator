@@ -11,6 +11,17 @@ export interface CLIOptions {
     readonly username: string;
     readonly password: string;
   } | null;
+  /** Optional Basic Auth gate for the HTTP web console / API / WS upgrades.
+   *  Unrelated to `basicAuth` above (which is for the *outgoing* CP →
+   *  CSMS WebSocket). When set, every request to the daemon's HTTP server
+   *  except the configured health path must carry a matching
+   *  `Authorization: Basic <base64(user:pass)>` header; otherwise the
+   *  server returns 401 + `WWW-Authenticate: Basic realm="..."` so
+   *  browsers prompt for credentials. */
+  readonly webConsoleBasicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
   readonly vendor: string;
   readonly model: string;
   readonly scenario: string | null;

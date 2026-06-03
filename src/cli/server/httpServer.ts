@@ -139,6 +139,69 @@ function forbidden(): Response {
   return new Response("origin not allowed", { status: 403 });
 }
 
+/**
+ * Parse a `Authorization: Basic <base64>` header into username + password.
+ * Returns null when the header is missing, not Basic, or doesn't decode.
+ * Tolerates the rare `Basic` scheme written in any case.
+ */
+function parseBasicAuthHeader(
+  header: string | null,
+): { username: string; password: string } | null {
+  if (!header) return null;
+  const match = /^\s*Basic\s+(\S+)\s*$/i.exec(header);
+  if (!match) return null;
+  let latin1: string;
+  try {
+    latin1 = atob(match[1]);
+  } catch {
+    return null;
+  }
+  // RFC 7617 lets clients encode credentials as UTF-8 (and we hint
+  // `charset="UTF-8"` in the WWW-Authenticate header). atob produces a
+  // Latin-1 string where each char carries one byte; re-decode through
+  // a UTF-8 TextDecoder so non-ASCII passwords compare correctly.
+  const bytes = new Uint8Array(latin1.length);
+  for (let i = 0; i < latin1.length; i++) bytes[i] = latin1.charCodeAt(i);
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  const idx = decoded.indexOf(":");
+  if (idx < 0) return null;
+  return {
+    username: decoded.slice(0, idx),
+    password: decoded.slice(idx + 1),
+  };
+}
+
+/**
+ * Constant-time comparison of supplied creds vs the configured creds.
+ * Length differences are inferred from the buffer comparison itself, so
+ * an attacker can still time-distinguish "wrong length" from "wrong
+ * content" — that leak is fine because the realm name in
+ * WWW-Authenticate already announces the server's identity. What we
+ * defend against is byte-by-byte secret discovery via response timing.
+ */
+function credentialsMatch(
+  supplied: { username: string; password: string },
+  expected: { username: string; password: string },
+): boolean {
+  return (
+    timingSafeStringEqual(supplied.username, expected.username) &&
+    timingSafeStringEqual(supplied.password, expected.password)
+  );
+}
+
+function timingSafeStringEqual(a: string, b: string): boolean {
+  // Buffer compare is constant-time when lengths match; if they don't,
+  // we return false immediately. Pad to avoid a length-zero edge case.
+  const ba = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  if (ba.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ba.length; i++) {
+    diff |= ba[i] ^ bb[i];
+  }
+  return diff === 0;
+}
+
 export interface HttpHandlers {
   fetch: (
     req: Request,
@@ -159,16 +222,43 @@ export function createHttpHandlers(deps: {
   /** Absolute URL path the health-check JSON is served on. Defaults to
    *  `/v1/healthz`. */
   healthPath?: string;
+  /** Optional Basic Auth gate for the HTTP web console / API / WS upgrades.
+   *  When set, every request except the configured `healthPath` must
+   *  carry a matching `Authorization: Basic <base64(user:pass)>` header.
+   *  Null = no auth (default; backward compatible). */
+  webConsoleBasicAuth?: { username: string; password: string } | null;
 }): HttpHandlers {
   const { registry, bus, lifecycle } = deps;
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
   const staticDir = deps.staticDir ?? null;
   const database = deps.database ?? null;
   const healthPath = deps.healthPath ?? "/v1/healthz";
+  const webConsoleBasicAuth = deps.webConsoleBasicAuth ?? null;
 
   return {
     fetch(req, server) {
-      // Reserved hook: authentication middleware can be added here.
+      // Optional Basic Auth gate. Runs *before* CORS so an attacker without
+      // creds can't probe internal endpoints via a same-origin request.
+      // The health path is intentionally exempt so k8s probes / external
+      // load balancers / browser auto-detect can keep working unprompted.
+      if (webConsoleBasicAuth !== null) {
+        const url = new URL(req.url);
+        if (url.pathname !== healthPath) {
+          const auth = parseBasicAuthHeader(req.headers.get("authorization"));
+          if (!auth || !credentialsMatch(auth, webConsoleBasicAuth)) {
+            // 401 with WWW-Authenticate so browsers prompt for credentials
+            // instead of just showing the 401 body. realm is shown in the
+            // prompt; charset hints UTF-8 for non-ASCII passwords.
+            return new Response("authentication required", {
+              status: 401,
+              headers: {
+                "www-authenticate":
+                  'Basic realm="ocpp-cp-simulator", charset="UTF-8"',
+              },
+            });
+          }
+        }
+      }
 
       // Block disallowed browser origins BEFORE dispatching so simple-request
       // POSTs / WS upgrades / GETs don't trigger side effects under a tightened

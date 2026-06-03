@@ -68,6 +68,13 @@ export interface ServerOptions {
   /** Absolute URL path the health-check JSON is served on. Defaults to
    *  `/v1/healthz` (set by the CLI). */
   readonly healthPath: string;
+  /** Optional Basic Auth credentials for the inbound HTTP server (web
+   *  console / JSON API / WS upgrades). Health path is exempt. Null = no
+   *  auth. Plumbed straight through to `createHttpHandlers`. */
+  readonly webConsoleBasicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -117,6 +124,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     cors: opts.cors,
     database,
     healthPath: opts.healthPath,
+    webConsoleBasicAuth: opts.webConsoleBasicAuth,
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -127,10 +135,19 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         staticDir: opts.staticDir,
         database,
         healthPath: opts.healthPath,
+        webConsoleBasicAuth: opts.webConsoleBasicAuth,
       })
     : apiHandlers;
   if (opts.staticDir) {
     serverLog(`Web console: ${opts.staticDir}`);
+  }
+  if (opts.webConsoleBasicAuth) {
+    // Visible-on-startup log line so an operator can confirm the gate is on
+    // (and which user). The password is intentionally NOT logged.
+    serverLog(
+      `HTTP Basic Auth: enabled (user=${opts.webConsoleBasicAuth.username}, ` +
+        `health path ${opts.healthPath} exempt)`,
+    );
   }
   serverLog(`Health endpoint: GET ${opts.healthPath}`);
   const servers: AnyServer[] = [];

@@ -30,15 +30,11 @@ export interface CallResultHandler<TPayload = unknown> {
  * Registry for message handlers using Strategy Pattern
  */
 export class MessageHandlerRegistry {
-  private callHandlers: Map<
-    OCPPAction,
-    CallHandler<unknown, unknown>
-  > = new Map();
+  private callHandlers: Map<OCPPAction, CallHandler<unknown, unknown>> =
+    new Map();
 
-  private callResultHandlers: Map<
-    OCPPAction,
-    CallResultHandler<unknown>
-  > = new Map();
+  private callResultHandlers: Map<OCPPAction, CallResultHandler<unknown>> =
+    new Map();
 
   /**
    * Register a handler for CALL messages (incoming requests)
@@ -57,16 +53,15 @@ export class MessageHandlerRegistry {
     action: OCPPAction,
     handler: CallResultHandler<TPayload>,
   ): void {
-    this.callResultHandlers.set(
-      action,
-      handler as CallResultHandler<unknown>,
-    );
+    this.callResultHandlers.set(action, handler as CallResultHandler<unknown>);
   }
 
   /**
    * Get handler for CALL messages
    */
-  getCallHandler(action: OCPPAction): CallHandler<unknown, unknown> | undefined {
+  getCallHandler(
+    action: OCPPAction,
+  ): CallHandler<unknown, unknown> | undefined {
     return this.callHandlers.get(action);
   }
 
@@ -104,10 +99,7 @@ export type CallHandlerMap = {
     request.RemoteStopTransactionRequest,
     response.RemoteStopTransactionResponse
   >;
-  [OCPPAction.Reset]: CallHandler<
-    request.ResetRequest,
-    response.ResetResponse
-  >;
+  [OCPPAction.Reset]: CallHandler<request.ResetRequest, response.ResetResponse>;
   [OCPPAction.GetDiagnostics]: CallHandler<
     request.GetDiagnosticsRequest,
     response.GetDiagnosticsResponse
@@ -139,6 +131,18 @@ export type CallHandlerMap = {
   [OCPPAction.CancelReservation]: CallHandler<
     request.CancelReservationRequest,
     response.CancelReservationResponse
+  >;
+  [OCPPAction.GetLocalListVersion]: CallHandler<
+    request.GetLocalListVersionRequest,
+    response.GetLocalListVersionResponse
+  >;
+  [OCPPAction.SendLocalList]: CallHandler<
+    request.SendLocalListRequest,
+    response.SendLocalListResponse
+  >;
+  [OCPPAction.UpdateFirmware]: CallHandler<
+    request.UpdateFirmwareRequest,
+    response.UpdateFirmwareResponse
   >;
 };
 

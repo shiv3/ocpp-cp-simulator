@@ -123,15 +123,15 @@ export enum OCPPAction {
   UnlockConnector = "UnlockConnector",
   // FirmwareManagement actions
   GetDiagnostics = "GetDiagnostics",
-  DiagnosticsStatusNotification = "DiagnosticsStatusNotification", // TODO
-  FirmwareStatusNotification = "FirmwareStatusNotification", // TODO
-  UpdateFirmware = "UpdateFirmware", // TODO
+  DiagnosticsStatusNotification = "DiagnosticsStatusNotification",
+  FirmwareStatusNotification = "FirmwareStatusNotification",
+  UpdateFirmware = "UpdateFirmware",
   // LocalAuthListManagement actions
-  GetLocalListVersion = "GetLocalListVersion", // TODO
-  SendLocalList = "SendLocalList", // TODO
+  GetLocalListVersion = "GetLocalListVersion",
+  SendLocalList = "SendLocalList",
   // Reservation actions
-  CancelReservation = "CancelReservation", // TODO
-  ReserveNow = "ReserveNow", // TODO
+  CancelReservation = "CancelReservation",
+  ReserveNow = "ReserveNow",
   // SmartCharging actions
   ClearChargingProfile = "ClearChargingProfile",
   GetCompositeSchedule = "GetCompositeSchedule",

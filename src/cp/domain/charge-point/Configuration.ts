@@ -458,6 +458,8 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     intVal(ConfigurationKeys.Core.StopTxnSampledDataMaxLength, 8),
     arrVal(ConfigurationKeys.Core.SupportedFeatureProfiles, [
       OcppFeatureProfile.Core,
+      OcppFeatureProfile.FirmwareManagement,
+      OcppFeatureProfile.LocalAuthListManagement,
       OcppFeatureProfile.Reservation,
       OcppFeatureProfile.SmartCharging,
       OcppFeatureProfile.RemoteTrigger,
@@ -467,6 +469,20 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     intVal(ConfigurationKeys.Core.TransactionMessageRetryInterval, 60),
     boolVal(ConfigurationKeys.Core.UnlockConnectorOnEVSideDisconnect, true),
     intVal(ConfigurationKeys.Core.WebSocketPingInterval, 0),
+
+    // ── LocalAuthListManagement profile ────────────────────────────────
+    boolVal(
+      ConfigurationKeys.LocalAuthListManagement.LocalAuthListEnabled,
+      true,
+    ),
+    intVal(
+      ConfigurationKeys.LocalAuthListManagement.LocalAuthListMaxLength,
+      1000,
+    ),
+    intVal(
+      ConfigurationKeys.LocalAuthListManagement.SendLocalListMaxLength,
+      100,
+    ),
 
     // ── Reservation profile ────────────────────────────────────────────
     boolVal(ConfigurationKeys.Reservation.ReserveConnectorZeroSupported, false),

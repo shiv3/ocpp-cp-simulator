@@ -19,6 +19,9 @@ import {
 } from "../types/OcppTypes";
 import type { Transaction } from "../connector/Transaction";
 import { ReservationManager } from "../reservation/Reservation";
+import { LocalAuthListManager } from "../auth/LocalAuthList";
+import { ChargingProfileStore } from "./ChargingProfileStore";
+import type { ActiveChargingProfile } from "../connector/Connector";
 
 interface BasicAuthSettings {
   username: string;
@@ -43,6 +46,12 @@ export class ChargePoint {
   private readonly _stateManager: StateManager;
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
+  private readonly _localAuthListManager: LocalAuthListManager;
+  // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
+  // station-wide TxDefaultProfile) belong at the CP level, not duplicated
+  // onto every connector. Connectors consult this store at composite time.
+  private readonly _stationProfiles: ChargingProfileStore =
+    new ChargingProfileStore();
   private readonly _configuration: ConfigurationStore;
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
@@ -100,7 +109,11 @@ export class ChargePoint {
     };
 
     for (let connectorId = 1; connectorId <= connectorCount; connectorId++) {
-      const connector = new Connector(connectorId, this._logger);
+      const connector = new Connector(
+        connectorId,
+        this._logger,
+        () => this._stationProfiles,
+      );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
@@ -166,6 +179,7 @@ export class ChargePoint {
     );
 
     this._reservationManager = new ReservationManager(this._logger);
+    this._localAuthListManager = new LocalAuthListManager(this._logger);
 
     this._stateManager = new StateManager(
       this._logger,
@@ -383,6 +397,27 @@ export class ChargePoint {
     return this._reservationManager;
   }
 
+  get localAuthListManager(): LocalAuthListManager {
+    return this._localAuthListManager;
+  }
+
+  /** Read-only access for handlers and tests. SetChargingProfile /
+   *  ClearChargingProfile mutate this directly. */
+  get stationProfiles(): ChargingProfileStore {
+    return this._stationProfiles;
+  }
+
+  /** Convenience: the currently active ChargePointMaxProfile (highest
+   *  stackLevel) at the station level. Returns `null` if none. */
+  getActiveChargePointMaxProfile(
+    now: Date = new Date(),
+  ): ActiveChargingProfile | null {
+    return this._stationProfiles.getActive(
+      ChargingProfilePurposeType.ChargePointMaxProfile,
+      now,
+    );
+  }
+
   /**
    * Register a connector as being handled by a scenario.
    * When registered, RemoteStartTransaction handler will emit
@@ -541,6 +576,56 @@ export class ChargePoint {
     this._messageHandler.sendFirmwareStatusNotification(status);
   }
 
+  /** Set while a simulated firmware update is in flight, so a second
+   *  UpdateFirmware.req (the spec allows the CSMS to re-issue) doesn't
+   *  fork a parallel status train. */
+  private _firmwareUpdateInFlight = false;
+  /** Reference kept so disconnect/dispose can cancel a pending start
+   *  before `retrieveDate`. */
+  private _firmwareUpdateTimers: NodeJS.Timeout[] = [];
+
+  /**
+   * §4.5 / §6.19: schedule a simulated firmware update progression. After
+   * `retrieveDate` is reached, fires FirmwareStatusNotification.req in
+   * sequence — Downloading → Downloaded → Installing → Installed — with
+   * `intervalMs` between each transition.
+   *
+   * Real charge points download a binary, install it, and reboot. The
+   * simulator just walks the status machine so the CSMS observes the
+   * full happy-path. Failure paths (DownloadFailed / InstallationFailed)
+   * are reachable via TriggerMessage(FirmwareStatusNotification) for
+   * tests that want to drive them manually.
+   */
+  simulateFirmwareUpdate(retrieveDate: Date, intervalMs = 2000): void {
+    if (this._firmwareUpdateInFlight) {
+      this._logger.warn(
+        "UpdateFirmware: a previous simulated update is still in flight; ignoring",
+        LogType.OCPP,
+      );
+      return;
+    }
+    this._firmwareUpdateInFlight = true;
+
+    const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
+    const sequence: Array<
+      "Downloading" | "Downloaded" | "Installing" | "Installed"
+    > = ["Downloading", "Downloaded", "Installing", "Installed"];
+
+    const fireStep = (index: number) => {
+      if (index >= sequence.length) {
+        this._firmwareUpdateInFlight = false;
+        this._firmwareUpdateTimers = [];
+        return;
+      }
+      this.sendFirmwareStatusNotification(sequence[index]);
+      const t = setTimeout(() => fireStep(index + 1), intervalMs);
+      this._firmwareUpdateTimers.push(t);
+    };
+
+    const startTimer = setTimeout(() => fireStep(0), startDelay);
+    this._firmwareUpdateTimers.push(startTimer);
+  }
+
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._messageHandler.setBootStatus({ status: "Accepted" });
@@ -592,6 +677,13 @@ export class ChargePoint {
     this._heartbeat.cleanup();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
+    this._localAuthListManager.dispose();
+    this._stationProfiles.clear();
+    // Cancel any pending firmware-update simulation so its status train
+    // doesn't keep firing against a dead WebSocket.
+    this._firmwareUpdateTimers.forEach((t) => clearTimeout(t));
+    this._firmwareUpdateTimers = [];
+    this._firmwareUpdateInFlight = false;
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire

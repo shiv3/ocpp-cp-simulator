@@ -58,9 +58,8 @@ export function openOcppWebSocket(params: {
   basicAuth: BasicAuthSettings | null;
   /** Extra raw HTTP headers attached to the WebSocket upgrade request.
    *  Only emitted when running in the Bun/Node CLI runtime — the DOM
-   *  WebSocket constructor doesn't accept headers. Useful for CSMS in
-   *  front of a header-routing proxy (e.g. preview environments matching
-   *  on `X-Preview-Slug`). */
+   *  WebSocket constructor doesn't accept headers. Useful for driving a
+   *  header-routing proxy in front of the CSMS. */
   extraHeaders?: Record<string, string>;
   /** Extra Sec-WebSocket-Protocol tokens appended to the OCPP version
    *  subprotocol. OCPP servers pick the first recognised version token

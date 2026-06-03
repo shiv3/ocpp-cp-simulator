@@ -80,15 +80,12 @@ export interface ChargePointInitOptions {
   };
   /** Extra HTTP headers attached to every WS upgrade request (CLI runtime
    *  only — the browser WebSocket constructor can't set arbitrary headers).
-   *  Typical use: `X-Preview-Slug: feature-foo` to route to a preview env
-   *  CSMS sitting behind a header-routing proxy. */
+   *  Useful for driving a header-routing proxy in front of the CSMS. */
   readonly extraWsHeaders?: Record<string, string>;
   /** Extra Sec-WebSocket-Protocol tokens appended after the OCPP version
    *  subprotocol. OCPP servers pick the first recognised version token
    *  (ocpp1.6 / ocpp2.0.1) and ignore the rest, so any extras are visible
-   *  to upstream routers but harmless for OCPP negotiation.
-   *  Typical use: `preview-feature-foo` for WSS preview routing on
-   *  charger clients that can't set custom HTTP headers. */
+   *  to upstream routers but harmless for OCPP negotiation. */
   readonly extraWsSubprotocols?: ReadonlyArray<string>;
 }
 

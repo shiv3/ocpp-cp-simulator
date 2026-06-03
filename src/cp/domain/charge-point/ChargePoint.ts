@@ -75,6 +75,11 @@ export class ChargePoint {
      *  and per-connector availability. `null` keeps everything in-memory —
      *  used by the daemon's `:memory:` mode and by tests. */
     private readonly _database: Database | null = null,
+    /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
+     *  every WS upgrade. Wired through to OCPPWebSocket so reconnects
+     *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
+    extraWsHeaders: Record<string, string> = {},
+    extraWsSubprotocols: ReadonlyArray<string> = [],
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._logger.setCpId(this._id);
@@ -146,6 +151,8 @@ export class ChargePoint {
       this._id,
       this._logger,
       basicAuthSettings,
+      extraWsHeaders,
+      extraWsSubprotocols,
     );
     this._messageHandler = new OCPPMessageHandler(
       this,

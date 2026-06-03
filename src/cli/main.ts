@@ -66,6 +66,8 @@ function parseArgs(argv: string[]): CLIOptions {
   let logFormat: "plain" | "json" = "plain";
   let healthPath = "/v1/healthz";
   const corsOrigins: string[] = [];
+  const extraWsHeaders: Record<string, string> = {};
+  const extraWsSubprotocols: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -190,6 +192,38 @@ function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         healthPath = next;
+        i++;
+        break;
+      case "--header": {
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --header requires KEY:VALUE (use multiple --header flags for several headers)\n",
+          );
+          process.exit(1);
+        }
+        const idx = next.indexOf(":");
+        if (idx <= 0) {
+          process.stderr.write(
+            `Error: --header value must be KEY:VALUE, got '${next}'\n`,
+          );
+          process.exit(1);
+        }
+        const k = next.slice(0, idx).trim();
+        const v = next.slice(idx + 1).trim();
+        if (!k) {
+          process.stderr.write("Error: --header KEY part is empty\n");
+          process.exit(1);
+        }
+        extraWsHeaders[k] = v;
+        i++;
+        break;
+      }
+      case "--ws-subprotocol":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --ws-subprotocol requires a value\n");
+          process.exit(1);
+        }
+        extraWsSubprotocols.push(next);
         i++;
         break;
       case "--web-console":
@@ -335,6 +369,8 @@ function parseArgs(argv: string[]): CLIOptions {
     stateDb,
     logFormat,
     healthPath,
+    extraWsHeaders,
+    extraWsSubprotocols,
   };
 }
 
@@ -468,6 +504,8 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
     vendor: options.vendor,
     model: options.model,
     basicAuth: options.basicAuth,
+    extraWsHeaders: options.extraWsHeaders,
+    extraWsSubprotocols: options.extraWsSubprotocols,
   };
 }
 

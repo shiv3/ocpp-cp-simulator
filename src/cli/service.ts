@@ -237,6 +237,8 @@ export class CLIChargePointService {
       init.basicAuth,
       autoMeterValue,
       this.database,
+      init.extraWsHeaders ?? {},
+      init.extraWsSubprotocols ?? [],
     );
 
     this.attachEventForwarders();

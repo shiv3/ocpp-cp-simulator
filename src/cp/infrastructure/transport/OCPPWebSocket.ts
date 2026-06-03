@@ -61,12 +61,19 @@ export class OCPPWebSocket {
   private _onOpenCallback: (() => void) | null = null;
   private _onCloseCallback: ((ev: CloseEvent) => void) | null = null;
   private _isManualDisconnect: boolean = false;
+  // Extra HTTP headers + Sec-WebSocket-Protocol tokens attached on each
+  // upgrade. Both are CLI-only — DOM WebSocket ignores extraHeaders, but
+  // the runtime fallback in openOcppWebSocket handles that.
+  private _extraHeaders: Record<string, string>;
+  private _extraSubprotocols: ReadonlyArray<string>;
 
   constructor(
     url: string,
     chargePointId: string,
     logger: Logger,
     basicAuthSettings: { username: string; password: string } | null = null,
+    extraHeaders: Record<string, string> = {},
+    extraSubprotocols: ReadonlyArray<string> = [],
   ) {
     this._url = url;
     this._chargePointId = chargePointId;
@@ -77,6 +84,8 @@ export class OCPPWebSocket {
         password: basicAuthSettings.password,
       };
     }
+    this._extraHeaders = extraHeaders;
+    this._extraSubprotocols = extraSubprotocols;
   }
 
   get url(): string {
@@ -97,6 +106,8 @@ export class OCPPWebSocket {
       baseUrl: this._url,
       chargePointId: this._chargePointId,
       basicAuth: this._basicAuth,
+      extraHeaders: this._extraHeaders,
+      extraSubprotocols: this._extraSubprotocols,
     });
     this._ws.onopen = () => {
       this.handleOpen();

@@ -51,6 +51,12 @@ export interface CLIOptions {
    *  set as `VITE_HEALTH_PATH` at UI build time so the browser auto-detect
    *  probe targets the same endpoint. */
   readonly healthPath: string;
+  /** Repeatable `--header KEY:VALUE` — extra HTTP headers attached to
+   *  the WS upgrade. CLI runtime only. See ChargePointInitOptions. */
+  readonly extraWsHeaders: Record<string, string>;
+  /** Repeatable `--ws-subprotocol TOKEN` — extra subprotocols appended
+   *  to the OCPP version subprotocol in the WS upgrade. */
+  readonly extraWsSubprotocols: ReadonlyArray<string>;
 }
 
 export interface ChargePointInitOptions {
@@ -72,6 +78,15 @@ export interface ChargePointInitOptions {
     readonly iccid?: string;
     readonly imsi?: string;
   };
+  /** Extra HTTP headers attached to every WS upgrade request (CLI runtime
+   *  only — the browser WebSocket constructor can't set arbitrary headers).
+   *  Useful for driving a header-routing proxy in front of the CSMS. */
+  readonly extraWsHeaders?: Record<string, string>;
+  /** Extra Sec-WebSocket-Protocol tokens appended after the OCPP version
+   *  subprotocol. OCPP servers pick the first recognised version token
+   *  (ocpp1.6 / ocpp2.0.1) and ignore the rest, so any extras are visible
+   *  to upstream routers but harmless for OCPP negotiation. */
+  readonly extraWsSubprotocols?: ReadonlyArray<string>;
 }
 
 export interface JsonCommand {

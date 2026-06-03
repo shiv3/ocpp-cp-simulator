@@ -77,8 +77,7 @@ export class ChargePoint {
     private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
      *  every WS upgrade. Wired through to OCPPWebSocket so reconnects
-     *  pick the same values up. CLI-only (DOM WebSocket ignores headers).
-     *  Used to drive header-based CSMS routing for preview envs. */
+     *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
     extraWsHeaders: Record<string, string> = {},
     extraWsSubprotocols: ReadonlyArray<string> = [],
   ) {

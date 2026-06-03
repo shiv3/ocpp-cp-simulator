@@ -62,11 +62,8 @@ export class OCPPWebSocket {
   private _onCloseCallback: ((ev: CloseEvent) => void) | null = null;
   private _isManualDisconnect: boolean = false;
   // Extra HTTP headers + Sec-WebSocket-Protocol tokens attached on each
-  // upgrade. Used to drive header-based routing in front of the CSMS
-  // (e.g. preview envs matching on X-Preview-Slug or `preview-<slug>`
-  // in the subprotocol negotiation). Both are CLI-only — DOM WebSocket
-  // ignores extraHeaders, but the runtime fallback in openOcppWebSocket
-  // handles that.
+  // upgrade. Both are CLI-only — DOM WebSocket ignores extraHeaders, but
+  // the runtime fallback in openOcppWebSocket handles that.
   private _extraHeaders: Record<string, string>;
   private _extraSubprotocols: ReadonlyArray<string>;
 

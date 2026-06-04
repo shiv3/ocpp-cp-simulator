@@ -32,6 +32,27 @@ import {
 import { interpret } from "robot3";
 import type { EventEmitter } from "../../shared/EventEmitter";
 
+/**
+ * Optional resume hint passed to {@link ScenarioExecutor.start}. When set
+ * the executor skips the normal walk from the `start` node and instead
+ * resumes from the outgoing edge of `resumeFromNodeId`. Intended for the
+ * daemon-restart path that loads a {@link ScenarioPositionSnapshot} from
+ * the connector_runtime persistence and reattaches an executor to it.
+ *
+ * If `resumeFromNodeId` doesn't exist in the scenario graph (because the
+ * scenario was edited between runs) the executor logs a warning and
+ * falls back to a fresh start from `start` — the safe default; the next
+ * RemoteStartTransaction will re-arm the connector cleanly.
+ */
+export interface ScenarioStartOptions {
+  resumeFromNodeId?: string;
+  /** Seed for `context.executedNodes`. Lets branching-history checks
+   *  (the ones that look at "have we executed node X already?") behave
+   *  consistently after resume. Optional; defaults to a list containing
+   *  just `resumeFromNodeId`. */
+  executedNodes?: string[];
+}
+
 export class ScenarioExecutor {
   private scenario: ScenarioDefinition;
   private callbacks: ScenarioExecutorCallbacks;
@@ -101,7 +122,7 @@ export class ScenarioExecutor {
    * Start scenario execution. Execution mode is always one-shot — the
    * step / loop variants were removed from the product surface.
    */
-  public async start(): Promise<void> {
+  public async start(opts?: ScenarioStartOptions): Promise<void> {
     const mode: ScenarioExecutionMode = "oneshot";
     // Dispatch START event to transition to running state
     this.service.send({ type: "START", mode });
@@ -138,7 +159,7 @@ export class ScenarioExecutor {
     }
 
     try {
-      await this.executeFlow();
+      await this.executeFlow(opts);
 
       // Check if we were stopped during execution
       const stateName = getScenarioStateName(this.service.machine);
@@ -188,32 +209,76 @@ export class ScenarioExecutor {
    * Execute the flow from start to end
    * Supports scenarios with internal loops - use Stop button to exit infinite loops
    * Supports parallel branches from Start node
+   *
+   * If `opts.resumeFromNodeId` is supplied AND the node exists, the executor
+   * resumes from the outgoing edge of that node — the START node and every
+   * node up to `resumeFromNodeId` are treated as already executed and are
+   * NOT re-fired. Used by the daemon restart path so side-effecting nodes
+   * (Plug In, Start Transaction, …) don't double-emit OCPP traffic.
    */
-  private async executeFlow(): Promise<void> {
-    // Find start node
-    const startNode = this.scenario.nodes.find(
-      (n) => n.type === ScenarioNodeType.START || n.data.label === "Start",
-    );
+  private async executeFlow(opts?: ScenarioStartOptions): Promise<void> {
+    const resumeFromNodeId = opts?.resumeFromNodeId;
+    let originNode: ScenarioNode | undefined;
+    let resumed = false;
 
-    if (!startNode) {
-      throw new Error("No start node found in scenario");
+    if (resumeFromNodeId) {
+      originNode = this.scenario.nodes.find((n) => n.id === resumeFromNodeId);
+      if (originNode) {
+        // Seed executedNodes from the resume snapshot so any node-history
+        // check inside an executor down the flow has the right shape.
+        // Fall back to `[resumeFromNodeId]` when the caller didn't provide
+        // the full list (it's only used for diagnostics in most nodes).
+        const seededNodes =
+          opts?.executedNodes && opts.executedNodes.length > 0
+            ? [...opts.executedNodes]
+            : [resumeFromNodeId];
+        const context = getScenarioContext(this.service.machine);
+        context.executedNodes = seededNodes;
+        context.currentNodeId = originNode.id;
+        this.service.machine.context.executedNodes = seededNodes;
+        this.service.machine.context.currentNodeId = originNode.id;
+        resumed = true;
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Resuming scenario from node "${
+            originNode.data?.label || originNode.id
+          }"`,
+          "info",
+        );
+      } else {
+        // Scenario tree changed between persistence and resume; fall
+        // through to a fresh run. Logged at warn so an operator sees it.
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Cannot resume: node "${resumeFromNodeId}" no ` +
+            "longer exists in scenario; falling back to fresh start",
+          "warn",
+        );
+      }
     }
 
-    // Execute start node
-    await this.executeSingleNode(startNode);
+    if (!originNode) {
+      // Normal path: find and execute the Start node.
+      originNode = this.scenario.nodes.find(
+        (n) => n.type === ScenarioNodeType.START || n.data.label === "Start",
+      );
+      if (!originNode) {
+        throw new Error("No start node found in scenario");
+      }
+      await this.executeSingleNode(originNode);
+    }
 
-    // Check for parallel branches from Start node
+    // Walk outgoing edges from the origin node (whether Start or resume).
     const outgoingEdges = this.scenario.edges.filter(
-      (e) => e.source === startNode.id,
+      (e) => e.source === originNode!.id,
     );
     const nextNodes = outgoingEdges
       .map((edge) => this.scenario.nodes.find((n) => n.id === edge.target))
-      .filter((node) => node !== undefined);
+      .filter((node): node is ScenarioNode => node !== undefined);
 
     if (nextNodes.length === 0) {
+      const tag = resumed ? "Resume point" : "Start";
       this.callbacks.log?.(
-        `[${this.scenario.name}] No nodes after Start, scenario ends`,
-        "warn",
+        `[${this.scenario.name}] No nodes after ${tag}, scenario ends`,
+        resumed ? "info" : "warn",
       );
       return;
     }

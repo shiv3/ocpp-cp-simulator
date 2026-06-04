@@ -176,6 +176,111 @@ describe("BunSqliteDatabase", () => {
     }
   });
 
+  it("round-trips a scenario position when one is set", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      const snap: ConnectorRuntimeSnapshot = {
+        status: OCPPStatus.Charging,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: null,
+        meterValueWh: 12000,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+        scenarioPosition: {
+          scenarioKey: "essential-cp-behavior",
+          lastCompletedNodeId: "tx-start",
+          executedNodes: [
+            "start-1",
+            "delay-2s",
+            "plug-in",
+            "delay-1s",
+            "trigger-remote-start",
+            "tx-start",
+          ],
+        },
+      };
+      repo.save("shiv3-cp7", 1, snap);
+      const loaded = repo.load("shiv3-cp7", 1);
+      expect(loaded?.scenarioPosition?.lastCompletedNodeId).toBe("tx-start");
+      expect(loaded?.scenarioPosition?.executedNodes).toEqual([
+        "start-1",
+        "delay-2s",
+        "plug-in",
+        "delay-1s",
+        "trigger-remote-start",
+        "tx-start",
+      ]);
+      expect(loaded?.scenarioPosition?.scenarioKey).toBe(
+        "essential-cp-behavior",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("treats absent scenarioPosition as null on load", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      // Save without scenarioPosition — backward-compat path.
+      const snap: ConnectorRuntimeSnapshot = {
+        status: OCPPStatus.Available,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: null,
+        meterValueWh: 0,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+      };
+      repo.save("cp-a", 1, snap);
+      const loaded = repo.load("cp-a", 1);
+      // Implementation may return undefined or null depending on
+      // serialisation path; both mean "no resume info, fresh start".
+      expect(loaded?.scenarioPosition ?? null).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("clears scenarioPosition when saved as null", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      repo.save("cp-a", 1, {
+        status: OCPPStatus.Charging,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: null,
+        meterValueWh: 0,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+        scenarioPosition: {
+          scenarioKey: "x",
+          lastCompletedNodeId: "n1",
+          executedNodes: ["n1"],
+        },
+      });
+      // Same row again, this time with scenarioPosition explicitly null
+      // (simulates the scenario-finished cleanup path).
+      repo.save("cp-a", 1, {
+        status: OCPPStatus.Available,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: null,
+        meterValueWh: 0,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+        scenarioPosition: null,
+      });
+      const loaded = repo.load("cp-a", 1);
+      expect(loaded?.scenarioPosition ?? null).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses to open a DB whose schema version is newer than the build", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {

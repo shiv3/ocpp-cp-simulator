@@ -816,27 +816,36 @@ const MeterValueEditor: React.FC<{
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="maxChargeKwh">Max charge (kWh, 0 = unlimited)</Label>
-        <Input
-          id="maxChargeKwh"
-          type="number"
-          step="0.1"
-          min="0"
-          value={maxChargeKwh ?? 0}
-          onChange={(e) => {
-            const next = parseFloat(e.target.value);
-            const kwh = Number.isFinite(next) && next >= 0 ? next : 0;
-            setFormData((prev) => ({
-              ...prev,
-              maxChargeKwh: kwh,
-              // Keep `maxValue` (Wh) in sync so older daemon builds that
-              // only read `maxValue` stop at the same point.
-              maxValue: Math.round(kwh * 1000),
-            }));
-          }}
-        />
-      </div>
+      {formData.stopMode !== "evSettings" && (
+        <div className="space-y-2">
+          <Label htmlFor="maxChargeKwh">Max charge (kWh, 0 = unlimited)</Label>
+          <Input
+            id="maxChargeKwh"
+            type="number"
+            step="0.1"
+            min="0"
+            value={maxChargeKwh ?? 0}
+            onChange={(e) => {
+              const next = parseFloat(e.target.value);
+              const kwh = Number.isFinite(next) && next >= 0 ? next : 0;
+              setFormData((prev) => ({
+                ...prev,
+                maxChargeKwh: kwh,
+                // Keep `maxValue` (Wh) in sync so older daemon builds
+                // that only read `maxValue` stop at the same point.
+                maxValue: Math.round(kwh * 1000),
+              }));
+            }}
+          />
+        </div>
+      )}
+      {formData.stopMode === "evSettings" && (
+        <div className="rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+          Auto-meter stops at the connector's target SoC (set in EV Settings).
+          Switch the stop condition in the advanced panel below to use a fixed
+          kWh cap instead.
+        </div>
+      )}
 
       {/* --- Advanced (collapsible) --- */}
       <div className="border-t pt-3">
@@ -892,6 +901,39 @@ const MeterValueEditor: React.FC<{
               >
                 Auto increment (start AutoMeterValue manager)
               </Label>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="stopMode">Stop condition</Label>
+              <Select
+                value={(formData.stopMode as string) || "manual"}
+                onValueChange={(value) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    stopMode: value as "manual" | "evSettings",
+                  }))
+                }
+              >
+                <SelectTrigger id="stopMode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">
+                    Manual (use Max value / Max time below)
+                  </SelectItem>
+                  <SelectItem value="evSettings">
+                    EV Settings (stop at target SoC)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                In <em>EV Settings</em> mode the auto-meter stops when delivered
+                Wh reaches{" "}
+                <code>
+                  capacity_kWh × (targetSoc − initialSoc) ÷ 100 × 1000
+                </code>
+                . Configure the connector's EV settings (battery capacity,
+                target SoC) from the connector side panel.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="incrementInterval">

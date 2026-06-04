@@ -322,6 +322,7 @@ export const createScenarioExecutorCallbacks = (
     onSetMeterValue: (value) => {
       chargePoint.setMeterValue(connector.id, value);
     },
+    onGetMeterValue: () => connector.meterValue,
     onSendMeterValue: async () => {
       chargePoint.sendMeterValue(connector.id);
     },

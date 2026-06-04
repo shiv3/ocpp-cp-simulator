@@ -190,137 +190,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
       case ScenarioNodeType.METER_VALUE:
         return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="meter-label">Label</Label>
-              <Input
-                id="meter-label"
-                type="text"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="meter-value">Initial Value (Wh)</Label>
-              <Input
-                id="meter-value"
-                type="number"
-                value={formData.value || 0}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    value: parseInt(e.target.value) || 0,
-                  })
-                }
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="sendMessage"
-                checked={formData.sendMessage || false}
-                onCheckedChange={(checked) =>
-                  setFormData({ ...formData, sendMessage: checked })
-                }
-              />
-              <Label
-                htmlFor="sendMessage"
-                className="font-normal cursor-pointer"
-              >
-                Send MeterValue Message
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="autoIncrement"
-                checked={formData.autoIncrement || false}
-                onCheckedChange={(checked) =>
-                  setFormData({ ...formData, autoIncrement: checked })
-                }
-              />
-              <Label
-                htmlFor="autoIncrement"
-                className="font-normal cursor-pointer"
-              >
-                Auto Increment (Start AutoMeterValue Manager)
-              </Label>
-            </div>
-            {formData.autoIncrement && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="incrementInterval">
-                    Increment Interval (seconds)
-                  </Label>
-                  <Input
-                    id="incrementInterval"
-                    type="number"
-                    value={formData.incrementInterval || 10}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        incrementInterval: parseInt(e.target.value) || 10,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="incrementAmount">Increment Amount (Wh)</Label>
-                  <Input
-                    id="incrementAmount"
-                    type="number"
-                    value={formData.incrementAmount || 1000}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        incrementAmount: parseInt(e.target.value) || 1000,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="maxTime">
-                    Max Time (seconds, 0 = unlimited)
-                  </Label>
-                  <Input
-                    id="maxTime"
-                    type="number"
-                    value={formData.maxTime || 0}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        maxTime: parseInt(e.target.value) || 0,
-                      })
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    AutoMeterValue will stop after this many seconds (0 =
-                    unlimited)
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="maxValue">
-                    Max Value (Wh, 0 = unlimited)
-                  </Label>
-                  <Input
-                    id="maxValue"
-                    type="number"
-                    value={formData.maxValue || 0}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        maxValue: parseInt(e.target.value) || 0,
-                      })
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    AutoMeterValue will stop when meter reaches this value (0 =
-                    unlimited)
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
+          <MeterValueEditor formData={formData} setFormData={setFormData} />
         );
 
       case ScenarioNodeType.DELAY:
@@ -833,6 +703,285 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+};
+
+/**
+ * MeterValue node editor split into two surfaces:
+ *
+ *   - **Simple** (always visible): `Output (kW)` and `Max charge (kWh)`.
+ *     These are the two knobs an operator typically wants when
+ *     simulating an EV plugged into a charger — "how fast and how
+ *     much?". The editor derives the existing `incrementAmount` (Wh per
+ *     tick) and `maxValue` (Wh) on save, keeping the scheduler
+ *     contract unchanged so older scenarios and the runtime
+ *     `MeterValueScheduler` keep working.
+ *
+ *   - **Advanced** (collapsed by default unless the scenario has raw
+ *     fields and no `outputKw`): the existing Initial value /
+ *     interval / increment amount / max time / max value fields. Power
+ *     users can still tune raw Wh-per-tick or non-default intervals;
+ *     when those diverge from what `outputKw` would compute, advanced
+ *     wins (the scheduler reads the raw fields).
+ *
+ * Default interval is 5 s (matches what scenarios already produce). A
+ * different interval can be set in the advanced panel.
+ */
+function deriveIncrementAmountWh(
+  outputKw: number,
+  intervalSec: number,
+): number {
+  // Wh delivered in `intervalSec` at `outputKw` of constant output.
+  //   kW × (intervalSec / 3600) × 1000  =  Wh
+  // Rounded to 2 decimals so the chart doesn't drift on long runs from
+  // a quietly truncating integer cast downstream.
+  return Math.round(outputKw * intervalSec * (1000 / 3600) * 100) / 100;
+}
+
+const MeterValueEditor: React.FC<{
+  formData: Record<string, unknown>;
+  setFormData: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+}> = ({ formData, setFormData }) => {
+  const outputKw =
+    typeof formData.outputKw === "number" ? formData.outputKw : undefined;
+  const maxChargeKwh =
+    typeof formData.maxChargeKwh === "number"
+      ? formData.maxChargeKwh
+      : undefined;
+  const intervalSec =
+    typeof formData.incrementInterval === "number"
+      ? formData.incrementInterval
+      : 5;
+  // Open the Advanced panel by default for legacy scenarios that have raw
+  // increment fields but no outputKw (otherwise the operator opens the
+  // editor and sees what looks like a fresh node with the raw values
+  // hidden behind the toggle).
+  const initialAdvancedOpen =
+    outputKw === undefined &&
+    typeof formData.incrementAmount === "number" &&
+    formData.incrementAmount > 0;
+  const [advancedOpen, setAdvancedOpen] =
+    useState<boolean>(initialAdvancedOpen);
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="meter-label">Label</Label>
+        <Input
+          id="meter-label"
+          type="text"
+          value={(formData.label as string) || ""}
+          onChange={(e) =>
+            setFormData((prev) => ({ ...prev, label: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* --- Simple inputs --- */}
+      <div className="space-y-2">
+        <Label htmlFor="outputKw">Output (kW)</Label>
+        <Input
+          id="outputKw"
+          type="number"
+          step="0.1"
+          min="0"
+          value={outputKw ?? 5}
+          onChange={(e) => {
+            const next = parseFloat(e.target.value);
+            const kw = Number.isFinite(next) && next >= 0 ? next : 0;
+            setFormData((prev) => ({
+              ...prev,
+              outputKw: kw,
+              // Enable auto-increment + send-message implicitly when the
+              // simple inputs are touched; the operator can override
+              // these checkboxes in the advanced panel below.
+              autoIncrement: true,
+              sendMessage: true,
+              incrementInterval:
+                typeof prev.incrementInterval === "number"
+                  ? prev.incrementInterval
+                  : 5,
+              incrementAmount: deriveIncrementAmountWh(
+                kw,
+                typeof prev.incrementInterval === "number"
+                  ? prev.incrementInterval
+                  : 5,
+              ),
+            }));
+          }}
+        />
+        <p className="text-xs text-muted-foreground">
+          1 tick = {deriveIncrementAmountWh(outputKw ?? 5, intervalSec)} Wh at{" "}
+          {intervalSec} s interval
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="maxChargeKwh">Max charge (kWh, 0 = unlimited)</Label>
+        <Input
+          id="maxChargeKwh"
+          type="number"
+          step="0.1"
+          min="0"
+          value={maxChargeKwh ?? 0}
+          onChange={(e) => {
+            const next = parseFloat(e.target.value);
+            const kwh = Number.isFinite(next) && next >= 0 ? next : 0;
+            setFormData((prev) => ({
+              ...prev,
+              maxChargeKwh: kwh,
+              // Keep `maxValue` (Wh) in sync so older daemon builds that
+              // only read `maxValue` stop at the same point.
+              maxValue: Math.round(kwh * 1000),
+            }));
+          }}
+        />
+      </div>
+
+      {/* --- Advanced (collapsible) --- */}
+      <div className="border-t pt-3">
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          className="text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          {advancedOpen ? "▼" : "▶"} Advanced settings
+        </button>
+        {advancedOpen && (
+          <div className="mt-3 space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="meter-value">Initial value (Wh)</Label>
+              <Input
+                id="meter-value"
+                type="number"
+                value={(formData.value as number) || 0}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    value: parseInt(e.target.value) || 0,
+                  }))
+                }
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="sendMessage"
+                checked={(formData.sendMessage as boolean) || false}
+                onCheckedChange={(checked) =>
+                  setFormData((prev) => ({ ...prev, sendMessage: checked }))
+                }
+              />
+              <Label
+                htmlFor="sendMessage"
+                className="font-normal cursor-pointer"
+              >
+                Send MeterValue message
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="autoIncrement"
+                checked={(formData.autoIncrement as boolean) || false}
+                onCheckedChange={(checked) =>
+                  setFormData((prev) => ({ ...prev, autoIncrement: checked }))
+                }
+              />
+              <Label
+                htmlFor="autoIncrement"
+                className="font-normal cursor-pointer"
+              >
+                Auto increment (start AutoMeterValue manager)
+              </Label>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="incrementInterval">
+                Increment interval (seconds)
+              </Label>
+              <Input
+                id="incrementInterval"
+                type="number"
+                value={(formData.incrementInterval as number) ?? 5}
+                onChange={(e) => {
+                  const nextInterval = parseInt(e.target.value) || 5;
+                  setFormData((prev) => ({
+                    ...prev,
+                    incrementInterval: nextInterval,
+                    // Recompute Wh-per-tick when interval changes so the
+                    // effective kW output the operator set in the simple
+                    // panel stays constant.
+                    ...(typeof prev.outputKw === "number"
+                      ? {
+                          incrementAmount: deriveIncrementAmountWh(
+                            prev.outputKw,
+                            nextInterval,
+                          ),
+                        }
+                      : {}),
+                  }));
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="incrementAmount">Increment amount (Wh)</Label>
+              <Input
+                id="incrementAmount"
+                type="number"
+                step="0.01"
+                value={(formData.incrementAmount as number) ?? 0}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    incrementAmount: parseFloat(e.target.value) || 0,
+                    // Detach from `outputKw` once the operator edits the
+                    // raw Wh-per-tick directly — otherwise the next save
+                    // would overwrite their value with the derived one.
+                    outputKw: undefined,
+                  }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="maxTime">Max time (seconds, 0 = unlimited)</Label>
+              <Input
+                id="maxTime"
+                type="number"
+                value={(formData.maxTime as number) || 0}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    maxTime: parseInt(e.target.value) || 0,
+                  }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                AutoMeterValue stops after this many seconds (0 = unlimited).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="maxValue">Max value (Wh, 0 = unlimited)</Label>
+              <Input
+                id="maxValue"
+                type="number"
+                value={(formData.maxValue as number) || 0}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    maxValue: parseInt(e.target.value) || 0,
+                    // Detach from `maxChargeKwh` so the next round-trip
+                    // doesn't silently overwrite the raw Wh threshold.
+                    maxChargeKwh: undefined,
+                  }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                AutoMeterValue stops when the meter reaches this value (0 =
+                unlimited).
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 

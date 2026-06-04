@@ -109,4 +109,35 @@ describe("ScenarioExecutor.start(resumeFromNodeId)", () => {
     expect(onSetMeterValue).toHaveBeenNthCalledWith(1, 100);
     expect(onSetMeterValue).toHaveBeenNthCalledWith(2, 200);
   });
+
+  it("preserves the connector meter accumulator on resume when current > node seed", async () => {
+    // Real-world resume case: daemon was killed mid-charge, the
+    // connector_runtime row restored meter=624Wh, the scenario now
+    // walks into a meterValue node whose `data.value` is 0 (the
+    // common "start from zero" seed). The node MUST NOT clobber the
+    // accumulator back to 0 — that would erase a real charge.
+    const def = buildLinearScenario();
+    def.nodes.find((n) => n.id === "node-a")!.data.value = 0;
+    def.nodes.find((n) => n.id === "node-b")!.data.value = 0;
+    const onSetMeterValue = vi.fn();
+    const onGetMeterValue = vi.fn(() => 624);
+    const log = vi.fn();
+    const executor = new ScenarioExecutor(def, {
+      onSetMeterValue,
+      onGetMeterValue,
+      log,
+    });
+
+    await executor.start({
+      resumeFromNodeId: "node-a",
+      executedNodes: ["start", "node-a"],
+    });
+
+    // node-b's seed (0) must NOT have been written — current (624) > seed (0).
+    expect(onSetMeterValue).not.toHaveBeenCalled();
+    const preservedLog = log.mock.calls.find(([msg]) =>
+      String(msg).includes("Preserving meter accumulator"),
+    );
+    expect(preservedLog).toBeDefined();
+  });
 });

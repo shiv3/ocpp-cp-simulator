@@ -15,12 +15,6 @@ import type { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
  *     the connector is in a non-Operative state mid-conversation with
  *     the CSMS; resyncing them after a restart loses no information of
  *     value to the operator.
- *   - Scenario execution position: the daemon doesn't yet know how to
- *     freeze and thaw a Robot3 service mid-flow, so we let scenarios
- *     re-arm from the top on restart. A connector that was Charging
- *     will resume the OCPP transaction (StopTransaction goes out
- *     correctly on the next RemoteStop), but its scenario node
- *     position is lost.
  *   - Auto-meter scheduler state: the schedule itself is reproducible
  *     from {@link ConnectorSettingsRepository}'s `auto_meter` row and
  *     the restored `meterValueWh`, so we don't store the scheduler's
@@ -41,6 +35,52 @@ export interface ConnectorRuntimeSnapshot {
    *  restart, which would otherwise reset the connector to the
    *  scenario's first node. */
   lastAutoStartedScenarioKey: string | null;
+  /** Position of the in-flight scenario on this connector, persisted so
+   *  a daemon restart mid-transaction can resume the scenario at the saved
+   *  node rather than replaying from `start`. Null when no scenario is
+   *  running, or when the scenario has finished. See
+   *  {@link ScenarioPositionSnapshot} for the contract on resume semantics.
+   *
+   *  Optional for backward compatibility: snapshots written by older
+   *  daemon builds (pre-v3 schema) won't carry this field, and load
+   *  callers should treat its absence as "no resume info; start from top".
+   */
+  scenarioPosition?: ScenarioPositionSnapshot | null;
+}
+
+/**
+ * Per-connector scenario execution checkpoint. Persisted on every node
+ * completion so a daemon restart mid-flow can resume the scenario at the
+ * node *after* the last completed one.
+ *
+ * Why `lastCompletedNodeId` and not `currentNodeId`?
+ *   - Many scenario nodes have side effects (Plug In, Start Transaction).
+ *     Re-running a side-effecting node on resume would double-send
+ *     OCPP messages or contradict the restored connector state.
+ *   - Saving "the node we finished" means resume walks the outgoing edge
+ *     from that node, picking up at the next node — every node already
+ *     in `executedNodes` is treated as "do not re-execute".
+ *
+ * `scenarioKey` identifies the executor instance the position belongs to
+ * (the same key used by `Connector.lastAutoStartedScenarioKey`). The
+ * resume path verifies the key matches the scenario the executor is
+ * being re-armed with; a mismatch means the scenario tree changed and
+ * we fall back to a fresh start (logged as a warning).
+ */
+export interface ScenarioPositionSnapshot {
+  /** Stable identifier of the scenario instance, e.g.
+   *  `essential-cp-behavior-shiv3-cp7-c1-1780480212898-z3cggj`. */
+  scenarioKey: string;
+  /** ID of the last node that finished executing. The resume path walks
+   *  the outgoing edge from this node. Null when execution hasn't reached
+   *  the first node yet — equivalent to "no resume info" and falls back
+   *  to a fresh start. */
+  lastCompletedNodeId: string | null;
+  /** Full list of nodes that have been visited so far. Used by the resume
+   *  path to skip nodes (so a parallel branch that already executed half
+   *  its nodes doesn't re-execute them) and as the seed for the executor
+   *  context's `executedNodes` after restore. */
+  executedNodes: string[];
 }
 
 /**

@@ -87,6 +87,18 @@ export interface MeterValueNodeData extends BaseNodeData {
   value: number;
   sendMessage: boolean; // If true, send MeterValue message
   autoIncrement?: boolean; // If true, automatically increment meter value
+  /** Simplified "how fast is the EV charging?" input expressed in kW.
+   *  The editor derives `incrementAmount` from this on save (using the
+   *  current `incrementInterval`) so the runtime scheduler keeps using
+   *  its raw Wh-per-tick contract. Optional: when null/undefined the
+   *  scenario was authored against the advanced inputs directly and the
+   *  editor opens with the details panel expanded by default. */
+  outputKw?: number;
+  /** Simplified stop condition mirroring `maxValue` but expressed in kWh
+   *  (the total energy delivered before auto-increment stops). The editor
+   *  writes both this field AND `maxValue` (Wh) on save so older daemon
+   *  builds that only read `maxValue` keep working. 0 = unlimited. */
+  maxChargeKwh?: number;
   incrementInterval?: number; // Interval in seconds between auto-increments
   incrementAmount?: number; // Amount to increment each time (Wh)
   /**
@@ -397,6 +409,10 @@ export interface ScenarioExecutorCallbacks {
     targetValue: number,
     timeout?: number,
   ) => Promise<void>; // Waits for meter value to reach target
+  /** Read the connector's current meter accumulator (Wh). Used by the
+   *  meterValue node to avoid clobbering a persisted value with the
+   *  node's own `data.value` after a daemon restart resume. */
+  onGetMeterValue?: () => number;
   onReserveNow?: (
     expiryMinutes: number,
     idTag: string,

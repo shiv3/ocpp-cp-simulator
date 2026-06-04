@@ -10,7 +10,9 @@ import type {
   ConnectorStatus,
 } from "./types";
 import { ScenarioExecutor } from "../cp/application/scenario/ScenarioExecutor";
+import type { ScenarioEvents } from "../cp/application/scenario/ScenarioTypes";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
+import { EventEmitter } from "../cp/shared/EventEmitter";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -23,6 +25,7 @@ import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/Sqlit
 import {
   NoopConnectorRuntimeRepository,
   type ConnectorRuntimeRepository,
+  type ScenarioPositionSnapshot,
 } from "../cp/domain/persistence/ConnectorRuntimeRepository";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
@@ -195,6 +198,36 @@ export class CLIChargePointService {
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
   private readonly _scenarioRepo: SqliteScenarioRepository;
   private readonly _runtimeRepo: ConnectorRuntimeRepository;
+  /**
+   * Per-connector scenario execution position that was loaded from the
+   * persistence layer during {@link restoreConnectorRuntimeFromDatabase}
+   * but hasn't yet been handed to a fresh {@link ScenarioExecutor}.
+   * Consumed by {@link runScenario} on the first matching call so the
+   * resumed executor picks up at the saved node instead of replaying
+   * from `start`. Keyed by connectorId because at restore time we don't
+   * yet know which scenarioId the auto-start path will pick.
+   */
+  private readonly _pendingScenarioResumes: Map<
+    number,
+    ScenarioPositionSnapshot
+  > = new Map();
+  /**
+   * Tracks which connector each running executor belongs to, so the
+   * `node.complete` listener can persist the scenarioPosition for the
+   * right connector + clear it when the scenario exits.
+   */
+  private readonly _executorConnectorIds: Map<string, number> = new Map();
+  /**
+   * The currently-tracked scenario position for each connector. Updated
+   * by the `node.complete` listener attached in {@link runScenario}, read
+   * by {@link persistConnectorRuntime} so connector-field-change writes
+   * include the latest scenario position in the same row. Cleared by the
+   * executor exit listener.
+   */
+  private readonly _scenarioPositionByConnector: Map<
+    number,
+    ScenarioPositionSnapshot
+  > = new Map();
   // Keep the original init so the web console can prefill the "Edit CP"
   // modal without us having to round-trip the persisted SQL row back into
   // ChargePointInitOptions shape. Exposed via getInit() and the
@@ -666,13 +699,86 @@ export class CLIChargePointService {
       },
     });
 
-    const executor = new ScenarioExecutor(entry.definition, callbacks);
+    // Build a per-executor event emitter so we can subscribe to
+    // `node.complete` and persist the scenario position after every
+    // step. Without this, a daemon restart mid-flow can resume the
+    // connector_runtime row (Charging, in-flight transaction) but the
+    // scenario would replay from `start` and double-fire side-effecting
+    // nodes (Plug In, Start Transaction) before reaching `meterValue`.
+    const eventEmitter = new EventEmitter<ScenarioEvents>();
+    eventEmitter.on(
+      "node.complete",
+      (data: ScenarioEvents["node.complete"]) => {
+        // Push the latest position into the connector-keyed map so any
+        // imminent connector-field-change write (status/transaction/…)
+        // picks it up. Then trigger a write directly so a daemon kill
+        // *right now* still captures the just-finished node.
+        const existing = this._scenarioPositionByConnector.get(connectorId);
+        const executedNodes = existing
+          ? [...existing.executedNodes, data.nodeId]
+          : [data.nodeId];
+        this._scenarioPositionByConnector.set(connectorId, {
+          scenarioKey: scenarioId,
+          lastCompletedNodeId: data.nodeId,
+          executedNodes,
+        });
+        this.persistConnectorRuntime(connector, connectorId);
+      },
+    );
+
+    // Resume hint: if restoreConnectorRuntimeFromDatabase loaded a
+    // position for this connector AND the saved node ids still exist in
+    // the scenario we're about to run, hand it to the executor's start()
+    // so it walks the graph from after lastCompletedNodeId. We can't
+    // compare scenarioKey directly: scenario template instances get a
+    // fresh `${templateId}-${cpId}-c${connectorId}-${Date.now()}-${suffix}`
+    // id on every daemon boot, so the saved key never matches the new
+    // run's id. Structural match (lastCompletedNodeId is a node in the
+    // current scenario, every executedNode resolves too) is the
+    // load-bearing check.
+    const pending = this._pendingScenarioResumes.get(connectorId);
+    const nodeIds = new Set(entry.definition.nodes.map((n) => n.id));
+    const positionMatches =
+      pending &&
+      pending.lastCompletedNodeId != null &&
+      nodeIds.has(pending.lastCompletedNodeId) &&
+      pending.executedNodes.every((id) => nodeIds.has(id));
+    const resumeOpts = positionMatches
+      ? {
+          resumeFromNodeId: pending!.lastCompletedNodeId ?? undefined,
+          executedNodes: pending!.executedNodes,
+        }
+      : undefined;
+    if (resumeOpts) {
+      this._pendingScenarioResumes.delete(connectorId);
+      // Rebase the position map to this run's scenarioId so subsequent
+      // node.complete writes accumulate against the right key on the
+      // next persistConnectorRuntime call.
+      this._scenarioPositionByConnector.set(connectorId, {
+        ...pending!,
+        scenarioKey: scenarioId,
+      });
+    }
+
+    const executor = new ScenarioExecutor(
+      entry.definition,
+      callbacks,
+      eventEmitter,
+    );
     this._executors.set(scenarioId, executor);
+    this._executorConnectorIds.set(scenarioId, connectorId);
 
     this.emit({ event: "scenario_started", data: { connectorId, scenarioId } });
 
-    executor.start().finally(() => {
+    executor.start(resumeOpts).finally(() => {
       this._executors.delete(scenarioId);
+      this._executorConnectorIds.delete(scenarioId);
+      // Scenario exited cleanly — clear the persisted position so a
+      // subsequent restart treats the connector as idle (the
+      // connector_runtime row's transaction_json itself is already
+      // null by the time the Stop Transaction node ran).
+      this._scenarioPositionByConnector.delete(connectorId);
+      this.persistConnectorRuntime(connector, connectorId);
     });
   }
 
@@ -951,11 +1057,15 @@ export class CLIChargePointService {
   ): void {
     if (!connector) return;
     try {
-      this._runtimeRepo.save(
-        this._init.cpId,
-        connectorId,
-        connector.snapshotRuntime(),
-      );
+      this._runtimeRepo.save(this._init.cpId, connectorId, {
+        ...connector.snapshotRuntime(),
+        // Persist whichever scenario position we last captured for this
+        // connector, so the row stays a self-consistent snapshot even
+        // when the trigger is a connector field change (status/meter/…)
+        // rather than a scenario node completion.
+        scenarioPosition:
+          this._scenarioPositionByConnector.get(connectorId) ?? null,
+      });
     } catch (err) {
       console.warn(
         `[service] failed to persist connector_runtime for ` +
@@ -984,6 +1094,24 @@ export class CLIChargePointService {
       const snapshot = this._runtimeRepo.load(this._init.cpId, connectorId);
       if (!snapshot) return;
       connector.restoreRuntimeSnapshot(snapshot);
+      // Capture the scenario position so the auto-start path can resume
+      // the scenario at the saved node instead of replaying from `start`.
+      // Stored on both _pendingScenarioResumes (for runScenario to
+      // consume once) and _scenarioPositionByConnector (so the row stays
+      // self-consistent on later connector-field-change writes that
+      // happen before the executor is re-armed). The same snapshot is
+      // intentionally placed in both maps; runScenario removes the
+      // pending entry as soon as it hands the position to the executor.
+      if (snapshot.scenarioPosition) {
+        this._pendingScenarioResumes.set(
+          connectorId,
+          snapshot.scenarioPosition,
+        );
+        this._scenarioPositionByConnector.set(
+          connectorId,
+          snapshot.scenarioPosition,
+        );
+      }
       restored += 1;
     });
     return restored;

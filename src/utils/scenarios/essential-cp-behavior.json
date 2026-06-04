@@ -1,12 +1,19 @@
 {
   "id": "essential-cp-behavior",
   "name": "Essential CP Behavior",
-  "description": "Auto-start on connect: plug in, wait for RemoteStart, run a transaction with auto-meter, then plug out.",
+  "description": "Auto-start on connect: plug in, wait for RemoteStart, run a transaction with auto-meter (stops at the EV's target SoC), then plug out.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },
   "defaultExecutionMode": "oneshot",
   "enabled": true,
+  "evSettings": {
+    "modelName": "Generic EV",
+    "batteryCapacityKwh": 75,
+    "maxChargingPowerKw": 150,
+    "initialSoc": 20,
+    "targetSoc": 80
+  },
   "nodes": [
     {
       "id": "start-1",
@@ -57,10 +64,10 @@
         "value": 0,
         "sendMessage": true,
         "autoIncrement": true,
+        "outputKw": 50,
         "incrementInterval": 5,
-        "incrementAmount": 1000,
-        "maxValue": 0,
-        "maxTime": 0
+        "incrementAmount": 69.44,
+        "stopMode": "evSettings"
       }
     },
     {

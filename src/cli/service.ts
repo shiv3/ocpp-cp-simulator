@@ -727,21 +727,37 @@ export class CLIChargePointService {
     );
 
     // Resume hint: if restoreConnectorRuntimeFromDatabase loaded a
-    // position for this connector AND the scenarioKey matches the
-    // scenario we're about to run, hand it to the executor's start()
-    // so it walks the graph from after lastCompletedNodeId. Mismatched
-    // key (different scenario) → fresh start, leave the pending entry
-    // in place for a later matching runScenario call.
+    // position for this connector AND the saved node ids still exist in
+    // the scenario we're about to run, hand it to the executor's start()
+    // so it walks the graph from after lastCompletedNodeId. We can't
+    // compare scenarioKey directly: scenario template instances get a
+    // fresh `${templateId}-${cpId}-c${connectorId}-${Date.now()}-${suffix}`
+    // id on every daemon boot, so the saved key never matches the new
+    // run's id. Structural match (lastCompletedNodeId is a node in the
+    // current scenario, every executedNode resolves too) is the
+    // load-bearing check.
     const pending = this._pendingScenarioResumes.get(connectorId);
-    const resumeOpts =
-      pending && pending.scenarioKey === scenarioId
-        ? {
-            resumeFromNodeId: pending.lastCompletedNodeId ?? undefined,
-            executedNodes: pending.executedNodes,
-          }
-        : undefined;
+    const nodeIds = new Set(entry.definition.nodes.map((n) => n.id));
+    const positionMatches =
+      pending &&
+      pending.lastCompletedNodeId != null &&
+      nodeIds.has(pending.lastCompletedNodeId) &&
+      pending.executedNodes.every((id) => nodeIds.has(id));
+    const resumeOpts = positionMatches
+      ? {
+          resumeFromNodeId: pending!.lastCompletedNodeId ?? undefined,
+          executedNodes: pending!.executedNodes,
+        }
+      : undefined;
     if (resumeOpts) {
       this._pendingScenarioResumes.delete(connectorId);
+      // Rebase the position map to this run's scenarioId so subsequent
+      // node.complete writes accumulate against the right key on the
+      // next persistConnectorRuntime call.
+      this._scenarioPositionByConnector.set(connectorId, {
+        ...pending!,
+        scenarioKey: scenarioId,
+      });
     }
 
     const executor = new ScenarioExecutor(

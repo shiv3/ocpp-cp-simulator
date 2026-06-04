@@ -640,7 +640,22 @@ export class ScenarioExecutor {
     data: MeterValueNodeData,
   ): Promise<void> {
     if (this.callbacks.onSetMeterValue) {
-      this.callbacks.onSetMeterValue(data.value);
+      // Daemon-restart resume case: the persisted connector_runtime row
+      // restored a non-zero meter accumulator (e.g. 624 Wh from a charge
+      // that was interrupted), and now the scenario walks back into the
+      // meterValue node whose `data.value` is the node's *initial seed*
+      // (commonly 0). Writing that seed would erase the accumulator and
+      // restart the maxValue cap from scratch. Skip the seed write when
+      // the connector already holds more.
+      const current = this.callbacks.onGetMeterValue?.();
+      if (current == null || current <= data.value) {
+        this.callbacks.onSetMeterValue(data.value);
+      } else {
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Preserving meter accumulator ${current}Wh (> node seed ${data.value}Wh) on resume`,
+          "info",
+        );
+      }
     }
 
     // Handle auto-increment mode - start AutoMeterValue manager

@@ -124,26 +124,24 @@ describe("runScenario resume across daemon restart", () => {
     const boot2Id = svc.loadScenario(1, boot2Def);
     expect(boot2Id).not.toBe(boot1Id);
 
-    const meterVals: number[] = [];
-    const cp = (
-      svc as unknown as { _chargePoint: { connectors: Map<number, unknown> } }
-    )._chargePoint;
-    const connector = cp.connectors.get(1) as {
-      events: {
-        on: (e: string, cb: (data: { meterValue: number }) => void) => void;
-      };
-    };
-    connector.events.on("meterValueChange", ({ meterValue }) => {
-      meterVals.push(meterValue);
+    const executedNodes: string[] = [];
+    svc.onEvent((ev) => {
+      if (
+        ev.event === "scenario_node_execute" &&
+        typeof ev.data.nodeId === "string"
+      ) {
+        executedNodes.push(ev.data.nodeId);
+      }
     });
 
     svc.runScenario(1, boot2Id);
     await new Promise((r) => setTimeout(r, 600));
 
-    // node-a's set (value=11) MUST be skipped; only node-b's (value=22)
-    // fires. Pre-fix: both fire because the resume opts were dropped.
-    expect(meterVals).toContain(22);
-    expect(meterVals).not.toContain(11);
+    // node-a MUST be skipped on resume; only node-b runs. Pre-fix the
+    // resume opts were dropped and both fired (false negative for the
+    // bug we're guarding against).
+    expect(executedNodes).toContain("node-b");
+    expect(executedNodes).not.toContain("node-a");
   });
 
   it("falls back to a fresh run when the persisted node ids don't exist in the new scenario", async () => {
@@ -185,24 +183,21 @@ describe("runScenario resume across daemon restart", () => {
     });
     svc.restoreConnectorRuntimeFromDatabase();
 
-    const meterVals: number[] = [];
-    const cp = (
-      svc as unknown as { _chargePoint: { connectors: Map<number, unknown> } }
-    )._chargePoint;
-    const connector = cp.connectors.get(1) as {
-      events: {
-        on: (e: string, cb: (data: { meterValue: number }) => void) => void;
-      };
-    };
-    connector.events.on("meterValueChange", ({ meterValue }) => {
-      meterVals.push(meterValue);
+    const executedNodes: string[] = [];
+    svc.onEvent((ev) => {
+      if (
+        ev.event === "scenario_node_execute" &&
+        typeof ev.data.nodeId === "string"
+      ) {
+        executedNodes.push(ev.data.nodeId);
+      }
     });
 
     svc.runScenario(1, id);
     await new Promise((r) => setTimeout(r, 600));
 
     // Structural match fails → full replay: both A and B run.
-    expect(meterVals).toContain(11);
-    expect(meterVals).toContain(22);
+    expect(executedNodes).toContain("node-a");
+    expect(executedNodes).toContain("node-b");
   });
 });

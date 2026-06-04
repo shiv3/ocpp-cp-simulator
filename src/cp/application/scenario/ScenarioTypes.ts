@@ -409,6 +409,10 @@ export interface ScenarioExecutorCallbacks {
     targetValue: number,
     timeout?: number,
   ) => Promise<void>; // Waits for meter value to reach target
+  /** Read the connector's current meter accumulator (Wh). Used by the
+   *  meterValue node to avoid clobbering a persisted value with the
+   *  node's own `data.value` after a daemon restart resume. */
+  onGetMeterValue?: () => number;
   onReserveNow?: (
     expiryMinutes: number,
     idTag: string,

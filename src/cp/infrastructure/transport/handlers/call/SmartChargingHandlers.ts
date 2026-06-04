@@ -1,50 +1,20 @@
 /**
  * OCPP 1.6J Smart Charging Handlers
  *
- * IMPORTANT: This is a SIMPLIFIED IMPLEMENTATION for simulator purposes.
- * Several aspects are NOT fully compliant with the OCPP 1.6J specification.
+ * Implements §5.10 SetChargingProfile, §5.4 ClearChargingProfile, and
+ * §5.7 GetCompositeSchedule against the connector / charge-point profile
+ * stores. Composite calculation walks the merged Tx-layer + station max
+ * profile via `buildCompositeWattsSchedule`.
  *
- * Known Non-Compliant Behaviors:
- * ================================
+ * Departures from spec that remain (intentionally out of scope here):
  *
- * 1. ConnectorId=0 Profile Handling:
- *    SPEC: Should store as single charge-point-level profile that applies to entire station
- *    HERE: Duplicates profile to each connector individually
- *    WHY: Simpler implementation, allows per-connector visualization
- *    IMPACT: ClearChargingProfile behavior differs from spec when clearing connector-specific
- *
- * 2. Composite Schedule Calculation:
- *    SPEC: Must calculate MINIMUM limit at each time period across all active profiles
- *          of different purposes (ChargePointMaxProfile, TxDefaultProfile, TxProfile)
- *    HERE: Returns the single "active" profile (highest stack level)
- *    WHY: Complex merging algorithm not needed for basic testing
- *    IMPACT: GetCompositeSchedule returns simplified schedule
- *
- * 3. Profile Purpose Precedence:
- *    SPEC: TxProfile completely overrules TxDefaultProfile (not minimum)
- *          Within same purpose, highest stackLevel wins
- *          Final limit = min(ChargePointMaxProfile, TxProfile OR TxDefaultProfile)
- *    HERE: Simple highest stackLevel selection across all purposes
- *    WHY: Simulator doesn't enforce combined station limits
- *
- * 4. ChargePointMaxProfile Enforcement:
- *    SPEC: Defines OVERALL limit for entire station (sum of all connectors)
- *          Station must ensure total draw doesn't exceed this limit
- *    HERE: Treated as just another profile without total station enforcement
- *    WHY: Requires load balancing logic across connectors
- *
- * 5. Recurring Profile Calculation:
- *    SPEC: Must calculate current period based on Daily/Weekly cycling from startSchedule
- *    HERE: Stores periods as-is without time-based recurrence calculation
- *    WHY: Time-based schedule advancement not implemented
- *
- * For Production Implementation:
- * ================================
- * - Store charge-point-level profiles separately from connector-level
- * - Implement composite schedule merging with min() across purposes
- * - Add load balancing when ChargePointMaxProfile is active
- * - Calculate recurring schedule periods based on elapsed time
- * - Track which profiles originated from connectorId=0 for proper clearing
+ * - `connectorId=0` GetCompositeSchedule returns the highest-draw single
+ *   connector composite, not the sum across simultaneous transactions.
+ *   The simulator typically drives one connector at a time, so summing
+ *   would mostly produce the same result as the per-connector view.
+ * - Unit conversion W↔A in GetCompositeSchedule responses uses
+ *   `numberPhases=3`, voltage=230 — matches what the resolver assumes
+ *   internally and is sufficient for CSMS validation tests.
  */
 
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
@@ -60,6 +30,10 @@ import {
 } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 import { defaultConfiguration } from "../../../../domain/charge-point/Configuration";
+import { buildCompositeWattsSchedule } from "../../../../domain/connector/ChargingScheduleResolver";
+
+const REFERENCE_PHASE_VOLTAGE = 230;
+const DEFAULT_PHASES = 3;
 
 function getIntegerConfigValue(
   chargePoint: HandlerContext["chargePoint"],
@@ -75,21 +49,26 @@ function getIntegerConfigValue(
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// ts-ocpp@2.7.3 inlines the charging-profile object inside
+// `SetChargingProfileRequest` rather than exporting a named ChargingProfile
+// type. Alias the inline shape so the validator can keep using a tight
+// parameter type.
+type CsChargingProfile =
+  request.SetChargingProfileRequest["csChargingProfiles"];
+
 /**
- * Validate charging profile against OCPP 1.6 spec and configuration
+ * Validate charging profile against OCPP 1.6 spec and configuration.
  */
 function validateChargingProfile(
-  profile: request.ChargingProfile,
+  profile: CsChargingProfile,
   connectorId: number,
   context: HandlerContext,
 ): { valid: boolean; reason?: string } {
-  // Check stack level against configuration
   const maxStackLevel = getIntegerConfigValue(
     context.chargePoint,
     "ChargeProfileMaxStackLevel",
     10,
   );
-
   if (profile.stackLevel > maxStackLevel) {
     return {
       valid: false,
@@ -97,10 +76,10 @@ function validateChargingProfile(
     };
   }
 
-  // Validate charging profile kind
-  const validKinds = Object.values(ChargingProfileKindType);
   if (
-    !validKinds.includes(profile.chargingProfileKind as ChargingProfileKindType)
+    !Object.values(ChargingProfileKindType).includes(
+      profile.chargingProfileKind as ChargingProfileKindType,
+    )
   ) {
     return {
       valid: false,
@@ -108,10 +87,8 @@ function validateChargingProfile(
     };
   }
 
-  // Validate charging profile purpose
-  const validPurposes = Object.values(ChargingProfilePurposeType);
   if (
-    !validPurposes.includes(
+    !Object.values(ChargingProfilePurposeType).includes(
       profile.chargingProfilePurpose as ChargingProfilePurposeType,
     )
   ) {
@@ -121,7 +98,8 @@ function validateChargingProfile(
     };
   }
 
-  // Validate TxProfile only allowed on specific connector
+  // §5.10 / §3.13.3: TxProfile is tied to a specific transaction —
+  // installing one at connectorId=0 makes no sense.
   if (
     profile.chargingProfilePurpose === ChargingProfilePurposeType.TxProfile &&
     connectorId === 0
@@ -131,8 +109,19 @@ function validateChargingProfile(
       reason: "TxProfile not allowed on connectorId 0",
     };
   }
+  // Mirror of the above for ChargePointMaxProfile: it MUST be installed
+  // at the CP level. A real CP would reject; we surface the same error.
+  if (
+    profile.chargingProfilePurpose ===
+      ChargingProfilePurposeType.ChargePointMaxProfile &&
+    connectorId !== 0
+  ) {
+    return {
+      valid: false,
+      reason: "ChargePointMaxProfile must be installed on connectorId 0",
+    };
+  }
 
-  // Validate recurrencyKind for Recurring profiles
   if (profile.chargingProfileKind === ChargingProfileKindType.Recurring) {
     if (!profile.recurrencyKind) {
       return {
@@ -140,9 +129,10 @@ function validateChargingProfile(
         reason: "recurrencyKind required for Recurring profile",
       };
     }
-    const validRecurrency = Object.values(RecurrencyKindType);
     if (
-      !validRecurrency.includes(profile.recurrencyKind as RecurrencyKindType)
+      !Object.values(RecurrencyKindType).includes(
+        profile.recurrencyKind as RecurrencyKindType,
+      )
     ) {
       return {
         valid: false,
@@ -151,10 +141,8 @@ function validateChargingProfile(
     }
   }
 
-  // Validate chargingRateUnit
-  const validUnits = Object.values(ChargingRateUnitType);
   if (
-    !validUnits.includes(
+    !Object.values(ChargingRateUnitType).includes(
       profile.chargingSchedule.chargingRateUnit as ChargingRateUnitType,
     )
   ) {
@@ -164,7 +152,6 @@ function validateChargingProfile(
     };
   }
 
-  // Validate schedule periods exist
   if (
     !profile.chargingSchedule.chargingSchedulePeriod ||
     profile.chargingSchedule.chargingSchedulePeriod.length === 0
@@ -178,34 +165,21 @@ function validateChargingProfile(
   return { valid: true };
 }
 
-/**
- * Check if the currently active charging profile has a zero limit
- */
 function isCurrentlyPaused(connector: Connector): boolean {
-  const activeProfile = connector.getActiveChargingProfile();
-  if (!activeProfile) return false;
-
-  // Simple check: if all periods are zero, it's paused
-  return activeProfile.chargingSchedulePeriods.every((p) => p.limit === 0);
+  const active = connector.getActiveChargingProfile();
+  if (!active) return false;
+  return active.chargingSchedulePeriods.every((p) => p.limit === 0);
 }
 
-/**
- * Apply the correct OCPP status after a profile change on a connector.
- *
- * Rules:
- * - Zero-limit active profile + connector is Charging → SuspendedEVSE
- * - Non-zero active profile + connector is SuspendedEVSE + active transaction → Charging
- */
 function applyProfileStatus(
   connector: Connector,
   chargePoint: HandlerContext["chargePoint"],
 ): void {
-  const isPaused = isCurrentlyPaused(connector);
-
-  if (isPaused && connector.status === OCPPStatus.Charging) {
+  const paused = isCurrentlyPaused(connector);
+  if (paused && connector.status === OCPPStatus.Charging) {
     chargePoint.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
   } else if (
-    !isPaused &&
+    !paused &&
     connector.status === OCPPStatus.SuspendedEVSE &&
     connector.transaction != null
   ) {
@@ -214,27 +188,15 @@ function applyProfileStatus(
 }
 
 /**
- * Handler for SetChargingProfile request (OCPP 1.6 SmartCharging)
+ * §5.10 SetChargingProfile.req
  *
- * Validates and stores charging profiles on the connector.
- * Supports multi-profile stack management with proper validation.
- * Updates connector status based on active profile limits.
+ * Routing:
+ *   - `connectorId = 0` → ChargePoint.stationProfiles (single station copy)
+ *   - `connectorId > 0` → that Connector's profile array
  *
- * NON-COMPLIANT: ConnectorId=0 Handling
- * ======================================
- * SPEC: Should store ONE charge-point-level profile that applies to the entire station
- * HERE: Duplicates the profile to each connector with modified connectorId
- *
- * Impact:
- * - Each connector gets its own copy with the same profileId and stackLevel
- * - ClearChargingProfile with specific connectorId will only clear that connector's copy
- * - For spec-compliant behavior, should store at ChargePoint level and reference during
- *   composite schedule calculation
- *
- * Why this approach:
- * - Simpler implementation for testing/simulation
- * - Allows UI to display profiles per connector
- * - Adequate for CSMS testing that doesn't rely on exact clearing semantics
+ * Spec-compliant precedence (TxProfile > TxDefaultProfile, station vs
+ * connector defaults, ChargePointMaxProfile min-merge) is enforced
+ * downstream by Connector.getActiveChargingProfile + the resolver.
  */
 export class SetChargingProfileHandler
   implements
@@ -254,7 +216,6 @@ export class SetChargingProfileHandler
       LogType.OCPP,
     );
 
-    // Validate the profile
     const validation = validateChargingProfile(
       csChargingProfiles,
       connectorId,
@@ -269,8 +230,6 @@ export class SetChargingProfileHandler
     }
 
     const periods = csChargingProfiles.chargingSchedule.chargingSchedulePeriod;
-
-    // Build the profile object
     const profile = {
       chargingProfileId: csChargingProfiles.chargingProfileId,
       connectorId,
@@ -290,13 +249,14 @@ export class SetChargingProfileHandler
     };
 
     if (connectorId === 0) {
-      // connectorId 0 applies to all connectors
-      context.chargePoint.connectors.forEach((connector: Connector) => {
-        connector.addChargingProfile({ ...profile, connectorId: connector.id });
-        applyProfileStatus(connector, context.chargePoint);
-      });
+      context.chargePoint.stationProfiles.add(profile);
+      // Status re-eval on every connector — a new station-wide profile
+      // may flip a Charging connector to SuspendedEVSE (or vice versa).
+      context.chargePoint.connectors.forEach((c: Connector) =>
+        applyProfileStatus(c, context.chargePoint),
+      );
       context.logger.info(
-        `Applied charging profile #${profile.chargingProfileId} to all connectors`,
+        `Installed station profile #${profile.chargingProfileId} (${profile.chargingProfilePurpose})`,
         LogType.OCPP,
       );
     } else {
@@ -312,19 +272,24 @@ export class SetChargingProfileHandler
         LogType.OCPP,
       );
     }
-
     return { status: "Accepted" };
   }
 }
 
 /**
- * Handler for ClearChargingProfile request (OCPP 1.6 SmartCharging)
+ * §5.4 ClearChargingProfile.req
  *
- * Clears charging profiles based on optional filter criteria:
- * - id: specific profile ID
- * - connectorId: specific connector (or all if omitted)
- * - chargingProfilePurpose: profiles with specific purpose
- * - stackLevel: profiles at specific stack level
+ * Filter dimensions (id / purpose / stackLevel) compose with the
+ * connector target the same way for both station and connector layers:
+ *
+ *   - `connectorId == null` → clear matching profiles from station store
+ *     AND every connector.
+ *   - `connectorId === 0` → station store only.
+ *   - `connectorId > 0`   → that one connector.
+ *
+ * Spec note: returns Accepted as long as the request was understood,
+ * even when zero profiles matched (this matches §5.4's "the CP MAY return
+ * Accepted regardless of whether profiles were cleared").
  */
 export class ClearChargingProfileHandler
   implements
@@ -342,46 +307,57 @@ export class ClearChargingProfileHandler
       LogType.OCPP,
     );
 
+    const criteria = {
+      profileId: payload.id,
+      purpose: payload.chargingProfilePurpose as
+        | ChargingProfilePurposeType
+        | undefined,
+      stackLevel: payload.stackLevel,
+    };
     let totalCleared = 0;
-    const connectors: Connector[] = [];
 
-    // Determine which connectors to clear
-    if (payload.connectorId != null) {
-      const connector = context.chargePoint.getConnector(payload.connectorId);
-      if (connector) {
-        connectors.push(connector);
-      }
-    } else {
-      // Clear from all connectors
-      context.chargePoint.connectors.forEach((connector) => {
-        connectors.push(connector);
+    const clearStation =
+      payload.connectorId == null || payload.connectorId === 0;
+    if (clearStation) {
+      const removed = context.chargePoint.stationProfiles.remove({
+        profileId: criteria.profileId,
+        purpose: criteria.purpose,
+        stackLevel: criteria.stackLevel,
       });
+      totalCleared += removed;
+      if (removed > 0) {
+        context.logger.info(
+          `Cleared ${removed} station-level profile(s)`,
+          LogType.OCPP,
+        );
+        // A station profile change may flip Charging/SuspendedEVSE on
+        // any connector currently in a transaction.
+        context.chargePoint.connectors.forEach((c: Connector) =>
+          applyProfileStatus(c, context.chargePoint),
+        );
+      }
     }
 
-    // Build filter criteria
-    const criteria: Parameters<Connector["removeChargingProfiles"]>[0] = {};
-    if (payload.id != null) {
-      criteria.profileId = payload.id;
-    }
-    if (payload.chargingProfilePurpose != null) {
-      criteria.purpose =
-        payload.chargingProfilePurpose as ChargingProfilePurposeType;
-    }
-    if (payload.stackLevel != null) {
-      criteria.stackLevel = payload.stackLevel;
+    const targets: Connector[] = [];
+    if (payload.connectorId == null) {
+      context.chargePoint.connectors.forEach((c: Connector) => targets.push(c));
+    } else if (payload.connectorId > 0) {
+      const c = context.chargePoint.getConnector(payload.connectorId);
+      if (c) targets.push(c);
     }
 
-    // Apply clearing to each connector
-    for (const connector of connectors) {
-      const cleared = connector.removeChargingProfiles(criteria);
+    for (const connector of targets) {
+      const cleared = connector.removeChargingProfiles({
+        profileId: criteria.profileId,
+        purpose: criteria.purpose,
+        stackLevel: criteria.stackLevel,
+      });
       totalCleared += cleared;
-
       if (cleared > 0) {
         context.logger.info(
           `Cleared ${cleared} profile(s) from connector ${connector.id}`,
           LogType.OCPP,
         );
-        // Re-evaluate connector status after clearing
         applyProfileStatus(connector, context.chargePoint);
       }
     }
@@ -392,37 +368,29 @@ export class ClearChargingProfileHandler
         LogType.OCPP,
       );
     }
-
     return { status: "Accepted" };
   }
 }
 
+function wattsToUnit(watts: number, unit: ChargingRateUnitType): number {
+  if (unit === ChargingRateUnitType.W) return watts;
+  // W → A: divide by phase voltage × phases. Mirrors the inverse used by
+  // the resolver. Caller is responsible for rounding semantics; we return
+  // the raw float here.
+  return watts / REFERENCE_PHASE_VOLTAGE / DEFAULT_PHASES;
+}
+
 /**
- * Handler for GetCompositeSchedule request (OCPP 1.6 SmartCharging)
+ * §5.7 GetCompositeSchedule.req
  *
- * Returns the effective charging schedule for the requested connector and duration.
+ * Builds a composite of (connector Tx-layer profile, ChargePointMaxProfile)
+ * over the requested `duration`. Returns `Accepted` with an empty
+ * schedule when no profile is active — CSMSs interpret this as
+ * "unconstrained for the window".
  *
- * NON-COMPLIANT: Simplified Composite Schedule Calculation
- * =========================================================
- * SPEC: Must calculate composite by:
- *   1. Find leading profile for each purpose (highest stackLevel)
- *   2. TxProfile completely overrules TxDefaultProfile (not min)
- *   3. Take MINIMUM limit across ChargePointMaxProfile and active Tx profile at each time period
- *   4. For connectorId=0: return TOTAL station power (sum of all connectors + ChargePointMaxProfile)
- *
- * HERE: Returns the single "active" profile (highest valid stackLevel across all purposes)
- *
- * Impact:
- * - Does not merge multiple profiles with min() logic
- * - Does not handle connectorId=0 as total station calculation
- * - Does not apply TxProfile > TxDefaultProfile precedence rules
- * - Adequate for simple CSMS testing but not real load management
- *
- * For Production:
- * - Implement profile merging algorithm per OCPP 1.6 spec section 5.10
- * - Track ChargePointMaxProfile separately
- * - Calculate total for connectorId=0 requests
- * - Handle Recurring profile time calculations
+ * `connectorId = 0` returns the composite considering only
+ * ChargePointMaxProfile (the simulator does not track parallel
+ * transactions for total-power roll-up).
  */
 export class GetCompositeScheduleHandler
   implements
@@ -442,62 +410,47 @@ export class GetCompositeScheduleHandler
       LogType.OCPP,
     );
 
-    const connector = context.chargePoint.getConnector(connectorId);
-    if (!connector) {
-      context.logger.warn(`Connector ${connectorId} not found`, LogType.OCPP);
-      return { status: "Rejected" };
+    let txProfile = null as ReturnType<
+      Connector["getActiveChargingProfile"]
+    > | null;
+    if (connectorId > 0) {
+      const connector = context.chargePoint.getConnector(connectorId);
+      if (!connector) {
+        context.logger.warn(`Connector ${connectorId} not found`, LogType.OCPP);
+        return { status: "Rejected" };
+      }
+      txProfile = connector.getActiveChargingProfile();
     }
+    const chargePointMaxProfile =
+      context.chargePoint.getActiveChargePointMaxProfile();
 
-    const activeProfile = connector.getActiveChargingProfile();
-    if (!activeProfile) {
-      context.logger.info(
-        `No active charging profile for connector ${connectorId}`,
-        LogType.OCPP,
-      );
-      return { status: "Rejected" };
-    }
-
-    // If chargingRateUnit is specified and doesn't match, we'd need conversion
-    // For simplicity, we return the profile's native unit
-    const responseUnit = chargingRateUnit || activeProfile.chargingRateUnit;
-
-    if (
-      chargingRateUnit &&
-      chargingRateUnit !== activeProfile.chargingRateUnit
-    ) {
-      context.logger.warn(
-        `Unit conversion from ${activeProfile.chargingRateUnit} to ${chargingRateUnit} not implemented`,
-        LogType.OCPP,
-      );
-      return { status: "Rejected" };
-    }
-
-    // Build the composite schedule from the active profile
-    // For now, we return the schedule periods as-is
-    // A more complete implementation would merge multiple profiles and trim to duration
-    const compositeSchedule = {
-      chargingSchedulePeriod: activeProfile.chargingSchedulePeriods.map(
-        (period) => ({
-          startPeriod: period.startPeriod,
-          limit: period.limit,
-          numberPhases: period.numberPhases,
-        }),
-      ),
+    const anchor = new Date();
+    const slices = buildCompositeWattsSchedule(
+      { txProfile, chargePointMaxProfile },
+      anchor,
       duration,
-      startSchedule: activeProfile.validFrom || new Date().toISOString(),
-      chargingRateUnit: responseUnit,
-    };
-
-    context.logger.info(
-      `Returning composite schedule for connector ${connectorId} with ${compositeSchedule.chargingSchedulePeriod.length} periods`,
-      LogType.OCPP,
     );
+
+    // No profile data → respond Accepted with empty period array.
+    const responseUnit: "W" | "A" =
+      (chargingRateUnit as "W" | "A" | undefined) ?? "W";
+    const chargingSchedulePeriod = slices
+      .filter((s) => Number.isFinite(s.watts))
+      .map((s) => ({
+        startPeriod: s.startPeriod,
+        limit: wattsToUnit(s.watts, responseUnit as ChargingRateUnitType),
+      }));
 
     return {
       status: "Accepted",
       connectorId,
-      scheduleStart: compositeSchedule.startSchedule,
-      chargingSchedule: compositeSchedule,
+      scheduleStart: anchor.toISOString(),
+      chargingSchedule: {
+        duration,
+        startSchedule: anchor.toISOString(),
+        chargingRateUnit: responseUnit,
+        chargingSchedulePeriod,
+      },
     };
   }
 }

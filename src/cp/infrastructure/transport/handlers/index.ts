@@ -12,6 +12,8 @@ export * from "./call/ReservationHandlers";
 export * from "./call/SmartChargingHandlers";
 export * from "./call/DataTransferHandler";
 export * from "./call/ChangeAvailabilityHandler";
+export * from "./call/LocalAuthListHandlers";
+export * from "./call/UpdateFirmwareHandler";
 
 // Export CALLRESULT handlers
 export * from "./callresult/BootNotificationResultHandler";

@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -134,13 +134,12 @@ CREATE TABLE IF NOT EXISTS charge_point_state (
 -- StatusNotification / MeterValues stop arriving until an operator
 -- manually intervenes.
 --
--- Scope is deliberately small: just the OCPP-visible state plus the
--- in-flight transaction JSON and the meter accumulator. Scenario
--- execution position is NOT persisted yet (see follow-up), so a
--- restored Charging connector won't keep advancing through scenario
--- nodes on its own. It will, however, accept RemoteStopTransaction
--- through the daemon's default handler and emit a correctly-numbered
--- StopTransaction.req.
+-- Scope is the OCPP-visible state plus the in-flight transaction JSON
+-- and the meter accumulator. Since v3 we also persist scenario execution
+-- position so that a daemon restart mid-transaction resumes the same
+-- scenario node instead of replaying from the top (which previously left
+-- the Charging connector parked at "Wait for RemoteStartTransaction"
+-- forever, since the scenario never reaches its meterValue node again).
 CREATE TABLE IF NOT EXISTS connector_runtime (
   cp_id                            TEXT NOT NULL,
   connector_id                     INTEGER NOT NULL,
@@ -151,6 +150,7 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
   meter_value_wh                   INTEGER NOT NULL DEFAULT 0,
   soc_percent                      REAL,
   last_auto_started_scenario_key   TEXT,
+  scenario_position_json           TEXT,
   updated_at                       TEXT NOT NULL,
   PRIMARY KEY (cp_id, connector_id)
 );
@@ -204,6 +204,22 @@ export function runMigrations(db: Database): void {
   const stored = row ? Number(row.value) : 0;
   if (Number.isFinite(stored) && stored > SCHEMA_VERSION) {
     throw new SchemaVersionMismatchError(stored, SCHEMA_VERSION);
+  }
+
+  // v2 → v3: add `scenario_position_json` column to `connector_runtime`
+  // so a daemon restart can resume the scenario at the saved node instead
+  // of replaying from the START node. SQLite has no `ADD COLUMN IF NOT
+  // EXISTS`, so we probe pragma table_info first.
+  if (stored < 3) {
+    const cols = db.all<{ name: string }>(
+      "PRAGMA table_info(connector_runtime)",
+    );
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("scenario_position_json")) {
+      db.exec(
+        "ALTER TABLE connector_runtime ADD COLUMN scenario_position_json TEXT",
+      );
+    }
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

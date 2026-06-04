@@ -4,6 +4,7 @@ import type { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
 import type {
   ConnectorRuntimeRepository,
   ConnectorRuntimeSnapshot,
+  ScenarioPositionSnapshot,
 } from "./ConnectorRuntimeRepository";
 
 interface ConnectorRuntimeRow {
@@ -14,6 +15,7 @@ interface ConnectorRuntimeRow {
   meter_value_wh: number;
   soc_percent: number | null;
   last_auto_started_scenario_key: string | null;
+  scenario_position_json: string | null;
 }
 
 /**
@@ -30,7 +32,8 @@ export class SqliteConnectorRuntimeRepository
   load(cpId: string, connectorId: number): ConnectorRuntimeSnapshot | null {
     const row = this.database.get<ConnectorRuntimeRow>(
       "SELECT status, availability, scheduled_availability, transaction_json, " +
-        "meter_value_wh, soc_percent, last_auto_started_scenario_key " +
+        "meter_value_wh, soc_percent, last_auto_started_scenario_key, " +
+        "scenario_position_json " +
         "FROM connector_runtime WHERE cp_id = ? AND connector_id = ?",
       [cpId, connectorId],
     );
@@ -46,6 +49,7 @@ export class SqliteConnectorRuntimeRepository
       meterValueWh: row.meter_value_wh,
       socPercent: row.soc_percent,
       lastAutoStartedScenarioKey: row.last_auto_started_scenario_key,
+      scenarioPosition: deserializeScenarioPosition(row.scenario_position_json),
     };
   }
 
@@ -58,8 +62,8 @@ export class SqliteConnectorRuntimeRepository
       "INSERT INTO connector_runtime " +
         "(cp_id, connector_id, status, availability, scheduled_availability, " +
         " transaction_json, meter_value_wh, soc_percent, " +
-        " last_auto_started_scenario_key, updated_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        " last_auto_started_scenario_key, scenario_position_json, updated_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id, connector_id) DO UPDATE SET " +
         "  status = excluded.status, " +
         "  availability = excluded.availability, " +
@@ -69,6 +73,7 @@ export class SqliteConnectorRuntimeRepository
         "  soc_percent = excluded.soc_percent, " +
         "  last_auto_started_scenario_key = " +
         "    excluded.last_auto_started_scenario_key, " +
+        "  scenario_position_json = excluded.scenario_position_json, " +
         "  updated_at = excluded.updated_at",
       [
         cpId,
@@ -80,6 +85,7 @@ export class SqliteConnectorRuntimeRepository
         snapshot.meterValueWh,
         snapshot.socPercent,
         snapshot.lastAutoStartedScenarioKey,
+        serializeScenarioPosition(snapshot.scenarioPosition ?? null),
         new Date().toISOString(),
       ],
     );
@@ -117,6 +123,44 @@ function deserializeTransaction(raw: string | null): Transaction | null {
       parsed.stopTime = new Date(parsed.stopTime as unknown as string);
     }
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function serializeScenarioPosition(
+  pos: ScenarioPositionSnapshot | null,
+): string | null {
+  if (!pos) return null;
+  return JSON.stringify(pos);
+}
+
+function deserializeScenarioPosition(
+  raw: string | null,
+): ScenarioPositionSnapshot | null {
+  if (raw == null) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ScenarioPositionSnapshot>;
+    // Light shape validation: reject silently if the row was hand-edited
+    // or written by some future shape we don't recognise. Returning null
+    // is equivalent to "no resume info; start from top" — the safe
+    // fallback.
+    if (
+      typeof parsed.scenarioKey !== "string" ||
+      !Array.isArray(parsed.executedNodes)
+    ) {
+      return null;
+    }
+    return {
+      scenarioKey: parsed.scenarioKey,
+      lastCompletedNodeId:
+        typeof parsed.lastCompletedNodeId === "string"
+          ? parsed.lastCompletedNodeId
+          : null,
+      executedNodes: parsed.executedNodes.filter(
+        (n): n is string => typeof n === "string",
+      ),
+    };
   } catch {
     return null;
   }

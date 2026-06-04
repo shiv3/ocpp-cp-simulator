@@ -24,7 +24,8 @@ import {
 } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
 import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
-import { resolveScheduleLimitWatts } from "./ChargingScheduleResolver";
+import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
+import type { ChargingProfileStore } from "../charge-point/ChargingProfileStore";
 
 export interface ChargingSchedulePeriod {
   startPeriod: number;
@@ -227,10 +228,23 @@ export class Connector {
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
   }
 
+  /**
+   * Lazy getter for the parent ChargePoint's `ChargingProfileStore`. We
+   * take a closure rather than a direct reference because the connector
+   * is constructed inside the ChargePoint's loop, and the store is a
+   * `this`-owned field that would force a temporal-dead-zone dance if
+   * we passed it eagerly. The closure is also nullable for the benefit
+   * of tests that construct a bare Connector without a ChargePoint —
+   * those just see an empty station store.
+   */
+  private readonly stationProfilesProvider: () => ChargingProfileStore | null;
+
   constructor(
     private readonly connectorId: number,
     private readonly logger: Logger,
+    stationProfilesProvider?: () => ChargingProfileStore | null,
   ) {
+    this.stationProfilesProvider = stationProfilesProvider ?? (() => null);
     this.meterScheduler = new MeterValueScheduler(
       connectorId,
       {
@@ -262,9 +276,13 @@ export class Connector {
    * without needing an extra timer.
    */
   currentScheduleLimitWatts(): number {
-    const profile = this.getActiveChargingProfile();
+    const txProfile = this.getActiveChargingProfile();
+    const stationMax =
+      this.stationProfilesProvider()?.getActive(
+        ChargingProfilePurposeType.ChargePointMaxProfile,
+      ) ?? null;
     const start = this.transactionValue?.startTime ?? null;
-    const resolved = resolveScheduleLimitWatts(profile, start);
+    const resolved = resolveEffectiveLimitWatts(txProfile, stationMax, start);
     const paused = resolved.watts === 0;
     const isCapped = resolved.watts !== Infinity;
     if (
@@ -469,29 +487,62 @@ export class Connector {
   }
 
   /**
-   * Get the currently active charging profile (highest valid stack level)
-   * Returns null if no valid profiles exist.
+   * Resolve the connector's currently active **Tx-layer** charging profile
+   * per OCPP 1.6 §3.13.3 precedence rules:
+   *
+   *   1. The connector's own TxProfile (highest valid stackLevel) — if
+   *      one exists it completely overrules anything else at the Tx layer.
+   *   2. Otherwise, the highest valid TxDefaultProfile among:
+   *        - this connector's own TxDefaultProfile(s), and
+   *        - the station-wide TxDefaultProfile(s) (installed by the CSMS
+   *          via SetChargingProfile.req with connectorId=0).
+   *
+   * The ChargePointMaxProfile lives separately on the ChargePoint and is
+   * combined with this result via `min` inside the resolver.
+   *
+   * Returns `null` when no Tx-layer profile applies.
    */
-  getActiveChargingProfile(): ActiveChargingProfile | null {
-    const now = new Date();
-    const validProfiles = this._chargingProfiles.filter((profile) => {
-      // Check validity period
-      if (profile.validFrom && new Date(profile.validFrom) > now) {
-        return false;
-      }
-      if (profile.validTo && new Date(profile.validTo) < now) {
-        return false;
-      }
+  getActiveChargingProfile(
+    now: Date = new Date(),
+  ): ActiveChargingProfile | null {
+    const isValid = (profile: ActiveChargingProfile) => {
+      if (profile.validFrom && new Date(profile.validFrom) > now) return false;
+      if (profile.validTo && new Date(profile.validTo) < now) return false;
       return true;
-    });
+    };
 
-    if (validProfiles.length === 0) {
-      return null;
+    // Tier 1: TxProfile on this connector wins outright (§3.13.3).
+    const txProfiles = this._chargingProfiles.filter(
+      (p) =>
+        p.chargingProfilePurpose === ChargingProfilePurposeType.TxProfile &&
+        isValid(p),
+    );
+    if (txProfiles.length > 0) {
+      return txProfiles.reduce((best, c) =>
+        c.stackLevel > best.stackLevel ? c : best,
+      );
     }
 
-    // Return profile with highest stack level
-    return validProfiles.reduce((highest, current) =>
-      current.stackLevel > highest.stackLevel ? current : highest,
+    // Tier 2: TxDefaultProfile — connector-own and station-wide compete
+    // by stackLevel. (If a CSMS wants connector defaults to always win
+    // over station defaults, it sets them at a higher stackLevel.)
+    const ownDefaults = this._chargingProfiles.filter(
+      (p) =>
+        p.chargingProfilePurpose ===
+          ChargingProfilePurposeType.TxDefaultProfile && isValid(p),
+    );
+    const stationDefaults =
+      this.stationProfilesProvider()
+        ?.all()
+        .filter(
+          (p) =>
+            p.chargingProfilePurpose ===
+              ChargingProfilePurposeType.TxDefaultProfile && isValid(p),
+        ) ?? [];
+    const defaults = [...ownDefaults, ...stationDefaults];
+    if (defaults.length === 0) return null;
+    return defaults.reduce((best, c) =>
+      c.stackLevel > best.stackLevel ? c : best,
     );
   }
 

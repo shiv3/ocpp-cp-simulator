@@ -53,6 +53,9 @@ import {
   DataTransferResultHandler,
   DataTransferHandler,
   ChangeAvailabilityHandler,
+  GetLocalListVersionHandler,
+  SendLocalListHandler,
+  UpdateFirmwareHandler,
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
@@ -288,6 +291,23 @@ export class OCPPMessageHandler {
     this._registry.registerCallHandler(
       OCPPAction.ChangeAvailability,
       new ChangeAvailabilityHandler(),
+    );
+    // §9 LocalAuthListManagement
+    this._registry.registerCallHandler(
+      OCPPAction.GetLocalListVersion,
+      new GetLocalListVersionHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.SendLocalList,
+      new SendLocalListHandler(),
+    );
+    // §6.19 FirmwareManagement: UpdateFirmware. (GetDiagnostics is
+    // registered above; the matching outbound status notifications fire
+    // from inside ChargePoint.simulateFirmwareUpdate / the GetDiagnostics
+    // handler — there is no CALLRESULT counterpart to register.)
+    this._registry.registerCallHandler(
+      OCPPAction.UpdateFirmware,
+      new UpdateFirmwareHandler(),
     );
 
     // Register CALLRESULT handlers (incoming responses from central system)

@@ -12,6 +12,8 @@ OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CS
 | **Server**    | Long-running HTTP/WebSocket server, multi-CP per process | [docs/server.md](docs/server.md)   |
 | **Docker**    | Pre-built image (daemon + web console) on GHCR           | [docs/docker.md](docs/docker.md)   |
 
+![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
+
 ## Quick Start
 
 ```bash

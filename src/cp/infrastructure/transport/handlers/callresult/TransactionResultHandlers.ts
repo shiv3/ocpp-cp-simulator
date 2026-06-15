@@ -1,17 +1,14 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
 export class StartTransactionResultHandler
-  implements CallResultHandler<response.StartTransactionResponse>
+  implements CallResultHandler<StartTransactionResponseV16>
 {
   constructor(private connectorId: number) {}
 
-  handle(
-    payload: response.StartTransactionResponse,
-    context: HandlerContext,
-  ): void {
+  handle(payload: StartTransactionResponseV16, context: HandlerContext): void {
     const { transactionId, idTagInfo } = payload;
     const connector = context.chargePoint.getConnector(this.connectorId);
 
@@ -48,14 +45,11 @@ export class StartTransactionResultHandler
 }
 
 export class StopTransactionResultHandler
-  implements CallResultHandler<response.StopTransactionResponse>
+  implements CallResultHandler<StopTransactionResponseV16>
 {
   constructor(private connectorId: number) {}
 
-  handle(
-    payload: response.StopTransactionResponse,
-    context: HandlerContext,
-  ): void {
+  handle(payload: StopTransactionResponseV16, context: HandlerContext): void {
     context.logger.info(
       `Transaction stopped successfully: ${JSON.stringify(payload)}`,
       LogType.TRANSACTION,
@@ -75,9 +69,9 @@ export class StopTransactionResultHandler
 }
 
 export class AuthorizeResultHandler
-  implements CallResultHandler<response.AuthorizeResponse>
+  implements CallResultHandler<AuthorizeResponseV16>
 {
-  handle(payload: response.AuthorizeResponse, context: HandlerContext): void {
+  handle(payload: AuthorizeResponseV16, context: HandlerContext): void {
     const { idTagInfo } = payload;
     if (idTagInfo.status === "Accepted") {
       context.logger.info("Authorization successful", LogType.TRANSACTION);

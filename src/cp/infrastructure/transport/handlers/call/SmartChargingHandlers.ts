@@ -18,9 +18,8 @@
  */
 
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type {} from "@cshil/ocpp-tools";
 import type { Connector } from "../../../../domain/connector/Connector";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 import {
   OCPPStatus,
   ChargingProfilePurposeType,
@@ -53,8 +52,7 @@ function getIntegerConfigValue(
 // `SetChargingProfileRequest` rather than exporting a named ChargingProfile
 // type. Alias the inline shape so the validator can keep using a tight
 // parameter type.
-type CsChargingProfile =
-  request.SetChargingProfileRequest["csChargingProfiles"];
+type CsChargingProfile = SetChargingProfileRequestV16["csChargingProfiles"];
 
 /**
  * Validate charging profile against OCPP 1.6 spec and configuration.
@@ -200,15 +198,12 @@ function applyProfileStatus(
  */
 export class SetChargingProfileHandler
   implements
-    CallHandler<
-      request.SetChargingProfileRequest,
-      response.SetChargingProfileResponse
-    >
+    CallHandler<SetChargingProfileRequestV16, SetChargingProfileResponseV16>
 {
   handle(
-    payload: request.SetChargingProfileRequest,
+    payload: SetChargingProfileRequestV16,
     context: HandlerContext,
-  ): response.SetChargingProfileResponse {
+  ): SetChargingProfileResponseV16 {
     const { connectorId, csChargingProfiles } = payload;
 
     context.logger.info(
@@ -294,14 +289,14 @@ export class SetChargingProfileHandler
 export class ClearChargingProfileHandler
   implements
     CallHandler<
-      request.ClearChargingProfileRequest,
-      response.ClearChargingProfileResponse
+      ClearChargingProfileRequestV16,
+      ClearChargingProfileResponseV16
     >
 {
   handle(
-    payload: request.ClearChargingProfileRequest,
+    payload: ClearChargingProfileRequestV16,
     context: HandlerContext,
-  ): response.ClearChargingProfileResponse {
+  ): ClearChargingProfileResponseV16 {
     context.logger.info(
       `ClearChargingProfile received: id=${payload.id}, connectorId=${payload.connectorId}, purpose=${payload.chargingProfilePurpose}, stackLevel=${payload.stackLevel}`,
       LogType.OCPP,
@@ -395,14 +390,14 @@ function wattsToUnit(watts: number, unit: ChargingRateUnitType): number {
 export class GetCompositeScheduleHandler
   implements
     CallHandler<
-      request.GetCompositeScheduleRequest,
-      response.GetCompositeScheduleResponse
+      GetCompositeScheduleRequestV16,
+      GetCompositeScheduleResponseV16
     >
 {
   handle(
-    payload: request.GetCompositeScheduleRequest,
+    payload: GetCompositeScheduleRequestV16,
     context: HandlerContext,
-  ): response.GetCompositeScheduleResponse {
+  ): GetCompositeScheduleResponseV16 {
     const { connectorId, duration, chargingRateUnit } = payload;
 
     context.logger.info(

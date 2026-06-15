@@ -1,8 +1,24 @@
+import type {
+  AuthorizeRequestV16,
+  BootNotificationRequestV16,
+  ChangeConfigurationResponseV16,
+  ClearChargingProfileResponseV16,
+  GetConfigurationResponseV16,
+  GetDiagnosticsResponseV16,
+  HeartbeatRequestV16,
+  MeterValuesRequestV16,
+  RemoteStartTransactionResponseV16,
+  RemoteStopTransactionResponseV16,
+  ResetResponseV16,
+  StartTransactionRequestV16,
+  StatusNotificationRequestV16,
+  StopTransactionRequestV16,
+  TriggerMessageResponseV16,
+  UnlockConnectorResponseV16,
+} from "@cshil/ocpp-tools";
 import { openOcppWebSocket } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { Logger } from "./Logger";
 import { OCPPAction, OCPPErrorCode, OCPPMessageType } from "./OcppTypes";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -10,24 +26,24 @@ export type OcppMessagePayload =
   | OcppMessageErrorPayload;
 
 export type OcppMessageRequestPayload =
-  | request.AuthorizeRequest
-  | request.BootNotificationRequest
-  | request.HeartbeatRequest
-  | request.MeterValuesRequest
-  | request.StartTransactionRequest
-  | request.StatusNotificationRequest
-  | request.StopTransactionRequest;
+  | AuthorizeRequestV16
+  | BootNotificationRequestV16
+  | HeartbeatRequestV16
+  | MeterValuesRequestV16
+  | StartTransactionRequestV16
+  | StatusNotificationRequestV16
+  | StopTransactionRequestV16;
 
 export type OcppMessageResponsePayload =
-  | response.ChangeConfigurationResponse
-  | response.GetConfigurationResponse
-  | response.GetDiagnosticsResponse
-  | response.RemoteStartTransactionResponse
-  | response.RemoteStopTransactionResponse
-  | response.ResetResponse
-  | response.TriggerMessageResponse
-  | response.UnlockConnectorResponse
-  | response.ClearChargingProfileResponse;
+  | ChangeConfigurationResponseV16
+  | GetConfigurationResponseV16
+  | GetDiagnosticsResponseV16
+  | RemoteStartTransactionResponseV16
+  | RemoteStopTransactionResponseV16
+  | ResetResponseV16
+  | TriggerMessageResponseV16
+  | UnlockConnectorResponseV16
+  | ClearChargingProfileResponseV16;
 
 export type OcppMessageErrorPayload = {
   readonly errorCode: OCPPErrorCode;

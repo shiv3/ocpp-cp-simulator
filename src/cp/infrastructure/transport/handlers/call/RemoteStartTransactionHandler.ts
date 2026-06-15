@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 
 /**
@@ -21,14 +20,14 @@ import { LogType } from "../../../../shared/Logger";
 export class RemoteStartTransactionHandler
   implements
     CallHandler<
-      request.RemoteStartTransactionRequest,
-      response.RemoteStartTransactionResponse
+      RemoteStartTransactionRequestV16,
+      RemoteStartTransactionResponseV16
     >
 {
   handle(
-    payload: request.RemoteStartTransactionRequest,
+    payload: RemoteStartTransactionRequestV16,
     context: HandlerContext,
-  ): response.RemoteStartTransactionResponse {
+  ): RemoteStartTransactionResponseV16 {
     const { idTag, connectorId } = payload;
     const resolvedConnectorId = connectorId || 1;
     const connector = context.chargePoint.getConnector(resolvedConnectorId);

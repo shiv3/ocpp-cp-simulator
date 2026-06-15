@@ -1,3 +1,43 @@
+import type {
+  AuthorizeRequestV16,
+  AuthorizeResponseV16,
+  BootNotificationResponseV16,
+  CancelReservationRequestV16,
+  ChangeAvailabilityRequestV16,
+  ChangeConfigurationRequestV16,
+  ChangeConfigurationResponseV16,
+  ClearCacheRequestV16,
+  ClearChargingProfileRequestV16,
+  DataTransferRequestV16,
+  DataTransferResponseV16,
+  DiagnosticsStatusNotificationRequestV16,
+  DiagnosticsStatusNotificationResponseV16,
+  FirmwareStatusNotificationRequestV16,
+  FirmwareStatusNotificationResponseV16,
+  GetCompositeScheduleRequestV16,
+  GetConfigurationRequestV16,
+  GetDiagnosticsRequestV16,
+  GetLocalListVersionRequestV16,
+  HeartbeatRequestV16,
+  HeartbeatResponseV16,
+  MeterValuesRequestV16,
+  MeterValuesResponseV16,
+  RemoteStartTransactionRequestV16,
+  RemoteStopTransactionRequestV16,
+  ReserveNowRequestV16,
+  ResetRequestV16,
+  SendLocalListRequestV16,
+  SetChargingProfileRequestV16,
+  StartTransactionRequestV16,
+  StartTransactionResponseV16,
+  StatusNotificationRequestV16,
+  StatusNotificationResponseV16,
+  StopTransactionRequestV16,
+  StopTransactionResponseV16,
+  TriggerMessageRequestV16,
+  UnlockConnectorRequestV16,
+  UpdateFirmwareRequestV16,
+} from "@cshil/ocpp-tools";
 import {
   OcppMessageErrorPayload,
   OcppMessagePayload,
@@ -21,9 +61,6 @@ import {
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
 // Import handler registry and handlers
 import {
@@ -59,33 +96,33 @@ import {
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
-  | request.ChangeAvailabilityRequest
-  | request.ChangeConfigurationRequest
-  | request.ClearCacheRequest
-  | request.GetConfigurationRequest
-  | request.RemoteStartTransactionRequest
-  | request.RemoteStopTransactionRequest
-  | request.ResetRequest
-  | request.UnlockConnectorRequest;
+  | ChangeAvailabilityRequestV16
+  | ChangeConfigurationRequestV16
+  | ClearCacheRequestV16
+  | GetConfigurationRequestV16
+  | RemoteStartTransactionRequestV16
+  | RemoteStopTransactionRequestV16
+  | ResetRequestV16
+  | UnlockConnectorRequestV16;
 
 type FirmwareManagementOcppMessagePayloadCall =
-  | request.GetDiagnosticsRequest
-  | request.UpdateFirmwareRequest;
+  | GetDiagnosticsRequestV16
+  | UpdateFirmwareRequestV16;
 
 type LocalAuthListManagementOcppMessagePayloadCall =
-  | request.GetLocalListVersionRequest
-  | request.SendLocalListRequest;
+  | GetLocalListVersionRequestV16
+  | SendLocalListRequestV16;
 
 type ReservationOcppMessagePayloadCall =
-  | request.CancelReservationRequest
-  | request.ReserveNowRequest;
+  | CancelReservationRequestV16
+  | ReserveNowRequestV16;
 
 type SmartChargingOcppMessagePayloadCall =
-  | request.ClearChargingProfileRequest
-  | request.GetCompositeScheduleRequest
-  | request.SetChargingProfileRequest;
+  | ClearChargingProfileRequestV16
+  | GetCompositeScheduleRequestV16
+  | SetChargingProfileRequestV16;
 
-type RemoteTriggerOcppMessagePayloadCall = request.TriggerMessageRequest;
+type RemoteTriggerOcppMessagePayloadCall = TriggerMessageRequestV16;
 
 type OcppMessagePayloadCall =
   | CoreOcppMessagePayloadCall
@@ -96,19 +133,19 @@ type OcppMessagePayloadCall =
   | RemoteTriggerOcppMessagePayloadCall;
 
 type CoreOcppMessagePayloadCallResult =
-  | response.AuthorizeResponse
-  | response.BootNotificationResponse
-  | response.ChangeConfigurationResponse
-  | response.DataTransferResponse
-  | response.HeartbeatResponse
-  | response.MeterValuesResponse
-  | response.StartTransactionResponse
-  | response.StatusNotificationResponse
-  | response.StopTransactionResponse;
+  | AuthorizeResponseV16
+  | BootNotificationResponseV16
+  | ChangeConfigurationResponseV16
+  | DataTransferResponseV16
+  | HeartbeatResponseV16
+  | MeterValuesResponseV16
+  | StartTransactionResponseV16
+  | StatusNotificationResponseV16
+  | StopTransactionResponseV16;
 
 type FirmwareManagementOcppMessagePayloadCallResult =
-  | response.DiagnosticsStatusNotificationResponse
-  | response.FirmwareStatusNotificationResponse;
+  | DiagnosticsStatusNotificationResponseV16
+  | FirmwareStatusNotificationResponseV16;
 
 type OcppMessagePayloadCallResult =
   | CoreOcppMessagePayloadCallResult
@@ -381,13 +418,13 @@ export class OCPPMessageHandler {
 
   public authorize(tagId: string): void {
     const messageId = this.generateMessageId();
-    const payload: request.AuthorizeRequest = { idTag: tagId };
+    const payload: AuthorizeRequestV16 = { idTag: tagId };
     this.sendRequest(OCPPAction.Authorize, messageId, payload);
   }
 
   public startTransaction(transaction: Transaction, connectorId: number): void {
     const messageId = this.generateMessageId();
-    const payload: request.StartTransactionRequest = {
+    const payload: StartTransactionRequestV16 = {
       connectorId: connectorId,
       idTag: transaction.tagId,
       meterStart: transaction.meterStart,
@@ -413,7 +450,7 @@ export class OCPPMessageHandler {
     // transaction.stopReason in non-default stop paths (Remote / Reset /
     // EVDisconnected / UnlockCommand / DeAuthorized / …).
     const reason = transaction.stopReason;
-    const payload: request.StopTransactionRequest = {
+    const payload: StopTransactionRequestV16 = {
       transactionId: transaction.id!,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
@@ -436,7 +473,7 @@ export class OCPPMessageHandler {
 
   public sendHeartbeat(): void {
     const messageId = this.generateMessageId();
-    const payload: request.HeartbeatRequest = {};
+    const payload: HeartbeatRequestV16 = {};
     this.sendRequest(OCPPAction.Heartbeat, messageId, payload);
   }
 
@@ -452,7 +489,7 @@ export class OCPPMessageHandler {
     data?: string,
   ): void {
     const id = this.generateMessageId();
-    const payload: request.DataTransferRequest = {
+    const payload: DataTransferRequestV16 = {
       vendorId,
       ...(messageId !== undefined ? { messageId } : {}),
       ...(data !== undefined ? { data } : {}),
@@ -470,7 +507,7 @@ export class OCPPMessageHandler {
     status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
   ): void {
     const messageId = this.generateMessageId();
-    const payload: request.DiagnosticsStatusNotificationRequest = { status };
+    const payload: DiagnosticsStatusNotificationRequestV16 = { status };
     this.sendRequest(
       OCPPAction.DiagnosticsStatusNotification,
       messageId,
@@ -495,7 +532,7 @@ export class OCPPMessageHandler {
       | "Installed",
   ): void {
     const messageId = this.generateMessageId();
-    const payload: request.FirmwareStatusNotificationRequest = { status };
+    const payload: FirmwareStatusNotificationRequestV16 = { status };
     this.sendRequest(OCPPAction.FirmwareStatusNotification, messageId, payload);
   }
 
@@ -526,7 +563,7 @@ export class OCPPMessageHandler {
     ) ?? ["Energy.Active.Import.Register"];
     const sampledValue = buildSampledValues(connector, measurands, context);
 
-    const payload: request.MeterValuesRequest = {
+    const payload: MeterValuesRequestV16 = {
       transactionId,
       connectorId,
       meterValue: [
@@ -537,7 +574,7 @@ export class OCPPMessageHandler {
           // generated type is a strict union. Cast at this boundary
           // rather than mirror the entire enum.
           sampledValue:
-            sampledValue as unknown as request.MeterValuesRequest["meterValue"][0]["sampledValue"],
+            sampledValue as unknown as MeterValuesRequestV16["meterValue"][0]["sampledValue"],
         },
       ],
     };
@@ -561,7 +598,7 @@ export class OCPPMessageHandler {
     },
   ): void {
     const messageId = this.generateMessageId();
-    const payload: request.StatusNotificationRequest = {
+    const payload: StatusNotificationRequestV16 = {
       connectorId,
       errorCode: opts?.errorCode ?? "NoError",
       status,
@@ -825,7 +862,7 @@ export class OCPPMessageHandler {
         handler = new StopTransactionResultHandler(request.connectorId || 1);
       } else if (action === OCPPAction.MeterValues) {
         handler = new MeterValuesResultHandler(
-          request.payload as request.MeterValuesRequest,
+          request.payload as MeterValuesRequestV16,
         );
       }
     }

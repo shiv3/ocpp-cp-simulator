@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 import {
   OCPPAvailability,
@@ -23,15 +22,12 @@ import {
  */
 export class ChangeAvailabilityHandler
   implements
-    CallHandler<
-      request.ChangeAvailabilityRequest,
-      response.ChangeAvailabilityResponse
-    >
+    CallHandler<ChangeAvailabilityRequestV16, ChangeAvailabilityResponseV16>
 {
   handle(
-    payload: request.ChangeAvailabilityRequest,
+    payload: ChangeAvailabilityRequestV16,
     context: HandlerContext,
-  ): response.ChangeAvailabilityResponse {
+  ): ChangeAvailabilityResponseV16 {
     const target: OCPPAvailability =
       payload.type === "Operative" ? "Operative" : "Inoperative";
 
@@ -49,7 +45,7 @@ export class ChangeAvailabilityHandler
   private applyChargePoint(
     target: OCPPAvailability,
     context: HandlerContext,
-  ): response.ChangeAvailabilityResponse {
+  ): ChangeAvailabilityResponseV16 {
     const { chargePoint } = context;
     // §5.2: if any connector has an active transaction we have to defer,
     // even for the CP-wide form.
@@ -80,7 +76,7 @@ export class ChangeAvailabilityHandler
     connectorId: number,
     target: OCPPAvailability,
     context: HandlerContext,
-  ): response.ChangeAvailabilityResponse {
+  ): ChangeAvailabilityResponseV16 {
     const connector = context.chargePoint.getConnector(connectorId);
     if (!connector) {
       // Unknown connector id — spec doesn't have an explicit status for

@@ -1,19 +1,15 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 
 export class ChangeConfigurationHandler
   implements
-    CallHandler<
-      request.ChangeConfigurationRequest,
-      response.ChangeConfigurationResponse
-    >
+    CallHandler<ChangeConfigurationRequestV16, ChangeConfigurationResponseV16>
 {
   handle(
-    payload: request.ChangeConfigurationRequest,
+    payload: ChangeConfigurationRequestV16,
     context: HandlerContext,
-  ): response.ChangeConfigurationResponse {
+  ): ChangeConfigurationResponseV16 {
     const status = context.chargePoint.configuration.applyChange(
       payload.key,
       payload.value,
@@ -27,13 +23,12 @@ export class ChangeConfigurationHandler
 }
 
 export class TriggerMessageHandler
-  implements
-    CallHandler<request.TriggerMessageRequest, response.TriggerMessageResponse>
+  implements CallHandler<TriggerMessageRequestV16, TriggerMessageResponseV16>
 {
   handle(
-    payload: request.TriggerMessageRequest,
+    payload: TriggerMessageRequestV16,
     context: HandlerContext,
-  ): response.TriggerMessageResponse {
+  ): TriggerMessageResponseV16 {
     context.logger.info(
       `Trigger message request received: ${payload.requestedMessage}` +
         (payload.connectorId !== undefined
@@ -100,13 +95,12 @@ export class TriggerMessageHandler
 }
 
 export class ClearCacheHandler
-  implements
-    CallHandler<request.ClearCacheRequest, response.ClearCacheResponse>
+  implements CallHandler<ClearCacheRequestV16, ClearCacheResponseV16>
 {
   handle(
-    payload: request.ClearCacheRequest,
+    payload: ClearCacheRequestV16,
     context: HandlerContext,
-  ): response.ClearCacheResponse {
+  ): ClearCacheResponseV16 {
     context.logger.info(
       `Clear cache request received: ${JSON.stringify(payload)}`,
       LogType.OCPP,
@@ -122,16 +116,12 @@ export class ClearCacheHandler
  * flip this to `UnlockFailed` or `NotSupported` to verify CSMS error paths.
  */
 export class UnlockConnectorHandler
-  implements
-    CallHandler<
-      request.UnlockConnectorRequest,
-      response.UnlockConnectorResponse
-    >
+  implements CallHandler<UnlockConnectorRequestV16, UnlockConnectorResponseV16>
 {
   handle(
-    payload: request.UnlockConnectorRequest,
+    payload: UnlockConnectorRequestV16,
     context: HandlerContext,
-  ): response.UnlockConnectorResponse {
+  ): UnlockConnectorResponseV16 {
     const { connectorId } = payload;
     const connector = context.chargePoint.getConnector(connectorId);
     if (!connector) {

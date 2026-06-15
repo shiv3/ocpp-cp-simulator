@@ -1,28 +1,24 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 
 export class HeartbeatResultHandler
-  implements CallResultHandler<response.HeartbeatResponse>
+  implements CallResultHandler<HeartbeatResponseV16>
 {
-  handle(
-    payload: response.HeartbeatResponse,
-    context: HandlerContext,
-  ): void {
-    context.logger.debug(`Received heartbeat response: ${payload.currentTime}`, LogType.HEARTBEAT);
+  handle(payload: HeartbeatResponseV16, context: HandlerContext): void {
+    context.logger.debug(
+      `Received heartbeat response: ${payload.currentTime}`,
+      LogType.HEARTBEAT,
+    );
   }
 }
 
 export class MeterValuesResultHandler
-  implements CallResultHandler<response.MeterValuesResponse>
+  implements CallResultHandler<MeterValuesResponseV16>
 {
-  constructor(private requestPayload?: request.MeterValuesRequest) {}
+  constructor(private requestPayload?: MeterValuesRequestV16) {}
 
-  handle(
-    payload: response.MeterValuesResponse,
-    context: HandlerContext,
-  ): void {
+  handle(payload: MeterValuesResponseV16, context: HandlerContext): void {
     if (this.requestPayload) {
       const connector = context.chargePoint.getConnector(
         this.requestPayload.connectorId,
@@ -39,10 +35,10 @@ export class MeterValuesResultHandler
 }
 
 export class StatusNotificationResultHandler
-  implements CallResultHandler<response.StatusNotificationResponse>
+  implements CallResultHandler<StatusNotificationResponseV16>
 {
   handle(
-    payload: response.StatusNotificationResponse,
+    payload: StatusNotificationResponseV16,
     context: HandlerContext,
   ): void {
     context.logger.debug(
@@ -53,12 +49,9 @@ export class StatusNotificationResultHandler
 }
 
 export class DataTransferResultHandler
-  implements CallResultHandler<response.DataTransferResponse>
+  implements CallResultHandler<DataTransferResponseV16>
 {
-  handle(
-    payload: response.DataTransferResponse,
-    context: HandlerContext,
-  ): void {
+  handle(payload: DataTransferResponseV16, context: HandlerContext): void {
     context.logger.info(
       `Data transfer sent successfully: ${JSON.stringify(payload)}`,
       LogType.OCPP,

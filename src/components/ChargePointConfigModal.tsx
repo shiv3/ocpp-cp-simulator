@@ -273,6 +273,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
+                    <SelectItem value="OCPP-2.0.1">OCPP 2.0.1</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

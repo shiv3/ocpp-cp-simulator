@@ -84,6 +84,7 @@ export interface LocalChargePointDefinition {
   wsUrl: string;
   basicAuth: { username: string; password: string } | null;
   autoMeterValueSetting: AutoMeterValueSetting | null;
+  ocppVersion?: string;
 }
 
 export class LocalChargePointService implements ChargePointService {
@@ -612,6 +613,9 @@ export class LocalChargePointService implements ChargePointService {
       definition.basicAuth,
       definition.autoMeterValueSetting,
       this.database,
+      {},
+      [],
+      definition.ocppVersion,
     );
 
     // Restore connector-level settings from the SQLite store. Sync reads

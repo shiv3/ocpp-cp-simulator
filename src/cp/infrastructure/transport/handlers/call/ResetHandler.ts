@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 
 /**
@@ -13,12 +12,9 @@ import { LogType } from "../../../../shared/Logger";
  * before any StopTransaction.req goes out.
  */
 export class ResetHandler
-  implements CallHandler<request.ResetRequest, response.ResetResponse>
+  implements CallHandler<ResetRequestV16, ResetResponseV16>
 {
-  handle(
-    payload: request.ResetRequest,
-    context: HandlerContext,
-  ): response.ResetResponse {
+  handle(payload: ResetRequestV16, context: HandlerContext): ResetResponseV16 {
     context.logger.info(
       `Reset request received: ${payload.type}`,
       LogType.OCPP,

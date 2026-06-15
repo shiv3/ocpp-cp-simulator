@@ -12,6 +12,56 @@
  * - Adequate for simulator/testing purposes
  */
 
+import type {
+  AuthorizeRequestV16,
+  AuthorizeResponseV16,
+  BootNotificationRequestV16,
+  BootNotificationResponseV16,
+  CancelReservationRequestV16,
+  ChangeAvailabilityRequestV16,
+  ChangeAvailabilityResponseV16,
+  ChangeConfigurationRequestV16,
+  ChangeConfigurationResponseV16,
+  ClearCacheRequestV16,
+  ClearCacheResponseV16,
+  ClearChargingProfileRequestV16,
+  ClearChargingProfileResponseV16,
+  DataTransferResponseV16,
+  DiagnosticsStatusNotificationResponseV16,
+  FirmwareStatusNotificationResponseV16,
+  GetCompositeScheduleRequestV16,
+  GetCompositeScheduleResponseV16,
+  GetConfigurationRequestV16,
+  GetConfigurationResponseV16,
+  GetDiagnosticsRequestV16,
+  GetDiagnosticsResponseV16,
+  GetLocalListVersionRequestV16,
+  HeartbeatRequestV16,
+  HeartbeatResponseV16,
+  MeterValuesRequestV16,
+  MeterValuesResponseV16,
+  RemoteStartTransactionRequestV16,
+  RemoteStartTransactionResponseV16,
+  RemoteStopTransactionRequestV16,
+  RemoteStopTransactionResponseV16,
+  ReserveNowRequestV16,
+  ResetRequestV16,
+  ResetResponseV16,
+  SendLocalListRequestV16,
+  SetChargingProfileRequestV16,
+  SetChargingProfileResponseV16,
+  StartTransactionRequestV16,
+  StartTransactionResponseV16,
+  StatusNotificationRequestV16,
+  StatusNotificationResponseV16,
+  StopTransactionRequestV16,
+  StopTransactionResponseV16,
+  TriggerMessageRequestV16,
+  TriggerMessageResponseV16,
+  UnlockConnectorRequestV16,
+  UnlockConnectorResponseV16,
+  UpdateFirmwareRequestV16,
+} from "@cshil/ocpp-tools";
 import {
   OcppMessageErrorPayload,
   OcppMessagePayload,
@@ -46,9 +96,6 @@ import {
   StringConfigurationValue,
 } from "./Configuration.ts";
 
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
-
 function applyProfileStatus(
   chargePoint: ChargePoint,
   connector: Connector,
@@ -70,33 +117,33 @@ function applyProfileStatus(
 }
 
 type CoreOcppMessagePayloadCall =
-  | request.ChangeAvailabilityRequest
-  | request.ChangeConfigurationRequest
-  | request.ClearCacheRequest
-  | request.GetConfigurationRequest
-  | request.RemoteStartTransactionRequest
-  | request.RemoteStopTransactionRequest
-  | request.ResetRequest
-  | request.UnlockConnectorRequest;
+  | ChangeAvailabilityRequestV16
+  | ChangeConfigurationRequestV16
+  | ClearCacheRequestV16
+  | GetConfigurationRequestV16
+  | RemoteStartTransactionRequestV16
+  | RemoteStopTransactionRequestV16
+  | ResetRequestV16
+  | UnlockConnectorRequestV16;
 
 type FirmwareManagementOcppMessagePayloadCall =
-  | request.GetDiagnosticsRequest
-  | request.UpdateFirmwareRequest;
+  | GetDiagnosticsRequestV16
+  | UpdateFirmwareRequestV16;
 
 type LocalAuthListManagementOcppMessagePayloadCall =
-  | request.GetLocalListVersionRequest
-  | request.SendLocalListRequest;
+  | GetLocalListVersionRequestV16
+  | SendLocalListRequestV16;
 
 type ReservationOcppMessagePayloadCall =
-  | request.CancelReservationRequest
-  | request.ReserveNowRequest;
+  | CancelReservationRequestV16
+  | ReserveNowRequestV16;
 
 type SmartChargingOcppMessagePayloadCall =
-  | request.ClearChargingProfileRequest
-  | request.GetCompositeScheduleRequest
-  | request.SetChargingProfileRequest;
+  | ClearChargingProfileRequestV16
+  | GetCompositeScheduleRequestV16
+  | SetChargingProfileRequestV16;
 
-type RemoteTriggerOcppMessagePayloadCall = request.TriggerMessageRequest;
+type RemoteTriggerOcppMessagePayloadCall = TriggerMessageRequestV16;
 
 type OcppMessagePayloadCall =
   | CoreOcppMessagePayloadCall
@@ -107,19 +154,19 @@ type OcppMessagePayloadCall =
   | RemoteTriggerOcppMessagePayloadCall;
 
 type CoreOcppMessagePayloadCallResult =
-  | response.AuthorizeResponse
-  | response.BootNotificationResponse
-  | response.ChangeConfigurationResponse
-  | response.DataTransferResponse
-  | response.HeartbeatResponse
-  | response.MeterValuesResponse
-  | response.StartTransactionResponse
-  | response.StatusNotificationResponse
-  | response.StopTransactionResponse;
+  | AuthorizeResponseV16
+  | BootNotificationResponseV16
+  | ChangeConfigurationResponseV16
+  | DataTransferResponseV16
+  | HeartbeatResponseV16
+  | MeterValuesResponseV16
+  | StartTransactionResponseV16
+  | StatusNotificationResponseV16
+  | StopTransactionResponseV16;
 
 type FirmwareManagementOcppMessagePayloadCallResult =
-  | response.DiagnosticsStatusNotificationResponse
-  | response.FirmwareStatusNotificationResponse;
+  | DiagnosticsStatusNotificationResponseV16
+  | FirmwareStatusNotificationResponseV16;
 
 type OcppMessagePayloadCallResult =
   | CoreOcppMessagePayloadCallResult
@@ -175,13 +222,13 @@ export class OCPPMessageHandler {
 
   public authorize(tagId: string): void {
     const messageId = this.generateMessageId();
-    const payload: request.AuthorizeRequest = { idTag: tagId };
+    const payload: AuthorizeRequestV16 = { idTag: tagId };
     this.sendRequest(OCPPAction.Authorize, messageId, payload);
   }
 
   public startTransaction(transaction: Transaction, connectorId: number): void {
     const messageId = this.generateMessageId();
-    const payload: request.StartTransactionRequest = {
+    const payload: StartTransactionRequestV16 = {
       connectorId: connectorId,
       idTag: transaction.tagId,
       meterStart: transaction.meterStart,
@@ -197,7 +244,7 @@ export class OCPPMessageHandler {
 
   public stopTransaction(transaction: Transaction, connectorId: number): void {
     const messageId = this.generateMessageId();
-    const payload: request.StopTransactionRequest = {
+    const payload: StopTransactionRequestV16 = {
       transactionId: transaction.id!,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
@@ -213,7 +260,7 @@ export class OCPPMessageHandler {
 
   public sendBootNotification(bootPayload: BootNotification): void {
     const messageId = this.generateMessageId();
-    const payload: request.BootNotificationRequest = {
+    const payload: BootNotificationRequestV16 = {
       chargePointVendor: bootPayload.ChargePointVendor,
       chargePointModel: bootPayload.ChargePointModel,
       chargePointSerialNumber: bootPayload.ChargePointSerialNumber,
@@ -229,7 +276,7 @@ export class OCPPMessageHandler {
 
   public sendHeartbeat(): void {
     const messageId = this.generateMessageId();
-    const payload: request.HeartbeatRequest = {};
+    const payload: HeartbeatRequestV16 = {};
     this.sendRequest(OCPPAction.Heartbeat, messageId, payload);
   }
 
@@ -239,7 +286,7 @@ export class OCPPMessageHandler {
     meterValue: number,
   ): void {
     const messageId = this.generateMessageId();
-    const payload: request.MeterValuesRequest = {
+    const payload: MeterValuesRequestV16 = {
       transactionId: transactionId,
       connectorId: connectorId,
       meterValue: [
@@ -254,7 +301,7 @@ export class OCPPMessageHandler {
 
   public sendStatusNotification(connectorId: number, status: OCPPStatus): void {
     const messageId = this.generateMessageId();
-    const payload: request.StatusNotificationRequest = {
+    const payload: StatusNotificationRequestV16 = {
       connectorId: connectorId,
       errorCode: "NoError",
       status: status,
@@ -314,58 +361,58 @@ export class OCPPMessageHandler {
     switch (action) {
       case OCPPAction.RemoteStartTransaction:
         response = this.handleRemoteStartTransaction(
-          payload as request.RemoteStartTransactionRequest,
+          payload as RemoteStartTransactionRequestV16,
         );
         break;
       case OCPPAction.RemoteStopTransaction:
         response = this.handleRemoteStopTransaction(
-          payload as request.RemoteStopTransactionRequest,
+          payload as RemoteStopTransactionRequestV16,
         );
         break;
       case OCPPAction.Reset:
-        response = this.handleReset(payload as request.ResetRequest);
+        response = this.handleReset(payload as ResetRequestV16);
         break;
       case OCPPAction.GetDiagnostics:
         response = this.handleGetDiagnostics(
-          payload as request.GetDiagnosticsRequest,
+          payload as GetDiagnosticsRequestV16,
         );
         break;
       case OCPPAction.TriggerMessage:
         response = this.handleTriggerMessage(
-          payload as request.TriggerMessageRequest,
+          payload as TriggerMessageRequestV16,
         );
         break;
       case OCPPAction.GetConfiguration:
         response = this.handleGetConfiguration(
-          payload as request.GetConfigurationRequest,
+          payload as GetConfigurationRequestV16,
         );
         break;
       case OCPPAction.ChangeConfiguration:
         response = this.handleChangeConfiguration(
-          payload as request.ChangeConfigurationRequest,
+          payload as ChangeConfigurationRequestV16,
         );
         break;
       case OCPPAction.ClearCache:
-        response = this.handleClearCache(payload as request.ClearCacheRequest);
+        response = this.handleClearCache(payload as ClearCacheRequestV16);
         break;
       case OCPPAction.UnlockConnector:
         response = this.handleUnlockConnector(
-          payload as request.UnlockConnectorRequest,
+          payload as UnlockConnectorRequestV16,
         );
         break;
       case OCPPAction.SetChargingProfile:
         response = this.handleSetChargingProfile(
-          payload as request.SetChargingProfileRequest,
+          payload as SetChargingProfileRequestV16,
         );
         break;
       case OCPPAction.ClearChargingProfile:
         response = this.handleClearChargingProfile(
-          payload as request.ClearChargingProfileRequest,
+          payload as ClearChargingProfileRequestV16,
         );
         break;
       case OCPPAction.GetCompositeSchedule:
         response = this.handleGetCompositeSchedule(
-          payload as request.GetCompositeScheduleRequest,
+          payload as GetCompositeScheduleRequestV16,
         );
         break;
       default:
@@ -392,48 +439,44 @@ export class OCPPMessageHandler {
     const action = request?.action;
     switch (action) {
       case OCPPAction.ChangeAvailability:
-        this.handleChangeAvailability(
-          payload as request.ChangeAvailabilityRequest,
-        );
+        this.handleChangeAvailability(payload as ChangeAvailabilityRequestV16);
         break;
       case OCPPAction.BootNotification:
         this.handleBootNotificationResponse(
-          payload as response.BootNotificationResponse,
+          payload as BootNotificationResponseV16,
         );
         break;
       case OCPPAction.Authorize:
-        this.handleAuthorizeResponse(payload as response.AuthorizeResponse);
+        this.handleAuthorizeResponse(payload as AuthorizeResponseV16);
         break;
       case OCPPAction.StartTransaction:
         this.handleStartTransactionResponse(
           request?.connectorId || 1,
-          payload as response.StartTransactionResponse,
+          payload as StartTransactionResponseV16,
         );
         break;
       case OCPPAction.StopTransaction:
         this.handleStopTransactionResponse(
           request?.connectorId || 1,
-          payload as response.StopTransactionResponse,
+          payload as StopTransactionResponseV16,
         );
         break;
       case OCPPAction.Heartbeat:
-        this.handleHeartbeatResponse(payload as response.HeartbeatResponse);
+        this.handleHeartbeatResponse(payload as HeartbeatResponseV16);
         break;
       case OCPPAction.MeterValues:
         this.handleMeterValuesResponse(
-          payload as response.MeterValuesResponse,
-          request?.payload as request.MeterValuesRequest,
+          payload as MeterValuesResponseV16,
+          request?.payload as MeterValuesRequestV16,
         );
         break;
       case OCPPAction.StatusNotification:
         this.handleStatusNotificationResponse(
-          payload as response.StatusNotificationResponse,
+          payload as StatusNotificationResponseV16,
         );
         break;
       case OCPPAction.DataTransfer:
-        this.handleDataTransferResponse(
-          payload as response.DataTransferResponse,
-        );
+        this.handleDataTransferResponse(payload as DataTransferResponseV16);
         break;
       default:
         this._logger.log(`Unsupported action result: ${action}`);
@@ -454,8 +497,8 @@ export class OCPPMessageHandler {
   }
 
   private handleRemoteStartTransaction(
-    payload: request.RemoteStartTransactionRequest,
-  ): response.RemoteStartTransactionResponse {
+    payload: RemoteStartTransactionRequestV16,
+  ): RemoteStartTransactionResponseV16 {
     const { idTag, connectorId } = payload;
     const connector = this._chargePoint.getConnector(connectorId || 1);
 
@@ -468,8 +511,8 @@ export class OCPPMessageHandler {
   }
 
   private handleRemoteStopTransaction(
-    payload: request.RemoteStopTransactionRequest,
-  ): response.RemoteStopTransactionResponse {
+    payload: RemoteStopTransactionRequestV16,
+  ): RemoteStopTransactionResponseV16 {
     const { transactionId } = payload;
     const connector = Array.from(this._chargePoint.connectors.values()).find(
       (c) => c.transaction && c.transaction.id === transactionId,
@@ -487,7 +530,7 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleReset(payload: request.ResetRequest): response.ResetResponse {
+  private handleReset(payload: ResetRequestV16): ResetResponseV16 {
     this._logger.log(`Reset request received: ${payload.type}`);
     setTimeout(() => {
       this._logger.log(`Reset chargePoint: ${this._chargePoint.id}`);
@@ -501,8 +544,8 @@ export class OCPPMessageHandler {
   }
 
   private handleGetDiagnostics(
-    payload: request.GetDiagnosticsRequest,
-  ): response.GetDiagnosticsResponse {
+    payload: GetDiagnosticsRequestV16,
+  ): GetDiagnosticsResponseV16 {
     this._logger.log(`Get diagnostics request received: ${payload.location}`); // e.g. `FTP
     const logs = this._logger.getLogs().join("\n");
     const blob = new Blob([logs], { type: "text/plain" });
@@ -512,8 +555,8 @@ export class OCPPMessageHandler {
   }
 
   private handleGetConfiguration(
-    payload: request.GetConfigurationRequest,
-  ): response.GetConfigurationResponse {
+    payload: GetConfigurationRequestV16,
+  ): GetConfigurationResponseV16 {
     this._logger.log(
       `Get configuration request received: ${JSON.stringify(payload.key)}`,
     );
@@ -562,8 +605,8 @@ export class OCPPMessageHandler {
   }
 
   private handleChangeConfiguration(
-    payload: request.ChangeConfigurationRequest,
-  ): response.ChangeConfigurationResponse {
+    payload: ChangeConfigurationRequestV16,
+  ): ChangeConfigurationResponseV16 {
     this._logger.log(
       `Change configuration request received: ${JSON.stringify(payload.key)}: ${JSON.stringify(payload.value)}`,
     );
@@ -576,8 +619,8 @@ export class OCPPMessageHandler {
   }
 
   private handleTriggerMessage(
-    payload: request.TriggerMessageRequest,
-  ): response.TriggerMessageResponse {
+    payload: TriggerMessageRequestV16,
+  ): TriggerMessageResponseV16 {
     this._logger.log(
       `Trigger message request received: ${payload.requestedMessage}`,
     ); // e.g. `DiagnosticsStatusNotification`
@@ -585,8 +628,8 @@ export class OCPPMessageHandler {
   }
 
   private handleChangeAvailability(
-    payload: request.ChangeAvailabilityRequest,
-  ): response.ChangeAvailabilityResponse {
+    payload: ChangeAvailabilityRequestV16,
+  ): ChangeAvailabilityResponseV16 {
     this._logger.log(
       `Change availability request received: ${JSON.stringify(payload)}`,
     );
@@ -602,8 +645,8 @@ export class OCPPMessageHandler {
   }
 
   private handleClearCache(
-    payload: request.ClearCacheRequest,
-  ): response.ClearCacheResponse {
+    payload: ClearCacheRequestV16,
+  ): ClearCacheResponseV16 {
     this._logger.log(
       `Clear cache request received: ${JSON.stringify(payload)}`,
     );
@@ -611,8 +654,8 @@ export class OCPPMessageHandler {
   }
 
   private handleUnlockConnector(
-    payload: request.UnlockConnectorRequest,
-  ): response.UnlockConnectorResponse {
+    payload: UnlockConnectorRequestV16,
+  ): UnlockConnectorResponseV16 {
     this._logger.log(
       `Unlock connector request received: ${JSON.stringify(payload)}`,
     );
@@ -620,8 +663,8 @@ export class OCPPMessageHandler {
   }
 
   private handleSetChargingProfile(
-    payload: request.SetChargingProfileRequest,
-  ): response.SetChargingProfileResponse {
+    payload: SetChargingProfileRequestV16,
+  ): SetChargingProfileResponseV16 {
     const { connectorId, csChargingProfiles } = payload;
     this._logger.log(
       `SetChargingProfile received for connector ${connectorId}: profileId=${csChargingProfiles.chargingProfileId}, purpose=${csChargingProfiles.chargingProfilePurpose}`,
@@ -689,8 +732,8 @@ export class OCPPMessageHandler {
   }
 
   private handleClearChargingProfile(
-    payload: request.ClearChargingProfileRequest,
-  ): response.ClearChargingProfileResponse {
+    payload: ClearChargingProfileRequestV16,
+  ): ClearChargingProfileResponseV16 {
     this._logger.log(
       `ClearChargingProfile received: id=${payload.id}, connectorId=${payload.connectorId}`,
     );
@@ -720,8 +763,8 @@ export class OCPPMessageHandler {
   }
 
   private handleGetCompositeSchedule(
-    payload: request.GetCompositeScheduleRequest,
-  ): response.GetCompositeScheduleResponse {
+    payload: GetCompositeScheduleRequestV16,
+  ): GetCompositeScheduleResponseV16 {
     this._logger.log(
       `GetCompositeSchedule received: connectorId=${payload.connectorId}, duration=${payload.duration}`,
     );
@@ -759,7 +802,7 @@ export class OCPPMessageHandler {
   }
 
   private handleBootNotificationResponse(
-    payload: response.BootNotificationResponse,
+    payload: BootNotificationResponseV16,
   ): void {
     this._logger.log("Boot notification successful");
     if (payload.status === "Accepted") {
@@ -770,7 +813,7 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleAuthorizeResponse(payload: response.AuthorizeResponse): void {
+  private handleAuthorizeResponse(payload: AuthorizeResponseV16): void {
     const { idTagInfo } = payload;
     if (idTagInfo.status === "Accepted") {
       this._logger.log("Authorization successful");
@@ -781,7 +824,7 @@ export class OCPPMessageHandler {
 
   private handleStartTransactionResponse(
     connectorId: number,
-    payload: response.StartTransactionResponse,
+    payload: StartTransactionResponseV16,
   ): void {
     const { transactionId, idTagInfo } = payload;
     const connector = this._chargePoint.getConnector(connectorId);
@@ -814,7 +857,7 @@ export class OCPPMessageHandler {
 
   private handleStopTransactionResponse(
     connectorId: number,
-    payload: response.StopTransactionResponse,
+    payload: StopTransactionResponseV16,
   ): void {
     this._logger.log(
       `Transaction stopped successfully: ${JSON.stringify(payload)}`,
@@ -827,13 +870,13 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleHeartbeatResponse(payload: response.HeartbeatResponse): void {
+  private handleHeartbeatResponse(payload: HeartbeatResponseV16): void {
     this._logger.log(`Received heartbeat response: ${payload.currentTime}`);
   }
 
   private handleMeterValuesResponse(
-    payload: response.MeterValuesResponse,
-    request?: request.MeterValuesRequest,
+    payload: MeterValuesResponseV16,
+    request?: MeterValuesRequestV16,
   ): void {
     if (request) {
       const connector = this._chargePoint.getConnector(request.connectorId);
@@ -847,16 +890,14 @@ export class OCPPMessageHandler {
   }
 
   private handleStatusNotificationResponse(
-    payload: response.StatusNotificationResponse,
+    payload: StatusNotificationResponseV16,
   ): void {
     this._logger.log(
       `Status notification sent successfully: ${JSON.stringify(payload)}`,
     );
   }
 
-  private handleDataTransferResponse(
-    payload: response.DataTransferResponse,
-  ): void {
+  private handleDataTransferResponse(payload: DataTransferResponseV16): void {
     this._logger.log(
       `Data transfer sent successfully: ${JSON.stringify(payload)}`,
     );

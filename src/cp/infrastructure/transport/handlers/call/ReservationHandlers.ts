@@ -1,7 +1,10 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
-import { ReservationStatus, CancelReservationStatus, OCPPStatus } from "../../../../domain/types/OcppTypes";
+import type {} from "@cshil/ocpp-tools";
+import {
+  ReservationStatus,
+  CancelReservationStatus,
+  OCPPStatus,
+} from "../../../../domain/types/OcppTypes";
 
 /**
  * Handler for ReserveNow request
@@ -10,13 +13,14 @@ import { ReservationStatus, CancelReservationStatus, OCPPStatus } from "../../..
  * The reservation allows a specific ID tag to use a connector at a future time.
  */
 export class ReserveNowHandler
-  implements CallHandler<request.ReserveNowRequest, response.ReserveNowResponse>
+  implements CallHandler<ReserveNowRequestV16, ReserveNowResponseV16>
 {
   handle(
-    payload: request.ReserveNowRequest,
+    payload: ReserveNowRequestV16,
     context: HandlerContext,
-  ): response.ReserveNowResponse {
-    const { connectorId, expiryDate, idTag, parentIdTag, reservationId } = payload;
+  ): ReserveNowResponseV16 {
+    const { connectorId, expiryDate, idTag, parentIdTag, reservationId } =
+      payload;
     const connector = context.chargePoint.getConnector(connectorId);
     const reservationManager = context.chargePoint.reservationManager;
 
@@ -49,7 +53,7 @@ export class ReserveNowHandler
       expiryDateTime,
       idTag,
       parentIdTag,
-      reservationId
+      reservationId,
     );
 
     // If reservation was accepted, update connector status to Reserved
@@ -68,15 +72,12 @@ export class ReserveNowHandler
  */
 export class CancelReservationHandler
   implements
-    CallHandler<
-      request.CancelReservationRequest,
-      response.CancelReservationResponse
-    >
+    CallHandler<CancelReservationRequestV16, CancelReservationResponseV16>
 {
   handle(
-    payload: request.CancelReservationRequest,
+    payload: CancelReservationRequestV16,
     context: HandlerContext,
-  ): response.CancelReservationResponse {
+  ): CancelReservationResponseV16 {
     const { reservationId } = payload;
     const reservationManager = context.chargePoint.reservationManager;
 
@@ -88,7 +89,9 @@ export class CancelReservationHandler
 
     if (cancelled && reservation) {
       // Update connector status back to Available
-      const connector = context.chargePoint.getConnector(reservation.connectorId);
+      const connector = context.chargePoint.getConnector(
+        reservation.connectorId,
+      );
       if (connector && connector.status === OCPPStatus.Reserved) {
         connector.status = OCPPStatus.Available;
       }

@@ -1,4 +1,4 @@
-import { ErrorCode } from "@voltbras/ts-ocpp/dist/ws";
+import { OCPPErrorCodeV16 } from "@cshil/ocpp-tools";
 
 export enum OCPPStatus {
   Available = "Available",
@@ -126,7 +126,7 @@ export type OcppConfigurationKey = {
   value?: string;
 };
 
-export type OCPPErrorCode = ErrorCode;
+export type OCPPErrorCode = OCPPErrorCodeV16;
 
 export interface BootNotification {
   ChargeBoxSerialNumber: string;

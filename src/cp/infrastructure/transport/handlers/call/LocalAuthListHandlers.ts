@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 import type { SendLocalListItem } from "../../../../domain/auth/LocalAuthList";
 
@@ -35,15 +34,12 @@ function maxSendLength(context: HandlerContext): number {
  */
 export class GetLocalListVersionHandler
   implements
-    CallHandler<
-      request.GetLocalListVersionRequest,
-      response.GetLocalListVersionResponse
-    >
+    CallHandler<GetLocalListVersionRequestV16, GetLocalListVersionResponseV16>
 {
   handle(
-    _payload: request.GetLocalListVersionRequest,
+    _payload: GetLocalListVersionRequestV16,
     context: HandlerContext,
-  ): response.GetLocalListVersionResponse {
+  ): GetLocalListVersionResponseV16 {
     if (!isFeatureEnabled(context)) {
       context.logger.info(
         "GetLocalListVersion: LocalAuthListEnabled=false, returning -1",
@@ -63,13 +59,12 @@ export class GetLocalListVersionHandler
  * CP returns `NotSupported` when LocalAuthListManagement is disabled.
  */
 export class SendLocalListHandler
-  implements
-    CallHandler<request.SendLocalListRequest, response.SendLocalListResponse>
+  implements CallHandler<SendLocalListRequestV16, SendLocalListResponseV16>
 {
   handle(
-    payload: request.SendLocalListRequest,
+    payload: SendLocalListRequestV16,
     context: HandlerContext,
-  ): response.SendLocalListResponse {
+  ): SendLocalListResponseV16 {
     if (!isFeatureEnabled(context)) {
       context.logger.warn(
         "SendLocalList: LocalAuthListEnabled=false → NotSupported",

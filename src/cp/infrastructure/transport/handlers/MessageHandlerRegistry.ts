@@ -1,8 +1,44 @@
+import type {
+  AuthorizeResponseV16,
+  BootNotificationResponseV16,
+  CancelReservationRequestV16,
+  CancelReservationResponseV16,
+  ChangeConfigurationRequestV16,
+  ChangeConfigurationResponseV16,
+  ClearCacheRequestV16,
+  ClearCacheResponseV16,
+  DataTransferResponseV16,
+  GetConfigurationRequestV16,
+  GetConfigurationResponseV16,
+  GetDiagnosticsRequestV16,
+  GetDiagnosticsResponseV16,
+  GetLocalListVersionRequestV16,
+  GetLocalListVersionResponseV16,
+  HeartbeatResponseV16,
+  MeterValuesResponseV16,
+  RemoteStartTransactionRequestV16,
+  RemoteStartTransactionResponseV16,
+  RemoteStopTransactionRequestV16,
+  RemoteStopTransactionResponseV16,
+  ReserveNowRequestV16,
+  ReserveNowResponseV16,
+  ResetRequestV16,
+  ResetResponseV16,
+  SendLocalListRequestV16,
+  SendLocalListResponseV16,
+  StartTransactionResponseV16,
+  StatusNotificationResponseV16,
+  StopTransactionResponseV16,
+  TriggerMessageRequestV16,
+  TriggerMessageResponseV16,
+  UnlockConnectorRequestV16,
+  UnlockConnectorResponseV16,
+  UpdateFirmwareRequestV16,
+  UpdateFirmwareResponseV16,
+} from "@cshil/ocpp-tools";
 import { OCPPAction } from "../../../../domain/types/OcppTypes";
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { Logger } from "../../../../shared/Logger";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
 
 /**
  * Context provided to message handlers
@@ -92,67 +128,67 @@ export class MessageHandlerRegistry {
 // Type-safe handler factory helpers
 export type CallHandlerMap = {
   [OCPPAction.RemoteStartTransaction]: CallHandler<
-    request.RemoteStartTransactionRequest,
-    response.RemoteStartTransactionResponse
+    RemoteStartTransactionRequestV16,
+    RemoteStartTransactionResponseV16
   >;
   [OCPPAction.RemoteStopTransaction]: CallHandler<
-    request.RemoteStopTransactionRequest,
-    response.RemoteStopTransactionResponse
+    RemoteStopTransactionRequestV16,
+    RemoteStopTransactionResponseV16
   >;
-  [OCPPAction.Reset]: CallHandler<request.ResetRequest, response.ResetResponse>;
+  [OCPPAction.Reset]: CallHandler<ResetRequestV16, ResetResponseV16>;
   [OCPPAction.GetDiagnostics]: CallHandler<
-    request.GetDiagnosticsRequest,
-    response.GetDiagnosticsResponse
+    GetDiagnosticsRequestV16,
+    GetDiagnosticsResponseV16
   >;
   [OCPPAction.TriggerMessage]: CallHandler<
-    request.TriggerMessageRequest,
-    response.TriggerMessageResponse
+    TriggerMessageRequestV16,
+    TriggerMessageResponseV16
   >;
   [OCPPAction.GetConfiguration]: CallHandler<
-    request.GetConfigurationRequest,
-    response.GetConfigurationResponse
+    GetConfigurationRequestV16,
+    GetConfigurationResponseV16
   >;
   [OCPPAction.ChangeConfiguration]: CallHandler<
-    request.ChangeConfigurationRequest,
-    response.ChangeConfigurationResponse
+    ChangeConfigurationRequestV16,
+    ChangeConfigurationResponseV16
   >;
   [OCPPAction.ClearCache]: CallHandler<
-    request.ClearCacheRequest,
-    response.ClearCacheResponse
+    ClearCacheRequestV16,
+    ClearCacheResponseV16
   >;
   [OCPPAction.UnlockConnector]: CallHandler<
-    request.UnlockConnectorRequest,
-    response.UnlockConnectorResponse
+    UnlockConnectorRequestV16,
+    UnlockConnectorResponseV16
   >;
   [OCPPAction.ReserveNow]: CallHandler<
-    request.ReserveNowRequest,
-    response.ReserveNowResponse
+    ReserveNowRequestV16,
+    ReserveNowResponseV16
   >;
   [OCPPAction.CancelReservation]: CallHandler<
-    request.CancelReservationRequest,
-    response.CancelReservationResponse
+    CancelReservationRequestV16,
+    CancelReservationResponseV16
   >;
   [OCPPAction.GetLocalListVersion]: CallHandler<
-    request.GetLocalListVersionRequest,
-    response.GetLocalListVersionResponse
+    GetLocalListVersionRequestV16,
+    GetLocalListVersionResponseV16
   >;
   [OCPPAction.SendLocalList]: CallHandler<
-    request.SendLocalListRequest,
-    response.SendLocalListResponse
+    SendLocalListRequestV16,
+    SendLocalListResponseV16
   >;
   [OCPPAction.UpdateFirmware]: CallHandler<
-    request.UpdateFirmwareRequest,
-    response.UpdateFirmwareResponse
+    UpdateFirmwareRequestV16,
+    UpdateFirmwareResponseV16
   >;
 };
 
 export type CallResultHandlerMap = {
-  [OCPPAction.BootNotification]: CallResultHandler<response.BootNotificationResponse>;
-  [OCPPAction.Authorize]: CallResultHandler<response.AuthorizeResponse>;
-  [OCPPAction.StartTransaction]: CallResultHandler<response.StartTransactionResponse>;
-  [OCPPAction.StopTransaction]: CallResultHandler<response.StopTransactionResponse>;
-  [OCPPAction.Heartbeat]: CallResultHandler<response.HeartbeatResponse>;
-  [OCPPAction.MeterValues]: CallResultHandler<response.MeterValuesResponse>;
-  [OCPPAction.StatusNotification]: CallResultHandler<response.StatusNotificationResponse>;
-  [OCPPAction.DataTransfer]: CallResultHandler<response.DataTransferResponse>;
+  [OCPPAction.BootNotification]: CallResultHandler<BootNotificationResponseV16>;
+  [OCPPAction.Authorize]: CallResultHandler<AuthorizeResponseV16>;
+  [OCPPAction.StartTransaction]: CallResultHandler<StartTransactionResponseV16>;
+  [OCPPAction.StopTransaction]: CallResultHandler<StopTransactionResponseV16>;
+  [OCPPAction.Heartbeat]: CallResultHandler<HeartbeatResponseV16>;
+  [OCPPAction.MeterValues]: CallResultHandler<MeterValuesResponseV16>;
+  [OCPPAction.StatusNotification]: CallResultHandler<StatusNotificationResponseV16>;
+  [OCPPAction.DataTransfer]: CallResultHandler<DataTransferResponseV16>;
 };

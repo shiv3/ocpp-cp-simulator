@@ -6,6 +6,8 @@ import { Connector } from "../connector/Connector";
 import type { ChargePointEvents } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import { OCPPMessageHandler } from "../../infrastructure/transport/OCPPMessageHandler";
+import { OCPPMessageHandlerV201 } from "../../infrastructure/transport/OCPPMessageHandlerV201";
+import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
@@ -41,7 +43,7 @@ export class ChargePoint {
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket;
-  private readonly _messageHandler: OCPPMessageHandler;
+  private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
   private readonly _logRepository: LogRepository;
@@ -89,6 +91,7 @@ export class ChargePoint {
      *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
     extraWsHeaders: Record<string, string> = {},
     extraWsSubprotocols: ReadonlyArray<string> = [],
+    ocppVersion: string = "OCPP-1.6J",
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._logger.setCpId(this._id);
@@ -166,12 +169,12 @@ export class ChargePoint {
       basicAuthSettings,
       extraWsHeaders,
       extraWsSubprotocols,
+      ocppVersion,
     );
-    this._messageHandler = new OCPPMessageHandler(
-      this,
-      this._webSocket,
-      this._logger,
-    );
+    this._messageHandler =
+      ocppVersion === "OCPP-2.0.1"
+        ? new OCPPMessageHandlerV201(this, this._webSocket, this._logger)
+        : new OCPPMessageHandler(this, this._webSocket, this._logger);
 
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() =>

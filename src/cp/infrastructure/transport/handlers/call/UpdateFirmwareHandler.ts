@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 
 /**
@@ -14,13 +13,12 @@ import { LogType } from "../../../../shared/Logger";
  * via TriggerMessage(FirmwareStatusNotification).
  */
 export class UpdateFirmwareHandler
-  implements
-    CallHandler<request.UpdateFirmwareRequest, response.UpdateFirmwareResponse>
+  implements CallHandler<UpdateFirmwareRequestV16, UpdateFirmwareResponseV16>
 {
   handle(
-    payload: request.UpdateFirmwareRequest,
+    payload: UpdateFirmwareRequestV16,
     context: HandlerContext,
-  ): response.UpdateFirmwareResponse {
+  ): UpdateFirmwareResponseV16 {
     const retrieveDate = new Date(payload.retrieveDate);
     if (Number.isNaN(retrieveDate.getTime())) {
       context.logger.warn(

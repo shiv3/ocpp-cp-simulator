@@ -5,7 +5,14 @@
  * / Node `ws`) send the credentials as a real HTTP Basic header instead.
  */
 export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
-export const OCPP_WEBSOCKET_PROTOCOL = "ocpp1.6";
+export const OCPP_WEBSOCKET_PROTOCOL_16 = "ocpp1.6";
+export const OCPP_WEBSOCKET_PROTOCOL_201 = "ocpp2.0.1";
+
+export function ocppVersionToSubprotocol(ocppVersion: string): string {
+  return ocppVersion === "OCPP-2.0.1"
+    ? OCPP_WEBSOCKET_PROTOCOL_201
+    : OCPP_WEBSOCKET_PROTOCOL_16;
+}
 
 export interface BasicAuthSettings {
   username: string;
@@ -66,12 +73,12 @@ export function openOcppWebSocket(params: {
    *  and ignore the rest, so extras are safe to add and become visible
    *  to upstream routers that match on subprotocol. */
   extraSubprotocols?: ReadonlyArray<string>;
+  /** OCPP version string (e.g. "OCPP-1.6J", "OCPP-2.0.1"). Defaults to 1.6. */
+  ocppVersion?: string;
 }): WebSocket {
   const url = buildOcppWebSocketUrl(params);
-  const protocols = [
-    OCPP_WEBSOCKET_PROTOCOL,
-    ...(params.extraSubprotocols ?? []),
-  ];
+  const versionProtocol = ocppVersionToSubprotocol(params.ocppVersion ?? "");
+  const protocols = [versionProtocol, ...(params.extraSubprotocols ?? [])];
   const extraHeaders = params.extraHeaders ?? {};
   const hasExtraHeaders = Object.keys(extraHeaders).length > 0;
   if (!isBrowserRuntime() && (params.basicAuth?.password || hasExtraHeaders)) {

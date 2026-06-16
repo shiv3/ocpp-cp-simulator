@@ -413,6 +413,25 @@ export class CLIChargePointService {
     this._chargePoint.sendHeartbeat();
   }
 
+  sendDiagnosticsStatusNotification(status: string): void {
+    this._chargePoint.sendDiagnosticsStatusNotification(
+      status as "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
+    );
+  }
+
+  sendFirmwareStatusNotification(status: string): void {
+    this._chargePoint.sendFirmwareStatusNotification(
+      status as
+        | "Downloaded"
+        | "DownloadFailed"
+        | "Downloading"
+        | "Idle"
+        | "InstallationFailed"
+        | "Installing"
+        | "Installed",
+    );
+  }
+
   startHeartbeat(intervalSeconds: number): void {
     this._chargePoint.startHeartbeat(intervalSeconds);
   }

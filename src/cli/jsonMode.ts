@@ -126,6 +126,18 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "diagnostics_status_notification": {
+      const status = requireString(params, "status");
+      service.sendDiagnosticsStatusNotification(status);
+      return undefined;
+    }
+
+    case "firmware_status_notification": {
+      const status = requireString(params, "status");
+      service.sendFirmwareStatusNotification(status);
+      return undefined;
+    }
+
     case "start_heartbeat": {
       const interval = requireNumber(params, "interval");
       if (interval <= 0) {

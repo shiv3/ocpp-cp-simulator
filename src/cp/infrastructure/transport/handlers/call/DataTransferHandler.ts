@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { LogType } from "../../../../shared/Logger";
 
 /**
@@ -29,8 +28,7 @@ export interface DataTransferResponder {
  * between charge points.
  */
 export class DataTransferHandler
-  implements
-    CallHandler<request.DataTransferRequest, response.DataTransferResponse>
+  implements CallHandler<DataTransferRequestV16, DataTransferResponseV16>
 {
   private readonly vendors = new Map<string, DataTransferResponder>();
 
@@ -47,9 +45,9 @@ export class DataTransferHandler
   }
 
   handle(
-    payload: request.DataTransferRequest,
+    payload: DataTransferRequestV16,
     context: HandlerContext,
-  ): response.DataTransferResponse {
+  ): DataTransferResponseV16 {
     context.logger.info(
       `DataTransfer received: vendorId=${payload.vendorId}` +
         (payload.messageId ? ` messageId=${payload.messageId}` : ""),

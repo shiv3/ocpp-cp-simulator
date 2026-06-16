@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import type {
   ConfigurationValue,
   StringConfigurationValue,
@@ -13,15 +12,12 @@ import { LogType } from "../../../../shared/Logger";
 
 export class GetConfigurationHandler
   implements
-    CallHandler<
-      request.GetConfigurationRequest,
-      response.GetConfigurationResponse
-    >
+    CallHandler<GetConfigurationRequestV16, GetConfigurationResponseV16>
 {
   handle(
-    payload: request.GetConfigurationRequest,
+    payload: GetConfigurationRequestV16,
     context: HandlerContext,
-  ): response.GetConfigurationResponse {
+  ): GetConfigurationResponseV16 {
     context.logger.info(
       `GetConfiguration request: ${JSON.stringify(payload.key ?? "<all>")}`,
       LogType.CONFIGURATION,

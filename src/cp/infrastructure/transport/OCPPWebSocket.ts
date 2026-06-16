@@ -5,8 +5,23 @@ import {
   OCPPErrorCode,
   OCPPMessageType,
 } from "../../domain/types/OcppTypes";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {
+  AuthorizeRequestV16,
+  BootNotificationRequestV16,
+  HeartbeatRequestV16,
+  MeterValuesRequestV16,
+  StartTransactionRequestV16,
+  StatusNotificationRequestV16,
+  StopTransactionRequestV16,
+  ChangeConfigurationResponseV16,
+  GetConfigurationResponseV16,
+  GetDiagnosticsResponseV16,
+  RemoteStartTransactionResponseV16,
+  RemoteStopTransactionResponseV16,
+  ResetResponseV16,
+  TriggerMessageResponseV16,
+  UnlockConnectorResponseV16,
+} from "@cshil/ocpp-tools";
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -14,23 +29,23 @@ export type OcppMessagePayload =
   | OcppMessageErrorPayload;
 
 export type OcppMessageRequestPayload =
-  | request.AuthorizeRequest
-  | request.BootNotificationRequest
-  | request.HeartbeatRequest
-  | request.MeterValuesRequest
-  | request.StartTransactionRequest
-  | request.StatusNotificationRequest
-  | request.StopTransactionRequest;
+  | AuthorizeRequestV16
+  | BootNotificationRequestV16
+  | HeartbeatRequestV16
+  | MeterValuesRequestV16
+  | StartTransactionRequestV16
+  | StatusNotificationRequestV16
+  | StopTransactionRequestV16;
 
 export type OcppMessageResponsePayload =
-  | response.ChangeConfigurationResponse
-  | response.GetConfigurationResponse
-  | response.GetDiagnosticsResponse
-  | response.RemoteStartTransactionResponse
-  | response.RemoteStopTransactionResponse
-  | response.ResetResponse
-  | response.TriggerMessageResponse
-  | response.UnlockConnectorResponse;
+  | ChangeConfigurationResponseV16
+  | GetConfigurationResponseV16
+  | GetDiagnosticsResponseV16
+  | RemoteStartTransactionResponseV16
+  | RemoteStopTransactionResponseV16
+  | ResetResponseV16
+  | TriggerMessageResponseV16
+  | UnlockConnectorResponseV16;
 
 export type OcppMessageErrorPayload = {
   readonly errorCode: OCPPErrorCode;
@@ -66,6 +81,7 @@ export class OCPPWebSocket {
   // the runtime fallback in openOcppWebSocket handles that.
   private _extraHeaders: Record<string, string>;
   private _extraSubprotocols: ReadonlyArray<string>;
+  private _ocppVersion: string;
 
   constructor(
     url: string,
@@ -74,9 +90,11 @@ export class OCPPWebSocket {
     basicAuthSettings: { username: string; password: string } | null = null,
     extraHeaders: Record<string, string> = {},
     extraSubprotocols: ReadonlyArray<string> = [],
+    ocppVersion: string = "OCPP-1.6J",
   ) {
     this._url = url;
     this._chargePointId = chargePointId;
+    this._ocppVersion = ocppVersion;
     this._logger = logger;
     if (basicAuthSettings) {
       this._basicAuth = {
@@ -108,6 +126,7 @@ export class OCPPWebSocket {
       basicAuth: this._basicAuth,
       extraHeaders: this._extraHeaders,
       extraSubprotocols: this._extraSubprotocols,
+      ocppVersion: this._ocppVersion,
     });
     this._ws.onopen = () => {
       this.handleOpen();

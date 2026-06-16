@@ -1,19 +1,18 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 
 export class RemoteStopTransactionHandler
   implements
     CallHandler<
-      request.RemoteStopTransactionRequest,
-      response.RemoteStopTransactionResponse
+      RemoteStopTransactionRequestV16,
+      RemoteStopTransactionResponseV16
     >
 {
   handle(
-    payload: request.RemoteStopTransactionRequest,
+    payload: RemoteStopTransactionRequestV16,
     context: HandlerContext,
-  ): response.RemoteStopTransactionResponse {
+  ): RemoteStopTransactionResponseV16 {
     const { transactionId } = payload;
     const connector = Array.from(context.chargePoint.connectors.values()).find(
       (c) => c.transaction && c.transaction.id === transactionId,

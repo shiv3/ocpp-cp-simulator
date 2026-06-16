@@ -1,5 +1,5 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
@@ -16,12 +16,9 @@ import { LogType } from "../../../../shared/Logger";
  *   seconds, then auto-retry BootNotification.
  */
 export class BootNotificationResultHandler
-  implements CallResultHandler<response.BootNotificationResponse>
+  implements CallResultHandler<BootNotificationResponseV16>
 {
-  handle(
-    payload: response.BootNotificationResponse,
-    context: HandlerContext,
-  ): void {
+  handle(payload: BootNotificationResponseV16, context: HandlerContext): void {
     const interval =
       typeof payload.interval === "number" && payload.interval > 0
         ? payload.interval

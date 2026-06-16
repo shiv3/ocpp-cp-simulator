@@ -1,6 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import * as request from "@voltbras/ts-ocpp/dist/messages/json/request";
-import * as response from "@voltbras/ts-ocpp/dist/messages/json/response";
+import type {} from "@cshil/ocpp-tools";
 import { UploadFile } from "../../../file_upload";
 import { LogType } from "../../../../shared/Logger";
 
@@ -15,13 +14,12 @@ import { LogType } from "../../../../shared/Logger";
  * UploadFailed.
  */
 export class GetDiagnosticsHandler
-  implements
-    CallHandler<request.GetDiagnosticsRequest, response.GetDiagnosticsResponse>
+  implements CallHandler<GetDiagnosticsRequestV16, GetDiagnosticsResponseV16>
 {
   handle(
-    payload: request.GetDiagnosticsRequest,
+    payload: GetDiagnosticsRequestV16,
     context: HandlerContext,
-  ): response.GetDiagnosticsResponse {
+  ): GetDiagnosticsResponseV16 {
     context.logger.info(
       `Get diagnostics request received: ${payload.location}`,
       LogType.DIAGNOSTICS,

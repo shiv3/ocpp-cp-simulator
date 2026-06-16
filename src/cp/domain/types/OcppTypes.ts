@@ -1,14 +1,18 @@
-import { ErrorCode, MessageType } from "@voltbras/ts-ocpp/dist/ws";
 import {
-  BootNotificationRequest,
-  ReserveNowRequest,
-  CancelReservationRequest,
-} from "@voltbras/ts-ocpp/dist/messages/json/request";
-import {
-  ReserveNowResponse,
-  CancelReservationResponse,
-} from "@voltbras/ts-ocpp/dist/messages/json/response";
+  OCPPErrorCodeV16,
+  type BootNotificationRequestV16,
+  type ReserveNowRequestV16,
+  type ReserveNowResponseV16,
+  type CancelReservationRequestV16,
+  type CancelReservationResponseV16,
+} from "@cshil/ocpp-tools";
 import { LogLevel, LogType } from "../../shared/Logger";
+
+export enum OCPPMessageType {
+  CALL = 2,
+  CALLRESULT = 3,
+  CALLERROR = 4,
+}
 
 export enum OCPPStatus {
   Available = "Available",
@@ -100,9 +104,6 @@ export const ALL_CHARGE_POINT_ERROR_CODES: ChargePointErrorCode[] = [
   "WeakSignal",
 ];
 
-// Re-export MessageType from ts-ocpp for convenience
-export { MessageType as OCPPMessageType };
-
 export enum OCPPAction {
   // Core actions
   Authorize = "Authorize",
@@ -164,10 +165,9 @@ export type OcppConfigurationKey = {
   value?: string;
 };
 
-export type OCPPErrorCode = ErrorCode;
+export type OCPPErrorCode = OCPPErrorCodeV16;
 
-// Re-export BootNotificationRequest from ts-ocpp
-export type BootNotification = BootNotificationRequest;
+export type BootNotification = BootNotificationRequestV16;
 
 export const DefaultBootNotification: BootNotification = {
   chargeBoxSerialNumber: "123456",
@@ -207,11 +207,10 @@ export enum CancelReservationStatus {
   Rejected = "Rejected",
 }
 
-// Re-export reservation request/response types from ts-ocpp
-export type ReserveNow = ReserveNowRequest;
-export type ReserveNowResponseType = ReserveNowResponse;
-export type CancelReservation = CancelReservationRequest;
-export type CancelReservationResponseType = CancelReservationResponse;
+export type ReserveNow = ReserveNowRequestV16;
+export type ReserveNowResponseType = ReserveNowResponseV16;
+export type CancelReservation = CancelReservationRequestV16;
+export type CancelReservationResponseType = CancelReservationResponseV16;
 
 // ============================================
 // Smart Charging Profile Types (OCPP 1.6)

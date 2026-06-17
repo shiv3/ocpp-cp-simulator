@@ -1,0 +1,59 @@
+# Config for release-drafter (.github/workflows/release-drafter.yml).
+# Maintains a rolling DRAFT GitHub Release that accumulates merged PRs on
+# `main`. Publishing the draft assigns the `vX.Y.Z` tag, which then triggers
+# the desktop-app build (release.yml) and the semver Docker image
+# (docker-publish.yml). The draft is just notes until you publish it.
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: "Features"
+    labels: ["feature", "enhancement", "feat"]
+  - title: "Bug Fixes"
+    labels: ["fix", "bugfix", "bug"]
+  - title: "Maintenance"
+    labels: ["chore", "ci", "docs", "documentation", "dependencies", "refactor", "test"]
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: '\<*_&'
+
+# Next version is inferred from the labels on the PRs since the last release.
+# Defaults to a patch bump when nothing more specific applies.
+version-resolver:
+  major:
+    labels: ["major", "breaking"]
+  minor:
+    labels: ["minor", "feature", "enhancement", "feat"]
+  patch:
+    labels:
+      ["patch", "fix", "bugfix", "bug", "chore", "ci", "docs", "documentation", "dependencies", "refactor", "test"]
+  default: patch
+
+# Auto-label PRs so the categories/version above work without manual labeling.
+# Matches this repo's branch + conventional-commit title conventions.
+autolabeler:
+  - label: "feature"
+    branch: ['/^feat(ure)?\//']
+    title: ["/^feat(\\(.+\\))?:/"]
+  - label: "fix"
+    branch: ['/^fix\//']
+    title: ["/^fix(\\(.+\\))?:/"]
+  - label: "docs"
+    branch: ['/^docs\//']
+    title: ["/^docs(\\(.+\\))?:/"]
+  - label: "ci"
+    branch: ['/^ci\//']
+    title: ["/^ci(\\(.+\\))?:/"]
+  - label: "chore"
+    branch: ['/^chore\//']
+    title: ["/^chore(\\(.+\\))?:/"]
+
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/$OWNER/$REPO/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+
+  ---
+  Container image: `ghcr.io/$OWNER/$REPO:$RESOLVED_VERSION` (published when this release is tagged).

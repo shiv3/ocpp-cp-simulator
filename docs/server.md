@@ -4,28 +4,28 @@ The simulator can run as a long-lived process exposing an HTTP/WebSocket API. A 
 
 The same HTTP/WS handlers are exposed over both a TCP port and a Unix domain socket, so local tools can use the Unix socket for lower-overhead IPC while remote clients use TCP.
 
-> All examples below show `bun src/cli/main.ts` for clarity when working from a checkout. If you've installed the package (`bun link` or `bun install -g`), `ocpp-cp-sim` is interchangeable everywhere.
+> All examples below use the installed `ocpp-cp-sim` command. From a source checkout (no install), `bun src/cli/main.ts …` is interchangeable everywhere.
 
 ## Starting the Server
 
 ```bash
 # Background daemon, Unix socket only (default /tmp/ocpp-server.sock)
-bun src/cli/main.ts --daemon &
+ocpp-cp-sim --daemon &
 
 # Background daemon, Unix + TCP
-bun src/cli/main.ts --daemon --http-port 9700 &
+ocpp-cp-sim --daemon --http-port 9700 &
 
 # Foreground HTTP server (no Unix socket by default)
-bun src/cli/main.ts --http-port 9700
+ocpp-cp-sim --http-port 9700
 
 # Foreground HTTP + custom Unix socket
-bun src/cli/main.ts --http-port 9700 --unix-socket /var/run/ocpp.sock
+ocpp-cp-sim --http-port 9700 --unix-socket /var/run/ocpp.sock
 
 # TCP-only daemon
-bun src/cli/main.ts --daemon --unix-socket none --http-port 9700 &
+ocpp-cp-sim --daemon --unix-socket none --http-port 9700 &
 
 # Bootstrap a CP at startup
-bun src/cli/main.ts --daemon --http-port 9700 \
+ocpp-cp-sim --daemon --http-port 9700 \
   --cp-id CP001 --ws-url ws://localhost:9000/ocpp &
 ```
 
@@ -259,7 +259,7 @@ Inbound messages are ignored in this version (push-only). For events, only TCP i
 
 ```bash
 # Start the server (foreground)
-bun src/cli/main.ts --http-port 9700
+ocpp-cp-sim --http-port 9700
 
 # In another shell, register a CP and connect it
 curl -X POST http://127.0.0.1:9700/v1/cp \

@@ -401,5 +401,5 @@ function instantiateTemplate(
   };
 }
 
-export const DEFAULT_UNIX_SOCKET = "/tmp/ocpp-server.sock";
+export { DEFAULT_UNIX_SOCKET } from "./constants";
 export const DEFAULT_PID_PATH = "/tmp/ocpp-server.pid";

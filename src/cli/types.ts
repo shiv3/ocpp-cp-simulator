@@ -36,6 +36,14 @@ export interface CLIOptions {
   readonly httpHost: string;
   readonly unixSocket: string | null;
   readonly httpUrl: string | null;
+  /** Basic Auth credentials the CLI *client* modes (`--send` / `--stop` /
+   *  `--events`) send to a daemon that was started with
+   *  `--web-console-basic-auth-*`. Set via `--http-basic-auth-user/pass`.
+   *  Null = send no Authorization header. */
+  readonly httpBasicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
   readonly allEvents: boolean;
   readonly corsOrigins: ReadonlyArray<string>;
   /** Absolute or relative path of a directory the daemon serves as static

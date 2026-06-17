@@ -101,6 +101,8 @@ curl -X POST http://127.0.0.1:5172/v1/cp/CP001/command \
 wscat -c ws://127.0.0.1:5172/v1/cp/CP001/events
 ```
 
+Prefer not to hand-roll HTTP? The same `ocpp-cp-sim` binary doubles as a client for a running daemon — `--send` a command, `--stop` it, or `--events` to stream, over `--http-url` or the Unix socket. If the daemon is gated with `--web-console-basic-auth-*`, authenticate with `--http-basic-auth-user/pass`. See [docs/server.md → Controlling a running daemon from the CLI](docs/server.md#controlling-a-running-daemon-from-the-cli).
+
 See [docs/server.md](docs/server.md) for the full HTTP API reference.
 
 ## Persistence

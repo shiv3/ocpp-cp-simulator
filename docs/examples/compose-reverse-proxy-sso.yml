@@ -1,0 +1,75 @@
+# Example: ocpp-cp-simulator (server mode) behind nginx + Authelia SSO.
+#
+# Implements the "behind a reverse proxy with SSO" setup from issue #73, using
+# nginx as the reverse proxy (TLS termination + forward-auth via auth_request)
+# and Authelia for single sign-on. The web console is published at a public
+# HTTPS URL, gated by SSO. nginx config lives in the sibling file
+# `nginx-reverse-proxy-sso.conf`.
+#
+# The key bit for the simulator is `--trust-forwarded-headers`: bound to
+# 0.0.0.0 behind a proxy, the daemon only knows its internal address, so the
+# browser's `Origin: https://ocpp.example.com` would fail the same-origin CORS
+# default and the page's own `/assets/*` would 403. nginx sets
+# X-Forwarded-Proto/Host, and the flag lets the daemon reconstruct the public
+# origin and allow them. (Alternatively, drop the flag and pass
+# `--cors-origin https://ocpp.example.com`.)
+#
+# SECURITY: the simulator port is NOT published to the host — only nginx can
+# reach it on the internal network, so a client cannot bypass the proxy and
+# spoof X-Forwarded-* headers.
+#
+# Illustrative, not turnkey: supply your own TLS certs under ./certs, an
+# Authelia config under ./authelia, and replace ocpp.example.com /
+# auth.example.com.
+
+services:
+  ocpp-cp-simulator:
+    image: ghcr.io/shiv3/ocpp-cp-simulator:latest
+    restart: unless-stopped
+    # No `ports:` — only nginx reaches the daemon over the internal network.
+    expose:
+      - "9700"
+    command:
+      - --cp-id
+      - cp1
+      - --connectors
+      - "2"
+      - --ws-url
+      - wss://csms.example.com/chargepoint/
+      # Trust nginx's forwarding headers so the public origin passes CORS.
+      - --trust-forwarded-headers
+    volumes:
+      - ocpp-state:/data
+    networks:
+      - internal
+
+  authelia:
+    image: authelia/authelia:latest
+    restart: unless-stopped
+    expose:
+      - "9091"
+    # Provide your own configuration.yml + users_database.yml (see Authelia docs).
+    volumes:
+      - ./authelia:/config
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx-reverse-proxy-sso.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - ocpp-cp-simulator
+      - authelia
+    networks:
+      - internal
+
+volumes:
+  ocpp-state:
+
+networks:
+  internal:

@@ -76,6 +76,7 @@ function parseArgs(argv: string[]): CLIOptions {
   let logFormat: "plain" | "json" = "plain";
   let healthPath = "/v1/healthz";
   const corsOrigins: string[] = [];
+  let trustForwardedHeaders = false;
   const extraWsHeaders: Record<string, string> = {};
   const extraWsSubprotocols: string[] = [];
 
@@ -189,6 +190,9 @@ function parseArgs(argv: string[]): CLIOptions {
         }
         corsOrigins.push(next);
         i++;
+        break;
+      case "--trust-forwarded-headers":
+        trustForwardedHeaders = true;
         break;
       case "--state-db":
         if (!next || next.startsWith("--")) {
@@ -423,6 +427,7 @@ function parseArgs(argv: string[]): CLIOptions {
     httpBasicAuth,
     allEvents,
     corsOrigins,
+    trustForwardedHeaders,
     serveStatic,
     webConsolePort,
     stateDb,
@@ -493,7 +498,16 @@ Options:
   --unix-socket <path|none> Unix socket path; "none" disables it
   --http-url <url>         Client target: TCP HTTP base URL
   --all                    Use the global event stream (--events only)
-  --cors-origin <origin>   Restrict CORS to this origin (repeatable). Default: any origin (*)
+  --cors-origin <origin>   Restrict CORS to this origin (repeatable). Pass "*"
+                           for open CORS. Default: open on a loopback bind;
+                           same-origin-only when bound to a non-loopback host
+                           (0.0.0.0 / LAN) so cross-site browser calls are
+                           rejected.
+  --trust-forwarded-headers
+                           With the same-origin default, also accept the
+                           public origin a reverse proxy reports via
+                           X-Forwarded-Proto / X-Forwarded-Host. Use only
+                           behind a trusted proxy (see docs/server.md).
   --web-console [<port>]   Serve the bundled browser UI alongside the API.
                            With <port>: opens a second listener on that port.
                            Without <port>: shares the --http-port listener.
@@ -548,7 +562,7 @@ function resolveCorsPolicy(
 ):
   | { kind: "any" }
   | { kind: "allowlist"; origins: string[] }
-  | { kind: "same-origin" } {
+  | { kind: "same-origin"; trustForwardedHeaders: boolean } {
   if (options.corsOrigins.length > 0) {
     if (options.corsOrigins.length === 1 && options.corsOrigins[0] === "*") {
       return { kind: "any" };
@@ -562,13 +576,20 @@ function resolveCorsPolicy(
     host === "localhost" ||
     host.startsWith("127.");
   if (isLoopback) return { kind: "any" };
-  process.stderr.write(
-    `[server] WARNING: binding to ${host} without --cors-origin; ` +
-      "applying same-origin-only CORS so cross-site browser requests are " +
-      'rejected. Pass `--cors-origin "*"` to opt back into open CORS, or ' +
-      "`--cors-origin https://your.ui` for an explicit allowlist.\n",
-  );
-  return { kind: "same-origin" };
+  if (!options.trustForwardedHeaders) {
+    process.stderr.write(
+      `[server] WARNING: binding to ${host} without --cors-origin; ` +
+        "applying same-origin-only CORS so cross-site browser requests are " +
+        'rejected. Pass `--cors-origin "*"` to opt back into open CORS, ' +
+        "`--cors-origin https://your.ui` for an explicit allowlist, or " +
+        "`--trust-forwarded-headers` when running behind a reverse proxy " +
+        "that sets X-Forwarded-Proto/Host.\n",
+    );
+  }
+  return {
+    kind: "same-origin",
+    trustForwardedHeaders: options.trustForwardedHeaders,
+  };
 }
 
 function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {

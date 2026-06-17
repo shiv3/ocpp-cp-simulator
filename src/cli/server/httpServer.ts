@@ -77,8 +77,16 @@ export type CorsPolicy =
    * without an explicit `--cors-origin`, so a LAN-exposed daemon doesn't
    * silently accept admin-API calls from any third-party page in the
    * operator's browser.
+   *
+   * `trustForwardedHeaders` (set by `--trust-forwarded-headers`): when the
+   * daemon runs behind a reverse proxy its own request URL is the internal
+   * address, so a browser Origin of the public URL never matches. With this
+   * flag the same-origin check ALSO accepts an Origin equal to
+   * `${X-Forwarded-Proto}://${X-Forwarded-Host}`. Only enable it when a
+   * trusted proxy sets those headers — if the daemon is reachable directly,
+   * a client can spoof them to forge an allowed origin.
    */
-  | { kind: "same-origin" };
+  | { kind: "same-origin"; trustForwardedHeaders?: boolean };
 
 function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
   if (policy.kind === "any") return "*";
@@ -88,21 +96,61 @@ function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
     return policy.origins.includes(origin) ? origin : null;
   }
   // same-origin: echo back Origin iff it matches the request's host.
-  return isSameOriginRequest(req, origin) ? origin : null;
+  return isSameOriginRequest(req, origin, policy.trustForwardedHeaders === true)
+    ? origin
+    : null;
 }
 
-/** True when the request's Origin header points at the same scheme+host+port
- *  as the request itself. Used by the "same-origin" CORS policy. */
-function isSameOriginRequest(req: Request, origin: string): boolean {
+/**
+ * True when the request's Origin header points at the same scheme+host+port
+ * as the request itself. Used by the "same-origin" CORS policy.
+ *
+ * When `trustForwarded` is set, the Origin is also accepted if it matches the
+ * proxy-reported public URL (`X-Forwarded-Proto` + `X-Forwarded-Host`), so the
+ * daemon works behind a reverse proxy where its own request URL is the
+ * internal address. Caller must only pass `true` when a trusted proxy sets
+ * those headers (see CorsPolicy docs).
+ */
+function isSameOriginRequest(
+  req: Request,
+  origin: string,
+  trustForwarded: boolean,
+): boolean {
   try {
-    const reqUrl = new URL(req.url);
     const originUrl = new URL(origin);
-    return (
-      originUrl.protocol === reqUrl.protocol && originUrl.host === reqUrl.host
-    );
+    const reqUrl = new URL(req.url);
+    if (originsEqual(originUrl, reqUrl)) return true;
+    if (trustForwarded) {
+      const forwarded = forwardedOrigin(req);
+      if (forwarded && originsEqual(originUrl, new URL(forwarded))) return true;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+function originsEqual(a: URL, b: URL): boolean {
+  return a.protocol === b.protocol && a.host === b.host;
+}
+
+/**
+ * Reconstruct the public origin from a reverse proxy's forwarding headers,
+ * or null when either is absent. Each header may carry a comma-separated
+ * chain (`client, proxy1, proxy2`); the first entry is the value the
+ * outermost proxy saw, i.e. the public URL.
+ */
+function forwardedOrigin(req: Request): string | null {
+  const proto = firstForwardedValue(req.headers.get("x-forwarded-proto"));
+  const host = firstForwardedValue(req.headers.get("x-forwarded-host"));
+  if (!proto || !host) return null;
+  return `${proto}://${host}`;
+}
+
+function firstForwardedValue(header: string | null): string | null {
+  if (!header) return null;
+  const first = header.split(",")[0]?.trim() ?? "";
+  return first.length > 0 ? first : null;
 }
 
 /**
@@ -119,8 +167,13 @@ function isOriginAllowed(req: Request, policy: CorsPolicy): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true; // non-browser caller (curl / CLI / server-to-server)
   if (policy.kind === "allowlist") return policy.origins.includes(origin);
-  // same-origin: only the simulator's own served origin can call its API.
-  return isSameOriginRequest(req, origin);
+  // same-origin: only the simulator's own served origin can call its API
+  // (optionally including the proxy-reported public origin).
+  return isSameOriginRequest(
+    req,
+    origin,
+    policy.trustForwardedHeaders === true,
+  );
 }
 
 function applyCors(res: Response, req: Request, policy: CorsPolicy): Response {

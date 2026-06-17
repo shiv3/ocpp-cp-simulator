@@ -53,10 +53,16 @@ services:
       - "${CONNECTORS:-1}"
       - --ws-url
       - "${WS_URL:-wss://example.invalid/chargepoint/}"
-      # CORS: leave unset for "*" (any origin). To restrict, set
-      # CORS_ORIGIN and uncomment the lines below.
+      # CORS: the image binds 0.0.0.0, so with no flag the daemon applies
+      # the safe `same-origin` policy (not open CORS). When the web console
+      # is reached from a different origin — a separate UI host, or this
+      # container behind a reverse proxy at a public URL — name that origin:
       # - --cors-origin
       # - "${CORS_ORIGIN}"
+      # ...or, behind a trusted reverse proxy that sets X-Forwarded-*,
+      # let the daemon derive the public origin instead (see docs/server.md):
+      # - --trust-forwarded-headers
+      # Pass `--cors-origin "*"` to deliberately opt into open CORS.
       # Scenario template (optional) — uncomment + adjust:
       # - --scenario-template-file
       # - /scenarios/demo-charging.json

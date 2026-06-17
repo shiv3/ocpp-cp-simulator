@@ -38,6 +38,11 @@ export interface CLIOptions {
   readonly httpUrl: string | null;
   readonly allEvents: boolean;
   readonly corsOrigins: ReadonlyArray<string>;
+  /** When true, the same-origin CORS default also trusts a reverse proxy's
+   *  `X-Forwarded-Proto`/`X-Forwarded-Host` to reconstruct the public origin.
+   *  Only safe when a trusted proxy sets those headers (the daemon must not be
+   *  reachable directly). Set by `--trust-forwarded-headers`. */
+  readonly trustForwardedHeaders: boolean;
   /** Absolute or relative path of a directory the daemon serves as static
    *  files (SPA-aware). Null disables static hosting. */
   readonly serveStatic: string | null;

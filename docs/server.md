@@ -323,6 +323,40 @@ ocpp-cp-sim --daemon --http-port 9700 --http-host 0.0.0.0 --cors-origin "*"
 
 Non-browser callers (curl, the bundled CLI, server-to-server) don't send an `Origin` header and are always allowed regardless of policy — the policy only restricts cross-site browser access.
 
+### Behind a reverse proxy (Traefik, nginx, Caddy, …)
+
+This is the **#1 gotcha** when serving the web console (`--web-console`) behind a proxy at a public HTTPS URL. The Vite `index.html` references its bundle with `crossorigin`, so the browser sends an `Origin` header even for the page's own assets:
+
+```
+GET https://app.example.com/assets/index-*.js   403 (Forbidden)
+GET https://app.example.com/assets/index-*.css  403 (Forbidden)
+```
+
+The daemon serves those assets fine internally (`200`), but with the `same-origin` default it only knows its **internal** bind address (`0.0.0.0:9700`), not the public URL the proxy exposes — so the browser's `Origin: https://app.example.com` doesn't match and it returns `403`. The symptom (blank page, `403` only on `/assets/*`, behind an auth proxy) is easy to misattribute to the proxy or SSO.
+
+Two ways to fix it:
+
+```sh
+# 1. Name the public origin explicitly (works with any proxy):
+ocpp-cp-sim --daemon --http-port 9700 --web-console \
+  --cors-origin https://app.example.com
+
+# 2. Let the daemon derive the public origin from the proxy's
+#    X-Forwarded-Proto / X-Forwarded-Host headers:
+ocpp-cp-sim --daemon --http-port 9700 --web-console \
+  --trust-forwarded-headers
+```
+
+| Bind                          | Flag                        | Effective policy                                                                                                           |
+| ----------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Non-loopback (`0.0.0.0`, LAN) | `--trust-forwarded-headers` | **`same-origin` + forwarded** — also accepts `Origin` equal to `${X-Forwarded-Proto}://${X-Forwarded-Host}` (first value). |
+
+> **Security:** only pass `--trust-forwarded-headers` when a **trusted** proxy sets those headers and the daemon is **not** reachable directly. If a client can hit the daemon without going through the proxy, it can spoof `X-Forwarded-Host` to forge an allowed origin. `--cors-origin` has no such caveat — prefer it when the public URL is fixed.
+
+Everything stays behind your auth proxy either way: the session cookie rides the same-origin `crossorigin` asset requests, so forward-auth (e.g. Authelia) allows them — no need to exempt `/assets` from auth.
+
+A worked Traefik + Authelia compose lives at [`docs/examples/compose-reverse-proxy-sso.yml`](examples/compose-reverse-proxy-sso.yml).
+
 ## Security
 
 This release ships **without authentication**. Run it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel, …) or keep it on a loopback / Unix socket if exposed beyond your machine. The default bind address is `127.0.0.1`.

@@ -6,15 +6,14 @@ name: Release Drafter
 # (desktop builds) and docker-publish.yml (semver image tags). See config in
 # .github/release-drafter.yml.
 #
-# The `pull_request` trigger only runs the autolabeler (categorize PRs by
-# branch/title); the draft itself is (re)written on push to `main`.
+# Runs ONLY on push to `main` — not on pull requests. Categorization / version
+# bumps therefore use whatever labels a PR already carries (label PRs manually,
+# or the change lands uncategorized and the version defaults to a patch bump).
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
@@ -23,7 +22,6 @@ jobs:
   update_release_draft:
     permissions:
       contents: write # create / update the draft release
-      pull-requests: write # apply autolabels to PRs
     runs-on: ubuntu-latest
     steps:
       - uses: release-drafter/release-drafter@v6

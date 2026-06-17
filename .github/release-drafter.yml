@@ -29,24 +29,9 @@ version-resolver:
       ["patch", "fix", "bugfix", "bug", "chore", "ci", "docs", "documentation", "dependencies", "refactor", "test"]
   default: patch
 
-# Auto-label PRs so the categories/version above work without manual labeling.
-# Matches this repo's branch + conventional-commit title conventions.
-autolabeler:
-  - label: "feature"
-    branch: ['/^feat(ure)?\//']
-    title: ["/^feat(\\(.+\\))?:/"]
-  - label: "fix"
-    branch: ['/^fix\//']
-    title: ["/^fix(\\(.+\\))?:/"]
-  - label: "docs"
-    branch: ['/^docs\//']
-    title: ["/^docs(\\(.+\\))?:/"]
-  - label: "ci"
-    branch: ['/^ci\//']
-    title: ["/^ci(\\(.+\\))?:/"]
-  - label: "chore"
-    branch: ['/^chore\//']
-    title: ["/^chore(\\(.+\\))?:/"]
+# Note: categories/version above key off PR labels. This drafter runs only on
+# push to `main` (no PR autolabeling), so label PRs manually to group them —
+# otherwise changes land uncategorized and the version defaults to a patch bump.
 
 template: |
   ## What's Changed

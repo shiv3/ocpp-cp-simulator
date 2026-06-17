@@ -5,12 +5,15 @@ name: Build & publish Docker image
 # ghcr.io/<owner>/<repo>. Triggers:
 #   - push to `main`                       → `main` + `sha-<short>` + `latest`
 #   - push to `feat/browser-remote-mode`   → branch-slug + `sha-<short>` (no `latest`)
+#   - push of a `vX.Y.Z` tag               → `X.Y.Z` + `X.Y` + `X` (semver pins)
 #   - manual via workflow_dispatch         → same as the triggering branch
 #
 # We deliberately do NOT build on every PR or every feature branch:
 # Docker layers take time + cache space, and the active branch already
-# rebuilds on every push. Tag-based releases can be re-added if/when
-# we cut versioned images.
+# rebuilds on every push. Versioned releases come from `vX.Y.Z` tags
+# (same tags that `release.yml` cuts for the desktop app), giving
+# reproducible image pins like `ghcr.io/<owner>/<repo>:1.2.3`. `latest`
+# stays pinned to `main` (bleeding edge), not to the newest release.
 
 on:
   push:
@@ -20,6 +23,10 @@ on:
       # Active feature branch — pushes here get an image tagged with the
       # branch slug + commit sha so we can test changes without merging.
       - feat/browser-remote-mode
+    tags:
+      # Semver release tags — publish immutable `X.Y.Z` / `X.Y` / `X`
+      # image pins for reproducible deployments (issue #72).
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -50,11 +57,20 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # `latest` deliberately tracks the default branch (bleeding edge),
+          # NOT the newest semver tag — so disable metadata-action's built-in
+          # "latest on semver" behaviour and set `latest` ourselves below.
+          flavor: |
+            latest=false
           tags: |
-            # main      → `main` + `sha-<short>` + `latest`
-            # feat/...  → branch-slug + `sha-<short>` (no `latest`)
+            # main       → `main` + `sha-<short>` + `latest`
+            # feat/...   → branch-slug + `sha-<short>` (no `latest`)
+            # v1.2.3 tag → `1.2.3` + `1.2` + `1` (semver release pins)
             type=ref,event=branch
             type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build & push

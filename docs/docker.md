@@ -4,6 +4,22 @@ The image bundles **both** the daemon and the React browser UI in a single Bun-b
 
 Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) on push to `main` and on `v*` / `cli-v*` tags).
 
+### Image tags
+
+| Tag                      | Moves?    | Use it for                                                       |
+| ------------------------ | --------- | ---------------------------------------------------------------- |
+| `latest`                 | mutable   | Bleeding edge — tracks the newest `main` build.                  |
+| `main`                   | mutable   | Same as `latest`; explicit about the source branch.              |
+| `sha-<short>`            | immutable | Pin to one exact `main` commit.                                  |
+| `X.Y.Z` (e.g. `1.2.3`)   | immutable | **Reproducible release pin** — recommended for IaC / production. |
+| `X.Y` (e.g. `1.2`) / `X` | mutable   | Auto-track patch / minor releases within a version line.         |
+
+Semver tags are published when a `vX.Y.Z` git tag is pushed (the same tag that cuts the desktop-app [release](../.github/workflows/release.yml)). For production, pin to a full `X.Y.Z` (or a digest) rather than `latest`/`main`:
+
+```sh
+docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
+```
+
 ## Quick start
 
 ```sh

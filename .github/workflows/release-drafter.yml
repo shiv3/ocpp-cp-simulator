@@ -1,0 +1,31 @@
+name: Release Drafter
+
+# Keeps a DRAFT GitHub Release up to date as PRs merge to `main`, so a release
+# is always one click away: review the auto-generated notes, then Publish. On
+# publish the release's `vX.Y.Z` tag is created, which triggers release.yml
+# (desktop builds) and docker-publish.yml (semver image tags). See config in
+# .github/release-drafter.yml.
+#
+# Runs ONLY on push to `main` — not on pull requests. Categorization / version
+# bumps therefore use whatever labels a PR already carries (label PRs manually,
+# or the change lands uncategorized and the version defaults to a patch bump).
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  update_release_draft:
+    permissions:
+      contents: write # create / update the draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

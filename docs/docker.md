@@ -2,7 +2,7 @@
 
 The image bundles **both** the daemon and the React browser UI in a single Bun-based container. `--web-console` is enabled by default, so opening the published port in a browser gives you the full UI talking to the API on the same origin.
 
-Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) on push to `main` and on `v*` / `cli-v*` tags).
+Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) on push to `main` and on `v*` tags).
 
 ### Image tags
 

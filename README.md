@@ -36,15 +36,15 @@ pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/downl
 # bun
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
 
-# Or pin to a specific CLI release
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+# Or pin to a specific release
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/v0.1.0/ocpp-cp-simulator-0.1.0.tgz
 
 # From a local checkout
 bun link              # in this repo
 bun link ocpp-cp-simulator   # in any other project
 ```
 
-> The release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags. A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
+> The release tarballs are produced by the `Release` workflow on `vX.Y.Z` tags (the same tag that publishes the desktop apps and Docker images). A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
 
 Then run from anywhere:
 

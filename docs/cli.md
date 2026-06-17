@@ -27,8 +27,8 @@ The package exposes a `ocpp-cp-sim` bin so it can be invoked from anywhere once 
 # Prebuilt release tarball (recommended) — ships the web-console dist/
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
 
-# Or pin to a specific CLI release
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+# Or pin to a specific release
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/v0.1.0/ocpp-cp-simulator-0.1.0.tgz
 
 # From a local checkout (dev)
 bun link

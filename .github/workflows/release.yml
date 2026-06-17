@@ -1,4 +1,10 @@
-name: Release Desktop App
+name: Release
+
+# Cut on a `vX.Y.Z` tag — publish the release-drafter draft to create the tag.
+# A single tag drives the whole release: the Tauri desktop apps AND the
+# npm-style CLI tarball are built here and attached to the same GitHub Release,
+# and docker-publish.yml publishes the matching semver images in parallel.
+# (The old separate `cli-v*` tag + Release CLI workflow are folded in here.)
 
 on:
   push:
@@ -147,3 +153,63 @@ jobs:
               release_id: release.id,
               body: body
             });
+
+  release-cli:
+    # Build the npm-style CLI tarball (ocpp-cp-simulator-<version>.tgz, bundling
+    # the web console dist/) and attach it to the same vX.Y.Z release as the
+    # desktop apps. Folds in what used to be the separate `cli-v*` workflow.
+    # Independent of the desktop matrix so a desktop build failure doesn't block
+    # the CLI artifact; softprops attaches assets to the existing release.
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node (for `npm pack`)
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Resolve version
+        id: version
+        # `vX.Y.Z` tag → bare `X.Y.Z` for `npm version` / the tarball name.
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web console (vite)
+        run: bun run build
+
+      - name: Stamp package version
+        run: npm version --no-git-tag-version --allow-same-version "${{ steps.version.outputs.version }}"
+
+      - name: Pack tarball
+        id: pack
+        run: |
+          # `npm pack` reads package.json `files` (dist, src/cli, src/cp,
+          # scenario templates). --ignore-scripts skips the prepack vite build
+          # (already built above) so its log doesn't pollute the captured name.
+          TARBALL=$(npm pack --silent --ignore-scripts)
+          # Stable filename so consumers can pin
+          # releases/latest/download/ocpp-cp-simulator.tgz.
+          cp "${TARBALL}" ocpp-cp-simulator.tgz
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          ls -lh "${TARBALL}" ocpp-cp-simulator.tgz
+
+      - name: Attach tarball to the release
+        # No name/body here on purpose — the desktop job / release-drafter own
+        # the release notes; this only uploads the CLI assets onto the same tag.
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ steps.pack.outputs.tarball }}
+            ocpp-cp-simulator.tgz

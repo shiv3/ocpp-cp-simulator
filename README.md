@@ -24,7 +24,7 @@ npm install
 npm run dev
 
 # CLI / Server mode (requires Bun)
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
 ### Install as a global command (`ocpp-cp-sim`)

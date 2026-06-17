@@ -10,10 +10,10 @@ Headless charge point simulator for scripting, CI pipelines, and AI/automation i
 
 ```bash
 # Interactive REPL
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 
 # JSON Lines mode (for automation)
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
 
 # npm script shorthand
 npm run cli -- --ws-url ws://localhost:9000/ocpp --cp-id CP001
@@ -41,7 +41,7 @@ ocpp-cp-sim --daemon --http-port 9700
 
 > A plain `bun install -g github:shiv3/ocpp-cp-simulator` is **not** supported: the web-console `dist/` is built at release time (not committed to git), and bun doesn't install devDependencies for global packages so it can't run `vite build` on install. Use the prebuilt tarball URL above.
 
-All flags described below apply to both `ocpp-cp-sim ...` and `bun src/cli/main.ts ...`.
+All flags described below apply whether you run the installed `ocpp-cp-sim` command or, from a source checkout, `bun src/cli/main.ts …`.
 
 ## Operation Modes
 
@@ -50,7 +50,7 @@ All flags described below apply to both `ocpp-cp-sim ...` and `bun src/cli/main.
 Default mode. Connects to a CSMS and provides a `ocpp>` prompt.
 
 ```bash
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
 ```
@@ -93,7 +93,7 @@ ChargePoint: CP001  Status: ...
 Machine-readable mode for automation and AI agent integration. Each line of stdin is a JSON command; each line of stdout is a JSON response or event.
 
 ```bash
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
 ```
 
 #### Request Format
@@ -160,25 +160,25 @@ Long-running process that exposes an **HTTP + WebSocket** API over a Unix domain
 
 ```bash
 # Start daemon (Unix socket only, default /tmp/ocpp-server.sock)
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon &
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon &
 
 # Start daemon with both Unix socket and TCP
-bun src/cli/main.ts --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon --http-port 9700 &
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon --http-port 9700 &
 
 # Start foreground HTTP server (no Unix socket by default)
-bun src/cli/main.ts --http-port 9700
+ocpp-cp-sim --http-port 9700
 
 # Send command to running server (Unix socket by default)
-bun src/cli/main.ts --cp-id CP001 --send '{"command": "status"}'
+ocpp-cp-sim --cp-id CP001 --send '{"command": "status"}'
 
 # Send command via TCP HTTP
-bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 --send '{"command": "status"}'
+ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9700 --send '{"command": "status"}'
 
 # Subscribe to real-time events (TCP only)
-bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 --events
+ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9700 --events
 
 # Subscribe to all CPs' events
-bun src/cli/main.ts --http-url http://127.0.0.1:9700 --events --all
+ocpp-cp-sim --http-url http://127.0.0.1:9700 --events --all
 
 # Talk to a daemon protected by --web-console-basic-auth-*
 bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 \
@@ -186,7 +186,7 @@ bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 \
   --http-basic-auth-user admin --http-basic-auth-pass secret
 
 # Shut down the server
-bun src/cli/main.ts --stop
+ocpp-cp-sim --stop
 ```
 
 #### Server Files
@@ -204,7 +204,7 @@ Use `--unix-socket /custom/path` to change the path. Use `--unix-socket none` to
 
 ```bash
 # Start with no initial CP
-bun src/cli/main.ts --daemon --http-port 9700 &
+ocpp-cp-sim --daemon --http-port 9700 &
 
 # Create CPs dynamically
 curl -X POST http://127.0.0.1:9700/v1/cp \

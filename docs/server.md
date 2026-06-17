@@ -355,6 +355,8 @@ ocpp-cp-sim --daemon --http-port 9700 --web-console \
 
 Everything stays behind your auth proxy either way: the session cookie rides the same-origin `crossorigin` asset requests, so forward-auth (e.g. Authelia) allows them — no need to exempt `/assets` from auth.
 
+A worked **nginx + Authelia** example lives at [`docs/examples/compose-reverse-proxy-sso.yml`](examples/compose-reverse-proxy-sso.yml) (with its [`nginx-reverse-proxy-sso.conf`](examples/nginx-reverse-proxy-sso.conf)).
+
 ## Security
 
 This release ships **without authentication**. Run it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel, …) or keep it on a loopback / Unix socket if exposed beyond your machine. The default bind address is `127.0.0.1`.

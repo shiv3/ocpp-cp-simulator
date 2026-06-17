@@ -72,7 +72,7 @@ ocpp-cp-sim --http-port 5172 --web-console \
 
 `--web-console` serves the browser UI (built into `dist/` and shipped inside the release tarball) from the same HTTP port as the control API, so a single port is all you need to expose. See [docs/cli.md](docs/cli.md) for the full flag reference and [docs/server.md](docs/server.md) for the HTTP / WebSocket protocol.
 
-> **Behind a reverse proxy?** Bound to a non-loopback host the daemon applies a safe same-origin CORS policy, so the web console served at a public URL will `403` its own assets until you name that origin with `--cors-origin https://your.url` (or, behind a trusted proxy, `--trust-forwarded-headers`). See [docs/server.md → Behind a reverse proxy](docs/server.md#behind-a-reverse-proxy-traefik-nginx-caddy-) for details.
+> **Behind a reverse proxy?** Bound to a non-loopback host the daemon applies a safe same-origin CORS policy, so the web console served at a public URL will `403` its own assets until you name that origin with `--cors-origin https://your.url` (or, behind a trusted proxy, `--trust-forwarded-headers`). See [docs/server.md → Behind a reverse proxy](docs/server.md#behind-a-reverse-proxy-traefik-nginx-caddy-) for details and an nginx + Authelia example compose.
 
 ## AI Agent & Automation Testing
 

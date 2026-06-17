@@ -1,5 +1,5 @@
 import * as http from "http";
-import { DEFAULT_UNIX_SOCKET } from "./server/startServer";
+import { DEFAULT_UNIX_SOCKET } from "./server/constants";
 
 export type ClientTarget =
   | { readonly kind: "tcp"; readonly host: string; readonly port: number }
@@ -8,6 +8,22 @@ export type ClientTarget =
 export interface ClientLocation {
   readonly httpUrl: string | null;
   readonly unixSocket: string | null;
+  /** Basic Auth credentials to send to a daemon started with
+   *  `--web-console-basic-auth-*`. Null/omitted = no Authorization header
+   *  (the daemon must then be running without the auth gate). */
+  readonly basicAuth?: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
+}
+
+/** `Authorization: Basic <base64(user:pass)>`, UTF-8 encoded to match the
+ *  daemon's decode path (server side re-decodes through a UTF-8 TextDecoder). */
+function basicAuthHeader(cred: { username: string; password: string }): string {
+  return (
+    "Basic " +
+    Buffer.from(`${cred.username}:${cred.password}`, "utf-8").toString("base64")
+  );
 }
 
 export function resolveTarget(loc: ClientLocation): ClientTarget {
@@ -36,6 +52,7 @@ function httpRequest(
   method: string,
   path: string,
   body: string | null,
+  auth?: ClientLocation["basicAuth"],
 ): Promise<HttpResult> {
   const headers: Record<string, string> = body
     ? {
@@ -43,6 +60,7 @@ function httpRequest(
         "content-length": String(Buffer.byteLength(body)),
       }
     : {};
+  if (auth) headers["authorization"] = basicAuthHeader(auth);
 
   const reqOpts: http.RequestOptions =
     target.kind === "tcp"
@@ -109,6 +127,7 @@ export async function sendCommand(
       "POST",
       `/v1/cp/${encodeURIComponent(cpId)}/command`,
       jsonStr,
+      loc.basicAuth,
     );
     if (res.body.trim()) {
       process.stdout.write(`${res.body.trim()}\n`);
@@ -128,7 +147,13 @@ export async function stopDaemon(loc: ClientLocation): Promise<void> {
   const target = resolveTarget(loc);
 
   try {
-    const res = await httpRequest(target, "POST", "/v1/shutdown", null);
+    const res = await httpRequest(
+      target,
+      "POST",
+      "/v1/shutdown",
+      null,
+      loc.basicAuth,
+    );
     if (res.body.trim()) {
       try {
         const parsed = JSON.parse(res.body) as { ok?: boolean };
@@ -170,7 +195,13 @@ export async function subscribeEvents(
   const wsUrl = `${wsBase}${path}`;
 
   await new Promise<void>((resolve) => {
-    const ws = new WebSocket(wsUrl);
+    // Bun's WebSocket accepts a non-standard options object carrying request
+    // `headers`; the DOM lib types the 2nd arg as `protocols` only, hence the
+    // cast. Lets `--events` authenticate to a daemon behind --web-console-basic-auth.
+    const wsInit = loc.basicAuth
+      ? { headers: { authorization: basicAuthHeader(loc.basicAuth) } }
+      : undefined;
+    const ws = new WebSocket(wsUrl, wsInit as unknown as string[] | undefined);
     let opened = false;
 
     ws.onopen = () => {

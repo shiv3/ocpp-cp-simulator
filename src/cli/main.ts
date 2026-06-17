@@ -50,6 +50,11 @@ function parseArgs(argv: string[]): CLIOptions {
   // upgrade; these gate *incoming* HTTP requests to this daemon.
   let webConsoleBasicAuthUser = "";
   let webConsoleBasicAuthPass = "";
+  // Basic Auth the CLI *client* modes (--send/--stop/--events) send TO a
+  // daemon protected by --web-console-basic-auth-*. Outbound, mirror image of
+  // webConsoleBasicAuth* above (which is the daemon's inbound gate).
+  let httpBasicAuthUser = "";
+  let httpBasicAuthPass = "";
   let vendor = "CLI-Vendor";
   let model = "CLI-Model";
   let scenario: string | null = null;
@@ -121,6 +126,14 @@ function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--web-console-basic-auth-pass":
         webConsoleBasicAuthPass = next ?? "";
+        i++;
+        break;
+      case "--http-basic-auth-user":
+        httpBasicAuthUser = next ?? "";
+        i++;
+        break;
+      case "--http-basic-auth-pass":
+        httpBasicAuthPass = next ?? "";
         i++;
         break;
       case "--vendor":
@@ -373,6 +386,19 @@ function parseArgs(argv: string[]): CLIOptions {
         }
       : null;
 
+  // Same all-or-nothing rule for the client-side credentials.
+  if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
+    process.stderr.write(
+      "Error: --http-basic-auth-user and --http-basic-auth-pass " +
+        "must be supplied together (or both omitted)\n",
+    );
+    process.exit(1);
+  }
+  const httpBasicAuth =
+    httpBasicAuthUser && httpBasicAuthPass
+      ? { username: httpBasicAuthUser, password: httpBasicAuthPass }
+      : null;
+
   return {
     wsUrl,
     cpId,
@@ -394,6 +420,7 @@ function parseArgs(argv: string[]): CLIOptions {
     httpHost,
     unixSocket,
     httpUrl,
+    httpBasicAuth,
     allEvents,
     corsOrigins,
     serveStatic,
@@ -446,6 +473,13 @@ Options:
                            configured health path (--health-path, default
                            /v1/healthz) is always served without auth so
                            k8s probes / load balancers keep working.
+  --http-basic-auth-user <u>
+                           Basic auth user the CLIENT modes (--send / --stop /
+                           --events) send to a daemon protected by
+                           --web-console-basic-auth-*. Pair with
+                           --http-basic-auth-pass.
+  --http-basic-auth-pass <p>
+                           Basic auth password for the client modes (see above).
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
   --scenario <file>            Run scenario from JSON file on startup
@@ -561,6 +595,7 @@ async function main(): Promise<void> {
   const clientLoc = {
     httpUrl: options.httpUrl,
     unixSocket: options.unixSocket,
+    basicAuth: options.httpBasicAuth,
   };
 
   if (options.stop) {

@@ -296,6 +296,39 @@ curl --unix-socket /tmp/ocpp-server.sock http://localhost/v1/cp
 
 The bundled CLI client uses Node's `http.request({ socketPath, ... })` under the hood. `--send` and `--stop` prefer the Unix socket; `--events` always uses TCP.
 
+## Controlling a running daemon from the CLI
+
+A daemon doesn't have to be driven over raw HTTP or the web console — the same `ocpp-cp-sim` binary doubles as a **client** for a server someone else started. Point it at the daemon with `--http-url` (TCP) or `--unix-socket` (local), and use:
+
+```bash
+# Send an OCPP command to a CP managed by the daemon
+ocpp-cp-sim --http-url http://127.0.0.1:9700 \
+  --cp-id CP001 --send '{"command":"status"}'
+
+# Stream that CP's events (TCP only)
+ocpp-cp-sim --http-url http://127.0.0.1:9700 --cp-id CP001 --events
+
+# Shut the daemon down
+ocpp-cp-sim --http-url http://127.0.0.1:9700 --stop
+```
+
+### Authenticating to a protected daemon
+
+When the daemon is started with `--web-console-basic-auth-user/pass`, every request except the health path needs `Authorization: Basic …` — including these CLI client calls. Supply the matching credentials with `--http-basic-auth-user` / `--http-basic-auth-pass` and they're sent on `--send`, `--stop`, and `--events`:
+
+```bash
+# Daemon side: require Basic Auth on the control API
+ocpp-cp-sim --daemon --http-port 9700 \
+  --web-console-basic-auth-user admin --web-console-basic-auth-pass secret
+
+# Client side: authenticate to it
+ocpp-cp-sim --http-url http://127.0.0.1:9700 \
+  --cp-id CP001 --send '{"command":"status"}' \
+  --http-basic-auth-user admin --http-basic-auth-pass secret
+```
+
+Without the credentials the daemon replies `401 authentication required` and the command fails. (The CSMS-facing `--basic-auth-user/pass` flags are unrelated — those authenticate the simulated CP's _outgoing_ WebSocket to the CSMS.)
+
 ## CORS
 
 The CORS policy depends on the bind address and any `--cors-origin` flags:

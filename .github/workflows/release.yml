@@ -31,11 +31,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node is still needed: tauri-action's runtime + the `npx @tauri-apps/cli
+      # icon` step below. Dependency install + the tauri build itself go
+      # through Bun (see below), so there's no npm cache to prime here.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-          cache: 'npm'
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -54,13 +56,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Install frontend dependencies
-        run: npm install
-
-      - name: Setup Bun (for sidecar compile)
+      # Bun is the package manager for this repo's build path: it compiles
+      # the sidecar below, and tauri-action detects bun.lock and runs
+      # `bun tauri build`. Install with the same tool so there's a single,
+      # frozen-lockfile install rather than an npm/bun mix.
+      - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
 
       - name: Build CLI sidecar (Bun --compile → src-tauri/binaries/)
         # The Tauri build step below picks up the sidecar via

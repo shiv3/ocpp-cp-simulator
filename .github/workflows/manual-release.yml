@@ -50,18 +50,22 @@ jobs:
             target: "x86_64-apple-darwin"
           - platform: "ubuntu-22.04"
             args: ""
+            target: "x86_64-unknown-linux-gnu"
           - platform: "windows-latest"
             args: ""
+            target: "x86_64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
+      # Node is still needed: tauri-action's runtime + the `npx @tauri-apps/cli
+      # icon` step below. Dependency install + the tauri build itself go
+      # through Bun (see below), so there's no npm cache to prime here.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-          cache: 'npm'
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -72,7 +76,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -80,8 +84,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      # Bun is the package manager for this repo's build path: it compiles
+      # the sidecar below, and tauri-action detects bun.lock and runs
+      # `bun tauri build`. Install with the same tool so there's a single,
+      # frozen-lockfile install rather than an npm/bun mix.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Install frontend dependencies
-        run: npm install
+        run: bun install --frozen-lockfile
+
+      - name: Build CLI sidecar (Bun --compile → src-tauri/binaries/)
+        # The Tauri build step below picks up the sidecar via
+        # `bundle.externalBin`. Tauri expects the suffix to match the
+        # rust target triple, which is what scripts/build-tauri-sidecar.sh
+        # produces. Bun handles cross-compile internally.
+        shell: bash
+        env:
+          TAURI_TARGET: ${{ matrix.target }}
+        run: bash scripts/build-tauri-sidecar.sh
+
+      - name: Generate app icon
+        run: |
+          cd src-tauri
+          npx @tauri-apps/cli icon icons/icon.svg
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

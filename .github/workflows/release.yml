@@ -87,6 +87,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tauri's beforeBuildCommand re-runs build-tauri-sidecar.sh; hand it
+          # the matrix triple so it doesn't have to auto-detect the host (which
+          # fails on the Windows MINGW runner, and would pick the wrong arch
+          # for the cross-compiled x86_64 macOS build).
+          TAURI_TARGET: ${{ matrix.target }}
+          # linuxdeploy and its plugins are AppImages; GitHub runners lack FUSE,
+          # so extract-and-run instead of mounting. Fixes the Linux AppImage
+          # bundle dying with "failed to run linuxdeploy". No-op off Linux.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "OCPP CP Simulator ${{ github.ref_name }}"

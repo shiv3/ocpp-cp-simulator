@@ -24,6 +24,9 @@ if [ -z "$TARGET" ]; then
     "Darwin x86_64") TARGET="x86_64-apple-darwin" ;;
     "Linux aarch64") TARGET="aarch64-unknown-linux-gnu" ;;
     "Linux x86_64")  TARGET="x86_64-unknown-linux-gnu" ;;
+    # Git Bash / MSYS2 / Cygwin report e.g. "MINGW64_NT-10.0-26100 x86_64".
+    MINGW*" x86_64" | MSYS*" x86_64" | CYGWIN*" x86_64") TARGET="x86_64-pc-windows-msvc" ;;
+    MINGW*" arm64" | MSYS*" arm64" | CYGWIN*" arm64")    TARGET="aarch64-pc-windows-msvc" ;;
     *) echo "Unable to auto-detect rust target triple from $(uname -sm); pass it as an arg." >&2; exit 1 ;;
   esac
 fi

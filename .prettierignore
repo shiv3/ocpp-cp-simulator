@@ -38,7 +38,7 @@ coverage/
 # Package manager files
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
+bun.lock
 
 # Tauri generated files
 src-tauri/target/

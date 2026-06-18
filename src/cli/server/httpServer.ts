@@ -43,6 +43,7 @@ async function serveStatic(
   }
 
   let file = Bun.file(resolved);
+  let servedFallback = false;
   if (!(await file.exists())) {
     // SPA fallback: only for "looks like a page" requests (no extension on
     // the last path segment). Asset requests for missing files should
@@ -51,8 +52,30 @@ async function serveStatic(
     if (last.includes(".")) return null;
     file = Bun.file(path.join(absoluteRoot, "index.html"));
     if (!(await file.exists())) return null;
+    servedFallback = true;
   }
-  return new Response(file);
+  const res = new Response(file);
+  res.headers.set("cache-control", cacheControlFor(pathname, servedFallback));
+  return res;
+}
+
+/**
+ * Cache-Control for a statically served file (issue #79).
+ *
+ * - Vite emits content hashes into `/assets/*` filenames, so the bytes for a
+ *   given URL never change: cache them forever and skip revalidation.
+ * - The HTML entry point and any SPA fallback (a deep link rewritten to
+ *   index.html) are the bootstrap document that references the current hashed
+ *   bundles; it must always be re-fetched or a stale shell pins old assets.
+ *   Everything else served from the static root (favicon, manifest, …) is
+ *   un-hashed too, so default it to no-store as well — conservative, and it
+ *   keeps a CDN from edge-caching auth-gated files by extension.
+ */
+function cacheControlFor(pathname: string, servedFallback: boolean): string {
+  if (!servedFallback && pathname.startsWith("assets/")) {
+    return "public, max-age=31536000, immutable";
+  }
+  return "no-store";
 }
 
 interface SocketData {
@@ -193,6 +216,20 @@ function forbidden(): Response {
 }
 
 /**
+ * Default every response to `Cache-Control: no-store` unless the handler set
+ * one explicitly (issue #79). serveStatic already stamps build assets as
+ * immutable and HTML as no-store; this catches the dynamic / auth-sensitive
+ * rest — the /v1 control API, health, CORS rejections — which must never be
+ * cached at a reverse-proxy edge.
+ */
+function applyCacheControl(res: Response): Response {
+  if (!res.headers.has("cache-control")) {
+    res.headers.set("cache-control", "no-store");
+  }
+  return res;
+}
+
+/**
  * Parse a `Authorization: Basic <base64>` header into username + password.
  * Returns null when the header is missing, not Basic, or doesn't decode.
  * Tolerates the rare `Basic` scheme written in any case.
@@ -328,9 +365,11 @@ export function createHttpHandlers(deps: {
 
       const result = dispatch(req, server);
       if (result === undefined) return undefined; // WS upgrade already handled
-      if (result instanceof Response) return applyCors(result, req, cors);
+      if (result instanceof Response) {
+        return applyCacheControl(applyCors(result, req, cors));
+      }
       return result.then((r) =>
-        r instanceof Response ? applyCors(r, req, cors) : r,
+        r instanceof Response ? applyCacheControl(applyCors(r, req, cors)) : r,
       );
     },
 

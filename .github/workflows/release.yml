@@ -6,14 +6,6 @@ on:
       - "v*"
   workflow_dispatch:
 
-# tauri-action@v0 (incl. the latest v0.6.2) ships a Node 20 bundle whose
-# top-level await is left "unsettled" under the Node 24 that GitHub now forces
-# on Actions runners (Node 20 deprecated 2026-06-16). That kills the step right
-# after "running pnpm [tauri build]", before any build runs. Opt back into
-# Node 20 until tauri-action publishes a Node 24-compatible release.
-env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
-
 jobs:
   release:
     permissions:

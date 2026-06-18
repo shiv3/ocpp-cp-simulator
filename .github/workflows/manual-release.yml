@@ -8,12 +8,6 @@ on:
         required: true
         type: string
 
-# See release.yml: tauri-action@v0's Node 20 bundle crashes under the Node 24
-# GitHub now forces on Actions, so opt back into Node 20 until it ships a
-# Node 24-compatible release.
-env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
-
 jobs:
   create-release:
     runs-on: ubuntu-latest

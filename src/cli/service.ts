@@ -28,6 +28,7 @@ import {
   type ScenarioPositionSnapshot,
 } from "../cp/domain/persistence/ConnectorRuntimeRepository";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import { getDefaultEVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";
 import type {
@@ -545,7 +546,11 @@ export class CLIChargePointService {
     }
   }
 
-  loadScenarioTemplate(templateId: string, connectorId: number): string {
+  loadScenarioTemplate(
+    templateId: string,
+    connectorId: number,
+    evSettingsOverride?: Partial<EVSettings>,
+  ): string {
     const template = getTemplateById(templateId);
     if (!template) {
       throw new Error(`Unknown template: ${templateId}`);
@@ -554,6 +559,15 @@ export class CLIChargePointService {
       this._chargePoint.id,
       connectorId,
     );
+    // Let callers pin e.g. maxChargingPowerKw without authoring a custom
+    // scenario; otherwise the template's own evSettings clobber a prior
+    // set_ev_settings when the scenario starts.
+    if (evSettingsOverride) {
+      definition.evSettings = {
+        ...(definition.evSettings ?? getDefaultEVSettings()),
+        ...evSettingsOverride,
+      };
+    }
     return this.loadScenario(connectorId, definition);
   }
 

@@ -5,6 +5,7 @@ import type { CLIOptions, ChargePointInitOptions } from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
+import { resolveClientLocation } from "./clientLocation";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
 import { setGlobalLogFormat } from "../cp/shared/Logger";
@@ -613,11 +614,23 @@ async function main(): Promise<void> {
   // chatter via serverLog.
   setGlobalLogFormat(options.logFormat);
 
-  const clientLoc = {
+  // Client modes (--send/--stop/--events) target a running daemon. Resolve the
+  // canonical --http-url / --http-basic-auth-* flags, but keep honoring the
+  // server-side --http-host/--http-port and outgoing-WS --basic-auth-* flags
+  // with a deprecation warning for backward compatibility.
+  const isClientMode = options.stop || options.send !== null || options.events;
+  let clientLoc = {
     httpUrl: options.httpUrl,
     unixSocket: options.unixSocket,
     basicAuth: options.httpBasicAuth,
   };
+  if (isClientMode) {
+    const resolved = resolveClientLocation(options);
+    clientLoc = resolved.location;
+    for (const w of resolved.warnings) {
+      process.stderr.write(`Warning: ${w}\n`);
+    }
+  }
 
   if (options.stop) {
     await stopDaemon(clientLoc);

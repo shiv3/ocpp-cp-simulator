@@ -93,11 +93,14 @@ function formatHttpError(
   target: ClientTarget,
 ): string {
   if (target.kind === "unix") {
+    const hint =
+      " To target a TCP daemon pass --http-url http://host:port" +
+      " (client modes use --http-url, not the server's --http-host/--http-port).";
     if (err.code === "ENOENT") {
-      return `No server running (socket not found: ${target.path})`;
+      return `No server running (socket not found: ${target.path}).${hint}`;
     }
     if (err.code === "ECONNREFUSED") {
-      return `Server is not accepting connections at ${target.path}`;
+      return `Server is not accepting connections at ${target.path}.${hint}`;
     }
   } else {
     if (err.code === "ECONNREFUSED") {

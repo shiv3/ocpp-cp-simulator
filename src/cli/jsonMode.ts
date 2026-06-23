@@ -179,7 +179,12 @@ export async function handleJsonCommand(
     case "load_scenario_template": {
       const templateId = requireString(params, "templateId");
       const connectorId = requirePositiveInt(params, "connector");
-      const scenarioId = service.loadScenarioTemplate(templateId, connectorId);
+      const evSettings = params.evSettings as Partial<EVSettings> | undefined;
+      const scenarioId = service.loadScenarioTemplate(
+        templateId,
+        connectorId,
+        evSettings,
+      );
       return { scenarioId };
     }
 
@@ -266,7 +271,12 @@ export async function handleJsonCommand(
     case "run_scenario_template": {
       const connectorId = requirePositiveInt(params, "connector");
       const templateId = requireString(params, "templateId");
-      const scenarioId = service.loadScenarioTemplate(templateId, connectorId);
+      const evSettings = params.evSettings as Partial<EVSettings> | undefined;
+      const scenarioId = service.loadScenarioTemplate(
+        templateId,
+        connectorId,
+        evSettings,
+      );
       service.runScenario(connectorId, scenarioId);
       return { scenarioId };
     }

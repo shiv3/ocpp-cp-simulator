@@ -444,6 +444,10 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     intVal(ConfigurationKeys.Core.MeterValuesAlignedDataMaxLength, 8),
     arrVal(ConfigurationKeys.Core.MeterValuesSampledData, [
       "Energy.Active.Import.Register",
+      // Real charge points also sample instantaneous power; the CSMS uses
+      // Power.Active.Import (e.g. low-power / 3kW tariff detection), so emit it
+      // by default for realistic CSMS-side testing.
+      "Power.Active.Import",
     ]),
     intVal(ConfigurationKeys.Core.MeterValuesSampledDataMaxLength, 8),
     intVal(ConfigurationKeys.Core.MeterValueSampleInterval, 60),

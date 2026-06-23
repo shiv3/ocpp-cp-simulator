@@ -61,6 +61,14 @@ export class ScenarioExecutor {
   private previousState: ScenarioExecutionState = "idle";
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private forceSkipResolve: (() => void) | null = null;
+  // Abort plumbing: stop() flips `aborted` and resolves `abortPromise` so any
+  // in-flight wait (auto-meter maxTime, delay, status/meter waits) unblocks
+  // immediately and the flow walker bails before running the next node.
+  // Without this a stopped scenario's maxTime timer fires later and a stale
+  // "Stop Transaction" node ends an unrelated charge on the same connector.
+  private aborted = false;
+  private abortResolve: (() => void) | null = null;
+  private abortPromise: Promise<void> = Promise.resolve();
   private remoteStartTagId: string | null = null;
   // Reason captured from the most recent RemoteStopTrigger node, forwarded
   // to the next Transaction Stop's StopTransaction.req so the CSMS sees
@@ -124,6 +132,11 @@ export class ScenarioExecutor {
    */
   public async start(opts?: ScenarioStartOptions): Promise<void> {
     const mode: ScenarioExecutionMode = "oneshot";
+    // Fresh abort gate for this run.
+    this.aborted = false;
+    this.abortPromise = new Promise<void>((resolve) => {
+      this.abortResolve = resolve;
+    });
     // Dispatch START event to transition to running state
     this.service.send({ type: "START", mode });
     this.notifyStateChange();
@@ -334,6 +347,7 @@ export class ScenarioExecutor {
 
     while (
       currentNode &&
+      !this.aborted &&
       getScenarioStateName(this.service.machine) !== "idle"
     ) {
       // Execute the current node
@@ -380,6 +394,11 @@ export class ScenarioExecutor {
    * Execute a single node
    */
   private async executeSingleNode(node: ScenarioNode): Promise<void> {
+    // A stop() may have landed while the previous node was awaiting; never
+    // start another node once aborted.
+    if (this.aborted) {
+      return;
+    }
     // Update context with current node
     const context = getScenarioContext(this.service.machine);
     context.currentNodeId = node.id;
@@ -1149,6 +1168,15 @@ export class ScenarioExecutor {
    * Stop execution
    */
   public stop(): void {
+    // Flip the abort gate first so in-flight waits unblock and the flow
+    // walker bails before executing the next node.
+    this.aborted = true;
+    this.abortResolve?.();
+    // Stop the connector's auto-meter now; otherwise a pending maxTime/maxValue
+    // could later resume the flow and fire a downstream Stop Transaction on a
+    // charge that started after this scenario was stopped.
+    this.callbacks.onStopAutoMeterValue?.();
+
     this.service.send({ type: "STOP" });
     this.notifyStateChange();
 
@@ -1233,7 +1261,7 @@ export class ScenarioExecutor {
   ): Promise<void> {
     const stateName = getScenarioStateName(this.service.machine);
     if (stateName !== "stepping") {
-      await waitPromise;
+      await Promise.race([waitPromise, this.abortPromise]);
       return;
     }
 
@@ -1244,7 +1272,7 @@ export class ScenarioExecutor {
     this.forceSkipResolve = localResolve;
 
     try {
-      await Promise.race([waitPromise, forcePromise]);
+      await Promise.race([waitPromise, forcePromise, this.abortPromise]);
     } finally {
       if (this.forceSkipResolve === localResolve) {
         this.forceSkipResolve = null;
@@ -1263,6 +1291,12 @@ export class ScenarioExecutor {
    * Sleep utility
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    if (this.aborted) {
+      return Promise.resolve();
+    }
+    return Promise.race([
+      new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      this.abortPromise,
+    ]);
   }
 }

@@ -770,8 +770,16 @@ export class Connector {
   }
 
   private applyMeterValue(value: number): void {
-    this.meterValueWh = value;
-    this.eventsEmitter.emit("meterValueChange", { meterValue: value });
+    // OCPP 1.6 register meter values — StartTransaction.meterStart,
+    // StopTransaction.meterStop and MeterValues sampled values for
+    // Energy.Active.Import.Register — are integer watt-hours. The auto-meter
+    // curve interpolates in kWh and can yield a fractional Wh, so round to an
+    // integer here. A fractional meterStop is rejected by a strict CSMS with a
+    // FormationViolation ("cannot unmarshal number … into … of type int"),
+    // which silently strands the transaction in "Charging".
+    const meterValueWh = Math.round(value);
+    this.meterValueWh = meterValueWh;
+    this.eventsEmitter.emit("meterValueChange", { meterValue: meterValueWh });
     // Mirror the new meter value into SoC when the UI has flipped Sync on.
     // We do it here (not just in UI handlers) so the scenario's auto-meter
     // scheduler and any other domain caller also drive SoC. capacity=0 means
@@ -780,7 +788,7 @@ export class Connector {
       const capacity = this._evSettings.batteryCapacityKwh;
       if (capacity > 0) {
         const initial = this._evSettings.initialSoc ?? 0;
-        const derived = initial + (value / 1000 / capacity) * 100;
+        const derived = initial + (meterValueWh / 1000 / capacity) * 100;
         const clamped = Math.min(100, Math.max(0, derived));
         if (this.socPercent !== clamped) {
           this.socPercent = clamped;

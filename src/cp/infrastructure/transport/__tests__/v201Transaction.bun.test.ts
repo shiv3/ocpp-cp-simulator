@@ -3,7 +3,12 @@ import type {
   MeterValuesRequestV201,
   TransactionEventRequestV201,
 } from "@cshil/ocpp-tools";
-import { startMockCsms, normalizeTranscript, type OcppFrame } from "./mockCsms";
+import {
+  startMockCsms,
+  normalizeTranscript,
+  type MockCsms,
+  type OcppFrame,
+} from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import {
   DefaultBootNotification,
@@ -28,6 +33,18 @@ function transactionEventPayload(
 
 function meterValuesPayload(frame: OcppFrame): MeterValuesRequestV201 {
   return frame[3] as MeterValuesRequestV201;
+}
+
+function receivedMessageIds(csms: MockCsms): Set<unknown> {
+  return new Set(csms.received.map((frame) => frame[1]));
+}
+
+function newTransactionEventFrame(
+  eventType: TransactionEventRequestV201["eventType"],
+  seenMessageIds: Set<unknown>,
+): (frame: OcppFrame) => boolean {
+  return (frame) =>
+    transactionEventFrame(eventType)(frame) && !seenMessageIds.has(frame[1]);
 }
 
 describe("OCPP 2.0.1 transaction events", () => {
@@ -134,6 +151,78 @@ describe("OCPP 2.0.1 transaction events", () => {
     }
   });
 
+  it("resets TransactionEvent seqNo for each new transaction", async () => {
+    const csms = startMockCsms();
+    const cp = new ChargePoint(
+      "CP201-TX-SEQ",
+      DefaultBootNotification,
+      1,
+      csms.url,
+      null,
+      null,
+      null,
+      {},
+      [],
+      "OCPP-2.0.1",
+    );
+    cp.events.on("error", () => undefined);
+
+    try {
+      cp.connect();
+
+      const boot = await csms.waitForCall("BootNotification");
+      csms.replyCallResult(boot.messageId, {
+        status: "Accepted",
+        currentTime: "2026-06-24T00:00:00.000Z",
+        interval: 300,
+      });
+
+      await csms.waitForFrame(
+        (frame) =>
+          frame[0] === 2 &&
+          frame[2] === "StatusNotification" &&
+          (frame[3] as { evseId?: number; connectorId?: number }).evseId ===
+            1 &&
+          (frame[3] as { evseId?: number; connectorId?: number })
+            .connectorId === 1,
+      );
+
+      const beforeTx1Start = receivedMessageIds(csms);
+      cp.startTransaction("TAG-201-A", 1);
+      const tx1StartedFrame = await csms.waitForFrame(
+        newTransactionEventFrame("Started", beforeTx1Start),
+      );
+      const tx1Started = transactionEventPayload(tx1StartedFrame);
+
+      const beforeTx1End = receivedMessageIds(csms);
+      cp.stopTransaction(1);
+      const tx1EndedFrame = await csms.waitForFrame(
+        newTransactionEventFrame("Ended", beforeTx1End),
+      );
+      const tx1Ended = transactionEventPayload(tx1EndedFrame);
+
+      const beforeTx2Start = receivedMessageIds(csms);
+      cp.startTransaction("TAG-201-B", 1);
+      const tx2StartedFrame = await csms.waitForFrame(
+        newTransactionEventFrame("Started", beforeTx2Start),
+      );
+      const tx2Started = transactionEventPayload(tx2StartedFrame);
+
+      expect(tx1Started.seqNo).toBe(0);
+      expect(tx1Ended.seqNo).toBe(1);
+      expect(tx2Started.seqNo).toBe(0);
+      expect(tx1Ended.transactionInfo.transactionId).toBe(
+        tx1Started.transactionInfo.transactionId,
+      );
+      expect(tx2Started.transactionInfo.transactionId).not.toBe(
+        tx1Started.transactionInfo.transactionId,
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
   it("keeps persisted transaction id when stopping after handler restart", async () => {
     const csms = startMockCsms();
     const cp = new ChargePoint(
@@ -161,6 +250,7 @@ describe("OCPP 2.0.1 transaction events", () => {
       stopTime: null,
       meterSent: false,
       cpTransactionId: knownCpTransactionId,
+      cpNextSeqNo: 1,
     };
     const restoredConnector = cp.getConnector(1);
     expect(restoredConnector).toBeDefined();
@@ -176,6 +266,7 @@ describe("OCPP 2.0.1 transaction events", () => {
     expect(restoredConnector?.transaction?.cpTransactionId).toBe(
       knownCpTransactionId,
     );
+    expect(restoredConnector?.transaction?.cpNextSeqNo).toBe(1);
 
     try {
       cp.connect();
@@ -206,6 +297,7 @@ describe("OCPP 2.0.1 transaction events", () => {
       );
       const ended = transactionEventPayload(endedFrame);
       expect(ended.transactionInfo.transactionId).toBe(knownCpTransactionId);
+      expect(ended.seqNo).toBe(1);
     } finally {
       cp.disconnect();
       await csms.stop();

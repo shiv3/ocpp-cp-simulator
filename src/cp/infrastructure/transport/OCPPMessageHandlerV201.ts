@@ -123,8 +123,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     | { status: "Accepted" }
     | { status: "Pending" }
     | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
-  // TODO: Persist v201 seqNo continuity across restarts in a later persistence phase.
-  private _seqNo = 0;
 
   constructor(
     chargePoint: ChargePoint,
@@ -140,10 +138,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   private generateMessageId(): string {
     return crypto.randomUUID();
-  }
-
-  private nextSeqNo(): number {
-    return this._seqNo++;
   }
 
   private send(
@@ -277,11 +271,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
     const transactionId = transaction.cpTransactionId;
     const messageId = this.generateMessageId();
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
       triggerReason: "Authorized",
-      seqNo: this.nextSeqNo(),
+      seqNo,
       transactionInfo: {
         transactionId,
         chargingState: "Charging",
@@ -311,11 +307,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
     const messageId = this.generateMessageId();
     const timestamp = (transaction.stopTime ?? new Date()).toISOString();
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
       timestamp,
       triggerReason: "StopAuthorized",
-      seqNo: this.nextSeqNo(),
+      seqNo,
       transactionInfo: {
         transactionId,
         stoppedReason: toV201StoppedReason(transaction.stopReason),
@@ -434,9 +432,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this._dataTransferHandler;
   }
 
-  public onWebSocketClosed(): void {
-    this._seqNo = 0;
-  }
+  public onWebSocketClosed(): void {}
 
   public flushPendingQueue(): void {
     // OCPP 2.0.1: pending queue handled by TransactionEvent seqNo mechanism

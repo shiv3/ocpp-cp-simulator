@@ -654,6 +654,69 @@ export class ChargePoint {
     }, retryAfterSeconds * 1000);
   }
 
+  onBootNotificationAccepted(
+    _currentTime: string | undefined,
+    intervalSeconds: number,
+  ): void {
+    const interval = intervalSeconds > 0 ? intervalSeconds : 0;
+    this._logger.info("Boot notification accepted", LogType.OCPP);
+    this.markBootAccepted();
+    // Send connector 0 (charge point level) status first
+    this.updateConnectorStatus(0, OCPPStatus.Available);
+    this.connectors.forEach((connector) => {
+      // Reset to Available only when this is a fresh post-boot state —
+      // i.e. autoReset is enabled AND no transaction is in flight. A
+      // connector that was restored from `connector_runtime` with an
+      // active transaction must keep its persisted status (typically
+      // Preparing → Charging) so the CSMS-side view stays consistent
+      // with the resumed transaction id; otherwise the CSMS sees us
+      // bounce Charging → Available and the transaction is orphaned.
+      // (See `restoreConnectorRuntimeFromDatabase` for the persisted
+      // shape and `Connector.restoreRuntimeSnapshot` for how the
+      // private fields are restored ahead of this StatusNotification.)
+      if (connector.autoResetToAvailable && connector.transaction === null) {
+        this.updateConnectorStatus(connector.id, OCPPStatus.Available);
+        return;
+      }
+      this.updateConnectorStatus(connector.id, connector.status);
+    });
+    this.status = OCPPStatus.Available;
+
+    if (interval > 0) {
+      this.startHeartbeat(interval);
+      this._logger.info(
+        `Periodic Heartbeat enabled at ${interval}s interval`,
+        LogType.HEARTBEAT,
+      );
+    } else {
+      this.stopHeartbeat();
+    }
+  }
+
+  onBootNotificationPending(intervalSeconds: number): void {
+    const interval = intervalSeconds > 0 ? intervalSeconds : 0;
+    this._logger.warn(
+      `BootNotification Pending — only CSMS-initiated traffic allowed${
+        interval > 0 ? `, retry interval=${interval}s` : ""
+      }`,
+      LogType.OCPP,
+    );
+    this.markBootPending();
+    this.stopHeartbeat();
+    // Spec: stay quiet but keep the WebSocket open. No retry timer here;
+    // CSMS can move us to Accepted/Rejected via subsequent flow.
+  }
+
+  onBootNotificationRejected(intervalSeconds: number): void {
+    const wait = intervalSeconds > 0 ? intervalSeconds : 60;
+    this._logger.error(
+      `BootNotification Rejected — silent for ${wait}s before retry`,
+      LogType.OCPP,
+    );
+    this.markBootRejected(wait);
+    this.stopHeartbeat();
+  }
+
   boot(): void {
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level

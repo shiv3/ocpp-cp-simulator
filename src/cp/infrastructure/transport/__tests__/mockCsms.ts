@@ -22,8 +22,14 @@ export interface MockCsms {
   port: number;
   received: OcppFrame[];
   waitForConnection: (timeoutMs?: number) => Promise<void>;
-  waitForFrame: (pred: (f: OcppFrame) => boolean, timeoutMs?: number) => Promise<OcppFrame>;
-  waitForCall: (action: string, timeoutMs?: number) => Promise<{ messageId: string; payload: unknown }>;
+  waitForFrame: (
+    pred: (f: OcppFrame) => boolean,
+    timeoutMs?: number,
+  ) => Promise<OcppFrame>;
+  waitForCall: (
+    action: string,
+    timeoutMs?: number,
+  ) => Promise<{ messageId: string; payload: unknown }>;
   replyCallResult: (messageId: string, payload: unknown) => void;
   send: (frame: OcppFrame) => void;
   stop: () => Promise<void>;
@@ -65,8 +71,15 @@ export function startMockCsms(): MockCsms {
       },
     },
   });
+  const port = server.port;
+  if (port === undefined) {
+    throw new Error("Mock CSMS server did not allocate a port");
+  }
 
-  function waitForFrame(pred: (f: OcppFrame) => boolean, timeoutMs = 2000): Promise<OcppFrame> {
+  function waitForFrame(
+    pred: (f: OcppFrame) => boolean,
+    timeoutMs = 2000,
+  ): Promise<OcppFrame> {
     const existing = received.find(pred);
     if (existing) {
       return Promise.resolve(existing);
@@ -94,8 +107,8 @@ export function startMockCsms(): MockCsms {
   }
 
   return {
-    url: `ws://localhost:${server.port}/`,
-    port: server.port,
+    url: `ws://localhost:${port}/`,
+    port,
     received,
     waitForConnection(timeoutMs = 2000) {
       if (socket) {
@@ -123,7 +136,10 @@ export function startMockCsms(): MockCsms {
     },
     waitForFrame,
     async waitForCall(action, timeoutMs) {
-      const frame = await waitForFrame((f) => f[0] === 2 && f[2] === action, timeoutMs);
+      const frame = await waitForFrame(
+        (f) => f[0] === 2 && f[2] === action,
+        timeoutMs,
+      );
       return { messageId: frame[1] as string, payload: frame[3] };
     },
     replyCallResult(messageId, payload) {
@@ -144,20 +160,35 @@ export function startMockCsms(): MockCsms {
   };
 }
 
+const UUID_RE = /^[0-9a-fA-F-]{36}$/;
+const ISO_TIMESTAMP_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function normalizeValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    if (UUID_RE.test(value)) return "<uuid>";
+    if (ISO_TIMESTAMP_RE.test(value)) return "<ts>";
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    const clone: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      clone[key] = key === "seqNo" ? nested : normalizeValue(nested);
+    }
+    return clone;
+  }
+
+  return value;
+}
+
 /** Replace volatile fields (UUID message ids, timestamps) so transcripts can be snapshotted. */
 export function normalizeTranscript(frames: OcppFrame[]): OcppFrame[] {
-  return frames.map((frame) =>
-    frame.map((part) => {
-      if (typeof part === "string" && /^[0-9a-fA-F-]{36}$/.test(part)) {
-        return "<uuid>";
-      }
-      if (part && typeof part === "object") {
-        const clone = { ...(part as Record<string, unknown>) };
-        if (typeof clone.timestamp === "string") clone.timestamp = "<ts>";
-        if (typeof clone.currentTime === "string") clone.currentTime = "<ts>";
-        return clone;
-      }
-      return part;
-    }),
-  );
+  return frames.map((frame) => normalizeValue(frame) as OcppFrame);
 }

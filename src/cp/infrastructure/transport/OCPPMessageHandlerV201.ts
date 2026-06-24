@@ -125,7 +125,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       return;
     }
-    this._webSocket.sendAction(messageId, action, payload);
+    const sent = this._webSocket.sendAction(messageId, action, payload);
+    if (sent) {
+      this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
+    }
   }
 
   private handleIncomingMessage(
@@ -142,7 +145,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   private handleCallResult(
-    messageId: string,
+    _messageId: string,
     payload: V201ResponsePayload,
   ): void {
     const bootResult = payload as BootNotificationResponseV201;
@@ -195,7 +198,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public sendStatusNotification(
     connectorId: number,
     status: OCPPStatus,
-    _opts?: {
+    opts?: {
       errorCode?: ChargePointErrorCode;
       info?: string;
       vendorErrorCode?: string;
@@ -203,14 +206,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       timestamp?: Date;
     },
   ): void {
-    if (connectorId === 0) return;
-
     const messageId = this.generateMessageId();
     const payload: StatusNotificationRequestV201 = {
-      timestamp: new Date().toISOString(),
+      timestamp: (opts?.timestamp ?? new Date()).toISOString(),
       connectorStatus: ocppStatusToV201(status),
-      evseId: connectorId,
-      connectorId: 1,
+      evseId: connectorId === 0 ? 0 : connectorId,
+      connectorId: connectorId === 0 ? 0 : 1,
     };
     this.send("StatusNotification", messageId, payload);
   }

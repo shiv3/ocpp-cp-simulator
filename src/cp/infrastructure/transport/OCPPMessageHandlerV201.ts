@@ -30,6 +30,7 @@ import {
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import {
@@ -267,7 +268,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("Authorize", messageId, payload);
   }
 
-  public startTransaction(transaction: Transaction, connectorId: number): void {
+  private sendStartTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
     if (!transaction.cpTransactionId) {
       transaction.cpTransactionId = crypto.randomUUID();
     }
@@ -300,7 +304,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("TransactionEvent", messageId, payload);
   }
 
-  public stopTransaction(transaction: Transaction, connectorId: number): void {
+  private sendStopTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
     const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
     const messageId = this.generateMessageId();
     const timestamp = (transaction.stopTime ?? new Date()).toISOString();
@@ -331,6 +338,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           : undefined,
     };
     this.send("TransactionEvent", messageId, payload);
+  }
+
+  public sendTransactionEvent(event: TransactionLifecycleEvent): void {
+    if (event.phase === "started")
+      this.sendStartTransaction(event.transaction, event.connectorId);
+    else this.sendStopTransaction(event.transaction, event.connectorId);
   }
 
   public sendMeterValue(

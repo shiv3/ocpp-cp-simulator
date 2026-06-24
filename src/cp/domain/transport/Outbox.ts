@@ -2,6 +2,7 @@
 // handler; ordering, boot-gate, and version-encoding will migrate here in
 // later 0b increments.
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
+import type { TransactionLifecycleEvent } from "./TransactionLifecycleEvent";
 
 export class Outbox implements IChargePointMessageHandler {
   constructor(private readonly handler: IChargePointMessageHandler) {}
@@ -34,18 +35,10 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.authorize(tagId);
   }
 
-  startTransaction(
-    transaction: Parameters<IChargePointMessageHandler["startTransaction"]>[0],
-    connectorId: Parameters<IChargePointMessageHandler["startTransaction"]>[1],
-  ): ReturnType<IChargePointMessageHandler["startTransaction"]> {
-    return this.handler.startTransaction(transaction, connectorId);
-  }
-
-  stopTransaction(
-    transaction: Parameters<IChargePointMessageHandler["stopTransaction"]>[0],
-    connectorId: Parameters<IChargePointMessageHandler["stopTransaction"]>[1],
-  ): ReturnType<IChargePointMessageHandler["stopTransaction"]> {
-    return this.handler.stopTransaction(transaction, connectorId);
+  sendTransactionEvent(
+    event: TransactionLifecycleEvent,
+  ): ReturnType<IChargePointMessageHandler["sendTransactionEvent"]> {
+    return this.handler.sendTransactionEvent(event);
   }
 
   sendMeterValue(

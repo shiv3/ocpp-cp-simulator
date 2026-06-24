@@ -5,6 +5,7 @@ import { DataTransferHandler } from "../../../infrastructure/transport/handlers"
 import type { BootNotification } from "../../types/OcppTypes";
 import { OCPPStatus } from "../../types/OcppTypes";
 import type { Transaction } from "../../connector/Transaction";
+import type { TransactionLifecycleEvent } from "../TransactionLifecycleEvent";
 
 type HandlerMethod = keyof IChargePointMessageHandler;
 
@@ -43,16 +44,10 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     this.record("authorize", args);
   }
 
-  startTransaction(
-    ...args: Parameters<IChargePointMessageHandler["startTransaction"]>
-  ): ReturnType<IChargePointMessageHandler["startTransaction"]> {
-    this.record("startTransaction", args);
-  }
-
-  stopTransaction(
-    ...args: Parameters<IChargePointMessageHandler["stopTransaction"]>
-  ): ReturnType<IChargePointMessageHandler["stopTransaction"]> {
-    this.record("stopTransaction", args);
+  sendTransactionEvent(
+    ...args: Parameters<IChargePointMessageHandler["sendTransactionEvent"]>
+  ): ReturnType<IChargePointMessageHandler["sendTransactionEvent"]> {
+    this.record("sendTransactionEvent", args);
   }
 
   sendMeterValue(
@@ -170,11 +165,13 @@ describe("Outbox", () => {
     outbox.authorize("TAG-1");
     expectCall(handler, "authorize", ["TAG-1"]);
 
-    outbox.startTransaction(transaction, 1);
-    expectCall(handler, "startTransaction", [transaction, 1]);
-
-    outbox.stopTransaction(transaction, 1);
-    expectCall(handler, "stopTransaction", [transaction, 1]);
+    const event: TransactionLifecycleEvent = {
+      phase: "ended",
+      transaction,
+      connectorId: 1,
+    };
+    outbox.sendTransactionEvent(event);
+    expectCall(handler, "sendTransactionEvent", [event]);
 
     outbox.sendMeterValue(42, 1, "Sample.Periodic");
     expectCall(handler, "sendMeterValue", [42, 1, "Sample.Periodic"]);

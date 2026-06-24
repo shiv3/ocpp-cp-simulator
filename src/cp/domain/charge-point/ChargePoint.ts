@@ -861,7 +861,11 @@ export class ChargePoint {
     }
 
     connector.beginTransaction(transaction);
-    this._outbox.startTransaction(transaction, connectorId);
+    this._outbox.sendTransactionEvent({
+      phase: "started",
+      transaction,
+      connectorId,
+    });
     this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
 
     this._events.emit("transactionStarted", {
@@ -902,7 +906,11 @@ export class ChargePoint {
       transaction.stopReason = reason;
     }
 
-    this._outbox.stopTransaction(transaction, connector.id);
+    this._outbox.sendTransactionEvent({
+      phase: "ended",
+      transaction,
+      connectorId: connector.id,
+    });
 
     this._events.emit("transactionStopped", {
       connectorId: connector.id,

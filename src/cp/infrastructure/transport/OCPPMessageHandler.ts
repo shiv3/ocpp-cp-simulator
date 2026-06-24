@@ -53,6 +53,7 @@ import {
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
+import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -426,7 +427,10 @@ export class OCPPMessageHandler {
     this.sendRequest(OCPPAction.Authorize, messageId, payload);
   }
 
-  public startTransaction(transaction: Transaction, connectorId: number): void {
+  private sendStartTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
     const messageId = this.generateMessageId();
     const payload: StartTransactionRequestV16 = {
       connectorId: connectorId,
@@ -447,7 +451,10 @@ export class OCPPMessageHandler {
     );
   }
 
-  public stopTransaction(transaction: Transaction, connectorId: number): void {
+  private sendStopTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
     const messageId = this.generateMessageId();
     // §4.10: reason MAY be omitted when "Local" (the default), but SHOULD
     // be set to a correct value otherwise. The domain layer assigns
@@ -467,6 +474,12 @@ export class OCPPMessageHandler {
       payload,
       connectorId,
     );
+  }
+
+  public sendTransactionEvent(event: TransactionLifecycleEvent): void {
+    if (event.phase === "started")
+      this.sendStartTransaction(event.transaction, event.connectorId);
+    else this.sendStopTransaction(event.transaction, event.connectorId);
   }
 
   public sendBootNotification(bootPayload: BootNotification): void {

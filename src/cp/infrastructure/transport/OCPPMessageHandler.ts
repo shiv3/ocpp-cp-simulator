@@ -45,6 +45,7 @@ import {
   OcppMessageResponsePayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
+import { outgoingV16Warning } from "./codec/validateV16";
 import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Transaction } from "../../domain/connector/Transaction";
 import {
@@ -624,6 +625,10 @@ export class OCPPMessageHandler {
         LogType.OCPP,
       );
       return;
+    }
+    const warning = outgoingV16Warning(action, payload);
+    if (warning) {
+      this._logger.warn(warning, LogType.OCPP);
     }
     // §4.1.1: queue here, pumpSerialQueue does the actual `ws.sendAction`
     // one CALL at a time. The previous CALL's CALLRESULT/CALLERROR (or

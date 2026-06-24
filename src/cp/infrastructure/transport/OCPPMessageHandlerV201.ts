@@ -12,6 +12,7 @@ import type {
   AuthorizeRequestV201,
   AuthorizeResponseV201,
 } from "@cshil/ocpp-tools";
+import { isValidGetVariablesRequestV201 } from "@cshil/ocpp-tools/validation/v201";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import { Logger, LogType } from "../../shared/Logger";
 import {
@@ -38,6 +39,7 @@ import {
   v201StatusEvse,
   v201TransactionEvse,
 } from "./v201/topologyWireV201";
+import { handleGetVariablesV201 } from "./v201/getVariablesV201";
 
 type V201Action =
   | "BootNotification"
@@ -165,6 +167,24 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: unknown,
   ): void {
     if (messageType === OCPPMessageType.CALL) {
+      if (action === "GetVariables") {
+        if (!isValidGetVariablesRequestV201(payload)) {
+          this._webSocket.sendError(messageId, {
+            errorCode: "FormationViolation" as OCPPErrorCode,
+            errorDescription: "Invalid GetVariables payload",
+            errorDetails: {},
+          });
+          return;
+        }
+
+        const response = handleGetVariablesV201(
+          payload,
+          this._chargePoint.configuration,
+        );
+        this._webSocket.sendResult(messageId, response);
+        return;
+      }
+
       this._logger.warn(
         `[v2.0.1] Unsupported CSMS action ${action}`,
         LogType.OCPP,

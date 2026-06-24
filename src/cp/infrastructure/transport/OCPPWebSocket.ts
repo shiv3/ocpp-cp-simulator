@@ -179,10 +179,7 @@ export class OCPPWebSocket {
     return this.send(message);
   }
 
-  public sendResult(
-    messageId: string,
-    payload: OcppMessageResponsePayload,
-  ): void {
+  public sendResult(messageId: string, payload: unknown): void {
     const message = JSON.stringify([
       OCPPMessageType.CALLRESULT,
       messageId,

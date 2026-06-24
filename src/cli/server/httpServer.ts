@@ -741,6 +741,15 @@ function parseCreateBody(body: unknown): ChargePointInitOptions {
   const vendor =
     typeof body.vendor === "string" ? body.vendor : "Server-Vendor";
   const model = typeof body.model === "string" ? body.model : "Server-Model";
+  let ocppVersion = "OCPP-1.6J";
+  if (Object.prototype.hasOwnProperty.call(body, "ocppVersion")) {
+    if (typeof body.ocppVersion !== "string") {
+      throw new Error("ocppVersion must be a string");
+    }
+    if (body.ocppVersion === "OCPP-1.6J" || body.ocppVersion === "OCPP-2.0.1") {
+      ocppVersion = body.ocppVersion;
+    }
+  }
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
     const username = body.basicAuth.username;
@@ -778,6 +787,7 @@ function parseCreateBody(body: unknown): ChargePointInitOptions {
     vendor,
     model,
     basicAuth,
+    ocppVersion,
     ...(bootNotification ? { bootNotification } : {}),
   };
 }

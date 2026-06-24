@@ -93,6 +93,7 @@ export interface ChargePointInitOptions {
     readonly username: string;
     readonly password: string;
   } | null;
+  readonly ocppVersion?: string;
   readonly bootNotification?: {
     readonly firmwareVersion?: string;
     readonly chargePointSerialNumber?: string;
@@ -181,6 +182,7 @@ export interface ChargePointStatus {
       readonly username: string;
       readonly password: string;
     } | null;
+    readonly ocppVersion?: string;
     readonly bootNotification: {
       readonly firmwareVersion?: string;
       readonly chargePointSerialNumber?: string;

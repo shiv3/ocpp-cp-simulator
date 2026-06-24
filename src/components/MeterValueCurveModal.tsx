@@ -67,6 +67,8 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
     if (isOpen) {
       drawCanvas();
     }
+    // drawCanvas is recreated each render; re-running on its identity is unwanted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, isOpen, maxTime, maxValue]);
 
   const drawCanvas = () => {

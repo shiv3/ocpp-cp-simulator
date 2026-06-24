@@ -95,7 +95,6 @@ export class CPRegistry {
       // background), and we don't want one slow CSMS to block restore of
       // the others.
       svc.connect().catch((err) => {
-        // eslint-disable-next-line no-console
         console.error(
           `[CPRegistry] auto-connect failed for restored CP "${row.cp_id}":`,
           err,
@@ -181,7 +180,6 @@ export class CPRegistry {
       try {
         svc.loadScenario(connectorId, definition);
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.warn(
           `[CPRegistry] Failed to re-attach scenario ${definition.id} to ${init.cpId}/connector ${connectorId} during update:`,
           err,

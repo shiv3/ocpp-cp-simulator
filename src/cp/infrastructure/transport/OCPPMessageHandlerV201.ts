@@ -17,6 +17,7 @@ import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
   ChargePointErrorCode,
+  type OCPPErrorCode,
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
@@ -170,10 +171,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private handleIncomingMessage(
     messageType: OCPPMessageType,
     messageId: string,
-    _action: string,
+    action: string,
     payload: unknown,
   ): void {
-    if (messageType === OCPPMessageType.CALLRESULT) {
+    if (messageType === OCPPMessageType.CALL) {
+      this._logger.warn(
+        `[v2.0.1] Unsupported CSMS action ${action}`,
+        LogType.OCPP,
+      );
+      this._webSocket.sendError(messageId, {
+        errorCode: "NotImplemented" as OCPPErrorCode,
+        errorDescription: "This action is not supported",
+        errorDetails: {},
+      });
+    } else if (messageType === OCPPMessageType.CALLRESULT) {
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);

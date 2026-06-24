@@ -12,7 +12,10 @@ import type {
   AuthorizeRequestV201,
   AuthorizeResponseV201,
 } from "@cshil/ocpp-tools";
-import { isValidGetVariablesRequestV201 } from "@cshil/ocpp-tools/validation/v201";
+import {
+  isValidGetVariablesRequestV201,
+  isValidSetVariablesRequestV201,
+} from "@cshil/ocpp-tools/validation/v201";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import { Logger, LogType } from "../../shared/Logger";
 import {
@@ -40,6 +43,7 @@ import {
   v201TransactionEvse,
 } from "./v201/topologyWireV201";
 import { handleGetVariablesV201 } from "./v201/getVariablesV201";
+import { handleSetVariablesV201 } from "./v201/setVariablesV201";
 
 type V201Action =
   | "BootNotification"
@@ -182,6 +186,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           this._chargePoint.configuration,
         );
         this._webSocket.sendResult(messageId, response);
+        return;
+      }
+
+      if (action === "SetVariables") {
+        if (!isValidSetVariablesRequestV201(payload)) {
+          this._webSocket.sendError(messageId, {
+            errorCode: "FormationViolation" as OCPPErrorCode,
+            errorDescription: "Invalid SetVariables payload",
+            errorDetails: {},
+          });
+          return;
+        }
+
+        this._webSocket.sendResult(
+          messageId,
+          handleSetVariablesV201(payload, this._chargePoint.configuration),
+        );
         return;
       }
 

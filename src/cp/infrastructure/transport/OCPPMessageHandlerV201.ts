@@ -11,8 +11,12 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
+  GetBaseReportResponseV201,
+  NotifyReportRequestV201,
 } from "@cshil/ocpp-tools";
+import type { ReportDataType } from "@cshil/ocpp-tools/types/v201/notify-report";
 import {
+  isValidGetBaseReportRequestV201,
   isValidGetVariablesRequestV201,
   isValidSetVariablesRequestV201,
 } from "@cshil/ocpp-tools/validation/v201";
@@ -44,6 +48,7 @@ import {
 } from "./v201/topologyWireV201";
 import { handleGetVariablesV201 } from "./v201/getVariablesV201";
 import { handleSetVariablesV201 } from "./v201/setVariablesV201";
+import { buildBaseReportData } from "./v201/baseReportV201";
 
 type V201Action =
   | "BootNotification"
@@ -51,7 +56,8 @@ type V201Action =
   | "StatusNotification"
   | "TransactionEvent"
   | "MeterValues"
-  | "Authorize";
+  | "Authorize"
+  | "NotifyReport";
 
 type V201RequestPayload =
   | BootNotificationRequestV201
@@ -59,7 +65,8 @@ type V201RequestPayload =
   | StatusNotificationRequestV201
   | TransactionEventRequestV201
   | MeterValuesRequestV201
-  | AuthorizeRequestV201;
+  | AuthorizeRequestV201
+  | NotifyReportRequestV201;
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -206,6 +213,31 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         return;
       }
 
+      if (action === "GetBaseReport") {
+        if (!isValidGetBaseReportRequestV201(payload)) {
+          this._webSocket.sendError(messageId, {
+            errorCode: "FormationViolation" as OCPPErrorCode,
+            errorDescription: "Invalid GetBaseReport payload",
+            errorDetails: {},
+          });
+          return;
+        }
+
+        const reportData = buildBaseReportData(this._chargePoint.configuration);
+        if (reportData.length === 0) {
+          this._webSocket.sendResult(messageId, {
+            status: "EmptyResultSet",
+          } as GetBaseReportResponseV201);
+          return;
+        }
+
+        this._webSocket.sendResult(messageId, {
+          status: "Accepted",
+        } as GetBaseReportResponseV201);
+        this.sendBaseReport(payload.requestId, reportData);
+        return;
+      }
+
       this._logger.warn(
         `[v2.0.1] Unsupported CSMS action ${action}`,
         LogType.OCPP,
@@ -220,6 +252,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     } else if (messageType === OCPPMessageType.CALLERROR) {
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
     }
+  }
+
+  private sendBaseReport(
+    requestId: number,
+    reportData: ReportDataType[],
+  ): void {
+    const first = reportData[0];
+    if (first === undefined) return;
+
+    const payload: NotifyReportRequestV201 = {
+      requestId,
+      generatedAt: new Date().toISOString(),
+      seqNo: 0,
+      tbc: false,
+      reportData: [first, ...reportData.slice(1)],
+    };
+    this.send("NotifyReport", this.generateMessageId(), payload);
   }
 
   private handleCallResult(

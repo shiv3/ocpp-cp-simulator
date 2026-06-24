@@ -2,15 +2,9 @@ import type {
   GetVariablesRequestV201,
   GetVariablesResponseV201,
 } from "@cshil/ocpp-tools";
-import {
-  ConfigurationStore,
-  type ArrayConfigurationValue,
-  type BooleanConfigurationValue,
-  type ConfigurationValue,
-  type IntegerConfigurationValue,
-  type StringConfigurationValue,
-} from "../../../domain/charge-point/ConfigurationStore";
+import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
+import { renderConfigValue } from "./renderConfigValue";
 
 type GetVariableResult = GetVariablesResponseV201["getVariableResult"][number];
 
@@ -59,7 +53,7 @@ export function handleGetVariablesV201(
     return {
       attributeStatus: "Accepted",
       attributeType: "Actual",
-      attributeValue: renderValue(entry),
+      attributeValue: renderConfigValue(entry),
       component: data.component,
       variable: data.variable,
     };
@@ -73,17 +67,4 @@ export function handleGetVariablesV201(
   return {
     getVariableResult: [first, ...results.slice(1)],
   };
-}
-
-function renderValue(value: ConfigurationValue): string {
-  switch (value.key.type) {
-    case "string":
-      return (value as StringConfigurationValue).value;
-    case "boolean":
-      return String((value as BooleanConfigurationValue).value);
-    case "integer":
-      return String((value as IntegerConfigurationValue).value);
-    case "array":
-      return (value as ArrayConfigurationValue).value.join(",");
-  }
 }

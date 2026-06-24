@@ -1,0 +1,247 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport with mapped configuration variables 1`] = `
+[
+  [
+    2,
+    "<uuid>",
+    "NotifyReport",
+    {
+      "generatedAt": "<ts>",
+      "reportData": [
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "HeartbeatInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "300",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "WebSocketPingInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "ResetRetries",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "1",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "EVConnectionTimeOut",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "60",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxUpdatedInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "60",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxUpdatedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "Energy.Active.Import.Register,Power.Active.Import",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "Interval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "LocalAuthListCtrlr",
+          },
+          "variable": {
+            "name": "Enabled",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "true",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "LocalAuthListCtrlr",
+          },
+          "variable": {
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "AuthCtrlr",
+          },
+          "variable": {
+            "name": "AuthorizeRemoteStart",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "StopTxOnInvalidId",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "true",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "StopTxOnEVSideDisconnect",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "true",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+      ],
+      "requestId": 42,
+      "seqNo": 0,
+      "tbc": false,
+    },
+  ],
+]
+`;

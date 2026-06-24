@@ -9,23 +9,15 @@ import type { SendLocalListItem } from "../../../../domain/auth/LocalAuthList";
  * delete is cheap).
  */
 function isFeatureEnabled(context: HandlerContext): boolean {
-  return (
-    context.chargePoint.configuration.getBoolean("LocalAuthListEnabled") ?? true
-  );
+  return context.chargePoint.configuration.localAuthListEnabled();
 }
 
 function maxListLength(context: HandlerContext): number {
-  return (
-    context.chargePoint.configuration.getInteger("LocalAuthListMaxLength") ??
-    1000
-  );
+  return context.chargePoint.configuration.localAuthListMaxLength();
 }
 
 function maxSendLength(context: HandlerContext): number {
-  return (
-    context.chargePoint.configuration.getInteger("SendLocalListMaxLength") ??
-    100
-  );
+  return context.chargePoint.configuration.sendLocalListMaxLength();
 }
 
 /**

@@ -559,9 +559,7 @@ export class OCPPMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.getArray(
-      "MeterValuesSampledData",
-    ) ?? ["Energy.Active.Import.Register"];
+    const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
 
     const payload: MeterValuesRequestV16 = {
@@ -755,9 +753,7 @@ export class OCPPMessageHandler {
   public flushPendingQueue(): void {
     if (this._pendingQueue.size() === 0) return;
     const maxAttempts =
-      this._chargePoint.configuration.getInteger(
-        "TransactionMessageAttempts",
-      ) ?? 3;
+      this._chargePoint.configuration.transactionMessageAttempts();
     // Route flushed messages through `sendRequest` so they take the same
     // §4.1.1 serialization path as fresh CALLs. The PendingMessageQueue's
     // `flush` callback returns true for every entry (we're handing

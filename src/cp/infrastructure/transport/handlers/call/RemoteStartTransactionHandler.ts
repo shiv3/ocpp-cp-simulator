@@ -37,9 +37,7 @@ export class RemoteStartTransactionHandler
     }
 
     const authorizeFirst =
-      context.chargePoint.configuration.getBoolean(
-        "AuthorizeRemoteTxRequests",
-      ) ?? false;
+      context.chargePoint.configuration.authorizeRemoteTxRequests();
     if (authorizeFirst) {
       context.logger.info(
         `AuthorizeRemoteTxRequests=true: sending Authorize.req for ${idTag}`,

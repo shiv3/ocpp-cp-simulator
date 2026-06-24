@@ -301,9 +301,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.getArray(
-      "MeterValuesSampledData",
-    ) ?? ["Energy.Active.Import.Register"];
+    const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
 
     const payload: MeterValuesRequestV201 = {

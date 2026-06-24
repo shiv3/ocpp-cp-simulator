@@ -9,7 +9,7 @@ import type { HandlerContext } from "../../MessageHandlerRegistry";
 
 /**
  * Builds the minimal duck-typed HandlerContext the handlers consume. We
- * stub Configuration via a tiny record so tests can flip
+ * stub Configuration via semantic accessors so tests can flip
  * LocalAuthListEnabled / *MaxLength without spinning up a full
  * ChargePoint + ConfigurationStore + Database stack.
  */
@@ -24,13 +24,9 @@ function buildContext(
   const logger = new Logger();
   const manager = opts.manager ?? new LocalAuthListManager(logger);
   const configStub = {
-    getBoolean: (name: string) =>
-      name === "LocalAuthListEnabled" ? (opts.enabled ?? true) : undefined,
-    getInteger: (name: string) => {
-      if (name === "LocalAuthListMaxLength") return opts.localMax ?? 1000;
-      if (name === "SendLocalListMaxLength") return opts.sendMax ?? 100;
-      return undefined;
-    },
+    localAuthListEnabled: () => opts.enabled ?? true,
+    localAuthListMaxLength: () => opts.localMax ?? 1000,
+    sendLocalListMaxLength: () => opts.sendMax ?? 100,
   };
   const chargePointStub = {
     configuration: configStub,

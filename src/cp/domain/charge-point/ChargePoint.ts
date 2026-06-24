@@ -1043,8 +1043,7 @@ export class ChargePoint {
 
   private startConnectionTimeout(connectorId: number): void {
     this.clearConnectionTimeout(connectorId);
-    const timeoutSec =
-      this._configuration?.getInteger("ConnectionTimeOut") ?? 60;
+    const timeoutSec = this._configuration?.connectionTimeOut();
     if (timeoutSec <= 0) return;
     const handle = setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);

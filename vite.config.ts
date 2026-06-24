@@ -20,6 +20,11 @@ export default defineConfig({
     // ending in `.bun.test.ts` run under `bun test` instead (see the
     // `test:bun` npm script); skip them here.
     exclude: ["**/node_modules/**", "**/dist/**", "**/*.bun.test.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "./coverage",
+    },
   },
   resolve: {
     alias: {

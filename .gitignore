@@ -39,3 +39,4 @@ src-tauri/gen/
 # Tauri sidecar — Bun-compiled CLI per target triple, produced at build
 # time by scripts/build-tauri-sidecar.sh. Never committed.
 src-tauri/binaries/
+coverage/

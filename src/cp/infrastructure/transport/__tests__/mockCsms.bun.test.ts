@@ -15,8 +15,17 @@ describe("mock CSMS harness", () => {
     expect(call.messageId).toBe("m1");
 
     const pending = csms.waitForCall("NeverArrives", 5000);
-    csms.stop();
+    void pending.catch(() => undefined);
+    await csms.stop();
     await expect(pending).rejects.toThrow("mock CSMS stopped");
     client.close();
+  });
+
+  it("rejects pending connection waiters on stop", async () => {
+    const csms = startMockCsms();
+    const pending = csms.waitForConnection(5000);
+    void pending.catch(() => undefined);
+    await csms.stop();
+    await expect(pending).rejects.toThrow("mock CSMS stopped");
   });
 });

@@ -11,6 +11,12 @@ interface FrameWaiter {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface ConnectionWaiter {
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export interface MockCsms {
   url: string;
   port: number;
@@ -20,17 +26,14 @@ export interface MockCsms {
   waitForCall: (action: string, timeoutMs?: number) => Promise<{ messageId: string; payload: unknown }>;
   replyCallResult: (messageId: string, payload: unknown) => void;
   send: (frame: OcppFrame) => void;
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 export function startMockCsms(): MockCsms {
   const received: OcppFrame[] = [];
   const waiters = new Set<FrameWaiter>();
+  const connectionWaiters = new Set<ConnectionWaiter>();
   let socket: ServerWebSocket<unknown> | null = null;
-  let markConnected: (() => void) | null = null;
-  const connected = new Promise<void>((resolve) => {
-    markConnected = resolve;
-  });
 
   const server = Bun.serve({
     port: 0,
@@ -43,7 +46,9 @@ export function startMockCsms(): MockCsms {
     websocket: {
       open(ws) {
         socket = ws;
-        markConnected?.();
+        for (const w of [...connectionWaiters]) {
+          w.resolve(); // resolve() removes the waiter and clears its timer
+        }
       },
       message(_ws, message) {
         const raw = typeof message === "string" ? message : message.toString();
@@ -93,12 +98,28 @@ export function startMockCsms(): MockCsms {
     port: server.port,
     received,
     waitForConnection(timeoutMs = 2000) {
-      return Promise.race([
-        connected,
-        new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error("Timed out waiting for connection")), timeoutMs),
-        ),
-      ]);
+      if (socket) {
+        return Promise.resolve();
+      }
+      return new Promise((resolve, reject) => {
+        const waiter: ConnectionWaiter = {
+          timer: setTimeout(() => {
+            connectionWaiters.delete(waiter);
+            reject(new Error("Timed out waiting for connection"));
+          }, timeoutMs),
+          resolve: () => {
+            clearTimeout(waiter.timer);
+            connectionWaiters.delete(waiter);
+            resolve();
+          },
+          reject: (err) => {
+            clearTimeout(waiter.timer);
+            connectionWaiters.delete(waiter);
+            reject(err);
+          },
+        };
+        connectionWaiters.add(waiter);
+      });
     },
     waitForFrame,
     async waitForCall(action, timeoutMs) {
@@ -111,11 +132,14 @@ export function startMockCsms(): MockCsms {
     send(frame) {
       socket?.send(JSON.stringify(frame));
     },
-    stop() {
+    async stop() {
       for (const w of [...waiters]) {
         w.reject(new Error("mock CSMS stopped")); // reject() clears the timer and removes the waiter
       }
-      server.stop(true);
+      for (const w of [...connectionWaiters]) {
+        w.reject(new Error("mock CSMS stopped")); // reject() clears the timer and removes the waiter
+      }
+      await server.stop(true);
     },
   };
 }

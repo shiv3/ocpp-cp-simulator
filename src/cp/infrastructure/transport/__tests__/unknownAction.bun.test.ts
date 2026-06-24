@@ -27,7 +27,7 @@ describe("OCPP 1.6 unknown action (golden)", () => {
       expect(normalizeTranscript([callError])).toMatchSnapshot();
     } finally {
       cp.disconnect();
-      csms.stop();
+      await csms.stop();
     }
   });
 });

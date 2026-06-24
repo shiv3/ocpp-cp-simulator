@@ -36,7 +36,7 @@ describe("OCPP 1.6 boot handshake (golden)", () => {
       expect(normalizeTranscript(csms.received)).toMatchSnapshot();
     } finally {
       cp.disconnect();
-      csms.stop();
+      await csms.stop();
     }
   });
 });

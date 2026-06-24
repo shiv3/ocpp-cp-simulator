@@ -9,6 +9,7 @@ import { OCPPMessageHandler } from "../../infrastructure/transport/OCPPMessageHa
 import { OCPPMessageHandlerV201 } from "../../infrastructure/transport/OCPPMessageHandlerV201";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
+import { Outbox } from "../transport/Outbox";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
 import type { OCPPAvailability } from "../types/OcppTypes";
@@ -44,6 +45,7 @@ export class ChargePoint {
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket;
   private readonly _messageHandler: IChargePointMessageHandler;
+  private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
   private readonly _logRepository: LogRepository;
@@ -175,11 +177,10 @@ export class ChargePoint {
       ocppVersion === "OCPP-2.0.1"
         ? new OCPPMessageHandlerV201(this, this._webSocket, this._logger)
         : new OCPPMessageHandler(this, this._webSocket, this._logger);
+    this._outbox = new Outbox(this._messageHandler);
 
     this._heartbeat = new HeartbeatService(this._logger);
-    this._heartbeat.setHeartbeatCallback(() =>
-      this._messageHandler.sendHeartbeat(),
-    );
+    this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
 
     this._reservationManager = new ReservationManager(this._logger);
     this._localAuthListManager = new LocalAuthListManager(this._logger);
@@ -542,7 +543,7 @@ export class ChargePoint {
       );
       return;
     }
-    this._messageHandler.sendStatusNotification(connectorId, status, {
+    this._outbox.sendStatusNotification(connectorId, status, {
       errorCode:
         (opts.errorCode as
           | import("../types/OcppTypes").ChargePointErrorCode
@@ -555,14 +556,14 @@ export class ChargePoint {
 
   /** Send a CP-initiated DataTransfer.req (§4.3). */
   sendDataTransfer(vendorId: string, messageId?: string, data?: string): void {
-    this._messageHandler.sendDataTransfer(vendorId, messageId, data);
+    this._outbox.sendDataTransfer(vendorId, messageId, data);
   }
 
   /** Send DiagnosticsStatusNotification.req — see OCPPMessageHandler doc. */
   sendDiagnosticsStatusNotification(
     status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
   ): void {
-    this._messageHandler.sendDiagnosticsStatusNotification(status);
+    this._outbox.sendDiagnosticsStatusNotification(status);
   }
 
   /** Send FirmwareStatusNotification.req — see OCPPMessageHandler doc. */
@@ -576,7 +577,7 @@ export class ChargePoint {
       | "Installing"
       | "Installed",
   ): void {
-    this._messageHandler.sendFirmwareStatusNotification(status);
+    this._outbox.sendFirmwareStatusNotification(status);
   }
 
   /** Set while a simulated firmware update is in flight, so a second
@@ -631,19 +632,19 @@ export class ChargePoint {
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
-    this._messageHandler.setBootStatus({ status: "Accepted" });
+    this._outbox.setBootStatus({ status: "Accepted" });
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
     // any post-boot StatusNotification fan-out goes first.
-    queueMicrotask(() => this._messageHandler.flushPendingQueue());
+    queueMicrotask(() => this._outbox.flushPendingQueue());
   }
 
   markBootPending(): void {
-    this._messageHandler.setBootStatus({ status: "Pending" });
+    this._outbox.setBootStatus({ status: "Pending" });
   }
 
   markBootRejected(retryAfterSeconds: number): void {
-    this._messageHandler.setBootStatus({
+    this._outbox.setBootStatus({
       status: "Rejected",
       retryAfter: new Date(Date.now() + retryAfterSeconds * 1000),
     });
@@ -658,7 +659,7 @@ export class ChargePoint {
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
     // after we get the Accepted response.
-    this._messageHandler.sendBootNotification(this._bootNotification);
+    this._outbox.sendBootNotification(this._bootNotification);
     this.error = "";
   }
 
@@ -696,7 +697,7 @@ export class ChargePoint {
     // §4.1.1 serializer: drop the in-flight CALL + queued CALLs since the
     // WebSocket they target is gone. Transaction-related ones are already
     // persisted via PendingMessageQueue on prior send failures.
-    this._messageHandler.onWebSocketClosed();
+    this._outbox.onWebSocketClosed();
     // Flush any buffered log lines so the operator can still see the
     // last seconds of activity after the CP went down.
     this._logRepository.flush();
@@ -708,7 +709,7 @@ export class ChargePoint {
   }
 
   authorize(tagId: string): void {
-    this._messageHandler.authorize(tagId);
+    this._outbox.authorize(tagId);
   }
 
   set status(newStatus: ChargePointStatus) {
@@ -797,7 +798,7 @@ export class ChargePoint {
     }
 
     connector.beginTransaction(transaction);
-    this._messageHandler.startTransaction(transaction, connectorId);
+    this._outbox.startTransaction(transaction, connectorId);
     this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
 
     this._events.emit("transactionStarted", {
@@ -838,7 +839,7 @@ export class ChargePoint {
       transaction.stopReason = reason;
     }
 
-    this._messageHandler.stopTransaction(transaction, connector.id);
+    this._outbox.stopTransaction(transaction, connector.id);
 
     this._events.emit("transactionStopped", {
       connectorId: connector.id,
@@ -945,7 +946,7 @@ export class ChargePoint {
       );
       return;
     }
-    this._messageHandler.sendMeterValue(
+    this._outbox.sendMeterValue(
       connector.transaction?.id ?? undefined,
       connectorId,
     );
@@ -1000,7 +1001,7 @@ export class ChargePoint {
       // CP-level Faulted: send via the same path, no specific connector
       // errorCode available, so we'd pass NoError by default. Callers that
       // want to set a CP-level fault should use sendCpFaultedNotification.
-      this._messageHandler.sendStatusNotification(0, status);
+      this._outbox.sendStatusNotification(0, status);
       return;
     }
 
@@ -1033,7 +1034,7 @@ export class ChargePoint {
     // happy-path transitions.
     const useErrorCode =
       connector.currentErrorCode !== "NoError" || status === OCPPStatus.Faulted;
-    this._messageHandler.sendStatusNotification(connectorId, status, {
+    this._outbox.sendStatusNotification(connectorId, status, {
       errorCode: useErrorCode ? connector.currentErrorCode : "NoError",
       info: connector.errorInfo ?? undefined,
       vendorErrorCode: connector.vendorErrorCode ?? undefined,
@@ -1076,17 +1077,14 @@ export class ChargePoint {
    */
   sendCurrentStatusNotification(connectorId?: number): void {
     if (connectorId === undefined) {
-      this._messageHandler.sendStatusNotification(0, this._status);
+      this._outbox.sendStatusNotification(0, this._status);
       this._connectors.forEach((connector) => {
-        this._messageHandler.sendStatusNotification(
-          connector.id,
-          connector.status,
-        );
+        this._outbox.sendStatusNotification(connector.id, connector.status);
       });
       return;
     }
     if (connectorId === 0) {
-      this._messageHandler.sendStatusNotification(0, this._status);
+      this._outbox.sendStatusNotification(0, this._status);
       return;
     }
     const connector = this.getConnector(connectorId);
@@ -1097,6 +1095,6 @@ export class ChargePoint {
       );
       return;
     }
-    this._messageHandler.sendStatusNotification(connectorId, connector.status);
+    this._outbox.sendStatusNotification(connectorId, connector.status);
   }
 }

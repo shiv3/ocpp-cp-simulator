@@ -167,8 +167,8 @@ export class OCPPWebSocket {
 
   public sendAction(
     messageId: string,
-    action: OCPPAction,
-    payload: OcppMessageRequestPayload,
+    action: string,
+    payload: unknown,
   ): boolean {
     const message = JSON.stringify([
       OCPPMessageType.CALL,

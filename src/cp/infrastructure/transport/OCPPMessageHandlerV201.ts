@@ -125,7 +125,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       return;
     }
-    this._webSocket.sendAction(messageId, action as never, payload as never);
+    this._webSocket.sendAction(messageId, action, payload);
   }
 
   private handleIncomingMessage(

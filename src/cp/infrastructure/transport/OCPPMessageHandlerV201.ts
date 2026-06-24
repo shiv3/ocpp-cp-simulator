@@ -122,9 +122,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     | { status: "Accepted" }
     | { status: "Pending" }
     | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
-  // TODO: Persist v201 seqNo/transaction IDs across restarts in a later persistence phase.
+  // TODO: Persist v201 seqNo continuity across restarts in a later persistence phase.
   private _seqNo = 0;
-  private readonly _transactionIds = new Map<number, string>();
 
   constructor(
     chargePoint: ChargePoint,
@@ -144,15 +143,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   private nextSeqNo(): number {
     return this._seqNo++;
-  }
-
-  private getOrCreateTransactionId(numericId: number): string {
-    let id = this._transactionIds.get(numericId);
-    if (!id) {
-      id = crypto.randomUUID();
-      this._transactionIds.set(numericId, id);
-    }
-    return id;
   }
 
   private send(
@@ -278,7 +268,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   public startTransaction(transaction: Transaction, connectorId: number): void {
-    const transactionId = this.getOrCreateTransactionId(connectorId);
+    if (!transaction.cpTransactionId) {
+      transaction.cpTransactionId = crypto.randomUUID();
+    }
+    const transactionId = transaction.cpTransactionId;
     const messageId = this.generateMessageId();
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
@@ -308,7 +301,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   public stopTransaction(transaction: Transaction, connectorId: number): void {
-    const transactionId = this.getOrCreateTransactionId(connectorId);
+    const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
     const messageId = this.generateMessageId();
     const timestamp = (transaction.stopTime ?? new Date()).toISOString();
     const payload: TransactionEventRequestV201 = {
@@ -338,7 +331,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           : undefined,
     };
     this.send("TransactionEvent", messageId, payload);
-    this._transactionIds.delete(connectorId);
   }
 
   public sendMeterValue(

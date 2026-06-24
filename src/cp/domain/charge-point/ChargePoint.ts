@@ -5,10 +5,9 @@ import { StateManager } from "../../application/services/StateManager";
 import { Connector } from "../connector/Connector";
 import type { ChargePointEvents } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
-import { OCPPMessageHandler } from "../../infrastructure/transport/OCPPMessageHandler";
-import { OCPPMessageHandlerV201 } from "../../infrastructure/transport/OCPPMessageHandlerV201";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
+import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { Outbox } from "../transport/Outbox";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
@@ -173,10 +172,11 @@ export class ChargePoint {
       extraWsSubprotocols,
       ocppVersion,
     );
-    this._messageHandler =
-      ocppVersion === "OCPP-2.0.1"
-        ? new OCPPMessageHandlerV201(this, this._webSocket, this._logger)
-        : new OCPPMessageHandler(this, this._webSocket, this._logger);
+    this._messageHandler = getProtocolProfile(ocppVersion).createMessageHandler(
+      this,
+      this._webSocket,
+      this._logger,
+    );
     this._outbox = new Outbox(this._messageHandler);
 
     this._heartbeat = new HeartbeatService(this._logger);

@@ -4,15 +4,19 @@
  * many CSMS implementations accept (e.g. `ocpp_ws_secret`). CLI runtimes (Bun
  * / Node `ws`) send the credentials as a real HTTP Basic header instead.
  */
-export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
-export const OCPP_WEBSOCKET_PROTOCOL_16 = "ocpp1.6";
-export const OCPP_WEBSOCKET_PROTOCOL_201 = "ocpp2.0.1";
+import {
+  OCPP_WEBSOCKET_PROTOCOL_16,
+  OCPP_WEBSOCKET_PROTOCOL_201,
+  ocppVersionToSubprotocol,
+} from "./profile/subprotocols";
 
-export function ocppVersionToSubprotocol(ocppVersion: string): string {
-  return ocppVersion === "OCPP-2.0.1"
-    ? OCPP_WEBSOCKET_PROTOCOL_201
-    : OCPP_WEBSOCKET_PROTOCOL_16;
-}
+export {
+  OCPP_WEBSOCKET_PROTOCOL_16,
+  OCPP_WEBSOCKET_PROTOCOL_201,
+  ocppVersionToSubprotocol,
+};
+
+export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
 
 export interface BasicAuthSettings {
   username: string;

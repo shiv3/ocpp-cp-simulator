@@ -12,7 +12,7 @@ import type {
   AuthorizeRequestV201,
   AuthorizeResponseV201,
 } from "@cshil/ocpp-tools";
-import { OCPPWebSocket } from "./OCPPWebSocket";
+import type { OCPPWebSocket } from "./OCPPWebSocket";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -25,7 +25,7 @@ import {
   buildSampledValues,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
-import { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 

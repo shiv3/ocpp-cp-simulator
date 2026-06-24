@@ -38,15 +38,15 @@ import type {
   UnlockConnectorRequestV16,
   UpdateFirmwareRequestV16,
 } from "@cshil/ocpp-tools";
-import {
+import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,
   OcppMessageRequestPayload,
   OcppMessageResponsePayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
-import { outgoingV16Warning } from "./codec/validateV16";
-import { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { ProtocolCodec } from "./profile/ProtocolProfile";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Transaction } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
@@ -199,6 +199,7 @@ export class OCPPMessageHandler {
   private _chargePoint: ChargePoint;
   private _webSocket: OCPPWebSocket;
   private _logger: Logger;
+  private readonly _codec: ProtocolCodec;
   private _requests: RequestHistory = new RequestHistory();
   private _registry: MessageHandlerRegistry = new MessageHandlerRegistry();
   // Stored as a field so scenarios / tests can register vendor responders
@@ -246,10 +247,12 @@ export class OCPPMessageHandler {
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
     logger: Logger,
+    codec: ProtocolCodec,
   ) {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
+    this._codec = codec;
     this._pendingQueue = new PendingMessageQueue(
       chargePoint.id,
       chargePoint.database,
@@ -624,7 +627,7 @@ export class OCPPMessageHandler {
       );
       return;
     }
-    const warning = outgoingV16Warning(action, payload);
+    const warning = this._codec.outgoingWarning(action, payload);
     if (warning) {
       this._logger.warn(warning, LogType.OCPP);
     }

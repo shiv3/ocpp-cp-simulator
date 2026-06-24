@@ -32,6 +32,11 @@ import {
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
+import {
+  v201MeterEvseId,
+  v201StatusEvse,
+  v201TransactionEvse,
+} from "./v201/topologyWireV201";
 
 type V201Action =
   | "BootNotification"
@@ -254,11 +259,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     },
   ): void {
     const messageId = this.generateMessageId();
+    const ev = v201StatusEvse(connectorId);
     const payload: StatusNotificationRequestV201 = {
       timestamp: (opts?.timestamp ?? new Date()).toISOString(),
       connectorStatus: ocppStatusToV201(status),
-      evseId: connectorId === 0 ? 0 : connectorId,
-      connectorId: connectorId === 0 ? 0 : 1,
+      evseId: ev.evseId,
+      connectorId: ev.connectorId,
     };
     this.send("StatusNotification", messageId, payload);
   }
@@ -284,7 +290,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         chargingState: "Charging",
       },
       idToken: { idToken: transaction.tagId, type: "ISO14443" },
-      evse: { id: connectorId, connectorId: 1 },
+      evse: v201TransactionEvse(connectorId),
       meterValue: [
         {
           timestamp: transaction.startTime.toISOString(),
@@ -314,7 +320,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         transactionId,
         stoppedReason: toV201StoppedReason(transaction.stopReason),
       },
-      evse: { id: connectorId, connectorId: 1 },
+      evse: v201TransactionEvse(connectorId),
       meterValue:
         transaction.meterStop !== null
           ? [
@@ -367,7 +373,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     })) as [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]];
 
     const payload: MeterValuesRequestV201 = {
-      evseId: connectorId,
+      evseId: v201MeterEvseId(connectorId),
       meterValue: [
         {
           timestamp: new Date().toISOString(),

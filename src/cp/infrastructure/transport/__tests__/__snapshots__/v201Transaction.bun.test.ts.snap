@@ -1,0 +1,105 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OCPP 2.0.1 transaction events sends TransactionEvent and MeterValues with stable transaction id and numeric values 1`] = `
+[
+  [
+    2,
+    "<uuid>",
+    "TransactionEvent",
+    {
+      "eventType": "Started",
+      "evse": {
+        "connectorId": 1,
+        "id": 1,
+      },
+      "idToken": {
+        "idToken": "TAG-201",
+        "type": "ISO14443",
+      },
+      "meterValue": [
+        {
+          "sampledValue": [
+            {
+              "measurand": "Energy.Active.Import.Register",
+              "unitOfMeasure": {
+                "unit": "kWh",
+              },
+              "value": 0,
+            },
+          ],
+          "timestamp": "<ts>",
+        },
+      ],
+      "seqNo": 0,
+      "timestamp": "<ts>",
+      "transactionInfo": {
+        "chargingState": "Charging",
+        "transactionId": "<uuid>",
+      },
+      "triggerReason": "Authorized",
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "MeterValues",
+    {
+      "evseId": 1,
+      "meterValue": [
+        {
+          "sampledValue": [
+            {
+              "measurand": "Energy.Active.Import.Register",
+              "unitOfMeasure": {
+                "unit": "Wh",
+              },
+              "value": 0,
+            },
+            {
+              "measurand": "Power.Active.Import",
+              "unitOfMeasure": {
+                "unit": "W",
+              },
+              "value": 0,
+            },
+          ],
+          "timestamp": "<ts>",
+        },
+      ],
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "TransactionEvent",
+    {
+      "eventType": "Ended",
+      "evse": {
+        "connectorId": 1,
+        "id": 1,
+      },
+      "meterValue": [
+        {
+          "sampledValue": [
+            {
+              "measurand": "Energy.Active.Import.Register",
+              "unitOfMeasure": {
+                "unit": "kWh",
+              },
+              "value": 0,
+            },
+          ],
+          "timestamp": "<ts>",
+        },
+      ],
+      "seqNo": 1,
+      "timestamp": "<ts>",
+      "transactionInfo": {
+        "stoppedReason": "Local",
+        "transactionId": "<uuid>",
+      },
+      "triggerReason": "StopAuthorized",
+    },
+  ],
+]
+`;

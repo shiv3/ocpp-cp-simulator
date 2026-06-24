@@ -20,7 +20,10 @@ import {
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-import { Transaction } from "../../domain/connector/Transaction";
+import type {
+  StopTransactionReason,
+  Transaction,
+} from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
   type ReadingContext,
@@ -53,6 +56,38 @@ type V201ResponsePayload =
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
 
+type V201StoppedReason = NonNullable<
+  TransactionEventRequestV201["transactionInfo"]["stoppedReason"]
+>;
+type V201MeterValuesSampledValue =
+  MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
+
+function toV201StoppedReason(
+  reason: StopTransactionReason | undefined,
+): V201StoppedReason {
+  switch (reason) {
+    case undefined:
+      return "Local";
+    case "DeAuthorized":
+    case "EmergencyStop":
+    case "EVDisconnected":
+    case "Local":
+    case "Other":
+    case "PowerLoss":
+    case "Reboot":
+    case "Remote":
+      return reason;
+    case "HardReset":
+      return "ImmediateReset";
+    case "SoftReset":
+      return "Reboot";
+    case "UnlockCommand":
+      return "Other";
+    default:
+      return "Other";
+  }
+}
+
 function ocppStatusToV201(
   status: OCPPStatus,
 ): StatusNotificationRequestV201["connectorStatus"] {
@@ -81,6 +116,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     | { status: "Accepted" }
     | { status: "Pending" }
     | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
+  // TODO: Persist v201 seqNo/transaction IDs across restarts in a later persistence phase.
   private _seqNo = 0;
   private readonly _transactionIds = new Map<number, string>();
 
@@ -232,7 +268,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       timestamp: transaction.startTime.toISOString(),
       triggerReason: "Authorized",
       seqNo: this.nextSeqNo(),
-      transaction: {
+      transactionInfo: {
         transactionId,
         chargingState: "Charging",
       },
@@ -243,7 +279,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           timestamp: transaction.startTime.toISOString(),
           sampledValue: [
             {
-              value: String(transaction.meterStart / 1000),
+              value: transaction.meterStart / 1000,
               measurand: "Energy.Active.Import.Register",
               unitOfMeasure: { unit: "kWh" },
             },
@@ -257,24 +293,25 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public stopTransaction(transaction: Transaction, connectorId: number): void {
     const transactionId = this.getOrCreateTransactionId(connectorId);
     const messageId = this.generateMessageId();
+    const timestamp = (transaction.stopTime ?? new Date()).toISOString();
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
-      timestamp: new Date().toISOString(),
+      timestamp,
       triggerReason: "StopAuthorized",
       seqNo: this.nextSeqNo(),
-      transaction: {
+      transactionInfo: {
         transactionId,
-        stoppedReason: "Local",
+        stoppedReason: toV201StoppedReason(transaction.stopReason),
       },
       evse: { id: connectorId, connectorId: 1 },
       meterValue:
         transaction.meterStop !== null
           ? [
               {
-                timestamp: new Date().toISOString(),
+                timestamp,
                 sampledValue: [
                   {
-                    value: String(transaction.meterStop / 1000),
+                    value: transaction.meterStop / 1000,
                     measurand: "Energy.Active.Import.Register",
                     unitOfMeasure: { unit: "kWh" },
                   },
@@ -304,18 +341,26 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
     const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
+    if (sampledValues.length === 0) {
+      this._logger.debug(
+        `[v2.0.1] sendMeterValue: no sampled values for connector ${connectorId}`,
+        LogType.METER_VALUE,
+      );
+      return;
+    }
+
+    const sampledValue = sampledValues.map((sv) => ({
+      value: Number(sv.value),
+      measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
+      unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
+    })) as [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]];
 
     const payload: MeterValuesRequestV201 = {
       evseId: connectorId,
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: sampledValues.map((sv) => ({
-            value: String(sv.value),
-            measurand:
-              sv.measurand as MeterValuesRequestV201["meterValue"][0]["sampledValue"][0]["measurand"],
-            unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
-          })),
+          sampledValue,
         },
       ],
     };
@@ -354,6 +399,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void {
+    if (
+      this._bootStatus.status === status.status &&
+      status.status !== "Rejected"
+    ) {
+      return;
+    }
     this._bootStatus = status;
   }
 

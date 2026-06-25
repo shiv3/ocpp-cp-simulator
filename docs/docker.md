@@ -1,6 +1,6 @@
 # Docker
 
-The image bundles **both** the daemon and the React browser UI in a single Bun-based container. `--web-console` is enabled by default, so opening the published port in a browser gives you the full UI talking to the API on the same origin.
+The image bundles **both** the daemon and the React browser UI in a single Bun-based container. `--web-console` is enabled by default, so opening the published port in a browser gives you the full UI talking to the Socket.IO control plane on the same origin.
 
 Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) on push to `main` and on `v*` / `cli-v*` tags).
 
@@ -70,7 +70,7 @@ To opt out of persistence entirely:
 docker run -e STATE_DB=:memory: ghcr.io/shiv3/ocpp-cp-simulator:latest …
 ```
 
-See [server.md → State persistence](server.md#state-persistence) for the table catalog and the Reset endpoint.
+See [server.md → State persistence](server.md#state-persistence) for the table catalog and the `state.reset` RPC used by the Reset action.
 
 ## docker-compose
 
@@ -88,15 +88,19 @@ HTTP_PORT=5172 CP_ID=my-cp CONNECTORS=5 \
 
 Variables read by the compose file (all optional):
 
-| Variable      | Default                              | Purpose                                                                                                                                                                                                                                                                                                |
-| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `HTTP_PORT`   | `9700`                               | Host port forwarded to 9700/c                                                                                                                                                                                                                                                                          |
-| `CP_ID`       | `cp1`                                | Bootstrap charge point id                                                                                                                                                                                                                                                                              |
-| `CONNECTORS`  | `1`                                  | Number of connectors                                                                                                                                                                                                                                                                                   |
-| `WS_URL`      | `wss://example.invalid/chargepoint/` | CSMS WebSocket URL                                                                                                                                                                                                                                                                                     |
-| `CORS_ORIGIN` | _(empty → same-origin)_              | Public origin allowed to call the API/console. The image binds `0.0.0.0`, so empty applies the safe `same-origin` policy (not open CORS). Set it to your UI / public URL — required when the console is reached from another origin or behind a reverse proxy. See [server.md → CORS](server.md#cors). |
-| `STATE_DB`    | `/data/state.db`                     | SQLite path inside container                                                                                                                                                                                                                                                                           |
-| `HEALTH_PATH` | `/v1/healthz`                        | Daemon health endpoint path. Compose passes it both as `--build-arg` (baked into the UI bundle as `VITE_HEALTH_PATH`) and as a runtime env (forwarded to `--health-path`). Set both sides when a fronting proxy reserves the default — e.g. Cloud Run / GFE returning 404 on the default path.         |
+| Variable      | Default                              | Purpose                                                                                                                                                                                                                                                                                        |
+| ------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_PORT`   | `9700`                               | Host port forwarded to the container's port 9700                                                                                                                                                                                                                                               |
+| `CP_ID`       | `cp1`                                | Bootstrap charge point id                                                                                                                                                                                                                                                                      |
+| `CONNECTORS`  | `1`                                  | Number of connectors                                                                                                                                                                                                                                                                           |
+| `WS_URL`      | `wss://example.invalid/chargepoint/` | CSMS WebSocket URL                                                                                                                                                                                                                                                                             |
+| `STATE_DB`    | `/data/state.db`                     | SQLite path inside container                                                                                                                                                                                                                                                                   |
+| `HEALTH_PATH` | `/v1/healthz`                        | Daemon health endpoint path. Compose passes it both as `--build-arg` (baked into the UI bundle as `VITE_HEALTH_PATH`) and as a runtime env (forwarded to `--health-path`). Set both sides when a fronting proxy reserves the default — e.g. Cloud Run / GFE returning 404 on the default path. |
+
+The compose file also includes a commented `--cors-origin ${CORS_ORIGIN}` block.
+Uncomment it when the console is reached from another origin or behind a
+reverse proxy; otherwise the image's `0.0.0.0` bind uses the safe `same-origin`
+policy. See [server.md → CORS](server.md#cors).
 
 ## Mounting a scenario template
 
@@ -123,7 +127,7 @@ docker run --rm -p 9700:9700 \
   2>&1 | jq -r 'select(.type=="WebSocket") | "\(.timestamp) \(.message)"'
 ```
 
-See [server.md → Log format](server.md#log-format) for the schema and the related HTTP endpoints (`GET /v1/cp/:cpId/logs`, `POST /v1/cp/:cpId/logs/clear`).
+See [server.md → Log format](server.md#log-format) for the schema and the related `logs.get` / `logs.clear` RPC methods.
 
 ## Image details
 
@@ -134,7 +138,14 @@ See [server.md → Log format](server.md#log-format) for the schema and the rela
 | Exposed port      | `9700`                                                                                                                  |
 | Volumes           | `/data` (state DB)                                                                                                      |
 | Healthcheck       | `GET $HEALTH_PATH` every 30s (default `/v1/healthz`; override via build-arg + env)                                      |
+| Control plane     | Socket.IO at `/socket.io/`; REST control endpoints and the Unix-domain socket are removed                               |
 | Bundled scenarios | `/app/docs/examples/scenarios/` (point `--scenario-template-file` at one of these or mount your own under `/scenarios`) |
+
+The entrypoint starts the daemon with
+`--http-host 0.0.0.0 --unsafe-remote --web-console ${HTTP_PORT}`. The unsafe
+override is required because the container intentionally binds a non-loopback
+address; exposure is controlled by Docker port mapping, CORS, optional
+web-console Basic Auth, and any surrounding network policy.
 
 The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the browser UI in a separate stage and only `dist/` ships in the runtime layer.
 

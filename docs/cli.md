@@ -1,6 +1,7 @@
 # CLI Mode
 
-Headless charge point simulator for scripting, CI pipelines, and AI/automation integration. Runs on [Bun](https://bun.sh/).
+Headless charge point simulator for scripting, CI pipelines, and
+AI/automation integration. Runs on [Bun](https://bun.sh/).
 
 ## Prerequisites
 
@@ -15,13 +16,17 @@ ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 # JSON Lines mode (for automation)
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
 
-# npm script shorthand
+# Daemon on the default TCP loopback port (http://127.0.0.1:9700)
+ocpp-cp-sim --daemon
+
+# npm script shorthand from a checkout
 npm run cli -- --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
 ### Installing as the `ocpp-cp-sim` command
 
-The package exposes a `ocpp-cp-sim` bin so it can be invoked from anywhere once installed:
+The package exposes a `ocpp-cp-sim` bin so it can be invoked from anywhere once
+installed:
 
 ```bash
 # Prebuilt release tarball (recommended) — ships the web-console dist/
@@ -36,12 +41,16 @@ bun link ocpp-cp-simulator    # in any consumer project
 
 # Then use ocpp-cp-sim anywhere
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
-ocpp-cp-sim --daemon --http-port 9700
+ocpp-cp-sim --daemon
 ```
 
-> A plain `bun install -g github:shiv3/ocpp-cp-simulator` is **not** supported: the web-console `dist/` is built at release time (not committed to git), and bun doesn't install devDependencies for global packages so it can't run `vite build` on install. Use the prebuilt tarball URL above.
+> A plain `bun install -g github:shiv3/ocpp-cp-simulator` is **not**
+> supported: the web-console `dist/` is built at release time (not committed to
+> git), and bun does not install devDependencies for global packages so it
+> cannot run `vite build` on install. Use the prebuilt tarball URL above.
 
-All flags described below apply whether you run the installed `ocpp-cp-sim` command or, from a source checkout, `bun src/cli/main.ts …`.
+All flags described below apply whether you run the installed `ocpp-cp-sim`
+command or, from a source checkout, `bun src/cli/main.ts …`.
 
 ## Operation Modes
 
@@ -90,7 +99,8 @@ ChargePoint: CP001  Status: ...
 
 ### 2. JSON Lines Mode
 
-Machine-readable mode for automation and AI agent integration. Each line of stdin is a JSON command; each line of stdout is a JSON response or event.
+Machine-readable mode for automation and AI agent integration. Each line of
+stdin is a JSON command; each line of stdout is a JSON response or event.
 
 ```bash
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
@@ -120,100 +130,130 @@ Error responses:
 
 #### Event Format
 
-Asynchronous events are emitted as JSON lines without `ok` field:
+Asynchronous events are emitted as JSON lines without an `ok` field:
 
 ```json
 {"event": "connected", "data": {}, "timestamp": "2025-01-01T00:00:00.000Z"}
 {"event": "connector_status", "data": {"connectorId": 1, "status": "Charging", "previousStatus": "Available"}, "timestamp": "..."}
 ```
 
-#### Available Commands
+#### Available JSON Commands
 
-| Command                   | Params                            | Description                        |
-| ------------------------- | --------------------------------- | ---------------------------------- |
-| `connect`                 | -                                 | Connect to CSMS                    |
-| `disconnect`              | -                                 | Disconnect                         |
-| `status`                  | -                                 | Get charge point status            |
-| `start_transaction`       | `connector`, `tagId`              | Start transaction                  |
-| `stop_transaction`        | `connector`                       | Stop transaction                   |
-| `set_meter_value`         | `connector`, `value`              | Set meter value (Wh)               |
-| `send_meter_value`        | `connector`                       | Send meter value to CSMS           |
-| `heartbeat`               | -                                 | Send heartbeat                     |
-| `start_heartbeat`         | `interval`                        | Start periodic heartbeat (seconds) |
-| `stop_heartbeat`          | -                                 | Stop periodic heartbeat            |
-| `authorize`               | `tagId`                           | Send authorization                 |
-| `update_connector_status` | `connector`, `status`             | Update connector status            |
-| `list_scenario_templates` | -                                 | List built-in scenario templates   |
-| `load_scenario_template`  | `templateId`, `connector`         | Load a scenario template           |
-| `load_scenario`           | `connector`, `file` or `scenario` | Load scenario from file or inline  |
-| `list_scenarios`          | `connector`                       | List loaded scenarios              |
-| `run_scenario`            | `connector`, `scenarioId`         | Run a loaded scenario              |
-| `scenario_status`         | `connector`, `scenarioId`         | Get scenario execution status      |
-| `stop_scenario`           | `connector`, `scenarioId`         | Stop a running scenario            |
-| `stop_all_scenarios`      | `connector`                       | Stop all scenarios on connector    |
-| `run_scenario_file`       | `connector`, `file`               | Load and run scenario from file    |
-| `run_scenario_template`   | `connector`, `templateId`         | Load and run a template            |
+These command IDs are also the CP-scoped Socket.IO RPC method names in daemon
+mode.
+
+| Command                           | Params                                         | Description                        |
+| --------------------------------- | ---------------------------------------------- | ---------------------------------- |
+| `connect`                         | -                                              | Connect to CSMS                    |
+| `disconnect`                      | -                                              | Disconnect                         |
+| `status`                          | -                                              | Get charge point status            |
+| `heartbeat`                       | -                                              | Send heartbeat                     |
+| `start_heartbeat`                 | `interval`                                     | Start periodic heartbeat (seconds) |
+| `stop_heartbeat`                  | -                                              | Stop periodic heartbeat            |
+| `start_transaction`               | `connector`, `tagId`                           | Start transaction                  |
+| `stop_transaction`                | `connector`                                    | Stop transaction                   |
+| `authorize`                       | `tagId`                                        | Send authorization                 |
+| `diagnostics_status_notification` | `status`                                       | Send diagnostics status            |
+| `firmware_status_notification`    | `status`                                       | Send firmware status               |
+| `update_connector_status`         | `connector`, `status`                          | Update connector status            |
+| `set_meter_value`                 | `connector`, `value`                           | Set meter value (Wh)               |
+| `send_meter_value`                | `connector`                                    | Send meter value to CSMS           |
+| `remove_connector`                | `connector`                                    | Remove a connector                 |
+| `set_ev_settings`                 | `connector`, `settings`                        | Set EV settings                    |
+| `get_ev_settings`                 | `connector`                                    | Get EV settings                    |
+| `set_auto_meter_config`           | `connector`, `config`                          | Configure automatic meter values   |
+| `get_auto_meter_config`           | `connector`                                    | Get automatic meter config         |
+| `set_auto_reset_to_available`     | `connector`, `enabled`                         | Toggle auto-reset to Available     |
+| `set_mode`                        | `connector`, `mode`                            | Set connector mode                 |
+| `set_soc`                         | `connector`, `soc`                             | Set or clear SoC                   |
+| `set_soc_meter_sync`              | `connector`, `enabled`                         | Toggle SoC-meter sync              |
+| `get_charging_profiles`           | `connector`                                    | Get active charging profiles       |
+| `get_state_history`               | `options` (optional)                           | Get state history                  |
+| `list_scenario_templates`         | -                                              | List built-in scenario templates   |
+| `load_scenario_template`          | `templateId`, `connector`, `evSettings` (opt.) | Load a scenario template           |
+| `load_scenario`                   | `connector`, `file` or `scenario`              | Load scenario from file or inline  |
+| `list_scenarios`                  | `connector`                                    | List loaded scenarios              |
+| `run_scenario`                    | `connector`, `scenarioId`                      | Run a loaded scenario              |
+| `run_scenario_file`               | `connector`, `file`                            | Load and run scenario from file    |
+| `run_scenario_template`           | `connector`, `templateId`, `evSettings` (opt.) | Load and run a template            |
+| `scenario_status`                 | `connector`, `scenarioId`                      | Get scenario execution status      |
+| `get_scenario`                    | `connector`, `scenarioId`                      | Get a loaded scenario              |
+| `stop_scenario`                   | `connector`, `scenarioId`                      | Stop a running scenario            |
+| `step_scenario`                   | `connector`, `scenarioId`, `force` (optional)  | Step a scenario                    |
+| `stop_all_scenarios`              | `connector`                                    | Stop all scenarios on connector    |
+| `remove_scenario`                 | `connector`, `scenarioId`                      | Remove a loaded scenario           |
 
 ### 3. Daemon / Server Mode
 
-Long-running process that exposes an **HTTP + WebSocket** API over a Unix domain socket and/or TCP port. Replaces the legacy line-delimited JSON protocol. See [docs/server.md](server.md) for the full HTTP API reference.
+Long-running process that exposes health, optional static web-console assets,
+and a Socket.IO control plane on TCP. See [docs/server.md](server.md) for the
+full Socket.IO API reference.
 
 ```bash
-# Start daemon (Unix socket only, default /tmp/ocpp-server.sock)
+# Start daemon on the default TCP target: http://127.0.0.1:9700
+ocpp-cp-sim --daemon &
+
+# Start daemon with an initial CP and default TCP control plane
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon &
 
-# Start daemon with both Unix socket and TCP
-ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --daemon --http-port 9700 &
+# Start foreground server on a custom TCP port
+ocpp-cp-sim --http-port 9701
 
-# Start foreground HTTP server (no Unix socket by default)
-ocpp-cp-sim --http-port 9700
+# Daemon + bundled browser UI
+ocpp-cp-sim --daemon --web-console
 
-# Send command to running server (Unix socket by default)
-ocpp-cp-sim --cp-id CP001 --send '{"command": "status"}'
+# Send command to a running local daemon (default target is 127.0.0.1:9700)
+ocpp-cp-sim --cp-id CP001 --send '{"command":"status"}'
 
-# Send command via TCP HTTP
-ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9700 --send '{"command": "status"}'
+# Send command via an explicit TCP URL
+ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9701 \
+  --send '{"command":"status"}'
 
-# Subscribe to real-time events (TCP only)
-ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9700 --events
+# Subscribe to real-time events for one CP
+ocpp-cp-sim --cp-id CP001 --events
 
-# Subscribe to all CPs' events
-ocpp-cp-sim --http-url http://127.0.0.1:9700 --events --all
+# Subscribe to all CP and registry events
+ocpp-cp-sim --events --all
 
 # Talk to a daemon protected by --web-console-basic-auth-*
-bun src/cli/main.ts --cp-id CP001 --http-url http://127.0.0.1:9700 \
-  --send '{"command": "status"}' \
+ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9700 \
+  --send '{"command":"status"}' \
   --http-basic-auth-user admin --http-basic-auth-pass secret
 
 # Shut down the server
 ocpp-cp-sim --stop
 ```
 
+`--send` is for CP-scoped JSON commands and requires `--cp-id`. Daemon-level
+methods such as `cp.create`, `logs.get`, and `state.reset` are available over
+the Socket.IO RPC contract documented in [server.md](server.md#daemon-methods)
+and through the browser UI.
+
 #### Server Files
 
-| File                    | Description                               |
-| ----------------------- | ----------------------------------------- |
-| `/tmp/ocpp-server.sock` | Unix domain socket (HTTP/WS, daemon)      |
-| `/tmp/ocpp-server.pid`  | PID file for duplicate detection (daemon) |
+| File                   | Description                               |
+| ---------------------- | ----------------------------------------- |
+| `/tmp/ocpp-server.pid` | PID file for duplicate detection (daemon) |
 
-Use `--unix-socket /custom/path` to change the path. Use `--unix-socket none` to disable Unix socket entirely (TCP-only daemon).
+There is no Unix-domain socket listener. `--unix-socket <path|none>` is still
+accepted for launcher compatibility, prints a deprecation warning, and is
+ignored.
 
 #### Multiple Charge Points in One Process
 
-`--cp-id` becomes optional in server mode. Additional CPs can be added at runtime via `POST /v1/cp`:
+`--cp-id` becomes optional in server mode. Additional CPs can be added at
+runtime with the browser UI or the `cp.create` Socket.IO RPC method:
 
-```bash
-# Start with no initial CP
-ocpp-cp-sim --daemon --http-port 9700 &
-
-# Create CPs dynamically
-curl -X POST http://127.0.0.1:9700/v1/cp \
-  -H 'content-type: application/json' \
-  -d '{"cpId":"CP001","wsUrl":"ws://localhost:9000/ocpp","autoConnect":true}'
-
-curl -X POST http://127.0.0.1:9700/v1/cp \
-  -H 'content-type: application/json' \
-  -d '{"cpId":"CP002","wsUrl":"ws://localhost:9000/ocpp","autoConnect":true}'
+```js
+await rpc({
+  method: "cp.create",
+  params: {
+    cpId: "CP001",
+    wsUrl: "ws://localhost:9000/ocpp",
+    connectors: 1,
+    autoConnect: true,
+  },
+});
 ```
 
 #### Startup Scenarios
@@ -248,11 +288,19 @@ clones it per connector — rewriting `targetType`, `targetId`, `id`, and
 file. `--scenario` and `--scenario-template` fan out the same way when
 `--scenario-connector` resolves to more than one id.
 
-> **Breaking change (vs. earlier versions):** the legacy line-delimited JSON protocol on `/tmp/ocpp-<cpId>.sock` has been removed. The daemon now speaks HTTP/WebSocket. If you have external clients that wrote raw JSON to the old socket, migrate them to `POST /v1/cp/<cpId>/command` (HTTP can run over the Unix socket as well).
+> **Breaking change (vs. earlier versions):** REST control endpoints, native
+> WebSocket event streams, and the Unix-domain control socket have been
+> removed. External clients should migrate to the Socket.IO `rpc` event and
+> `event` push envelopes. See [docs/migration.md](migration.md).
 
 ## Events
 
-Events are emitted in all modes (REPL shows formatted text, JSON/daemon emit JSON).
+Events are emitted in all modes:
+
+- REPL shows formatted text.
+- JSON Lines mode emits JSON event lines.
+- Daemon mode emits Socket.IO `event` envelopes with `kind: "cp"` or
+  `kind: "registry"`.
 
 | Event                   | Data Fields                               | Description                  |
 | ----------------------- | ----------------------------------------- | ---------------------------- |
@@ -271,33 +319,47 @@ Events are emitted in all modes (REPL shows formatted text, JSON/daemon emit JSO
 
 ## CLI Options
 
-| Option                         | Required | Default                 | Description                                                                                                                                                                                                                                                                                             |
-| ------------------------------ | -------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--cp-id <id>`                 | Yes\*    | -                       | Charge Point ID                                                                                                                                                                                                                                                                                         |
-| `--ws-url <url>`               | Yes\*\*  | -                       | WebSocket URL of CSMS                                                                                                                                                                                                                                                                                   |
-| `--connectors <n>`             | No       | `1`                     | Number of connectors                                                                                                                                                                                                                                                                                    |
-| `--json`                       | No       | -                       | JSON Lines mode                                                                                                                                                                                                                                                                                         |
-| `--daemon`                     | No       | -                       | Server daemon (Unix socket ON by default)                                                                                                                                                                                                                                                               |
-| `--http-port <port>`           | No       | -                       | Enable HTTP/WebSocket on this TCP port                                                                                                                                                                                                                                                                  |
-| `--http-host <addr>`           | No       | `127.0.0.1`             | Bind address for HTTP                                                                                                                                                                                                                                                                                   |
-| `--unix-socket <path>`         | No       | `/tmp/ocpp-server.sock` | Unix socket path; `none` to disable                                                                                                                                                                                                                                                                     |
-| `--http-url <url>`             | No       | -                       | Client target: TCP HTTP base URL                                                                                                                                                                                                                                                                        |
-| `--send <json>`                | No       | -                       | Send command to running server                                                                                                                                                                                                                                                                          |
-| `--events`                     | No       | -                       | Subscribe to events (TCP only)                                                                                                                                                                                                                                                                          |
-| `--all`                        | No       | -                       | With `--events`, subscribe to all CPs' events                                                                                                                                                                                                                                                           |
-| `--stop`                       | No       | -                       | Shut down the running server                                                                                                                                                                                                                                                                            |
-| `--http-basic-auth-user <u>`   | No       | -                       | Basic auth user the client modes (`--send`/`--stop`/`--events`) send to a daemon protected by `--web-console-basic-auth-*`                                                                                                                                                                              |
-| `--http-basic-auth-pass <p>`   | No       | -                       | Basic auth password for the client modes (pair with `--http-basic-auth-user`)                                                                                                                                                                                                                           |
-| `--basic-auth-user <u>`        | No       | -                       | Basic auth username (outgoing CP → CSMS WebSocket)                                                                                                                                                                                                                                                      |
-| `--basic-auth-pass <p>`        | No       | -                       | Basic auth password (outgoing CP → CSMS WebSocket)                                                                                                                                                                                                                                                      |
-| `--vendor <vendor>`            | No       | `CLI-Vendor`            | Charge point vendor                                                                                                                                                                                                                                                                                     |
-| `--model <model>`              | No       | `CLI-Model`             | Charge point model                                                                                                                                                                                                                                                                                      |
-| `--scenario <file>`            | No       | -                       | Startup scenario JSON file (server mode)                                                                                                                                                                                                                                                                |
-| `--scenario-template <id>`     | No       | -                       | Built-in scenario template id (server mode)                                                                                                                                                                                                                                                             |
-| `--scenario-template-file <p>` | No       | -                       | Path to a cpId-independent template JSON                                                                                                                                                                                                                                                                |
-| `--scenario-connector <list>`  | No       | `1`                     | `all`, single id (`1`), or list (`1,2,3`)                                                                                                                                                                                                                                                               |
-| `--state-db <path>`            | No       | _(in-memory)_           | Persist scenarios, ChangeConfiguration overrides, charging profile state, availability flags, pending transaction messages, registered CPs and logs to a SQLite file. See [docs/server.md → State persistence](./server.md#state-persistence). Without this flag the daemon forgets everything at exit. |
-| `--log-format <fmt>`           | No       | `plain`                 | `plain` writes the legacy `[ts] [LEVEL] [TYPE] message` lines; `json` writes one JSON Lines object per line (same shape as the `logs` table + browser export + `GET /v1/cp/:cpId/logs`). See [docs/server.md → Log format](./server.md#log-format).                                                     |
+| Option                                             | Required | Default                                 | Description                                                                                                                                                                                                                               |
+| -------------------------------------------------- | -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--cp-id <id>`                                     | Yes\*    | -                                       | Charge Point ID                                                                                                                                                                                                                           |
+| `--ws-url <url>`                                   | Yes\*\*  | -                                       | WebSocket URL of CSMS                                                                                                                                                                                                                     |
+| `--connectors <n>`                                 | No       | `1`                                     | Number of connectors                                                                                                                                                                                                                      |
+| `--ocpp-version <OCPP-1.6J\|OCPP-2.0.1\|OCPP-2.1>` | No       | `OCPP-1.6J`                             | OCPP version for a directly started or bootstrapped CP                                                                                                                                                                                    |
+| `--json`                                           | No       | -                                       | JSON Lines mode                                                                                                                                                                                                                           |
+| `--daemon`                                         | No       | -                                       | Server daemon. With no `--http-port`, listens on `http://127.0.0.1:9700`.                                                                                                                                                                 |
+| `--http-port <port>`                               | No       | `9700` with bare `--daemon`             | Enable the TCP health / Socket.IO server on this port                                                                                                                                                                                     |
+| `--http-host <addr>`                               | No       | `127.0.0.1`                             | Bind address for HTTP. Non-loopback binds require web-console Basic Auth or `--unsafe-remote`.                                                                                                                                            |
+| `--unsafe-remote`                                  | No       | -                                       | Allow a non-loopback daemon bind without `--web-console-basic-auth-user/pass`. Use only on trusted networks.                                                                                                                              |
+| `--unix-socket <path\|none>`                       | No       | deprecated no-op                        | Accepted for launcher compatibility, prints one warning, and is ignored.                                                                                                                                                                  |
+| `--web-console [<port>]`                           | No       | -                                       | Serve the bundled browser UI alongside Socket.IO. Without a port, shares `--http-port`; with a port, serves on that listener. Requires built `dist/` or a release package that ships it.                                                  |
+| `--web-console-basic-auth-user <u>`                | No       | -                                       | Basic Auth user for incoming static assets and Socket.IO handshake auth. Pair with `--web-console-basic-auth-pass`. The configured health path is exempt.                                                                                 |
+| `--web-console-basic-auth-pass <p>`                | No       | -                                       | Basic Auth password for incoming static assets and Socket.IO handshake auth. Pair with `--web-console-basic-auth-user`.                                                                                                                   |
+| `--http-url <url>`                                 | No       | `http://127.0.0.1:9700` in client modes | Client target: TCP HTTP base URL for Socket.IO                                                                                                                                                                                            |
+| `--send <json>`                                    | No       | -                                       | Send a CP-scoped JSON command to a running server                                                                                                                                                                                         |
+| `--events`                                         | No       | -                                       | Subscribe to daemon events over Socket.IO                                                                                                                                                                                                 |
+| `--all`                                            | No       | -                                       | With `--events`, subscribe to all CP and registry events                                                                                                                                                                                  |
+| `--stop`                                           | No       | -                                       | Shut down the running server with `server.shutdown`                                                                                                                                                                                       |
+| `--http-basic-auth-user <u>`                       | No       | -                                       | Basic Auth user the client modes (`--send`/`--stop`/`--events`) send as Socket.IO handshake auth to a daemon protected by `--web-console-basic-auth-*`                                                                                    |
+| `--http-basic-auth-pass <p>`                       | No       | -                                       | Basic Auth password for the client modes (pair with `--http-basic-auth-user`)                                                                                                                                                             |
+| `--basic-auth-user <u>`                            | No       | -                                       | Basic auth username for outgoing CP → CSMS WebSocket                                                                                                                                                                                      |
+| `--basic-auth-pass <p>`                            | No       | -                                       | Basic auth password for outgoing CP → CSMS WebSocket                                                                                                                                                                                      |
+| `--header KEY:VALUE`                               | No       | -                                       | Extra header for the outgoing CP → CSMS WebSocket upgrade. Repeatable.                                                                                                                                                                    |
+| `--ws-subprotocol <value>`                         | No       | -                                       | Extra subprotocol for the outgoing CP → CSMS WebSocket upgrade. Repeatable.                                                                                                                                                               |
+| `--vendor <vendor>`                                | No       | `CLI-Vendor`                            | Charge point vendor                                                                                                                                                                                                                       |
+| `--model <model>`                                  | No       | `CLI-Model`                             | Charge point model                                                                                                                                                                                                                        |
+| `--scenario <file>`                                | No       | -                                       | Startup scenario JSON file (server mode)                                                                                                                                                                                                  |
+| `--scenario-template <id>`                         | No       | -                                       | Built-in scenario template id (server mode)                                                                                                                                                                                               |
+| `--scenario-template-file <p>`                     | No       | -                                       | Path to a cpId-independent template JSON                                                                                                                                                                                                  |
+| `--scenario-connector <list>`                      | No       | `1`                                     | `all`, single id (`1`), or list (`1,2,3`)                                                                                                                                                                                                 |
+| `--state-db <path>`                                | No       | _(in-memory)_                           | Persist scenarios, ChangeConfiguration overrides, charging profile state, availability flags, pending transaction messages, registered CPs and logs to a SQLite file. See [server.md → State persistence](./server.md#state-persistence). |
+| `--log-format <fmt>`                               | No       | `plain`                                 | `plain` writes the legacy `[ts] [LEVEL] [TYPE] message` lines; `json` writes one JSON Lines object per line (same shape as the `logs` table + browser export + `logs.get` RPC). See [server.md → Log format](./server.md#log-format).     |
+| `--health-path <path>`                             | No       | `/v1/healthz`                           | Absolute path for the unauthenticated health-check JSON. The browser UI build must use matching `VITE_HEALTH_PATH` when this changes.                                                                                                     |
+| `--cors-origin <origin>`                           | No       | loopback: open; remote: same-origin     | Restrict browser Origins. Repeatable. Pass literal `"*"` to opt into open CORS.                                                                                                                                                           |
+| `--trust-forwarded-headers`                        | No       | -                                       | With same-origin CORS, also accept the public origin reported by `X-Forwarded-Proto` / `X-Forwarded-Host`. Use only behind a trusted reverse proxy.                                                                                       |
 
-\* `--cp-id` is **optional** in server mode (no bootstrap CP). Required for REPL/JSON and for `--send`/`--events` (without `--all`).
-\*\* `--ws-url` is required for REPL/JSON, and only when bootstrapping a CP in server mode. CPs created later via HTTP supply their own `wsUrl` in the request body.
+\* `--cp-id` is **optional** in server mode (no bootstrap CP). Required for
+REPL/JSON and for `--send`/`--events` without `--all`.
+
+\*\* `--ws-url` is required for REPL/JSON, and only when bootstrapping a CP in
+server mode. CPs created later via Socket.IO `cp.create` supply their own
+`wsUrl` in the RPC params.

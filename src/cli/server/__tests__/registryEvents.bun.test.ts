@@ -152,6 +152,27 @@ describe("socket.io registry event bridge", () => {
       socket.disconnect();
     }
   });
+
+  it("does not emit cp.updated after cp.removed (no resurrection)", async () => {
+    const server = await serverWithCp("cp-gone", 1);
+    const socket = await connectTestClient(server);
+    try {
+      await subscribe(socket, "*");
+      const events = await collectEvents(socket, () => {
+        server.registry.remove("cp-gone");
+      });
+      const registryEvents = events.filter(
+        (event) => event.kind === "registry" && event.cp?.cpId === "cp-gone",
+      );
+      const lastForCp = registryEvents.at(-1);
+      expect(lastForCp?.change).toBe("removed");
+      expect(registryEvents.some((event) => event.change === "updated")).toBe(
+        false,
+      );
+    } finally {
+      socket.disconnect();
+    }
+  });
 });
 
 async function startAndTrack(): Promise<TestServer> {

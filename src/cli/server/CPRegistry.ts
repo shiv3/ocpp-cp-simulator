@@ -263,13 +263,17 @@ export class CPRegistry {
   remove(cpId: string, opts: { notify?: boolean } = {}): boolean {
     const svc = this.services.get(cpId);
     if (!svc) return false;
+    // Detach the CP from the EventBus and the registry map BEFORE cleanup().
+    // cleanup() synchronously fires teardown statusChange events; if the CP
+    // were still subscribed/registered, the registry bridge would emit a
+    // `cp.updated` AFTER `cp.removed`, resurrecting the deleted CP in the UI.
+    this.unsubscribes.get(cpId)?.();
+    this.unsubscribes.delete(cpId);
+    this.services.delete(cpId);
     if (opts.notify !== false) {
       this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
     }
     svc.cleanup();
-    this.unsubscribes.get(cpId)?.();
-    this.unsubscribes.delete(cpId);
-    this.services.delete(cpId);
     // Operator-initiated removal: drop the persisted row too. Process
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.
@@ -278,12 +282,18 @@ export class CPRegistry {
   }
 
   shutdownAll(): void {
-    for (const [cpId, svc] of this.services) {
-      svc.cleanup();
+    // Detach every CP from the EventBus + registry BEFORE cleanup(), so the
+    // teardown statusChange events can't produce post-removal `cp.updated`
+    // pushes (same hazard as remove()).
+    const entries = [...this.services];
+    for (const [cpId] of entries) {
       this.unsubscribes.get(cpId)?.();
     }
-    this.services.clear();
     this.unsubscribes.clear();
+    this.services.clear();
+    for (const [, svc] of entries) {
+      svc.cleanup();
+    }
   }
 
   private notifyRegistryMembership(event: RegistryMembershipEvent): void {

@@ -40,7 +40,7 @@ export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
 
 /** Atomic `events.subscribe` ack: rooms joined + the current snapshot. */
 export const subscribeResultSchema = z.object({
-  subscribed: z.array(z.string().max(256)),
+  subscribed: ARRAY_1000(z.string().max(256)),
   snapshot: z.object({
     cps: ARRAY_1000(cpListItemSchema),
     perCp: z.record(z.string(), statusWireSchema),

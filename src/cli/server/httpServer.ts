@@ -746,7 +746,11 @@ function parseCreateBody(body: unknown): ChargePointInitOptions {
     if (typeof body.ocppVersion !== "string") {
       throw new Error("ocppVersion must be a string");
     }
-    if (body.ocppVersion === "OCPP-1.6J" || body.ocppVersion === "OCPP-2.0.1") {
+    if (
+      body.ocppVersion === "OCPP-1.6J" ||
+      body.ocppVersion === "OCPP-2.0.1" ||
+      body.ocppVersion === "OCPP-2.1"
+    ) {
       ocppVersion = body.ocppVersion;
     }
   }

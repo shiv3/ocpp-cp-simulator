@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { parseOcppVersion } from "../../../../domain/types/OcppVersion";
 import { outgoingV16Warning } from "../../codec/validateV16";
 import { getProtocolProfile } from "../profiles";
 import { ocppVersionToSubprotocol } from "../subprotocols";
@@ -11,6 +12,19 @@ describe("ProtocolProfile", () => {
     expect(profile.version).toBe("OCPP-2.0.1");
     expect(profile.subprotocol).toBe("ocpp2.0.1");
     expect(profile.codec.outgoingWarning("Heartbeat", {})).toBeNull();
+  });
+
+  it("selects the OCPP 2.1 profile using the v201-compatible handler path", () => {
+    const profile = getProtocolProfile("OCPP-2.1");
+
+    expect(profile.version).toBe("OCPP-2.1");
+    expect(profile.subprotocol).toBe("ocpp2.1");
+    expect(typeof profile.createMessageHandler).toBe("function");
+  });
+
+  it("parses exact supported versions and keeps the legacy fallback", () => {
+    expect(parseOcppVersion("OCPP-2.1")).toBe("OCPP-2.1");
+    expect(parseOcppVersion("garbage")).toBe("OCPP-1.6J");
   });
 
   it("selects the OCPP 1.6J profile for exact and fallback inputs", () => {
@@ -28,6 +42,10 @@ describe("ProtocolProfile", () => {
 
     expect(fallbackSubprotocol).toBe("ocpp1.6");
     expect(fallbackSubprotocol).toBe(getProtocolProfile("garbage").subprotocol);
+  });
+
+  it("maps OCPP 2.1 to the 2.1 WebSocket subprotocol", () => {
+    expect(ocppVersionToSubprotocol("OCPP-2.1")).toBe("ocpp2.1");
   });
 
   it("uses the exact v16 outgoing validator", () => {

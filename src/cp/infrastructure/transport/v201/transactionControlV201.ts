@@ -62,11 +62,18 @@ export function handleRequestStopTransactionV201(
     };
   }
 
+  const txId = connector.transaction?.id ?? 0;
   return {
     response: {
       status: "Accepted",
     } satisfies RequestStopTransactionResponseV201,
-    afterResult: () => ctx.chargePoint.stopTransaction(connector.id, "Remote"),
+    afterResult: () => {
+      if (ctx.chargePoint.isScenarioStopHandled(connector.id)) {
+        ctx.chargePoint.notifyRemoteStopReceived(connector.id, txId);
+      } else {
+        ctx.chargePoint.stopTransaction(connector.id, "Remote");
+      }
+    },
   };
 }
 

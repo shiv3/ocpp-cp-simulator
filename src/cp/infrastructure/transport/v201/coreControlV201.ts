@@ -190,7 +190,10 @@ export function handleUnlockConnectorV201(
   }
 
   return {
-    response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,
+    response: {
+      status:
+        connector.unlockResponse === "Unlocked" ? "Unlocked" : "UnlockFailed",
+    } satisfies UnlockConnectorResponseV201,
   };
 }
 

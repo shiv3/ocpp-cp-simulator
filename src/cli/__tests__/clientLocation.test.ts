@@ -3,7 +3,6 @@ import { resolveClientLocation } from "../clientLocation";
 
 const base = {
   httpUrl: null as string | null,
-  unixSocket: null as string | null,
   httpBasicAuth: null as { username: string; password: string } | null,
   httpHost: "",
   httpPort: null as number | null,
@@ -19,9 +18,14 @@ describe("resolveClientLocation", () => {
     });
     expect(location).toEqual({
       httpUrl: "http://h:1",
-      unixSocket: null,
       basicAuth: { username: "u", password: "p" },
     });
+    expect(warnings).toEqual([]);
+  });
+
+  it("defaults to the TCP loopback daemon URL", () => {
+    const { location, warnings } = resolveClientLocation(base);
+    expect(location.httpUrl).toBe("http://127.0.0.1:9700");
     expect(warnings).toEqual([]);
   });
 
@@ -66,17 +70,6 @@ describe("resolveClientLocation", () => {
       basicAuth: { username: "a", password: "b" },
     });
     expect(location.basicAuth).toEqual({ username: "x", password: "y" });
-    expect(warnings).toEqual([]);
-  });
-
-  it("an explicit unix socket suppresses the --http-port derivation", () => {
-    const { location, warnings } = resolveClientLocation({
-      ...base,
-      unixSocket: "/tmp/s.sock",
-      httpPort: 9700,
-    });
-    expect(location.httpUrl).toBeNull();
-    expect(location.unixSocket).toBe("/tmp/s.sock");
     expect(warnings).toEqual([]);
   });
 });

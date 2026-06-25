@@ -46,6 +46,9 @@ export interface CLIOptions {
     readonly password: string;
   } | null;
   readonly allEvents: boolean;
+  /** Explicit opt-out for the startup guard that blocks unauthenticated
+   *  non-loopback daemon binds. Use only on trusted networks. */
+  readonly unsafeRemote: boolean;
   readonly corsOrigins: ReadonlyArray<string>;
   /** When true, the same-origin CORS default also trusts a reverse proxy's
    *  `X-Forwarded-Proto`/`X-Forwarded-Host` to reconstruct the public origin.

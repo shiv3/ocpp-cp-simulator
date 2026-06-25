@@ -1,11 +1,11 @@
 import type { ClientLocation } from "./client";
+import { DEFAULT_HTTP_PORT } from "./server/constants";
 
 type BasicAuth = { username: string; password: string };
 
 export interface ClientLocationOptions {
   /** Canonical client target / credentials. */
   httpUrl: string | null;
-  unixSocket: string | null;
   httpBasicAuth: BasicAuth | null;
   /** Server-side listen flags, accepted as a deprecated client target. */
   httpHost: string;
@@ -32,13 +32,16 @@ export function resolveClientLocation(options: ClientLocationOptions): {
   let httpUrl = options.httpUrl;
   let basicAuth = options.httpBasicAuth;
 
-  if (!httpUrl && !options.unixSocket && options.httpPort != null) {
+  if (!httpUrl && options.httpPort != null) {
     const host = options.httpHost || "127.0.0.1";
     httpUrl = `http://${host}:${options.httpPort}`;
     warnings.push(
       `deprecated: derived client target ${httpUrl} from --http-port/--http-host; ` +
         "use --http-url <url> for client modes (--send/--stop/--events).",
     );
+  }
+  if (!httpUrl) {
+    httpUrl = `http://127.0.0.1:${DEFAULT_HTTP_PORT}`;
   }
 
   if (!basicAuth && options.basicAuth) {
@@ -51,7 +54,7 @@ export function resolveClientLocation(options: ClientLocationOptions): {
   }
 
   return {
-    location: { httpUrl, unixSocket: options.unixSocket, basicAuth },
+    location: { httpUrl, basicAuth },
     warnings,
   };
 }

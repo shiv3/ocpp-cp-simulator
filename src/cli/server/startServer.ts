@@ -9,6 +9,11 @@ import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
 import { createHttpHandlers, type CorsPolicy } from "./httpServer";
+import {
+  attachSocketIo,
+  combineWebSocketHandlers,
+  isSocketIoPath,
+} from "./socketServer";
 import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
@@ -100,16 +105,24 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
   // re-run with the same --cp-id is treated as "update wsUrl/connectors"
   // rather than "create + collide".
-  const restored = registry.restoreFromDatabase();
+  const restored = await Promise.resolve(registry.restoreFromDatabase());
   if (restored.length > 0) {
     serverLog(
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
     );
   }
+  const socketIo = attachSocketIo();
   const lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
+    onShutdownStart: () => {
+      void socketIo.close();
+    },
   });
+  const socketIoRoute = {
+    matches: isSocketIoPath,
+    handleRequest: socketIo.handleRequest,
+  };
 
   // Two listener configurations:
   //   * "api"  — no static fallback; what --http-port and the Unix socket
@@ -125,6 +138,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     database,
     healthPath: opts.healthPath,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
+    socketIo: socketIoRoute,
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -136,6 +150,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         database,
         healthPath: opts.healthPath,
         webConsoleBasicAuth: opts.webConsoleBasicAuth,
+        socketIo: socketIoRoute,
       })
     : apiHandlers;
   if (opts.staticDir) {
@@ -156,7 +171,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     const unixServer = Bun.serve({
       unix: opts.unixSocket,
       fetch: apiHandlers.fetch,
-      websocket: apiHandlers.websocket,
+      idleTimeout: socketIo.idleTimeout,
+      websocket: combineWebSocketHandlers(
+        socketIo.websocket,
+        apiHandlers.websocket,
+      ),
     });
     servers.push(unixServer);
     lifecycle.attachServer(unixServer);
@@ -175,7 +194,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       port: opts.httpPort,
       hostname: opts.httpHost,
       fetch: handlers.fetch,
-      websocket: handlers.websocket,
+      idleTimeout: socketIo.idleTimeout,
+      websocket: combineWebSocketHandlers(
+        socketIo.websocket,
+        handlers.websocket,
+      ),
     });
     servers.push(httpServer);
     lifecycle.attachServer(httpServer);
@@ -190,7 +213,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       port: opts.webConsolePort,
       hostname: opts.httpHost,
       fetch: consoleHandlers.fetch,
-      websocket: consoleHandlers.websocket,
+      idleTimeout: socketIo.idleTimeout,
+      websocket: combineWebSocketHandlers(
+        socketIo.websocket,
+        consoleHandlers.websocket,
+      ),
     });
     servers.push(consoleServer);
     lifecycle.attachServer(consoleServer);
@@ -401,5 +428,5 @@ function instantiateTemplate(
   };
 }
 
-export { DEFAULT_UNIX_SOCKET } from "./constants";
+export { DEFAULT_HTTP_PORT, DEFAULT_UNIX_SOCKET } from "./constants";
 export const DEFAULT_PID_PATH = "/tmp/ocpp-server.pid";

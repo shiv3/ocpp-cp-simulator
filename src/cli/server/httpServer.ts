@@ -300,6 +300,14 @@ export interface HttpHandlers {
   websocket: WebSocketHandler<SocketData>;
 }
 
+export interface SocketIoRoute {
+  matches(pathname: string): boolean;
+  handleRequest(
+    req: Request,
+    server: Server<unknown>,
+  ): Response | Promise<Response>;
+}
+
 export function createHttpHandlers(deps: {
   registry: CPRegistry;
   bus: EventBus;
@@ -317,6 +325,8 @@ export function createHttpHandlers(deps: {
    *  carry a matching `Authorization: Basic <base64(user:pass)>` header.
    *  Null = no auth (default; backward compatible). */
   webConsoleBasicAuth?: { username: string; password: string } | null;
+  /** Optional socket.io/Engine.IO route mounted on the same Bun listener. */
+  socketIo?: SocketIoRoute | null;
 }): HttpHandlers {
   const { registry, bus, lifecycle } = deps;
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
@@ -324,15 +334,16 @@ export function createHttpHandlers(deps: {
   const database = deps.database ?? null;
   const healthPath = deps.healthPath ?? "/v1/healthz";
   const webConsoleBasicAuth = deps.webConsoleBasicAuth ?? null;
+  const socketIo = deps.socketIo ?? null;
 
   return {
     fetch(req, server) {
+      const url = new URL(req.url);
       // Optional Basic Auth gate. Runs *before* CORS so an attacker without
       // creds can't probe internal endpoints via a same-origin request.
       // The health path is intentionally exempt so k8s probes / external
       // load balancers / browser auto-detect can keep working unprompted.
       if (webConsoleBasicAuth !== null) {
-        const url = new URL(req.url);
         if (url.pathname !== healthPath) {
           const auth = parseBasicAuthHeader(req.headers.get("authorization"));
           if (!auth || !credentialsMatch(auth, webConsoleBasicAuth)) {
@@ -361,6 +372,14 @@ export function createHttpHandlers(deps: {
       // CORS preflight — answer immediately for any path/method.
       if (req.method === "OPTIONS") {
         return applyCors(new Response(null, { status: 204 }), req, cors);
+      }
+
+      if (socketIo !== null && socketIo.matches(url.pathname)) {
+        const result = socketIo.handleRequest(req, server as Server<unknown>);
+        if (result instanceof Response) {
+          return applyCacheControl(applyCors(result, req, cors));
+        }
+        return result.then((r) => applyCacheControl(applyCors(r, req, cors)));
       }
 
       const result = dispatch(req, server);
@@ -435,7 +454,7 @@ export function createHttpHandlers(deps: {
 
     // GET <healthPath>  (default /v1/healthz; configurable via --health-path)
     if (req.method === "GET" && url.pathname === healthPath) {
-      return Response.json({ ok: true, cps: registry.list().length });
+      return Response.json({ ok: true });
     }
 
     // POST /v1/shutdown

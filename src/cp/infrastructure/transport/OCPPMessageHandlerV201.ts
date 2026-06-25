@@ -42,6 +42,7 @@ import {
   buildV201InboundRegistry,
   type V201Action,
   type V201InboundContext,
+  type V201InboundRegistry,
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
 
@@ -108,7 +109,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _logger: Logger;
   private readonly _dataTransferHandler: DataTransferHandler =
     new DataTransferHandler();
-  private readonly _inbound = buildV201InboundRegistry();
+  private readonly _inbound: V201InboundRegistry;
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -119,10 +120,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
     logger: Logger,
+    inboundRegistry?: V201InboundRegistry,
   ) {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
+    this._inbound = inboundRegistry ?? buildV201InboundRegistry();
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
   }

@@ -2,6 +2,7 @@ import { parseOcppVersion } from "../../../domain/types/OcppVersion";
 import { outgoingV16Warning } from "../codec/validateV16";
 import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
+import { buildV21InboundRegistry } from "../v21/inboundRegistryV21";
 import {
   OCPP_WEBSOCKET_PROTOCOL_16,
   OCPP_WEBSOCKET_PROTOCOL_201,
@@ -30,14 +31,12 @@ const V201_PROFILE: ProtocolProfile = {
     new OCPPMessageHandlerV201(cp, ws, log),
 };
 
-// The generated OCPP package has no 2.1 types/schemas yet, so this exposes
-// the 2.0.1-compatible subset until 2.1-net-new messages can be modeled.
 const V21_PROFILE: ProtocolProfile = {
   version: "OCPP-2.1",
   subprotocol: OCPP_WEBSOCKET_PROTOCOL_21,
   codec: v201Codec,
   createMessageHandler: (cp, ws, log) =>
-    new OCPPMessageHandlerV201(cp, ws, log),
+    new OCPPMessageHandlerV201(cp, ws, log, buildV21InboundRegistry()),
 };
 
 export function getProtocolProfile(raw: string): ProtocolProfile {

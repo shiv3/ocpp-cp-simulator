@@ -8,6 +8,7 @@ import {
   type LocalChargePointDefinition,
 } from "../local/LocalChargePointService";
 import type { ChargePointSnapshot } from "../interfaces/ChargePointService";
+import type { RemoteRegistrySubscriptionEvent } from "../remote/RemoteChargePointService";
 
 interface UseChargePointsOptions {
   isLoading?: boolean;
@@ -18,12 +19,47 @@ interface UseChargePointsResult {
   refresh: () => Promise<void>;
 }
 
-const REMOTE_POLL_INTERVAL_MS = 4000;
+interface RegistrySubscribableService {
+  subscribeRegistry(
+    handler: (event: RemoteRegistrySubscriptionEvent) => void,
+  ): () => void;
+}
+
+function canSubscribeRegistry(
+  service: unknown,
+): service is RegistrySubscribableService {
+  return (
+    typeof service === "object" &&
+    service !== null &&
+    "subscribeRegistry" in service &&
+    typeof (service as { subscribeRegistry?: unknown }).subscribeRegistry ===
+      "function"
+  );
+}
+
+export function applyRegistryEvent(
+  current: ChargePointSnapshot[],
+  event: RemoteRegistrySubscriptionEvent,
+): ChargePointSnapshot[] {
+  if (event.type === "snapshot") return event.cps;
+  if (event.change === "reset") return [];
+  if (!event.cp) return current;
+
+  if (event.change === "removed") {
+    return current.filter((cp) => cp.id !== event.cp?.id);
+  }
+
+  const index = current.findIndex((cp) => cp.id === event.cp?.id);
+  if (index === -1) return [...current, event.cp];
+  const next = [...current];
+  next[index] = event.cp;
+  return next;
+}
 
 /**
  * Returns the active list of ChargePointSnapshot in the current mode.
  * - Local: syncs LocalChargePointService against config and lists snapshots.
- * - Remote: lists CPs from the connected server, with periodic polling.
+ * - Remote: subscribes to registry snapshots/events from the server.
  */
 export function useChargePoints(
   config: Config | null,
@@ -124,24 +160,22 @@ export function useChargePoints(
       };
     }
 
-    // Remote mode: poll the list periodically.
-    const fetchOnce = async () => {
-      try {
-        const list = await chargePointService.listChargePoints();
-        setIfActive(list);
-      } catch (err) {
-        if (cancelled) return;
-        console.error("Failed to list charge points", err);
-        setIfActive([]);
-      }
-    };
-    void fetchOnce();
-    const interval = setInterval(fetchOnce, REMOTE_POLL_INTERVAL_MS);
+    if (!canSubscribeRegistry(chargePointService)) {
+      void refresh();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const unsubscribe = chargePointService.subscribeRegistry((event) => {
+      if (cancelled) return;
+      setChargePoints((current) => applyRegistryEvent(current, event));
+    });
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      unsubscribe();
     };
-  }, [chargePointService, mode, config, isLoading]);
+  }, [chargePointService, mode, config, isLoading, refresh]);
 
   return { chargePoints, refresh };
 }

@@ -111,8 +111,15 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
     );
   }
-  const socketIo = attachSocketIo();
-  const lifecycle = createLifecycle({
+  let lifecycle: ReturnType<typeof createLifecycle> | null = null;
+  const socketIo = attachSocketIo({
+    registry,
+    database,
+    requestShutdown: () => {
+      lifecycle?.requestShutdown();
+    },
+  });
+  lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
     onShutdownStart: () => {
@@ -171,7 +178,10 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     const unixServer = Bun.serve({
       unix: opts.unixSocket,
       fetch: apiHandlers.fetch,
-      idleTimeout: socketIo.idleTimeout,
+      // No idleTimeout: Bun's UnixServeOptions doesn't accept it, and socket.io
+      // (HTTP/Engine.IO) doesn't run over a unix socket anyway — this listener
+      // only carries the REST API + the legacy native /v1/events WS during the
+      // REST-coexistence window (the unix socket is removed in Task 12).
       websocket: combineWebSocketHandlers(
         socketIo.websocket,
         apiHandlers.websocket,

@@ -31,5 +31,11 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/cli", "src/cp", "src/ocpp", "src/utils/scenarioTemplates.ts"]
+  "include": [
+    "src/cli",
+    "src/cp",
+    "src/ocpp",
+    "src/protocol",
+    "src/utils/scenarioTemplates.ts"
+  ]
 }

@@ -10,7 +10,11 @@ import {
 import type { Database } from "../../../cp/domain/persistence/Database";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import { createHttpHandlers, type CorsPolicy } from "../httpServer";
+import {
+  createHttpHandlers,
+  type CorsPolicy,
+  type SocketData,
+} from "../httpServer";
 import { createLifecycle } from "../lifecycle";
 import {
   attachSocketIo,
@@ -36,7 +40,7 @@ export interface TestServerOptions {
 export interface TestServer {
   readonly bus: EventBus;
   readonly registry: CPRegistry;
-  readonly server: BunServer;
+  readonly server: BunServer<SocketData>;
   readonly socketIo: SocketIoAttachment;
   readonly url: string;
   readonly port: number;
@@ -54,8 +58,15 @@ export async function startTestServer(
   const database = options.database ?? null;
   const registry = new CPRegistry(bus, database);
   const restored = await Promise.resolve(registry.restoreFromDatabase());
-  const socketIo = attachSocketIo();
-  const lifecycle = createLifecycle({
+  let lifecycle: ReturnType<typeof createLifecycle> | null = null;
+  const socketIo = attachSocketIo({
+    registry,
+    database,
+    requestShutdown: () => {
+      lifecycle?.requestShutdown();
+    },
+  });
+  lifecycle = createLifecycle({
     pidPath: null,
     registry,
     onShutdownStart: () => {
@@ -97,7 +108,7 @@ export async function startTestServer(
     server,
     socketIo,
     url,
-    port: server.port,
+    port: server.port ?? 0,
     restored,
     async close() {
       if (closed) return;

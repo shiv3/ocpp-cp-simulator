@@ -141,7 +141,10 @@ interface FullStatus {
   id: string;
   status: string;
   error: string;
-  connectors: ReadonlyArray<Record<string, unknown>>;
+  // Passed straight through (validated separately by statusWireSchema), so we
+  // accept any connector shape — the daemon's ConnectorStatus has no index
+  // signature and would otherwise not be assignable to Record<string, unknown>.
+  connectors: ReadonlyArray<unknown>;
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
   config?: FullCpConfig;
 }

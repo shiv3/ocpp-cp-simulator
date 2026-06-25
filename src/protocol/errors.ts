@@ -36,8 +36,10 @@ export class RpcFailure extends Error {
 
 /** Client → server: `socket.emit("rpc", request, ack)`. */
 export const rpcRequestSchema = z.object({
+  // Required for CP-command methods; omitted for daemon-level explicit ops.
+  cpId: z.string().max(256).optional(),
   method: z.string().max(128),
-  params: z.unknown(),
+  params: z.unknown().optional(),
 });
 export type RpcRequest = z.infer<typeof rpcRequestSchema>;
 

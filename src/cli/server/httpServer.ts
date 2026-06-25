@@ -78,7 +78,7 @@ function cacheControlFor(pathname: string, servedFallback: boolean): string {
   return "no-store";
 }
 
-interface SocketData {
+export interface SocketData {
   scope: string;
   unsub?: () => void;
 }
@@ -740,7 +740,7 @@ function isJsonCommand(v: unknown): v is JsonCommand {
   return isRecord(v) && typeof v.command === "string";
 }
 
-function parseCreateBody(body: unknown): ChargePointInitOptions {
+export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (!isRecord(body)) throw new Error("body must be an object");
   const cpId = body.cpId;
   if (typeof cpId !== "string" || cpId.length === 0) {

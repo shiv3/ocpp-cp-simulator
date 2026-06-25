@@ -18,6 +18,7 @@ interface ChargePointProps {
    * to [TagID] when omitted to keep older callers working.
    */
   tagIDs?: string[];
+  ocppVersion?: string;
 }
 
 // Panel width constants (in vw)
@@ -25,8 +26,14 @@ const PANEL_DEFAULT_WIDTH = 50; // 50vw default — keeps the home tab list
 // readable behind the panel. Users can drag the left edge of the panel
 // wider when they want more room for the scenario canvas.
 const PANEL_COLLAPSED_WIDTH_PX = 60; // px for collapsed
+const DEFAULT_OCPP_VERSION = "OCPP-1.6J";
 
-const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID, tagIDs }) => {
+const ChargePoint: React.FC<ChargePointProps> = ({
+  cpId,
+  TagID,
+  tagIDs,
+  ocppVersion,
+}) => {
   const availableTagIds =
     tagIDs && tagIDs.length > 0 ? tagIDs : TagID ? [TagID] : [];
   const {
@@ -158,6 +165,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({ cpId, TagID, tagIDs }) => {
                 cpId={cpId}
                 connectorCount={connectorIds.length}
                 TagID={TagID}
+                ocppVersion={ocppVersion}
               />
             </div>
           </div>
@@ -496,14 +504,17 @@ interface SettingsViewProps {
   cpId: string;
   connectorCount: number;
   TagID: string;
+  ocppVersion?: string;
 }
 
 const SettingsView: React.FC<SettingsViewProps> = ({
   cpId,
   connectorCount,
   TagID,
+  ocppVersion,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const displayedOcppVersion = ocppVersion || DEFAULT_OCPP_VERSION;
 
   return (
     <div className="panel p-3">
@@ -538,7 +549,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                 OCPP Version
               </span>
               <span className="text-xs text-gray-900 dark:text-gray-100">
-                1.6J
+                {displayedOcppVersion}
               </span>
             </div>
           </div>

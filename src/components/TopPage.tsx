@@ -353,6 +353,7 @@ const TopPage: React.FC = () => {
     <div className="px-8 pt-6 pb-8 mb-4">
       <ExperimentalView
         cps={chargePoints}
+        chargePointConfigs={chargePointConfigs}
         tagIDs={effectiveTagIDs}
         onAddChargePoint={handleAddChargePoint}
         onEditChargePoint={handleEditChargePoint}
@@ -377,6 +378,7 @@ const TopPage: React.FC = () => {
 
 interface ExperimentalProps {
   cps: ChargePointSnapshot[];
+  chargePointConfigs: ChargePointConfig[];
   tagIDs: string[];
   onAddChargePoint: () => void;
   onEditChargePoint: (index: number) => void;
@@ -385,6 +387,7 @@ interface ExperimentalProps {
 
 const ExperimentalView: React.FC<ExperimentalProps> = ({
   cps,
+  chargePointConfigs,
   tagIDs,
   onAddChargePoint,
   onEditChargePoint,
@@ -459,6 +462,13 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
   };
 
   const hasMultipleCps = cps.length >= 2;
+  const ocppVersionByCpId = useMemo(
+    () =>
+      new Map(
+        chargePointConfigs.map((config) => [config.cpId, config.ocppVersion]),
+      ),
+    [chargePointConfigs],
+  );
 
   return (
     <>
@@ -557,6 +567,9 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({
               cpId={cp.id}
               TagID={tagIDs[0] ?? "TAG001"}
               tagIDs={tagIDs}
+              ocppVersion={
+                cp.config?.ocppVersion ?? ocppVersionByCpId.get(cp.id)
+              }
             />
           </TabsContent>
         ))}

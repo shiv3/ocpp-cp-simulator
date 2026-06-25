@@ -7,6 +7,7 @@ import type {
   ChangeAvailabilityResponseV201,
   ClearCacheResponseV201,
   ReserveNowResponseV201,
+  ResetRequestV201,
   ResetResponseV201,
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
@@ -18,9 +19,51 @@ import type {
 } from "./inboundRegistryV201";
 import { OCPPAvailability, OCPPStatus } from "../../../domain/types/OcppTypes";
 
-export const handleResetV201 = (): V201HandlerResult => ({
-  response: { status: "Accepted" } satisfies ResetResponseV201,
-});
+export const handleResetV201 = (
+  payload?: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult => {
+  if (payload === undefined || ctx === undefined) {
+    return {
+      response: { status: "Accepted" } satisfies ResetResponseV201,
+    };
+  }
+
+  const req = payload as ResetRequestV201;
+  const type: string = req.type;
+  const { evseId } = req;
+  const all = [...ctx.chargePoint.connectors.values()];
+  const targets =
+    evseId === undefined
+      ? all
+      : all.filter((connector) => connector.id === evseId);
+
+  if (evseId !== undefined && targets.length === 0) {
+    return {
+      response: { status: "Rejected" } satisfies ResetResponseV201,
+    };
+  }
+
+  if (type === "OnIdle" && targets.some((connector) => connector.transaction)) {
+    return {
+      response: { status: "Scheduled" } satisfies ResetResponseV201,
+    };
+  }
+
+  return {
+    response: { status: "Accepted" } satisfies ResetResponseV201,
+    afterResult: () => {
+      if (type !== "ImmediateAndResume") {
+        for (const connector of targets) {
+          if (connector.transaction) {
+            ctx.chargePoint.stopTransaction(connector.id, "HardReset");
+          }
+        }
+      }
+      ctx.chargePoint.boot();
+    },
+  };
+};
 
 function availabilityStatus(target: OCPPAvailability): OCPPStatus {
   return target === "Operative" ? OCPPStatus.Available : OCPPStatus.Unavailable;

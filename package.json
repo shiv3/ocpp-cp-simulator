@@ -75,6 +75,7 @@
     "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "@vitest/coverage-v8": "^2.1.8",
+    "ajv-draft-04": "^1.0.0",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

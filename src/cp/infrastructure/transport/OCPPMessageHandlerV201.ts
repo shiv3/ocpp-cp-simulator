@@ -11,15 +11,7 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
-  GetBaseReportResponseV201,
-  NotifyReportRequestV201,
 } from "@cshil/ocpp-tools";
-import type { ReportDataType } from "@cshil/ocpp-tools/types/v201/notify-report";
-import {
-  isValidGetBaseReportRequestV201,
-  isValidGetVariablesRequestV201,
-  isValidSetVariablesRequestV201,
-} from "@cshil/ocpp-tools/validation/v201";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import { Logger, LogType } from "../../shared/Logger";
 import {
@@ -46,27 +38,12 @@ import {
   v201StatusEvse,
   v201TransactionEvse,
 } from "./v201/topologyWireV201";
-import { handleGetVariablesV201 } from "./v201/getVariablesV201";
-import { handleSetVariablesV201 } from "./v201/setVariablesV201";
-import { buildBaseReportData } from "./v201/baseReportV201";
-
-type V201Action =
-  | "BootNotification"
-  | "Heartbeat"
-  | "StatusNotification"
-  | "TransactionEvent"
-  | "MeterValues"
-  | "Authorize"
-  | "NotifyReport";
-
-type V201RequestPayload =
-  | BootNotificationRequestV201
-  | HeartbeatRequestV201
-  | StatusNotificationRequestV201
-  | TransactionEventRequestV201
-  | MeterValuesRequestV201
-  | AuthorizeRequestV201
-  | NotifyReportRequestV201;
+import {
+  buildV201InboundRegistry,
+  type V201Action,
+  type V201InboundContext,
+  type V201RequestPayload,
+} from "./v201/inboundRegistryV201";
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -131,6 +108,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _logger: Logger;
   private readonly _dataTransferHandler: DataTransferHandler =
     new DataTransferHandler();
+  private readonly _inbound = buildV201InboundRegistry();
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -178,63 +156,25 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: unknown,
   ): void {
     if (messageType === OCPPMessageType.CALL) {
-      if (action === "GetVariables") {
-        if (!isValidGetVariablesRequestV201(payload)) {
+      const entry = this._inbound.get(action);
+      if (entry) {
+        if (!entry.validate(payload)) {
           this._webSocket.sendError(messageId, {
             errorCode: "FormationViolation" as OCPPErrorCode,
-            errorDescription: "Invalid GetVariables payload",
+            errorDescription: `Invalid ${action} payload`,
             errorDetails: {},
           });
           return;
         }
 
-        const response = handleGetVariablesV201(
-          payload,
-          this._chargePoint.configuration,
-        );
+        const ctx: V201InboundContext = {
+          chargePoint: this._chargePoint,
+          logger: this._logger,
+          sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
+        };
+        const { response, afterResult } = entry.handle(payload, ctx);
         this._webSocket.sendResult(messageId, response);
-        return;
-      }
-
-      if (action === "SetVariables") {
-        if (!isValidSetVariablesRequestV201(payload)) {
-          this._webSocket.sendError(messageId, {
-            errorCode: "FormationViolation" as OCPPErrorCode,
-            errorDescription: "Invalid SetVariables payload",
-            errorDetails: {},
-          });
-          return;
-        }
-
-        this._webSocket.sendResult(
-          messageId,
-          handleSetVariablesV201(payload, this._chargePoint.configuration),
-        );
-        return;
-      }
-
-      if (action === "GetBaseReport") {
-        if (!isValidGetBaseReportRequestV201(payload)) {
-          this._webSocket.sendError(messageId, {
-            errorCode: "FormationViolation" as OCPPErrorCode,
-            errorDescription: "Invalid GetBaseReport payload",
-            errorDetails: {},
-          });
-          return;
-        }
-
-        const reportData = buildBaseReportData(this._chargePoint.configuration);
-        if (reportData.length === 0) {
-          this._webSocket.sendResult(messageId, {
-            status: "EmptyResultSet",
-          } as GetBaseReportResponseV201);
-          return;
-        }
-
-        this._webSocket.sendResult(messageId, {
-          status: "Accepted",
-        } as GetBaseReportResponseV201);
-        this.sendBaseReport(payload.requestId, reportData);
+        afterResult?.();
         return;
       }
 
@@ -252,23 +192,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     } else if (messageType === OCPPMessageType.CALLERROR) {
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
     }
-  }
-
-  private sendBaseReport(
-    requestId: number,
-    reportData: ReportDataType[],
-  ): void {
-    const first = reportData[0];
-    if (first === undefined) return;
-
-    const payload: NotifyReportRequestV201 = {
-      requestId,
-      generatedAt: new Date().toISOString(),
-      seqNo: 0,
-      tbc: false,
-      reportData: [first, ...reportData.slice(1)],
-    };
-    this.send("NotifyReport", this.generateMessageId(), payload);
   }
 
   private handleCallResult(

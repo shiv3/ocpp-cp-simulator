@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { parseOcppVersion } from "../../../../domain/types/OcppVersion";
 import { outgoingV16Warning } from "../../codec/validateV16";
+import { outgoingV201Warning } from "../../codec/validateV201";
+import { outgoingV21Warning } from "../../codec/validateV21";
 import { getProtocolProfile } from "../profiles";
 import { ocppVersionToSubprotocol } from "../subprotocols";
 
@@ -62,6 +64,44 @@ describe("ProtocolProfile", () => {
     expect(
       profile.codec.outgoingWarning("BootNotification", validPayload),
     ).toBe(outgoingV16Warning("BootNotification", validPayload));
+    expect(
+      profile.codec.outgoingWarning("BootNotification", validPayload),
+    ).toBeNull();
+  });
+
+  it("uses the exact v201 outgoing validator", () => {
+    const invalidPayload = { reason: "PowerUp" };
+    const validPayload = {
+      reason: "PowerUp",
+      chargingStation: { model: "M", vendorName: "V" },
+    };
+    const profile = getProtocolProfile("OCPP-2.0.1");
+
+    expect(
+      profile.codec.outgoingWarning("BootNotification", invalidPayload),
+    ).toBe(outgoingV201Warning("BootNotification", invalidPayload));
+    expect(
+      profile.codec.outgoingWarning("BootNotification", invalidPayload),
+    ).not.toBeNull();
+    expect(
+      profile.codec.outgoingWarning("BootNotification", validPayload),
+    ).toBeNull();
+  });
+
+  it("uses the exact v21 outgoing validator", () => {
+    const invalidPayload = { reason: "PowerUp" };
+    const validPayload = {
+      reason: "PowerUp",
+      chargingStation: { model: "M", vendorName: "V" },
+    };
+    const profile = getProtocolProfile("OCPP-2.1");
+
+    expect(
+      profile.codec.outgoingWarning("BootNotification", invalidPayload),
+    ).toBe(outgoingV21Warning("BootNotification", invalidPayload));
+    expect(
+      profile.codec.outgoingWarning("BootNotification", invalidPayload),
+    ).not.toBeNull();
     expect(
       profile.codec.outgoingWarning("BootNotification", validPayload),
     ).toBeNull();

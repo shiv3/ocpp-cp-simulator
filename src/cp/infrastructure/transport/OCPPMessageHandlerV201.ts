@@ -13,6 +13,7 @@ import type {
   AuthorizeResponseV201,
 } from "../../../ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
+import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -107,6 +108,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _chargePoint: ChargePoint;
   private readonly _webSocket: OCPPWebSocket;
   private readonly _logger: Logger;
+  private readonly _codec?: ProtocolCodec;
   private readonly _dataTransferHandler: DataTransferHandler =
     new DataTransferHandler();
   private readonly _inbound: V201InboundRegistry;
@@ -121,10 +123,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     webSocket: OCPPWebSocket,
     logger: Logger,
     inboundRegistry?: V201InboundRegistry,
+    codec?: ProtocolCodec,
   ) {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
+    this._codec = codec;
     this._inbound = inboundRegistry ?? buildV201InboundRegistry();
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
@@ -145,6 +149,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         LogType.WEBSOCKET,
       );
       return;
+    }
+    const warning = this._codec?.outgoingWarning(action, payload);
+    if (warning) {
+      this._logger.warn(warning, LogType.OCPP);
     }
     const sent = this._webSocket.sendAction(messageId, action, payload);
     if (sent) {

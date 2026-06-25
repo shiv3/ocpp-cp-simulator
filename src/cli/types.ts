@@ -11,13 +11,14 @@ export interface CLIOptions {
     readonly username: string;
     readonly password: string;
   } | null;
-  /** Optional Basic Auth gate for the HTTP web console / API / WS upgrades.
+  /** Optional Basic Auth gate for the HTTP web console and non-health HTTP.
    *  Unrelated to `basicAuth` above (which is for the *outgoing* CP →
    *  CSMS WebSocket). When set, every request to the daemon's HTTP server
    *  except the configured health path must carry a matching
    *  `Authorization: Basic <base64(user:pass)>` header; otherwise the
    *  server returns 401 + `WWW-Authenticate: Basic realm="..."` so
-   *  browsers prompt for credentials. */
+   *  browsers prompt for credentials. Socket.IO authenticates in its
+   *  handshake. */
   readonly webConsoleBasicAuth: {
     readonly username: string;
     readonly password: string;
@@ -59,7 +60,7 @@ export interface CLIOptions {
    *  files (SPA-aware). Null disables static hosting. */
   readonly serveStatic: string | null;
   /** TCP port for the bundled web console. When set, the daemon stands up
-   *  an HTTP listener on this port serving both the API and the UI. May
+   *  an HTTP listener on this port serving socket.io, health, and the UI. May
    *  share a port with `httpPort` (one listener) or use its own. */
   readonly webConsolePort: number | null;
   /** Filesystem path for the SQLite state DB. When set, ConfigurationStore

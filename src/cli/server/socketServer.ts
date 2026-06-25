@@ -1,8 +1,4 @@
-import type {
-  Server as BunServer,
-  ServerWebSocket,
-  WebSocketHandler,
-} from "bun";
+import type { Server as BunServer, WebSocketHandler } from "bun";
 import { Server as Engine } from "@socket.io/bun-engine";
 import {
   Server as SocketIoServer,
@@ -36,7 +32,7 @@ import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { LogLevel } from "../../cp/shared/Logger";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
-import { parseCreateBody, type HttpHandlers } from "./httpServer";
+import { parseCreateBody } from "./httpServer";
 import {
   createRegistryEventBridge,
   type RegistryEventBridge,
@@ -46,8 +42,6 @@ export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
 export const SOCKET_IO_PING_TIMEOUT_MS = 20_000;
 
-type SocketIoWebSocketData = { transport?: unknown };
-type AnyWebSocket = ServerWebSocket<Record<string, unknown>>;
 type AnyWebSocketHandler = WebSocketHandler<Record<string, unknown>>;
 
 export interface SocketIoAttachment {
@@ -688,56 +682,4 @@ function timingSafeStringEqual(a: string, b: string): boolean {
     diff |= ba[i] ^ bb[i];
   }
   return diff === 0;
-}
-
-export function combineWebSocketHandlers(
-  socketIoHandler: AnyWebSocketHandler,
-  legacyHandler: HttpHandlers["websocket"],
-): HttpHandlers["websocket"] {
-  const combined: AnyWebSocketHandler = {
-    maxPayloadLength: socketIoHandler.maxPayloadLength,
-    open(ws) {
-      if (isSocketIoWebSocket(ws)) {
-        return socketIoHandler.open?.(ws);
-      }
-      return legacyHandler.open?.(ws as never);
-    },
-    message(ws, message) {
-      if (isSocketIoWebSocket(ws)) {
-        return socketIoHandler.message(ws, message);
-      }
-      return legacyHandler.message(ws as never, message);
-    },
-    close(ws, code, reason) {
-      if (isSocketIoWebSocket(ws)) {
-        return socketIoHandler.close?.(ws, code, reason);
-      }
-      return legacyHandler.close?.(ws as never, code, reason);
-    },
-    drain(ws) {
-      if (isSocketIoWebSocket(ws)) {
-        return socketIoHandler.drain?.(ws);
-      }
-      return legacyHandler.drain?.(ws as never);
-    },
-    ping(ws, data) {
-      if (isSocketIoWebSocket(ws)) {
-        return socketIoHandler.ping?.(ws, data);
-      }
-      return legacyHandler.ping?.(ws as never, data);
-    },
-    pong(ws, data) {
-      if (isSocketIoWebSocket(ws)) {
-        return socketIoHandler.pong?.(ws, data);
-      }
-      return legacyHandler.pong?.(ws as never, data);
-    },
-  };
-  return combined as unknown as HttpHandlers["websocket"];
-}
-
-function isSocketIoWebSocket(
-  ws: AnyWebSocket,
-): ws is ServerWebSocket<SocketIoWebSocketData> {
-  return Boolean((ws.data as SocketIoWebSocketData | undefined)?.transport);
 }

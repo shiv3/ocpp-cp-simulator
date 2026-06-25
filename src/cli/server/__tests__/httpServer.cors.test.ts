@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from "vitest";
 import { createHttpHandlers, type CorsPolicy } from "../httpServer";
 import { CPRegistry } from "../CPRegistry";
@@ -6,7 +7,6 @@ import { createLifecycle } from "../lifecycle";
 
 // CORS checks run before dispatch() and don't touch the WS `server`, so an
 // opaque cast is enough (mirrors httpServer.basicAuth.test.ts).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stubServer = null as any;
 
 function makeHandlers(cors: CorsPolicy): ReturnType<typeof createHttpHandlers> {
@@ -115,7 +115,7 @@ describe("httpServer same-origin CORS behind a reverse proxy", () => {
     expect(res.status).toBe(200);
   });
 
-  it("answers OPTIONS preflight 204 with the forwarded origin echoed (trust on)", async () => {
+  it("answers socket.io OPTIONS preflight 204 with the forwarded origin echoed (trust on)", async () => {
     const handlers = makeHandlers({
       kind: "same-origin",
       trustForwardedHeaders: true,
@@ -124,7 +124,7 @@ describe("httpServer same-origin CORS behind a reverse proxy", () => {
       handlers,
       proxiedRequest("https://app.example.com", "https", "app.example.com", {
         method: "OPTIONS",
-        path: "/v1/cp",
+        path: "/socket.io/?EIO=4&transport=polling",
       }),
     );
     expect(res.status).toBe(204);

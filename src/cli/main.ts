@@ -359,7 +359,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     }
     serveStatic = bundled;
     // --web-console alone is enough to put the daemon into server mode —
-    // even without --http-port, the web-console port carries the full API
+    // even without --http-port, the web-console port carries socket.io/health
     // alongside the UI on the same origin.
   }
 
@@ -530,8 +530,8 @@ Options:
   --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
   --web-console-basic-auth-user <u>
                            Basic auth user for INCOMING HTTP requests to
-                           this daemon (web console / JSON API / WS
-                           upgrades). Must be supplied together with
+                           this daemon (web console / socket.io).
+                           Must be supplied together with
                            --web-console-basic-auth-pass. Default: no auth.
   --web-console-basic-auth-pass <p>
                            Basic auth password for INCOMING HTTP. The
@@ -574,7 +574,7 @@ Options:
                            public origin a reverse proxy reports via
                            X-Forwarded-Proto / X-Forwarded-Host. Use only
                            behind a trusted proxy (see docs/server.md).
-  --web-console [<port>]   Serve the bundled browser UI alongside the API.
+  --web-console [<port>]   Serve the bundled browser UI alongside socket.io.
                            With <port>: opens a second listener on that port.
                            Without <port>: shares the --http-port listener.
                            Requires the UI to be built (run "bun run build",
@@ -595,16 +595,10 @@ Options:
                            remote-mode auto-detect probe lines up.
   -h, --help               Show this help
 
-HTTP API (see docs/server.md):
+HTTP endpoints (see docs/server.md):
   GET    /v1/healthz       (or whatever --health-path is set to)
-  GET    /v1/cp
-  POST   /v1/cp
-  GET    /v1/cp/:cpId
-  DELETE /v1/cp/:cpId
-  POST   /v1/cp/:cpId/command
-  WS     /v1/cp/:cpId/events
-  WS     /v1/events
-  POST   /v1/shutdown
+  GET    /socket.io/       Socket.IO / Engine.IO transport
+  POST   /socket.io/       Socket.IO / Engine.IO transport
 `);
 }
 
@@ -620,8 +614,8 @@ HTTP API (see docs/server.md):
  *     else's browser, so open CORS is fine.
  *   - No `--cors-origin` flag + binding to a non-loopback host
  *     (0.0.0.0, LAN IP, hostname) → `same-origin` AND a warning to
- *     stderr. The admin API is exposed on the LAN; defaulting to open
- *     CORS would let any page in the operator's browser POST to it.
+ *     stderr. The daemon is exposed on the LAN; defaulting to open
+ *     CORS would let any page in the operator's browser call it.
  */
 function resolveCorsPolicy(
   options: CLIOptions,
@@ -720,7 +714,6 @@ async function main(): Promise<void> {
     await startServer({
       httpPort: options.httpPort,
       httpHost: options.httpHost,
-      unixSocket: null,
       pidPath: options.daemon ? DEFAULT_PID_PATH : null,
       bootstrap: buildBootstrap(options),
       autoConnect: !!options.cpId,

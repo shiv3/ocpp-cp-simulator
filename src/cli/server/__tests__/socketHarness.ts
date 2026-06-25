@@ -10,15 +10,10 @@ import {
 import type { Database } from "../../../cp/domain/persistence/Database";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import {
-  createHttpHandlers,
-  type CorsPolicy,
-  type SocketData,
-} from "../httpServer";
+import { createHttpHandlers, type CorsPolicy } from "../httpServer";
 import { createLifecycle } from "../lifecycle";
 import {
   attachSocketIo,
-  combineWebSocketHandlers,
   isSocketIoPath,
   SOCKET_IO_PATH,
   type SocketIoAttachment,
@@ -40,7 +35,7 @@ export interface TestServerOptions {
 export interface TestServer {
   readonly bus: EventBus;
   readonly registry: CPRegistry;
-  readonly server: BunServer<SocketData>;
+  readonly server: BunServer<Record<string, unknown>>;
   readonly socketIo: SocketIoAttachment;
   readonly url: string;
   readonly port: number;
@@ -99,7 +94,7 @@ export async function startTestServer(
     port,
     fetch: handlers.fetch,
     idleTimeout: socketIo.idleTimeout,
-    websocket: combineWebSocketHandlers(socketIo.websocket, handlers.websocket),
+    websocket: socketIo.websocket,
   });
   const url = `http://${host}:${server.port}`;
   let closed = false;

@@ -164,7 +164,7 @@ describe("socket.io registry event bridge", () => {
       const registryEvents = events.filter(
         (event) => event.kind === "registry" && event.cp?.cpId === "cp-gone",
       );
-      const lastForCp = registryEvents.at(-1);
+      const lastForCp = registryEvents[registryEvents.length - 1];
       expect(lastForCp?.change).toBe("removed");
       expect(registryEvents.some((event) => event.change === "updated")).toBe(
         false,

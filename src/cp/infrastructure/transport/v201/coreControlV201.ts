@@ -1,8 +1,9 @@
-// Tier-3 schema-valid acks for CSMS core-control CALLs; real effects —
-// availability application, reservation state, reset/unlock side effects —
+// Tier-3 schema-valid acks for CSMS core-control CALLs. Availability has
+// protocol-visible effects here; reservation state, reset/unlock side effects
 // are deferred to a later fidelity phase.
 import type {
   CancelReservationResponseV201,
+  ChangeAvailabilityRequestV201,
   ChangeAvailabilityResponseV201,
   ClearCacheResponseV201,
   ReserveNowResponseV201,
@@ -15,14 +16,94 @@ import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
+import { OCPPAvailability, OCPPStatus } from "../../../domain/types/OcppTypes";
 
 export const handleResetV201 = (): V201HandlerResult => ({
   response: { status: "Accepted" } satisfies ResetResponseV201,
 });
 
-export const handleChangeAvailabilityV201 = (): V201HandlerResult => ({
-  response: { status: "Accepted" } satisfies ChangeAvailabilityResponseV201,
-});
+function availabilityStatus(target: OCPPAvailability): OCPPStatus {
+  return target === "Operative" ? OCPPStatus.Available : OCPPStatus.Unavailable;
+}
+
+export const handleChangeAvailabilityV201 = (
+  payload?: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult => {
+  if (payload === undefined || ctx === undefined) {
+    return {
+      response: { status: "Accepted" } satisfies ChangeAvailabilityResponseV201,
+    };
+  }
+
+  const req = payload as ChangeAvailabilityRequestV201;
+  const target: OCPPAvailability = req.operationalStatus;
+  const connectorId = req.evse?.id;
+  const nextStatus = availabilityStatus(target);
+
+  if (connectorId === undefined) {
+    const activeConnectors = Array.from(
+      ctx.chargePoint.connectors.values(),
+    ).filter((connector) => connector.transaction);
+    if (activeConnectors.length > 0) {
+      return {
+        response: {
+          status: "Scheduled",
+        } satisfies ChangeAvailabilityResponseV201,
+        afterResult: () => {
+          for (const connector of activeConnectors) {
+            connector.scheduledAvailability = target;
+          }
+        },
+      };
+    }
+
+    return {
+      response: {
+        status: "Accepted",
+      } satisfies ChangeAvailabilityResponseV201,
+      afterResult: () => {
+        ctx.chargePoint.updateConnectorStatus(0, nextStatus);
+        for (const connector of ctx.chargePoint.connectors.values()) {
+          connector.availability = target;
+          ctx.chargePoint.updateConnectorStatus(connector.id, nextStatus);
+        }
+        ctx.chargePoint.persistAvailability();
+      },
+    };
+  }
+
+  const connector = ctx.chargePoint.getConnector(connectorId);
+  if (!connector) {
+    return {
+      response: {
+        status: "Rejected",
+      } satisfies ChangeAvailabilityResponseV201,
+    };
+  }
+
+  if (connector.transaction) {
+    return {
+      response: {
+        status: "Scheduled",
+      } satisfies ChangeAvailabilityResponseV201,
+      afterResult: () => {
+        connector.scheduledAvailability = target;
+      },
+    };
+  }
+
+  return {
+    response: {
+      status: "Accepted",
+    } satisfies ChangeAvailabilityResponseV201,
+    afterResult: () => {
+      connector.availability = target;
+      ctx.chargePoint.updateConnectorStatus(connectorId, nextStatus);
+      ctx.chargePoint.persistAvailability();
+    },
+  };
+};
 
 export const handleUnlockConnectorV201 = (): V201HandlerResult => ({
   response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,

@@ -7,6 +7,7 @@ import type {
   HeartbeatRequestV201,
   MeterValuesRequestV201,
   NotifyReportRequestV201,
+  ReportChargingProfilesRequestV201,
   SetVariablesRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
@@ -58,15 +59,12 @@ import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import {
   handleCertificateSignedAckV201,
-  handleClearChargingProfileAckV201,
   handleClearDisplayMessageAckV201,
   handleClearVariableMonitoringAckV201,
   handleCostUpdatedAckV201,
   handleCustomerInformationAckV201,
   handleDataTransferAckV201,
   handleDeleteCertificateAckV201,
-  handleGetChargingProfilesAckV201,
-  handleGetCompositeScheduleAckV201,
   handleGetDisplayMessagesAckV201,
   handleGetInstalledCertificateIdsAckV201,
   handleGetLocalListVersionAckV201,
@@ -76,7 +74,6 @@ import {
   handleInstallCertificateAckV201,
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
-  handleSetChargingProfileAckV201,
   handleSetDisplayMessageAckV201,
   handleSetMonitoringBaseAckV201,
   handleSetMonitoringLevelAckV201,
@@ -101,6 +98,12 @@ import {
   handleRequestStartTransactionV201,
   handleRequestStopTransactionV201,
 } from "./transactionControlV201";
+import {
+  handleClearChargingProfileV201,
+  handleGetChargingProfilesV201,
+  handleGetCompositeScheduleV201,
+  handleSetChargingProfileV201,
+} from "./smartChargingV201";
 
 export type V201Action =
   | "BootNotification"
@@ -109,7 +112,8 @@ export type V201Action =
   | "TransactionEvent"
   | "MeterValues"
   | "Authorize"
-  | "NotifyReport";
+  | "NotifyReport"
+  | "ReportChargingProfiles";
 
 export type V201RequestPayload =
   | BootNotificationRequestV201
@@ -118,7 +122,8 @@ export type V201RequestPayload =
   | TransactionEventRequestV201
   | MeterValuesRequestV201
   | AuthorizeRequestV201
-  | NotifyReportRequestV201;
+  | NotifyReportRequestV201
+  | ReportChargingProfilesRequestV201;
 
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
@@ -276,28 +281,28 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "SetChargingProfile",
       {
         validate: isValidSetChargingProfileRequestV201,
-        handle: handleSetChargingProfileAckV201,
+        handle: handleSetChargingProfileV201,
       },
     ],
     [
       "ClearChargingProfile",
       {
         validate: isValidClearChargingProfileRequestV201,
-        handle: handleClearChargingProfileAckV201,
+        handle: handleClearChargingProfileV201,
       },
     ],
     [
       "GetChargingProfiles",
       {
         validate: isValidGetChargingProfilesRequestV201,
-        handle: handleGetChargingProfilesAckV201,
+        handle: handleGetChargingProfilesV201,
       },
     ],
     [
       "GetCompositeSchedule",
       {
         validate: isValidGetCompositeScheduleRequestV201,
-        handle: handleGetCompositeScheduleAckV201,
+        handle: handleGetCompositeScheduleV201,
       },
     ],
     [

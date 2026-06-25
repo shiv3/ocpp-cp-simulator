@@ -7,26 +7,14 @@ import {
   handleClearVariableMonitoringAckV201,
   handleCostUpdatedAckV201,
   handleDataTransferAckV201,
-  handleGetChargingProfilesAckV201,
-  handleGetCompositeScheduleAckV201,
   handleGetLocalListVersionAckV201,
   handleGetReportAckV201,
-  handleSetChargingProfileAckV201,
   handleSetVariableMonitoringAckV201,
   handleUnpublishFirmwareAckV201,
 } from "../csmsAcksV201";
 
 describe("csmsAcksV201", () => {
   it("returns representative Tier-3 schema-valid static responses", () => {
-    expect(handleSetChargingProfileAckV201().response).toEqual({
-      status: "Rejected",
-    });
-    expect(handleGetChargingProfilesAckV201().response).toEqual({
-      status: "NoProfiles",
-    });
-    expect(handleGetCompositeScheduleAckV201().response).toEqual({
-      status: "Rejected",
-    });
     expect(handleGetReportAckV201().response).toEqual({
       status: "EmptyResultSet",
     });

@@ -1,7 +1,6 @@
 // Tier-3 schema-valid responses for the remaining CSMS-initiated 2.0.1 messages; honest non-Accepted statuses reflect features the simulator does not yet implement; deep behavior is a later fidelity phase.
 import type {
   CertificateSignedResponseV201,
-  ClearChargingProfileResponseV201,
   ClearDisplayMessageResponseV201,
   ClearVariableMonitoringRequestV201,
   ClearVariableMonitoringResponseV201,
@@ -9,8 +8,6 @@ import type {
   CustomerInformationResponseV201,
   DataTransferResponseV201,
   DeleteCertificateResponseV201,
-  GetChargingProfilesResponseV201,
-  GetCompositeScheduleResponseV201,
   GetDisplayMessagesResponseV201,
   GetInstalledCertificateIdsResponseV201,
   GetLocalListVersionResponseV201,
@@ -21,7 +18,6 @@ import type {
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
   SendLocalListResponseV201,
-  SetChargingProfileResponseV201,
   SetDisplayMessageResponseV201,
   SetMonitoringBaseResponseV201,
   SetMonitoringLevelResponseV201,
@@ -87,30 +83,6 @@ function toV201SendLocalListStatus(
       return "Failed";
   }
 }
-
-export const handleSetChargingProfileAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies SetChargingProfileResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleClearChargingProfileAckV201 = (() => ({
-  response: {
-    status: "Unknown",
-  } satisfies ClearChargingProfileResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleGetChargingProfilesAckV201 = (() => ({
-  response: {
-    status: "NoProfiles",
-  } satisfies GetChargingProfilesResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleGetCompositeScheduleAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies GetCompositeScheduleResponseV201,
-})) satisfies V201AckHandler;
 
 export const handleGetReportAckV201 = (() => ({
   response: {

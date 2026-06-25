@@ -83,7 +83,7 @@ const TopPage: React.FC = () => {
           cpId: cp.id,
           connectorNumber: c?.connectors ?? cp.connectors.length,
           wsURL: c?.wsUrl ?? "",
-          ocppVersion: "OCPP-1.6J",
+          ocppVersion: c?.ocppVersion ?? "OCPP-1.6J",
           basicAuthEnabled: !!c?.basicAuth,
           basicAuthUsername: c?.basicAuth?.username ?? "",
           basicAuthPassword: c?.basicAuth?.password ?? "",
@@ -161,6 +161,7 @@ const TopPage: React.FC = () => {
         const params = {
           cpId: cpConfig.cpId,
           wsUrl: cpConfig.wsURL,
+          ocppVersion: cpConfig.ocppVersion,
           connectors: cpConfig.connectorNumber,
           vendor: cpConfig.chargePointVendor,
           model: cpConfig.chargePointModel,

@@ -344,7 +344,8 @@ export function createHttpHandlers(deps: {
       // The health path is intentionally exempt so k8s probes / external
       // load balancers / browser auto-detect can keep working unprompted.
       if (webConsoleBasicAuth !== null) {
-        if (url.pathname !== healthPath) {
+        const socketIoRequest = socketIo?.matches(url.pathname) ?? false;
+        if (url.pathname !== healthPath && !socketIoRequest) {
           const auth = parseBasicAuthHeader(req.headers.get("authorization"));
           if (!auth || !credentialsMatch(auth, webConsoleBasicAuth)) {
             // 401 with WWW-Authenticate so browsers prompt for credentials

@@ -61,7 +61,9 @@ export async function startTestServer(
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
+    bus,
     database,
+    webConsoleBasicAuth: options.webConsoleBasicAuth ?? null,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },

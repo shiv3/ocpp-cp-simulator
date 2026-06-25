@@ -35,7 +35,12 @@ import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { LogLevel } from "../../cp/shared/Logger";
 import type { CPRegistry } from "./CPRegistry";
+import type { EventBus } from "./eventBus";
 import { parseCreateBody, type HttpHandlers } from "./httpServer";
+import {
+  createRegistryEventBridge,
+  type RegistryEventBridge,
+} from "./registryEvents";
 
 export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
@@ -59,8 +64,14 @@ export interface SocketIoAttachment {
 
 export interface SocketIoDeps {
   readonly registry: CPRegistry;
+  readonly bus: EventBus;
   readonly database?: Database | null;
   readonly requestShutdown?: () => void;
+  readonly webConsoleBasicAuth?: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
+  readonly registryEvents?: RegistryEventBridge | null;
 }
 
 interface SocketRpcState {
@@ -96,7 +107,11 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
   });
 
   io.bind(engine);
-  registerSocketHandlers(io, deps);
+  const registryEvents = deps
+    ? createRegistryEventBridge(io, { registry: deps.registry, bus: deps.bus })
+    : null;
+  const runtimeDeps = deps ? { ...deps, registryEvents } : undefined;
+  registerSocketHandlers(io, runtimeDeps);
 
   const handler = engine.handler();
   const idleTimeout = Math.max(
@@ -113,6 +128,7 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
       return engine.handleRequest(req, server as never);
     },
     close() {
+      registryEvents?.close();
       engine.close();
       return new Promise((resolve) => {
         io.close(() => resolve());
@@ -125,6 +141,8 @@ export function registerSocketHandlers(
   io: SocketIoServer,
   deps?: SocketIoDeps,
 ): void {
+  registerSocketAuth(io, deps?.webConsoleBasicAuth ?? null);
+
   io.on("connection", (socket) => {
     if (!deps) return;
 
@@ -384,11 +402,14 @@ function clearLogs(deps: SocketIoDeps, rawParams: unknown): { ok: true } {
 }
 
 function resetState(deps: SocketIoDeps): { ok: true } {
-  for (const cpId of [...deps.registry.list()]) deps.registry.remove(cpId);
+  for (const cpId of [...deps.registry.list()]) {
+    deps.registry.remove(cpId, { notify: false });
+  }
   if (deps.database) {
     resetSimulatorState(deps.database);
     void deps.database.flush?.();
   }
+  deps.registryEvents?.emitReset();
   return { ok: true };
 }
 
@@ -606,6 +627,67 @@ function publicErrorMessage(code: RpcErrorCode): string {
 function safeLogMessage(err: unknown): string {
   if (!(err instanceof Error)) return "operation failed";
   return err.message.replace(/\/\/[^@/\s]+@/g, "//[redacted]@");
+}
+
+function registerSocketAuth(
+  io: SocketIoServer,
+  expected: SocketIoDeps["webConsoleBasicAuth"],
+): void {
+  io.use((socket, next) => {
+    if (!expected) {
+      next();
+      return;
+    }
+    if (socketAuthMatches(socket.handshake.auth, expected)) {
+      next();
+      return;
+    }
+    next(new Error("unauthorized"));
+  });
+}
+
+function socketAuthMatches(
+  auth: unknown,
+  expected: { readonly username: string; readonly password: string },
+): boolean {
+  const supplied = readSocketAuth(auth);
+  if (!supplied) return false;
+  return (
+    timingSafeStringEqual(supplied.username, expected.username) &&
+    timingSafeStringEqual(supplied.password, expected.password)
+  );
+}
+
+function readSocketAuth(
+  auth: unknown,
+): { readonly username: string; readonly password: string } | null {
+  if (!auth || typeof auth !== "object") return null;
+  const record = auth as Record<string, unknown>;
+  const username =
+    typeof record.user === "string"
+      ? record.user
+      : typeof record.username === "string"
+        ? record.username
+        : null;
+  const password =
+    typeof record.pass === "string"
+      ? record.pass
+      : typeof record.password === "string"
+        ? record.password
+        : null;
+  if (username === null || password === null) return null;
+  return { username, password };
+}
+
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const ba = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  if (ba.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ba.length; i++) {
+    diff |= ba[i] ^ bb[i];
+  }
+  return diff === 0;
 }
 
 export function combineWebSocketHandlers(

@@ -114,7 +114,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
+    bus,
     database,
+    webConsoleBasicAuth: opts.webConsoleBasicAuth,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },
@@ -164,11 +166,10 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     serverLog(`Web console: ${opts.staticDir}`);
   }
   if (opts.webConsoleBasicAuth) {
-    // Visible-on-startup log line so an operator can confirm the gate is on
-    // (and which user). The password is intentionally NOT logged.
+    // Visible-on-startup log line so an operator can confirm the gate is on.
+    // Credential values are intentionally not logged.
     serverLog(
-      `HTTP Basic Auth: enabled (user=${opts.webConsoleBasicAuth.username}, ` +
-        `health path ${opts.healthPath} exempt)`,
+      `HTTP Basic Auth: enabled (health path ${opts.healthPath} exempt)`,
     );
   }
   serverLog(`Health endpoint: GET ${opts.healthPath}`);

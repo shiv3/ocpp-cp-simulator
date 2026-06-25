@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import type {
   MeterValuesRequestV201,
   TransactionEventRequestV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import {
   startMockCsms,
   normalizeTranscript,

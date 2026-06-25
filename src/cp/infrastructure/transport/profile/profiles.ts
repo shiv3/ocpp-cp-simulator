@@ -30,8 +30,8 @@ const V201_PROFILE: ProtocolProfile = {
     new OCPPMessageHandlerV201(cp, ws, log),
 };
 
-// @cshil/ocpp-tools@1.3.2 has no 2.1 types/schemas yet, so this exposes the
-// 2.0.1-compatible subset until 2.1-net-new messages can be modeled.
+// The generated OCPP package has no 2.1 types/schemas yet, so this exposes
+// the 2.0.1-compatible subset until 2.1-net-new messages can be modeled.
 const V21_PROFILE: ProtocolProfile = {
   version: "OCPP-2.1",
   subprotocol: OCPP_WEBSOCKET_PROTOCOL_21,

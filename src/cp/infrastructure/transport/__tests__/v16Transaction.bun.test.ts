@@ -3,7 +3,7 @@ import type {
   MeterValuesRequestV16,
   StartTransactionRequestV16,
   StopTransactionRequestV16,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import { startMockCsms, normalizeTranscript, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

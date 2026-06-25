@@ -1,7 +1,7 @@
 import type {
   GetVariablesRequestV201,
   GetVariablesResponseV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
 import { renderConfigValue } from "./renderConfigValue";

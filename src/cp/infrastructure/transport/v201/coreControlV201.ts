@@ -7,7 +7,7 @@ import type {
   ResetResponseV201,
   TriggerMessageResponseV201,
   UnlockConnectorResponseV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import type { V201HandlerResult } from "./inboundRegistryV201";
 
 export const handleResetV201 = (): V201HandlerResult => ({

@@ -10,7 +10,7 @@ import type {
   SetVariablesRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import {
   isValidCancelReservationRequestV201,
   isValidCertificateSignedRequestV201,
@@ -52,7 +52,7 @@ import {
   isValidUnlockConnectorRequestV201,
   isValidUnpublishFirmwareRequestV201,
   isValidUpdateFirmwareRequestV201,
-} from "@cshil/ocpp-tools/validation/v201";
+} from "../../../../ocpp/validation/v201";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";

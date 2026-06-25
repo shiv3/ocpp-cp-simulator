@@ -1,5 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "@cshil/ocpp-tools";
+import type {} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
 export class ChangeConfigurationHandler

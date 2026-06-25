@@ -21,7 +21,7 @@ import type {
   ResetResponseV16,
   TriggerMessageResponseV16,
   UnlockConnectorResponseV16,
-} from "@cshil/ocpp-tools";
+} from "../../../ocpp";
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload

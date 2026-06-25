@@ -15,7 +15,7 @@ import type {
   StopTransactionRequestV16,
   TriggerMessageResponseV16,
   UnlockConnectorResponseV16,
-} from "@cshil/ocpp-tools";
+} from "../../ocpp";
 import { openOcppWebSocket } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { Logger } from "./Logger";
 import { OCPPAction, OCPPErrorCode, OCPPMessageType } from "./OcppTypes";

@@ -1,4 +1,4 @@
-import type { SetVariablesRequestV201 } from "@cshil/ocpp-tools";
+import type { SetVariablesRequestV201 } from "../../../../../ocpp";
 import { describe, expect, it } from "vitest";
 import {
   ConfigurationKeys,

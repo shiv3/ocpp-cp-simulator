@@ -1,7 +1,7 @@
 import type {
   ClearVariableMonitoringRequestV201,
   SetVariableMonitoringRequestV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../../ocpp";
 import { describe, expect, it } from "vitest";
 import {
   handleClearVariableMonitoringAckV201,

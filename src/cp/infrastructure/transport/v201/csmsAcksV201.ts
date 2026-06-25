@@ -29,7 +29,7 @@ import type {
   SetVariableMonitoringResponseV201,
   UnpublishFirmwareResponseV201,
   UpdateFirmwareResponseV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import type {
   V201HandlerResult,
   V201InboundContext,

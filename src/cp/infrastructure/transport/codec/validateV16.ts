@@ -2,7 +2,7 @@ import {
   actionValidatorV16,
   schemas,
   validationErrors,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 
 export interface V16ValidationResult {
   valid: boolean;

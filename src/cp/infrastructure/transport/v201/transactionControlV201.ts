@@ -5,7 +5,7 @@ import type {
   RequestStartTransactionResponseV201,
   RequestStopTransactionRequestV201,
   RequestStopTransactionResponseV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import type {
   V201HandlerResult,
   V201InboundContext,

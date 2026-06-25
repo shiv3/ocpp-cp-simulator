@@ -11,7 +11,7 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
-} from "@cshil/ocpp-tools";
+} from "../../../ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import { Logger, LogType } from "../../shared/Logger";
 import {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import type { NotifyReportRequestV201 } from "@cshil/ocpp-tools";
-import type { ReportDataType } from "@cshil/ocpp-tools/types/v201/notify-report";
+import type { NotifyReportRequestV201 } from "../../../../ocpp";
+import type { ReportDataType } from "../../../../ocpp/types/v201/notify-report";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

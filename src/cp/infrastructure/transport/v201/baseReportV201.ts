@@ -2,7 +2,7 @@ import type {
   ReportDataType,
   VariableAttributeType,
   VariableCharacteristicsType,
-} from "@cshil/ocpp-tools/types/v201/notify-report";
+} from "../../../../ocpp/types/v201/notify-report";
 import type {
   ConfigurationKeyType,
   ConfigurationStore,

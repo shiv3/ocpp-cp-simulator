@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { TransactionEventRequestV201 } from "@cshil/ocpp-tools";
+import type { TransactionEventRequestV201 } from "../../../../ocpp";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

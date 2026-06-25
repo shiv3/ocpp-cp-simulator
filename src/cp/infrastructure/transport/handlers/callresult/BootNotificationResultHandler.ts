@@ -1,5 +1,5 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type { BootNotificationResponseV16 } from "@cshil/ocpp-tools";
+import type { BootNotificationResponseV16 } from "../../../../../ocpp";
 
 /**
  * §4.2 BootNotification.conf handling:

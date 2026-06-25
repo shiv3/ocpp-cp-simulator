@@ -5,7 +5,7 @@ import {
   type ReserveNowResponseV16,
   type CancelReservationRequestV16,
   type CancelReservationResponseV16,
-} from "@cshil/ocpp-tools";
+} from "../../../ocpp";
 import { LogLevel, LogType } from "../../shared/Logger";
 
 export enum OCPPMessageType {

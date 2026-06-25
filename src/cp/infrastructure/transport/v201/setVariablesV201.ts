@@ -1,7 +1,7 @@
 import type {
   SetVariablesRequestV201,
   SetVariablesResponseV201,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import type {
   ConfigurationChangeStatus,
   ConfigurationStore,

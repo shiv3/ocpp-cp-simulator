@@ -1,4 +1,4 @@
-import { OCPPErrorCodeV16 } from "@cshil/ocpp-tools";
+import { OCPPErrorCodeV16 } from "../../ocpp";
 
 export enum OCPPStatus {
   Available = "Available",

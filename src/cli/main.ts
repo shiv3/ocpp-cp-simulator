@@ -15,6 +15,7 @@ import {
   DEFAULT_PID_PATH,
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
+import type { ClientLocation } from "./client";
 
 /**
  * Locate the bundled web console (Vite-built `dist/`) shipped alongside
@@ -35,7 +36,15 @@ function resolveBundledDist(): string | null {
   return null;
 }
 
-function parseArgs(argv: string[]): CLIOptions {
+const OCPP_VERSION_VALUES = "OCPP-1.6J, OCPP-2.0.1, OCPP-2.1";
+
+function isSupportedOcppVersion(value: string): boolean {
+  return (
+    value === "OCPP-1.6J" || value === "OCPP-2.0.1" || value === "OCPP-2.1"
+  );
+}
+
+export function parseArgs(argv: string[]): CLIOptions {
   let wsUrl = "";
   let cpId: string | null = null;
   let connectors = 1;
@@ -58,6 +67,7 @@ function parseArgs(argv: string[]): CLIOptions {
   let httpBasicAuthPass = "";
   let vendor = "CLI-Vendor";
   let model = "CLI-Model";
+  let ocppVersion: string | undefined;
   let scenario: string | null = null;
   let scenarioTemplate: string | null = null;
   let scenarioTemplateFile: string | null = null;
@@ -144,6 +154,16 @@ function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--model":
         model = next ?? "";
+        i++;
+        break;
+      case "--ocpp-version":
+        if (!next || next.startsWith("--") || !isSupportedOcppVersion(next)) {
+          process.stderr.write(
+            `Error: --ocpp-version must be one of ${OCPP_VERSION_VALUES}\n`,
+          );
+          process.exit(1);
+        }
+        ocppVersion = next;
         i++;
         break;
       case "--scenario":
@@ -417,6 +437,7 @@ function parseArgs(argv: string[]): CLIOptions {
     webConsoleBasicAuth,
     vendor,
     model,
+    ocppVersion,
     scenario,
     scenarioTemplate,
     scenarioTemplateFile,
@@ -488,6 +509,9 @@ Options:
                            Basic auth password for the client modes (see above).
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
+  --ocpp-version <OCPP-1.6J|OCPP-2.0.1|OCPP-2.1>
+                           OCPP version for a directly-started CP
+                           (default: OCPP-1.6J)
   --scenario <file>            Run scenario from JSON file on startup
   --scenario-template <id>     Run built-in scenario template on startup
   --scenario-template-file <p> Load a cpId-independent template JSON and apply it
@@ -601,6 +625,7 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
     connectors: options.connectors,
     vendor: options.vendor,
     model: options.model,
+    ocppVersion: options.ocppVersion,
     basicAuth: options.basicAuth,
     extraWsHeaders: options.extraWsHeaders,
     extraWsSubprotocols: options.extraWsSubprotocols,
@@ -619,7 +644,7 @@ async function main(): Promise<void> {
   // server-side --http-host/--http-port and outgoing-WS --basic-auth-* flags
   // with a deprecation warning for backward compatibility.
   const isClientMode = options.stop || options.send !== null || options.events;
-  let clientLoc = {
+  let clientLoc: ClientLocation = {
     httpUrl: options.httpUrl,
     unixSocket: options.unixSocket,
     basicAuth: options.httpBasicAuth,
@@ -717,7 +742,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`Fatal: ${err instanceof Error ? err.message : err}\n`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    process.stderr.write(
+      `Fatal: ${err instanceof Error ? err.message : err}\n`,
+    );
+    process.exit(1);
+  });
+}

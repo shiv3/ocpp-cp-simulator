@@ -294,6 +294,7 @@ export class CLIChargePointService {
         connectors: options.connectors,
         vendor: options.vendor,
         model: options.model,
+        ocppVersion: options.ocppVersion,
         basicAuth: options.basicAuth,
       },
       database,

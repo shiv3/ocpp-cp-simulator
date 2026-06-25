@@ -24,6 +24,7 @@ export interface CLIOptions {
   } | null;
   readonly vendor: string;
   readonly model: string;
+  readonly ocppVersion?: string;
   readonly scenario: string | null;
   readonly scenarioTemplate: string | null;
   /** Path to a JSON file containing a cpId-independent scenario template.

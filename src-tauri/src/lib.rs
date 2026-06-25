@@ -71,8 +71,6 @@ fn spawn_daemon(
         "127.0.0.1",
         "--http-port",
         &port.to_string(),
-        "--unix-socket",
-        "none",
         "--web-console",
         "--state-db",
         state_db,

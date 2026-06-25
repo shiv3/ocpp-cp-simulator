@@ -44,7 +44,7 @@ services:
       # both this AND `STATE_DB` above (set to `:memory:`) for ephemeral.
       - ./.state:/data
     # Args appended to the image's ENTRYPOINT. Tweak to your CSMS / cpId.
-    # The Dockerfile already sets --http-host 0.0.0.0 --unix-socket none,
+    # The Dockerfile already sets --http-host 0.0.0.0 --unsafe-remote,
     # --http-port (from $HTTP_PORT) and --state-db (from $STATE_DB).
     command:
       - --cp-id

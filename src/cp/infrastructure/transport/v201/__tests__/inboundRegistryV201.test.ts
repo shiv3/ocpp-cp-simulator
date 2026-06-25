@@ -12,7 +12,24 @@ describe("buildV201InboundRegistry", () => {
       "RequestStartTransaction",
       "RequestStopTransaction",
       "GetTransactionStatus",
+      "Reset",
+      "ChangeAvailability",
+      "UnlockConnector",
+      "TriggerMessage",
+      "ClearCache",
+      "ReserveNow",
+      "CancelReservation",
     ]);
-    expect(registry.has("Reset")).toBe(false);
+    for (const action of [
+      "Reset",
+      "ChangeAvailability",
+      "UnlockConnector",
+      "TriggerMessage",
+      "ClearCache",
+      "ReserveNow",
+      "CancelReservation",
+    ]) {
+      expect(registry.has(action)).toBe(true);
+    }
   });
 });

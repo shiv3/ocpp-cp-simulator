@@ -12,16 +12,32 @@ import type {
   TransactionEventRequestV201,
 } from "@cshil/ocpp-tools";
 import {
+  isValidCancelReservationRequestV201,
+  isValidChangeAvailabilityRequestV201,
+  isValidClearCacheRequestV201,
   isValidGetBaseReportRequestV201,
   isValidGetTransactionStatusRequestV201,
   isValidGetVariablesRequestV201,
+  isValidReserveNowRequestV201,
   isValidRequestStartTransactionRequestV201,
   isValidRequestStopTransactionRequestV201,
+  isValidResetRequestV201,
   isValidSetVariablesRequestV201,
+  isValidTriggerMessageRequestV201,
+  isValidUnlockConnectorRequestV201,
 } from "@cshil/ocpp-tools/validation/v201";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
+import {
+  handleCancelReservationV201,
+  handleChangeAvailabilityV201,
+  handleClearCacheV201,
+  handleReserveNowV201,
+  handleResetV201,
+  handleTriggerMessageV201,
+  handleUnlockConnectorV201,
+} from "./coreControlV201";
 import { handleGetVariablesV201 } from "./getVariablesV201";
 import { handleSetVariablesV201 } from "./setVariablesV201";
 import {
@@ -149,6 +165,55 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       {
         validate: isValidGetTransactionStatusRequestV201,
         handle: handleGetTransactionStatusV201,
+      },
+    ],
+    [
+      "Reset",
+      {
+        validate: isValidResetRequestV201,
+        handle: handleResetV201,
+      },
+    ],
+    [
+      "ChangeAvailability",
+      {
+        validate: isValidChangeAvailabilityRequestV201,
+        handle: handleChangeAvailabilityV201,
+      },
+    ],
+    [
+      "UnlockConnector",
+      {
+        validate: isValidUnlockConnectorRequestV201,
+        handle: handleUnlockConnectorV201,
+      },
+    ],
+    [
+      "TriggerMessage",
+      {
+        validate: isValidTriggerMessageRequestV201,
+        handle: handleTriggerMessageV201,
+      },
+    ],
+    [
+      "ClearCache",
+      {
+        validate: isValidClearCacheRequestV201,
+        handle: handleClearCacheV201,
+      },
+    ],
+    [
+      "ReserveNow",
+      {
+        validate: isValidReserveNowRequestV201,
+        handle: handleReserveNowV201,
+      },
+    ],
+    [
+      "CancelReservation",
+      {
+        validate: isValidCancelReservationRequestV201,
+        handle: handleCancelReservationV201,
       },
     ],
   ]);

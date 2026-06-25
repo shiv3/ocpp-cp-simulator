@@ -13,22 +13,78 @@ import type {
 } from "@cshil/ocpp-tools";
 import {
   isValidCancelReservationRequestV201,
+  isValidCertificateSignedRequestV201,
   isValidChangeAvailabilityRequestV201,
   isValidClearCacheRequestV201,
+  isValidClearChargingProfileRequestV201,
+  isValidClearDisplayMessageRequestV201,
+  isValidClearVariableMonitoringRequestV201,
+  isValidCostUpdatedRequestV201,
+  isValidCustomerInformationRequestV201,
+  isValidDataTransferRequestV201,
+  isValidDeleteCertificateRequestV201,
   isValidGetBaseReportRequestV201,
+  isValidGetChargingProfilesRequestV201,
+  isValidGetCompositeScheduleRequestV201,
+  isValidGetDisplayMessagesRequestV201,
+  isValidGetInstalledCertificateIdsRequestV201,
+  isValidGetLocalListVersionRequestV201,
+  isValidGetLogRequestV201,
+  isValidGetMonitoringReportRequestV201,
+  isValidGetReportRequestV201,
   isValidGetTransactionStatusRequestV201,
   isValidGetVariablesRequestV201,
+  isValidInstallCertificateRequestV201,
+  isValidPublishFirmwareRequestV201,
   isValidReserveNowRequestV201,
   isValidRequestStartTransactionRequestV201,
   isValidRequestStopTransactionRequestV201,
   isValidResetRequestV201,
+  isValidSendLocalListRequestV201,
+  isValidSetChargingProfileRequestV201,
+  isValidSetDisplayMessageRequestV201,
+  isValidSetMonitoringBaseRequestV201,
+  isValidSetMonitoringLevelRequestV201,
+  isValidSetNetworkProfileRequestV201,
+  isValidSetVariableMonitoringRequestV201,
   isValidSetVariablesRequestV201,
   isValidTriggerMessageRequestV201,
   isValidUnlockConnectorRequestV201,
+  isValidUnpublishFirmwareRequestV201,
+  isValidUpdateFirmwareRequestV201,
 } from "@cshil/ocpp-tools/validation/v201";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
+import {
+  handleCertificateSignedAckV201,
+  handleClearChargingProfileAckV201,
+  handleClearDisplayMessageAckV201,
+  handleClearVariableMonitoringAckV201,
+  handleCostUpdatedAckV201,
+  handleCustomerInformationAckV201,
+  handleDataTransferAckV201,
+  handleDeleteCertificateAckV201,
+  handleGetChargingProfilesAckV201,
+  handleGetCompositeScheduleAckV201,
+  handleGetDisplayMessagesAckV201,
+  handleGetInstalledCertificateIdsAckV201,
+  handleGetLocalListVersionAckV201,
+  handleGetLogAckV201,
+  handleGetMonitoringReportAckV201,
+  handleGetReportAckV201,
+  handleInstallCertificateAckV201,
+  handlePublishFirmwareAckV201,
+  handleSendLocalListAckV201,
+  handleSetChargingProfileAckV201,
+  handleSetDisplayMessageAckV201,
+  handleSetMonitoringBaseAckV201,
+  handleSetMonitoringLevelAckV201,
+  handleSetNetworkProfileAckV201,
+  handleSetVariableMonitoringAckV201,
+  handleUnpublishFirmwareAckV201,
+  handleUpdateFirmwareAckV201,
+} from "./csmsAcksV201";
 import {
   handleCancelReservationV201,
   handleChangeAvailabilityV201,
@@ -214,6 +270,195 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       {
         validate: isValidCancelReservationRequestV201,
         handle: handleCancelReservationV201,
+      },
+    ],
+    [
+      "SetChargingProfile",
+      {
+        validate: isValidSetChargingProfileRequestV201,
+        handle: handleSetChargingProfileAckV201,
+      },
+    ],
+    [
+      "ClearChargingProfile",
+      {
+        validate: isValidClearChargingProfileRequestV201,
+        handle: handleClearChargingProfileAckV201,
+      },
+    ],
+    [
+      "GetChargingProfiles",
+      {
+        validate: isValidGetChargingProfilesRequestV201,
+        handle: handleGetChargingProfilesAckV201,
+      },
+    ],
+    [
+      "GetCompositeSchedule",
+      {
+        validate: isValidGetCompositeScheduleRequestV201,
+        handle: handleGetCompositeScheduleAckV201,
+      },
+    ],
+    [
+      "GetReport",
+      {
+        validate: isValidGetReportRequestV201,
+        handle: handleGetReportAckV201,
+      },
+    ],
+    [
+      "GetMonitoringReport",
+      {
+        validate: isValidGetMonitoringReportRequestV201,
+        handle: handleGetMonitoringReportAckV201,
+      },
+    ],
+    [
+      "SetMonitoringBase",
+      {
+        validate: isValidSetMonitoringBaseRequestV201,
+        handle: handleSetMonitoringBaseAckV201,
+      },
+    ],
+    [
+      "SetMonitoringLevel",
+      {
+        validate: isValidSetMonitoringLevelRequestV201,
+        handle: handleSetMonitoringLevelAckV201,
+      },
+    ],
+    [
+      "SetNetworkProfile",
+      {
+        validate: isValidSetNetworkProfileRequestV201,
+        handle: handleSetNetworkProfileAckV201,
+      },
+    ],
+    [
+      "SendLocalList",
+      {
+        validate: isValidSendLocalListRequestV201,
+        handle: handleSendLocalListAckV201,
+      },
+    ],
+    [
+      "GetLog",
+      {
+        validate: isValidGetLogRequestV201,
+        handle: handleGetLogAckV201,
+      },
+    ],
+    [
+      "SetDisplayMessage",
+      {
+        validate: isValidSetDisplayMessageRequestV201,
+        handle: handleSetDisplayMessageAckV201,
+      },
+    ],
+    [
+      "GetDisplayMessages",
+      {
+        validate: isValidGetDisplayMessagesRequestV201,
+        handle: handleGetDisplayMessagesAckV201,
+      },
+    ],
+    [
+      "ClearDisplayMessage",
+      {
+        validate: isValidClearDisplayMessageRequestV201,
+        handle: handleClearDisplayMessageAckV201,
+      },
+    ],
+    [
+      "CustomerInformation",
+      {
+        validate: isValidCustomerInformationRequestV201,
+        handle: handleCustomerInformationAckV201,
+      },
+    ],
+    [
+      "DataTransfer",
+      {
+        validate: isValidDataTransferRequestV201,
+        handle: handleDataTransferAckV201,
+      },
+    ],
+    [
+      "CertificateSigned",
+      {
+        validate: isValidCertificateSignedRequestV201,
+        handle: handleCertificateSignedAckV201,
+      },
+    ],
+    [
+      "DeleteCertificate",
+      {
+        validate: isValidDeleteCertificateRequestV201,
+        handle: handleDeleteCertificateAckV201,
+      },
+    ],
+    [
+      "GetInstalledCertificateIds",
+      {
+        validate: isValidGetInstalledCertificateIdsRequestV201,
+        handle: handleGetInstalledCertificateIdsAckV201,
+      },
+    ],
+    [
+      "InstallCertificate",
+      {
+        validate: isValidInstallCertificateRequestV201,
+        handle: handleInstallCertificateAckV201,
+      },
+    ],
+    [
+      "PublishFirmware",
+      {
+        validate: isValidPublishFirmwareRequestV201,
+        handle: handlePublishFirmwareAckV201,
+      },
+    ],
+    [
+      "UnpublishFirmware",
+      {
+        validate: isValidUnpublishFirmwareRequestV201,
+        handle: handleUnpublishFirmwareAckV201,
+      },
+    ],
+    [
+      "UpdateFirmware",
+      {
+        validate: isValidUpdateFirmwareRequestV201,
+        handle: handleUpdateFirmwareAckV201,
+      },
+    ],
+    [
+      "GetLocalListVersion",
+      {
+        validate: isValidGetLocalListVersionRequestV201,
+        handle: handleGetLocalListVersionAckV201,
+      },
+    ],
+    [
+      "CostUpdated",
+      {
+        validate: isValidCostUpdatedRequestV201,
+        handle: handleCostUpdatedAckV201,
+      },
+    ],
+    [
+      "SetVariableMonitoring",
+      {
+        validate: isValidSetVariableMonitoringRequestV201,
+        handle: handleSetVariableMonitoringAckV201,
+      },
+    ],
+    [
+      "ClearVariableMonitoring",
+      {
+        validate: isValidClearVariableMonitoringRequestV201,
+        handle: handleClearVariableMonitoringAckV201,
       },
     ],
   ]);

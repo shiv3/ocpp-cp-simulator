@@ -8,16 +8,12 @@ import {
   handleCostUpdatedAckV201,
   handleDataTransferAckV201,
   handleGetLocalListVersionAckV201,
-  handleGetReportAckV201,
   handleSetVariableMonitoringAckV201,
   handleUnpublishFirmwareAckV201,
 } from "../csmsAcksV201";
 
 describe("csmsAcksV201", () => {
   it("returns representative Tier-3 schema-valid static responses", () => {
-    expect(handleGetReportAckV201().response).toEqual({
-      status: "EmptyResultSet",
-    });
     expect(handleGetLocalListVersionAckV201().response).toEqual({
       versionNumber: 0,
     });

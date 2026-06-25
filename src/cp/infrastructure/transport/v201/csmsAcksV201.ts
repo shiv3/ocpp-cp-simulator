@@ -13,7 +13,6 @@ import type {
   GetLocalListVersionResponseV201,
   GetLogResponseV201,
   GetMonitoringReportResponseV201,
-  GetReportResponseV201,
   InstallCertificateResponseV201,
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
@@ -83,12 +82,6 @@ function toV201SendLocalListStatus(
       return "Failed";
   }
 }
-
-export const handleGetReportAckV201 = (() => ({
-  response: {
-    status: "EmptyResultSet",
-  } satisfies GetReportResponseV201,
-})) satisfies V201AckHandler;
 
 export const handleGetMonitoringReportAckV201 = (() => ({
   response: {

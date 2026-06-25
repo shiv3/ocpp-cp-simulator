@@ -3,6 +3,8 @@ import type {
   BootNotificationRequestV201,
   GetBaseReportRequestV201,
   GetBaseReportResponseV201,
+  GetReportRequestV201,
+  GetReportResponseV201,
   GetVariablesRequestV201,
   HeartbeatRequestV201,
   MeterValuesRequestV201,
@@ -70,7 +72,6 @@ import {
   handleGetLocalListVersionAckV201,
   handleGetLogAckV201,
   handleGetMonitoringReportAckV201,
-  handleGetReportAckV201,
   handleInstallCertificateAckV201,
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
@@ -163,6 +164,49 @@ export function handleGetBaseReportV201(
 
   return {
     response: { status: "Accepted" } satisfies GetBaseReportResponseV201,
+    afterResult: () =>
+      ctx.sendCall("NotifyReport", {
+        requestId: req.requestId,
+        generatedAt: new Date().toISOString(),
+        seqNo: 0,
+        tbc: false,
+        reportData: [first, ...reportData.slice(1)],
+      }),
+  };
+}
+
+export function handleGetReportV201(
+  payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult {
+  const req = payload as GetReportRequestV201;
+  let reportData = buildBaseReportData(ctx.chargePoint.configuration);
+
+  if (req.componentVariable && req.componentVariable.length > 0) {
+    const wanted = req.componentVariable;
+    reportData = reportData.filter((rd) =>
+      wanted.some(
+        (cv) =>
+          cv.component.name === rd.component.name &&
+          (cv.variable?.name === undefined ||
+            cv.variable.name === rd.variable?.name),
+      ),
+    );
+  }
+
+  // componentCriteria is ignored because the flat configuration store does not
+  // model Active/Available/Enabled/Problem state.
+  const first = reportData[0];
+  if (first === undefined) {
+    return {
+      response: {
+        status: "EmptyResultSet",
+      } satisfies GetReportResponseV201,
+    };
+  }
+
+  return {
+    response: { status: "Accepted" } satisfies GetReportResponseV201,
     afterResult: () =>
       ctx.sendCall("NotifyReport", {
         requestId: req.requestId,
@@ -309,7 +353,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "GetReport",
       {
         validate: isValidGetReportRequestV201,
-        handle: handleGetReportAckV201,
+        handle: handleGetReportV201,
       },
     ],
     [

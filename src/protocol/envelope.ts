@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 
+import { ARRAY_1000 } from "./limits";
 import {
   cliEventWireSchema,
   cpListItemSchema,
@@ -41,7 +42,7 @@ export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
 export const subscribeResultSchema = z.object({
   subscribed: z.array(z.string().max(256)),
   snapshot: z.object({
-    cps: z.array(cpListItemSchema),
+    cps: ARRAY_1000(cpListItemSchema),
     perCp: z.record(z.string(), statusWireSchema),
   }),
 });

@@ -30,3 +30,21 @@ export const INFLIGHT_CAP = 64;
 
 /** Sustained rpc rate budget per socket (calls/second). */
 export const RPC_RATE_PER_SEC = 100;
+
+/** Max serialized size (bytes) of a scenario-definition object param. */
+export const SCENARIO_MAX_BYTES = 262_144;
+
+/** Max serialized size (bytes) of a generic settings/config object param. */
+export const OBJ_MAX_BYTES = 65_536;
+
+/**
+ * A free-form object param bounded by its serialized size — used for
+ * settings/config/options/scenario params whose inner shape is owned by the
+ * domain layer but must still be size-capped (Sec-4 DoS).
+ */
+export const boundedObject = (maxBytes: number) =>
+  z
+    .record(z.string(), z.unknown())
+    .refine((o) => JSON.stringify(o).length <= maxBytes, {
+      message: `object exceeds ${maxBytes} bytes`,
+    });

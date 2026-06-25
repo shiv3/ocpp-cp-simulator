@@ -112,7 +112,7 @@ export const connectorStatusWireSchema = z
     autoMeterValueConfig: z.record(z.string(), z.unknown()).nullable(),
     evSettings: z.record(z.string(), z.unknown()).nullable(),
     chargingProfile: z.record(z.string(), z.unknown()).nullable(),
-    chargingProfiles: z.array(z.record(z.string(), z.unknown())),
+    chargingProfiles: z.array(z.record(z.string(), z.unknown())).max(1_000),
     transactionStartTime: z.string().nullable(),
     transactionTagId: z.string().nullable(),
     transactionBatteryCapacityKwh: z.number().nullable(),
@@ -124,7 +124,7 @@ export const statusWireSchema = z
     id: STR_64K,
     status: STR_64K,
     error: STR_64K,
-    connectors: z.array(connectorStatusWireSchema),
+    connectors: z.array(connectorStatusWireSchema).max(1_000),
     heartbeat: z
       .object({
         intervalSeconds: z.number(),
@@ -192,14 +192,23 @@ export const cliEventWireSchema = z
   .strict();
 export type CliEventWire = z.infer<typeof cliEventWireSchema>;
 
-/** Deep-strip any `password` key (defensive; CLIEvents do not carry config). */
-function deepStripPassword(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(deepStripPassword);
+const URL_WITH_CREDS = /^[a-zA-Z][\w+.-]*:\/\/[^@/]*@/;
+
+/**
+ * Defensively redact event data: drop any `password` key AND strip embedded
+ * `user:pass@` credentials from any URL-shaped string value. CLIEvents do not
+ * carry CP config today, so this is belt-and-suspenders (B-1).
+ */
+function deepRedact(value: unknown): unknown {
+  if (typeof value === "string") {
+    return URL_WITH_CREDS.test(value) ? redactUrl(value) : value;
+  }
+  if (Array.isArray(value)) return value.map(deepRedact);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (k === "password") continue;
-      out[k] = deepStripPassword(v);
+      out[k] = deepRedact(v);
     }
     return out;
   }
@@ -214,7 +223,7 @@ export function eventToWire(evt: {
 }): CliEventWire {
   return {
     event: evt.event,
-    data: deepStripPassword(evt.data),
+    data: deepRedact(evt.data),
     timestamp: evt.timestamp,
   };
 }

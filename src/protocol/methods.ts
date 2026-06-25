@@ -9,7 +9,13 @@
 
 import { z } from "zod";
 
-import { ARRAY_1000, STR_64K } from "./limits";
+import {
+  ARRAY_1000,
+  OBJ_MAX_BYTES,
+  SCENARIO_MAX_BYTES,
+  STR_64K,
+  boundedObject,
+} from "./limits";
 import { cpListItemSchema, statusWireSchema } from "./events";
 import { subscribeResultSchema } from "./envelope";
 
@@ -17,8 +23,10 @@ const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
 const EMPTY = z.object({});
 const ANY = z.unknown();
-/** A bounded free-form object param (settings/config/options/scenario). */
-const OBJ = () => z.record(z.string(), z.unknown());
+/** A bounded free-form object param (settings/config/options): ≤ 64 KB. */
+const OBJ = () => boundedObject(OBJ_MAX_BYTES);
+/** A bounded scenario-definition object param: ≤ 256 KB. */
+const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
 
 /** create/update CP — password is accepted here as WRITE-ONLY input. */
 const createParamsSchema = z.object({
@@ -130,7 +138,7 @@ export const METHODS = {
     params: z.object({
       connector: CONN_POS,
       file: STR_64K.optional(),
-      scenario: OBJ().optional(),
+      scenario: SCENARIO_OBJ().optional(),
     }),
     result: ANY,
   },

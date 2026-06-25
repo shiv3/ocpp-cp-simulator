@@ -478,6 +478,11 @@ export class CLIChargePointService {
     connector.autoResetToAvailable = enabled;
   }
 
+  setConnectorSocMeterSync(connectorId: number, enabled: boolean): void {
+    const connector = this.requireConnector(connectorId);
+    connector.socMeterSyncEnabled = enabled;
+  }
+
   setConnectorMode(connectorId: number, mode: ScenarioMode): void {
     const connector = this.requireConnector(connectorId);
     connector.mode = mode;

@@ -1,11 +1,13 @@
-// Tier-3 schema-valid acks for CSMS core-control CALLs. Availability has
-// protocol-visible effects here; reservation state, reset/unlock side effects
+// Tier-3 schema-valid acks for CSMS core-control CALLs. Availability and
+// reservations have protocol-visible effects here; reset/unlock side effects
 // are deferred to a later fidelity phase.
 import type {
+  CancelReservationRequestV201,
   CancelReservationResponseV201,
   ChangeAvailabilityRequestV201,
   ChangeAvailabilityResponseV201,
   ClearCacheResponseV201,
+  ReserveNowRequestV201,
   ReserveNowResponseV201,
   ResetRequestV201,
   ResetResponseV201,
@@ -18,7 +20,11 @@ import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
-import { OCPPAvailability, OCPPStatus } from "../../../domain/types/OcppTypes";
+import {
+  OCPPAvailability,
+  OCPPStatus,
+  ReservationStatus,
+} from "../../../domain/types/OcppTypes";
 
 export const handleResetV201 = (
   payload?: unknown,
@@ -250,10 +256,98 @@ export const handleClearCacheV201 = (): V201HandlerResult => ({
   response: { status: "Accepted" } satisfies ClearCacheResponseV201,
 });
 
-export const handleReserveNowV201 = (): V201HandlerResult => ({
-  response: { status: "Accepted" } satisfies ReserveNowResponseV201,
-});
+export const handleReserveNowV201 = (
+  payload?: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult => {
+  if (payload === undefined || ctx === undefined) {
+    return {
+      response: { status: "Accepted" } satisfies ReserveNowResponseV201,
+    };
+  }
 
-export const handleCancelReservationV201 = (): V201HandlerResult => ({
-  response: { status: "Accepted" } satisfies CancelReservationResponseV201,
-});
+  const req = payload as ReserveNowRequestV201;
+  const connectorId = req.evseId ?? 1;
+  const connector = ctx.chargePoint.getConnector(connectorId);
+
+  if (!connector) {
+    return {
+      response: { status: "Rejected" } satisfies ReserveNowResponseV201,
+    };
+  }
+
+  if (connector.status === OCPPStatus.Faulted) {
+    return {
+      response: { status: "Faulted" } satisfies ReserveNowResponseV201,
+    };
+  }
+
+  if (connector.status === OCPPStatus.Charging || connector.transaction) {
+    return {
+      response: { status: "Occupied" } satisfies ReserveNowResponseV201,
+    };
+  }
+
+  if (connector.availability !== "Operative") {
+    return {
+      response: { status: "Unavailable" } satisfies ReserveNowResponseV201,
+    };
+  }
+
+  const status = ctx.chargePoint.reservationManager.createReservation(
+    connectorId,
+    new Date(req.expiryDateTime),
+    req.idToken.idToken,
+    req.groupIdToken?.idToken,
+    req.id,
+  );
+
+  return {
+    response: {
+      status: status as ReserveNowResponseV201["status"],
+    } satisfies ReserveNowResponseV201,
+    afterResult:
+      status === ReservationStatus.Accepted
+        ? () =>
+            ctx.chargePoint.updateConnectorStatus(
+              connectorId,
+              OCPPStatus.Reserved,
+            )
+        : undefined,
+  };
+};
+
+export const handleCancelReservationV201 = (
+  payload?: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult => {
+  if (payload === undefined || ctx === undefined) {
+    return {
+      response: { status: "Accepted" } satisfies CancelReservationResponseV201,
+    };
+  }
+
+  const req = payload as CancelReservationRequestV201;
+  const mgr = ctx.chargePoint.reservationManager;
+  const reservation = mgr.getReservation(req.reservationId);
+  const cancelled = mgr.cancelReservation(req.reservationId);
+
+  if (cancelled && reservation) {
+    return {
+      response: { status: "Accepted" } satisfies CancelReservationResponseV201,
+      afterResult: () => {
+        const connector = ctx.chargePoint.getConnector(reservation.connectorId);
+        if (connector && connector.status === OCPPStatus.Reserved) {
+          ctx.chargePoint.updateConnectorStatus(
+            reservation.connectorId,
+            OCPPStatus.Available,
+          );
+        }
+      },
+    };
+  }
+
+  return {
+    response: { status: "Rejected" } satisfies CancelReservationResponseV201,
+  };
+};

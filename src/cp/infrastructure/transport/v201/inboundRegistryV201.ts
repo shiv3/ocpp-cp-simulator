@@ -13,7 +13,10 @@ import type {
 } from "@cshil/ocpp-tools";
 import {
   isValidGetBaseReportRequestV201,
+  isValidGetTransactionStatusRequestV201,
   isValidGetVariablesRequestV201,
+  isValidRequestStartTransactionRequestV201,
+  isValidRequestStopTransactionRequestV201,
   isValidSetVariablesRequestV201,
 } from "@cshil/ocpp-tools/validation/v201";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
@@ -21,6 +24,11 @@ import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import { handleGetVariablesV201 } from "./getVariablesV201";
 import { handleSetVariablesV201 } from "./setVariablesV201";
+import {
+  handleGetTransactionStatusV201,
+  handleRequestStartTransactionV201,
+  handleRequestStopTransactionV201,
+} from "./transactionControlV201";
 
 export type V201Action =
   | "BootNotification"
@@ -120,6 +128,27 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       {
         validate: isValidGetBaseReportRequestV201,
         handle: handleGetBaseReportV201,
+      },
+    ],
+    [
+      "RequestStartTransaction",
+      {
+        validate: isValidRequestStartTransactionRequestV201,
+        handle: handleRequestStartTransactionV201,
+      },
+    ],
+    [
+      "RequestStopTransaction",
+      {
+        validate: isValidRequestStopTransactionRequestV201,
+        handle: handleRequestStopTransactionV201,
+      },
+    ],
+    [
+      "GetTransactionStatus",
+      {
+        validate: isValidGetTransactionStatusRequestV201,
+        handle: handleGetTransactionStatusV201,
       },
     ],
   ]);

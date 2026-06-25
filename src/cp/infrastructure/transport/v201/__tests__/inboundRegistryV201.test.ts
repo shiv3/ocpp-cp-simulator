@@ -9,6 +9,9 @@ describe("buildV201InboundRegistry", () => {
       "GetVariables",
       "SetVariables",
       "GetBaseReport",
+      "RequestStartTransaction",
+      "RequestStopTransaction",
+      "GetTransactionStatus",
     ]);
     expect(registry.has("Reset")).toBe(false);
   });

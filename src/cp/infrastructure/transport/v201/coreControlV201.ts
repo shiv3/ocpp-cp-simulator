@@ -11,6 +11,7 @@ import type {
   ResetResponseV201,
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
+  UnlockConnectorRequestV201,
   UnlockConnectorResponseV201,
 } from "../../../../ocpp";
 import type {
@@ -148,9 +149,44 @@ export const handleChangeAvailabilityV201 = (
   };
 };
 
-export const handleUnlockConnectorV201 = (): V201HandlerResult => ({
-  response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,
-});
+export function handleUnlockConnectorV201(): V201HandlerResult;
+export function handleUnlockConnectorV201(
+  payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult;
+export function handleUnlockConnectorV201(
+  payload?: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult {
+  if (payload === undefined || ctx === undefined) {
+    return {
+      response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,
+    };
+  }
+
+  const req = payload as UnlockConnectorRequestV201;
+  const connector = ctx.chargePoint.getConnector(req.evseId);
+  if (!connector) {
+    return {
+      response: {
+        status: "UnknownConnector",
+      } satisfies UnlockConnectorResponseV201,
+    };
+  }
+
+  if (connector.transaction) {
+    // OCPP 2.0.1: do not unlock or stop an ongoing authorized transaction.
+    return {
+      response: {
+        status: "OngoingAuthorizedTransaction",
+      } satisfies UnlockConnectorResponseV201,
+    };
+  }
+
+  return {
+    response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,
+  };
+}
 
 export const handleTriggerMessageV201 = (
   payload?: unknown,

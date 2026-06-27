@@ -51,6 +51,14 @@ async function connectBootReady(
   sinceSeq?: number,
 ): Promise<Frame> {
   await cp.connect();
+  return waitForBootReady(cp, cpId, sinceSeq);
+}
+
+async function waitForBootReady(
+  cp: ChargePoint,
+  cpId: string,
+  sinceSeq?: number,
+): Promise<Frame> {
   const boot = await csms.frames.waitForCall("BootNotification", {
     cpId,
     sinceSeq,
@@ -413,14 +421,16 @@ test(
       await connectBootReady(cp, cpId);
       const sinceSeq = lastSeq(cpId);
 
-      assertCommandOk(
+      const resetResult = assertCommandOk(
         await csms.command({
           cpId,
           action: "Reset",
           type: "Hard",
         }),
       );
-      const secondBoot = await connectBootReady(cp, cpId, sinceSeq);
+      expect(resetResult).toMatchObject({ status: "Accepted" });
+
+      const secondBoot = await waitForBootReady(cp, cpId, sinceSeq);
 
       expect(secondBoot.seq).toBeGreaterThan(sinceSeq);
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Available);

@@ -253,6 +253,26 @@ test(
         eventType: "Ended",
         transactionInfo: { transactionId },
       });
+
+      const relevantFrames = csms.frames
+        .byCp(cpId)
+        .filter(
+          (frame) =>
+            frame.seq > sinceSeq &&
+            (frame.action === "TransactionEvent" ||
+              frame.action === "MeterValues"),
+        );
+      expect(
+        relevantFrames.map((frame) =>
+          frame.action === "TransactionEvent"
+            ? `TransactionEvent:${payloadOf(frame).eventType}`
+            : "MeterValues",
+        ),
+      ).toEqual([
+        "TransactionEvent:Started",
+        "MeterValues",
+        "TransactionEvent:Ended",
+      ]);
       expect(started.seq).toBeLessThan(meter.seq);
       expect(meter.seq).toBeLessThan(ended.seq);
     } finally {

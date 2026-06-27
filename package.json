@@ -20,7 +20,7 @@
     "test": "vitest run && bun test bun.test",
     "test:vitest": "vitest run",
     "test:bun": "bun test bun.test",
-    "test:e2e": "bun run e2e/support/buildCsms.ts && bun test --timeout 60000 ./e2e/ocpp16.gocpp.e2e.ts ./e2e/ocpp201.gocpp.e2e.ts ./e2e/ocpp21.gocpp.e2e.ts",
+    "test:e2e": "bun run e2e/support/buildCsms.ts && bun test --timeout 60000 ./e2e/ocpp16.gocpp.e2e.ts ./e2e/ocpp201.gocpp.e2e.ts ./e2e/ocpp21.gocpp.e2e.ts ./e2e/scenario.gocpp.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",

@@ -65,6 +65,15 @@ func run() int {
 			reg.del(conn)
 		}),
 		csms.WithLogger(logger),
+		// Serialize inbound handler execution so the recorder's NDJSON `seq`
+		// reflects true WIRE/receive order. gocpp dispatches each inbound CALL
+		// on its own goroutine (core/dispatcher/conn.go: `go c.runHandler`),
+		// so without this, two frames sent back-to-back (e.g. TransactionEvent
+		// Started immediately followed by MeterValues from a scenario) can be
+		// RECORDED in either order — making seq-based ordering assertions flaky.
+		// A global limit of 1 makes the dispatch loop process c.in strictly in
+		// FIFO/wire order. Fine for a low-volume single-CP-per-test fixture.
+		csms.WithGlobalConcurrencyLimit(1),
 	)
 	if err := cfg.register(srv, rec); err != nil {
 		logger.Error("register CSMS handlers", "version", cfg.token, "error", err)

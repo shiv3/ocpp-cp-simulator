@@ -33,10 +33,20 @@ import { interpret } from "robot3";
 import type { EventEmitter } from "../../shared/EventEmitter";
 
 type MaybeCancellablePromise<T> = Promise<T> & { cancel?: () => void };
+type AutoMeterStartConfig = Parameters<
+  NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
+>[0] & { sendMessage?: boolean };
+type MeterValueCallbacks = ScenarioExecutorCallbacks & {
+  onGetTransactionMeterStart?: () => number | null;
+};
 
 const cancelIfCancellable = (promise: Promise<unknown>): void => {
   (promise as MaybeCancellablePromise<unknown>).cancel?.();
 };
+
+const isMeterValueTimeout = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith("Timeout waiting for meter value:");
 
 /**
  * Optional resume hint passed to {@link ScenarioExecutor.start}. When set
@@ -680,6 +690,9 @@ export class ScenarioExecutor {
     nodeId: string,
     data: MeterValueNodeData,
   ): Promise<void> {
+    const meterCallbacks = this.callbacks as MeterValueCallbacks;
+    const currentBeforeSeed = this.callbacks.onGetMeterValue?.();
+    let seededValue = currentBeforeSeed ?? data.value;
     if (this.callbacks.onSetMeterValue) {
       // Daemon-restart resume case: the persisted connector_runtime row
       // restored a non-zero meter accumulator (e.g. 624 Wh from a charge
@@ -688,12 +701,13 @@ export class ScenarioExecutor {
       // (commonly 0). Writing that seed would erase the accumulator and
       // restart the maxValue cap from scratch. Skip the seed write when
       // the connector already holds more.
-      const current = this.callbacks.onGetMeterValue?.();
-      if (current == null || current <= data.value) {
+      if (currentBeforeSeed == null || currentBeforeSeed <= data.value) {
         this.callbacks.onSetMeterValue(data.value);
+        seededValue = data.value;
       } else {
+        seededValue = currentBeforeSeed;
         this.callbacks.log?.(
-          `[${this.scenario.name}] Preserving meter accumulator ${current}Wh (> node seed ${data.value}Wh) on resume`,
+          `[${this.scenario.name}] Preserving meter accumulator ${currentBeforeSeed}Wh (> node seed ${data.value}Wh) on resume`,
           "info",
         );
       }
@@ -705,7 +719,11 @@ export class ScenarioExecutor {
       // which reads the node's maxTime / maxValue. "evSettings" derives a
       // maxValue from the connector's EV settings (capacity × ΔSoC).
       let resolvedMaxTime: number | undefined = data.maxTime;
-      let resolvedMaxValue: number | undefined = data.maxValue;
+      let resolvedMaxValue: number | undefined =
+        data.maxValue ??
+        (data.maxChargeKwh != null
+          ? Math.round(data.maxChargeKwh * 1000)
+          : undefined);
 
       if (data.stopMode === "evSettings") {
         const settings = this.callbacks.onGetEVSettings?.() ?? null;
@@ -714,6 +732,13 @@ export class ScenarioExecutor {
             0,
             (settings.targetSoc ?? 0) - (settings.initialSoc ?? 0),
           );
+          if (delta <= 0) {
+            this.callbacks.log?.(
+              `[${this.scenario.name}] stopMode=evSettings target already reached; auto-meter completes without starting`,
+              "info",
+            );
+            return;
+          }
           // Wh delivered to move from initialSoc% to targetSoc% on a
           // capacity-kWh battery: capacity_kWh × (Δ%/100) × 1000 Wh/kWh
           resolvedMaxValue = Math.round(
@@ -741,26 +766,50 @@ export class ScenarioExecutor {
         );
       }
 
-      this.callbacks.onStartAutoMeterValue({
+      const meterStart =
+        meterCallbacks.onGetTransactionMeterStart?.() ?? seededValue;
+      const resolvedMaxMeterValue =
+        resolvedMaxValue && resolvedMaxValue > 0
+          ? meterStart + resolvedMaxValue
+          : undefined;
+      const autoMeterConfig: AutoMeterStartConfig = {
         intervalSeconds: data.incrementInterval || 10,
         incrementValue: data.incrementAmount || 1000,
         maxTimeSeconds: resolvedMaxTime,
-        maxValue: resolvedMaxValue,
-      });
+        maxValue: resolvedMaxMeterValue,
+        sendMessage: data.sendMessage,
+      };
 
-      if (resolvedMaxTime && resolvedMaxTime > 0) {
-        await this.waitWithProgress(nodeId, resolvedMaxTime);
+      this.callbacks.onStartAutoMeterValue(autoMeterConfig);
+
+      if (resolvedMaxMeterValue && resolvedMaxMeterValue > 0) {
+        try {
+          await this.waitWithOptionalForceSkip(
+            this.callbacks.onWaitForMeterValue?.(
+              resolvedMaxMeterValue,
+              resolvedMaxTime,
+            ) ??
+              (resolvedMaxTime && resolvedMaxTime > 0
+                ? this.sleep(resolvedMaxTime * 1000)
+                : Promise.resolve()),
+          );
+        } catch (error) {
+          if (!resolvedMaxTime || !isMeterValueTimeout(error)) {
+            throw error;
+          }
+        }
         this.callbacks.onStopAutoMeterValue?.();
-      } else if (resolvedMaxValue && resolvedMaxValue > 0) {
-        await this.waitWithOptionalForceSkip(
-          this.callbacks.onWaitForMeterValue?.(resolvedMaxValue) ??
-            Promise.resolve(),
-        );
+      } else if (resolvedMaxTime && resolvedMaxTime > 0) {
+        await this.waitWithProgress(nodeId, resolvedMaxTime);
         this.callbacks.onStopAutoMeterValue?.();
       }
     }
 
-    if (data.sendMessage && this.callbacks.onSendMeterValue) {
+    if (
+      !data.autoIncrement &&
+      data.sendMessage &&
+      this.callbacks.onSendMeterValue
+    ) {
       await this.callbacks.onSendMeterValue();
     }
   }

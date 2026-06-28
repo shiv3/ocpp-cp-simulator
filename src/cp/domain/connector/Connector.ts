@@ -306,6 +306,22 @@ export class Connector {
    *  haven't seen a capped schedule yet (or it was cleared). */
   private lastSchedulePaused: boolean | null = null;
 
+  private socFromMeterValue(meterValueWh: number): number | null {
+    const transactionCapacity = this.transactionValue?.batteryCapacityKwh;
+    const capacity =
+      transactionCapacity && transactionCapacity > 0
+        ? transactionCapacity
+        : this._evSettings.batteryCapacityKwh;
+    if (capacity <= 0) return null;
+
+    const initial =
+      this.transactionValue?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const meterStart = this.transactionValue?.meterStart ?? 0;
+    const deliveredKWh = Math.max(0, meterValueWh - meterStart) / 1000;
+    const derived = initial + (deliveredKWh / capacity) * 100;
+    return Math.min(100, Math.max(0, derived));
+  }
+
   get id(): number {
     return this.connectorId;
   }
@@ -397,15 +413,10 @@ export class Connector {
     // an explicit value (MeterValue SoC sample, manual override) was set —
     // we only derive from the meter when nothing else has populated it.
     if (value && wasOff) {
-      const capacity = this._evSettings.batteryCapacityKwh;
-      if (capacity > 0) {
-        const initial = this._evSettings.initialSoc ?? 0;
-        const derived = initial + (this.meterValueWh / 1000 / capacity) * 100;
-        const clamped = Math.min(100, Math.max(0, derived));
-        if (this.socPercent !== clamped) {
-          this.socPercent = clamped;
-          this.eventsEmitter.emit("socChange", { soc: clamped });
-        }
+      const derived = this.socFromMeterValue(this.meterValueWh);
+      if (derived !== null && this.socPercent !== derived) {
+        this.socPercent = derived;
+        this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }
   }
@@ -785,15 +796,10 @@ export class Connector {
     // scheduler and any other domain caller also drive SoC. capacity=0 means
     // we have no way to convert — leave SoC untouched in that case.
     if (this.socMeterSyncEnabledValue) {
-      const capacity = this._evSettings.batteryCapacityKwh;
-      if (capacity > 0) {
-        const initial = this._evSettings.initialSoc ?? 0;
-        const derived = initial + (meterValueWh / 1000 / capacity) * 100;
-        const clamped = Math.min(100, Math.max(0, derived));
-        if (this.socPercent !== clamped) {
-          this.socPercent = clamped;
-          this.eventsEmitter.emit("socChange", { soc: clamped });
-        }
+      const derived = this.socFromMeterValue(meterValueWh);
+      if (derived !== null && this.socPercent !== derived) {
+        this.socPercent = derived;
+        this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }
     this.checkAutoStop();
@@ -807,11 +813,7 @@ export class Connector {
    */
   private effectiveSocPercent(): number | null {
     if (this.socPercent !== null) return this.socPercent;
-    const capacity = this._evSettings.batteryCapacityKwh;
-    if (!capacity || capacity <= 0) return null;
-    const initial = this._evSettings.initialSoc ?? 0;
-    const deliveredKWh = this.meterValueWh / 1000;
-    return initial + (deliveredKWh / capacity) * 100;
+    return this.socFromMeterValue(this.meterValueWh);
   }
 
   /**

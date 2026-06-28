@@ -17,6 +17,7 @@ export type MeterValueStrategy =
       incrementValue: number;
       maxTimeSeconds?: number; // Maximum time to run (0 = unlimited)
       maxValue?: number; // Maximum meter value in Wh (0 = unlimited)
+      sendMeterValues?: boolean; // false = update local register only
     };
 
 interface MeterValueSchedulerCallbacks {
@@ -142,7 +143,20 @@ export class MeterValueScheduler {
         : next;
 
     this.callbacks.updateValue(finalValue);
-    this.callbacks.onSend(this.connectorId);
+    if (strategy.sendMeterValues !== false) {
+      this.callbacks.onSend(this.connectorId);
+    }
+
+    if (
+      strategy.maxValue &&
+      strategy.maxValue > 0 &&
+      finalValue >= strategy.maxValue
+    ) {
+      this.logger?.info?.(
+        `[MeterValueScheduler] Max value reached (${strategy.maxValue}Wh) for connector ${this.connectorId}, stopping`,
+      );
+      this.stop();
+    }
   }
 
   stop(): void {

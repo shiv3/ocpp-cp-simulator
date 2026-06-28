@@ -323,7 +323,9 @@ export const createScenarioExecutorCallbacks = (
 ): ScenarioExecutorCallbacks => {
   const { chargePoint, connector, hooks } = params;
 
-  return {
+  const callbacks: ScenarioExecutorCallbacks & {
+    onGetTransactionMeterStart: () => number | null;
+  } = {
     onStatusChange: async (status) => {
       chargePoint.updateConnectorStatus(connector.id, status);
     },
@@ -349,16 +351,21 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.setMeterValue(connector.id, value);
     },
     onGetMeterValue: () => connector.meterValue,
+    onGetTransactionMeterStart: () => connector.transaction?.meterStart ?? null,
     onSendMeterValue: async () => {
       chargePoint.sendMeterValue(connector.id);
     },
     onStartAutoMeterValue: (config) => {
+      const extendedConfig = config as typeof config & {
+        sendMessage?: boolean;
+      };
       connector.startManualMeterStrategy({
         kind: "increment",
         intervalSeconds: config.intervalSeconds,
         incrementValue: config.incrementValue,
         maxTimeSeconds: config.maxTimeSeconds,
         maxValue: config.maxValue,
+        sendMeterValues: extendedConfig.sendMessage !== false,
       });
     },
     onStopAutoMeterValue: () => {
@@ -467,4 +474,6 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.sendDataTransfer(vendorId, messageId, data);
     },
   };
+
+  return callbacks;
 };

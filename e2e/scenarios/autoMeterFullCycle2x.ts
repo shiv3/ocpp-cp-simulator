@@ -46,7 +46,7 @@ export function makeAutoMeterFullCycle2x(): ScenarioDefinition {
         data: {
           label: "Auto Meter",
           value: 0,
-          sendMessage: false,
+          sendMessage: true,
           autoIncrement: true,
           incrementInterval: 1,
           incrementAmount: 100,

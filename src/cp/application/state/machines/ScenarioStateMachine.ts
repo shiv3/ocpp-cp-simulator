@@ -265,29 +265,32 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
 }
 
 /**
- * Get state name from machine state
- * @param machineState Robot3 machine state
+ * Get state name from a Robot3 service
+ * @param service Robot3 service
  * @returns State name as string
  */
-export function getScenarioStateName(machineState: { name: string }): string {
-  return machineState.name;
+export function getScenarioStateName(service: {
+  machine: { current: string };
+}): string {
+  return service.machine.current;
 }
 
 /**
- * Get context from machine state
- * @param machineState Robot3 machine state
+ * Get context from a Robot3 service
+ * @param service Robot3 service
  * @returns Scenario context
  */
-export function getScenarioContext(machineState: {
+export function getScenarioContext(service: {
   context: ScenarioContext;
 }): ScenarioContext {
+  const context = service.context;
   return {
-    scenarioId: machineState.context.scenarioId,
-    mode: machineState.context.mode || "oneshot",
-    currentNodeId: machineState.context.currentNodeId || null,
-    executedNodes: machineState.context.executedNodes || [],
-    loopCount: machineState.context.loopCount || 0,
-    error: machineState.context.error,
-    waitType: machineState.context.waitType,
+    scenarioId: context.scenarioId,
+    mode: context.mode || "oneshot",
+    currentNodeId: context.currentNodeId || null,
+    executedNodes: [...(context.executedNodes || [])],
+    loopCount: context.loopCount || 0,
+    error: context.error,
+    waitType: context.waitType,
   };
 }

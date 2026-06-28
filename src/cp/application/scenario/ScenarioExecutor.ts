@@ -75,6 +75,8 @@ export class ScenarioExecutor {
   // "Remote" (§6.21) for RemoteStop-driven stops instead of a blank
   // reason. Cleared as soon as the stop node consumes it.
   private remoteStopReason: string | null = null;
+  private currentNodeId: string | null = null;
+  private executedNodes: string[] = [];
 
   constructor(
     scenario: ScenarioDefinition,
@@ -95,9 +97,9 @@ export class ScenarioExecutor {
     });
 
     // Create service to manage machine and emit state change events
-    this.service = interpret(machine, (machineState) => {
+    this.service = interpret(machine, (service) => {
       const currentState = getScenarioStateName(
-        machineState,
+        service,
       ) as ScenarioExecutionState;
 
       // Emit state change event if state actually changed
@@ -134,6 +136,8 @@ export class ScenarioExecutor {
     const mode: ScenarioExecutionMode = "oneshot";
     // Fresh abort gate for this run.
     this.aborted = false;
+    this.currentNodeId = null;
+    this.executedNodes = [];
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
@@ -175,7 +179,7 @@ export class ScenarioExecutor {
       await this.executeFlow(opts);
 
       // Check if we were stopped during execution
-      const stateName = getScenarioStateName(this.service.machine);
+      const stateName = getScenarioStateName(this.service);
       if (stateName !== "idle") {
         // Dispatch FLOW_COMPLETE event to transition to completed state
         this.service.send({ type: "FLOW_COMPLETE" });
@@ -245,11 +249,8 @@ export class ScenarioExecutor {
           opts?.executedNodes && opts.executedNodes.length > 0
             ? [...opts.executedNodes]
             : [resumeFromNodeId];
-        const context = getScenarioContext(this.service.machine);
-        context.executedNodes = seededNodes;
-        context.currentNodeId = originNode.id;
-        this.service.machine.context.executedNodes = seededNodes;
-        this.service.machine.context.currentNodeId = originNode.id;
+        this.executedNodes = seededNodes;
+        this.currentNodeId = originNode.id;
         resumed = true;
         this.callbacks.log?.(
           `[${this.scenario.name}] Resuming scenario from node "${
@@ -313,7 +314,7 @@ export class ScenarioExecutor {
     }
 
     // Clear current node
-    this.service.machine.context.currentNodeId = null;
+    this.currentNodeId = null;
   }
 
   /**
@@ -348,7 +349,7 @@ export class ScenarioExecutor {
     while (
       currentNode &&
       !this.aborted &&
-      getScenarioStateName(this.service.machine) !== "idle"
+      getScenarioStateName(this.service) !== "idle"
     ) {
       // Execute the current node
       await this.executeSingleNode(currentNode);
@@ -400,13 +401,8 @@ export class ScenarioExecutor {
       return;
     }
     // Update context with current node
-    const context = getScenarioContext(this.service.machine);
-    context.currentNodeId = node.id;
-    context.executedNodes.push(node.id);
-
-    // Update machine context manually (robot3 doesn't expose context mutation directly)
-    this.service.machine.context.currentNodeId = node.id;
-    this.service.machine.context.executedNodes = context.executedNodes;
+    this.currentNodeId = node.id;
+    this.executedNodes.push(node.id);
 
     this.notifyStateChange();
     this.callbacks.onNodeExecute?.(node.id);
@@ -429,7 +425,7 @@ export class ScenarioExecutor {
     await this.waitIfPaused();
 
     // Wait for step if in step mode
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName === "stepping") {
       await this.waitForStep();
     }
@@ -1136,7 +1132,7 @@ export class ScenarioExecutor {
    * Pause execution
    */
   public pause(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName === "running") {
       this.service.send({ type: "PAUSE" });
       this.notifyStateChange();
@@ -1152,7 +1148,7 @@ export class ScenarioExecutor {
    * Resume execution
    */
   public resume(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName === "paused") {
       this.service.send({ type: "RESUME" });
       this.notifyStateChange();
@@ -1171,6 +1167,7 @@ export class ScenarioExecutor {
     // Flip the abort gate first so in-flight waits unblock and the flow
     // walker bails before executing the next node.
     this.aborted = true;
+    this.currentNodeId = null;
     this.abortResolve?.();
     // Stop the connector's auto-meter now; otherwise a pending maxTime/maxValue
     // could later resume the flow and fire a downstream Stop Transaction on a
@@ -1190,7 +1187,7 @@ export class ScenarioExecutor {
    * Execute next step (for step mode)
    */
   public step(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName === "stepping" && this.stepResolve) {
       this.service.send({ type: "STEP" });
       this.stepResolve();
@@ -1202,7 +1199,7 @@ export class ScenarioExecutor {
    * Force step even while waiting for trigger/meter events
    */
   public forceStep(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
     if (this.forceSkipResolve) {
@@ -1221,15 +1218,15 @@ export class ScenarioExecutor {
    * Get current execution context
    */
   public getContext(): ScenarioExecutionContext {
-    const stateName = getScenarioStateName(this.service.machine);
-    const context = getScenarioContext(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
+    const context = getScenarioContext(this.service);
 
     return {
       scenarioId: context.scenarioId,
       state: stateName as ScenarioExecutionState,
       mode: context.mode,
-      currentNodeId: context.currentNodeId,
-      executedNodes: context.executedNodes,
+      currentNodeId: this.currentNodeId,
+      executedNodes: [...this.executedNodes],
       loopCount: context.loopCount,
       error: context.error,
     };
@@ -1239,7 +1236,7 @@ export class ScenarioExecutor {
    * Wait if execution is paused
    */
   private async waitIfPaused(): Promise<void> {
-    while (getScenarioStateName(this.service.machine) === "paused") {
+    while (getScenarioStateName(this.service) === "paused") {
       await this.sleep(100);
     }
   }
@@ -1248,7 +1245,7 @@ export class ScenarioExecutor {
    * Wait for step command
    */
   private async waitForStep(): Promise<void> {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
     return new Promise<void>((resolve) => {
@@ -1259,7 +1256,7 @@ export class ScenarioExecutor {
   private async waitWithOptionalForceSkip(
     waitPromise: Promise<void>,
   ): Promise<void> {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") {
       await Promise.race([waitPromise, this.abortPromise]);
       return;

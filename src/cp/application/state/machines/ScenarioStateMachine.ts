@@ -22,7 +22,7 @@ export interface ScenarioContext {
  * Scenario event type definitions
  */
 export type ScenarioEvent =
-  | { type: "START"; mode: ScenarioExecutionMode }
+  | { type: "START"; mode?: ScenarioExecutionMode }
   | { type: "PAUSE" }
   | { type: "RESUME" }
   | { type: "STOP" }
@@ -34,8 +34,12 @@ export type ScenarioEvent =
   | { type: "WAIT_COMPLETE" };
 
 // Guards (transition conditions)
-const isStepMode = (ctx: ScenarioContext) => ctx.mode === "step";
-const isOneshotMode = (ctx: ScenarioContext) => ctx.mode === "oneshot";
+const startMode = (event: ScenarioEvent): ScenarioExecutionMode =>
+  event.type === "START" ? (event.mode ?? "oneshot") : "oneshot";
+const isStartStepMode = (_ctx: ScenarioContext, event: ScenarioEvent) =>
+  startMode(event) === "step";
+const isStartOneshotMode = (_ctx: ScenarioContext, event: ScenarioEvent) =>
+  startMode(event) === "oneshot";
 
 /**
  * Create Scenario State Machine
@@ -50,10 +54,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "running",
-          guard(isOneshotMode),
+          guard(isStartOneshotMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -63,10 +67,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "stepping",
-          guard(isStepMode),
+          guard(isStartStepMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -118,6 +122,14 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       // Paused state - temporarily halted
       paused: state(
         transition("RESUME", "running"),
+        transition(
+          "ERROR",
+          "error",
+          reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
+            ...ctx,
+            error: event.type === "ERROR" ? event.error : ctx.error,
+          })),
+        ),
         transition(
           "STOP",
           "idle",
@@ -192,10 +204,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "running",
-          guard(isOneshotMode),
+          guard(isStartOneshotMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -205,10 +217,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "stepping",
-          guard(isStepMode),
+          guard(isStartStepMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -222,10 +234,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "running",
-          guard(isOneshotMode),
+          guard(isStartOneshotMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -235,10 +247,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "stepping",
-          guard(isStepMode),
+          guard(isStartStepMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,

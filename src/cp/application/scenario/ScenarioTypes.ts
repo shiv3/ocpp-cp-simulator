@@ -15,6 +15,8 @@ export type ScenarioExecutionState =
   | "idle"
   | "running"
   | "paused"
+  | "stepping"
+  | "waiting"
   | "completed"
   | "error";
 

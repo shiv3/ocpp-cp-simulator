@@ -45,6 +45,7 @@ import type { EventEmitter } from "../../shared/EventEmitter";
  * RemoteStartTransaction will re-arm the connector cleanly.
  */
 export interface ScenarioStartOptions {
+  mode?: ScenarioExecutionMode;
   resumeFromNodeId?: string;
   /** Seed for `context.executedNodes`. Lets branching-history checks
    *  (the ones that look at "have we executed node X already?") behave
@@ -57,7 +58,8 @@ export class ScenarioExecutor {
   private scenario: ScenarioDefinition;
   private callbacks: ScenarioExecutorCallbacks;
   private service: ReturnType<typeof interpret>; // Robot3 service
-  private stepResolve: ((value: void) => void) | null = null;
+  private stepResolve: (() => void) | null = null;
+  private pendingSteps = 0;
   private previousState: ScenarioExecutionState = "idle";
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private forceSkipResolve: (() => void) | null = null;
@@ -129,15 +131,17 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Start scenario execution. Execution mode is always one-shot — the
-   * step / loop variants were removed from the product surface.
+   * Start scenario execution. Defaults to one-shot execution unless the caller
+   * explicitly requests step mode.
    */
   public async start(opts?: ScenarioStartOptions): Promise<void> {
-    const mode: ScenarioExecutionMode = "oneshot";
+    const mode: ScenarioExecutionMode = opts?.mode ?? "oneshot";
     // Fresh abort gate for this run.
     this.aborted = false;
     this.currentNodeId = null;
     this.executedNodes = [];
+    this.stepResolve = null;
+    this.pendingSteps = 0;
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
@@ -354,6 +358,13 @@ export class ScenarioExecutor {
       // Execute the current node
       await this.executeSingleNode(currentNode);
 
+      // If the node finished while paused, do not make the next node visible
+      // until the run has been resumed. Stop/abort can also land while parked.
+      await this.waitIfPaused();
+      if (this.aborted || getScenarioStateName(this.service) === "idle") {
+        break;
+      }
+
       // Check if this is the end node
       if (
         currentNode.type === ScenarioNodeType.END ||
@@ -400,6 +411,24 @@ export class ScenarioExecutor {
     if (this.aborted) {
       return;
     }
+
+    // Do not make the node visible while paused. This protects the boundary
+    // after an in-flight wait resolves under pause.
+    await this.waitIfPaused();
+    if (this.aborted || getScenarioStateName(this.service) === "idle") {
+      return;
+    }
+
+    // Wait for step before marking/emitting the node so each step exposes
+    // exactly one more node.
+    const stateName = getScenarioStateName(this.service);
+    if (stateName === "stepping") {
+      await this.waitForStep();
+      if (this.aborted || getScenarioStateName(this.service) === "idle") {
+        return;
+      }
+    }
+
     // Update context with current node
     this.currentNodeId = node.id;
     this.executedNodes.push(node.id);
@@ -420,15 +449,6 @@ export class ScenarioExecutor {
       `node.${node.type}.execute` as keyof ScenarioEvents,
       nodeExecuteData,
     );
-
-    // Wait if paused
-    await this.waitIfPaused();
-
-    // Wait for step if in step mode
-    const stateName = getScenarioStateName(this.service);
-    if (stateName === "stepping") {
-      await this.waitForStep();
-    }
 
     // Execute node
     if (
@@ -754,7 +774,9 @@ export class ScenarioExecutor {
     totalSeconds: number,
   ): Promise<void> {
     if (this.callbacks.onDelay) {
-      await this.callbacks.onDelay(totalSeconds);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onDelay(totalSeconds),
+      );
       return;
     }
 
@@ -784,23 +806,26 @@ export class ScenarioExecutor {
       }
     }, updateInterval);
 
-    await this.sleep(totalSeconds * 1000);
-    clearInterval(progressInterval);
+    try {
+      await this.waitWithOptionalForceSkip(this.sleep(totalSeconds * 1000));
+    } finally {
+      clearInterval(progressInterval);
 
-    // Final progress update
-    if (this.callbacks.onNodeProgress) {
-      this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
+      // Final progress update
+      if (this.callbacks.onNodeProgress) {
+        this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
+      }
+
+      // Emit final progress events
+      const finalProgressData = {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining: 0,
+        total: totalSeconds,
+      };
+      this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
+      this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
     }
-
-    // Emit final progress events
-    const finalProgressData = {
-      scenarioId: this.scenario.id,
-      nodeId,
-      remaining: 0,
-      total: totalSeconds,
-    };
-    this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
-    this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
   }
 
   /**
@@ -1188,11 +1213,19 @@ export class ScenarioExecutor {
    */
   public step(): void {
     const stateName = getScenarioStateName(this.service);
-    if (stateName === "stepping" && this.stepResolve) {
-      this.service.send({ type: "STEP" });
-      this.stepResolve();
-      this.stepResolve = null;
+    if (stateName !== "stepping") {
+      return;
     }
+
+    if (this.stepResolve) {
+      const resolve = this.stepResolve;
+      this.stepResolve = null;
+      this.service.send({ type: "STEP" });
+      resolve();
+      return;
+    }
+
+    this.pendingSteps += 1;
   }
 
   /**
@@ -1248,9 +1281,25 @@ export class ScenarioExecutor {
     const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
-    return new Promise<void>((resolve) => {
-      this.stepResolve = resolve;
+    if (this.pendingSteps > 0) {
+      this.pendingSteps -= 1;
+      this.service.send({ type: "STEP" });
+      return;
+    }
+
+    let localResolve: (() => void) | null = null;
+    const stepPromise = new Promise<void>((resolve) => {
+      localResolve = () => resolve();
+      this.stepResolve = localResolve;
     });
+
+    try {
+      await Promise.race([stepPromise, this.abortPromise]);
+    } finally {
+      if (this.stepResolve === localResolve) {
+        this.stepResolve = null;
+      }
+    }
   }
 
   private async waitWithOptionalForceSkip(

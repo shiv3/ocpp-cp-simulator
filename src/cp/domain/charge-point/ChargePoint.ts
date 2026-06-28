@@ -827,6 +827,25 @@ export class ChargePoint {
       return;
     }
 
+    if (connector.transaction && connector.transaction.stopTime === null) {
+      // Only a NOT-yet-stopped transaction blocks a new start. A cleaned/
+      // rejected transaction (cleanTransaction sets stopTime but leaves the
+      // object on the connector) must NOT block a legitimate retry.
+      this._logger.warn(
+        `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (connector.availability !== "Operative") {
+      this._logger.warn(
+        `Connector ${connectorId} is ${connector.availability}; refusing to start transaction`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
     // §5.13: if the connector was Reserved (or the reservation is for
     // connectorId=0 with this idTag), consume that reservation and carry
     // its id into StartTransaction.req so CSMS can close it out.

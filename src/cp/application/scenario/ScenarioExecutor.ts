@@ -32,6 +32,12 @@ import {
 import { interpret } from "robot3";
 import type { EventEmitter } from "../../shared/EventEmitter";
 
+type MaybeCancellablePromise<T> = Promise<T> & { cancel?: () => void };
+
+const cancelIfCancellable = (promise: Promise<unknown>): void => {
+  (promise as MaybeCancellablePromise<unknown>).cancel?.();
+};
+
 /**
  * Optional resume hint passed to {@link ScenarioExecutor.start}. When set
  * the executor skips the normal walk from the `start` node and instead
@@ -870,10 +876,13 @@ export class ScenarioExecutor {
 
     // If no timeout, just wait without progress
     if (!timeout || timeout === 0) {
-      await this.waitWithOptionalForceSkip(
-        captureTagId(this.callbacks.onWaitForRemoteStart(timeout)),
-      );
-      this.remoteStartTagId = resolvedTagId;
+      const waitPromise = this.callbacks.onWaitForRemoteStart(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
+        this.remoteStartTagId = resolvedTagId;
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
       return;
     }
 
@@ -905,9 +914,12 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.waitWithOptionalForceSkip(
-        captureTagId(this.callbacks.onWaitForRemoteStart(timeout)),
-      );
+      const waitPromise = this.callbacks.onWaitForRemoteStart(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
       this.remoteStartTagId = resolvedTagId;
     } finally {
       clearInterval(progressInterval);
@@ -946,13 +958,17 @@ export class ScenarioExecutor {
     // Stop node can pass `reason` through to StopTransaction.req. The
     // runtime hard-codes "Remote" for the CSMS path (§6.21); we keep
     // the wrapping here so it survives waitWithOptionalForceSkip.
-    const wait = (): Promise<void> =>
-      this.callbacks.onWaitForRemoteStop!(timeout).then((res) => {
-        this.remoteStopReason = res?.reason ?? null;
-      });
-
     if (!timeout || timeout === 0) {
-      await this.waitWithOptionalForceSkip(wait());
+      const waitPromise = this.callbacks.onWaitForRemoteStop(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.remoteStopReason = res?.reason ?? null;
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
       return;
     }
 
@@ -974,7 +990,16 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.waitWithOptionalForceSkip(wait());
+      const waitPromise = this.callbacks.onWaitForRemoteStop(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.remoteStopReason = res?.reason ?? null;
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
     } finally {
       clearInterval(progressInterval);
       this.callbacks.onNodeProgress?.(nodeId, 0, timeout);

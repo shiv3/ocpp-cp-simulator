@@ -87,6 +87,17 @@ interface CancellableWait<T> {
   cancel: () => void;
 }
 
+type CancellablePromise<T> = Promise<T> & { cancel?: () => void };
+
+const cancellablePromise = <T>({
+  promise,
+  cancel,
+}: CancellableWait<T>): CancellablePromise<T> => {
+  const wrapped = promise.finally(cancel) as CancellablePromise<T>;
+  wrapped.cancel = cancel;
+  return wrapped;
+};
+
 const waitForRemoteStart = (
   chargePoint: ChargePoint,
   connector: Connector,
@@ -262,26 +273,41 @@ const waitForMeterValue = (
   targetValue: number,
   timeout?: number,
 ): Promise<void> => {
-  if (connector.meterValue >= targetValue) {
+  if (connector.meterValue >= targetValue || connector.transaction === null) {
     return Promise.resolve();
   }
 
   return new Promise<void>((resolve, reject) => {
     let timeoutId: NodeJS.Timeout | null = null;
+    let settled = false;
 
-    const handler = (data: { meterValue: number }) => {
+    const cleanup = () => {
+      if (settled) return false;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      connector.events.off("meterValueChange", meterHandler);
+      connector.events.off("transactionChange", transactionHandler);
+      return true;
+    };
+
+    const meterHandler = (data: { meterValue: number }) => {
       if (data.meterValue >= targetValue) {
-        if (timeoutId) clearTimeout(timeoutId);
-        connector.events.off("meterValueChange", handler);
-        resolve();
+        if (cleanup()) resolve();
       }
     };
 
-    connector.events.on("meterValueChange", handler);
+    const transactionHandler = (data: { transaction: unknown | null }) => {
+      if (data.transaction === null || connector.transaction === null) {
+        if (cleanup()) resolve();
+      }
+    };
+
+    connector.events.on("meterValueChange", meterHandler);
+    connector.events.on("transactionChange", transactionHandler);
 
     if (timeout && timeout > 0) {
       timeoutId = setTimeout(() => {
-        connector.events.off("meterValueChange", handler);
+        if (!cleanup()) return;
         reject(
           new Error(
             `Timeout waiting for meter value: ${targetValue} (${timeout}s)`,
@@ -370,30 +396,15 @@ export const createScenarioExecutorCallbacks = (
     onDelay: async (seconds) => {
       await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
     },
-    onWaitForRemoteStart: async (timeout) => {
-      const { promise, cancel } = waitForRemoteStart(
-        chargePoint,
-        connector,
-        timeout,
+    onWaitForRemoteStart: (timeout) => {
+      return cancellablePromise(
+        waitForRemoteStart(chargePoint, connector, timeout),
       );
-      try {
-        return await promise;
-      } finally {
-        // Ensure cleanup even if the promise is abandoned (e.g., force-skip, scenario stop)
-        cancel();
-      }
     },
-    onWaitForRemoteStop: async (timeout) => {
-      const { promise, cancel } = waitForRemoteStop(
-        chargePoint,
-        connector,
-        timeout,
+    onWaitForRemoteStop: (timeout) => {
+      return cancellablePromise(
+        waitForRemoteStop(chargePoint, connector, timeout),
       );
-      try {
-        return await promise;
-      } finally {
-        cancel();
-      }
     },
     onWaitForStatus: async (targetStatus, timeout) =>
       waitForStatus(connector, targetStatus, timeout),

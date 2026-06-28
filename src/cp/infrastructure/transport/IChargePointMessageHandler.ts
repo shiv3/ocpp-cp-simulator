@@ -19,6 +19,7 @@ export interface IChargePointMessageHandler {
       vendorErrorCode?: string;
       vendorId?: string;
       timestamp?: Date;
+      suppressChargingStateTransactionEvent?: boolean;
     },
   ): void;
   authorize(tagId: string): void;

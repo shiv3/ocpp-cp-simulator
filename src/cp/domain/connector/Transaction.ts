@@ -25,6 +25,11 @@ export type TransactionStopTriggerReason =
   | "ResetCommand"
   | "StopAuthorized";
 
+export type TransactionChargingState =
+  | "Charging"
+  | "SuspendedEV"
+  | "SuspendedEVSE";
+
 export interface Transaction {
   id: number | null;
   connectorId: number;
@@ -42,6 +47,10 @@ export interface Transaction {
    *  starts at 0; OCPP 2.0.1 SHOULD reset seqNo to 0 when a transaction starts). Persisted with the
    *  transaction so the sequence continues correctly across a daemon restart. OCPP 1.6 does not use this. */
   cpNextSeqNo?: number;
+  /** Last OCPP 2.x TransactionEvent.transactionInfo.chargingState emitted for
+   *  this transaction. Used to suppress duplicate Updated events when
+   *  StatusNotification writes repeat the same Charging/Suspended state. */
+  cpLastTransactionEventChargingState?: TransactionChargingState;
   /** Reservation that this transaction consumes, set when the transaction
    *  was started against a connector already in the Reserved state (§5.13).
    *  Carried into StartTransaction.req so CSMS can close out the

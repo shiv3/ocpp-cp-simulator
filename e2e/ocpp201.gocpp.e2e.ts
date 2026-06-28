@@ -179,6 +179,25 @@ async function waitForTransactionEvent(
   );
 }
 
+async function waitForChargingStateUpdated(
+  cpId: string,
+  transactionId: string,
+  chargingState: string,
+  sinceSeq: number,
+): Promise<Frame> {
+  return waitForPayload(
+    cpId,
+    "TransactionEvent",
+    (payload) =>
+      payload.eventType === "Updated" &&
+      payload.triggerReason === "ChargingStateChanged" &&
+      isRecord(payload.transactionInfo) &&
+      payload.transactionInfo.transactionId === transactionId &&
+      payload.transactionInfo.chargingState === chargingState,
+    sinceSeq,
+  );
+}
+
 function transactionIdOf(frame: Frame): string {
   const transactionInfo = recordField(payloadOf(frame), "transactionInfo");
   const transactionId = transactionInfo.transactionId;
@@ -359,6 +378,96 @@ test(
       ]);
       expect(started.seq).toBeLessThan(meter.seq);
       expect(meter.seq).toBeLessThan(ended.seq);
+    } finally {
+      await cp.disconnect();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "CP transaction records chargingState Updated on active suspend and resume",
+  async () => {
+    const cpId = "cp201-tx-charging-state";
+    const cp = makeChargePoint(cpId);
+
+    try {
+      await connectBootReady(cp, cpId);
+      const sinceSeq = lastSeq(cpId);
+
+      cp.startTransaction("TAG-OK", 1);
+      const started = await waitForTransactionEvent(cpId, "Started", sinceSeq);
+      const transactionId = transactionIdOf(started);
+
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEVSE);
+      const suspended = await waitForChargingStateUpdated(
+        cpId,
+        transactionId,
+        "SuspendedEVSE",
+        started.seq,
+      );
+
+      cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      const resumed = await waitForChargingStateUpdated(
+        cpId,
+        transactionId,
+        "Charging",
+        suspended.seq,
+      );
+
+      cp.stopTransaction(1);
+      const ended = await waitForPayload(
+        cpId,
+        "TransactionEvent",
+        (payload) =>
+          payload.eventType === "Ended" &&
+          isRecord(payload.transactionInfo) &&
+          payload.transactionInfo.transactionId === transactionId,
+        resumed.seq,
+      );
+
+      expect(payloadOf(started)).toMatchObject({
+        eventType: "Started",
+        transactionInfo: { transactionId, chargingState: "Charging" },
+      });
+      expect(payloadOf(suspended)).toMatchObject({
+        eventType: "Updated",
+        triggerReason: "ChargingStateChanged",
+        transactionInfo: { transactionId, chargingState: "SuspendedEVSE" },
+      });
+      expect(payloadOf(resumed)).toMatchObject({
+        eventType: "Updated",
+        triggerReason: "ChargingStateChanged",
+        transactionInfo: { transactionId, chargingState: "Charging" },
+      });
+      expect(payloadOf(ended)).toMatchObject({
+        eventType: "Ended",
+        transactionInfo: { transactionId },
+      });
+
+      const payloads = [started, suspended, resumed, ended].map(payloadOf);
+      expect(payloads.map((payload) => payload.seqNo)).toEqual([0, 1, 2, 3]);
+
+      const relevantFrames = csms.frames
+        .byCp(cpId)
+        .filter(
+          (frame) =>
+            frame.seq > sinceSeq && frame.action === "TransactionEvent",
+        );
+      expect(
+        relevantFrames.map((frame) => {
+          const payload = payloadOf(frame);
+          const transactionInfo = recordField(payload, "transactionInfo");
+          return transactionInfo.chargingState
+            ? `TransactionEvent:${payload.eventType}:${transactionInfo.chargingState}`
+            : `TransactionEvent:${payload.eventType}`;
+        }),
+      ).toEqual([
+        "TransactionEvent:Started:Charging",
+        "TransactionEvent:Updated:SuspendedEVSE",
+        "TransactionEvent:Updated:Charging",
+        "TransactionEvent:Ended",
+      ]);
     } finally {
       await cp.disconnect();
     }

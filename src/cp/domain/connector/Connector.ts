@@ -455,6 +455,12 @@ export class Connector {
     this.transactionValue = transaction;
   }
 
+  markTransactionChanged(): void {
+    this.eventsEmitter.emit("transactionChange", {
+      transaction: this.transactionValue,
+    });
+  }
+
   set transactionId(transactionId: number | null) {
     if (!this.transactionValue) return;
     this.transactionValue.id = transactionId;

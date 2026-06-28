@@ -610,6 +610,7 @@ export class OCPPMessageHandler {
       vendorErrorCode?: string;
       vendorId?: string;
       timestamp?: Date;
+      suppressChargingStateTransactionEvent?: boolean;
     },
   ): void {
     const messageId = this.generateMessageId();

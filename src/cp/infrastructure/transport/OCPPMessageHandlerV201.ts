@@ -26,6 +26,7 @@ import {
 import type {
   StopTransactionReason,
   Transaction,
+  TransactionChargingState,
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
@@ -102,6 +103,21 @@ function ocppStatusToV201(
       return "Faulted";
     default:
       return "Occupied";
+  }
+}
+
+function ocppStatusToTransactionChargingState(
+  status: OCPPStatus,
+): TransactionChargingState | null {
+  switch (status) {
+    case OCPPStatus.Charging:
+      return "Charging";
+    case OCPPStatus.SuspendedEV:
+      return "SuspendedEV";
+    case OCPPStatus.SuspendedEVSE:
+      return "SuspendedEVSE";
+    default:
+      return null;
   }
 }
 
@@ -266,6 +282,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       vendorErrorCode?: string;
       vendorId?: string;
       timestamp?: Date;
+      suppressChargingStateTransactionEvent?: boolean;
     },
   ): void {
     const messageId = this.generateMessageId();
@@ -277,6 +294,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       connectorId: ev.connectorId,
     };
     this.send("StatusNotification", messageId, payload);
+    const chargingState = ocppStatusToTransactionChargingState(status);
+    if (chargingState && !opts?.suppressChargingStateTransactionEvent) {
+      this.sendChargingStateChanged(connectorId, chargingState);
+    }
   }
 
   public authorize(tagId: string): void {
@@ -298,6 +319,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
+    transaction.cpLastTransactionEventChargingState = "Charging";
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
@@ -327,6 +349,46 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           ],
         },
       ],
+    };
+    this.send("TransactionEvent", messageId, payload);
+  }
+
+  private sendChargingStateChanged(
+    connectorId: number,
+    chargingState: TransactionChargingState,
+  ): void {
+    const connector = this._chargePoint.getConnector(connectorId);
+    const transaction = connector?.transaction;
+    if (!transaction || transaction.stopTime !== null) return;
+
+    const lastChargingState =
+      transaction.cpLastTransactionEventChargingState ?? "Charging";
+    if (lastChargingState === chargingState) {
+      transaction.cpLastTransactionEventChargingState = lastChargingState;
+      return;
+    }
+
+    if (!transaction.cpTransactionId) {
+      transaction.cpTransactionId = crypto.randomUUID();
+    }
+    const messageId = this.generateMessageId();
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
+    transaction.cpLastTransactionEventChargingState = chargingState;
+    connector.markTransactionChanged();
+    const payload: TransactionEventRequestV201 = {
+      eventType: "Updated",
+      timestamp: new Date().toISOString(),
+      triggerReason: "ChargingStateChanged",
+      seqNo,
+      transactionInfo: {
+        transactionId: transaction.cpTransactionId,
+        chargingState,
+      },
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
+      evse: v201TransactionEvse(connectorId),
     };
     this.send("TransactionEvent", messageId, payload);
   }

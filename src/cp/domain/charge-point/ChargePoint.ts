@@ -575,6 +575,7 @@ export class ChargePoint {
       info: opts.info,
       vendorErrorCode: opts.vendorErrorCode,
       vendorId: opts.vendorId,
+      suppressChargingStateTransactionEvent: true,
     });
   }
 

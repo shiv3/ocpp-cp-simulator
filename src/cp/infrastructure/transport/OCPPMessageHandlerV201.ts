@@ -3,6 +3,7 @@ import type {
   HeartbeatRequestV201,
   HeartbeatResponseV201,
   BootNotificationResponseV201,
+  DataTransferRequestV201,
   StatusNotificationRequestV201,
   StatusNotificationResponseV201,
   TransactionEventRequestV201,
@@ -412,14 +413,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   public sendDataTransfer(
-    _vendorId: string,
-    _messageId: string,
-    _data?: string,
+    vendorId: string,
+    messageId?: string,
+    data?: string,
   ): void {
-    this._logger.warn(
-      "[v2.0.1] DataTransfer not supported in OCPP 2.0.1",
-      LogType.OCPP,
-    );
+    const id = this.generateMessageId();
+    const payload = {
+      vendorId,
+      ...(messageId !== undefined ? { messageId } : {}),
+      ...(data !== undefined ? { data } : {}),
+    } as unknown as DataTransferRequestV201;
+    this.send("DataTransfer", id, payload);
   }
 
   public sendDiagnosticsStatusNotification(_status: string): void {

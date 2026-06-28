@@ -73,3 +73,10 @@ func (h *handler21) OnNotifyReport(_ context.Context, conn *csms.Conn, req v21ms
 	}
 	return v21msg.NotifyReportResponse{}, nil
 }
+
+func (h *handler21) OnDataTransfer(_ context.Context, conn *csms.Conn, req v21msg.DataTransferRequest) (v21msg.DataTransferResponse, error) {
+	if err := h.rec.Record(conn.ID(), "DataTransfer", req); err != nil {
+		return v21msg.DataTransferResponse{}, err
+	}
+	return v21msg.DataTransferResponse{Status: "Accepted"}, nil
+}

@@ -18,6 +18,16 @@ import {
   HEARTBEAT_INTERVAL_VALUE,
   makeConfigSetScenario,
 } from "./scenarios/configSetScenario";
+import { makeStatusWalk2x } from "./scenarios/statusWalk2x";
+import { makeAutoMeterFullCycle2x } from "./scenarios/autoMeterFullCycle2x";
+import { makeMultiTransaction2x } from "./scenarios/multiTransaction2x";
+import { makeReservationNode2x } from "./scenarios/reservationNode2x";
+import {
+  DATA_TRANSFER_MESSAGE_ID,
+  DATA_TRANSFER_PAYLOAD,
+  DATA_TRANSFER_VENDOR_ID,
+  makeDataTransferNode2x,
+} from "./scenarios/dataTransferNode2x";
 
 type OcppVersion = "OCPP-1.6J" | "OCPP-2.0.1" | "OCPP-2.1";
 
@@ -36,6 +46,9 @@ const VERSION_CASES: VersionCase[] = [
   { version: "OCPP-2.0.1", label: "2.0.1", cpPrefix: "cp201" },
   { version: "OCPP-2.1", label: "2.1", cpPrefix: "cp21" },
 ];
+const TWO_X_VERSION_CASES = VERSION_CASES.filter(
+  ({ version }) => version !== "OCPP-1.6J",
+);
 
 const csmsByVersion = new Map<OcppVersion, CsmsHandle>();
 
@@ -246,6 +259,240 @@ describe("scenario-driven gocpp e2e", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  for (const versionCase of TWO_X_VERSION_CASES) {
+    test(
+      `statusWalk maps 2.x connector statuses on OCPP ${versionCase.label}`,
+      async () => {
+        const csms = getCsms(versionCase.version);
+        const cpId = `${versionCase.cpPrefix}-scenario-status-walk`;
+        const cp = makeChargePoint(cpId, versionCase.version, csms);
+
+        try {
+          await connectBootReady(cp, cpId, csms, versionCase.version);
+          const sinceSeq = lastSeq(csms, cpId);
+
+          const result = await runScenario(cp, makeStatusWalk2x(), {
+            timeoutMs: 20_000,
+          });
+          expect(result.completed).toBe(true);
+          expect(result.errored).toBe(false);
+
+          const expectedStatuses = [
+            "Available",
+            "Occupied",
+            "Occupied",
+            "Occupied",
+            "Occupied",
+            "Occupied",
+            "Available",
+          ];
+          const statuses = await waitForActionFrames(
+            csms,
+            cpId,
+            "StatusNotification",
+            sinceSeq,
+            expectedStatuses.length,
+          );
+
+          expect(
+            statuses.map((frame) => payloadOf(frame).connectorStatus),
+          ).toEqual(expectedStatuses);
+          for (const frame of statuses) {
+            expect(payloadOf(frame)).toMatchObject({
+              evseId: 1,
+              connectorId: 1,
+            });
+          }
+        } finally {
+          await cp.disconnect();
+        }
+      },
+      TEST_TIMEOUT_MS,
+    );
+  }
+
+  for (const versionCase of TWO_X_VERSION_CASES) {
+    test(
+      `autoMeter full cycle sends two MeterValues on OCPP ${versionCase.label}`,
+      async () => {
+        const csms = getCsms(versionCase.version);
+        const cpId = `${versionCase.cpPrefix}-scenario-auto-meter`;
+        const cp = makeChargePoint(cpId, versionCase.version, csms);
+
+        try {
+          await connectBootReady(cp, cpId, csms, versionCase.version);
+          const sinceSeq = lastSeq(csms, cpId);
+
+          const result = await runScenario(cp, makeAutoMeterFullCycle2x(), {
+            timeoutMs: 20_000,
+          });
+          expect(result.completed).toBe(true);
+          expect(result.errored).toBe(false);
+
+          await waitUntil(
+            () =>
+              transactionEventFramesSince(csms, cpId, sinceSeq).length >= 2 &&
+              actionFramesSince(csms, cpId, "MeterValues", sinceSeq).length >=
+                2,
+            WAIT_TIMEOUT_MS,
+          );
+
+          const txEvents = transactionEventFramesSince(csms, cpId, sinceSeq);
+          const meterValues = actionFramesSince(
+            csms,
+            cpId,
+            "MeterValues",
+            sinceSeq,
+          );
+          const started = txEvents.find(
+            (frame) => payloadOf(frame).eventType === "Started",
+          );
+          if (!started) throw new Error("Expected TransactionEvent Started");
+          const transactionId = transactionIdOf(started);
+          const ended = txEvents.find(
+            (frame) =>
+              payloadOf(frame).eventType === "Ended" &&
+              transactionIdOf(frame) === transactionId,
+          );
+          if (!ended)
+            throw new Error("Expected matching TransactionEvent Ended");
+
+          expect(meterValues).toHaveLength(2);
+          expect(meterValues.map(energyValueFromMeterValues)).toEqual([
+            100, 200,
+          ]);
+          for (const meterValue of meterValues) {
+            expect(payloadOf(meterValue)).toMatchObject({ evseId: 1 });
+          }
+          expect(started.seq).toBeLessThan(meterValues[0]!.seq);
+          expect(meterValues[0]!.seq).toBeLessThan(meterValues[1]!.seq);
+          expect(meterValues[1]!.seq).toBeLessThan(ended.seq);
+        } finally {
+          await cp.disconnect();
+        }
+      },
+      TEST_TIMEOUT_MS,
+    );
+  }
+
+  test(
+    "multiTransaction emits distinct paired TransactionEvents on OCPP 2.0.1",
+    async () => {
+      const version: OcppVersion = "OCPP-2.0.1";
+      const csms = getCsms(version);
+      const cpId = "cp201-scenario-multi-transaction";
+      const cp = makeChargePoint(cpId, version, csms);
+
+      try {
+        await connectBootReady(cp, cpId, csms, version);
+        const sinceSeq = lastSeq(csms, cpId);
+
+        const result = await runScenario(cp, makeMultiTransaction2x(), {
+          timeoutMs: 20_000,
+        });
+        expect(result.completed).toBe(true);
+        expect(result.errored).toBe(false);
+
+        const txEvents = await waitForTransactionEventCount(
+          csms,
+          cpId,
+          sinceSeq,
+          4,
+        );
+        expect(txEvents.map((frame) => payloadOf(frame).eventType)).toEqual([
+          "Started",
+          "Ended",
+          "Started",
+          "Ended",
+        ]);
+
+        const firstTransactionId = transactionIdOf(txEvents[0]!);
+        const secondTransactionId = transactionIdOf(txEvents[2]!);
+        expect(firstTransactionId).not.toBe(secondTransactionId);
+        expect(transactionIdOf(txEvents[1]!)).toBe(firstTransactionId);
+        expect(transactionIdOf(txEvents[3]!)).toBe(secondTransactionId);
+        expect(txEvents[0]!.seq).toBeLessThan(txEvents[1]!.seq);
+        expect(txEvents[1]!.seq).toBeLessThan(txEvents[2]!.seq);
+        expect(txEvents[2]!.seq).toBeLessThan(txEvents[3]!.seq);
+      } finally {
+        await cp.disconnect();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "reservation scenario node emits Reserved then Available on OCPP 2.0.1",
+    async () => {
+      const version: OcppVersion = "OCPP-2.0.1";
+      const csms = getCsms(version);
+      const cpId = "cp201-scenario-reservation-node";
+      const cp = makeChargePoint(cpId, version, csms);
+
+      try {
+        await connectBootReady(cp, cpId, csms, version);
+        const sinceSeq = lastSeq(csms, cpId);
+
+        const result = await runScenario(cp, makeReservationNode2x(), {
+          timeoutMs: 20_000,
+        });
+        expect(result.completed).toBe(true);
+        expect(result.errored).toBe(false);
+
+        const statuses = await waitForActionFrames(
+          csms,
+          cpId,
+          "StatusNotification",
+          sinceSeq,
+          2,
+        );
+        expect(
+          statuses.map((frame) => payloadOf(frame).connectorStatus),
+        ).toEqual(["Reserved", "Available"]);
+      } finally {
+        await cp.disconnect();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "dataTransfer scenario node sends DataTransfer on OCPP 2.0.1",
+    async () => {
+      const version: OcppVersion = "OCPP-2.0.1";
+      const csms = getCsms(version);
+      const cpId = "cp201-scenario-data-transfer-node";
+      const cp = makeChargePoint(cpId, version, csms);
+
+      try {
+        await connectBootReady(cp, cpId, csms, version);
+        const sinceSeq = lastSeq(csms, cpId);
+
+        const result = await runScenario(cp, makeDataTransferNode2x(), {
+          timeoutMs: 20_000,
+        });
+        expect(result.completed).toBe(true);
+        expect(result.errored).toBe(false);
+
+        const dataTransfer = await waitForPayload(
+          csms,
+          cpId,
+          "DataTransfer",
+          (payload) => payload.vendorId === DATA_TRANSFER_VENDOR_ID,
+          sinceSeq,
+        );
+        expect(payloadOf(dataTransfer)).toMatchObject({
+          vendorId: DATA_TRANSFER_VENDOR_ID,
+          messageId: DATA_TRANSFER_MESSAGE_ID,
+          data: DATA_TRANSFER_PAYLOAD,
+        });
+      } finally {
+        await cp.disconnect();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
 
 function makeChargePoint(
@@ -267,6 +514,11 @@ function makeChargePoint(
   );
   cp.logger.setEnabledTypes();
   cp.events.on("error", () => undefined);
+  cp.connectors.forEach((connector) => {
+    connector.setOnMeterValueSend((connectorId) => {
+      cp.sendMeterValue(connectorId);
+    });
+  });
   return cp;
 }
 
@@ -350,6 +602,84 @@ async function waitForPayload(
       pred(frame.payload),
     { timeoutMs: WAIT_TIMEOUT_MS },
   );
+}
+
+function actionFramesSince(
+  csms: CsmsHandle,
+  cpId: string,
+  action: string,
+  sinceSeq: number,
+): Frame[] {
+  return csms.frames
+    .byCp(cpId)
+    .filter((frame) => frame.seq > sinceSeq && frame.action === action);
+}
+
+async function waitForActionFrames(
+  csms: CsmsHandle,
+  cpId: string,
+  action: string,
+  sinceSeq: number,
+  count: number,
+  timeoutMs = WAIT_TIMEOUT_MS,
+): Promise<Frame[]> {
+  await waitUntil(
+    () => actionFramesSince(csms, cpId, action, sinceSeq).length >= count,
+    timeoutMs,
+  );
+  return actionFramesSince(csms, cpId, action, sinceSeq);
+}
+
+function transactionEventFramesSince(
+  csms: CsmsHandle,
+  cpId: string,
+  sinceSeq: number,
+): Frame[] {
+  return actionFramesSince(csms, cpId, "TransactionEvent", sinceSeq).filter(
+    (frame) =>
+      isRecord(frame.payload) && typeof frame.payload.eventType === "string",
+  );
+}
+
+async function waitForTransactionEventCount(
+  csms: CsmsHandle,
+  cpId: string,
+  sinceSeq: number,
+  count: number,
+): Promise<Frame[]> {
+  await waitUntil(
+    () => transactionEventFramesSince(csms, cpId, sinceSeq).length >= count,
+    WAIT_TIMEOUT_MS,
+  );
+  return transactionEventFramesSince(csms, cpId, sinceSeq);
+}
+
+function energyValueFromMeterValues(frame: Frame): number {
+  const payload = payloadOf(frame);
+  const firstMeterValue = firstRecordFromArray(
+    payload.meterValue,
+    "meterValue",
+  );
+  const sampledValues = firstMeterValue.sampledValue;
+  if (!Array.isArray(sampledValues)) {
+    throw new Error("Expected meterValue.sampledValue to be an array");
+  }
+  const energySample = sampledValues.find(
+    (sample): sample is Record<string, unknown> =>
+      isRecord(sample) &&
+      (sample.measurand === "Energy.Active.Import.Register" ||
+        sample.measurand === undefined),
+  );
+  if (!energySample) {
+    throw new Error("Expected an energy sampledValue");
+  }
+  const value = energySample.value;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  throw new Error("Expected sampledValue.value to be numeric");
 }
 
 async function waitForStatusNotification(

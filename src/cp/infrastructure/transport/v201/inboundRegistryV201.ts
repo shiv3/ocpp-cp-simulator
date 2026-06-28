@@ -1,6 +1,7 @@
 import type {
   AuthorizeRequestV201,
   BootNotificationRequestV201,
+  DataTransferRequestV201,
   GetBaseReportRequestV201,
   GetBaseReportResponseV201,
   GetReportRequestV201,
@@ -113,6 +114,7 @@ export type V201Action =
   | "TransactionEvent"
   | "MeterValues"
   | "Authorize"
+  | "DataTransfer"
   | "NotifyReport"
   | "ReportChargingProfiles";
 
@@ -123,6 +125,7 @@ export type V201RequestPayload =
   | TransactionEventRequestV201
   | MeterValuesRequestV201
   | AuthorizeRequestV201
+  | DataTransferRequestV201
   | NotifyReportRequestV201
   | ReportChargingProfilesRequestV201;
 

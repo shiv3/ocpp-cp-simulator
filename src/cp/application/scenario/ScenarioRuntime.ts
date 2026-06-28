@@ -410,7 +410,7 @@ export const createScenarioExecutorCallbacks = (
         resolvedId,
       );
       if (status === ReservationStatus.Accepted) {
-        connector.status = OCPPStatus.Reserved;
+        chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Reserved);
       }
       return resolvedId;
     },
@@ -419,12 +419,17 @@ export const createScenarioExecutorCallbacks = (
         chargePoint.reservationManager.getReservation(reservationId);
       const cancelled =
         chargePoint.reservationManager.cancelReservation(reservationId);
-      if (
-        cancelled &&
-        reservation &&
-        connector.status === OCPPStatus.Reserved
-      ) {
-        connector.status = OCPPStatus.Available;
+      if (cancelled && reservation) {
+        // Free the connector the reservation was actually for — NOT the
+        // scenario-bound connector — so cancelling a reservation on another
+        // connector of a multi-connector CP doesn't clear the wrong one.
+        const reserved = chargePoint.getConnector(reservation.connectorId);
+        if (reserved && reserved.status === OCPPStatus.Reserved) {
+          chargePoint.updateConnectorStatus(
+            reservation.connectorId,
+            OCPPStatus.Available,
+          );
+        }
       }
     },
     onWaitForReservation: async (timeout) =>

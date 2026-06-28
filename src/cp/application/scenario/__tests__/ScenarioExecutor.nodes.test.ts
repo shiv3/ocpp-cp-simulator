@@ -8,7 +8,7 @@ import {
   ScenarioNodeData,
   ScenarioNodeType,
 } from "../ScenarioTypes";
-import { OCPPStatus } from "../../../domain/types/OcppTypes";
+import { OCPPStatus, ReservationStatus } from "../../../domain/types/OcppTypes";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../../domain/connector/Connector";
 
@@ -66,9 +66,9 @@ async function runSingleNode(
   await executor.start();
 }
 
-function createRuntimeMocks() {
-  const connectorShape = {
-    id: 1,
+function createRuntimeMocks(connectorIds = [1]) {
+  const connectorShapes = connectorIds.map((id) => ({
+    id,
     status: OCPPStatus.Available,
     meterValue: 0,
     unlockResponse: "UnlockFailed" as
@@ -83,7 +83,11 @@ function createRuntimeMocks() {
     },
     startManualMeterStrategy: vi.fn(),
     stopAutoMeterValue: vi.fn(),
-  };
+  }));
+  const connectorShape = connectorShapes[0]!;
+  const connectorsById = new Map(
+    connectorShapes.map((connector) => [connector.id, connector]),
+  );
 
   const chargePointShape = {
     logger: {
@@ -93,21 +97,26 @@ function createRuntimeMocks() {
       error: vi.fn(),
     },
     updateConnectorStatus: vi.fn((connectorId: number, status: OCPPStatus) => {
-      if (connectorId === connectorShape.id) {
-        connectorShape.status = status;
+      const connector = connectorsById.get(connectorId);
+      if (connector) {
+        connector.status = status;
       }
     }),
     startTransaction: vi.fn(),
     stopTransaction: vi.fn(),
     setMeterValue: vi.fn((connectorId: number, value: number) => {
-      if (connectorId === connectorShape.id) {
-        connectorShape.meterValue = value;
+      const connector = connectorsById.get(connectorId);
+      if (connector) {
+        connector.meterValue = value;
       }
     }),
     sendMeterValue: vi.fn(),
     sendHeartbeat: vi.fn(),
     sendStatusNotificationRaw: vi.fn(),
     sendDataTransfer: vi.fn(),
+    getConnector: vi.fn((connectorId: number) =>
+      connectorsById.get(connectorId),
+    ),
     configuration: {
       applyChange: vi.fn(),
     },
@@ -130,6 +139,7 @@ function createRuntimeMocks() {
   return {
     chargePointShape,
     connectorShape,
+    connectorShapes,
     chargePoint: chargePointShape as unknown as ChargePoint,
     connector: connectorShape as unknown as Connector,
   };
@@ -472,5 +482,116 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
 
     expect(executor.getContext().state).toBe("completed");
     expect(chargePointShape.setMeterValue).toHaveBeenCalledWith(1, 42);
+  });
+
+  it("routes scenario reservation status changes through ChargePoint status updates", async () => {
+    const { chargePoint, chargePointShape, connector, connectorShape } =
+      createRuntimeMocks();
+    const callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector,
+    });
+
+    chargePointShape.reservationManager.createReservation.mockReturnValue(
+      ReservationStatus.Accepted,
+    );
+    chargePointShape.reservationManager.getReservation.mockReturnValue({
+      reservationId: 42,
+      connectorId: 1,
+    });
+    chargePointShape.reservationManager.cancelReservation.mockReturnValue(true);
+
+    const reservationId = await callbacks.onReserveNow?.(
+      15,
+      "TAG-1",
+      undefined,
+      42,
+    );
+    connectorShape.status = OCPPStatus.Reserved;
+    await callbacks.onCancelReservation?.(42);
+
+    expect(reservationId).toBe(42);
+    expect(
+      chargePointShape.reservationManager.createReservation,
+    ).toHaveBeenCalledWith(1, expect.any(Date), "TAG-1", undefined, 42);
+    expect(chargePointShape.updateConnectorStatus).toHaveBeenCalledWith(
+      1,
+      OCPPStatus.Reserved,
+    );
+    expect(
+      chargePointShape.reservationManager.cancelReservation,
+    ).toHaveBeenCalledWith(42);
+    expect(chargePointShape.updateConnectorStatus).toHaveBeenCalledWith(
+      1,
+      OCPPStatus.Available,
+    );
+  });
+
+  it("cancels the reservation connector without freeing the scenario-bound connector", async () => {
+    const { chargePoint, chargePointShape, connectorShapes } =
+      createRuntimeMocks([1, 2]);
+    const connector1Shape = connectorShapes[0]!;
+    const connector2Shape = connectorShapes[1]!;
+    const connector1Callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector: connector1Shape as unknown as Connector,
+    });
+    const connector2Callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector: connector2Shape as unknown as Connector,
+    });
+    const reservations = new Map<
+      number,
+      { reservationId: number; connectorId: number }
+    >();
+
+    chargePointShape.reservationManager.createReservation.mockImplementation(
+      (
+        connectorId: number,
+        _expiryDate: Date,
+        _idTag: string,
+        _parentIdTag: string | undefined,
+        reservationId: number,
+      ) => {
+        reservations.set(reservationId, { reservationId, connectorId });
+        return ReservationStatus.Accepted;
+      },
+    );
+    chargePointShape.reservationManager.getReservation.mockImplementation(
+      (reservationId: number) => reservations.get(reservationId),
+    );
+    chargePointShape.reservationManager.cancelReservation.mockImplementation(
+      (reservationId: number) => reservations.delete(reservationId),
+    );
+
+    const connector1ReservationId = await connector1Callbacks.onReserveNow?.(
+      15,
+      "TAG-1",
+      undefined,
+      101,
+    );
+    const connector2ReservationId = await connector2Callbacks.onReserveNow?.(
+      15,
+      "TAG-2",
+      undefined,
+      202,
+    );
+
+    expect(connector1ReservationId).toBe(101);
+    expect(connector2ReservationId).toBe(202);
+    expect(connector1Shape.status).toBe(OCPPStatus.Reserved);
+    expect(connector2Shape.status).toBe(OCPPStatus.Reserved);
+
+    await connector1Callbacks.onCancelReservation?.(202);
+
+    expect(
+      chargePointShape.reservationManager.cancelReservation,
+    ).toHaveBeenCalledWith(202);
+    expect(chargePointShape.updateConnectorStatus).toHaveBeenLastCalledWith(
+      2,
+      OCPPStatus.Available,
+    );
+    expect(connector2Shape.status).toBe(OCPPStatus.Available);
+    expect(connector1Shape.status).toBe(OCPPStatus.Reserved);
   });
 });

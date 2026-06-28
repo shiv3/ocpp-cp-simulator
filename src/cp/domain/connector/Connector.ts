@@ -753,31 +753,21 @@ export class Connector {
 
   cleanup(): void {
     this.meterScheduler.cleanup();
+  }
+
+  dispose(): void {
+    this.cleanup();
     if (this._scenarioManager) {
       this._scenarioManager.destroy();
       this._scenarioManager = undefined;
     }
     this.eventsEmitter.removeAllListeners();
+    this.scenarioEventsEmitter.removeAllListeners();
     this.onMeterSend = null;
-    // Intentionally do NOT clear `transactionValue` / `socPercent` here.
-    // `cleanup()` is called from `ChargePoint.teardownAfterClose` on any
-    // WebSocket close, including transient CSMS-side restarts (i.e. the
-    // simulator daemon stays up but its peer ocpp-cs / CSMS bounces).
-    // After such a reconnect the CSMS-side may have lost its in-memory
-    // ChargePointState entirely and rely on the simulator's next
-    // BootNotification + StatusNotifications to re-learn the live
-    // connector status. If we null `transactionValue` here, the post-
-    // boot fan-out in `BootNotificationResultHandler` takes the
-    // `autoResetToAvailable && transaction === null` branch and tells the
-    // CSMS "this connector is Available" — orphaning the in-flight
-    // transaction id at the CSMS side.
-    //
-    // The connector_runtime sqlite snapshot still has the active
-    // transaction at this point, so a full simulator daemon restart
-    // recovers via `CPRegistry.restoreFromDatabase` →
-    // `restoreConnectorRuntimeFromDatabase`. Keeping the in-memory
-    // values around lets the WS-only reconnect path benefit from the
-    // same correctness without going through sqlite.
+    // Intentionally do NOT clear `transactionValue` / `socPercent` in either
+    // runtime cleanup or full dispose. Disconnect/reconnect paths rely on those
+    // values so post-boot StatusNotifications can describe the live connector
+    // state instead of orphaning an in-flight transaction at the CSMS side.
   }
 
   private applyMeterValue(value: number): void {

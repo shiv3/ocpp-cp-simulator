@@ -23,6 +23,8 @@ import {
   UnlockOutcomeNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
+  StartTransactionOptions,
+  StopTransactionOptions,
 } from "./ScenarioTypes";
 import {
   createScenarioMachine,
@@ -88,11 +90,13 @@ export class ScenarioExecutor {
   private abortResolve: (() => void) | null = null;
   private abortPromise: Promise<void> = Promise.resolve();
   private remoteStartTagId: string | null = null;
+  private remoteStartOptions: StartTransactionOptions | null = null;
   // Reason captured from the most recent RemoteStopTrigger node, forwarded
   // to the next Transaction Stop's StopTransaction.req so the CSMS sees
   // "Remote" (§6.21) for RemoteStop-driven stops instead of a blank
   // reason. Cleared as soon as the stop node consumes it.
   private remoteStopReason: string | null = null;
+  private remoteStopOptions: StopTransactionOptions | null = null;
   private currentNodeId: string | null = null;
   private executedNodes: string[] = [];
 
@@ -667,18 +671,35 @@ export class ScenarioExecutor {
       if (this.callbacks.onStartTransaction) {
         // Use the tagId captured from a preceding RemoteStartTrigger node if available
         const tagId = this.remoteStartTagId || data.tagId || "123456";
+        const options = this.remoteStartOptions;
         this.remoteStartTagId = null;
-        await this.callbacks.onStartTransaction(
-          tagId,
-          data.batteryCapacityKwh,
-          data.initialSoc,
-        );
+        this.remoteStartOptions = null;
+        if (options) {
+          await this.callbacks.onStartTransaction(
+            tagId,
+            data.batteryCapacityKwh,
+            data.initialSoc,
+            options,
+          );
+        } else {
+          await this.callbacks.onStartTransaction(
+            tagId,
+            data.batteryCapacityKwh,
+            data.initialSoc,
+          );
+        }
       }
     } else if (data.action === "stop") {
       if (this.callbacks.onStopTransaction) {
         const reason = this.remoteStopReason ?? undefined;
+        const options = this.remoteStopOptions;
         this.remoteStopReason = null;
-        await this.callbacks.onStopTransaction(reason);
+        this.remoteStopOptions = null;
+        if (options) {
+          await this.callbacks.onStopTransaction(reason, options);
+        } else {
+          await this.callbacks.onStopTransaction(reason);
+        }
       }
     }
   }
@@ -918,9 +939,25 @@ export class ScenarioExecutor {
 
     // Wrap the promise to capture the resolved tagId
     let resolvedTagId: string | null = null;
-    const captureTagId = (promise: Promise<string>): Promise<void> =>
-      promise.then((tagId) => {
-        resolvedTagId = tagId;
+    let resolvedOptions: StartTransactionOptions | null = null;
+    const captureTagId = (
+      promise: ReturnType<
+        NonNullable<ScenarioExecutorCallbacks["onWaitForRemoteStart"]>
+      >,
+    ): Promise<void> =>
+      promise.then((result) => {
+        if (typeof result === "string") {
+          resolvedTagId = result;
+          resolvedOptions = { triggerReason: "RemoteStart" };
+          return;
+        }
+        resolvedTagId = result.tagId;
+        resolvedOptions = {
+          triggerReason: "RemoteStart",
+          ...(result.remoteStartId !== undefined
+            ? { remoteStartId: result.remoteStartId }
+            : {}),
+        };
       });
 
     // If no timeout, just wait without progress
@@ -929,6 +966,7 @@ export class ScenarioExecutor {
       try {
         await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
         this.remoteStartTagId = resolvedTagId;
+        this.remoteStartOptions = resolvedOptions;
       } finally {
         cancelIfCancellable(waitPromise);
       }
@@ -970,6 +1008,7 @@ export class ScenarioExecutor {
         cancelIfCancellable(waitPromise);
       }
       this.remoteStartTagId = resolvedTagId;
+      this.remoteStartOptions = resolvedOptions;
     } finally {
       clearInterval(progressInterval);
 
@@ -1013,6 +1052,9 @@ export class ScenarioExecutor {
         await this.waitWithOptionalForceSkip(
           waitPromise.then((res) => {
             this.remoteStopReason = res?.reason ?? null;
+            this.remoteStopOptions = {
+              triggerReason: res?.triggerReason ?? "RemoteStop",
+            };
           }),
         );
       } finally {
@@ -1044,6 +1086,9 @@ export class ScenarioExecutor {
         await this.waitWithOptionalForceSkip(
           waitPromise.then((res) => {
             this.remoteStopReason = res?.reason ?? null;
+            this.remoteStopOptions = {
+              triggerReason: res?.triggerReason ?? "RemoteStop",
+            };
           }),
         );
       } finally {

@@ -301,12 +301,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
-      triggerReason: "Authorized",
+      triggerReason: transaction.startTriggerReason ?? "Authorized",
       seqNo,
       transactionInfo: {
         transactionId,
         chargingState: "Charging",
+        ...(transaction.remoteStartId !== undefined
+          ? { remoteStartId: transaction.remoteStartId }
+          : {}),
       },
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
       idToken: { idToken: transaction.tagId, type: "ISO14443" },
       evse: v201TransactionEvse(connectorId),
       meterValue: [
@@ -337,12 +343,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
       timestamp,
-      triggerReason: "StopAuthorized",
+      triggerReason: transaction.stopTriggerReason ?? "StopAuthorized",
       seqNo,
       transactionInfo: {
         transactionId,
         stoppedReason: toV201StoppedReason(transaction.stopReason),
       },
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
+      ...(transaction.tagId
+        ? { idToken: { idToken: transaction.tagId, type: "ISO14443" as const } }
+        : {}),
       evse: v201TransactionEvse(connectorId),
       meterValue:
         transaction.meterStop !== null

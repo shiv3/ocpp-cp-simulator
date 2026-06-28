@@ -17,6 +17,14 @@ export type StopTransactionReason =
   | "SoftReset"
   | "UnlockCommand";
 
+export type TransactionStartTriggerReason = "Authorized" | "RemoteStart";
+
+export type TransactionStopTriggerReason =
+  | "EnergyLimitReached"
+  | "RemoteStop"
+  | "ResetCommand"
+  | "StopAuthorized";
+
 export interface Transaction {
   id: number | null;
   connectorId: number;
@@ -39,6 +47,15 @@ export interface Transaction {
    *  Carried into StartTransaction.req so CSMS can close out the
    *  reservation. */
   reservationId?: number;
+  /** CSMS RequestStartTransaction remoteStartId carried into OCPP 2.x
+   *  TransactionEvent.transactionInfo.remoteStartId. */
+  remoteStartId?: number;
+  /** OCPP 2.x TransactionEvent triggerReason for the Started event. If absent,
+   *  the encoder defaults to the local Authorized path. */
+  startTriggerReason?: TransactionStartTriggerReason;
+  /** OCPP 2.x TransactionEvent triggerReason for the Ended event. If absent,
+   *  the encoder defaults to the local StopAuthorized path. */
+  stopTriggerReason?: TransactionStopTriggerReason;
   /** Reason chosen for the StopTransaction.req payload. Defaults to `Local`
    *  when not explicitly assigned. */
   stopReason?: StopTransactionReason;

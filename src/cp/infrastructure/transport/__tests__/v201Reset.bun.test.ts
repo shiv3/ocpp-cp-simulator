@@ -77,6 +77,33 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
   );
 }
 
+async function bootAcceptedAfter(
+  csms: MockCsms,
+  afterIndex: number,
+): Promise<void> {
+  const boot = await csms.waitForFrame(
+    callFrameAfter(csms, afterIndex, "BootNotification"),
+  );
+  csms.replyCallResult(boot[1] as string, {
+    status: "Accepted",
+    currentTime: "2026-06-24T00:00:00.000Z",
+    interval: 0,
+  });
+
+  const bootIndex = csms.received.indexOf(boot);
+  await csms.waitForFrame(
+    (frame) =>
+      csms.received.indexOf(frame) > bootIndex &&
+      frame[0] === 2 &&
+      frame[2] === "StatusNotification" &&
+      (frame[3] as { evseId?: number; connectorId?: number }).evseId === 1 &&
+      (frame[3] as { evseId?: number; connectorId?: number }).connectorId ===
+        1 &&
+      (frame[3] as { connectorStatus?: string }).connectorStatus ===
+        "Available",
+  );
+}
+
 function newChargePoint(
   id: string,
   version = "OCPP-2.0.1",
@@ -213,10 +240,67 @@ describe("OCPP 2.0.1 Reset", () => {
       const ended = transactionEventPayload(endedFrame);
 
       expect(ended.transactionInfo.stoppedReason).toBe("ImmediateReset");
+      expect(ended.triggerReason).toBe("ResetCommand");
       expect(csms.received.indexOf(endedFrame)).toBeGreaterThan(resultIndex);
       expect(csms.received.indexOf(boot)).toBeGreaterThan(
         csms.received.indexOf(endedFrame),
       );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("keeps ChargePoint connector listeners alive across reset for target-SoC auto-stop", async () => {
+    const { csms, cp } = newChargePoint("CP201-RESET-LISTENER-SURVIVAL");
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+
+      const beforeResetIndex = csms.received.length - 1;
+      cp.reset();
+      await bootAcceptedAfter(csms, beforeResetIndex);
+
+      const connector = cp.getConnector(1);
+      expect(connector).toBeDefined();
+      connector!.evSettings = {
+        ...connector!.evSettings,
+        batteryCapacityKwh: 50,
+        initialSoc: 10,
+        targetSoc: 20,
+      };
+      connector!.autoMeterValueConfig = {
+        enabled: true,
+        curvePoints: [
+          { time: 0, value: 0 },
+          { time: 3600, value: 50 },
+        ],
+        intervalSeconds: 60,
+        autoCalculateInterval: false,
+        stopAtTargetSoc: true,
+      };
+
+      const beforeStartIndex = csms.received.length - 1;
+      cp.startTransaction("TAG-RESET-LISTENER", 1, 50, 10);
+      const startedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(csms, beforeStartIndex, "Started"),
+      );
+
+      connector!.soc = 20;
+      const endedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(startedFrame),
+          "Ended",
+        ),
+      );
+      const ended = transactionEventPayload(endedFrame);
+
+      expect(ended.transactionInfo.transactionId).toBe(
+        transactionEventPayload(startedFrame).transactionInfo.transactionId,
+      );
+      expect(ended.triggerReason).toBe("EnergyLimitReached");
     } finally {
       cp.disconnect();
       await csms.stop();

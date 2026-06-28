@@ -37,9 +37,22 @@ export function handleRequestStartTransactionV201(
         ctx.chargePoint.authorize(idTag);
       }
       if (ctx.chargePoint.isScenarioHandled(connectorId)) {
-        ctx.chargePoint.notifyRemoteStartReceived(connectorId, idTag);
+        ctx.chargePoint.notifyRemoteStartReceived(
+          connectorId,
+          idTag,
+          req.remoteStartId,
+        );
       } else {
-        ctx.chargePoint.startTransaction(idTag, connectorId);
+        ctx.chargePoint.startTransaction(
+          idTag,
+          connectorId,
+          undefined,
+          undefined,
+          {
+            triggerReason: "RemoteStart",
+            remoteStartId: req.remoteStartId,
+          },
+        );
       }
     },
   };
@@ -71,7 +84,9 @@ export function handleRequestStopTransactionV201(
       if (ctx.chargePoint.isScenarioStopHandled(connector.id)) {
         ctx.chargePoint.notifyRemoteStopReceived(connector.id, txId);
       } else {
-        ctx.chargePoint.stopTransaction(connector.id, "Remote");
+        ctx.chargePoint.stopTransaction(connector.id, "Remote", {
+          triggerReason: "RemoteStop",
+        });
       }
     },
   };

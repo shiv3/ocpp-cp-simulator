@@ -895,11 +895,15 @@ async function assertRemoteSession2x(
   expect(meter.seq).toBeLessThan(ended.seq);
   expect(payloadOf(started)).toMatchObject({
     eventType: "Started",
+    triggerReason: "RemoteStart",
     idToken: { idToken: REMOTE_TAG, type: "ISO14443" },
+    transactionInfo: { remoteStartId: expect.any(Number) },
     evse: { id: 1, connectorId: 1 },
   });
   expect(payloadOf(ended)).toMatchObject({
     eventType: "Ended",
+    triggerReason: "RemoteStop",
+    idToken: { idToken: REMOTE_TAG, type: "ISO14443" },
     transactionInfo: { transactionId, stoppedReason: "Remote" },
   });
 }

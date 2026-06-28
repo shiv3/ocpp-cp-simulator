@@ -43,6 +43,7 @@ export interface ChargePointEvents {
   remoteStartReceived: {
     connectorId: number;
     tagId: string;
+    remoteStartId?: number;
   };
   /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
    *  has registered as the stop-side handler for this connector. The

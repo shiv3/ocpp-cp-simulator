@@ -63,7 +63,9 @@ export const handleResetV201 = (
       if (type !== "ImmediateAndResume") {
         for (const connector of targets) {
           if (connector.transaction) {
-            ctx.chargePoint.stopTransaction(connector.id, "HardReset");
+            ctx.chargePoint.stopTransaction(connector.id, "HardReset", {
+              triggerReason: "ResetCommand",
+            });
           }
         }
       }

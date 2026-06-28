@@ -96,6 +96,9 @@ describe("OCPP 2.0.1 transaction events", () => {
       expect(started.transactionInfo.transactionId).toBe(
         transaction.cpTransactionId,
       );
+      expect(started.triggerReason).toBe("Authorized");
+      expect(started.transactionInfo.remoteStartId).toBeUndefined();
+      expect(started.reservationId).toBeUndefined();
 
       cp.sendMeterValue(1);
       const meterValuesFrame = await csms.waitForFrame(
@@ -129,6 +132,11 @@ describe("OCPP 2.0.1 transaction events", () => {
       expect(started.transactionInfo.transactionId).toBe(
         ended.transactionInfo.transactionId,
       );
+      expect(ended.triggerReason).toBe("StopAuthorized");
+      expect(ended.idToken).toEqual({
+        idToken: "TAG-201",
+        type: "ISO14443",
+      });
 
       const seqNos = [started.seqNo, ended.seqNo];
       expect(seqNos.every((seqNo) => Number.isInteger(seqNo))).toBe(true);

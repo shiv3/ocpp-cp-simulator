@@ -102,48 +102,59 @@ const waitForRemoteStart = (
   chargePoint: ChargePoint,
   connector: Connector,
   timeout?: number,
-): CancellableWait<string> => {
+): CancellableWait<{ tagId: string; remoteStartId?: number }> => {
   // Register so the handler emits remoteStartReceived instead of starting a transaction
   chargePoint.registerScenarioHandler(connector.id);
 
   let cleanupFn: (() => void) | null = null;
 
-  const promise = new Promise<string>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
-    let settled = false;
+  const promise = new Promise<{ tagId: string; remoteStartId?: number }>(
+    (resolve, reject) => {
+      let timeoutId: NodeJS.Timeout | null = null;
+      let settled = false;
 
-    const cleanup = () => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      chargePoint.events.off("remoteStartReceived", handler);
-      chargePoint.events.off("disconnected", disconnectHandler);
-      chargePoint.unregisterScenarioHandler(connector.id);
-    };
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        chargePoint.events.off("remoteStartReceived", handler);
+        chargePoint.events.off("disconnected", disconnectHandler);
+        chargePoint.unregisterScenarioHandler(connector.id);
+      };
 
-    cleanupFn = cleanup;
+      cleanupFn = cleanup;
 
-    const handler = (data: { connectorId: number; tagId: string }) => {
-      if (data.connectorId !== connector.id) return;
-      cleanup();
-      resolve(data.tagId);
-    };
-
-    const disconnectHandler = () => {
-      cleanup();
-      reject(new Error("Disconnected while waiting for remote start"));
-    };
-
-    chargePoint.events.on("remoteStartReceived", handler);
-    chargePoint.events.on("disconnected", disconnectHandler);
-
-    if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
+      const handler = (data: {
+        connectorId: number;
+        tagId: string;
+        remoteStartId?: number;
+      }) => {
+        if (data.connectorId !== connector.id) return;
         cleanup();
-        reject(new Error(`Timeout waiting for remote start (${timeout}s)`));
-      }, timeout * 1000);
-    }
-  });
+        resolve({
+          tagId: data.tagId,
+          ...(data.remoteStartId !== undefined
+            ? { remoteStartId: data.remoteStartId }
+            : {}),
+        });
+      };
+
+      const disconnectHandler = () => {
+        cleanup();
+        reject(new Error("Disconnected while waiting for remote start"));
+      };
+
+      chargePoint.events.on("remoteStartReceived", handler);
+      chargePoint.events.on("disconnected", disconnectHandler);
+
+      if (timeout && timeout > 0) {
+        timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error(`Timeout waiting for remote start (${timeout}s)`));
+        }, timeout * 1000);
+      }
+    },
+  );
 
   return {
     promise,
@@ -162,55 +173,62 @@ const waitForRemoteStop = (
   chargePoint: ChargePoint,
   connector: Connector,
   timeout?: number,
-): CancellableWait<{ transactionId: number; reason: string }> => {
+): CancellableWait<{
+  transactionId: number;
+  reason: string;
+  triggerReason: "RemoteStop";
+}> => {
   chargePoint.registerScenarioStopHandler(connector.id);
 
   let cleanupFn: (() => void) | null = null;
 
-  const promise = new Promise<{ transactionId: number; reason: string }>(
-    (resolve, reject) => {
-      let timeoutId: NodeJS.Timeout | null = null;
-      let settled = false;
+  const promise = new Promise<{
+    transactionId: number;
+    reason: string;
+    triggerReason: "RemoteStop";
+  }>((resolve, reject) => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let settled = false;
 
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        chargePoint.events.off("remoteStopReceived", handler);
-        chargePoint.events.off("disconnected", disconnectHandler);
-        chargePoint.unregisterScenarioStopHandler(connector.id);
-      };
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      chargePoint.events.off("remoteStopReceived", handler);
+      chargePoint.events.off("disconnected", disconnectHandler);
+      chargePoint.unregisterScenarioStopHandler(connector.id);
+    };
 
-      cleanupFn = cleanup;
+    cleanupFn = cleanup;
 
-      const handler = (data: {
-        connectorId: number;
-        transactionId: number;
-      }) => {
-        if (data.connectorId !== connector.id) return;
+    const handler = (data: { connectorId: number; transactionId: number }) => {
+      if (data.connectorId !== connector.id) return;
+      cleanup();
+      // §6.21: CSMS-initiated stop → reason="Remote". Hard-code here
+      // since the request payload itself doesn't carry a reason field;
+      // the handler is what knows the provenance.
+      resolve({
+        transactionId: data.transactionId,
+        reason: "Remote",
+        triggerReason: "RemoteStop",
+      });
+    };
+
+    const disconnectHandler = () => {
+      cleanup();
+      reject(new Error("Disconnected while waiting for remote stop"));
+    };
+
+    chargePoint.events.on("remoteStopReceived", handler);
+    chargePoint.events.on("disconnected", disconnectHandler);
+
+    if (timeout && timeout > 0) {
+      timeoutId = setTimeout(() => {
         cleanup();
-        // §6.21: CSMS-initiated stop → reason="Remote". Hard-code here
-        // since the request payload itself doesn't carry a reason field;
-        // the handler is what knows the provenance.
-        resolve({ transactionId: data.transactionId, reason: "Remote" });
-      };
-
-      const disconnectHandler = () => {
-        cleanup();
-        reject(new Error("Disconnected while waiting for remote stop"));
-      };
-
-      chargePoint.events.on("remoteStopReceived", handler);
-      chargePoint.events.on("disconnected", disconnectHandler);
-
-      if (timeout && timeout > 0) {
-        timeoutId = setTimeout(() => {
-          cleanup();
-          reject(new Error(`Timeout waiting for remote stop (${timeout}s)`));
-        }, timeout * 1000);
-      }
-    },
-  );
+        reject(new Error(`Timeout waiting for remote stop (${timeout}s)`));
+      }, timeout * 1000);
+    }
+  });
 
   return {
     promise,
@@ -329,15 +347,21 @@ export const createScenarioExecutorCallbacks = (
     onStatusChange: async (status) => {
       chargePoint.updateConnectorStatus(connector.id, status);
     },
-    onStartTransaction: async (tagId, batteryCapacityKwh, initialSoc) => {
+    onStartTransaction: async (
+      tagId,
+      batteryCapacityKwh,
+      initialSoc,
+      options,
+    ) => {
       chargePoint.startTransaction(
         tagId,
         connector.id,
         batteryCapacityKwh,
         initialSoc,
+        options,
       );
     },
-    onStopTransaction: async (reason) => {
+    onStopTransaction: async (reason, options) => {
       // The cast keeps stopTransaction's StopTransactionReason union
       // happy without dragging the enum import into the callbacks
       // declaration. ChargePoint.stopTransaction safely no-ops if there
@@ -345,6 +369,7 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.stopTransaction(
         connector.id,
         reason as Parameters<typeof chargePoint.stopTransaction>[1],
+        options,
       );
     },
     onSetMeterValue: (value) => {

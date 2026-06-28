@@ -145,6 +145,46 @@ function createRuntimeMocks(connectorIds = [1]) {
   };
 }
 
+async function runAutoMeterCapNode(params: {
+  initialMeterValue: number;
+  seedValue: number;
+  maxValueDelta: number;
+  transactionMeterStart: number | null;
+}) {
+  let meterValue = params.initialMeterValue;
+  const onSetMeterValue = vi.fn((value: number) => {
+    meterValue = value;
+  });
+  const onStartAutoMeterValue = vi.fn();
+  const onWaitForMeterValue = vi.fn(async () => {});
+  const callbacks = {
+    onSetMeterValue,
+    onGetMeterValue: vi.fn(() => meterValue),
+    onGetTransactionMeterStart: vi.fn(() => params.transactionMeterStart),
+    onStartAutoMeterValue,
+    onWaitForMeterValue,
+    onStopAutoMeterValue: vi.fn(),
+  } satisfies ScenarioExecutorCallbacks & {
+    onGetTransactionMeterStart: () => number | null;
+  };
+
+  await runSingleNode(
+    ScenarioNodeType.METER_VALUE,
+    {
+      label: "Auto Meter",
+      value: params.seedValue,
+      sendMessage: false,
+      autoIncrement: true,
+      incrementInterval: 1,
+      incrementAmount: 100,
+      maxValue: params.maxValueDelta,
+    },
+    callbacks,
+  );
+
+  return { onSetMeterValue, onStartAutoMeterValue, onWaitForMeterValue };
+}
+
 describe("ScenarioExecutor node dispatch", () => {
   it("dispatches statusChange nodes to onStatusChange", async () => {
     const onStatusChange = vi.fn(async () => {});
@@ -200,6 +240,35 @@ describe("ScenarioExecutor node dispatch", () => {
 
     expect(onSetMeterValue).toHaveBeenCalledWith(321);
     expect(onSendMeterValue).toHaveBeenCalledTimes(1);
+  });
+
+  it("bases no-transaction auto-meter cap on the post-seed meter value", async () => {
+    const result = await runAutoMeterCapNode({
+      initialMeterValue: 0,
+      seedValue: 1_000,
+      maxValueDelta: 2_000,
+      transactionMeterStart: null,
+    });
+
+    expect(result.onSetMeterValue).toHaveBeenCalledWith(1_000);
+    expect(result.onStartAutoMeterValue).toHaveBeenCalledWith(
+      expect.objectContaining({ maxValue: 3_000 }),
+    );
+    expect(result.onWaitForMeterValue).toHaveBeenCalledWith(3_000, undefined);
+  });
+
+  it("keeps zero-seed no-transaction auto-meter cap relative to zero", async () => {
+    const result = await runAutoMeterCapNode({
+      initialMeterValue: 0,
+      seedValue: 0,
+      maxValueDelta: 200,
+      transactionMeterStart: null,
+    });
+
+    expect(result.onStartAutoMeterValue).toHaveBeenCalledWith(
+      expect.objectContaining({ maxValue: 200 }),
+    );
+    expect(result.onWaitForMeterValue).toHaveBeenCalledWith(200, undefined);
   });
 
   it("dispatches delay nodes to onDelay", async () => {

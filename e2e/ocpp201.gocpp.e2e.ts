@@ -389,7 +389,9 @@ test(
       expect(result).toMatchObject({ status: "Accepted" });
       expect(payloadOf(started)).toMatchObject({
         eventType: "Started",
+        triggerReason: "RemoteStart",
         idToken: { idToken: "REMOTE-TAG", type: "ISO14443" },
+        transactionInfo: { remoteStartId: expect.any(Number) },
         evse: { id: 1, connectorId: 1 },
       });
     } finally {
@@ -433,6 +435,7 @@ test(
       expect(result).toMatchObject({ status: "Accepted" });
       expect(payloadOf(ended)).toMatchObject({
         eventType: "Ended",
+        triggerReason: "RemoteStop",
         transactionInfo: { transactionId, stoppedReason: "Remote" },
       });
       expect(started.seq).toBeLessThan(ended.seq);

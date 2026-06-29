@@ -3,41 +3,54 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle.tsx";
 import { useDataContext } from "../data/providers/DataProvider";
+import type { RemoteConnectionState } from "../data/remote/RemoteChargePointService";
 
 type RemoteHealth = "checking" | "ok" | "down";
 
-const HEALTH_POLL_MS = 5000;
+interface ConnectionAwareService {
+  getConnectionState(): RemoteConnectionState;
+  onConnectionChange(
+    handler: (state: RemoteConnectionState) => void,
+  ): () => void;
+}
+
+function isConnectionAwareService(
+  service: unknown,
+): service is ConnectionAwareService {
+  return (
+    typeof service === "object" &&
+    service !== null &&
+    "getConnectionState" in service &&
+    "onConnectionChange" in service &&
+    typeof (service as { getConnectionState?: unknown }).getConnectionState ===
+      "function" &&
+    typeof (service as { onConnectionChange?: unknown }).onConnectionChange ===
+      "function"
+  );
+}
+
+function healthFromConnectionState(state: RemoteConnectionState): RemoteHealth {
+  if (state === "connected") return "ok";
+  if (state === "connecting") return "checking";
+  return "down";
+}
 
 const Navbar: React.FC = () => {
   const { mode, serverUrl, chargePointService } = useDataContext();
   const isRemote = mode === "remote";
   const [health, setHealth] = useState<RemoteHealth>("checking");
 
-  // Poll the daemon's health endpoint every 5s while we're in remote mode
-  // (the path is whatever the build / daemon were configured with — see
-  // src/data/healthPath.ts). Local mode has no remote to watch, so skip
-  // the timer entirely.
   useEffect(() => {
-    if (!isRemote || !chargePointService.ping) {
+    if (!isRemote || !isConnectionAwareService(chargePointService)) {
       setHealth("checking");
       return;
     }
-    let cancelled = false;
-    const ping = chargePointService.ping.bind(chargePointService);
-    const tick = async () => {
-      try {
-        await ping();
-        if (!cancelled) setHealth("ok");
-      } catch {
-        if (!cancelled) setHealth("down");
-      }
-    };
-    void tick();
-    const id = window.setInterval(tick, HEALTH_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
+    setHealth(
+      healthFromConnectionState(chargePointService.getConnectionState()),
+    );
+    return chargePointService.onConnectionChange((state) => {
+      setHealth(healthFromConnectionState(state));
+    });
   }, [isRemote, serverUrl, chargePointService]);
 
   const badgeLabel = isRemote

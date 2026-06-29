@@ -3,6 +3,16 @@ import type { ChargePointInitOptions } from "../types";
 import type { EventBus } from "./eventBus";
 import type { Database } from "../../cp/domain/persistence/Database";
 
+export type RegistryMembershipChange = "added" | "removed";
+
+export interface RegistryMembershipEvent {
+  readonly change: RegistryMembershipChange;
+  readonly cpId: string;
+  readonly service: CLIChargePointService;
+}
+
+export type RegistryMembershipSink = (event: RegistryMembershipEvent) => void;
+
 interface ChargePointRow {
   cp_id: string;
   ws_url: string;
@@ -18,6 +28,7 @@ interface ChargePointRow {
 export class CPRegistry {
   private readonly services = new Map<string, CLIChargePointService>();
   private readonly unsubscribes = new Map<string, () => void>();
+  private readonly registrySinks = new Set<RegistryMembershipSink>();
 
   constructor(
     private readonly bus: EventBus,
@@ -119,6 +130,13 @@ export class CPRegistry {
     return [...this.services.keys()];
   }
 
+  onRegistryMembership(handler: RegistryMembershipSink): () => void {
+    this.registrySinks.add(handler);
+    return () => {
+      this.registrySinks.delete(handler);
+    };
+  }
+
   /**
    * Create + register a brand-new CP. Pass `opts.seedDefault: false` to
    * skip the auto-seeded Essential CP Behavior template — used by the
@@ -142,6 +160,11 @@ export class CPRegistry {
     if (opts.seedDefault !== false) {
       svc.seedDefaultScenarios("essential-cp-behavior");
     }
+    this.notifyRegistryMembership({
+      change: "added",
+      cpId: init.cpId,
+      service: svc,
+    });
     return svc;
   }
 
@@ -237,13 +260,20 @@ export class CPRegistry {
     this.database.run("DELETE FROM connector_runtime WHERE cp_id = ?", [cpId]);
   }
 
-  remove(cpId: string): boolean {
+  remove(cpId: string, opts: { notify?: boolean } = {}): boolean {
     const svc = this.services.get(cpId);
     if (!svc) return false;
-    svc.cleanup();
+    // Detach the CP from the EventBus and the registry map BEFORE cleanup().
+    // cleanup() synchronously fires teardown statusChange events; if the CP
+    // were still subscribed/registered, the registry bridge would emit a
+    // `cp.updated` AFTER `cp.removed`, resurrecting the deleted CP in the UI.
     this.unsubscribes.get(cpId)?.();
     this.unsubscribes.delete(cpId);
     this.services.delete(cpId);
+    if (opts.notify !== false) {
+      this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
+    }
+    svc.cleanup();
     // Operator-initiated removal: drop the persisted row too. Process
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.
@@ -252,12 +282,28 @@ export class CPRegistry {
   }
 
   shutdownAll(): void {
-    for (const [cpId, svc] of this.services) {
-      svc.cleanup();
+    // Detach every CP from the EventBus + registry BEFORE cleanup(), so the
+    // teardown statusChange events can't produce post-removal `cp.updated`
+    // pushes (same hazard as remove()).
+    const entries = [...this.services];
+    for (const [cpId] of entries) {
       this.unsubscribes.get(cpId)?.();
     }
-    this.services.clear();
     this.unsubscribes.clear();
+    this.services.clear();
+    for (const [, svc] of entries) {
+      svc.cleanup();
+    }
+  }
+
+  private notifyRegistryMembership(event: RegistryMembershipEvent): void {
+    for (const sink of this.registrySinks) {
+      try {
+        sink(event);
+      } catch {
+        process.stderr.write("[CPRegistry] registry membership sink error\n");
+      }
+    }
   }
 }
 

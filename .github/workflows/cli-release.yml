@@ -81,6 +81,14 @@ jobs:
           echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
           ls -lh "${TARBALL}" ocpp-cp-simulator.tgz
 
+      - name: Verify the tarball ships the socket.io protocol module
+        run: |
+          # The daemon (src/cli/server/*) imports src/protocol; if it is missing
+          # from the npm `files` list the published CLI crashes on boot.
+          tar -tf "${{ steps.pack.outputs.tarball }}" \
+            | grep -q 'package/src/protocol/' \
+            || { echo "::error::src/protocol missing from the CLI tarball"; exit 1; }
+
       - name: Create / update release
         uses: softprops/action-gh-release@v2
         with:

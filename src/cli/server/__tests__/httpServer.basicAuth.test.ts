@@ -1,14 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from "vitest";
 import { createHttpHandlers } from "../httpServer";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createLifecycle } from "../lifecycle";
 
-// The fetch handler's signature wants a Bun `Server<SocketData>` for WS
-// upgrades. Basic-auth check runs BEFORE dispatch() and the healthz route
-// also doesn't touch `server`, so an opaque cast is enough for these tests.
+// The fetch handler's signature wants a Bun `Server` for socket.io transport
+// requests. These tests don't hit socket.io, so an opaque cast is enough.
 //
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stubServer = null as any;
 
 function makeHandlers(
@@ -46,7 +45,7 @@ describe("httpServer Basic Auth gate", () => {
 
   it("returns 401 + WWW-Authenticate when header is missing", async () => {
     const handlers = makeHandlers({ username: "alice", password: "secret" });
-    const req = new Request("http://localhost/v1/cps");
+    const req = new Request("http://localhost/index.html");
     const res = await Promise.resolve(handlers.fetch(req, stubServer));
     expect(res).toBeInstanceOf(Response);
     expect((res as Response).status).toBe(401);
@@ -58,7 +57,7 @@ describe("httpServer Basic Auth gate", () => {
 
   it("returns 401 for the wrong password", async () => {
     const handlers = makeHandlers({ username: "alice", password: "secret" });
-    const req = new Request("http://localhost/v1/cps", {
+    const req = new Request("http://localhost/index.html", {
       headers: { authorization: basicAuthHeader("alice", "wrong") },
     });
     const res = await Promise.resolve(handlers.fetch(req, stubServer));
@@ -67,7 +66,7 @@ describe("httpServer Basic Auth gate", () => {
 
   it("returns 401 for the wrong username", async () => {
     const handlers = makeHandlers({ username: "alice", password: "secret" });
-    const req = new Request("http://localhost/v1/cps", {
+    const req = new Request("http://localhost/index.html", {
       headers: { authorization: basicAuthHeader("bob", "secret") },
     });
     const res = await Promise.resolve(handlers.fetch(req, stubServer));
@@ -76,7 +75,7 @@ describe("httpServer Basic Auth gate", () => {
 
   it("returns 401 on garbled / non-Basic Authorization header", async () => {
     const handlers = makeHandlers({ username: "alice", password: "secret" });
-    const req = new Request("http://localhost/v1/cps", {
+    const req = new Request("http://localhost/index.html", {
       headers: { authorization: "Bearer xyz" },
     });
     const res = await Promise.resolve(handlers.fetch(req, stubServer));
@@ -107,18 +106,17 @@ describe("httpServer Basic Auth gate", () => {
       username: "operator",
       password: "パスワード",
     });
-    const goodReq = new Request("http://localhost/v1/cps", {
+    const goodReq = new Request("http://localhost/v1/cp", {
       headers: { authorization: basicAuthHeader("operator", "パスワード") },
     });
-    const badReq = new Request("http://localhost/v1/cps", {
+    const badReq = new Request("http://localhost/v1/cp", {
       headers: { authorization: basicAuthHeader("operator", "ぱすわーど") },
     });
 
     const goodRes = await Promise.resolve(handlers.fetch(goodReq, stubServer));
-    // After auth passes the request falls through to dispatch which hits
-    // a no-such-route case and returns 404 — that's fine, we only care
-    // that the gate let it through.
-    expect((goodRes as Response).status).not.toBe(401);
+    // After auth passes, removed REST routes return 404. We only care that
+    // the gate let UTF-8 credentials through.
+    expect((goodRes as Response).status).toBe(404);
 
     const badRes = await Promise.resolve(handlers.fetch(badReq, stubServer));
     expect((badRes as Response).status).toBe(401);

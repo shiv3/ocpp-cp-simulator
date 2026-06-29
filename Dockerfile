@@ -76,6 +76,10 @@ COPY package.json bun.lock ./
 # Only the files the CLI / daemon needs at runtime.
 COPY src/cli ./src/cli
 COPY src/cp ./src/cp
+# src/protocol holds the socket.io control-plane zod schemas imported by the
+# daemon (src/cli/server/*). Without it the daemon crashes on boot with a
+# "Cannot find package '../../protocol'" resolution error.
+COPY src/protocol ./src/protocol
 COPY src/data ./src/data
 # scenarioTemplates.ts statically imports built-in templates from
 # src/utils/scenarios/*.json (extracted in PR #54). Copying the whole utils/

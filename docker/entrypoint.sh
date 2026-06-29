@@ -14,7 +14,7 @@
 #      cost on first run; no-op on subsequent runs.
 #   3. Drop to the bun user via `su-exec` and exec the simulator.
 #   4. Compose the CLI flag bundle:
-#        --http-host 0.0.0.0 --unix-socket none --web-console $HTTP_PORT
+#        --http-host 0.0.0.0 --unsafe-remote --web-console $HTTP_PORT
 #        (--state-db $STATE_DB only when STATE_DB is non-empty).
 #        (--health-path $HEALTH_PATH only when HEALTH_PATH is non-empty).
 #
@@ -36,7 +36,11 @@ if [ -d /data ] && [ "$(stat -c %u /data 2>/dev/null)" != "1000" ]; then
   chown bun:bun /data
 fi
 
-ARGS="--http-host 0.0.0.0 --unix-socket none --web-console ${HTTP_PORT}"
+# --unsafe-remote: the container intentionally binds 0.0.0.0 (non-loopback) so
+# the web console / socket.io API are reachable from outside the container.
+# The Sec-3 startup guard refuses a non-loopback bind without auth unless this
+# explicit opt-in is given; exposure is controlled by Docker port mapping.
+ARGS="--http-host 0.0.0.0 --unsafe-remote --web-console ${HTTP_PORT}"
 if [ -n "${STATE_DB}" ]; then
   ARGS="${ARGS} --state-db ${STATE_DB}"
 fi

@@ -1,17 +1,13 @@
-import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
+import type { Server } from "bun";
 import * as path from "path";
-import { handleJsonCommand } from "../jsonMode";
-import { toJsonResponse, toJsonEvent } from "../output";
-import type { JsonCommand, ChargePointInitOptions } from "../types";
+import type { ChargePointInitOptions } from "../types";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
 import type { Database } from "../../cp/domain/persistence/Database";
-import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
-import { LogLevel } from "../../cp/shared/Logger";
 
 /**
- * Serve files out of a directory as a 404 fallback for the API router.
+ * Serve files out of a directory as a 404 fallback for the HTTP router.
  * SPA-friendly: requests with no file extension (`/`, `/settings`, ...)
  * that don't match a real file fall back to `index.html` so the React
  * router can take over.
@@ -78,11 +74,6 @@ function cacheControlFor(pathname: string, servedFallback: boolean): string {
   return "no-store";
 }
 
-interface SocketData {
-  scope: string;
-  unsub?: () => void;
-}
-
 const COMMON_CORS_HEADERS: Record<string, string> = {
   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
   "access-control-allow-headers": "content-type, authorization",
@@ -98,7 +89,7 @@ export type CorsPolicy =
    * same-origin browser requests (Origin matches the request's Host) are
    * allowed. Used as the safe default when the daemon binds to 0.0.0.0
    * without an explicit `--cors-origin`, so a LAN-exposed daemon doesn't
-   * silently accept admin-API calls from any third-party page in the
+   * silently accept daemon control calls from any third-party page in the
    * operator's browser.
    *
    * `trustForwardedHeaders` (set by `--trust-forwarded-headers`): when the
@@ -190,7 +181,7 @@ function isOriginAllowed(req: Request, policy: CorsPolicy): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true; // non-browser caller (curl / CLI / server-to-server)
   if (policy.kind === "allowlist") return policy.origins.includes(origin);
-  // same-origin: only the simulator's own served origin can call its API
+  // same-origin: only the simulator's own served origin can call the daemon
   // (optionally including the proxy-reported public origin).
   return isSameOriginRequest(
     req,
@@ -219,7 +210,7 @@ function forbidden(): Response {
  * Default every response to `Cache-Control: no-store` unless the handler set
  * one explicitly (issue #79). serveStatic already stamps build assets as
  * immutable and HTML as no-store; this catches the dynamic / auth-sensitive
- * rest — the /v1 control API, health, CORS rejections — which must never be
+ * rest — health, 404s, CORS rejections — which must never be
  * cached at a reverse-proxy edge.
  */
 function applyCacheControl(res: Response): Response {
@@ -295,9 +286,16 @@ function timingSafeStringEqual(a: string, b: string): boolean {
 export interface HttpHandlers {
   fetch: (
     req: Request,
-    server: Server<SocketData>,
+    server: Server<Record<string, unknown>>,
   ) => Response | Promise<Response | undefined> | undefined;
-  websocket: WebSocketHandler<SocketData>;
+}
+
+export interface SocketIoRoute {
+  matches(pathname: string): boolean;
+  handleRequest(
+    req: Request,
+    server: Server<Record<string, unknown>>,
+  ): Response | Promise<Response>;
 }
 
 export function createHttpHandlers(deps: {
@@ -307,33 +305,36 @@ export function createHttpHandlers(deps: {
   cors?: CorsPolicy;
   /** Absolute path of a directory served as a 404 fallback (SPA aware). */
   staticDir?: string | null;
-  /** Daemon state DB; needed so POST /v1/state/reset can truncate it. */
+  /** Retained for call-site compatibility; control RPC uses the database. */
   database?: Database | null;
   /** Absolute URL path the health-check JSON is served on. Defaults to
    *  `/v1/healthz`. */
   healthPath?: string;
-  /** Optional Basic Auth gate for the HTTP web console / API / WS upgrades.
+  /** Optional Basic Auth gate for the HTTP web console and non-health HTTP.
    *  When set, every request except the configured `healthPath` must
    *  carry a matching `Authorization: Basic <base64(user:pass)>` header.
+   *  Socket.IO transport requests are authenticated by the socket handshake.
    *  Null = no auth (default; backward compatible). */
   webConsoleBasicAuth?: { username: string; password: string } | null;
+  /** Optional socket.io/Engine.IO route mounted on the same Bun listener. */
+  socketIo?: SocketIoRoute | null;
 }): HttpHandlers {
-  const { registry, bus, lifecycle } = deps;
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
   const staticDir = deps.staticDir ?? null;
-  const database = deps.database ?? null;
   const healthPath = deps.healthPath ?? "/v1/healthz";
   const webConsoleBasicAuth = deps.webConsoleBasicAuth ?? null;
+  const socketIo = deps.socketIo ?? null;
 
   return {
     fetch(req, server) {
+      const url = new URL(req.url);
       // Optional Basic Auth gate. Runs *before* CORS so an attacker without
       // creds can't probe internal endpoints via a same-origin request.
       // The health path is intentionally exempt so k8s probes / external
       // load balancers / browser auto-detect can keep working unprompted.
       if (webConsoleBasicAuth !== null) {
-        const url = new URL(req.url);
-        if (url.pathname !== healthPath) {
+        const socketIoRequest = socketIo?.matches(url.pathname) ?? false;
+        if (url.pathname !== healthPath && !socketIoRequest) {
           const auth = parseBasicAuthHeader(req.headers.get("authorization"));
           if (!auth || !credentialsMatch(auth, webConsoleBasicAuth)) {
             // 401 with WWW-Authenticate so browsers prompt for credentials
@@ -351,7 +352,7 @@ export function createHttpHandlers(deps: {
       }
 
       // Block disallowed browser origins BEFORE dispatching so simple-request
-      // POSTs / WS upgrades / GETs don't trigger side effects under a tightened
+      // POSTs / socket upgrades / GETs don't trigger side effects under a tightened
       // --cors-origin allowlist. CORS response headers alone are not enough,
       // since simple requests bypass preflight and reach the handler regardless.
       if (!isOriginAllowed(req, cors)) {
@@ -363,342 +364,35 @@ export function createHttpHandlers(deps: {
         return applyCors(new Response(null, { status: 204 }), req, cors);
       }
 
+      if (socketIo !== null && socketIo.matches(url.pathname)) {
+        const result = socketIo.handleRequest(req, server);
+        if (result instanceof Response) {
+          return applyCacheControl(applyCors(result, req, cors));
+        }
+        return result.then((r) => applyCacheControl(applyCors(r, req, cors)));
+      }
+
       const result = dispatch(req, server);
-      if (result === undefined) return undefined; // WS upgrade already handled
       if (result instanceof Response) {
         return applyCacheControl(applyCors(result, req, cors));
       }
-      return result.then((r) =>
-        r instanceof Response ? applyCacheControl(applyCors(r, req, cors)) : r,
-      );
-    },
-
-    websocket: {
-      open(ws: ServerWebSocket<SocketData>) {
-        const { scope } = ws.data;
-        const unsub = bus.subscribe(scope, ({ cpId, evt }) => {
-          const base = toJsonEvent(evt.event, evt.data);
-          const payload = scope === "*" ? { cpId, ...base } : base;
-          try {
-            ws.send(JSON.stringify(payload));
-          } catch {
-            // best effort
-          }
-        });
-        ws.data.unsub = unsub;
-      },
-      message() {
-        // phase1: ignore inbound
-      },
-      close(ws: ServerWebSocket<SocketData>) {
-        ws.data.unsub?.();
-      },
+      return result.then((r) => applyCacheControl(applyCors(r, req, cors)));
     },
   };
 
   function dispatch(
     req: Request,
-    server: Server<SocketData>,
-  ): Response | Promise<Response> | undefined {
+    _server: Server<Record<string, unknown>>,
+  ): Response | Promise<Response> {
     const url = new URL(req.url);
-    const segs = url.pathname.split("/").filter(Boolean);
-
-    const isWsUpgrade =
-      (req.headers.get("upgrade") ?? "").toLowerCase() === "websocket";
-
-    // WS /v1/events (all CPs)
-    if (
-      isWsUpgrade &&
-      segs.length === 2 &&
-      segs[0] === "v1" &&
-      segs[1] === "events"
-    ) {
-      const ok = server.upgrade(req, { data: { scope: "*" } as SocketData });
-      return ok ? undefined : new Response("upgrade failed", { status: 400 });
-    }
-
-    // WS /v1/cp/:cpId/events (single CP)
-    if (
-      isWsUpgrade &&
-      segs.length === 4 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp" &&
-      segs[3] === "events"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      if (!registry.has(cpId)) {
-        return new Response("unknown cpId", { status: 404 });
-      }
-      const ok = server.upgrade(req, { data: { scope: cpId } as SocketData });
-      return ok ? undefined : new Response("upgrade failed", { status: 400 });
-    }
 
     // GET <healthPath>  (default /v1/healthz; configurable via --health-path)
     if (req.method === "GET" && url.pathname === healthPath) {
-      return Response.json({ ok: true, cps: registry.list().length });
-    }
-
-    // POST /v1/shutdown
-    if (req.method === "POST" && url.pathname === "/v1/shutdown") {
-      // Defer shutdown so the response body has time to flush to the client.
-      setTimeout(() => lifecycle.requestShutdown(), 100);
       return Response.json({ ok: true });
     }
 
-    // POST /v1/cp/:cpId/logs/clear — drop the persisted log rows for one
-    // CP, leaving the rest of the DB intact. The browser also clears its
-    // own in-memory log buffer; this is the "and DB too" half.
-    if (
-      req.method === "POST" &&
-      segs.length === 5 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp" &&
-      segs[3] === "logs" &&
-      segs[4] === "clear"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      if (database) {
-        database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
-        void database.flush?.();
-      }
-      return Response.json({ ok: true });
-    }
-
-    // GET /v1/cp/:cpId/logs — list log entries for one CP, oldest-first.
-    // Prefers the persisted `logs` table (full session-spanning history
-    // when --state-db is set), and falls back to the Logger's in-memory
-    // list for daemons running without persistence. Backs the browser's
-    // "Download logs" button in remote mode.
-    if (
-      req.method === "GET" &&
-      segs.length === 4 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp" &&
-      segs[3] === "logs"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      const svc = registry.get(cpId);
-      svc?.flushLogs();
-      if (database) {
-        const rows = database.all<{
-          timestamp: string;
-          level: string;
-          log_type: string;
-          message: string;
-        }>(
-          "SELECT timestamp, level, log_type, message FROM logs " +
-            "WHERE cp_id = ? ORDER BY id ASC",
-          [cpId],
-        );
-        if (rows.length > 0) {
-          return Response.json(
-            rows.map((r) => ({
-              timestamp: r.timestamp,
-              level: r.level,
-              type: r.log_type,
-              cpId,
-              message: r.message,
-            })),
-          );
-        }
-      }
-      // No DB or DB empty — fall back to whatever the Logger has buffered
-      // in memory for this CP's process lifetime.
-      const memEntries = svc?.getInMemoryLogs() ?? [];
-      return Response.json(
-        memEntries.map((e) => ({
-          timestamp: e.timestamp.toISOString(),
-          level: LogLevel[e.level] ?? "INFO",
-          type: e.type,
-          cpId,
-          message: e.message,
-        })),
-      );
-    }
-
-    // POST /v1/state/reset — drop every CP, then truncate the state DB.
-    // Called by the UI "Reset all simulator data" button when in remote
-    // mode (browser sends this via RemoteChargePointService.resetAllState).
-    if (req.method === "POST" && url.pathname === "/v1/state/reset") {
-      for (const cpId of [...registry.list()]) registry.remove(cpId);
-      if (database) {
-        resetSimulatorState(database);
-        // database.flush is a no-op on bun:sqlite; call without await so
-        // the fetch handler stays sync (matches the rest of the routes).
-        void database.flush?.();
-      }
-      return Response.json({ ok: true });
-    }
-
-    // GET /v1/cp
-    if (
-      req.method === "GET" &&
-      segs.length === 2 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp"
-    ) {
-      const list = registry.list().map((cpId) => {
-        const svc = registry.get(cpId);
-        const status = svc?.getStatus();
-        return {
-          cpId,
-          status: status?.status ?? "",
-          connectors: status?.connectors.length ?? 0,
-        };
-      });
-      return Response.json(list);
-    }
-
-    // POST /v1/cp  (create)
-    if (
-      req.method === "POST" &&
-      segs.length === 2 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp"
-    ) {
-      return req
-        .json()
-        .then(async (body: unknown) => {
-          try {
-            const init = parseCreateBody(body);
-            const svc = registry.create(init);
-            const autoConnect =
-              isRecord(body) && body.autoConnect === true ? true : false;
-            if (autoConnect) {
-              svc.connect().catch((err) => {
-                process.stderr.write(
-                  `[server] autoConnect failed for ${init.cpId}: ${
-                    err instanceof Error ? err.message : err
-                  }\n`,
-                );
-              });
-            }
-            return Response.json({
-              ok: true,
-              data: { cpId: init.cpId },
-            });
-          } catch (err) {
-            return Response.json({
-              ok: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        })
-        .catch(() => Response.json({ ok: false, error: "invalid JSON body" }));
-    }
-
-    // GET /v1/cp/:cpId
-    if (
-      req.method === "GET" &&
-      segs.length === 3 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      const svc = registry.get(cpId);
-      if (!svc) return new Response("unknown cpId", { status: 404 });
-      return Response.json(svc.getStatus());
-    }
-
-    // PUT /v1/cp/:cpId  (replace config — used by the web console "edit"
-    // flow). The body shape is identical to POST /v1/cp; the URL cpId must
-    // match `body.cpId`. The existing service is torn down and a fresh
-    // one with the new config is constructed; persisted scenarios survive
-    // because we update the row (ON CONFLICT) rather than removing it.
-    if (
-      req.method === "PUT" &&
-      segs.length === 3 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      if (!registry.has(cpId)) {
-        return new Response("unknown cpId", { status: 404 });
-      }
-      return req
-        .json()
-        .then(async (body: unknown) => {
-          try {
-            const init = parseCreateBody(body);
-            if (init.cpId !== cpId) {
-              return Response.json({
-                ok: false,
-                error: "URL cpId and body cpId do not match",
-              });
-            }
-            const autoConnect =
-              isRecord(body) && body.autoConnect === true ? true : false;
-            const svc = registry.update(init);
-            if (autoConnect) {
-              svc.connect().catch((err) => {
-                process.stderr.write(
-                  `[server] reconnect after update failed for ${init.cpId}: ${
-                    err instanceof Error ? err.message : err
-                  }\n`,
-                );
-              });
-            }
-            return Response.json({ ok: true, data: { cpId: init.cpId } });
-          } catch (err) {
-            return Response.json({
-              ok: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        })
-        .catch(() => Response.json({ ok: false, error: "invalid JSON body" }));
-    }
-
-    // DELETE /v1/cp/:cpId
-    if (
-      req.method === "DELETE" &&
-      segs.length === 3 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      const removed = registry.remove(cpId);
-      if (!removed) return new Response("unknown cpId", { status: 404 });
-      return Response.json({ ok: true });
-    }
-
-    // POST /v1/cp/:cpId/command
-    if (
-      req.method === "POST" &&
-      segs.length === 4 &&
-      segs[0] === "v1" &&
-      segs[1] === "cp" &&
-      segs[3] === "command"
-    ) {
-      const cpId = decodeURIComponent(segs[2]);
-      const svc = registry.get(cpId);
-      if (!svc) return new Response("unknown cpId", { status: 404 });
-
-      return req
-        .json()
-        .then(async (body: unknown) => {
-          if (!isJsonCommand(body)) {
-            return Response.json(
-              toJsonResponse(null, false, "Invalid JsonCommand"),
-            );
-          }
-          const id = body.id ?? null;
-          try {
-            const data = await handleJsonCommand(svc, body);
-            return Response.json(toJsonResponse(id, true, data));
-          } catch (err) {
-            return Response.json(
-              toJsonResponse(
-                id,
-                false,
-                err instanceof Error ? err.message : String(err),
-              ),
-            );
-          }
-        })
-        .catch(() =>
-          Response.json(toJsonResponse(null, false, "Invalid JSON body")),
-        );
+    if (url.pathname === "/v1" || url.pathname.startsWith("/v1/")) {
+      return new Response("not found", { status: 404 });
     }
 
     // Static file fallback (SPA aware). Disabled when --serve-static is
@@ -717,11 +411,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-function isJsonCommand(v: unknown): v is JsonCommand {
-  return isRecord(v) && typeof v.command === "string";
-}
-
-function parseCreateBody(body: unknown): ChargePointInitOptions {
+export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (!isRecord(body)) throw new Error("body must be an object");
   const cpId = body.cpId;
   if (typeof cpId !== "string" || cpId.length === 0) {

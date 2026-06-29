@@ -237,7 +237,7 @@ export interface ChargePointService {
    *  overrides, pending messages, logs, …). Schema is preserved.
    *
    *  In local mode this clears the browser sql.js DB. In remote mode it
-   *  hits `POST /v1/state/reset` on the daemon. Callers should reload
+   *  sends the `state.reset` socket.io RPC to the daemon. Callers should reload
    *  the UI afterwards to drop in-memory caches. */
   resetAllState?(): Promise<void>;
 

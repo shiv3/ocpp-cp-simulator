@@ -9,6 +9,7 @@ import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
 import { createHttpHandlers, type CorsPolicy } from "./httpServer";
+import { attachSocketIo, isSocketIoPath } from "./socketServer";
 import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
@@ -37,7 +38,6 @@ function serverLog(message: string): void {
 export interface ServerOptions {
   readonly httpPort: number | null;
   readonly httpHost: string;
-  readonly unixSocket: string | null;
   readonly pidPath: string | null;
   readonly bootstrap: ChargePointInitOptions | null;
   readonly autoConnect: boolean;
@@ -50,15 +50,15 @@ export interface ServerOptions {
   } | null;
   readonly cors: CorsPolicy;
   /**
-   * If set, every non-API GET is served from this directory (SPA aware).
+   * If set, non-/v1 GETs are served from this directory (SPA aware).
    * Lets you ship the daemon and the browser UI in one process.
    */
   readonly staticDir: string | null;
   /**
    * Optional second HTTP listener for the bundled web console. If equal
-   * to `httpPort`, a single listener serves both API and UI. If different,
+   * to `httpPort`, a single listener serves both socket.io/health and UI. If different,
    * a second `Bun.serve` is bound to this port (the UI is also exposed on
-   * that port together with the API so the browser can reach both at the
+   * that port together with socket.io/health so the browser can reach both at the
    * same origin).
    */
   readonly webConsolePort: number | null;
@@ -69,7 +69,7 @@ export interface ServerOptions {
    *  `/v1/healthz` (set by the CLI). */
   readonly healthPath: string;
   /** Optional Basic Auth credentials for the inbound HTTP server (web
-   *  console / JSON API / WS upgrades). Health path is exempt. Null = no
+   *  console / non-health HTTP). Health path is exempt. Null = no
    *  auth. Plumbed straight through to `createHttpHandlers`. */
   readonly webConsoleBasicAuth: {
     readonly username: string;
@@ -78,12 +78,8 @@ export interface ServerOptions {
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
-  if (opts.unixSocket) {
-    removeStaleSocket(opts.unixSocket);
-  }
-
   // Open the persistent state DB up front so every CP we create (boot
-  // bootstrap or via POST /v1/cp) gets the same Database handle. Without
+  // bootstrap or via socket.io RPC) gets the same Database handle. Without
   // --state-db we stay in-memory; the log line below makes the choice
   // visible because a silent in-memory daemon would surprise the operator.
   let database: Database | null = null;
@@ -100,23 +96,39 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
   // re-run with the same --cp-id is treated as "update wsUrl/connectors"
   // rather than "create + collide".
-  const restored = registry.restoreFromDatabase();
+  const restored = await Promise.resolve(registry.restoreFromDatabase());
   if (restored.length > 0) {
     serverLog(
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
     );
   }
-  const lifecycle = createLifecycle({
+  let lifecycle: ReturnType<typeof createLifecycle> | null = null;
+  const socketIo = attachSocketIo({
+    registry,
+    bus,
+    database,
+    webConsoleBasicAuth: opts.webConsoleBasicAuth,
+    requestShutdown: () => {
+      lifecycle?.requestShutdown();
+    },
+  });
+  lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
+    onShutdownStart: () => {
+      void socketIo.close();
+    },
   });
+  const socketIoRoute = {
+    matches: isSocketIoPath,
+    handleRequest: socketIo.handleRequest,
+  };
 
   // Two listener configurations:
-  //   * "api"  — no static fallback; what --http-port and the Unix socket
-  //     serve unless --web-console asks them to share a port.
-  //   * "console" — serves static files (UI) AND the full API; used by the
-  //     --web-console port. The API is exposed on this listener too so the
-  //     browser can talk to it at the same origin without CORS.
+  //   * "api"  — health + socket.io, no static fallback.
+  //   * "console" — health + socket.io + static files (UI); used by the
+  //     --web-console port so the browser talks to the daemon at the same
+  //     origin without CORS.
   const apiHandlers = createHttpHandlers({
     registry,
     bus,
@@ -125,6 +137,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     database,
     healthPath: opts.healthPath,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
+    socketIo: socketIoRoute,
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -136,36 +149,25 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         database,
         healthPath: opts.healthPath,
         webConsoleBasicAuth: opts.webConsoleBasicAuth,
+        socketIo: socketIoRoute,
       })
     : apiHandlers;
   if (opts.staticDir) {
     serverLog(`Web console: ${opts.staticDir}`);
   }
   if (opts.webConsoleBasicAuth) {
-    // Visible-on-startup log line so an operator can confirm the gate is on
-    // (and which user). The password is intentionally NOT logged.
+    // Visible-on-startup log line so an operator can confirm the gate is on.
+    // Credential values are intentionally not logged.
     serverLog(
-      `HTTP Basic Auth: enabled (user=${opts.webConsoleBasicAuth.username}, ` +
-        `health path ${opts.healthPath} exempt)`,
+      `HTTP Basic Auth: enabled (health path ${opts.healthPath} exempt)`,
     );
   }
   serverLog(`Health endpoint: GET ${opts.healthPath}`);
   const servers: AnyServer[] = [];
 
-  if (opts.unixSocket) {
-    const unixServer = Bun.serve({
-      unix: opts.unixSocket,
-      fetch: apiHandlers.fetch,
-      websocket: apiHandlers.websocket,
-    });
-    servers.push(unixServer);
-    lifecycle.attachServer(unixServer);
-    serverLog(`Listening on unix:${opts.unixSocket}`);
-  }
-
   // --http-port and --web-console may share a port (single listener) or
   // use different ports (two listeners). When they share, the listener
-  // gets the console handler (API + UI).
+  // gets the console handler (socket.io/health + UI).
   const httpPortShared =
     opts.httpPort != null && opts.httpPort === opts.webConsolePort;
 
@@ -175,13 +177,14 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       port: opts.httpPort,
       hostname: opts.httpHost,
       fetch: handlers.fetch,
-      websocket: handlers.websocket,
+      idleTimeout: socketIo.idleTimeout,
+      websocket: socketIo.websocket,
     });
     servers.push(httpServer);
     lifecycle.attachServer(httpServer);
     serverLog(
       `Listening on http://${opts.httpHost}:${opts.httpPort}` +
-        (httpPortShared ? " (API + web console)" : " (API)"),
+        (httpPortShared ? " (socket.io + web console)" : " (socket.io)"),
     );
   }
 
@@ -190,7 +193,8 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       port: opts.webConsolePort,
       hostname: opts.httpHost,
       fetch: consoleHandlers.fetch,
-      websocket: consoleHandlers.websocket,
+      idleTimeout: socketIo.idleTimeout,
+      websocket: socketIo.websocket,
     });
     servers.push(consoleServer);
     lifecycle.attachServer(consoleServer);
@@ -198,7 +202,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   }
 
   if (servers.length === 0) {
-    throw new Error("Server has no listener (httpPort or unixSocket required)");
+    throw new Error("Server has no listener (httpPort required)");
   }
 
   lifecycle.installSignalHandlers();
@@ -262,14 +266,6 @@ function resolveConnectorIds(raw: string, connectorCount: number): number[] {
     }
   }
   return [...seen];
-}
-
-function removeStaleSocket(socketPath: string): void {
-  try {
-    fs.unlinkSync(socketPath);
-  } catch {
-    // not present, fine
-  }
 }
 
 function runStartupScenario(
@@ -401,5 +397,5 @@ function instantiateTemplate(
   };
 }
 
-export { DEFAULT_UNIX_SOCKET } from "./constants";
+export { DEFAULT_HTTP_PORT } from "./constants";
 export const DEFAULT_PID_PATH = "/tmp/ocpp-server.pid";

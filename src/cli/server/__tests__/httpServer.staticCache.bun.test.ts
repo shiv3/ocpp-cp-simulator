@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
@@ -14,7 +15,6 @@ import { createLifecycle } from "../lifecycle";
 // headers so a CDN behind forward-auth doesn't edge-cache auth-gated assets by
 // file extension, while still letting content-hashed build assets cache long.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stubServer = null as any;
 
 let staticDir: string;
@@ -86,9 +86,9 @@ describe("httpServer static Cache-Control (issue #79)", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("marks control-API (/v1/*) responses as no-store", async () => {
-    const res = await run(new Request("http://127.0.0.1:9700/v1/cp"));
-    expect(res.status).toBe(200);
+  it("marks missing asset responses as no-store", async () => {
+    const res = await run(new Request("http://127.0.0.1:9700/missing.js"));
+    expect(res.status).toBe(404);
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });

@@ -345,6 +345,13 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "set_soc_meter_sync": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const enabled = requireBoolean(params, "enabled");
+      service.setConnectorSocMeterSync(connectorId, enabled);
+      return undefined;
+    }
+
     case "get_charging_profiles": {
       const connectorId = requirePositiveInt(params, "connector");
       return service.getChargingProfiles(connectorId);

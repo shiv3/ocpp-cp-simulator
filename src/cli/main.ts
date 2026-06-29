@@ -11,7 +11,7 @@ import type { Database } from "../cp/domain/persistence/Database";
 import { setGlobalLogFormat } from "../cp/shared/Logger";
 import {
   startServer,
-  DEFAULT_UNIX_SOCKET,
+  DEFAULT_HTTP_PORT,
   DEFAULT_PID_PATH,
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
@@ -41,6 +41,17 @@ const OCPP_VERSION_VALUES = "OCPP-1.6J, OCPP-2.0.1, OCPP-2.1";
 function isSupportedOcppVersion(value: string): boolean {
   return (
     value === "OCPP-1.6J" || value === "OCPP-2.0.1" || value === "OCPP-2.1"
+  );
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "[::1]" ||
+    normalized === "127.0.0.1" ||
+    normalized.startsWith("127.")
   );
 }
 
@@ -75,9 +86,10 @@ export function parseArgs(argv: string[]): CLIOptions {
   let httpPort: number | null = null;
   let httpHost = "127.0.0.1";
   let unixSocket: string | null = null;
-  let unixSocketExplicit = false;
+  let unixSocketWarningPrinted = false;
   let httpUrl: string | null = null;
   let allEvents = false;
+  let unsafeRemote = false;
   let serveStatic: string | null = null;
   // --web-console: enabled flag + optional explicit port. When the port is
   // omitted (`--web-console` alone), the UI shares the --http-port listener.
@@ -191,9 +203,15 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       case "--unix-socket":
-        unixSocketExplicit = true;
-        unixSocket = next === "none" ? null : (next ?? "");
-        i++;
+        if (!unixSocketWarningPrinted) {
+          process.stderr.write(
+            "Warning: --unix-socket is deprecated and ignored; the daemon " +
+              `uses TCP loopback by default (http://127.0.0.1:${DEFAULT_HTTP_PORT}).\n`,
+          );
+          unixSocketWarningPrinted = true;
+        }
+        unixSocket = null;
+        if (next && !next.startsWith("--")) i++;
         break;
       case "--http-url":
         httpUrl = next ?? "";
@@ -201,6 +219,9 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--all":
         allEvents = true;
+        break;
+      case "--unsafe-remote":
+        unsafeRemote = true;
         break;
       case "--cors-origin":
         if (!next || next.startsWith("--")) {
@@ -302,6 +323,10 @@ export function parseArgs(argv: string[]): CLIOptions {
 
   const isClientMode = send !== null || events || stop;
 
+  if (!isClientMode && daemon && httpPort == null) {
+    httpPort = DEFAULT_HTTP_PORT;
+  }
+
   let webConsolePort: number | null = null;
   if (webConsoleEnabled) {
     if (
@@ -334,7 +359,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     }
     serveStatic = bundled;
     // --web-console alone is enough to put the daemon into server mode —
-    // even without --http-port, the web-console port carries the full API
+    // even without --http-port, the web-console port carries socket.io/health
     // alongside the UI on the same origin.
   }
 
@@ -381,11 +406,10 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
-  // Server defaults for unixSocket:
-  //  - daemon mode: enabled by default at DEFAULT_UNIX_SOCKET
-  //  - foreground server mode (--http-port without --daemon): opt-in only
-  if (isServerMode && !unixSocketExplicit) {
-    unixSocket = daemon ? DEFAULT_UNIX_SOCKET : null;
+  // Unix sockets are deprecated for the daemon control plane. The flag is
+  // still accepted above for launcher compatibility, but it is always ignored.
+  if (isServerMode) {
+    unixSocket = null;
   }
 
   const basicAuth =
@@ -410,6 +434,22 @@ export function parseArgs(argv: string[]): CLIOptions {
           password: webConsoleBasicAuthPass,
         }
       : null;
+
+  if (
+    !isClientMode &&
+    isServerMode &&
+    !isLoopbackHost(httpHost) &&
+    !webConsoleBasicAuth &&
+    !unsafeRemote
+  ) {
+    process.stderr.write(
+      `Error: refusing to bind unauthenticated daemon to non-loopback host ` +
+        `${httpHost}. Configure --web-console-basic-auth-user and ` +
+        "--web-console-basic-auth-pass, bind to 127.0.0.1/localhost/::1, " +
+        "or pass --unsafe-remote to override.\n",
+    );
+    process.exit(1);
+  }
 
   // Same all-or-nothing rule for the client-side credentials.
   if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
@@ -448,6 +488,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     httpUrl,
     httpBasicAuth,
     allEvents,
+    unsafeRemote,
     corsOrigins,
     trustForwardedHeaders,
     serveStatic,
@@ -469,20 +510,17 @@ Local modes (single CP, no server):
   --cp-id <id> --ws-url <url> --json         JSON Lines mode
 
 Server modes (HTTP/WebSocket, multi-CP):
-  --daemon [--cp-id X --ws-url Y]                  Background server (Unix socket default ON)
-  --daemon --http-port P [--cp-id ...]             Background server + TCP HTTP
-  --http-port P [--cp-id ...]                      Foreground HTTP server (TCP only)
-  --http-port P --unix-socket /path                Foreground HTTP + Unix socket
-  --daemon --unix-socket none --http-port P        Background TCP-only daemon
+  --daemon [--cp-id X --ws-url Y]                  Background TCP server (127.0.0.1:${DEFAULT_HTTP_PORT})
+  --daemon --http-port P [--cp-id ...]             Background TCP server on port P
+  --http-port P [--cp-id ...]                      Foreground TCP server
 
 Client modes (talk to a running server):
   --send <json> --cp-id <id> [target]        Send command to a CP
-  --events --cp-id <id> [target]             Subscribe per-CP events (TCP only)
-  --events --all [target]                    Subscribe all-CP events (TCP only)
+  --events --cp-id <id> [target]             Subscribe per-CP events
+  --events --all [target]                    Subscribe all-CP events
   --stop [target]                            Shut down the server
 
-  [target] = --http-url http://host:port  (TCP)
-           | --unix-socket /path           (Unix HTTP, default ${DEFAULT_UNIX_SOCKET})
+  [target] = --http-url http://host:port  (default http://127.0.0.1:${DEFAULT_HTTP_PORT})
 
 Options:
   --cp-id <id>             Charge Point ID
@@ -492,8 +530,8 @@ Options:
   --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
   --web-console-basic-auth-user <u>
                            Basic auth user for INCOMING HTTP requests to
-                           this daemon (web console / JSON API / WS
-                           upgrades). Must be supplied together with
+                           this daemon (web console / socket.io).
+                           Must be supplied together with
                            --web-console-basic-auth-pass. Default: no auth.
   --web-console-basic-auth-pass <p>
                            Basic auth password for INCOMING HTTP. The
@@ -520,9 +558,12 @@ Options:
                                or a comma-separated list ("1,2,3"). Default: 1
   --http-port <port>       Enable HTTP/WebSocket server on this TCP port
   --http-host <addr>       Bind address for HTTP (default: 127.0.0.1)
-  --unix-socket <path|none> Unix socket path; "none" disables it
+  --unix-socket <path|none> Deprecated no-op; accepted for launcher compatibility
   --http-url <url>         Client target: TCP HTTP base URL
   --all                    Use the global event stream (--events only)
+  --unsafe-remote          Allow a non-loopback daemon bind without
+                           --web-console-basic-auth-user/pass. Use only on
+                           trusted networks.
   --cors-origin <origin>   Restrict CORS to this origin (repeatable). Pass "*"
                            for open CORS. Default: open on a loopback bind;
                            same-origin-only when bound to a non-loopback host
@@ -533,7 +574,7 @@ Options:
                            public origin a reverse proxy reports via
                            X-Forwarded-Proto / X-Forwarded-Host. Use only
                            behind a trusted proxy (see docs/server.md).
-  --web-console [<port>]   Serve the bundled browser UI alongside the API.
+  --web-console [<port>]   Serve the bundled browser UI alongside socket.io.
                            With <port>: opens a second listener on that port.
                            Without <port>: shares the --http-port listener.
                            Requires the UI to be built (run "bun run build",
@@ -554,16 +595,10 @@ Options:
                            remote-mode auto-detect probe lines up.
   -h, --help               Show this help
 
-HTTP API (see docs/server.md):
+HTTP endpoints (see docs/server.md):
   GET    /v1/healthz       (or whatever --health-path is set to)
-  GET    /v1/cp
-  POST   /v1/cp
-  GET    /v1/cp/:cpId
-  DELETE /v1/cp/:cpId
-  POST   /v1/cp/:cpId/command
-  WS     /v1/cp/:cpId/events
-  WS     /v1/events
-  POST   /v1/shutdown
+  GET    /socket.io/       Socket.IO / Engine.IO transport
+  POST   /socket.io/       Socket.IO / Engine.IO transport
 `);
 }
 
@@ -579,8 +614,8 @@ HTTP API (see docs/server.md):
  *     else's browser, so open CORS is fine.
  *   - No `--cors-origin` flag + binding to a non-loopback host
  *     (0.0.0.0, LAN IP, hostname) → `same-origin` AND a warning to
- *     stderr. The admin API is exposed on the LAN; defaulting to open
- *     CORS would let any page in the operator's browser POST to it.
+ *     stderr. The daemon is exposed on the LAN; defaulting to open
+ *     CORS would let any page in the operator's browser call it.
  */
 function resolveCorsPolicy(
   options: CLIOptions,
@@ -595,12 +630,7 @@ function resolveCorsPolicy(
     return { kind: "allowlist", origins: [...options.corsOrigins] };
   }
   const host = options.httpHost;
-  const isLoopback =
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "localhost" ||
-    host.startsWith("127.");
-  if (isLoopback) return { kind: "any" };
+  if (isLoopbackHost(host)) return { kind: "any" };
   if (!options.trustForwardedHeaders) {
     process.stderr.write(
       `[server] WARNING: binding to ${host} without --cors-origin; ` +
@@ -645,8 +675,7 @@ async function main(): Promise<void> {
   // with a deprecation warning for backward compatibility.
   const isClientMode = options.stop || options.send !== null || options.events;
   let clientLoc: ClientLocation = {
-    httpUrl: options.httpUrl,
-    unixSocket: options.unixSocket,
+    httpUrl: options.httpUrl ?? `http://127.0.0.1:${DEFAULT_HTTP_PORT}`,
     basicAuth: options.httpBasicAuth,
   };
   if (isClientMode) {
@@ -685,7 +714,6 @@ async function main(): Promise<void> {
     await startServer({
       httpPort: options.httpPort,
       httpHost: options.httpHost,
-      unixSocket: options.unixSocket,
       pidPath: options.daemon ? DEFAULT_PID_PATH : null,
       bootstrap: buildBootstrap(options),
       autoConnect: !!options.cpId,

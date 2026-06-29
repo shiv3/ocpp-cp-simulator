@@ -11,7 +11,15 @@ function runParseArgs(args: string[]) {
     `const options = parseArgs(["bun", "src/cli/main.ts", ...${JSON.stringify(
       args,
     )}]);`,
-    "console.log(JSON.stringify({ ocppVersion: options.ocppVersion ?? null }));",
+    "console.log(JSON.stringify({",
+    "  ocppVersion: options.ocppVersion ?? null,",
+    "  daemon: options.daemon,",
+    "  httpHost: options.httpHost,",
+    "  httpPort: options.httpPort,",
+    "  unixSocket: options.unixSocket,",
+    "  unsafeRemote: options.unsafeRemote,",
+    "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
+    "}));",
   ].join("\n");
 
   return spawnSync("bun", ["--eval", script], {
@@ -32,7 +40,7 @@ describe("parseArgs --ocpp-version", () => {
     ]);
 
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
+    expect(JSON.parse(result.stdout)).toMatchObject({
       ocppVersion: "OCPP-2.0.1",
     });
   });
@@ -46,7 +54,7 @@ describe("parseArgs --ocpp-version", () => {
     ]);
 
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ ocppVersion: null });
+    expect(JSON.parse(result.stdout)).toMatchObject({ ocppVersion: null });
   });
 
   it("rejects unsupported versions", () => {
@@ -63,5 +71,75 @@ describe("parseArgs --ocpp-version", () => {
     expect(result.stderr).toContain(
       "Error: --ocpp-version must be one of OCPP-1.6J, OCPP-2.0.1, OCPP-2.1",
     );
+  });
+});
+
+describe("parseArgs socket.io daemon migration flags", () => {
+  it("defaults bare --daemon to 127.0.0.1:9700", () => {
+    const result = runParseArgs(["--daemon"]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      daemon: true,
+      httpHost: "127.0.0.1",
+      httpPort: 9700,
+      unixSocket: null,
+    });
+  });
+
+  it("accepts --unix-socket as a deprecated no-op", () => {
+    const result = runParseArgs(["--daemon", "--unix-socket", "/tmp/old.sock"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("--unix-socket is deprecated and ignored");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      httpPort: 9700,
+      unixSocket: null,
+    });
+  });
+
+  it("parses --unsafe-remote", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--http-host",
+      "0.0.0.0",
+      "--unsafe-remote",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      httpHost: "0.0.0.0",
+      httpPort: 9700,
+      unsafeRemote: true,
+    });
+  });
+
+  it("rejects non-loopback daemon binds without web-console auth or --unsafe-remote", () => {
+    const result = runParseArgs(["--daemon", "--http-host", "0.0.0.0"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("refusing to bind unauthenticated daemon");
+    expect(result.stderr).toContain("--web-console-basic-auth-user");
+    expect(result.stderr).toContain("--unsafe-remote");
+  });
+
+  it("allows non-loopback daemon binds with web-console basic auth", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--http-host",
+      "0.0.0.0",
+      "--web-console-basic-auth-user",
+      "operator",
+      "--web-console-basic-auth-pass",
+      "secret",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      httpHost: "0.0.0.0",
+      httpPort: 9700,
+      hasWebConsoleBasicAuth: true,
+      unsafeRemote: false,
+    });
   });
 });

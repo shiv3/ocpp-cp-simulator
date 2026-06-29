@@ -391,8 +391,8 @@ export class CLIChargePointService {
     };
   }
 
-  /** Original init the CP was constructed from. Used by the PUT /v1/cp
-   *  flow to surface current config to the web console's edit modal. */
+  /** Original init the CP was constructed from. Used by socket.io control
+   *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {
     return this._init;
   }
@@ -476,6 +476,11 @@ export class CLIChargePointService {
   setAutoResetToAvailable(connectorId: number, enabled: boolean): void {
     const connector = this.requireConnector(connectorId);
     connector.autoResetToAvailable = enabled;
+  }
+
+  setConnectorSocMeterSync(connectorId: number, enabled: boolean): void {
+    const connector = this.requireConnector(connectorId);
+    connector.socMeterSyncEnabled = enabled;
   }
 
   setConnectorMode(connectorId: number, mode: ScenarioMode): void {
@@ -893,15 +898,15 @@ export class CLIChargePointService {
     }
   }
 
-  /** Drain any buffered log lines to the DB — called from the HTTP
-   *  GET /v1/cp/:cpId/logs handler so the download includes the last
+  /** Drain any buffered log lines to the DB — called from the socket.io
+   *  logs.get handler so the download includes the last
    *  seconds of activity that the LogRepository hasn't flushed yet. */
   flushLogs(): void {
     this._chargePoint.flushLogs();
   }
 
   /** In-memory log entries for this CP (Logger's session buffer).
-   *  Used by the GET /v1/cp/:cpId/logs endpoint when --state-db is off
+   *  Used by the socket.io logs.get handler when --state-db is off
    *  so the daemon can still serve a useful download. */
   getInMemoryLogs() {
     return this._chargePoint.getInMemoryLogs();

@@ -5,6 +5,7 @@ import type {
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
 import { useDataContext } from "../providers/DataProvider";
+import type { RemoteConnectionState } from "../remote/RemoteChargePointService";
 
 interface UseStateHistoryOptions {
   autoRefresh?: boolean;
@@ -17,15 +18,27 @@ interface UseStateHistoryResult {
   isLoading: boolean;
 }
 
-const DEFAULT_POLL_INTERVAL_MS = 1000;
+interface ConnectionAwareService {
+  onConnectionChange(
+    handler: (state: RemoteConnectionState) => void,
+  ): () => void;
+}
+
+function isConnectionAwareService(
+  service: unknown,
+): service is ConnectionAwareService {
+  return (
+    typeof service === "object" &&
+    service !== null &&
+    "onConnectionChange" in service &&
+    typeof (service as { onConnectionChange?: unknown }).onConnectionChange ===
+      "function"
+  );
+}
 
 export function useStateHistory(
   chargePointId: string | null,
-  {
-    autoRefresh = true,
-    historyOptions,
-    intervalMs = DEFAULT_POLL_INTERVAL_MS,
-  }: UseStateHistoryOptions = {},
+  { autoRefresh = true, historyOptions }: UseStateHistoryOptions = {},
 ): UseStateHistoryResult {
   const { chargePointService } = useDataContext();
   const [history, setHistory] = useState<StateHistoryEntry[]>([]);
@@ -58,32 +71,35 @@ export function useStateHistory(
 
     void fetchHistory();
 
-    let interval: ReturnType<typeof setInterval> | null = null;
     let unsubscribe: (() => void) | null = null;
+    let unsubscribeConnection: (() => void) | null = null;
 
     if (autoRefresh) {
-      // Trigger an immediate refetch on relevant push events too — the polling
-      // interval is a safety net for cases without push events.
       unsubscribe = chargePointService.subscribe(chargePointId, (event) => {
         if (event.type === "state-history-entry") {
           void fetchHistory();
         }
       });
-      interval = setInterval(fetchHistory, intervalMs);
+      if (isConnectionAwareService(chargePointService)) {
+        let sawInitialConnectionState = false;
+        unsubscribeConnection = chargePointService.onConnectionChange(
+          (state) => {
+            if (!sawInitialConnectionState) {
+              sawInitialConnectionState = true;
+              return;
+            }
+            if (state === "connected") void fetchHistory();
+          },
+        );
+      }
     }
 
     return () => {
       cancelled = true;
-      if (interval) clearInterval(interval);
       unsubscribe?.();
+      unsubscribeConnection?.();
     };
-  }, [
-    autoRefresh,
-    chargePointId,
-    historyOptions,
-    intervalMs,
-    chargePointService,
-  ]);
+  }, [autoRefresh, chargePointId, historyOptions, chargePointService]);
 
   return { history, isLoading };
 }

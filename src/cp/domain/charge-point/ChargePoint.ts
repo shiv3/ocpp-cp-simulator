@@ -19,7 +19,12 @@ import {
   isChargePointStatus,
   OCPPStatus,
 } from "../types/OcppTypes";
-import type { Transaction } from "../connector/Transaction";
+import type {
+  StopTransactionReason,
+  Transaction,
+  TransactionStartTriggerReason,
+  TransactionStopTriggerReason,
+} from "../connector/Transaction";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
@@ -34,6 +39,15 @@ export interface AutoMeterValueSetting {
   enabled: boolean;
   interval: number;
   value: number;
+}
+
+interface StartTransactionOptions {
+  triggerReason?: TransactionStartTriggerReason;
+  remoteStartId?: number;
+}
+
+interface StopTransactionOptions {
+  triggerReason?: TransactionStopTriggerReason;
 }
 
 export class ChargePoint {
@@ -138,7 +152,9 @@ export class ChargePoint {
           `Connector ${connectorId} auto-stop requested (${reason})`,
           LogType.TRANSACTION,
         );
-        this.stopTransaction(connector);
+        this.stopTransaction(connector, undefined, {
+          triggerReason: "EnergyLimitReached",
+        });
       });
       // §5.10 / §5.16: when the active schedule period switches between
       // limit=0 and a non-zero limit during a live transaction, the CP
@@ -439,8 +455,16 @@ export class ChargePoint {
     return this._scenarioHandledConnectors.has(connectorId);
   }
 
-  notifyRemoteStartReceived(connectorId: number, tagId: string): void {
-    this._events.emit("remoteStartReceived", { connectorId, tagId });
+  notifyRemoteStartReceived(
+    connectorId: number,
+    tagId: string,
+    remoteStartId?: number,
+  ): void {
+    this._events.emit("remoteStartReceived", {
+      connectorId,
+      tagId,
+      ...(remoteStartId !== undefined ? { remoteStartId } : {}),
+    });
   }
 
   /**
@@ -551,6 +575,7 @@ export class ChargePoint {
       info: opts.info,
       vendorErrorCode: opts.vendorErrorCode,
       vendorId: opts.vendorId,
+      suppressChargingStateTransactionEvent: true,
     });
   }
 
@@ -817,11 +842,31 @@ export class ChargePoint {
     connectorId: number,
     batteryCapacityKwh?: number,
     initialSoc?: number,
+    options: StartTransactionOptions = {},
   ): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(
         `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (connector.transaction && connector.transaction.stopTime === null) {
+      // Only a NOT-yet-stopped transaction blocks a new start. A cleaned/
+      // rejected transaction (cleanTransaction sets stopTime but leaves the
+      // object on the connector) must NOT block a legitimate retry.
+      this._logger.warn(
+        `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (connector.availability !== "Operative") {
+      this._logger.warn(
+        `Connector ${connectorId} is ${connector.availability}; refusing to start transaction`,
         LogType.TRANSACTION,
       );
       return;
@@ -844,6 +889,8 @@ export class ChargePoint {
       stopTime: null,
       meterSent: false,
       reservationId,
+      remoteStartId: options.remoteStartId,
+      startTriggerReason: options.triggerReason,
       batteryCapacityKwh,
       initialSoc,
     };
@@ -877,7 +924,8 @@ export class ChargePoint {
 
   stopTransaction(
     connectorOrId: number | Connector,
-    reason?: import("../connector/Transaction").StopTransactionReason,
+    reason?: StopTransactionReason,
+    options: StopTransactionOptions = {},
   ): void {
     const connector =
       typeof connectorOrId === "number"
@@ -904,6 +952,9 @@ export class ChargePoint {
     transaction.meterStop = connector.meterValue;
     if (reason) {
       transaction.stopReason = reason;
+    }
+    if (options.triggerReason) {
+      transaction.stopTriggerReason = options.triggerReason;
     }
 
     this._outbox.sendTransactionEvent({
@@ -1031,7 +1082,7 @@ export class ChargePoint {
     const connector = this._connectors.get(connectorId);
     if (!connector) return false;
 
-    connector.cleanup();
+    connector.dispose();
     const removed = this._connectors.delete(connectorId);
     if (removed) {
       this._events.emit("connectorRemoved", { connectorId });

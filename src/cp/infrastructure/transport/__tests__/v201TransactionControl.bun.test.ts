@@ -88,6 +88,8 @@ describe("OCPP 2.0.1 transaction control", () => {
       const transactionId = started.transactionInfo.transactionId;
       expect(typeof transactionId).toBe("string");
       expect(transactionId.length).toBeGreaterThan(0);
+      expect(started.triggerReason).toBe("RemoteStart");
+      expect(started.transactionInfo.remoteStartId).toBe(7);
 
       csms.send([2, "rs-201-2", "RequestStopTransaction", { transactionId }]);
 
@@ -103,6 +105,7 @@ describe("OCPP 2.0.1 transaction control", () => {
       const ended = transactionEventPayload(endedFrame);
       expect(ended.transactionInfo.transactionId).toBe(transactionId);
       expect(ended.transactionInfo.stoppedReason).toBe("Remote");
+      expect(ended.triggerReason).toBe("RemoteStop");
 
       csms.send([
         2,

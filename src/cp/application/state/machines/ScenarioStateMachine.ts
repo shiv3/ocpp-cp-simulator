@@ -22,7 +22,7 @@ export interface ScenarioContext {
  * Scenario event type definitions
  */
 export type ScenarioEvent =
-  | { type: "START"; mode: ScenarioExecutionMode }
+  | { type: "START"; mode?: ScenarioExecutionMode }
   | { type: "PAUSE" }
   | { type: "RESUME" }
   | { type: "STOP" }
@@ -34,8 +34,12 @@ export type ScenarioEvent =
   | { type: "WAIT_COMPLETE" };
 
 // Guards (transition conditions)
-const isStepMode = (ctx: ScenarioContext) => ctx.mode === "step";
-const isOneshotMode = (ctx: ScenarioContext) => ctx.mode === "oneshot";
+const startMode = (event: ScenarioEvent): ScenarioExecutionMode =>
+  event.type === "START" ? (event.mode ?? "oneshot") : "oneshot";
+const isStartStepMode = (_ctx: ScenarioContext, event: ScenarioEvent) =>
+  startMode(event) === "step";
+const isStartOneshotMode = (_ctx: ScenarioContext, event: ScenarioEvent) =>
+  startMode(event) === "oneshot";
 
 /**
  * Create Scenario State Machine
@@ -50,10 +54,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "running",
-          guard(isOneshotMode),
+          guard(isStartOneshotMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -63,10 +67,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "stepping",
-          guard(isStepMode),
+          guard(isStartStepMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -118,6 +122,14 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       // Paused state - temporarily halted
       paused: state(
         transition("RESUME", "running"),
+        transition(
+          "ERROR",
+          "error",
+          reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
+            ...ctx,
+            error: event.type === "ERROR" ? event.error : ctx.error,
+          })),
+        ),
         transition(
           "STOP",
           "idle",
@@ -192,10 +204,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "running",
-          guard(isOneshotMode),
+          guard(isStartOneshotMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -205,10 +217,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "stepping",
-          guard(isStepMode),
+          guard(isStartStepMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -222,10 +234,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "running",
-          guard(isOneshotMode),
+          guard(isStartOneshotMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -235,10 +247,10 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         transition(
           "START",
           "stepping",
-          guard(isStepMode),
+          guard(isStartStepMode),
           reduce((ctx: ScenarioContext, event: ScenarioEvent) => ({
             ...ctx,
-            mode: event.type === "START" ? event.mode : ctx.mode,
+            mode: event.type === "START" ? (event.mode ?? "oneshot") : ctx.mode,
             executedNodes: [],
             loopCount: 0,
             currentNodeId: null,
@@ -265,29 +277,32 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
 }
 
 /**
- * Get state name from machine state
- * @param machineState Robot3 machine state
+ * Get state name from a Robot3 service
+ * @param service Robot3 service
  * @returns State name as string
  */
-export function getScenarioStateName(machineState: { name: string }): string {
-  return machineState.name;
+export function getScenarioStateName(service: {
+  machine: { current: string };
+}): string {
+  return service.machine.current;
 }
 
 /**
- * Get context from machine state
- * @param machineState Robot3 machine state
+ * Get context from a Robot3 service
+ * @param service Robot3 service
  * @returns Scenario context
  */
-export function getScenarioContext(machineState: {
+export function getScenarioContext(service: {
   context: ScenarioContext;
 }): ScenarioContext {
+  const context = service.context;
   return {
-    scenarioId: machineState.context.scenarioId,
-    mode: machineState.context.mode || "oneshot",
-    currentNodeId: machineState.context.currentNodeId || null,
-    executedNodes: machineState.context.executedNodes || [],
-    loopCount: machineState.context.loopCount || 0,
-    error: machineState.context.error,
-    waitType: machineState.context.waitType,
+    scenarioId: context.scenarioId,
+    mode: context.mode || "oneshot",
+    currentNodeId: context.currentNodeId || null,
+    executedNodes: [...(context.executedNodes || [])],
+    loopCount: context.loopCount || 0,
+    error: context.error,
+    waitType: context.waitType,
   };
 }

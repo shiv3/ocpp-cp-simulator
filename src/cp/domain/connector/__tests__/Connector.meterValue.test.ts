@@ -1,9 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { Connector } from "../Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";
+import type { Transaction } from "../Transaction";
 
 function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
+}
+
+function transaction(meterStart: number): Transaction {
+  return {
+    id: 101,
+    connectorId: 1,
+    tagId: "TAG-SOC",
+    meterStart,
+    meterStop: null,
+    startTime: new Date("2026-06-28T00:00:00.000Z"),
+    stopTime: null,
+    meterSent: false,
+  };
 }
 
 describe("Connector meterValue rounding", () => {
@@ -28,5 +42,23 @@ describe("Connector meterValue rounding", () => {
     const connector = makeConnector();
     connector.meterValue = 5000;
     expect(connector.meterValue).toBe(5000);
+  });
+
+  it("W2-e derives synced SoC from energy delivered since transaction start", () => {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      batteryCapacityKwh: 40,
+      initialSoc: 20,
+      targetSoc: 80,
+    };
+    connector.meterValue = 10_000;
+    connector.beginTransaction(transaction(10_000));
+
+    connector.meterValue = 10_000;
+    expect(connector.soc).toBe(20);
+
+    connector.meterValue = 12_000;
+    expect(connector.soc).toBe(25);
   });
 });

@@ -23,6 +23,8 @@ import {
   UnlockOutcomeNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
+  StartTransactionOptions,
+  StopTransactionOptions,
 } from "./ScenarioTypes";
 import {
   createScenarioMachine,
@@ -31,6 +33,22 @@ import {
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
 import type { EventEmitter } from "../../shared/EventEmitter";
+
+type MaybeCancellablePromise<T> = Promise<T> & { cancel?: () => void };
+type AutoMeterStartConfig = Parameters<
+  NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
+>[0] & { sendMessage?: boolean };
+type MeterValueCallbacks = ScenarioExecutorCallbacks & {
+  onGetTransactionMeterStart?: () => number | null;
+};
+
+const cancelIfCancellable = (promise: Promise<unknown>): void => {
+  (promise as MaybeCancellablePromise<unknown>).cancel?.();
+};
+
+const isMeterValueTimeout = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith("Timeout waiting for meter value:");
 
 /**
  * Optional resume hint passed to {@link ScenarioExecutor.start}. When set
@@ -45,6 +63,7 @@ import type { EventEmitter } from "../../shared/EventEmitter";
  * RemoteStartTransaction will re-arm the connector cleanly.
  */
 export interface ScenarioStartOptions {
+  mode?: ScenarioExecutionMode;
   resumeFromNodeId?: string;
   /** Seed for `context.executedNodes`. Lets branching-history checks
    *  (the ones that look at "have we executed node X already?") behave
@@ -57,7 +76,8 @@ export class ScenarioExecutor {
   private scenario: ScenarioDefinition;
   private callbacks: ScenarioExecutorCallbacks;
   private service: ReturnType<typeof interpret>; // Robot3 service
-  private stepResolve: ((value: void) => void) | null = null;
+  private stepResolve: (() => void) | null = null;
+  private pendingSteps = 0;
   private previousState: ScenarioExecutionState = "idle";
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private forceSkipResolve: (() => void) | null = null;
@@ -70,11 +90,15 @@ export class ScenarioExecutor {
   private abortResolve: (() => void) | null = null;
   private abortPromise: Promise<void> = Promise.resolve();
   private remoteStartTagId: string | null = null;
+  private remoteStartOptions: StartTransactionOptions | null = null;
   // Reason captured from the most recent RemoteStopTrigger node, forwarded
   // to the next Transaction Stop's StopTransaction.req so the CSMS sees
   // "Remote" (§6.21) for RemoteStop-driven stops instead of a blank
   // reason. Cleared as soon as the stop node consumes it.
   private remoteStopReason: string | null = null;
+  private remoteStopOptions: StopTransactionOptions | null = null;
+  private currentNodeId: string | null = null;
+  private executedNodes: string[] = [];
 
   constructor(
     scenario: ScenarioDefinition,
@@ -95,9 +119,9 @@ export class ScenarioExecutor {
     });
 
     // Create service to manage machine and emit state change events
-    this.service = interpret(machine, (machineState) => {
+    this.service = interpret(machine, (service) => {
       const currentState = getScenarioStateName(
-        machineState,
+        service,
       ) as ScenarioExecutionState;
 
       // Emit state change event if state actually changed
@@ -127,13 +151,17 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Start scenario execution. Execution mode is always one-shot — the
-   * step / loop variants were removed from the product surface.
+   * Start scenario execution. Defaults to one-shot execution unless the caller
+   * explicitly requests step mode.
    */
   public async start(opts?: ScenarioStartOptions): Promise<void> {
-    const mode: ScenarioExecutionMode = "oneshot";
+    const mode: ScenarioExecutionMode = opts?.mode ?? "oneshot";
     // Fresh abort gate for this run.
     this.aborted = false;
+    this.currentNodeId = null;
+    this.executedNodes = [];
+    this.stepResolve = null;
+    this.pendingSteps = 0;
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
@@ -175,7 +203,7 @@ export class ScenarioExecutor {
       await this.executeFlow(opts);
 
       // Check if we were stopped during execution
-      const stateName = getScenarioStateName(this.service.machine);
+      const stateName = getScenarioStateName(this.service);
       if (stateName !== "idle") {
         // Dispatch FLOW_COMPLETE event to transition to completed state
         this.service.send({ type: "FLOW_COMPLETE" });
@@ -245,11 +273,8 @@ export class ScenarioExecutor {
           opts?.executedNodes && opts.executedNodes.length > 0
             ? [...opts.executedNodes]
             : [resumeFromNodeId];
-        const context = getScenarioContext(this.service.machine);
-        context.executedNodes = seededNodes;
-        context.currentNodeId = originNode.id;
-        this.service.machine.context.executedNodes = seededNodes;
-        this.service.machine.context.currentNodeId = originNode.id;
+        this.executedNodes = seededNodes;
+        this.currentNodeId = originNode.id;
         resumed = true;
         this.callbacks.log?.(
           `[${this.scenario.name}] Resuming scenario from node "${
@@ -313,7 +338,7 @@ export class ScenarioExecutor {
     }
 
     // Clear current node
-    this.service.machine.context.currentNodeId = null;
+    this.currentNodeId = null;
   }
 
   /**
@@ -348,10 +373,17 @@ export class ScenarioExecutor {
     while (
       currentNode &&
       !this.aborted &&
-      getScenarioStateName(this.service.machine) !== "idle"
+      getScenarioStateName(this.service) !== "idle"
     ) {
       // Execute the current node
       await this.executeSingleNode(currentNode);
+
+      // If the node finished while paused, do not make the next node visible
+      // until the run has been resumed. Stop/abort can also land while parked.
+      await this.waitIfPaused();
+      if (this.aborted || getScenarioStateName(this.service) === "idle") {
+        break;
+      }
 
       // Check if this is the end node
       if (
@@ -399,14 +431,27 @@ export class ScenarioExecutor {
     if (this.aborted) {
       return;
     }
-    // Update context with current node
-    const context = getScenarioContext(this.service.machine);
-    context.currentNodeId = node.id;
-    context.executedNodes.push(node.id);
 
-    // Update machine context manually (robot3 doesn't expose context mutation directly)
-    this.service.machine.context.currentNodeId = node.id;
-    this.service.machine.context.executedNodes = context.executedNodes;
+    // Do not make the node visible while paused. This protects the boundary
+    // after an in-flight wait resolves under pause.
+    await this.waitIfPaused();
+    if (this.aborted || getScenarioStateName(this.service) === "idle") {
+      return;
+    }
+
+    // Wait for step before marking/emitting the node so each step exposes
+    // exactly one more node.
+    const stateName = getScenarioStateName(this.service);
+    if (stateName === "stepping") {
+      await this.waitForStep();
+      if (this.aborted || getScenarioStateName(this.service) === "idle") {
+        return;
+      }
+    }
+
+    // Update context with current node
+    this.currentNodeId = node.id;
+    this.executedNodes.push(node.id);
 
     this.notifyStateChange();
     this.callbacks.onNodeExecute?.(node.id);
@@ -424,15 +469,6 @@ export class ScenarioExecutor {
       `node.${node.type}.execute` as keyof ScenarioEvents,
       nodeExecuteData,
     );
-
-    // Wait if paused
-    await this.waitIfPaused();
-
-    // Wait for step if in step mode
-    const stateName = getScenarioStateName(this.service.machine);
-    if (stateName === "stepping") {
-      await this.waitForStep();
-    }
 
     // Execute node
     if (
@@ -635,18 +671,35 @@ export class ScenarioExecutor {
       if (this.callbacks.onStartTransaction) {
         // Use the tagId captured from a preceding RemoteStartTrigger node if available
         const tagId = this.remoteStartTagId || data.tagId || "123456";
+        const options = this.remoteStartOptions;
         this.remoteStartTagId = null;
-        await this.callbacks.onStartTransaction(
-          tagId,
-          data.batteryCapacityKwh,
-          data.initialSoc,
-        );
+        this.remoteStartOptions = null;
+        if (options) {
+          await this.callbacks.onStartTransaction(
+            tagId,
+            data.batteryCapacityKwh,
+            data.initialSoc,
+            options,
+          );
+        } else {
+          await this.callbacks.onStartTransaction(
+            tagId,
+            data.batteryCapacityKwh,
+            data.initialSoc,
+          );
+        }
       }
     } else if (data.action === "stop") {
       if (this.callbacks.onStopTransaction) {
         const reason = this.remoteStopReason ?? undefined;
+        const options = this.remoteStopOptions;
         this.remoteStopReason = null;
-        await this.callbacks.onStopTransaction(reason);
+        this.remoteStopOptions = null;
+        if (options) {
+          await this.callbacks.onStopTransaction(reason, options);
+        } else {
+          await this.callbacks.onStopTransaction(reason);
+        }
       }
     }
   }
@@ -658,6 +711,9 @@ export class ScenarioExecutor {
     nodeId: string,
     data: MeterValueNodeData,
   ): Promise<void> {
+    const meterCallbacks = this.callbacks as MeterValueCallbacks;
+    const currentBeforeSeed = this.callbacks.onGetMeterValue?.();
+    let seededValue = currentBeforeSeed ?? data.value;
     if (this.callbacks.onSetMeterValue) {
       // Daemon-restart resume case: the persisted connector_runtime row
       // restored a non-zero meter accumulator (e.g. 624 Wh from a charge
@@ -666,12 +722,13 @@ export class ScenarioExecutor {
       // (commonly 0). Writing that seed would erase the accumulator and
       // restart the maxValue cap from scratch. Skip the seed write when
       // the connector already holds more.
-      const current = this.callbacks.onGetMeterValue?.();
-      if (current == null || current <= data.value) {
+      if (currentBeforeSeed == null || currentBeforeSeed <= data.value) {
         this.callbacks.onSetMeterValue(data.value);
+        seededValue = data.value;
       } else {
+        seededValue = currentBeforeSeed;
         this.callbacks.log?.(
-          `[${this.scenario.name}] Preserving meter accumulator ${current}Wh (> node seed ${data.value}Wh) on resume`,
+          `[${this.scenario.name}] Preserving meter accumulator ${currentBeforeSeed}Wh (> node seed ${data.value}Wh) on resume`,
           "info",
         );
       }
@@ -683,7 +740,11 @@ export class ScenarioExecutor {
       // which reads the node's maxTime / maxValue. "evSettings" derives a
       // maxValue from the connector's EV settings (capacity × ΔSoC).
       let resolvedMaxTime: number | undefined = data.maxTime;
-      let resolvedMaxValue: number | undefined = data.maxValue;
+      let resolvedMaxValue: number | undefined =
+        data.maxValue ??
+        (data.maxChargeKwh != null
+          ? Math.round(data.maxChargeKwh * 1000)
+          : undefined);
 
       if (data.stopMode === "evSettings") {
         const settings = this.callbacks.onGetEVSettings?.() ?? null;
@@ -692,6 +753,13 @@ export class ScenarioExecutor {
             0,
             (settings.targetSoc ?? 0) - (settings.initialSoc ?? 0),
           );
+          if (delta <= 0) {
+            this.callbacks.log?.(
+              `[${this.scenario.name}] stopMode=evSettings target already reached; auto-meter completes without starting`,
+              "info",
+            );
+            return;
+          }
           // Wh delivered to move from initialSoc% to targetSoc% on a
           // capacity-kWh battery: capacity_kWh × (Δ%/100) × 1000 Wh/kWh
           resolvedMaxValue = Math.round(
@@ -719,26 +787,50 @@ export class ScenarioExecutor {
         );
       }
 
-      this.callbacks.onStartAutoMeterValue({
+      const meterStart =
+        meterCallbacks.onGetTransactionMeterStart?.() ?? seededValue;
+      const resolvedMaxMeterValue =
+        resolvedMaxValue && resolvedMaxValue > 0
+          ? meterStart + resolvedMaxValue
+          : undefined;
+      const autoMeterConfig: AutoMeterStartConfig = {
         intervalSeconds: data.incrementInterval || 10,
         incrementValue: data.incrementAmount || 1000,
         maxTimeSeconds: resolvedMaxTime,
-        maxValue: resolvedMaxValue,
-      });
+        maxValue: resolvedMaxMeterValue,
+        sendMessage: data.sendMessage,
+      };
 
-      if (resolvedMaxTime && resolvedMaxTime > 0) {
-        await this.waitWithProgress(nodeId, resolvedMaxTime);
+      this.callbacks.onStartAutoMeterValue(autoMeterConfig);
+
+      if (resolvedMaxMeterValue && resolvedMaxMeterValue > 0) {
+        try {
+          await this.waitWithOptionalForceSkip(
+            this.callbacks.onWaitForMeterValue?.(
+              resolvedMaxMeterValue,
+              resolvedMaxTime,
+            ) ??
+              (resolvedMaxTime && resolvedMaxTime > 0
+                ? this.sleep(resolvedMaxTime * 1000)
+                : Promise.resolve()),
+          );
+        } catch (error) {
+          if (!resolvedMaxTime || !isMeterValueTimeout(error)) {
+            throw error;
+          }
+        }
         this.callbacks.onStopAutoMeterValue?.();
-      } else if (resolvedMaxValue && resolvedMaxValue > 0) {
-        await this.waitWithOptionalForceSkip(
-          this.callbacks.onWaitForMeterValue?.(resolvedMaxValue) ??
-            Promise.resolve(),
-        );
+      } else if (resolvedMaxTime && resolvedMaxTime > 0) {
+        await this.waitWithProgress(nodeId, resolvedMaxTime);
         this.callbacks.onStopAutoMeterValue?.();
       }
     }
 
-    if (data.sendMessage && this.callbacks.onSendMeterValue) {
+    if (
+      !data.autoIncrement &&
+      data.sendMessage &&
+      this.callbacks.onSendMeterValue
+    ) {
       await this.callbacks.onSendMeterValue();
     }
   }
@@ -758,7 +850,9 @@ export class ScenarioExecutor {
     totalSeconds: number,
   ): Promise<void> {
     if (this.callbacks.onDelay) {
-      await this.callbacks.onDelay(totalSeconds);
+      await this.waitWithOptionalForceSkip(
+        this.callbacks.onDelay(totalSeconds),
+      );
       return;
     }
 
@@ -788,23 +882,26 @@ export class ScenarioExecutor {
       }
     }, updateInterval);
 
-    await this.sleep(totalSeconds * 1000);
-    clearInterval(progressInterval);
+    try {
+      await this.waitWithOptionalForceSkip(this.sleep(totalSeconds * 1000));
+    } finally {
+      clearInterval(progressInterval);
 
-    // Final progress update
-    if (this.callbacks.onNodeProgress) {
-      this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
+      // Final progress update
+      if (this.callbacks.onNodeProgress) {
+        this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
+      }
+
+      // Emit final progress events
+      const finalProgressData = {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining: 0,
+        total: totalSeconds,
+      };
+      this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
+      this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
     }
-
-    // Emit final progress events
-    const finalProgressData = {
-      scenarioId: this.scenario.id,
-      nodeId,
-      remaining: 0,
-      total: totalSeconds,
-    };
-    this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
-    this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
   }
 
   /**
@@ -842,17 +939,37 @@ export class ScenarioExecutor {
 
     // Wrap the promise to capture the resolved tagId
     let resolvedTagId: string | null = null;
-    const captureTagId = (promise: Promise<string>): Promise<void> =>
-      promise.then((tagId) => {
-        resolvedTagId = tagId;
+    let resolvedOptions: StartTransactionOptions | null = null;
+    const captureTagId = (
+      promise: ReturnType<
+        NonNullable<ScenarioExecutorCallbacks["onWaitForRemoteStart"]>
+      >,
+    ): Promise<void> =>
+      promise.then((result) => {
+        if (typeof result === "string") {
+          resolvedTagId = result;
+          resolvedOptions = { triggerReason: "RemoteStart" };
+          return;
+        }
+        resolvedTagId = result.tagId;
+        resolvedOptions = {
+          triggerReason: "RemoteStart",
+          ...(result.remoteStartId !== undefined
+            ? { remoteStartId: result.remoteStartId }
+            : {}),
+        };
       });
 
     // If no timeout, just wait without progress
     if (!timeout || timeout === 0) {
-      await this.waitWithOptionalForceSkip(
-        captureTagId(this.callbacks.onWaitForRemoteStart(timeout)),
-      );
-      this.remoteStartTagId = resolvedTagId;
+      const waitPromise = this.callbacks.onWaitForRemoteStart(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
+        this.remoteStartTagId = resolvedTagId;
+        this.remoteStartOptions = resolvedOptions;
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
       return;
     }
 
@@ -884,10 +1001,14 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.waitWithOptionalForceSkip(
-        captureTagId(this.callbacks.onWaitForRemoteStart(timeout)),
-      );
+      const waitPromise = this.callbacks.onWaitForRemoteStart(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
       this.remoteStartTagId = resolvedTagId;
+      this.remoteStartOptions = resolvedOptions;
     } finally {
       clearInterval(progressInterval);
 
@@ -925,13 +1046,20 @@ export class ScenarioExecutor {
     // Stop node can pass `reason` through to StopTransaction.req. The
     // runtime hard-codes "Remote" for the CSMS path (§6.21); we keep
     // the wrapping here so it survives waitWithOptionalForceSkip.
-    const wait = (): Promise<void> =>
-      this.callbacks.onWaitForRemoteStop!(timeout).then((res) => {
-        this.remoteStopReason = res?.reason ?? null;
-      });
-
     if (!timeout || timeout === 0) {
-      await this.waitWithOptionalForceSkip(wait());
+      const waitPromise = this.callbacks.onWaitForRemoteStop(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.remoteStopReason = res?.reason ?? null;
+            this.remoteStopOptions = {
+              triggerReason: res?.triggerReason ?? "RemoteStop",
+            };
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
       return;
     }
 
@@ -953,7 +1081,19 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      await this.waitWithOptionalForceSkip(wait());
+      const waitPromise = this.callbacks.onWaitForRemoteStop(timeout);
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.remoteStopReason = res?.reason ?? null;
+            this.remoteStopOptions = {
+              triggerReason: res?.triggerReason ?? "RemoteStop",
+            };
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
     } finally {
       clearInterval(progressInterval);
       this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
@@ -1136,7 +1276,7 @@ export class ScenarioExecutor {
    * Pause execution
    */
   public pause(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName === "running") {
       this.service.send({ type: "PAUSE" });
       this.notifyStateChange();
@@ -1152,7 +1292,7 @@ export class ScenarioExecutor {
    * Resume execution
    */
   public resume(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName === "paused") {
       this.service.send({ type: "RESUME" });
       this.notifyStateChange();
@@ -1171,6 +1311,7 @@ export class ScenarioExecutor {
     // Flip the abort gate first so in-flight waits unblock and the flow
     // walker bails before executing the next node.
     this.aborted = true;
+    this.currentNodeId = null;
     this.abortResolve?.();
     // Stop the connector's auto-meter now; otherwise a pending maxTime/maxValue
     // could later resume the flow and fire a downstream Stop Transaction on a
@@ -1190,19 +1331,27 @@ export class ScenarioExecutor {
    * Execute next step (for step mode)
    */
   public step(): void {
-    const stateName = getScenarioStateName(this.service.machine);
-    if (stateName === "stepping" && this.stepResolve) {
-      this.service.send({ type: "STEP" });
-      this.stepResolve();
-      this.stepResolve = null;
+    const stateName = getScenarioStateName(this.service);
+    if (stateName !== "stepping") {
+      return;
     }
+
+    if (this.stepResolve) {
+      const resolve = this.stepResolve;
+      this.stepResolve = null;
+      this.service.send({ type: "STEP" });
+      resolve();
+      return;
+    }
+
+    this.pendingSteps += 1;
   }
 
   /**
    * Force step even while waiting for trigger/meter events
    */
   public forceStep(): void {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
     if (this.forceSkipResolve) {
@@ -1221,15 +1370,15 @@ export class ScenarioExecutor {
    * Get current execution context
    */
   public getContext(): ScenarioExecutionContext {
-    const stateName = getScenarioStateName(this.service.machine);
-    const context = getScenarioContext(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
+    const context = getScenarioContext(this.service);
 
     return {
       scenarioId: context.scenarioId,
       state: stateName as ScenarioExecutionState,
       mode: context.mode,
-      currentNodeId: context.currentNodeId,
-      executedNodes: context.executedNodes,
+      currentNodeId: this.currentNodeId,
+      executedNodes: [...this.executedNodes],
       loopCount: context.loopCount,
       error: context.error,
     };
@@ -1239,7 +1388,7 @@ export class ScenarioExecutor {
    * Wait if execution is paused
    */
   private async waitIfPaused(): Promise<void> {
-    while (getScenarioStateName(this.service.machine) === "paused") {
+    while (getScenarioStateName(this.service) === "paused") {
       await this.sleep(100);
     }
   }
@@ -1248,18 +1397,34 @@ export class ScenarioExecutor {
    * Wait for step command
    */
   private async waitForStep(): Promise<void> {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
-    return new Promise<void>((resolve) => {
-      this.stepResolve = resolve;
+    if (this.pendingSteps > 0) {
+      this.pendingSteps -= 1;
+      this.service.send({ type: "STEP" });
+      return;
+    }
+
+    let localResolve: (() => void) | null = null;
+    const stepPromise = new Promise<void>((resolve) => {
+      localResolve = () => resolve();
+      this.stepResolve = localResolve;
     });
+
+    try {
+      await Promise.race([stepPromise, this.abortPromise]);
+    } finally {
+      if (this.stepResolve === localResolve) {
+        this.stepResolve = null;
+      }
+    }
   }
 
   private async waitWithOptionalForceSkip(
     waitPromise: Promise<void>,
   ): Promise<void> {
-    const stateName = getScenarioStateName(this.service.machine);
+    const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") {
       await Promise.race([waitPromise, this.abortPromise]);
       return;

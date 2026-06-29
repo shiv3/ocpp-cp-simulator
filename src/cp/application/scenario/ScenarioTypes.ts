@@ -2,6 +2,10 @@ import { Node, Edge } from "@xyflow/react";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { CurvePoint } from "../../domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../domain/connector/EVSettings";
+import type {
+  TransactionStartTriggerReason,
+  TransactionStopTriggerReason,
+} from "../../domain/connector/Transaction";
 
 /**
  * Scenario execution mode
@@ -15,6 +19,8 @@ export type ScenarioExecutionState =
   | "idle"
   | "running"
   | "paused"
+  | "stepping"
+  | "waiting"
   | "completed"
   | "error";
 
@@ -78,6 +84,20 @@ export interface TransactionNodeData extends BaseNodeData {
   tagId?: string; // Only for start
   batteryCapacityKwh?: number; // Battery capacity of the EV in kWh (e.g., 40, 60, 100)
   initialSoc?: number; // Initial State of Charge percentage (0-100)
+}
+
+export interface RemoteStartDetails {
+  tagId: string;
+  remoteStartId?: number;
+}
+
+export interface StartTransactionOptions {
+  triggerReason?: TransactionStartTriggerReason;
+  remoteStartId?: number;
+}
+
+export interface StopTransactionOptions {
+  triggerReason?: TransactionStopTriggerReason;
 }
 
 /**
@@ -361,6 +381,7 @@ export interface ScenarioExecutorCallbacks {
     tagId: string,
     batteryCapacityKwh?: number,
     initialSoc?: number,
+    options?: StartTransactionOptions,
   ) => Promise<void>;
   onStopTransaction?: (
     /** Optional OCPP §6.21 reason string. When a preceding
@@ -370,6 +391,7 @@ export interface ScenarioExecutorCallbacks {
      *  RemoteStopTransactionHandler path. Other call sites can omit it
      *  and the connector / charge point default applies. */
     reason?: string,
+    options?: StopTransactionOptions,
   ) => Promise<void>;
   onSetMeterValue?: (value: number) => void;
   onSendMeterValue?: () => Promise<void>;
@@ -386,7 +408,9 @@ export interface ScenarioExecutorCallbacks {
   ) => Promise<void>;
   onConnectorPlug?: (action: "plugin" | "plugout") => Promise<void>;
   onDelay?: (seconds: number) => Promise<void>;
-  onWaitForRemoteStart?: (timeout?: number) => Promise<string>; // Returns tagId from RemoteStartTransaction
+  onWaitForRemoteStart?: (
+    timeout?: number,
+  ) => Promise<string | RemoteStartDetails>; // Returns tagId from RemoteStartTransaction
   /**
    * Block until CSMS sends RemoteStopTransaction.req for the currently
    * active transaction. Returns the requested transactionId so callers
@@ -398,9 +422,11 @@ export interface ScenarioExecutorCallbacks {
   /** Resolves with `{ transactionId, reason }` so the next Transaction
    *  Stop node can pass the CSMS-supplied reason (defaults to "Remote")
    *  through to StopTransaction.req. */
-  onWaitForRemoteStop?: (
-    timeout?: number,
-  ) => Promise<{ transactionId: number; reason: string }>;
+  onWaitForRemoteStop?: (timeout?: number) => Promise<{
+    transactionId: number;
+    reason: string;
+    triggerReason?: TransactionStopTriggerReason;
+  }>;
   onWaitForStatus?: (
     targetStatus: OCPPStatus,
     timeout?: number,

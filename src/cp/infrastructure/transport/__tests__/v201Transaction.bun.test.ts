@@ -15,6 +15,8 @@ import {
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import type { Transaction } from "../../../domain/connector/Transaction";
+import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { SqliteConnectorRuntimeRepository } from "../../../domain/persistence/SqliteConnectorRuntimeRepository";
 
 function transactionEventFrame(
   eventType: TransactionEventRequestV201["eventType"],
@@ -45,6 +47,86 @@ function newTransactionEventFrame(
 ): (frame: OcppFrame) => boolean {
   return (frame) =>
     transactionEventFrame(eventType)(frame) && !seenMessageIds.has(frame[1]);
+}
+
+function transactionEventFrameAfter(
+  csms: MockCsms,
+  afterIndex: number,
+  eventType: TransactionEventRequestV201["eventType"],
+): (frame: OcppFrame) => boolean {
+  return (frame) =>
+    csms.received.indexOf(frame) > afterIndex &&
+    transactionEventFrame(eventType)(frame);
+}
+
+function statusNotificationFrameAfter(
+  csms: MockCsms,
+  afterIndex: number,
+  connectorId: number,
+): (frame: OcppFrame) => boolean {
+  return (frame) =>
+    csms.received.indexOf(frame) > afterIndex &&
+    frame[0] === 2 &&
+    frame[2] === "StatusNotification" &&
+    (frame[3] as { evseId?: number; connectorId?: number }).evseId ===
+      connectorId &&
+    (frame[3] as { evseId?: number; connectorId?: number }).connectorId ===
+      connectorId;
+}
+
+function callFrameAfter(
+  csms: MockCsms,
+  afterIndex: number,
+  action: string,
+): (frame: OcppFrame) => boolean {
+  return (frame) =>
+    csms.received.indexOf(frame) > afterIndex &&
+    frame[0] === 2 &&
+    frame[2] === action;
+}
+
+async function expectNoFrame(
+  csms: MockCsms,
+  pred: (frame: OcppFrame) => boolean,
+): Promise<void> {
+  try {
+    const frame = await csms.waitForFrame(pred, 150);
+    throw new Error(`Unexpected frame: ${JSON.stringify(frame)}`);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "Timed out waiting for frame"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function attachConnectorRuntimePersistence(
+  repo: SqliteConnectorRuntimeRepository,
+  cpId: string,
+  cp: ChargePoint,
+  connectorId: number,
+): Array<() => void> {
+  const connector = cp.getConnector(connectorId);
+  if (!connector) {
+    throw new Error(`Connector ${connectorId} not found`);
+  }
+  const persist = () => {
+    repo.save(cpId, connectorId, {
+      ...connector.snapshotRuntime(),
+      scenarioPosition: null,
+    });
+  };
+  return [
+    connector.events.on("statusChange", persist),
+    connector.events.on("availabilityChange", persist),
+    connector.events.on("transactionChange", persist),
+    connector.events.on("transactionIdChange", persist),
+    connector.events.on("meterValueChange", persist),
+    connector.events.on("socChange", persist),
+  ];
 }
 
 describe("OCPP 2.0.1 transaction events", () => {
@@ -96,6 +178,9 @@ describe("OCPP 2.0.1 transaction events", () => {
       expect(started.transactionInfo.transactionId).toBe(
         transaction.cpTransactionId,
       );
+      expect(started.triggerReason).toBe("Authorized");
+      expect(started.transactionInfo.remoteStartId).toBeUndefined();
+      expect(started.reservationId).toBeUndefined();
 
       cp.sendMeterValue(1);
       const meterValuesFrame = await csms.waitForFrame(
@@ -129,6 +214,11 @@ describe("OCPP 2.0.1 transaction events", () => {
       expect(started.transactionInfo.transactionId).toBe(
         ended.transactionInfo.transactionId,
       );
+      expect(ended.triggerReason).toBe("StopAuthorized");
+      expect(ended.idToken).toEqual({
+        idToken: "TAG-201",
+        type: "ISO14443",
+      });
 
       const seqNos = [started.seqNo, ended.seqNo];
       expect(seqNos.every((seqNo) => Number.isInteger(seqNo))).toBe(true);
@@ -145,6 +235,177 @@ describe("OCPP 2.0.1 transaction events", () => {
       }
 
       expect(normalizeTranscript(relevantFrames)).toMatchSnapshot();
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("sends TransactionEvent Updated when active chargingState changes", async () => {
+    const csms = startMockCsms();
+    const cp = new ChargePoint(
+      "CP201-TX-CHARGING-STATE",
+      DefaultBootNotification,
+      1,
+      csms.url,
+      null,
+      null,
+      null,
+      {},
+      [],
+      "OCPP-2.0.1",
+    );
+    cp.events.on("error", () => undefined);
+
+    try {
+      cp.connect();
+
+      const boot = await csms.waitForCall("BootNotification");
+      csms.replyCallResult(boot.messageId, {
+        status: "Accepted",
+        currentTime: "2026-06-24T00:00:00.000Z",
+        interval: 300,
+      });
+
+      await csms.waitForFrame(
+        (frame) =>
+          frame[0] === 2 &&
+          frame[2] === "StatusNotification" &&
+          (frame[3] as { evseId?: number; connectorId?: number }).evseId ===
+            1 &&
+          (frame[3] as { evseId?: number; connectorId?: number })
+            .connectorId === 1,
+      );
+
+      cp.startTransaction("TAG-201", 1);
+      const startedFrame = await csms.waitForFrame(
+        transactionEventFrame("Started"),
+      );
+      const started = transactionEventPayload(startedFrame);
+      const transactionId = started.transactionInfo.transactionId;
+
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEVSE);
+      const suspendedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(startedFrame),
+          "Updated",
+        ),
+      );
+      const suspended = transactionEventPayload(suspendedFrame);
+      expect(suspended.triggerReason).toBe("ChargingStateChanged");
+      expect(suspended.transactionInfo).toMatchObject({
+        transactionId,
+        chargingState: "SuspendedEVSE",
+      });
+
+      const beforeDuplicateSuspend = csms.received.length - 1;
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEVSE);
+      await expectNoFrame(
+        csms,
+        transactionEventFrameAfter(csms, beforeDuplicateSuspend, "Updated"),
+      );
+
+      cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      const resumedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(suspendedFrame),
+          "Updated",
+        ),
+      );
+      const resumed = transactionEventPayload(resumedFrame);
+      expect(resumed.triggerReason).toBe("ChargingStateChanged");
+      expect(resumed.transactionInfo).toMatchObject({
+        transactionId,
+        chargingState: "Charging",
+      });
+
+      const beforeDuplicateResume = csms.received.length - 1;
+      cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      await expectNoFrame(
+        csms,
+        transactionEventFrameAfter(csms, beforeDuplicateResume, "Updated"),
+      );
+
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEV);
+      const suspendedEvFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(resumedFrame),
+          "Updated",
+        ),
+      );
+      const suspendedEv = transactionEventPayload(suspendedEvFrame);
+      expect(suspendedEv.triggerReason).toBe("ChargingStateChanged");
+      expect(suspendedEv.transactionInfo).toMatchObject({
+        transactionId,
+        chargingState: "SuspendedEV",
+      });
+
+      const beforeDuplicateSuspendedEv = csms.received.length - 1;
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEV);
+      await expectNoFrame(
+        csms,
+        transactionEventFrameAfter(csms, beforeDuplicateSuspendedEv, "Updated"),
+      );
+
+      const beforeRawStatus = csms.received.length - 1;
+      cp.sendStatusNotificationRaw(1, OCPPStatus.SuspendedEV, {});
+      await expectNoFrame(
+        csms,
+        transactionEventFrameAfter(csms, beforeRawStatus, "Updated"),
+      );
+
+      const beforeFinishing = csms.received.length - 1;
+      cp.updateConnectorStatus(1, OCPPStatus.Finishing);
+      await expectNoFrame(
+        csms,
+        transactionEventFrameAfter(csms, beforeFinishing, "Updated"),
+      );
+
+      cp.stopTransaction(1);
+      const endedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(suspendedEvFrame),
+          "Ended",
+        ),
+      );
+      const ended = transactionEventPayload(endedFrame);
+
+      const beforeInactive = csms.received.length - 1;
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEV);
+      await expectNoFrame(
+        csms,
+        transactionEventFrameAfter(csms, beforeInactive, "Updated"),
+      );
+
+      expect(started.seqNo).toBe(0);
+      expect(suspended.seqNo).toBe(1);
+      expect(resumed.seqNo).toBe(2);
+      expect(suspendedEv.seqNo).toBe(3);
+      expect(ended.seqNo).toBe(4);
+      expect(ended.transactionInfo.transactionId).toBe(transactionId);
+
+      const relevantFrames = csms.received.filter(
+        (frame) => frame[0] === 2 && frame[2] === "TransactionEvent",
+      );
+      expect(
+        relevantFrames.map((frame) => {
+          const payload = transactionEventPayload(frame);
+          const state = payload.transactionInfo.chargingState;
+          return state
+            ? `TransactionEvent:${payload.eventType}:${state}`
+            : `TransactionEvent:${payload.eventType}`;
+        }),
+      ).toEqual([
+        "TransactionEvent:Started:Charging",
+        "TransactionEvent:Updated:SuspendedEVSE",
+        "TransactionEvent:Updated:Charging",
+        "TransactionEvent:Updated:SuspendedEV",
+        "TransactionEvent:Ended",
+      ]);
     } finally {
       cp.disconnect();
       await csms.stop();
@@ -300,6 +561,139 @@ describe("OCPP 2.0.1 transaction events", () => {
       expect(ended.seqNo).toBe(1);
     } finally {
       cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("does not re-emit chargingState Updated or reuse seqNo after restart while suspended", async () => {
+    const csms = startMockCsms();
+    const db = BunSqliteDatabase.open(":memory:");
+    const repo = new SqliteConnectorRuntimeRepository(db);
+    const cpId = "CP201-TX-CHARGING-STATE-RESTART";
+    const makeCp = () => {
+      const cp = new ChargePoint(
+        cpId,
+        DefaultBootNotification,
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-2.0.1",
+      );
+      cp.events.on("error", () => undefined);
+      return cp;
+    };
+
+    let cp1: ChargePoint | null = null;
+    let cp2: ChargePoint | null = null;
+    let unsubs: Array<() => void> = [];
+
+    try {
+      cp1 = makeCp();
+      unsubs = attachConnectorRuntimePersistence(repo, cpId, cp1, 1);
+      cp1.connect();
+
+      const boot1 = await csms.waitForCall("BootNotification");
+      csms.replyCallResult(boot1.messageId, {
+        status: "Accepted",
+        currentTime: "2026-06-24T00:00:00.000Z",
+        interval: 300,
+      });
+      await csms.waitForFrame(statusNotificationFrameAfter(csms, -1, 1));
+
+      cp1.startTransaction("TAG-201", 1);
+      const startedFrame = await csms.waitForFrame(
+        transactionEventFrame("Started"),
+      );
+      const started = transactionEventPayload(startedFrame);
+      const transactionId = started.transactionInfo.transactionId;
+
+      cp1.updateConnectorStatus(1, OCPPStatus.SuspendedEVSE);
+      const suspendedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(startedFrame),
+          "Updated",
+        ),
+      );
+      const suspended = transactionEventPayload(suspendedFrame);
+      expect(suspended.seqNo).toBe(1);
+      expect(suspended.transactionInfo).toMatchObject({
+        transactionId,
+        chargingState: "SuspendedEVSE",
+      });
+
+      const beforeRestartIndex = csms.received.length - 1;
+      for (const unsub of unsubs) unsub();
+      unsubs = [];
+      cp1.disconnect();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const restored = repo.load(cpId, 1);
+      expect(restored?.transaction?.cpTransactionId).toBe(transactionId);
+
+      cp2 = makeCp();
+      unsubs = attachConnectorRuntimePersistence(repo, cpId, cp2, 1);
+      const restoredConnector = cp2.getConnector(1);
+      expect(restoredConnector).toBeDefined();
+      restoredConnector?.restoreRuntimeSnapshot(restored!);
+      cp2.connect();
+
+      const boot2Frame = await csms.waitForFrame(
+        callFrameAfter(csms, beforeRestartIndex, "BootNotification"),
+      );
+      csms.replyCallResult(boot2Frame[1] as string, {
+        status: "Accepted",
+        currentTime: "2026-06-24T00:00:01.000Z",
+        interval: 300,
+      });
+      await csms.waitForFrame(
+        statusNotificationFrameAfter(
+          csms,
+          csms.received.indexOf(boot2Frame),
+          1,
+        ),
+      );
+
+      await expectNoFrame(
+        csms,
+        (frame) =>
+          transactionEventFrameAfter(
+            csms,
+            beforeRestartIndex,
+            "Updated",
+          )(frame) &&
+          transactionEventPayload(frame).transactionInfo.transactionId ===
+            transactionId &&
+          transactionEventPayload(frame).transactionInfo.chargingState ===
+            "SuspendedEVSE",
+      );
+
+      const beforeResumeIndex = csms.received.length - 1;
+      cp2.updateConnectorStatus(1, OCPPStatus.Charging);
+      const resumedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(csms, beforeResumeIndex, "Updated"),
+      );
+      const resumed = transactionEventPayload(resumedFrame);
+      expect(resumed.seqNo).toBe(2);
+      expect(resumed.transactionInfo).toMatchObject({
+        transactionId,
+        chargingState: "Charging",
+      });
+
+      const persistedAfterResume = repo.load(cpId, 1);
+      expect(persistedAfterResume?.transaction?.cpNextSeqNo).toBe(3);
+      expect(
+        persistedAfterResume?.transaction?.cpLastTransactionEventChargingState,
+      ).toBe("Charging");
+    } finally {
+      for (const unsub of unsubs) unsub();
+      cp2?.disconnect();
+      cp1?.disconnect();
+      db.close();
       await csms.stop();
     }
   });

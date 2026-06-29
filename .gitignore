@@ -40,3 +40,8 @@ src-tauri/gen/
 # time by scripts/build-tauri-sidecar.sh. Never committed.
 src-tauri/binaries/
 coverage/
+
+# e2e Go CSMS fixture build artifact
+e2e/csms/e2e-csms
+
+.eslintcache

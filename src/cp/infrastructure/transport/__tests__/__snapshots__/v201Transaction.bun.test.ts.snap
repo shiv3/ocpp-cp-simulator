@@ -78,6 +78,10 @@ exports[`OCPP 2.0.1 transaction events sends TransactionEvent and MeterValues wi
         "connectorId": 1,
         "id": 1,
       },
+      "idToken": {
+        "idToken": "TAG-201",
+        "type": "ISO14443",
+      },
       "meterValue": [
         {
           "sampledValue": [

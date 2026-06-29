@@ -225,4 +225,49 @@ describe("OCPP 2.0.1 reservations", () => {
       await csms.stop();
     }
   });
+
+  it("includes reservationId on TransactionEvent when a reservation is consumed", async () => {
+    const { csms, cp } = newChargePoint("CP201-RESERVATION-TX");
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+
+      const reserveResult = await sendReserveNow(csms, "reserve-tx-7", {
+        id: 7,
+        evseId: 1,
+        expiryDateTime: "2030-01-01T00:00:00Z",
+        idToken: { idToken: "TAG", type: "ISO14443" },
+      });
+      expect(reserveResult).toEqual([
+        3,
+        "reserve-tx-7",
+        { status: "Accepted" },
+      ]);
+
+      const reserved = await csms.waitForFrame(
+        statusNotificationFrameAfter(
+          csms,
+          csms.received.indexOf(reserveResult),
+          1,
+          "Reserved",
+        ),
+      );
+
+      cp.startTransaction("TAG", 1);
+      const startedFrame = await csms.waitForFrame(
+        transactionEventFrame("Started"),
+      );
+      const started = startedFrame[3] as TransactionEventRequestV201;
+
+      expect(csms.received.indexOf(startedFrame)).toBeGreaterThan(
+        csms.received.indexOf(reserved),
+      );
+      expect(started.reservationId).toBe(7);
+      expect(started.transactionInfo.remoteStartId).toBeUndefined();
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
 });

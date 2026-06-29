@@ -14,6 +14,10 @@ const POLL_MS = 25;
 interface RunScenarioOptions {
   onParkStart?: () => Promise<void> | void;
   onParkStop?: () => Promise<void> | void;
+  /** Fired (once per node) when the executor begins a node. Lets a test
+   *  drive a CSMS-initiated action that a wait-node is parked on but which
+   *  has no dedicated park flag (e.g. reservationTrigger → CSMS ReserveNow). */
+  onNodeExecute?: (nodeId: string, nodeType: string) => Promise<void> | void;
   timeoutMs?: number;
 }
 
@@ -29,6 +33,7 @@ export async function runScenario(
   {
     onParkStart,
     onParkStop,
+    onNodeExecute,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   }: RunScenarioOptions = {},
 ): Promise<ScenarioRunResult> {
@@ -73,6 +78,19 @@ export async function runScenario(
     errored = true;
     errorInfo = info;
   });
+
+  if (onNodeExecute) {
+    const seen = new Set<string>();
+    events.on("node.execute", (data) => {
+      const payload = data as { nodeId?: string; nodeType?: string };
+      const nodeId = payload.nodeId ?? "";
+      if (seen.has(nodeId)) return;
+      seen.add(nodeId);
+      void Promise.resolve(
+        onNodeExecute(nodeId, String(payload.nodeType ?? "")),
+      ).catch(() => undefined);
+    });
+  }
 
   const executor = new ScenarioExecutor(def, callbacks, events);
   let keepWatching = true;

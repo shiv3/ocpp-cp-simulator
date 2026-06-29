@@ -283,6 +283,17 @@ func (h *controlHandler) dispatch21(ctx context.Context, conn *csms.Conn, action
 			Activate:      cmd.Activate,
 			TransactionID: cmd.TransactionID,
 		})
+	case "ReserveNow":
+		cmd, err := decodeCommand[reserveNow21Command](body)
+		if err != nil {
+			return nil, err
+		}
+		return client.ReserveNow(ctx, v21msg.ReserveNowRequest{
+			EVSEID:         cmd.EVSEID,
+			ExpiryDateTime: cmd.ExpiryDateTime,
+			ID:             cmd.ID,
+			IDToken:        cmd.IDToken,
+		})
 	default:
 		return nil, fmt.Errorf("unsupported 2.1 action %q", action)
 	}
@@ -407,6 +418,14 @@ type reserveNow201Command struct {
 	ExpiryDateTime time.Time           `json:"expiryDateTime"`
 	ID             int32               `json:"id"`
 	IDToken        v201msg.IdTokenType `json:"idToken"`
+}
+
+type reserveNow21Command struct {
+	commandEnvelope
+	EVSEID         *int32             `json:"evseId,omitempty"`
+	ExpiryDateTime time.Time          `json:"expiryDateTime"`
+	ID             int32              `json:"id"`
+	IDToken        v21msg.IdTokenType `json:"idToken"`
 }
 
 type usePriorityChargingCommand struct {

@@ -9,8 +9,11 @@ import {
 import type {
   AuthorizeRequestV16,
   BootNotificationRequestV16,
+  CertificateSignedResponseV16,
   HeartbeatRequestV16,
   MeterValuesRequestV16,
+  SecurityEventNotificationRequestV16,
+  SignCertificateRequestV16,
   StartTransactionRequestV16,
   StatusNotificationRequestV16,
   StopTransactionRequestV16,
@@ -34,11 +37,14 @@ export type OcppMessageRequestPayload =
   | BootNotificationRequestV16
   | HeartbeatRequestV16
   | MeterValuesRequestV16
+  | SecurityEventNotificationRequestV16
+  | SignCertificateRequestV16
   | StartTransactionRequestV16
   | StatusNotificationRequestV16
   | StopTransactionRequestV16;
 
 export type OcppMessageResponsePayload =
+  | CertificateSignedResponseV16
   | ChangeConfigurationResponseV16
   | GetConfigurationResponseV16
   | GetDiagnosticsResponseV16

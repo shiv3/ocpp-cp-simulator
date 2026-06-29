@@ -454,6 +454,14 @@ export class CLIChargePointService {
     );
   }
 
+  sendSecurityEventNotification(type: string, techInfo?: string): void {
+    this._chargePoint.sendSecurityEventNotification(type, techInfo);
+  }
+
+  sendSignCertificate(): Promise<void> {
+    return this._chargePoint.sendSignCertificate();
+  }
+
   startHeartbeat(intervalSeconds: number): void {
     this._chargePoint.startHeartbeat(intervalSeconds);
   }

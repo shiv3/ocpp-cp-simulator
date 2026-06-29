@@ -62,6 +62,21 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     this.record("sendDataTransfer", args);
   }
 
+  sendSecurityEventNotification(
+    ...args: Parameters<
+      IChargePointMessageHandler["sendSecurityEventNotification"]
+    >
+  ): ReturnType<IChargePointMessageHandler["sendSecurityEventNotification"]> {
+    this.record("sendSecurityEventNotification", args);
+  }
+
+  sendSignCertificate(): ReturnType<
+    IChargePointMessageHandler["sendSignCertificate"]
+  > {
+    this.record("sendSignCertificate", []);
+    return Promise.resolve();
+  }
+
   sendDiagnosticsStatusNotification(
     ...args: Parameters<
       IChargePointMessageHandler["sendDiagnosticsStatusNotification"]
@@ -182,6 +197,15 @@ describe("Outbox", () => {
       "Message",
       '{"ok":true}',
     ]);
+
+    outbox.sendSecurityEventNotification("StartupOfTheDevice", "boot accepted");
+    expectCall(handler, "sendSecurityEventNotification", [
+      "StartupOfTheDevice",
+      "boot accepted",
+    ]);
+
+    void outbox.sendSignCertificate();
+    expectCall(handler, "sendSignCertificate", []);
 
     outbox.sendDiagnosticsStatusNotification("Uploading");
     expectCall(handler, "sendDiagnosticsStatusNotification", ["Uploading"]);

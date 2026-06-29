@@ -100,6 +100,11 @@ export const METHODS = {
     params: z.object({ status: STR_64K }),
     result: ANY,
   },
+  security_event_notification: {
+    params: z.object({ type: STR_64K, techInfo: STR_64K.optional() }),
+    result: ANY,
+  },
+  sign_certificate: { params: EMPTY, result: ANY },
 
   // -- connector --
   update_connector_status: {

@@ -33,6 +33,7 @@ import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
+import { CertificateStore } from "../security/CertificateStore";
 
 interface BasicAuthSettings {
   username: string;
@@ -73,6 +74,7 @@ export class ChargePoint {
   // onto every connector. Connectors consult this store at composite time.
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
+  private readonly _certificateStore = new CertificateStore();
   private readonly _configuration: ConfigurationStore;
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
@@ -110,7 +112,7 @@ export class ChargePoint {
      *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
     extraWsHeaders: Record<string, string> = {},
     extraWsSubprotocols: ReadonlyArray<string> = [],
-    ocppVersion: string = "OCPP-1.6J",
+    private readonly _ocppVersion: string = "OCPP-1.6J",
     securityProfile?: OcppSecurityProfile,
     authorizationKey?: string,
     cpoName?: string,
@@ -194,17 +196,15 @@ export class ChargePoint {
       basicAuthSettings,
       extraWsHeaders,
       extraWsSubprotocols,
-      ocppVersion,
+      this._ocppVersion,
       securityProfile,
       authorizationKey,
       cpoName,
       tls,
     );
-    this._messageHandler = getProtocolProfile(ocppVersion).createMessageHandler(
-      this,
-      this._webSocket,
-      this._logger,
-    );
+    this._messageHandler = getProtocolProfile(
+      this._ocppVersion,
+    ).createMessageHandler(this, this._webSocket, this._logger);
     this._outbox = new Outbox(this._messageHandler);
 
     this._heartbeat = new HeartbeatService(this._logger);
@@ -245,6 +245,18 @@ export class ChargePoint {
       this,
       this._database,
     );
+    if (securityProfile !== undefined) {
+      this._configuration.applyChange(
+        "SecurityProfile",
+        String(securityProfile),
+      );
+    }
+    if (authorizationKey !== undefined) {
+      this._configuration.applyChange("AuthorizationKey", authorizationKey);
+    }
+    if (cpoName !== undefined) {
+      this._configuration.applyChange("CpoName", cpoName);
+    }
     this.wireConfigurationListeners();
 
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
@@ -362,6 +374,10 @@ export class ChargePoint {
   /** Standard OCPP Configuration Keys store. */
   get configuration(): ConfigurationStore {
     return this._configuration;
+  }
+
+  get certificateStore(): CertificateStore {
+    return this._certificateStore;
   }
 
   /**
@@ -596,6 +612,16 @@ export class ChargePoint {
     this._outbox.sendDataTransfer(vendorId, messageId, data);
   }
 
+  /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */
+  sendSecurityEventNotification(type: string, techInfo?: string): void {
+    this._outbox.sendSecurityEventNotification(type, techInfo);
+  }
+
+  /** Generate a CSR and send OCPP 1.6 SignCertificate.req. */
+  sendSignCertificate(): Promise<void> {
+    return this._outbox.sendSignCertificate();
+  }
+
   /** Send DiagnosticsStatusNotification.req — see OCPPMessageHandler doc. */
   sendDiagnosticsStatusNotification(
     status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
@@ -670,6 +696,12 @@ export class ChargePoint {
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
+    if (
+      this._ocppVersion === "OCPP-1.6J" &&
+      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
+    ) {
+      this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+    }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
     // any post-boot StatusNotification fan-out goes first.

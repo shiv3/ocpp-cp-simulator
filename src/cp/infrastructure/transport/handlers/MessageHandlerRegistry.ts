@@ -3,6 +3,8 @@ import type {
   BootNotificationResponseV16,
   CancelReservationRequestV16,
   CancelReservationResponseV16,
+  CertificateSignedRequestV16,
+  CertificateSignedResponseV16,
   ChangeConfigurationRequestV16,
   ChangeConfigurationResponseV16,
   ClearCacheRequestV16,
@@ -179,6 +181,10 @@ export type CallHandlerMap = {
   [OCPPAction.UpdateFirmware]: CallHandler<
     UpdateFirmwareRequestV16,
     UpdateFirmwareResponseV16
+  >;
+  [OCPPAction.CertificateSigned]: CallHandler<
+    CertificateSignedRequestV16,
+    CertificateSignedResponseV16
   >;
 };
 

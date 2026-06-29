@@ -1,0 +1,317 @@
+{
+  "id": "all-cases",
+  "name": "All node types (OCPP 1.6 / 2.0.1 / 2.1)",
+  "description": "A single coverage reference that exercises EVERY scenario node type in one flow. The scenario engine is version-agnostic: run this same file under --ocpp-version OCPP-1.6J, OCPP-2.0.1, or OCPP-2.1 and each node emits the wire message appropriate to that version (2.1 output is identical to 2.0.1). It is an INTEGRATION scenario — three nodes block until a cooperating CSMS acts: reservationTrigger (CSMS ReserveNow), remoteStartTrigger (CSMS RemoteStartTransaction on 1.6 / RequestStartTransaction on 2.x), and remoteStopTrigger (CSMS RemoteStopTransaction on 1.6 / RequestStopTransaction on 2.x). Apply with `--scenario-template-file docs/examples/scenarios/all-cases.json --scenario-connector all`. Per-version notes are on each node. This is a node-type catalogue, not a realistic single session.",
+  "targetType": "connector",
+  "targetId": 1,
+  "evSettings": {
+    "modelName": "Reference EV",
+    "batteryCapacityKwh": 60,
+    "maxChargingPowerKw": 50,
+    "initialSoc": 20,
+    "targetSoc": 80
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 400, "y": 0 },
+      "data": {
+        "label": "Start on connect",
+        "description": "Fires once the CP is connected and BootNotification has been Accepted (ChargePoint status Available). triggerOn:\"status\" + targetStatus is the alternative.",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "boot-delay",
+      "type": "delay",
+      "position": { "x": 400, "y": 90 },
+      "data": {
+        "label": "Delay 2s (settle after boot)",
+        "description": "Pure timer. Gives the CSMS time to Accept BootNotification before we exercise the connector.",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "config-set",
+      "type": "configSet",
+      "position": { "x": 400, "y": 180 },
+      "data": {
+        "label": "configSet MeterValuesSampledData",
+        "description": "§5.3 ChangeConfiguration applied LOCALLY (no CSMS round-trip). Use 1.6 key names on every version — the 2.x device model maps SampledDataCtrlr/TxUpdatedMeasurands back to this key, so it also drives 2.x MeterValues content.",
+        "key": "MeterValuesSampledData",
+        "value": "Energy.Active.Import.Register"
+      }
+    },
+    {
+      "id": "config-set-interval",
+      "type": "configSet",
+      "position": { "x": 400, "y": 270 },
+      "data": {
+        "label": "configSet MeterValueSampleInterval=5",
+        "description": "Second local config change. Maps to SampledDataCtrlr/TxUpdatedInterval on 2.x.",
+        "key": "MeterValueSampleInterval",
+        "value": "5"
+      }
+    },
+    {
+      "id": "heartbeat",
+      "type": "notification",
+      "position": { "x": 400, "y": 360 },
+      "data": {
+        "label": "Heartbeat.req",
+        "description": "notification node. Only messageType Heartbeat and StatusNotification are handled; any other type is a no-op. Heartbeat works on all versions.",
+        "messageType": "Heartbeat",
+        "payload": {}
+      }
+    },
+    {
+      "id": "status-notif-available",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 450 },
+      "data": {
+        "label": "StatusNotification Available (errorCode NoError)",
+        "description": "§4.9 explicit StatusNotification.req. On 1.6 errorCode/info/vendorErrorCode reach the wire; on 2.x those fields are dropped (2.0.1 StatusNotification has no errorCode) — only the mapped connectorStatus is sent.",
+        "status": "Available",
+        "errorCode": "NoError",
+        "info": "Connector ready",
+        "connectorId": 1
+      }
+    },
+    {
+      "id": "reserve-now",
+      "type": "reserveNow",
+      "position": { "x": 400, "y": 540 },
+      "data": {
+        "label": "reserveNow (CP-side, id 101)",
+        "description": "CP-initiated reservation via reservationManager. On Accepted the connector goes Reserved (StatusNotification Reserved on all versions; Reserved maps 1:1 on 2.x).",
+        "expiryMinutes": 30,
+        "idTag": "RESV-TAG",
+        "reservationId": 101
+      }
+    },
+    {
+      "id": "await-reserved",
+      "type": "statusTrigger",
+      "position": { "x": 400, "y": 630 },
+      "data": {
+        "label": "Wait for status Reserved",
+        "description": "statusTrigger waits for the connector to reach targetStatus. reserveNow above set Reserved synchronously, so this resolves immediately.",
+        "targetStatus": "Reserved",
+        "timeout": 10
+      }
+    },
+    {
+      "id": "cancel-reservation",
+      "type": "cancelReservation",
+      "position": { "x": 400, "y": 720 },
+      "data": {
+        "label": "cancelReservation (id 101)",
+        "description": "Cancels reservation 101 and resets the connector to Available.",
+        "reservationId": 101
+      }
+    },
+    {
+      "id": "await-csms-reservation",
+      "type": "reservationTrigger",
+      "position": { "x": 400, "y": 810 },
+      "data": {
+        "label": "Wait for CSMS ReserveNow (BLOCKING)",
+        "description": "Blocks until the CSMS sends ReserveNow for this connector (reservationManager records it; connector goes Reserved). timeout 0 = wait forever. Version-independent.",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "clear-reserved",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 900 },
+      "data": {
+        "label": "statusChange Available (clear CSMS reservation)",
+        "description": "statusChange mutates connector status and emits a StatusNotification (1.6: raw status; 2.x: mapped). Used here to drop the CSMS-reserved connector back to Available before charging.",
+        "status": "Available"
+      }
+    },
+    {
+      "id": "await-remote-start",
+      "type": "remoteStartTrigger",
+      "position": { "x": 400, "y": 990 },
+      "data": {
+        "label": "Wait for RemoteStartTransaction (BLOCKING)",
+        "description": "Blocks until the CSMS sends a remote-start request — RemoteStartTransaction.req on 1.6 (§5.11), RequestStartTransaction on 2.x. The forwarded idTag + remoteStartId flow into the next transaction node and set triggerReason RemoteStart (2.x only; 1.6 has no triggerReason field).",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "start-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 1080 },
+      "data": {
+        "label": "StartTransaction / TransactionEvent(Started)",
+        "description": "1.6 → StartTransaction.req; 2.x → TransactionEvent(eventType Started, triggerReason RemoteStart, transactionInfo.remoteStartId). The domain auto-transitions Available → Preparing → Charging.",
+        "action": "start",
+        "tagId": "RESV-TAG",
+        "batteryCapacityKwh": 60,
+        "initialSoc": 20
+      }
+    },
+    {
+      "id": "auto-meter",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 1170 },
+      "data": {
+        "label": "MeterValues (auto-increment, stop at 1000 Wh)",
+        "description": "§5.9 periodic MeterValues.req (1.6) / MeterValues (2.x, measurands from MeterValuesSampledData). Auto-increments 500 Wh/s and stops at the EARLIEST of maxValue (1000 Wh delivered since tx start) or maxTime.",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 1,
+        "incrementAmount": 500,
+        "stopMode": "manual",
+        "maxValue": 1000,
+        "maxTime": 0
+      }
+    },
+    {
+      "id": "data-transfer",
+      "type": "dataTransfer",
+      "position": { "x": 400, "y": 1260 },
+      "data": {
+        "label": "DataTransfer.req (CP → CSMS)",
+        "description": "§4.3 vendor-specific DataTransfer. Implemented on all versions (1.6 DataTransfer.req; 2.x DataTransfer CALL — same wire shape).",
+        "vendorId": "com.example.vendor",
+        "messageId": "DiagnosticsPing",
+        "data": "{\"firmware\":\"1.0.0\"}"
+      }
+    },
+    {
+      "id": "suspend-ev",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 1350 },
+      "data": {
+        "label": "statusChange SuspendedEV",
+        "description": "Mid-charge suspend. On 2.x this also emits a TransactionEvent(Updated, triggerReason ChargingStateChanged) because a transaction is active; on 1.6 it is just a StatusNotification. Note: SuspendedEV maps to connectorStatus \"Occupied\" on 2.x.",
+        "status": "SuspendedEV"
+      }
+    },
+    {
+      "id": "resume-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 1440 },
+      "data": {
+        "label": "statusChange Charging (resume)",
+        "description": "Resume. On 2.x emits another TransactionEvent(Updated, ChargingStateChanged). Charging maps to \"Occupied\" on 2.x.",
+        "status": "Charging"
+      }
+    },
+    {
+      "id": "arm-unlock",
+      "type": "unlockOutcome",
+      "position": { "x": 400, "y": 1530 },
+      "data": {
+        "label": "unlockOutcome NotSupported (pre-arm)",
+        "description": "§5.18 / §7.46 — pre-arms the response to the NEXT CSMS UnlockConnector.req. Emits nothing itself. On 1.6 returns NotSupported verbatim; on 2.x there is no NotSupported, so it is coerced to UnlockFailed.",
+        "outcome": "NotSupported"
+      }
+    },
+    {
+      "id": "fault",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 1620 },
+      "data": {
+        "label": "StatusNotification Faulted (GroundFailure)",
+        "description": "§4.9 fault injection with errorCode + vendorErrorCode. On 1.6 the full fault context reaches the wire; on 2.x only connectorStatus Faulted is sent (errorCode/vendorErrorCode dropped).",
+        "status": "Faulted",
+        "errorCode": "GroundFailure",
+        "info": "Simulated ground fault",
+        "vendorErrorCode": "GF-001",
+        "vendorId": "com.example.vendor"
+      }
+    },
+    {
+      "id": "fault-recover",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 1710 },
+      "data": {
+        "label": "StatusNotification Charging (recover)",
+        "description": "Clear the fault and return to Charging so the transaction can be stopped cleanly. statusNotification suppresses the 2.x ChargingStateChanged TransactionEvent (unlike statusChange).",
+        "status": "Charging",
+        "errorCode": "NoError",
+        "connectorId": 1
+      }
+    },
+    {
+      "id": "await-remote-stop",
+      "type": "remoteStopTrigger",
+      "position": { "x": 400, "y": 1800 },
+      "data": {
+        "label": "Wait for RemoteStopTransaction (BLOCKING)",
+        "description": "Counterpart of remoteStartTrigger. Blocks until the CSMS sends a remote-stop request — RemoteStopTransaction.req on 1.6, RequestStopTransaction on 2.x — for the active transaction; the scenario's next transaction-stop node performs the actual stop with reason Remote (triggerReason RemoteStop on 2.x).",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "stop-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 1890 },
+      "data": {
+        "label": "StopTransaction / TransactionEvent(Ended)",
+        "description": "1.6 → StopTransaction.req (reason Remote); 2.x → TransactionEvent(eventType Ended, triggerReason RemoteStop, stoppedReason Remote). The domain transitions Charging → Finishing → Available.",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 1980 },
+      "data": {
+        "label": "connectorPlug plugout",
+        "description": "Models the cable being unplugged. NOTE: this node is a no-op in the daemon/CLI runtime (it emits no OCPP traffic and changes no state) — included for node-type completeness.",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 400, "y": 2070 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "boot-delay" },
+    { "id": "e2", "source": "boot-delay", "target": "config-set" },
+    { "id": "e3", "source": "config-set", "target": "config-set-interval" },
+    { "id": "e4", "source": "config-set-interval", "target": "heartbeat" },
+    { "id": "e5", "source": "heartbeat", "target": "status-notif-available" },
+    { "id": "e6", "source": "status-notif-available", "target": "reserve-now" },
+    { "id": "e7", "source": "reserve-now", "target": "await-reserved" },
+    { "id": "e8", "source": "await-reserved", "target": "cancel-reservation" },
+    {
+      "id": "e9",
+      "source": "cancel-reservation",
+      "target": "await-csms-reservation"
+    },
+    {
+      "id": "e10",
+      "source": "await-csms-reservation",
+      "target": "clear-reserved"
+    },
+    { "id": "e11", "source": "clear-reserved", "target": "await-remote-start" },
+    { "id": "e12", "source": "await-remote-start", "target": "start-tx" },
+    { "id": "e13", "source": "start-tx", "target": "auto-meter" },
+    { "id": "e14", "source": "auto-meter", "target": "data-transfer" },
+    { "id": "e15", "source": "data-transfer", "target": "suspend-ev" },
+    { "id": "e16", "source": "suspend-ev", "target": "resume-charging" },
+    { "id": "e17", "source": "resume-charging", "target": "arm-unlock" },
+    { "id": "e18", "source": "arm-unlock", "target": "fault" },
+    { "id": "e19", "source": "fault", "target": "fault-recover" },
+    { "id": "e20", "source": "fault-recover", "target": "await-remote-stop" },
+    { "id": "e21", "source": "await-remote-stop", "target": "stop-tx" },
+    { "id": "e22", "source": "stop-tx", "target": "plug-out" },
+    { "id": "e23", "source": "plug-out", "target": "end" }
+  ],
+  "createdAt": "2026-06-29T00:00:00.000Z",
+  "updatedAt": "2026-06-29T00:00:00.000Z",
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true
+}

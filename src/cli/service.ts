@@ -274,6 +274,10 @@ export class CLIChargePointService {
       init.extraWsHeaders ?? {},
       init.extraWsSubprotocols ?? [],
       init.ocppVersion ?? "OCPP-1.6J",
+      init.securityProfile,
+      init.authorizationKey,
+      init.cpoName,
+      init.tls,
     );
 
     this.attachEventForwarders();
@@ -296,6 +300,15 @@ export class CLIChargePointService {
         model: options.model,
         ocppVersion: options.ocppVersion,
         basicAuth: options.basicAuth,
+        extraWsHeaders: options.extraWsHeaders,
+        extraWsSubprotocols: options.extraWsSubprotocols,
+        securityProfile: options.securityProfile,
+        authorizationKey: options.authorizationKey,
+        cpoName: options.cpoName,
+        tls: options.tls,
+        tlsCaPath: options.tlsCaPath,
+        tlsCertPath: options.tlsCertPath,
+        tlsKeyPath: options.tlsKeyPath,
       },
       database,
     );
@@ -386,6 +399,11 @@ export class CLIChargePointService {
         model: this._init.model,
         basicAuth: this._init.basicAuth,
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
+        securityProfile: this._init.securityProfile,
+        cpoName: this._init.cpoName,
+        tlsCaPath: this._init.tlsCaPath,
+        tlsCertPath: this._init.tlsCertPath,
+        tlsKeyPath: this._init.tlsKeyPath,
         bootNotification: this._init.bootNotification ?? null,
       },
     };
@@ -434,6 +452,14 @@ export class CLIChargePointService {
         | "Installing"
         | "Installed",
     );
+  }
+
+  sendSecurityEventNotification(type: string, techInfo?: string): void {
+    this._chargePoint.sendSecurityEventNotification(type, techInfo);
+  }
+
+  sendSignCertificate(): Promise<void> {
+    return this._chargePoint.sendSignCertificate();
   }
 
   startHeartbeat(intervalSeconds: number): void {

@@ -13,6 +13,14 @@ import type {
   ScenarioTemplateInfo,
   StoredLogEntry,
 } from "../interfaces/ChargePointService";
+import {
+  BROWSER_TLS_UNSUPPORTED_MESSAGE,
+  UnsupportedFeatureError,
+} from "../interfaces/UnsupportedFeatureError";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -85,6 +93,25 @@ export interface LocalChargePointDefinition {
   basicAuth: { username: string; password: string } | null;
   autoMeterValueSetting: AutoMeterValueSetting | null;
   ocppVersion?: string;
+  securityProfile?: OcppSecurityProfile;
+  authorizationKey?: string;
+  cpoName?: string;
+  tls?: OcppTlsOptions;
+}
+
+function assertBrowserLocalTlsSupported(
+  definition: LocalChargePointDefinition,
+): void {
+  const profile = definition.securityProfile ?? 0;
+  const hasTlsMaterial = Boolean(
+    definition.tls?.ca || definition.tls?.cert || definition.tls?.key,
+  );
+  if (profile === 2 || profile === 3 || hasTlsMaterial) {
+    throw new UnsupportedFeatureError(
+      "browser_tls_unsupported",
+      BROWSER_TLS_UNSUPPORTED_MESSAGE,
+    );
+  }
 }
 
 export class LocalChargePointService implements ChargePointService {
@@ -577,6 +604,7 @@ export class LocalChargePointService implements ChargePointService {
     const seen = new Set<string>();
 
     for (const definition of definitions) {
+      assertBrowserLocalTlsSupported(definition);
       let cp = this.chargePoints.get(definition.id);
       seen.add(definition.id);
 
@@ -605,6 +633,7 @@ export class LocalChargePointService implements ChargePointService {
   private buildChargePoint(
     definition: LocalChargePointDefinition,
   ): ChargePoint {
+    assertBrowserLocalTlsSupported(definition);
     const chargePoint = new ChargePoint(
       definition.id,
       definition.bootNotification,
@@ -616,6 +645,10 @@ export class LocalChargePointService implements ChargePointService {
       {},
       [],
       definition.ocppVersion,
+      definition.securityProfile,
+      definition.authorizationKey,
+      definition.cpoName,
+      definition.tls,
     );
 
     // Restore connector-level settings from the SQLite store. Sync reads

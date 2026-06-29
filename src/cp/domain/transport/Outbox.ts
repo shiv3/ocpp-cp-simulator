@@ -57,6 +57,23 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendDataTransfer(vendorId, messageId, data);
   }
 
+  sendSecurityEventNotification(
+    type: Parameters<
+      IChargePointMessageHandler["sendSecurityEventNotification"]
+    >[0],
+    techInfo?: Parameters<
+      IChargePointMessageHandler["sendSecurityEventNotification"]
+    >[1],
+  ): ReturnType<IChargePointMessageHandler["sendSecurityEventNotification"]> {
+    return this.handler.sendSecurityEventNotification(type, techInfo);
+  }
+
+  sendSignCertificate(): ReturnType<
+    IChargePointMessageHandler["sendSignCertificate"]
+  > {
+    return this.handler.sendSignCertificate();
+  }
+
   sendDiagnosticsStatusNotification(
     status: Parameters<
       IChargePointMessageHandler["sendDiagnosticsStatusNotification"]

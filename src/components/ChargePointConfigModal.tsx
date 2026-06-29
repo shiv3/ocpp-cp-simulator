@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Save, X } from "lucide-react";
 import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
+import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../cp/infrastructure/transport/wsUrlWithBasic";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +45,13 @@ export interface ChargePointConfig {
   meterType: string;
   iccid: string;
   imsi: string;
+  securityProfile?: OcppSecurityProfile;
+  authorizationKey?: string;
+  cpoName?: string;
+  tls?: OcppTlsOptions;
+  tlsCaPath?: string;
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
 }
 
 interface ChargePointConfigModalProps {
@@ -83,6 +95,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   onSave,
   initialConfig,
   isNewChargePoint = false,
+  mode = "local",
 }) => {
   const [config, setConfig] = useState<ChargePointConfig>(
     initialConfig || defaultChargePointConfig,
@@ -95,6 +108,17 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   }, [initialConfig]);
 
   const handleSave = () => {
+    const profile = config.securityProfile ?? 0;
+    const hasTlsMaterial = Boolean(
+      config.tls?.ca || config.tls?.cert || config.tls?.key,
+    );
+    if (
+      mode === "local" &&
+      (profile === 2 || profile === 3 || hasTlsMaterial)
+    ) {
+      setFullUrlError(BROWSER_TLS_UNSUPPORTED_MESSAGE);
+      return;
+    }
     onSave(config);
     onClose();
   };

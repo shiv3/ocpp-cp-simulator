@@ -16,6 +16,7 @@ import {
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
 import type { ClientLocation } from "./client";
+import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
 /**
  * Locate the bundled web console (Vite-built `dist/`) shipped alongside
@@ -42,6 +43,37 @@ function isSupportedOcppVersion(value: string): boolean {
   return (
     value === "OCPP-1.6J" || value === "OCPP-2.0.1" || value === "OCPP-2.1"
   );
+}
+
+function parseSecurityProfile(
+  value: string | undefined,
+): CLIOptions["securityProfile"] {
+  if (value === "0" || value === "1" || value === "2" || value === "3") {
+    return Number(value) as CLIOptions["securityProfile"];
+  }
+  process.stderr.write("Error: --security-profile must be one of 0, 1, 2, 3\n");
+  process.exit(1);
+}
+
+function requireFlagValue(flag: string, value: string | undefined): string {
+  if (!value || value.startsWith("--")) {
+    process.stderr.write(`Error: ${flag} requires a value\n`);
+    process.exit(1);
+  }
+  return value;
+}
+
+function readPemFile(flag: string, filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    process.stderr.write(
+      `Error: failed to read ${flag} file '${filePath}': ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+    process.exit(1);
+  }
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -102,6 +134,13 @@ export function parseArgs(argv: string[]): CLIOptions {
   let trustForwardedHeaders = false;
   const extraWsHeaders: Record<string, string> = {};
   const extraWsSubprotocols: string[] = [];
+  let securityProfile: CLIOptions["securityProfile"];
+  let authorizationKey: string | undefined;
+  let tlsCaPath: string | undefined;
+  let tlsCertPath: string | undefined;
+  let tlsKeyPath: string | undefined;
+  let insecureTlsKeyPerms = false;
+  let cpoName: string | undefined;
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -298,6 +337,39 @@ export function parseArgs(argv: string[]): CLIOptions {
         extraWsSubprotocols.push(next);
         i++;
         break;
+      case "--security-profile":
+        securityProfile = parseSecurityProfile(next);
+        i++;
+        break;
+      case "--authorization-key":
+        authorizationKey = requireFlagValue("--authorization-key", next);
+        if (!/^[0-9a-fA-F]+$/.test(authorizationKey)) {
+          process.stderr.write(
+            "Error: --authorization-key must be a non-empty hex string\n",
+          );
+          process.exit(1);
+        }
+        i++;
+        break;
+      case "--tls-ca":
+        tlsCaPath = requireFlagValue("--tls-ca", next);
+        i++;
+        break;
+      case "--tls-cert":
+        tlsCertPath = requireFlagValue("--tls-cert", next);
+        i++;
+        break;
+      case "--tls-key":
+        tlsKeyPath = requireFlagValue("--tls-key", next);
+        i++;
+        break;
+      case "--insecure-tls-key-perms":
+        insecureTlsKeyPerms = true;
+        break;
+      case "--cpo-name":
+        cpoName = requireFlagValue("--cpo-name", next);
+        i++;
+        break;
       case "--web-console":
         webConsoleEnabled = true;
         // Optional port: only consume `next` when it looks like a number.
@@ -463,6 +535,29 @@ export function parseArgs(argv: string[]): CLIOptions {
     httpBasicAuthUser && httpBasicAuthPass
       ? { username: httpBasicAuthUser, password: httpBasicAuthPass }
       : null;
+  let tls: CLIOptions["tls"];
+  if (tlsCaPath || tlsCertPath || tlsKeyPath) {
+    tls = {};
+    if (tlsCaPath) tls = { ...tls, ca: readPemFile("--tls-ca", tlsCaPath) };
+    if (tlsCertPath) {
+      tls = { ...tls, cert: readPemFile("--tls-cert", tlsCertPath) };
+    }
+    if (tlsKeyPath) {
+      const warning = tlsKeyPermissionWarning(tlsKeyPath);
+      if (warning && !insecureTlsKeyPerms) {
+        process.stderr.write(
+          `Error: ${warning}. Pass --insecure-tls-key-perms to override.\n`,
+        );
+        process.exit(1);
+      }
+      if (warning) {
+        process.stderr.write(
+          `Warning: ${warning}; proceeding because --insecure-tls-key-perms was passed.\n`,
+        );
+      }
+      tls = { ...tls, key: readPemFile("--tls-key", tlsKeyPath) };
+    }
+  }
 
   return {
     wsUrl,
@@ -498,6 +593,14 @@ export function parseArgs(argv: string[]): CLIOptions {
     healthPath,
     extraWsHeaders,
     extraWsSubprotocols,
+    securityProfile,
+    authorizationKey,
+    cpoName,
+    tls,
+    tlsCaPath,
+    tlsCertPath,
+    tlsKeyPath,
+    insecureTlsKeyPerms,
   };
 }
 
@@ -526,6 +629,21 @@ Options:
   --cp-id <id>             Charge Point ID
   --ws-url <url>           WebSocket URL of CSMS
   --connectors <n>         Number of connectors (default: 1)
+  --security-profile <0|1|2|3>
+                           OCPP 1.6 security profile. 0 leaves transport/auth
+                           as configured; 1 forces ws:// + AuthorizationKey
+                           Basic Auth; 2 forces wss:// + AuthorizationKey
+                           Basic Auth + verified server cert; 3 forces
+                           wss:// mTLS and suppresses Basic Auth.
+  --authorization-key <hex> AuthorizationKey used as Basic Auth password for
+                           security profiles 1 and 2 (username is CP ID).
+  --tls-ca <path>          PEM CA bundle used to verify the CSMS server cert.
+  --tls-cert <path>        PEM client certificate for profile 3 mTLS.
+  --tls-key <path>         PEM client private key for profile 3 mTLS.
+                           Must be mode 0600 unless
+                           --insecure-tls-key-perms is passed.
+  --insecure-tls-key-perms Allow --tls-key files readable by group/other.
+  --cpo-name <name>        CPO name for generated SignCertificate CSRs.
   --basic-auth-user <u>    Outgoing WS Basic auth username (CP → CSMS)
   --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
   --web-console-basic-auth-user <u>
@@ -659,6 +777,13 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
     basicAuth: options.basicAuth,
     extraWsHeaders: options.extraWsHeaders,
     extraWsSubprotocols: options.extraWsSubprotocols,
+    securityProfile: options.securityProfile,
+    authorizationKey: options.authorizationKey,
+    cpoName: options.cpoName,
+    tls: options.tls,
+    tlsCaPath: options.tlsCaPath,
+    tlsCertPath: options.tlsCertPath,
+    tlsKeyPath: options.tlsKeyPath,
   };
 }
 
@@ -731,6 +856,7 @@ async function main(): Promise<void> {
       stateDb: options.stateDb,
       healthPath: options.healthPath,
       webConsoleBasicAuth: options.webConsoleBasicAuth,
+      insecureTlsKeyPerms: options.insecureTlsKeyPerms,
     });
     return;
   }

@@ -1,3 +1,8 @@
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../cp/infrastructure/transport/wsUrlWithBasic";
+
 export interface CLIOptions {
   readonly wsUrl: string;
   readonly cpId: string | null;
@@ -86,6 +91,14 @@ export interface CLIOptions {
   /** Repeatable `--ws-subprotocol TOKEN` — extra subprotocols appended
    *  to the OCPP version subprotocol in the WS upgrade. */
   readonly extraWsSubprotocols: ReadonlyArray<string>;
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly authorizationKey?: string;
+  readonly cpoName?: string;
+  readonly tls?: OcppTlsOptions;
+  readonly tlsCaPath?: string;
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
+  readonly insecureTlsKeyPerms: boolean;
 }
 
 export interface ChargePointInitOptions {
@@ -117,6 +130,13 @@ export interface ChargePointInitOptions {
    *  (ocpp1.6 / ocpp2.0.1) and ignore the rest, so any extras are visible
    *  to upstream routers but harmless for OCPP negotiation. */
   readonly extraWsSubprotocols?: ReadonlyArray<string>;
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly authorizationKey?: string;
+  readonly cpoName?: string;
+  readonly tls?: OcppTlsOptions;
+  readonly tlsCaPath?: string;
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
 }
 
 export interface JsonCommand {
@@ -185,8 +205,13 @@ export interface ChargePointStatus {
     readonly model: string;
     readonly basicAuth: {
       readonly username: string;
-      readonly password: string;
+      readonly password?: string;
     } | null;
+    readonly securityProfile?: OcppSecurityProfile;
+    readonly cpoName?: string;
+    readonly tlsCaPath?: string;
+    readonly tlsCertPath?: string;
+    readonly tlsKeyPath?: string;
     readonly ocppVersion?: string;
     readonly bootNotification: {
       readonly firmwareVersion?: string;

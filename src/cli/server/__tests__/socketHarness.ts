@@ -30,6 +30,7 @@ export interface TestServerOptions {
     readonly username: string;
     readonly password: string;
   } | null;
+  readonly insecureTlsKeyPerms?: boolean;
 }
 
 export interface TestServer {
@@ -51,7 +52,9 @@ export async function startTestServer(
   const host = options.host ?? "127.0.0.1";
   const bus = new EventBus();
   const database = options.database ?? null;
-  const registry = new CPRegistry(bus, database);
+  const registry = new CPRegistry(bus, database, {
+    allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms ?? false,
+  });
   const restored = await Promise.resolve(registry.restoreFromDatabase());
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({

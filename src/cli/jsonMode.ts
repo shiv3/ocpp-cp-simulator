@@ -138,6 +138,21 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "security_event_notification": {
+      const type = requireString(params, "type");
+      const techInfo =
+        params.techInfo === undefined
+          ? undefined
+          : requireString(params, "techInfo");
+      service.sendSecurityEventNotification(type, techInfo);
+      return undefined;
+    }
+
+    case "sign_certificate": {
+      await service.sendSignCertificate();
+      return undefined;
+    }
+
     case "start_heartbeat": {
       const interval = requireNumber(params, "interval");
       if (interval <= 0) {

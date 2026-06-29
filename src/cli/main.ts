@@ -630,17 +630,20 @@ Options:
   --ws-url <url>           WebSocket URL of CSMS
   --connectors <n>         Number of connectors (default: 1)
   --security-profile <0|1|2|3>
-                           OCPP 1.6 security profile. 1 forces ws:// +
-                           AuthorizationKey Basic Auth; 2 forces wss:// +
-                           AuthorizationKey Basic Auth; 3 forces wss:// mTLS
-                           and suppresses Basic Auth.
+                           OCPP 1.6 security profile. 0 leaves transport/auth
+                           as configured; 1 forces ws:// + AuthorizationKey
+                           Basic Auth; 2 forces wss:// + AuthorizationKey
+                           Basic Auth + verified server cert; 3 forces
+                           wss:// mTLS and suppresses Basic Auth.
   --authorization-key <hex> AuthorizationKey used as Basic Auth password for
-                           security profiles 1 and 2.
+                           security profiles 1 and 2 (username is CP ID).
   --tls-ca <path>          PEM CA bundle used to verify the CSMS server cert.
   --tls-cert <path>        PEM client certificate for profile 3 mTLS.
   --tls-key <path>         PEM client private key for profile 3 mTLS.
+                           Must be mode 0600 unless
+                           --insecure-tls-key-perms is passed.
   --insecure-tls-key-perms Allow --tls-key files readable by group/other.
-  --cpo-name <name>        CPO name for future certificate enrollment flows.
+  --cpo-name <name>        CPO name for generated SignCertificate CSRs.
   --basic-auth-user <u>    Outgoing WS Basic auth username (CP → CSMS)
   --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
   --web-console-basic-auth-user <u>

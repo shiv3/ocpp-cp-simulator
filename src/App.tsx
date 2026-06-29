@@ -2,6 +2,7 @@
 import React from "react";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import Navbar from "./components/Navbar.tsx";
+import Footer from "./components/Footer.tsx";
 import Settings from "./components/Settings.tsx";
 import TopPage from "./components/TopPage.tsx";
 import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
@@ -10,14 +11,15 @@ import V1App from "./v1/V1App.tsx";
 const V2App: React.FC = () => {
   return (
     <DarkModeProvider>
-      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
+      <div className="min-h-screen flex flex-col bg-gray-100 dark:bg-gray-900 transition-colors">
         <Navbar />
-        <div className="p-4">
+        <div className="p-4 flex-1">
           <Routes>
             <Route path="/" element={<TopPage />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>
+        <Footer />
       </div>
     </DarkModeProvider>
   );

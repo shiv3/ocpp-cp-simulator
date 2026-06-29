@@ -94,8 +94,10 @@
     @apply bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-500 dark:hover:bg-emerald-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
+  /* rose-600 (not -500) so white text/icons clear WCAG AA (~4.9:1) on the
+     red fill; -500 only reached ~3.9:1 (issue #92). */
   .btn-danger {
-    @apply bg-rose-500 hover:bg-rose-600 dark:bg-rose-500 dark:hover:bg-rose-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-rose-600 hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-warning {

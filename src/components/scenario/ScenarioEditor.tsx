@@ -42,6 +42,10 @@ import {
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import {
+  meterNodeToCurveConfig,
+  applyCurveConfigToMeterNode,
+} from "./meterValueNodeConfig";
+import {
   type EVSettings,
   EV_PRESETS,
 } from "../../cp/domain/connector/EVSettings";
@@ -162,6 +166,35 @@ const nodeTypes: NodeTypes = {
   ),
   [ScenarioNodeType.END]: (props) => <StartEndNode {...props} nodeType="end" />,
 };
+
+// MiniMap fill per node type. Without an explicit nodeColor the minimap falls
+// back to React Flow's default #e2e2e2, which is invisible against the
+// light-mode white minimap background (the nodes looked unrendered). Colors
+// roughly mirror each node's accent on the canvas.
+const MINIMAP_NODE_COLORS: Record<string, string> = {
+  [ScenarioNodeType.START]: "#22c55e",
+  [ScenarioNodeType.END]: "#ef4444",
+  [ScenarioNodeType.STATUS_CHANGE]: "#3b82f6",
+  [ScenarioNodeType.STATUS_NOTIFICATION]: "#3b82f6",
+  [ScenarioNodeType.TRANSACTION]: "#10b981",
+  [ScenarioNodeType.METER_VALUE]: "#eab308",
+  [ScenarioNodeType.DELAY]: "#64748b",
+  [ScenarioNodeType.NOTIFICATION]: "#0ea5e9",
+  [ScenarioNodeType.CONNECTOR_PLUG]: "#14b8a6",
+  [ScenarioNodeType.REMOTE_START_TRIGGER]: "#6366f1",
+  [ScenarioNodeType.REMOTE_STOP_TRIGGER]: "#a855f7",
+  [ScenarioNodeType.STATUS_TRIGGER]: "#8b5cf6",
+  [ScenarioNodeType.RESERVE_NOW]: "#f97316",
+  [ScenarioNodeType.CANCEL_RESERVATION]: "#f43f5e",
+  [ScenarioNodeType.RESERVATION_TRIGGER]: "#f59e0b",
+  [ScenarioNodeType.UNLOCK_OUTCOME]: "#06b6d4",
+  [ScenarioNodeType.CONFIG_SET]: "#6b7280",
+  [ScenarioNodeType.DATA_TRANSFER]: "#a8a29e",
+};
+
+// slate-500 fallback — stays visible on both the white (light) and
+// #1f2937 (dark) minimap backgrounds.
+const MINIMAP_NODE_FALLBACK = "#64748b";
 
 const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   cpId,
@@ -1851,14 +1884,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
   };
 
-  // Handle curve modal save
+  // Handle curve modal save. Maps the modal's "Charge until battery full"
+  // checkbox onto the node's stopMode so the executor honors it (issue #95).
   const handleCurveModalSave = (config: AutoMeterValueConfig) => {
-    setFormData({
-      ...formData,
-      curvePoints: config.curvePoints,
-      incrementInterval: config.intervalSeconds,
-      autoCalculateInterval: config.autoCalculateInterval,
-    });
+    setFormData(applyCurveConfigToMeterNode(formData, config));
     setIsCurveModalOpen(false);
   };
 
@@ -1876,15 +1905,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           <MeterValueCurveModal
             isOpen={isCurveModalOpen}
             onClose={() => setIsCurveModalOpen(false)}
-            initialConfig={{
-              enabled: true,
-              intervalSeconds: formData.incrementInterval || 10,
-              curvePoints: formData.curvePoints || [
-                { time: 0, value: 0 },
-                { time: 30, value: 50 },
-              ],
-              autoCalculateInterval: formData.autoCalculateInterval || false,
-            }}
+            initialConfig={meterNodeToCurveConfig(formData)}
             onSave={handleCurveModalSave}
           />
         </Suspense>
@@ -2417,6 +2438,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               <MiniMap
                 pannable
                 zoomable
+                nodeColor={(node) =>
+                  MINIMAP_NODE_COLORS[node.type ?? ""] ?? MINIMAP_NODE_FALLBACK
+                }
+                nodeStrokeColor={isDark ? "#0f172a" : "#cbd5e1"}
+                nodeStrokeWidth={2}
                 maskColor={
                   isDark ? "rgba(15, 23, 42, 0.6)" : "rgba(240, 240, 240, 0.6)"
                 }

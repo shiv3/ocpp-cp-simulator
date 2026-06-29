@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import { Trash2 } from "lucide-react";
 import type { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import * as ocpp from "../cp/domain/types/OcppTypes";
 import { OCPPAvailability } from "../cp/domain/types/OcppTypes";
@@ -423,10 +424,11 @@ const Connector: React.FC<ConnectorProps> = ({
                 e.stopPropagation();
                 handleRemoveConnector();
               }}
-              className="text-xs px-2 py-1 btn-danger rounded"
+              className="inline-flex items-center justify-center text-xs px-2 py-1 btn-danger rounded"
               title="Remove Connector"
+              aria-label="Remove Connector"
             >
-              🗑️
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </div>

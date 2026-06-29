@@ -7,6 +7,10 @@ import type { ChargePointEvents } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../../infrastructure/transport/wsUrlWithBasic";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { Outbox } from "../transport/Outbox";
 import type { Database } from "../persistence/Database";
@@ -107,6 +111,10 @@ export class ChargePoint {
     extraWsHeaders: Record<string, string> = {},
     extraWsSubprotocols: ReadonlyArray<string> = [],
     ocppVersion: string = "OCPP-1.6J",
+    securityProfile?: OcppSecurityProfile,
+    authorizationKey?: string,
+    cpoName?: string,
+    tls?: OcppTlsOptions,
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._logger.setCpId(this._id);
@@ -187,6 +195,10 @@ export class ChargePoint {
       extraWsHeaders,
       extraWsSubprotocols,
       ocppVersion,
+      securityProfile,
+      authorizationKey,
+      cpoName,
+      tls,
     );
     this._messageHandler = getProtocolProfile(ocppVersion).createMessageHandler(
       this,

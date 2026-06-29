@@ -322,8 +322,10 @@ function createCp(deps: SocketIoDeps, rawParams: unknown): { cpId: string } {
 }
 
 function updateCp(deps: SocketIoDeps, rawParams: unknown): { cpId: string } {
-  const init = parseCreateInput(rawParams);
-  if (!deps.registry.has(init.cpId)) throw new RpcFailure("not_found", "");
+  const cpId = stringParam(rawParams, "cpId");
+  const existing = deps.registry.get(cpId);
+  if (!existing) throw new RpcFailure("not_found", "");
+  const init = parseCreateInput(mergeUpdateParams(rawParams, existing));
   const service = deps.registry.update(init);
   if (rawParamsAsRecord(rawParams).autoConnect === true) {
     void service.connect().catch((err) => {
@@ -510,6 +512,11 @@ function statusCpForWire(
       model: init.model,
       basicAuth: init.basicAuth,
       ocppVersion: init.ocppVersion,
+      securityProfile: init.securityProfile,
+      cpoName: init.cpoName,
+      tlsCaPath: init.tlsCaPath,
+      tlsCertPath: init.tlsCertPath,
+      tlsKeyPath: init.tlsKeyPath,
       bootNotification: init.bootNotification ?? null,
     },
   };
@@ -540,6 +547,65 @@ function rawParamsAsRecord(rawParams: unknown): Record<string, unknown> {
   return rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)
     ? (rawParams as Record<string, unknown>)
     : {};
+}
+
+function isRecord(rawParams: unknown): rawParams is Record<string, unknown> {
+  return (
+    rawParams !== null &&
+    typeof rawParams === "object" &&
+    !Array.isArray(rawParams)
+  );
+}
+
+function mergeUpdateParams(
+  rawParams: unknown,
+  existing: CLIChargePointService,
+): Record<string, unknown> {
+  const params = rawParamsAsRecord(rawParams);
+  const init = existing.getInit();
+  const merged: Record<string, unknown> = { ...params };
+
+  preserveWhenMissing(merged, "basicAuth", init.basicAuth);
+  preserveWhenMissing(merged, "securityProfile", init.securityProfile);
+  preserveWhenMissing(merged, "authorizationKey", init.authorizationKey);
+  preserveWhenMissing(merged, "cpoName", init.cpoName);
+  preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
+  preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
+  preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);
+  preserveWhenMissing(merged, "tls", init.tls);
+
+  if (isRecord(merged.basicAuth) && init.basicAuth) {
+    const basicAuth = { ...merged.basicAuth };
+    if (
+      typeof basicAuth.password !== "string" ||
+      basicAuth.password.length === 0
+    ) {
+      basicAuth.password = init.basicAuth.password;
+    }
+    if (typeof basicAuth.username !== "string") {
+      basicAuth.username = init.basicAuth.username;
+    }
+    merged.basicAuth = basicAuth;
+  }
+
+  if (isRecord(merged.tls) && init.tls) {
+    merged.tls = { ...init.tls, ...merged.tls };
+  }
+
+  return merged;
+}
+
+function preserveWhenMissing(
+  params: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (
+    value !== undefined &&
+    !Object.prototype.hasOwnProperty.call(params, key)
+  ) {
+    params[key] = value;
+  }
 }
 
 function stringParam(rawParams: unknown, key: string): string {

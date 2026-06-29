@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS charge_points (
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
   ocpp_version   TEXT,
+  security_profile INTEGER,
+  authorization_key TEXT,
+  cpo_name       TEXT,
+  tls_ca_path    TEXT,
+  tls_cert_path  TEXT,
+  tls_key_path   TEXT,
   basic_auth     TEXT,
   boot_notif     TEXT,
   created_at     TEXT NOT NULL
@@ -232,6 +238,32 @@ export function runMigrations(db: Database): void {
     const have = new Set(cols.map((c) => c.name));
     if (!have.has("ocpp_version")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN ocpp_version TEXT");
+    }
+  }
+
+  // v4 → v5: persist OCPP 1.6 security-profile metadata and TLS file
+  // paths for daemon restore. Private key material stays out of SQLite;
+  // restore re-reads tls_key_path and fails closed if it cannot.
+  if (stored < 5) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("security_profile")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN security_profile INTEGER");
+    }
+    if (!have.has("authorization_key")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN authorization_key TEXT");
+    }
+    if (!have.has("cpo_name")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN cpo_name TEXT");
+    }
+    if (!have.has("tls_ca_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN tls_ca_path TEXT");
+    }
+    if (!have.has("tls_cert_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN tls_cert_path TEXT");
+    }
+    if (!have.has("tls_key_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN tls_key_path TEXT");
     }
   }
 

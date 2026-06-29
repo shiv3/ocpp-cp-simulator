@@ -15,6 +15,10 @@ import type {
   OCPPStatus,
 } from "../../cp/domain/types/OcppTypes";
 import type { LogEntry } from "../../cp/shared/Logger";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../../cp/infrastructure/transport/wsUrlWithBasic";
 
 export interface ConnectorSnapshot {
   id: number;
@@ -55,6 +59,11 @@ export interface ChargePointSnapshot {
     vendor: string;
     model: string;
     basicAuth: { username: string; password: string } | null;
+    securityProfile?: OcppSecurityProfile;
+    cpoName?: string;
+    tlsCaPath?: string;
+    tlsCertPath?: string;
+    tlsKeyPath?: string;
     bootNotification: {
       firmwareVersion?: string;
       chargePointSerialNumber?: string;
@@ -74,7 +83,14 @@ export interface CreateChargePointParams {
   connectors?: number;
   vendor?: string;
   model?: string;
-  basicAuth?: { username: string; password: string } | null;
+  basicAuth?: { username: string; password?: string } | null;
+  securityProfile?: OcppSecurityProfile;
+  authorizationKey?: string;
+  cpoName?: string;
+  tls?: OcppTlsOptions;
+  tlsCaPath?: string;
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
   bootNotification?: {
     firmwareVersion?: string;
     chargePointSerialNumber?: string;

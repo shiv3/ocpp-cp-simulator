@@ -18,6 +18,11 @@ const fullConfig = {
   vendor: "Acme",
   model: "X1",
   basicAuth: { username: "u", password: "s3cr3t" },
+  securityProfile: 3 as const,
+  cpoName: "Example CPO",
+  tlsCaPath: "/etc/ocpp/ca.pem",
+  tlsCertPath: "/etc/ocpp/client.pem",
+  tlsKeyPath: "/etc/ocpp/client-key.pem",
   bootNotification: { firmwareVersion: "1.0", iccid: "8900" },
 };
 
@@ -61,6 +66,13 @@ describe("redaction (Sec-2)", () => {
     expect(w.basicAuth).toEqual({ username: "u" });
     expect((w.basicAuth as Record<string, unknown>).password).toBeUndefined();
     expect(w.wsUrl).toBe("ws://host:9000/ocpp");
+    expect(w).toMatchObject({
+      securityProfile: 3,
+      cpoName: "Example CPO",
+      tlsCaPath: "/etc/ocpp/ca.pem",
+      tlsCertPath: "/etc/ocpp/client.pem",
+      tlsKeyPath: "/etc/ocpp/client-key.pem",
+    });
     expect(JSON.stringify(w)).not.toContain("s3cr3t");
   });
 

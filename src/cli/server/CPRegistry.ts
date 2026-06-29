@@ -1,7 +1,14 @@
+import * as fs from "fs";
+
 import { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { EventBus } from "./eventBus";
 import type { Database } from "../../cp/domain/persistence/Database";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
 
 export type RegistryMembershipChange = "added" | "removed";
 
@@ -20,9 +27,19 @@ interface ChargePointRow {
   vendor: string;
   model: string;
   ocpp_version: string | null;
+  security_profile: number | null;
+  authorization_key: string | null;
+  cpo_name: string | null;
+  tls_ca_path: string | null;
+  tls_cert_path: string | null;
+  tls_key_path: string | null;
   basic_auth: string | null;
   boot_notif: string | null;
   created_at: string;
+}
+
+interface CPRegistryOptions {
+  readonly allowInsecureTlsKeyPerms?: boolean;
 }
 
 export class CPRegistry {
@@ -35,6 +52,7 @@ export class CPRegistry {
     /** Shared daemon DB threaded into every CLIChargePointService we
      *  create. `null` keeps everything in-memory (no `--state-db`). */
     private readonly database: Database | null = null,
+    private readonly options: CPRegistryOptions = {},
   ) {}
 
   /**
@@ -54,12 +72,16 @@ export class CPRegistry {
   restoreFromDatabase(): string[] {
     if (!this.database) return [];
     const rows = this.database.all<ChargePointRow>(
-      "SELECT cp_id, ws_url, connectors, vendor, model, ocpp_version, basic_auth, boot_notif, created_at " +
+      "SELECT cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+        "security_profile, authorization_key, cpo_name, " +
+        "tls_ca_path, tls_cert_path, tls_key_path, " +
+        "basic_auth, boot_notif, created_at " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
     for (const row of rows) {
       if (this.services.has(row.cp_id)) continue;
+      const securityProfile = parsePersistedSecurityProfile(row);
       const init: ChargePointInitOptions = {
         cpId: row.cp_id,
         wsUrl: row.ws_url,
@@ -67,6 +89,13 @@ export class CPRegistry {
         vendor: row.vendor,
         model: row.model,
         ocppVersion: row.ocpp_version ?? "OCPP-1.6J",
+        securityProfile,
+        authorizationKey: row.authorization_key ?? undefined,
+        cpoName: row.cpo_name ?? undefined,
+        tls: this.restoreTlsFromPaths(row, securityProfile),
+        tlsCaPath: row.tls_ca_path ?? undefined,
+        tlsCertPath: row.tls_cert_path ?? undefined,
+        tlsKeyPath: row.tls_key_path ?? undefined,
         basicAuth: safeJsonParse<ChargePointInitOptions["basicAuth"]>(
           row.basic_auth,
         ),
@@ -151,8 +180,9 @@ export class CPRegistry {
     if (this.services.has(init.cpId)) {
       throw new Error(`cpId already exists: ${init.cpId}`);
     }
-    this.persistCreate(init);
-    const svc = this.instantiate(init);
+    const preparedInit = this.prepareInit(init);
+    this.persistCreate(preparedInit);
+    const svc = this.instantiate(preparedInit);
     // Restore path (restoreFromDatabase) calls instantiate() directly and
     // skips this seed — that path rehydrates whatever scenarios the
     // operator had, so we don't override an explicitly-cleared slot with
@@ -162,7 +192,7 @@ export class CPRegistry {
     }
     this.notifyRegistryMembership({
       change: "added",
-      cpId: init.cpId,
+      cpId: preparedInit.cpId,
       service: svc,
     });
     return svc;
@@ -183,6 +213,8 @@ export class CPRegistry {
     if (!existing) {
       throw new Error(`cpId not found: ${init.cpId}`);
     }
+    const mergedInit = mergeSecuritySensitiveInit(existing.getInit(), init);
+    const preparedInit = this.prepareInit(mergedInit);
     // Snapshot the existing in-memory scenarios BEFORE cleanup wipes
     // them. Without --state-db there's no `scenarios` table to rehydrate
     // from, so `restoreScenariosFromDatabase` returns 0 and the operator
@@ -195,8 +227,8 @@ export class CPRegistry {
     this.unsubscribes.get(init.cpId)?.();
     this.unsubscribes.delete(init.cpId);
     this.services.delete(init.cpId);
-    this.persistCreate(init); // ON CONFLICT UPDATE — leaves scenarios intact
-    const svc = this.instantiate(init);
+    this.persistCreate(preparedInit); // ON CONFLICT UPDATE — leaves scenarios intact
+    const svc = this.instantiate(preparedInit);
     // Re-attach scenarios that the previous instance had loaded so the
     // re-created service picks up the same set without the operator
     // having to reload them.
@@ -206,7 +238,7 @@ export class CPRegistry {
         svc.loadScenario(connectorId, definition);
       } catch (err) {
         console.warn(
-          `[CPRegistry] Failed to re-attach scenario ${definition.id} to ${init.cpId}/connector ${connectorId} during update:`,
+          `[CPRegistry] Failed to re-attach scenario ${definition.id} to ${preparedInit.cpId}/connector ${connectorId} during update:`,
           err,
         );
       }
@@ -225,16 +257,65 @@ export class CPRegistry {
     return svc;
   }
 
+  private prepareInit(init: ChargePointInitOptions): ChargePointInitOptions {
+    if (
+      (init.securityProfile === 1 || init.securityProfile === 2) &&
+      !init.authorizationKey
+    ) {
+      throw new Error(
+        `securityProfile ${init.securityProfile} requires authorizationKey.`,
+      );
+    }
+    if (
+      init.securityProfile === 3 &&
+      !(init.tls?.cert && init.tls?.key) &&
+      !(init.tlsCertPath && init.tlsKeyPath)
+    ) {
+      throw new Error(
+        "securityProfile 3 requires client certificate and key TLS material.",
+      );
+    }
+    const tlsFromPaths = this.readTlsFromInitPaths(init);
+    if (!tlsFromPaths) return init;
+    return {
+      ...init,
+      tls: init.tls ? mergeTlsOptions(init.tls, tlsFromPaths) : tlsFromPaths,
+    };
+  }
+
+  private readTlsFromInitPaths(
+    init: ChargePointInitOptions,
+  ): OcppTlsOptions | undefined {
+    if (!init.tlsCaPath && !init.tlsCertPath && !init.tlsKeyPath) {
+      return undefined;
+    }
+    return this.readTlsFromPaths({
+      cpId: init.cpId,
+      tlsCaPath: init.tlsCaPath ?? null,
+      tlsCertPath: init.tlsCertPath ?? null,
+      tlsKeyPath: init.tlsKeyPath ?? null,
+    });
+  }
+
   private persistCreate(init: ChargePointInitOptions): void {
     if (!this.database) return;
     this.database.run(
       "INSERT INTO charge_points " +
-        "(cp_id, ws_url, connectors, vendor, model, ocpp_version, basic_auth, boot_notif, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "(cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+        "security_profile, authorization_key, cpo_name, " +
+        "tls_ca_path, tls_cert_path, tls_key_path, " +
+        "basic_auth, boot_notif, created_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, connectors = excluded.connectors, " +
         "vendor = excluded.vendor, model = excluded.model, " +
         "ocpp_version = excluded.ocpp_version, " +
+        "security_profile = excluded.security_profile, " +
+        "authorization_key = excluded.authorization_key, " +
+        "cpo_name = excluded.cpo_name, " +
+        "tls_ca_path = excluded.tls_ca_path, " +
+        "tls_cert_path = excluded.tls_cert_path, " +
+        "tls_key_path = excluded.tls_key_path, " +
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif",
       [
         init.cpId,
@@ -243,11 +324,81 @@ export class CPRegistry {
         init.vendor,
         init.model,
         init.ocppVersion ?? "OCPP-1.6J",
+        init.securityProfile ?? null,
+        init.authorizationKey ?? null,
+        init.cpoName ?? null,
+        init.tlsCaPath ?? null,
+        init.tlsCertPath ?? null,
+        init.tlsKeyPath ?? null,
         init.basicAuth ? JSON.stringify(init.basicAuth) : null,
         init.bootNotification ? JSON.stringify(init.bootNotification) : null,
         new Date().toISOString(),
       ],
     );
+  }
+
+  private restoreTlsFromPaths(
+    row: ChargePointRow,
+    securityProfile: OcppSecurityProfile | undefined,
+  ): OcppTlsOptions | undefined {
+    if (
+      (securityProfile === 1 || securityProfile === 2) &&
+      !row.authorization_key
+    ) {
+      throw new Error(
+        `Refusing to restore CP "${row.cp_id}" with securityProfile ` +
+          `${securityProfile}: authorizationKey is required.`,
+      );
+    }
+    if (securityProfile === 3 && (!row.tls_cert_path || !row.tls_key_path)) {
+      throw new Error(
+        `Refusing to restore CP "${row.cp_id}" with securityProfile 3: ` +
+          "tlsCertPath and tlsKeyPath are required for mTLS.",
+      );
+    }
+
+    return this.readTlsFromPaths({
+      cpId: row.cp_id,
+      tlsCaPath: row.tls_ca_path,
+      tlsCertPath: row.tls_cert_path,
+      tlsKeyPath: row.tls_key_path,
+    });
+  }
+
+  private readTlsFromPaths(paths: {
+    readonly cpId: string;
+    readonly tlsCaPath: string | null;
+    readonly tlsCertPath: string | null;
+    readonly tlsKeyPath: string | null;
+  }): OcppTlsOptions | undefined {
+    const tls: {
+      ca?: string;
+      cert?: string;
+      key?: string;
+    } = {};
+    if (paths.tlsCaPath) {
+      tls.ca = readRestoredPem(paths.cpId, "--tls-ca", paths.tlsCaPath);
+    }
+    if (paths.tlsCertPath) {
+      tls.cert = readRestoredPem(paths.cpId, "--tls-cert", paths.tlsCertPath);
+    }
+    if (paths.tlsKeyPath) {
+      const warning = tlsKeyPermissionWarning(paths.tlsKeyPath);
+      if (warning && !this.options.allowInsecureTlsKeyPerms) {
+        throw new Error(
+          `Refusing to restore CP "${paths.cpId}": ${warning}. ` +
+            "Restart the daemon with --insecure-tls-key-perms to override.",
+        );
+      }
+      if (warning) {
+        process.stderr.write(
+          `[CPRegistry] Warning: ${warning}; proceeding because ` +
+            "--insecure-tls-key-perms was passed.\n",
+        );
+      }
+      tls.key = readRestoredPem(paths.cpId, "--tls-key", paths.tlsKeyPath);
+    }
+    return Object.keys(tls).length > 0 ? tls : undefined;
   }
 
   private persistRemove(cpId: string): void {
@@ -314,4 +465,62 @@ function safeJsonParse<T>(raw: string | null): T | null {
   } catch {
     return null;
   }
+}
+
+function parsePersistedSecurityProfile(
+  row: ChargePointRow,
+): OcppSecurityProfile | undefined {
+  if (row.security_profile === null) return undefined;
+  if (
+    row.security_profile === 0 ||
+    row.security_profile === 1 ||
+    row.security_profile === 2 ||
+    row.security_profile === 3
+  ) {
+    return row.security_profile;
+  }
+  throw new Error(
+    `Refusing to restore CP "${row.cp_id}": invalid securityProfile ` +
+      `${row.security_profile}.`,
+  );
+}
+
+function readRestoredPem(cpId: string, flag: string, filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    throw new Error(
+      `Refusing to restore CP "${cpId}": failed to read ${flag} file ` +
+        `'${filePath}': ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function mergeSecuritySensitiveInit(
+  existing: ChargePointInitOptions,
+  next: ChargePointInitOptions,
+): ChargePointInitOptions {
+  return {
+    ...next,
+    securityProfile: next.securityProfile ?? existing.securityProfile,
+    authorizationKey: next.authorizationKey ?? existing.authorizationKey,
+    cpoName: next.cpoName ?? existing.cpoName,
+    tls:
+      next.tls === undefined
+        ? existing.tls
+        : mergeTlsOptions(existing.tls, next.tls),
+    tlsCaPath: next.tlsCaPath ?? existing.tlsCaPath,
+    tlsCertPath: next.tlsCertPath ?? existing.tlsCertPath,
+    tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
+  };
+}
+
+function mergeTlsOptions(
+  existing: OcppTlsOptions | undefined,
+  next: OcppTlsOptions,
+): OcppTlsOptions {
+  return {
+    ...(existing ?? {}),
+    ...next,
+  };
 }

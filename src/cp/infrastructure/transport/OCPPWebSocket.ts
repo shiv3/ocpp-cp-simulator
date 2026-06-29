@@ -1,5 +1,6 @@
 import { Logger, LogType } from "../../shared/Logger";
 import { openOcppWebSocket } from "./wsUrlWithBasic";
+import type { OcppSecurityProfile, OcppTlsOptions } from "./wsUrlWithBasic";
 import {
   OCPPAction,
   OCPPErrorCode,
@@ -82,6 +83,10 @@ export class OCPPWebSocket {
   private _extraHeaders: Record<string, string>;
   private _extraSubprotocols: ReadonlyArray<string>;
   private _ocppVersion: string;
+  private _securityProfile?: OcppSecurityProfile;
+  private _authorizationKey?: string;
+  private _cpoName?: string;
+  private _tls?: OcppTlsOptions;
 
   constructor(
     url: string,
@@ -91,6 +96,10 @@ export class OCPPWebSocket {
     extraHeaders: Record<string, string> = {},
     extraSubprotocols: ReadonlyArray<string> = [],
     ocppVersion: string = "OCPP-1.6J",
+    securityProfile?: OcppSecurityProfile,
+    authorizationKey?: string,
+    cpoName?: string,
+    tls?: OcppTlsOptions,
   ) {
     this._url = url;
     this._chargePointId = chargePointId;
@@ -104,6 +113,10 @@ export class OCPPWebSocket {
     }
     this._extraHeaders = extraHeaders;
     this._extraSubprotocols = extraSubprotocols;
+    this._securityProfile = securityProfile;
+    this._authorizationKey = authorizationKey;
+    this._cpoName = cpoName;
+    this._tls = tls;
   }
 
   get url(): string {
@@ -120,6 +133,21 @@ export class OCPPWebSocket {
 
     this._isManualDisconnect = false;
 
+    const onopenHandler = () => {
+      this.handleOpen();
+      if (this._onOpenCallback) {
+        this._onOpenCallback();
+      }
+    };
+    const onmessageHandler = this.handleMessage.bind(this);
+    const onerrorHandler = this.handleError.bind(this);
+    const oncloseHandler = (ev: CloseEvent) => {
+      this.handleClose(ev);
+      if (this._onCloseCallback) {
+        this._onCloseCallback(ev);
+      }
+    };
+
     this._ws = openOcppWebSocket({
       baseUrl: this._url,
       chargePointId: this._chargePointId,
@@ -127,21 +155,16 @@ export class OCPPWebSocket {
       extraHeaders: this._extraHeaders,
       extraSubprotocols: this._extraSubprotocols,
       ocppVersion: this._ocppVersion,
+      securityProfile: this._securityProfile,
+      authorizationKey: this._authorizationKey,
+      cpoName: this._cpoName,
+      tls: this._tls,
+      warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
+      onopen: onopenHandler,
+      onmessage: onmessageHandler,
+      onerror: onerrorHandler,
+      onclose: oncloseHandler,
     });
-    this._ws.onopen = () => {
-      this.handleOpen();
-      if (this._onOpenCallback) {
-        this._onOpenCallback();
-      }
-    };
-    this._ws.onmessage = this.handleMessage.bind(this);
-    this._ws.onerror = this.handleError.bind(this);
-    this._ws.onclose = (ev: CloseEvent) => {
-      this.handleClose(ev);
-      if (this._onCloseCallback) {
-        this._onCloseCallback(ev);
-      }
-    };
   }
 
   public disconnect(): void {

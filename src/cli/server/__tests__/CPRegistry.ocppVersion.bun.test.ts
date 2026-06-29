@@ -1,6 +1,9 @@
 // Runs under `bun test` because it uses the `bun:sqlite` built-in.
 import { describe, it, expect } from "bun:test";
 import { Database as RawBunDatabase } from "bun:sqlite";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
@@ -199,6 +202,9 @@ INSERT INTO charge_points (
         .all<{ name: string }>("PRAGMA table_info(charge_points)")
         .map((column) => column.name);
       expect(columnNames).toContain("ocpp_version");
+      expect(columnNames).toContain("security_profile");
+      expect(columnNames).toContain("authorization_key");
+      expect(columnNames).toContain("tls_key_path");
 
       const legacyRow = db.get<{ ocpp_version: string | null }>(
         "SELECT ocpp_version FROM charge_points WHERE cp_id = ?",
@@ -217,6 +223,226 @@ INSERT INTO charge_points (
       await settleWebSocketClose();
       wsServer.stop();
       await settleWebSocketClose();
+      db.close();
+    }
+  });
+});
+
+describe("CPRegistry security profile persistence", () => {
+  it("persists security metadata and re-reads TLS material from paths on restore", async () => {
+    const wsServer = startWebSocketServer();
+    const dir = mkdtempSync(resolve(tmpdir(), "ocpp-registry-tls-"));
+    const caPath = resolve(dir, "ca.pem");
+    const certPath = resolve(dir, "client.pem");
+    const keyPath = resolve(dir, "client-key.pem");
+    writeFileSync(caPath, "CA BEFORE\n");
+    writeFileSync(certPath, "CERT BEFORE\n");
+    writeFileSync(keyPath, "KEY BEFORE\n");
+    chmodSync(keyPath, 0o600);
+
+    const db = BunSqliteDatabase.open(":memory:");
+    const registry = createRegistry(db);
+    let restoredRegistry: CPRegistry | null = null;
+    try {
+      registry.create(
+        {
+          cpId: "cp-secure",
+          wsUrl: wsServer.wsUrl,
+          connectors: 1,
+          vendor: "TestVendor",
+          model: "TestModel",
+          basicAuth: null,
+          ocppVersion: "OCPP-1.6J",
+          securityProfile: 3,
+          cpoName: "Example CPO",
+          tls: {
+            ca: "CA BEFORE\n",
+            cert: "CERT BEFORE\n",
+            key: "KEY BEFORE\n",
+          },
+          tlsCaPath: caPath,
+          tlsCertPath: certPath,
+          tlsKeyPath: keyPath,
+        },
+        { seedDefault: false },
+      );
+
+      const persisted = db.get<{
+        security_profile: number | null;
+        cpo_name: string | null;
+        tls_ca_path: string | null;
+        tls_cert_path: string | null;
+        tls_key_path: string | null;
+      }>("SELECT * FROM charge_points WHERE cp_id = ?", ["cp-secure"]);
+      expect(persisted).toMatchObject({
+        security_profile: 3,
+        cpo_name: "Example CPO",
+        tls_ca_path: caPath,
+        tls_cert_path: certPath,
+        tls_key_path: keyPath,
+      });
+
+      writeFileSync(caPath, "CA AFTER\n");
+      writeFileSync(certPath, "CERT AFTER\n");
+      writeFileSync(keyPath, "KEY AFTER\n");
+      chmodSync(keyPath, 0o600);
+
+      registry.shutdownAll();
+      restoredRegistry = createRegistry(db);
+      expect(restoredRegistry.restoreFromDatabase()).toEqual(["cp-secure"]);
+      const init = restoredRegistry.get("cp-secure")?.getInit();
+      expect(init?.securityProfile).toBe(3);
+      expect(init?.cpoName).toBe("Example CPO");
+      expect(init?.tls).toMatchObject({
+        ca: "CA AFTER\n",
+        cert: "CERT AFTER\n",
+        key: "KEY AFTER\n",
+      });
+      expect(init?.tlsCaPath).toBe(caPath);
+      expect(init?.tlsCertPath).toBe(certPath);
+      expect(init?.tlsKeyPath).toBe(keyPath);
+      expect(
+        restoredRegistry.get("cp-secure")?.getStatus().config,
+      ).toMatchObject({
+        securityProfile: 3,
+        cpoName: "Example CPO",
+        tlsCaPath: caPath,
+        tlsCertPath: certPath,
+        tlsKeyPath: keyPath,
+      });
+    } finally {
+      registry.shutdownAll();
+      restoredRegistry?.shutdownAll();
+      await settleWebSocketClose();
+      wsServer.stop();
+      await settleWebSocketClose();
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to restore profile 3 without persisted cert and key paths", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.run(
+        "INSERT INTO charge_points " +
+          "(cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+          "security_profile, basic_auth, boot_notif, created_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          "cp-missing-mtls",
+          "ws://example.test/ocpp/",
+          1,
+          "TestVendor",
+          "TestModel",
+          "OCPP-1.6J",
+          3,
+          null,
+          null,
+          new Date().toISOString(),
+        ],
+      );
+
+      const registry = createRegistry(db);
+      expect(() => registry.restoreFromDatabase()).toThrow(
+        /tlsCertPath and tlsKeyPath are required/,
+      );
+      registry.shutdownAll();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to restore profile 2 without AuthorizationKey", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.run(
+        "INSERT INTO charge_points " +
+          "(cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+          "security_profile, basic_auth, boot_notif, created_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          "cp-missing-auth",
+          "ws://example.test/ocpp/",
+          1,
+          "TestVendor",
+          "TestModel",
+          "OCPP-1.6J",
+          2,
+          null,
+          null,
+          new Date().toISOString(),
+        ],
+      );
+
+      const registry = createRegistry(db);
+      expect(() => registry.restoreFromDatabase()).toThrow(
+        /authorizationKey is required/,
+      );
+      registry.shutdownAll();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves security fields when an update omits them", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    const registry = createRegistry(db);
+    try {
+      registry.create(
+        {
+          cpId: "cp-update-sec",
+          wsUrl: "ws://example.test/ocpp/",
+          connectors: 1,
+          vendor: "TestVendor",
+          model: "TestModel",
+          basicAuth: { username: "user", password: "secret" },
+          ocppVersion: "OCPP-1.6J",
+          securityProfile: 2,
+          authorizationKey: "AABBCC",
+          cpoName: "Example CPO",
+          tls: { ca: "CA PEM" },
+        },
+        { seedDefault: false },
+      );
+
+      registry.update({
+        cpId: "cp-update-sec",
+        wsUrl: "ws://example.test/updated/",
+        connectors: 2,
+        vendor: "UpdatedVendor",
+        model: "UpdatedModel",
+        basicAuth: { username: "user", password: "secret" },
+        ocppVersion: "OCPP-1.6J",
+      });
+
+      expect(registry.get("cp-update-sec")?.getInit()).toMatchObject({
+        wsUrl: "ws://example.test/updated/",
+        connectors: 2,
+        vendor: "UpdatedVendor",
+        model: "UpdatedModel",
+        securityProfile: 2,
+        authorizationKey: "AABBCC",
+        cpoName: "Example CPO",
+        tls: { ca: "CA PEM" },
+      });
+      expect(
+        db.get<{
+          security_profile: number | null;
+          authorization_key: string | null;
+          cpo_name: string | null;
+        }>(
+          "SELECT security_profile, authorization_key, cpo_name " +
+            "FROM charge_points WHERE cp_id = ?",
+          ["cp-update-sec"],
+        ),
+      ).toMatchObject({
+        security_profile: 2,
+        authorization_key: "AABBCC",
+        cpo_name: "Example CPO",
+      });
+    } finally {
+      registry.shutdownAll();
       db.close();
     }
   });

@@ -50,6 +50,11 @@ COPY vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY src ./src
+# src/ocpp/v{16,201,21}/schemas.ts import the vendored OCA JSON schemas
+# (../../../vendor/ocpp-schemas/**). Vite resolves these JSON imports at
+# build time, so the vendor tree must be present or `bun run build` fails
+# with "Could not resolve ../../../vendor/ocpp-schemas/...".
+COPY vendor ./vendor
 
 # VITE_HEALTH_PATH is read by src/data/healthPath.ts at build time and
 # inlined into the bundle so the static UI knows which path to probe for
@@ -76,6 +81,17 @@ COPY package.json bun.lock ./
 # Only the files the CLI / daemon needs at runtime.
 COPY src/cli ./src/cli
 COPY src/cp ./src/cp
+# src/ocpp holds the self-generated OCPP types/validators. src/cp's transport
+# layer statically imports them on the daemon boot path
+# (ChargePoint -> profile/profiles -> OCPPMessageHandlerV201 ->
+# v201/inboundRegistryV201 -> ocpp/validation/v201), so without it the daemon
+# crashes when a charge point is created with a "Cannot find module
+# ../../../../ocpp/validation/v201" resolution error.
+COPY src/ocpp ./src/ocpp
+# The validators above import the vendored OCA JSON schemas
+# (src/ocpp/v{16,201,21}/schemas.ts -> ../../../vendor/ocpp-schemas/**); bun
+# resolves those JSON imports at runtime, so the vendor tree must ship too.
+COPY vendor ./vendor
 # src/protocol holds the socket.io control-plane zod schemas imported by the
 # daemon (src/cli/server/*). Without it the daemon crashes on boot with a
 # "Cannot find package '../../protocol'" resolution error.

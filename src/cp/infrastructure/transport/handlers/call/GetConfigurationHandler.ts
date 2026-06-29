@@ -1,5 +1,8 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  GetConfigurationRequestV16,
+  GetConfigurationResponseV16,
+} from "../../../../../ocpp";
 import type {
   ConfigurationValue,
   StringConfigurationValue,
@@ -24,7 +27,7 @@ export class GetConfigurationHandler
     );
 
     const store = context.chargePoint.configuration;
-    const { known, unknown } = store.read(payload.key ?? []);
+    const { known, unknown } = store.readRedacted(payload.key ?? []);
     const configurationKey = this.mapConfiguration(known);
     // §5.8 says unknownKey is optional; only include it when non-empty so
     // the response is the smallest legal payload.

@@ -357,6 +357,45 @@ export const ConfigurationKeys = {
       type: "integer",
     } as IntegerConfigurationKey,
   },
+  SecurityExtension: {
+    SecurityProfile: {
+      name: "SecurityProfile",
+      required: false,
+      readonly: false,
+      type: "integer",
+    } as IntegerConfigurationKey,
+    AuthorizationKey: {
+      name: "AuthorizationKey",
+      required: false,
+      readonly: false,
+      writeonly: true,
+      type: "string",
+    } as StringConfigurationKey,
+    AdditionalRootCertificateCheck: {
+      name: "AdditionalRootCertificateCheck",
+      required: false,
+      readonly: true,
+      type: "boolean",
+    } as BooleanConfigurationKey,
+    CertificateSignedMaxChainSize: {
+      name: "CertificateSignedMaxChainSize",
+      required: false,
+      readonly: true,
+      type: "integer",
+    } as IntegerConfigurationKey,
+    CertificateStoreMaxLength: {
+      name: "CertificateStoreMaxLength",
+      required: false,
+      readonly: true,
+      type: "integer",
+    } as IntegerConfigurationKey,
+    CpoName: {
+      name: "CpoName",
+      required: false,
+      readonly: false,
+      type: "string",
+    } as StringConfigurationKey,
+  },
   Custom: {
     OcppServer: {
       name: "OcppServer",
@@ -372,6 +411,7 @@ export type ConfigurationKeyType = "integer" | "string" | "boolean" | "array";
 export type ConfigurationKey<T = ConfigurationKeyType> = {
   name: string;
   readonly: boolean;
+  writeonly?: boolean;
   required: boolean;
   type: T;
 };
@@ -503,6 +543,20 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
       false,
     ),
     intVal(ConfigurationKeys.SmartCharging.MaxChargingProfilesInstalled, 16),
+
+    // ── Security extension (OCPP 1.6 Security Whitepaper) ──────────────
+    intVal(ConfigurationKeys.SecurityExtension.SecurityProfile, 0),
+    strVal(ConfigurationKeys.SecurityExtension.AuthorizationKey, ""),
+    boolVal(
+      ConfigurationKeys.SecurityExtension.AdditionalRootCertificateCheck,
+      false,
+    ),
+    intVal(
+      ConfigurationKeys.SecurityExtension.CertificateSignedMaxChainSize,
+      4,
+    ),
+    intVal(ConfigurationKeys.SecurityExtension.CertificateStoreMaxLength, 10),
+    strVal(ConfigurationKeys.SecurityExtension.CpoName, ""),
 
     // ── Custom (non-standard) ──────────────────────────────────────────
     strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),

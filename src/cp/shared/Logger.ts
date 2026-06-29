@@ -33,7 +33,8 @@ export interface LogFilter {
   endTime?: Date;
 }
 
-import EventEmitter2 from "eventemitter2";
+import { EventEmitter2 } from "eventemitter2";
+import { redactSensitiveText } from "./redaction";
 
 /** Output format for the console line that {@link Logger} writes for
  *  every entry. `plain` is the legacy
@@ -162,11 +163,12 @@ export class Logger {
     }
 
     const timestamp = new Date();
+    const safeMessage = redactSensitiveText(message);
     const logEntry: LogEntry = {
       timestamp,
       level,
       type,
-      message,
+      message: safeMessage,
     };
 
     const formattedMessage = this.formatLogEntry(logEntry);

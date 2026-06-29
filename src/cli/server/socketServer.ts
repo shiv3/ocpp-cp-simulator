@@ -30,6 +30,7 @@ import {
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { LogLevel } from "../../cp/shared/Logger";
+import { redactSensitiveText } from "../../cp/shared/redaction";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { parseCreateBody } from "./httpServer";
@@ -367,7 +368,7 @@ function getLogs(
         level: row.level,
         type: row.log_type,
         cpId,
-        message: row.message,
+        message: redactSensitiveText(row.message),
       }));
     }
   }
@@ -378,7 +379,7 @@ function getLogs(
       level: LogLevel[entry.level] ?? "INFO",
       type: entry.type,
       cpId,
-      message: entry.message,
+      message: redactSensitiveText(entry.message),
     }));
   }
 
@@ -620,7 +621,9 @@ function publicErrorMessage(code: RpcErrorCode): string {
 
 function safeLogMessage(err: unknown): string {
   if (!(err instanceof Error)) return "operation failed";
-  return err.message.replace(/\/\/[^@/\s]+@/g, "//[redacted]@");
+  return redactSensitiveText(
+    err.message.replace(/\/\/[^@/\s]+@/g, "//[redacted]@"),
+  );
 }
 
 function registerSocketAuth(

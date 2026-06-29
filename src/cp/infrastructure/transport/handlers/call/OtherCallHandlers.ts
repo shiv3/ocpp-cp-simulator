@@ -1,5 +1,15 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  ChangeConfigurationRequestV16,
+  ChangeConfigurationResponseV16,
+  ClearCacheRequestV16,
+  ClearCacheResponseV16,
+  TriggerMessageRequestV16,
+  TriggerMessageResponseV16,
+  UnlockConnectorRequestV16,
+  UnlockConnectorResponseV16,
+} from "../../../../../ocpp";
+import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";
 
 export class ChangeConfigurationHandler
@@ -14,8 +24,13 @@ export class ChangeConfigurationHandler
       payload.key,
       payload.value,
     );
+    const loggedValue = context.chargePoint.configuration.isWriteOnly(
+      payload.key,
+    )
+      ? REDACTED_VALUE
+      : payload.value;
     context.logger.info(
-      `ChangeConfiguration ${payload.key}='${payload.value}' → ${status}`,
+      `ChangeConfiguration ${payload.key}='${loggedValue}' → ${status}`,
       LogType.CONFIGURATION,
     );
     return { status };

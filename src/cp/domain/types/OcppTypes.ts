@@ -139,6 +139,18 @@ export enum OCPPAction {
   SetChargingProfile = "SetChargingProfile",
   // RemoteTrigger actions
   TriggerMessage = "TriggerMessage",
+  // Security extension (1.6 Security Whitepaper)
+  SecurityEventNotification = "SecurityEventNotification",
+  SignCertificate = "SignCertificate",
+  CertificateSigned = "CertificateSigned",
+  DeleteCertificate = "DeleteCertificate",
+  GetInstalledCertificateIds = "GetInstalledCertificateIds",
+  InstallCertificate = "InstallCertificate",
+  ExtendedTriggerMessage = "ExtendedTriggerMessage",
+  SignedUpdateFirmware = "SignedUpdateFirmware",
+  SignedFirmwareStatusNotification = "SignedFirmwareStatusNotification",
+  LogStatusNotification = "LogStatusNotification",
+  GetLog = "GetLog",
   // Fake actions
   CallResult = "CallResult",
 }

@@ -5,10 +5,11 @@
 // and strips embedded `user:pass@` credentials from `wsUrl`. `WireCpConfig` is
 // the canonical wire type; the daemon's full config (with secrets) never
 // reaches the wire. CLIEvents (`event`/`data`) do not carry CP config, but
-// `eventToWire` still defensively deep-strips any `password` key as a
-// belt-and-suspenders guard.
+// `eventToWire` still defensively deep-strips sensitive keys such as
+// `password` and `AuthorizationKey` as a belt-and-suspenders guard.
 
 import { z } from "zod";
+import { redactSensitiveValue } from "../cp/shared/redaction";
 import { STR_64K } from "./limits";
 
 // ---------------------------------------------------------------------------
@@ -198,24 +199,26 @@ export type CliEventWire = z.infer<typeof cliEventWireSchema>;
 const URL_WITH_CREDS = /^[a-zA-Z][\w+.-]*:\/\/[^@/]*@/;
 
 /**
- * Defensively redact event data: drop any `password` key AND strip embedded
+ * Defensively redact event data: drop sensitive keys AND strip embedded
  * `user:pass@` credentials from any URL-shaped string value. CLIEvents do not
  * carry CP config today, so this is belt-and-suspenders (B-1).
  */
 function deepRedact(value: unknown): unknown {
-  if (typeof value === "string") {
-    return URL_WITH_CREDS.test(value) ? redactUrl(value) : value;
+  const withoutSecrets = redactSensitiveValue(value);
+  if (typeof withoutSecrets === "string") {
+    return URL_WITH_CREDS.test(withoutSecrets)
+      ? redactUrl(withoutSecrets)
+      : withoutSecrets;
   }
-  if (Array.isArray(value)) return value.map(deepRedact);
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (k === "password") continue;
-      out[k] = deepRedact(v);
-    }
-    return out;
+  if (Array.isArray(withoutSecrets)) return withoutSecrets.map(deepRedact);
+  if (withoutSecrets && typeof withoutSecrets === "object") {
+    return Object.fromEntries(
+      Object.entries(withoutSecrets as Record<string, unknown>).map(
+        ([k, v]) => [k, deepRedact(v)],
+      ),
+    );
   }
-  return value;
+  return withoutSecrets;
 }
 
 /** Bound + defensively redact a CLIEvent for the wire. */

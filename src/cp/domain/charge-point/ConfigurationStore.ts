@@ -35,6 +35,7 @@ export type ConfigurationChangeStatus =
  */
 const REBOOT_REQUIRED_KEYS = new Set<string>([
   "ChargingScheduleMaxPeriods", // pre-allocated array sizes etc.
+  "SecurityProfile", // transport profile changes require reconnect/reboot.
   // (Extend as additional reboot-sensitive keys are wired in.)
 ]);
 
@@ -92,6 +93,11 @@ export class ConfigurationStore {
     return Array.from(this.values.values());
   }
 
+  /** Entries safe for read surfaces such as GetConfiguration and debug dumps. */
+  allRedacted(): Configuration {
+    return this.all().map(redactConfigurationValue);
+  }
+
   /** Return entries for the requested keys; missing keys are listed in `unknown`. */
   read(keys: string[]): { known: Configuration; unknown: string[] } {
     if (keys.length === 0) {
@@ -110,9 +116,25 @@ export class ConfigurationStore {
     return { known, unknown };
   }
 
+  /** Read entries with write-only values blanked for OCPP/wire/debug output. */
+  readRedacted(keys: string[]): { known: Configuration; unknown: string[] } {
+    const { known, unknown } = this.read(keys);
+    return { known: known.map(redactConfigurationValue), unknown };
+  }
+
+  /** JSON.stringify(ConfigurationStore) must not expose write-only values. */
+  toJSON(): Configuration {
+    return this.allRedacted();
+  }
+
   /** Raw lookup. Returns `undefined` for unknown keys. */
   get(name: string): ConfigurationValue | undefined {
     return this.values.get(name);
+  }
+
+  isWriteOnly(name: string): boolean {
+    const entry = this.values.get(name);
+    return entry ? isWriteOnlyConfigurationKey(entry.key) : false;
   }
 
   /** Typed getters for the common shapes. Returns `undefined` when missing or wrong type. */
@@ -192,6 +214,7 @@ export class ConfigurationStore {
 
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
+    if (!isConfigurationValueValid(entry.key, parsed)) return "Rejected";
 
     const next = { key: entry.key, value: parsed } as ConfigurationValue;
     this.values.set(name, next);
@@ -315,6 +338,33 @@ function isValueAssignable(
     default:
       return false;
   }
+}
+
+function isConfigurationValueValid(
+  key: ConfigurationKey,
+  value: ConfigurationValueType,
+): boolean {
+  if (key.name === "SecurityProfile") {
+    return typeof value === "number" && value >= 0 && value <= 3;
+  }
+  return true;
+}
+
+export function isWriteOnlyConfigurationKey(
+  key: ConfigurationKey | string,
+): boolean {
+  if (typeof key === "string") return key === "AuthorizationKey";
+  return key.writeonly === true || key.name === "AuthorizationKey";
+}
+
+export function redactConfigurationValue(
+  entry: ConfigurationValue,
+): ConfigurationValue {
+  if (!isWriteOnlyConfigurationKey(entry.key)) return entry;
+  return {
+    key: entry.key,
+    value: "",
+  } as ConfigurationValue;
 }
 
 // Re-export commonly-used types so importers don't need two import sites.

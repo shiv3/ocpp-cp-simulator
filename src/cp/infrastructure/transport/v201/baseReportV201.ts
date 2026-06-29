@@ -1,12 +1,13 @@
+import {
+  isWriteOnlyConfigurationKey,
+  type ConfigurationKeyType,
+  type ConfigurationStore,
+} from "../../../domain/charge-point/ConfigurationStore";
 import type {
   ReportDataType,
   VariableAttributeType,
   VariableCharacteristicsType,
 } from "../../../../ocpp/types/v201/notify-report";
-import type {
-  ConfigurationKeyType,
-  ConfigurationStore,
-} from "../../../domain/charge-point/ConfigurationStore";
 import { V201_VARIABLE_TO_V16_KEY } from "./deviceModelMap";
 import { renderConfigValue } from "./renderConfigValue";
 
@@ -37,7 +38,11 @@ export function buildBaseReportData(
     const separatorIndex = v201Key.indexOf("/");
     const componentName = v201Key.slice(0, separatorIndex);
     const variableName = v201Key.slice(separatorIndex + 1);
-    const mutability = entry.key.readonly ? "ReadOnly" : "ReadWrite";
+    const mutability = isWriteOnlyConfigurationKey(entry.key)
+      ? "WriteOnly"
+      : entry.key.readonly
+        ? "ReadOnly"
+        : "ReadWrite";
 
     reportData.push({
       component: { name: componentName },

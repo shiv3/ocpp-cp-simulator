@@ -1,12 +1,15 @@
-import type {
-  ArrayConfigurationValue,
-  BooleanConfigurationValue,
-  ConfigurationValue,
-  IntegerConfigurationValue,
-  StringConfigurationValue,
+import {
+  isWriteOnlyConfigurationKey,
+  type ArrayConfigurationValue,
+  type BooleanConfigurationValue,
+  type ConfigurationValue,
+  type IntegerConfigurationValue,
+  type StringConfigurationValue,
 } from "../../../domain/charge-point/ConfigurationStore";
 
 export function renderConfigValue(value: ConfigurationValue): string {
+  if (isWriteOnlyConfigurationKey(value.key)) return "";
+
   switch (value.key.type) {
     case "string":
       return (value as StringConfigurationValue).value;

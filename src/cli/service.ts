@@ -3,6 +3,7 @@ import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoin
 import type { Database } from "../cp/domain/persistence/Database";
 import type { BootNotification } from "../cp/domain/types/OcppTypes";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import { OCPP_1_5 } from "../cp/domain/types/OcppVersion";
 import type {
   CLIOptions,
   ChargePointInitOptions,
@@ -260,8 +261,20 @@ export class CLIChargePointService {
 
     const autoMeterValue: AutoMeterValueSetting | null = null;
 
-    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present
-    const baseUrl = buildBaseUrl(init.wsUrl, init.cpId);
+    const ocppVersion = init.ocppVersion ?? "OCPP-1.6J";
+    const centralSystemUrl = init.centralSystemUrl ?? init.wsUrl;
+    if (ocppVersion === OCPP_1_5 && !init.soapCallbackUrl) {
+      throw new Error(
+        "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
+      );
+    }
+
+    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present.
+    // OCPP 1.5 SOAP posts to the CentralSystemService URL exactly as configured.
+    const baseUrl =
+      ocppVersion === OCPP_1_5
+        ? centralSystemUrl
+        : buildBaseUrl(init.wsUrl, init.cpId);
 
     this._chargePoint = new ChargePoint(
       init.cpId,
@@ -273,7 +286,12 @@ export class CLIChargePointService {
       this.database,
       init.extraWsHeaders ?? {},
       init.extraWsSubprotocols ?? [],
-      init.ocppVersion ?? "OCPP-1.6J",
+      ocppVersion,
+      {
+        centralSystemUrl,
+        soapCallbackUrl: init.soapCallbackUrl,
+        soapPath: init.soapPath,
+      },
     );
 
     this.attachEventForwarders();
@@ -291,10 +309,13 @@ export class CLIChargePointService {
       {
         cpId: options.cpId,
         wsUrl: options.wsUrl,
+        centralSystemUrl: options.wsUrl,
         connectors: options.connectors,
         vendor: options.vendor,
         model: options.model,
         ocppVersion: options.ocppVersion,
+        soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+        soapPath: options.soapPath,
         basicAuth: options.basicAuth,
       },
       database,
@@ -385,6 +406,9 @@ export class CLIChargePointService {
         vendor: this._init.vendor,
         model: this._init.model,
         basicAuth: this._init.basicAuth,
+        centralSystemUrl: this._init.centralSystemUrl,
+        soapCallbackUrl: this._init.soapCallbackUrl,
+        soapPath: this._init.soapPath,
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
         bootNotification: this._init.bootNotification ?? null,
       },

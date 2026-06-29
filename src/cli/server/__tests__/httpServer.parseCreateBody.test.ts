@@ -3,11 +3,21 @@ import { describe, expect, it } from "vitest";
 import { parseCreateBody } from "../httpServer";
 
 function createBody(ocppVersion: string) {
-  return {
+  const body: {
+    cpId: string;
+    wsUrl: string;
+    ocppVersion: string;
+    soapCallbackUrl?: string;
+  } = {
     cpId: "CP-1",
     wsUrl: "ws://127.0.0.1:9000/ocpp",
     ocppVersion,
   };
+  if (ocppVersion === "OCPP-1.5") {
+    body.soapCallbackUrl =
+      "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService";
+  }
+  return body;
 }
 
 describe("parseCreateBody ocppVersion", () => {
@@ -24,5 +34,33 @@ describe("parseCreateBody ocppVersion", () => {
     expect(() => parseCreateBody(createBody("OCPP-1.2"))).toThrow(
       "ocppVersion must be a supported OCPP version",
     );
+  });
+
+  it("accepts SOAP fields for OCPP-1.5", () => {
+    expect(
+      parseCreateBody({
+        ...createBody("OCPP-1.5"),
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        soapCallbackUrl:
+          "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService",
+        soapPath: "/ocpp/soap",
+      }),
+    ).toMatchObject({
+      centralSystemUrl:
+        "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      soapCallbackUrl:
+        "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService",
+      soapPath: "/ocpp/soap",
+    });
+  });
+
+  it("rejects OCPP-1.5 without a SOAP callback URL", () => {
+    expect(() =>
+      parseCreateBody({
+        cpId: "CP-1",
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        ocppVersion: "OCPP-1.5",
+      }),
+    ).toThrow("soapCallbackUrl is required for OCPP-1.5 SOAP");
   });
 });

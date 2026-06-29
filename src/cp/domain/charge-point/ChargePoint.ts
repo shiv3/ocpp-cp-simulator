@@ -8,10 +8,12 @@ import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
+import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
 import type { OCPPAvailability } from "../types/OcppTypes";
+import { OCPP_1_5 } from "../types/OcppVersion";
 import {
   BootNotification,
   ChargePointStatus,
@@ -50,14 +52,21 @@ interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
 }
 
+export interface ChargePointTransportOptions {
+  readonly centralSystemUrl?: string;
+  readonly soapCallbackUrl?: string;
+  readonly soapPath?: string;
+}
+
 export class ChargePoint {
   private readonly _connectors: Map<number, Connector> = new Map();
   // cpId is injected later in the constructor body so the Logger can
   // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
-  private readonly _webSocket: OCPPWebSocket;
+  private readonly _webSocket: OCPPWebSocket | null;
   private readonly _messageHandler: IChargePointMessageHandler;
+  private readonly _transportUrl: string;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
@@ -107,8 +116,10 @@ export class ChargePoint {
     extraWsHeaders: Record<string, string> = {},
     extraWsSubprotocols: ReadonlyArray<string> = [],
     ocppVersion: string = "OCPP-1.6J",
+    transportOptions: ChargePointTransportOptions = {},
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
+    this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
 
@@ -179,20 +190,31 @@ export class ChargePoint {
       this._connectors.set(connectorId, connector);
     }
 
-    this._webSocket = new OCPPWebSocket(
-      wsUrl,
-      this._id,
-      this._logger,
-      basicAuthSettings,
-      extraWsHeaders,
-      extraWsSubprotocols,
-      ocppVersion,
-    );
-    this._messageHandler = getProtocolProfile(ocppVersion).createMessageHandler(
-      this,
-      this._webSocket,
-      this._logger,
-    );
+    if (ocppVersion === OCPP_1_5) {
+      if (!transportOptions.soapCallbackUrl) {
+        throw new Error(
+          "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
+        );
+      }
+      this._webSocket = null;
+      this._messageHandler = new OCPPSoapHandler(this, this._logger, {
+        centralSystemUrl: this._transportUrl,
+        soapCallbackUrl: transportOptions.soapCallbackUrl,
+      });
+    } else {
+      this._webSocket = new OCPPWebSocket(
+        wsUrl,
+        this._id,
+        this._logger,
+        basicAuthSettings,
+        extraWsHeaders,
+        extraWsSubprotocols,
+        ocppVersion,
+      );
+      this._messageHandler = getProtocolProfile(
+        ocppVersion,
+      ).createMessageHandler(this, this._webSocket, this._logger);
+    }
     this._outbox = new Outbox(this._messageHandler);
 
     this._heartbeat = new HeartbeatService(this._logger);
@@ -377,7 +399,7 @@ export class ChargePoint {
    *  async handshake — without the CONNECTING check we'd race and end up
    *  with two sockets fighting for the same cpId. */
   get isWebSocketConnected(): boolean {
-    return this._webSocket.isOpenOrConnecting();
+    return this._webSocket?.isOpenOrConnecting() ?? false;
   }
 
   get connectorNumber(): number {
@@ -389,7 +411,7 @@ export class ChargePoint {
   }
 
   get wsUrl(): string {
-    return this._webSocket.url;
+    return this._webSocket?.url ?? this._transportUrl;
   }
 
   get error(): string {
@@ -495,6 +517,13 @@ export class ChargePoint {
   }
 
   connect(): void {
+    if (!this._webSocket) {
+      this._logger.info("Connecting via OCPP 1.5 SOAP client", LogType.OCPP);
+      this.boot();
+      this._events.emit("connected", undefined);
+      return;
+    }
+
     // Idempotent: if a socket is already open or mid-handshake, don't
     // create a second one. The daemon's startServer can hit this twice
     // when restoreFromDatabase() auto-connects and then the bootstrap
@@ -752,9 +781,14 @@ export class ChargePoint {
   }
 
   disconnect(): void {
-    this._logger.info("Disconnecting from WebSocket", LogType.WEBSOCKET);
+    this._logger.info(
+      this._webSocket
+        ? "Disconnecting from WebSocket"
+        : "Disconnecting OCPP 1.5 SOAP client",
+      this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
+    );
     this.teardownAfterClose();
-    this._webSocket.disconnect();
+    this._webSocket?.disconnect();
   }
 
   /**

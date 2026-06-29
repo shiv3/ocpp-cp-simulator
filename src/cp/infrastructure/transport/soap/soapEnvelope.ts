@@ -85,7 +85,7 @@ export interface ParsedSoapEnvelope {
   readonly replyTo: string;
   readonly to: string;
   readonly relatesTo?: string;
-  readonly chargeBoxIdentity: string;
+  readonly chargeBoxIdentity?: string;
   readonly namespace: SoapTargetNamespace;
   readonly wrapper: string;
   readonly payload: SoapParsedPayload;
@@ -457,11 +457,37 @@ function requireTextElement(
   return { key, value, text: textValue(value, name) };
 }
 
+function optionalTextElement(
+  record: Record<string, unknown>,
+  name: string,
+):
+  | { readonly key: string; readonly value: unknown; readonly text: string }
+  | undefined {
+  const entry = findElement(record, name);
+  if (!entry) return undefined;
+  const [key, value] = entry;
+  return { key, value, text: textValue(value, name) };
+}
+
 function requireAddressHeader(
   header: Record<string, unknown>,
   name: string,
 ): { readonly key: string; readonly value: unknown; readonly address: string } {
   const [key, value] = requireElement(header, name);
+  const addressParent = requireRecord(value, name);
+  const [, addressValue] = requireElement(addressParent, "Address");
+  return { key, value, address: textValue(addressValue, `${name}.Address`) };
+}
+
+function optionalAddressHeader(
+  header: Record<string, unknown>,
+  name: string,
+):
+  | { readonly key: string; readonly value: unknown; readonly address: string }
+  | undefined {
+  const entry = findElement(header, name);
+  if (!entry) return undefined;
+  const [key, value] = entry;
   const addressParent = requireRecord(value, name);
   const [, addressValue] = requireElement(addressParent, "Address");
   return { key, value, address: textValue(addressValue, `${name}.Address`) };
@@ -585,20 +611,6 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
   ]);
   assertNamespace(bodyNamespace, metadata.namespace, "SOAP Body wrapper");
 
-  const chargeBoxIdentity = requireTextElement(header, "chargeBoxIdentity");
-  const chargeBoxRecord = isRecord(chargeBoxIdentity.value)
-    ? chargeBoxIdentity.value
-    : {};
-  assertNamespace(
-    namespaceForElement(chargeBoxIdentity.key, [
-      envelope,
-      header,
-      chargeBoxRecord,
-    ]),
-    metadata.namespace,
-    "chargeBoxIdentity",
-  );
-
   const action = requireTextElement(header, "Action");
   const actionRecord = isRecord(action.value) ? action.value : {};
   assertNamespace(
@@ -611,9 +623,34 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
     throw new Error(`SOAP Action must be ${expectedAction}`);
   }
 
+  const chargeBoxIdentity =
+    kind === "request"
+      ? requireTextElement(header, "chargeBoxIdentity")
+      : optionalTextElement(header, "chargeBoxIdentity");
+  if (chargeBoxIdentity) {
+    const chargeBoxRecord = isRecord(chargeBoxIdentity.value)
+      ? chargeBoxIdentity.value
+      : {};
+    assertNamespace(
+      namespaceForElement(chargeBoxIdentity.key, [
+        envelope,
+        header,
+        chargeBoxRecord,
+      ]),
+      metadata.namespace,
+      "chargeBoxIdentity",
+    );
+  }
+
   const messageId = requireTextElement(header, "MessageID");
-  const from = requireAddressHeader(header, "From");
-  const replyTo = requireAddressHeader(header, "ReplyTo");
+  const from =
+    kind === "request"
+      ? requireAddressHeader(header, "From")
+      : optionalAddressHeader(header, "From");
+  const replyTo =
+    kind === "request"
+      ? requireAddressHeader(header, "ReplyTo")
+      : optionalAddressHeader(header, "ReplyTo");
   const to = requireTextElement(header, "To");
   const relatesTo = findElement(header, "RelatesTo");
   const relatesToText = relatesTo
@@ -625,11 +662,11 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
     kind,
     action: action.text,
     messageId: messageId.text,
-    from: from.address,
-    replyTo: replyTo.address,
+    from: from?.address ?? "",
+    replyTo: replyTo?.address ?? "",
     to: to.text,
     ...(relatesToText ? { relatesTo: relatesToText } : {}),
-    chargeBoxIdentity: chargeBoxIdentity.text,
+    ...(chargeBoxIdentity ? { chargeBoxIdentity: chargeBoxIdentity.text } : {}),
     namespace: metadata.namespace,
     wrapper,
     payload: payloadFromWrapper(wrapperValue),

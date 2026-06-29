@@ -50,6 +50,9 @@ export interface ChargePointSnapshot {
    *  don't ship this field. */
   config?: {
     wsUrl: string;
+    centralSystemUrl?: string;
+    soapCallbackUrl?: string;
+    soapPath?: string;
     ocppVersion?: string;
     connectors: number;
     vendor: string;
@@ -70,6 +73,9 @@ export interface ChargePointSnapshot {
 export interface CreateChargePointParams {
   cpId: string;
   wsUrl: string;
+  centralSystemUrl?: string;
+  soapCallbackUrl?: string;
+  soapPath?: string;
   ocppVersion?: string;
   connectors?: number;
   vendor?: string;

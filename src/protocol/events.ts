@@ -39,6 +39,9 @@ interface FullBootNotification {
 
 interface FullCpConfig {
   wsUrl: string;
+  centralSystemUrl?: string;
+  soapCallbackUrl?: string;
+  soapPath?: string;
   ocppVersion?: string;
   connectors: number;
   vendor: string;
@@ -54,6 +57,11 @@ interface FullCpConfig {
 export function redactCp(config: FullCpConfig): WireCpConfig {
   return {
     wsUrl: redactUrl(config.wsUrl),
+    centralSystemUrl: config.centralSystemUrl
+      ? redactUrl(config.centralSystemUrl)
+      : undefined,
+    soapCallbackUrl: config.soapCallbackUrl,
+    soapPath: config.soapPath,
     ocppVersion: config.ocppVersion,
     connectors: config.connectors,
     vendor: config.vendor,
@@ -85,6 +93,9 @@ export const bootNotificationWireSchema = z
 export const wireCpConfigSchema = z
   .object({
     wsUrl: STR_64K,
+    centralSystemUrl: STR_64K.optional(),
+    soapCallbackUrl: STR_64K.optional(),
+    soapPath: STR_64K.optional(),
     ocppVersion: STR_64K.optional(),
     connectors: z.number().int().min(0),
     vendor: STR_64K,

@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
   ocpp_version   TEXT,
+  central_system_url TEXT,
+  soap_callback_url TEXT,
+  soap_path      TEXT,
   basic_auth     TEXT,
   boot_notif     TEXT,
   created_at     TEXT NOT NULL
@@ -232,6 +235,21 @@ export function runMigrations(db: Database): void {
     const have = new Set(cols.map((c) => c.name));
     if (!have.has("ocpp_version")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN ocpp_version TEXT");
+    }
+  }
+
+  // v4 → v5: persist OCPP 1.5 SOAP transport fields for daemon restores.
+  if (stored < 5) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("central_system_url")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN central_system_url TEXT");
+    }
+    if (!have.has("soap_callback_url")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN soap_callback_url TEXT");
+    }
+    if (!have.has("soap_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN soap_path TEXT");
     }
   }
 

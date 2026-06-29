@@ -18,6 +18,8 @@ function runParseArgs(args: string[]) {
     "  httpPort: options.httpPort,",
     "  unixSocket: options.unixSocket,",
     "  unsafeRemote: options.unsafeRemote,",
+    "  soapCallbackUrl: options.soapCallbackUrl,",
+    "  soapPath: options.soapPath,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "}));",
   ].join("\n");
@@ -71,6 +73,29 @@ describe("parseArgs --ocpp-version", () => {
 
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({ ocppVersion: null });
+  });
+
+  it("parses OCPP 1.5 SOAP callback flags", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      "--ocpp-version",
+      "OCPP-1.5",
+      "--soap-callback-url",
+      "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService",
+      "--soap-path",
+      "/ocpp/soap",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ocppVersion: "OCPP-1.5",
+      soapCallbackUrl:
+        "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService",
+      soapPath: "/ocpp/soap",
+    });
   });
 
   it("rejects unsupported versions", () => {

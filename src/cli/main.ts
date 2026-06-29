@@ -100,6 +100,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let trustForwardedHeaders = false;
   const extraWsHeaders: Record<string, string> = {};
   const extraWsSubprotocols: string[] = [];
+  let soapCallbackUrl: string | null = null;
+  let soapPath = "/ocpp/soap";
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -294,6 +296,24 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         extraWsSubprotocols.push(next);
+        i++;
+        break;
+      case "--soap-callback-url":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --soap-callback-url requires a URL\n");
+          process.exit(1);
+        }
+        soapCallbackUrl = next;
+        i++;
+        break;
+      case "--soap-path":
+        if (!next || next.startsWith("--") || !next.startsWith("/")) {
+          process.stderr.write(
+            "Error: --soap-path requires an absolute path starting with '/'\n",
+          );
+          process.exit(1);
+        }
+        soapPath = next.replace(/\/+$/, "") || "/";
         i++;
         break;
       case "--web-console":
@@ -496,6 +516,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     healthPath,
     extraWsHeaders,
     extraWsSubprotocols,
+    soapCallbackUrl,
+    soapPath,
   };
 }
 
@@ -591,6 +613,11 @@ Options:
                            (e.g. Cloud Run / GFE). The browser UI build must
                            be given the matching VITE_HEALTH_PATH so its
                            remote-mode auto-detect probe lines up.
+  --soap-callback-url <url>
+                           OCPP 1.5 SOAP ChargePointService callback URL.
+                           Required when --ocpp-version OCPP-1.5 is used.
+  --soap-path <path>       Base path reserved for the SOAP callback server
+                           (default: /ocpp/soap).
   -h, --help               Show this help
 
 HTTP endpoints (see docs/server.md):
@@ -650,10 +677,13 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
   return {
     cpId: options.cpId,
     wsUrl: options.wsUrl,
+    centralSystemUrl: options.wsUrl,
     connectors: options.connectors,
     vendor: options.vendor,
     model: options.model,
     ocppVersion: options.ocppVersion,
+    soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+    soapPath: options.soapPath,
     basicAuth: options.basicAuth,
     extraWsHeaders: options.extraWsHeaders,
     extraWsSubprotocols: options.extraWsSubprotocols,

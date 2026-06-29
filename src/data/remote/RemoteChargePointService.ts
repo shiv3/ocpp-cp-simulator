@@ -148,6 +148,9 @@ function toChargePointSnapshot(s: StatusWire): ChargePointSnapshot {
 function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
   return {
     wsUrl: config.wsUrl,
+    centralSystemUrl: config.centralSystemUrl,
+    soapCallbackUrl: config.soapCallbackUrl,
+    soapPath: config.soapPath,
     ocppVersion: config.ocppVersion,
     connectors: config.connectors,
     vendor: config.vendor,

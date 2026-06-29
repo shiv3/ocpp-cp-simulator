@@ -29,7 +29,7 @@ export interface IChargePointMessageHandler {
     connectorId: number,
     context?: ReadingContext,
   ): void;
-  sendDataTransfer(vendorId: string, messageId: string, data?: string): void;
+  sendDataTransfer(vendorId: string, messageId?: string, data?: string): void;
   sendDiagnosticsStatusNotification(status: string): void;
   sendFirmwareStatusNotification(status: string): void;
   setBootStatus(

@@ -422,6 +422,19 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (typeof wsUrl !== "string" || wsUrl.length === 0) {
     throw new Error("wsUrl is required (string)");
   }
+  const centralSystemUrl =
+    typeof body.centralSystemUrl === "string" &&
+    body.centralSystemUrl.length > 0
+      ? body.centralSystemUrl
+      : wsUrl;
+  const soapCallbackUrl =
+    typeof body.soapCallbackUrl === "string" && body.soapCallbackUrl.length > 0
+      ? body.soapCallbackUrl
+      : undefined;
+  const soapPath =
+    typeof body.soapPath === "string" && body.soapPath.startsWith("/")
+      ? body.soapPath
+      : undefined;
   const connectors =
     typeof body.connectors === "number" && Number.isInteger(body.connectors)
       ? body.connectors
@@ -442,6 +455,9 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     } else {
       throw new Error("ocppVersion must be a supported OCPP version");
     }
+  }
+  if (ocppVersion === "OCPP-1.5" && !soapCallbackUrl) {
+    throw new Error("soapCallbackUrl is required for OCPP-1.5 SOAP");
   }
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
@@ -476,11 +492,14 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   return {
     cpId,
     wsUrl,
+    centralSystemUrl,
     connectors,
     vendor,
     model,
     basicAuth,
     ocppVersion,
+    ...(soapCallbackUrl ? { soapCallbackUrl } : {}),
+    ...(soapPath ? { soapPath } : {}),
     ...(bootNotification ? { bootNotification } : {}),
   };
 }

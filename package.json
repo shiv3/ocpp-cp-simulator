@@ -51,6 +51,7 @@
     "ajv": "^8.20.0",
     "ajv-draft-04": "^1.0.0",
     "eventemitter2": "^6.4.9",
+    "fast-xml-parser": "^5.9.3",
     "flowbite": "^3.1.2",
     "flowbite-react": "^0.12.10",
     "idb-keyval": "^6.2.4",
@@ -66,6 +67,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "sql.js": "^1.14.1",
+    "xmlbuilder2": "^4.0.3",
     "zod": "^4.4.3",
     "zustand": "^4.5.7"
   },

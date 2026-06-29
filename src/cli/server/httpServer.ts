@@ -5,6 +5,7 @@ import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
 import type { Database } from "../../cp/domain/persistence/Database";
+import { isOcppVersion } from "../../cp/domain/types/OcppVersion";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -436,12 +437,10 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     if (typeof body.ocppVersion !== "string") {
       throw new Error("ocppVersion must be a string");
     }
-    if (
-      body.ocppVersion === "OCPP-1.6J" ||
-      body.ocppVersion === "OCPP-2.0.1" ||
-      body.ocppVersion === "OCPP-2.1"
-    ) {
+    if (isOcppVersion(body.ocppVersion)) {
       ocppVersion = body.ocppVersion;
+    } else {
+      throw new Error("ocppVersion must be a supported OCPP version");
     }
   }
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;

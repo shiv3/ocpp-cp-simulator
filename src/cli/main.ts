@@ -16,6 +16,10 @@ import {
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
 import type { ClientLocation } from "./client";
+import {
+  isOcppVersion,
+  SUPPORTED_OCPP_VERSIONS,
+} from "../cp/domain/types/OcppVersion";
 
 /**
  * Locate the bundled web console (Vite-built `dist/`) shipped alongside
@@ -36,13 +40,7 @@ function resolveBundledDist(): string | null {
   return null;
 }
 
-const OCPP_VERSION_VALUES = "OCPP-1.6J, OCPP-2.0.1, OCPP-2.1";
-
-function isSupportedOcppVersion(value: string): boolean {
-  return (
-    value === "OCPP-1.6J" || value === "OCPP-2.0.1" || value === "OCPP-2.1"
-  );
-}
+const OCPP_VERSION_VALUES = SUPPORTED_OCPP_VERSIONS.join(", ");
 
 function isLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase();
@@ -169,7 +167,7 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       case "--ocpp-version":
-        if (!next || next.startsWith("--") || !isSupportedOcppVersion(next)) {
+        if (!next || next.startsWith("--") || !isOcppVersion(next)) {
           process.stderr.write(
             `Error: --ocpp-version must be one of ${OCPP_VERSION_VALUES}\n`,
           );
@@ -547,7 +545,7 @@ Options:
                            Basic auth password for the client modes (see above).
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
-  --ocpp-version <OCPP-1.6J|OCPP-2.0.1|OCPP-2.1>
+  --ocpp-version <OCPP-1.5|OCPP-1.6J|OCPP-2.0.1|OCPP-2.1>
                            OCPP version for a directly-started CP
                            (default: OCPP-1.6J)
   --scenario <file>            Run scenario from JSON file on startup

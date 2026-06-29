@@ -29,6 +29,22 @@ function runParseArgs(args: string[]) {
 }
 
 describe("parseArgs --ocpp-version", () => {
+  it("accepts OCPP-1.5", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "ws://127.0.0.1:9000/ocpp",
+      "--ocpp-version",
+      "OCPP-1.5",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ocppVersion: "OCPP-1.5",
+    });
+  });
+
   it("accepts OCPP-2.0.1", () => {
     const result = runParseArgs([
       "--cp-id",
@@ -69,7 +85,7 @@ describe("parseArgs --ocpp-version", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "Error: --ocpp-version must be one of OCPP-1.6J, OCPP-2.0.1, OCPP-2.1",
+      "Error: --ocpp-version must be one of OCPP-1.5, OCPP-1.6J, OCPP-2.0.1, OCPP-2.1",
     );
   });
 });

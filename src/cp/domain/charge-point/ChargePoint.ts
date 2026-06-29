@@ -52,6 +52,8 @@ interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
 }
 
+export type ChargePointResetType = "Hard" | "Soft";
+
 export interface ChargePointTransportOptions {
   readonly centralSystemUrl?: string;
   readonly soapCallbackUrl?: string;
@@ -828,6 +830,21 @@ export class ChargePoint {
   reset(): void {
     this.disconnect();
     this.connect();
+  }
+
+  applyRemoteReset(type: ChargePointResetType): void {
+    const reason = type === "Hard" ? "HardReset" : "SoftReset";
+    for (const connector of this.connectors.values()) {
+      if (connector.transaction) {
+        this.stopTransaction(connector, reason);
+      }
+    }
+    this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
+    if (type === "Hard") {
+      this.reset();
+    } else {
+      this.boot();
+    }
   }
 
   authorize(tagId: string): void {

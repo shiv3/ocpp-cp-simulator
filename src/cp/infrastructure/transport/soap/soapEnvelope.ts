@@ -76,6 +76,11 @@ export interface BuildSoapEnvelopeOptions {
   readonly relatesTo?: string;
 }
 
+export interface BuildSoapFaultEnvelopeOptions {
+  readonly reason: string;
+  readonly code?: "Sender" | "Receiver";
+}
+
 export interface ParsedSoapEnvelope {
   readonly operation: SoapOperation;
   readonly kind: SoapMessageKind;
@@ -347,6 +352,37 @@ export function buildSoapEnvelope(options: BuildSoapEnvelopeOptions): string {
   appendPayloadChildren(bodyWrapper, payload, fieldOrder, prefix);
 
   return bodyWrapper.doc().end({ headless: true });
+}
+
+export function buildSoapFaultEnvelope(
+  options: BuildSoapFaultEnvelopeOptions,
+): string {
+  const code = options.code ?? "Sender";
+  const reason = options.reason.length > 0 ? options.reason : "SOAP fault";
+  return create()
+    .ele("s:Envelope", {
+      "xmlns:s": OCPP15_SOAP_NAMESPACES.SOAP12,
+    })
+    .ele("s:Body")
+    .ele("s:Fault")
+    .ele("s:Code")
+    .ele("s:Value")
+    .txt(`s:${code}`)
+    .up()
+    .up()
+    .ele("s:Reason")
+    .ele("s:Text", { "xml:lang": "en" })
+    .txt(reason)
+    .up()
+    .up()
+    .up()
+    .up()
+    .doc()
+    .end({ headless: true });
+}
+
+export function soapFaultContentType(): string {
+  return "application/soap+xml; charset=utf-8";
 }
 
 export function soapContentTypeForOperation(

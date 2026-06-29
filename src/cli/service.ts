@@ -4,6 +4,7 @@ import type { Database } from "../cp/domain/persistence/Database";
 import type { BootNotification } from "../cp/domain/types/OcppTypes";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { OCPP_1_5 } from "../cp/domain/types/OcppVersion";
+import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type {
   CLIOptions,
   ChargePointInitOptions,
@@ -190,6 +191,7 @@ type EventHandler = (evt: CLIEvent) => void;
 
 export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
+  private readonly _soapServer: OCPPSoapServer | null;
   private readonly _handlers: Set<EventHandler> = new Set();
   private _unsubscribes: Array<() => void> = [];
   private _connectorUnsubscribes: Array<() => void> = [];
@@ -293,6 +295,14 @@ export class CLIChargePointService {
         soapPath: init.soapPath,
       },
     );
+    this._soapServer =
+      ocppVersion === OCPP_1_5
+        ? new OCPPSoapServer({
+            cpId: init.cpId,
+            applyRemoteReset: (type) =>
+              this._chargePoint.applyRemoteReset(type),
+          })
+        : null;
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
@@ -358,6 +368,13 @@ export class CLIChargePointService {
 
   disconnect(): void {
     this._chargePoint.disconnect();
+  }
+
+  handleSoapChargePointServiceRequest(
+    pathCpId: string,
+    xml: string,
+  ): Response | null {
+    return this._soapServer?.handleRequest(pathCpId, xml) ?? null;
   }
 
   getStatus(): ChargePointStatus {

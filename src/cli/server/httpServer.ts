@@ -6,6 +6,7 @@ import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { isOcppVersion } from "../../cp/domain/types/OcppVersion";
+import { soapFaultResponse } from "../../cp/infrastructure/transport/soap/OCPPSoapServer";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -207,6 +208,18 @@ function forbidden(): Response {
   return new Response("origin not allowed", { status: 403 });
 }
 
+function matchSoapChargePointService(
+  pathname: string,
+): { readonly cpId: string } | null {
+  const match = /^\/ocpp\/soap\/([^/]+)\/ChargePointService$/.exec(pathname);
+  if (!match) return null;
+  try {
+    return { cpId: decodeURIComponent(match[1]) };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Default every response to `Cache-Control: no-store` unless the handler set
  * one explicitly (issue #79). serveStatic already stamps build assets as
@@ -390,6 +403,34 @@ export function createHttpHandlers(deps: {
     // GET <healthPath>  (default /v1/healthz; configurable via --health-path)
     if (req.method === "GET" && url.pathname === healthPath) {
       return Response.json({ ok: true });
+    }
+
+    const soapRoute = matchSoapChargePointService(url.pathname);
+    if (soapRoute) {
+      if (req.method !== "POST") {
+        return new Response("method not allowed", {
+          status: 405,
+          headers: { allow: "POST" },
+        });
+      }
+
+      // This callback is only meaningful in daemon/server mode, where the CP
+      // advertises soapCallbackUrl as this route. If webConsoleBasicAuth is
+      // unset, the HTTP gate is open; SOAP identity is still checked below.
+      return req.text().then((body) => {
+        const service = deps.registry.get(soapRoute.cpId);
+        if (!service) {
+          return soapFaultResponse(
+            `Unknown charge point for SOAP callback: ${soapRoute.cpId}`,
+          );
+        }
+        return (
+          service.handleSoapChargePointServiceRequest(soapRoute.cpId, body) ??
+          soapFaultResponse(
+            `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
+          )
+        );
+      });
     }
 
     if (url.pathname === "/v1" || url.pathname.startsWith("/v1/")) {

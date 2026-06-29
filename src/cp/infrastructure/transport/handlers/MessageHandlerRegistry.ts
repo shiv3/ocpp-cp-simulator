@@ -35,9 +35,9 @@ import type {
   UnlockConnectorResponseV16,
   UpdateFirmwareRequestV16,
   UpdateFirmwareResponseV16,
-} from "@cshil/ocpp-tools";
+} from "../../../../ocpp";
 import { OCPPAction } from "../../../../domain/types/OcppTypes";
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { Logger } from "../../../../shared/Logger";
 
 /**

@@ -1,0 +1,56 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OCPP 1.6 transaction lifecycle (golden) sends StartTransaction, MeterValues, and StopTransaction with CSMS transaction id 1`] = `
+[
+  [
+    2,
+    "<uuid>",
+    "StartTransaction",
+    {
+      "connectorId": 1,
+      "idTag": "TAG-16",
+      "meterStart": 0,
+      "timestamp": "<ts>",
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "MeterValues",
+    {
+      "connectorId": 1,
+      "meterValue": [
+        {
+          "sampledValue": [
+            {
+              "context": "Sample.Periodic",
+              "measurand": "Energy.Active.Import.Register",
+              "unit": "Wh",
+              "value": "0",
+            },
+            {
+              "context": "Sample.Periodic",
+              "measurand": "Power.Active.Import",
+              "unit": "W",
+              "value": "150000",
+            },
+          ],
+          "timestamp": "<ts>",
+        },
+      ],
+      "transactionId": 1001,
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "StopTransaction",
+    {
+      "idTag": "TAG-16",
+      "meterStop": 0,
+      "timestamp": "<ts>",
+      "transactionId": 1001,
+    },
+  ],
+]
+`;

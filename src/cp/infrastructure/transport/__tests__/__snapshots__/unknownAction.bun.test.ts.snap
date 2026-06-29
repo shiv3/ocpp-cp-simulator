@@ -1,0 +1,13 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OCPP 1.6 unknown action (golden) answers CALLERROR NotImplemented to an unknown CSMS action 1`] = `
+[
+  [
+    4,
+    "err-1",
+    "NotImplemented",
+    "This action is not supported",
+    {},
+  ],
+]
+`;

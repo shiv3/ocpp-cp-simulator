@@ -61,7 +61,7 @@ import type {
   UnlockConnectorRequestV16,
   UnlockConnectorResponseV16,
   UpdateFirmwareRequestV16,
-} from "@cshil/ocpp-tools";
+} from "../../ocpp";
 import {
   OcppMessageErrorPayload,
   OcppMessagePayload,

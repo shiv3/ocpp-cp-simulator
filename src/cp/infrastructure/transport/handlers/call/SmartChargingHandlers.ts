@@ -18,7 +18,7 @@
  */
 
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "@cshil/ocpp-tools";
+import type {} from "../../../../../ocpp";
 import type { Connector } from "../../../../domain/connector/Connector";
 import {
   OCPPStatus,

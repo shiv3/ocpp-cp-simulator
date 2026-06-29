@@ -37,21 +37,23 @@ import type {
   TriggerMessageRequestV16,
   UnlockConnectorRequestV16,
   UpdateFirmwareRequestV16,
-} from "@cshil/ocpp-tools";
-import {
+} from "../../../ocpp";
+import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,
   OcppMessageRequestPayload,
   OcppMessageResponsePayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
-import { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { ProtocolCodec } from "./profile/ProtocolProfile";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Transaction } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
+import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -198,6 +200,7 @@ export class OCPPMessageHandler {
   private _chargePoint: ChargePoint;
   private _webSocket: OCPPWebSocket;
   private _logger: Logger;
+  private readonly _codec: ProtocolCodec;
   private _requests: RequestHistory = new RequestHistory();
   private _registry: MessageHandlerRegistry = new MessageHandlerRegistry();
   // Stored as a field so scenarios / tests can register vendor responders
@@ -245,10 +248,12 @@ export class OCPPMessageHandler {
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
     logger: Logger,
+    codec: ProtocolCodec,
   ) {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
+    this._codec = codec;
     this._pendingQueue = new PendingMessageQueue(
       chargePoint.id,
       chargePoint.database,
@@ -422,7 +427,10 @@ export class OCPPMessageHandler {
     this.sendRequest(OCPPAction.Authorize, messageId, payload);
   }
 
-  public startTransaction(transaction: Transaction, connectorId: number): void {
+  private sendStartTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
     const messageId = this.generateMessageId();
     const payload: StartTransactionRequestV16 = {
       connectorId: connectorId,
@@ -443,7 +451,10 @@ export class OCPPMessageHandler {
     );
   }
 
-  public stopTransaction(transaction: Transaction, connectorId: number): void {
+  private sendStopTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
     const messageId = this.generateMessageId();
     // §4.10: reason MAY be omitted when "Local" (the default), but SHOULD
     // be set to a correct value otherwise. The domain layer assigns
@@ -463,6 +474,12 @@ export class OCPPMessageHandler {
       payload,
       connectorId,
     );
+  }
+
+  public sendTransactionEvent(event: TransactionLifecycleEvent): void {
+    if (event.phase === "started")
+      this.sendStartTransaction(event.transaction, event.connectorId);
+    else this.sendStopTransaction(event.transaction, event.connectorId);
   }
 
   public sendBootNotification(bootPayload: BootNotification): void {
@@ -558,9 +575,7 @@ export class OCPPMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.getArray(
-      "MeterValuesSampledData",
-    ) ?? ["Energy.Active.Import.Register"];
+    const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
 
     const payload: MeterValuesRequestV16 = {
@@ -624,6 +639,10 @@ export class OCPPMessageHandler {
         LogType.OCPP,
       );
       return;
+    }
+    const warning = this._codec.outgoingWarning(action, payload);
+    if (warning) {
+      this._logger.warn(warning, LogType.OCPP);
     }
     // §4.1.1: queue here, pumpSerialQueue does the actual `ws.sendAction`
     // one CALL at a time. The previous CALL's CALLRESULT/CALLERROR (or
@@ -750,9 +769,7 @@ export class OCPPMessageHandler {
   public flushPendingQueue(): void {
     if (this._pendingQueue.size() === 0) return;
     const maxAttempts =
-      this._chargePoint.configuration.getInteger(
-        "TransactionMessageAttempts",
-      ) ?? 3;
+      this._chargePoint.configuration.transactionMessageAttempts();
     // Route flushed messages through `sendRequest` so they take the same
     // §4.1.1 serialization path as fresh CALLs. The PendingMessageQueue's
     // `flush` callback returns true for every entry (we're handing

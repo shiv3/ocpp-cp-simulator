@@ -21,7 +21,7 @@ import type {
   ResetResponseV16,
   TriggerMessageResponseV16,
   UnlockConnectorResponseV16,
-} from "@cshil/ocpp-tools";
+} from "../../../ocpp";
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -167,8 +167,8 @@ export class OCPPWebSocket {
 
   public sendAction(
     messageId: string,
-    action: OCPPAction,
-    payload: OcppMessageRequestPayload,
+    action: string,
+    payload: unknown,
   ): boolean {
     const message = JSON.stringify([
       OCPPMessageType.CALL,
@@ -179,10 +179,7 @@ export class OCPPWebSocket {
     return this.send(message);
   }
 
-  public sendResult(
-    messageId: string,
-    payload: OcppMessageResponsePayload,
-  ): void {
+  public sendResult(messageId: string, payload: unknown): void {
     const message = JSON.stringify([
       OCPPMessageType.CALLRESULT,
       messageId,

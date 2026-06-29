@@ -1,5 +1,5 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "@cshil/ocpp-tools";
+import type {} from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 

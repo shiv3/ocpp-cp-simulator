@@ -1,0 +1,53 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OCPP 2.0.1 boot handshake boots, accepts, then reports station and connector availability 1`] = `
+[
+  [
+    2,
+    "<uuid>",
+    "BootNotification",
+    {
+      "chargingStation": {
+        "firmwareVersion": "1.0",
+        "model": "Model",
+        "serialNumber": "123456",
+        "vendorName": "Vendor",
+      },
+      "reason": "PowerUp",
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "StatusNotification",
+    {
+      "connectorId": 0,
+      "connectorStatus": "Available",
+      "evseId": 0,
+      "timestamp": "<ts>",
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "StatusNotification",
+    {
+      "connectorId": 1,
+      "connectorStatus": "Available",
+      "evseId": 1,
+      "timestamp": "<ts>",
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "StatusNotification",
+    {
+      "connectorId": 1,
+      "connectorStatus": "Available",
+      "evseId": 2,
+      "timestamp": "<ts>",
+    },
+  ],
+]
+`;

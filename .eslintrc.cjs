@@ -25,4 +25,16 @@ module.exports = {
       },
     ],
   },
+  overrides: [
+    {
+      files: [
+        "src/components/ui/**/*.tsx",
+        "src/contexts/**/*.tsx",
+        "src/data/providers/**/*.tsx",
+        "src/components/ChargePointConfigModal.tsx",
+        "src/components/MeterValueCurveModal.tsx",
+      ],
+      rules: { "react-refresh/only-export-components": "off" },
+    },
+  ],
 };

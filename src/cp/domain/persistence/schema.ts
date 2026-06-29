@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS charge_points (
   connectors     INTEGER NOT NULL,
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
+  ocpp_version   TEXT,
   basic_auth     TEXT,
   boot_notif     TEXT,
   created_at     TEXT NOT NULL
@@ -219,6 +220,18 @@ export function runMigrations(db: Database): void {
       db.exec(
         "ALTER TABLE connector_runtime ADD COLUMN scenario_position_json TEXT",
       );
+    }
+  }
+
+  // v3 → v4: persist the daemon CP's OCPP version so restored charge
+  // points keep the same protocol instead of falling back to OCPP 1.6.
+  // SQLite has no `ADD COLUMN IF NOT EXISTS`, so we probe pragma
+  // table_info first.
+  if (stored < 4) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("ocpp_version")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN ocpp_version TEXT");
     }
   }
 

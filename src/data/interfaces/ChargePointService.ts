@@ -50,6 +50,7 @@ export interface ChargePointSnapshot {
    *  don't ship this field. */
   config?: {
     wsUrl: string;
+    ocppVersion?: string;
     connectors: number;
     vendor: string;
     model: string;
@@ -69,6 +70,7 @@ export interface ChargePointSnapshot {
 export interface CreateChargePointParams {
   cpId: string;
   wsUrl: string;
+  ocppVersion?: string;
   connectors?: number;
   vendor?: string;
   model?: string;

@@ -262,7 +262,6 @@ const FullPanelContent: React.FC<{
       // Legacy "details" / "scenario" both land on the scenario editor now.
       setActiveTab("scenario");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab, tabResetNonce]);
   const {
     status: connectorStatus,

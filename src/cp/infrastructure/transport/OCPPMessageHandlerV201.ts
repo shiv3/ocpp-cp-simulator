@@ -11,39 +11,41 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
-} from "@cshil/ocpp-tools";
-import { OCPPWebSocket } from "./OCPPWebSocket";
+} from "../../../ocpp";
+import type { OCPPWebSocket } from "./OCPPWebSocket";
+import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
   ChargePointErrorCode,
+  type OCPPErrorCode,
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-import { Transaction } from "../../domain/connector/Transaction";
+import type {
+  StopTransactionReason,
+  Transaction,
+} from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
-import { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
-
-type V201Action =
-  | "BootNotification"
-  | "Heartbeat"
-  | "StatusNotification"
-  | "TransactionEvent"
-  | "MeterValues"
-  | "Authorize";
-
-type V201RequestPayload =
-  | BootNotificationRequestV201
-  | HeartbeatRequestV201
-  | StatusNotificationRequestV201
-  | TransactionEventRequestV201
-  | MeterValuesRequestV201
-  | AuthorizeRequestV201;
+import {
+  v201MeterEvseId,
+  v201StatusEvse,
+  v201TransactionEvse,
+} from "./v201/topologyWireV201";
+import {
+  buildV201InboundRegistry,
+  type V201Action,
+  type V201InboundContext,
+  type V201InboundRegistry,
+  type V201RequestPayload,
+} from "./v201/inboundRegistryV201";
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -52,6 +54,38 @@ type V201ResponsePayload =
   | TransactionEventResponseV201
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
+
+type V201StoppedReason = NonNullable<
+  TransactionEventRequestV201["transactionInfo"]["stoppedReason"]
+>;
+type V201MeterValuesSampledValue =
+  MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
+
+function toV201StoppedReason(
+  reason: StopTransactionReason | undefined,
+): V201StoppedReason {
+  switch (reason) {
+    case undefined:
+      return "Local";
+    case "DeAuthorized":
+    case "EmergencyStop":
+    case "EVDisconnected":
+    case "Local":
+    case "Other":
+    case "PowerLoss":
+    case "Reboot":
+    case "Remote":
+      return reason;
+    case "HardReset":
+      return "ImmediateReset";
+    case "SoftReset":
+      return "Reboot";
+    case "UnlockCommand":
+      return "Other";
+    default:
+      return "Other";
+  }
+}
 
 function ocppStatusToV201(
   status: OCPPStatus,
@@ -74,43 +108,34 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _chargePoint: ChargePoint;
   private readonly _webSocket: OCPPWebSocket;
   private readonly _logger: Logger;
+  private readonly _codec?: ProtocolCodec;
   private readonly _dataTransferHandler: DataTransferHandler =
     new DataTransferHandler();
+  private readonly _inbound: V201InboundRegistry;
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
     | { status: "Pending" }
     | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
-  private _seqNo = 0;
-  private readonly _transactionIds = new Map<number, string>();
 
   constructor(
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
     logger: Logger,
+    inboundRegistry?: V201InboundRegistry,
+    codec?: ProtocolCodec,
   ) {
     this._chargePoint = chargePoint;
     this._webSocket = webSocket;
     this._logger = logger;
+    this._codec = codec;
+    this._inbound = inboundRegistry ?? buildV201InboundRegistry();
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
   }
 
   private generateMessageId(): string {
     return crypto.randomUUID();
-  }
-
-  private nextSeqNo(): number {
-    return this._seqNo++;
-  }
-
-  private getOrCreateTransactionId(numericId: number): string {
-    let id = this._transactionIds.get(numericId);
-    if (!id) {
-      id = crypto.randomUUID();
-      this._transactionIds.set(numericId, id);
-    }
-    return id;
   }
 
   private send(
@@ -125,16 +150,55 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       return;
     }
-    this._webSocket.sendAction(messageId, action as never, payload as never);
+    const warning = this._codec?.outgoingWarning(action, payload);
+    if (warning) {
+      this._logger.warn(warning, LogType.OCPP);
+    }
+    const sent = this._webSocket.sendAction(messageId, action, payload);
+    if (sent) {
+      this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
+    }
   }
 
   private handleIncomingMessage(
     messageType: OCPPMessageType,
     messageId: string,
-    _action: string,
+    action: string,
     payload: unknown,
   ): void {
-    if (messageType === OCPPMessageType.CALLRESULT) {
+    if (messageType === OCPPMessageType.CALL) {
+      const entry = this._inbound.get(action);
+      if (entry) {
+        if (!entry.validate(payload)) {
+          this._webSocket.sendError(messageId, {
+            errorCode: "FormationViolation" as OCPPErrorCode,
+            errorDescription: `Invalid ${action} payload`,
+            errorDetails: {},
+          });
+          return;
+        }
+
+        const ctx: V201InboundContext = {
+          chargePoint: this._chargePoint,
+          logger: this._logger,
+          sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
+        };
+        const { response, afterResult } = entry.handle(payload, ctx);
+        this._webSocket.sendResult(messageId, response);
+        afterResult?.();
+        return;
+      }
+
+      this._logger.warn(
+        `[v2.0.1] Unsupported CSMS action ${action}`,
+        LogType.OCPP,
+      );
+      this._webSocket.sendError(messageId, {
+        errorCode: "NotImplemented" as OCPPErrorCode,
+        errorDescription: "This action is not supported",
+        errorDetails: {},
+      });
+    } else if (messageType === OCPPMessageType.CALLRESULT) {
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
@@ -142,7 +206,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   private handleCallResult(
-    messageId: string,
+    _messageId: string,
     payload: V201ResponsePayload,
   ): void {
     const bootResult = payload as BootNotificationResponseV201;
@@ -195,7 +259,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public sendStatusNotification(
     connectorId: number,
     status: OCPPStatus,
-    _opts?: {
+    opts?: {
       errorCode?: ChargePointErrorCode;
       info?: string;
       vendorErrorCode?: string;
@@ -203,14 +267,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       timestamp?: Date;
     },
   ): void {
-    if (connectorId === 0) return;
-
     const messageId = this.generateMessageId();
+    const ev = v201StatusEvse(connectorId);
     const payload: StatusNotificationRequestV201 = {
-      timestamp: new Date().toISOString(),
+      timestamp: (opts?.timestamp ?? new Date()).toISOString(),
       connectorStatus: ocppStatusToV201(status),
-      evseId: connectorId,
-      connectorId: 1,
+      evseId: ev.evseId,
+      connectorId: ev.connectorId,
     };
     this.send("StatusNotification", messageId, payload);
   }
@@ -223,26 +286,34 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("Authorize", messageId, payload);
   }
 
-  public startTransaction(transaction: Transaction, connectorId: number): void {
-    const transactionId = this.getOrCreateTransactionId(connectorId);
+  private sendStartTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
+    if (!transaction.cpTransactionId) {
+      transaction.cpTransactionId = crypto.randomUUID();
+    }
+    const transactionId = transaction.cpTransactionId;
     const messageId = this.generateMessageId();
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
       triggerReason: "Authorized",
-      seqNo: this.nextSeqNo(),
-      transaction: {
+      seqNo,
+      transactionInfo: {
         transactionId,
         chargingState: "Charging",
       },
       idToken: { idToken: transaction.tagId, type: "ISO14443" },
-      evse: { id: connectorId, connectorId: 1 },
+      evse: v201TransactionEvse(connectorId),
       meterValue: [
         {
           timestamp: transaction.startTime.toISOString(),
           sampledValue: [
             {
-              value: String(transaction.meterStart / 1000),
+              value: transaction.meterStart / 1000,
               measurand: "Energy.Active.Import.Register",
               unitOfMeasure: { unit: "kWh" },
             },
@@ -253,27 +324,33 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("TransactionEvent", messageId, payload);
   }
 
-  public stopTransaction(transaction: Transaction, connectorId: number): void {
-    const transactionId = this.getOrCreateTransactionId(connectorId);
+  private sendStopTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
+    const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
     const messageId = this.generateMessageId();
+    const timestamp = (transaction.stopTime ?? new Date()).toISOString();
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
-      timestamp: new Date().toISOString(),
+      timestamp,
       triggerReason: "StopAuthorized",
-      seqNo: this.nextSeqNo(),
-      transaction: {
+      seqNo,
+      transactionInfo: {
         transactionId,
-        stoppedReason: "Local",
+        stoppedReason: toV201StoppedReason(transaction.stopReason),
       },
-      evse: { id: connectorId, connectorId: 1 },
+      evse: v201TransactionEvse(connectorId),
       meterValue:
         transaction.meterStop !== null
           ? [
               {
-                timestamp: new Date().toISOString(),
+                timestamp,
                 sampledValue: [
                   {
-                    value: String(transaction.meterStop / 1000),
+                    value: transaction.meterStop / 1000,
                     measurand: "Energy.Active.Import.Register",
                     unitOfMeasure: { unit: "kWh" },
                   },
@@ -283,7 +360,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           : undefined,
     };
     this.send("TransactionEvent", messageId, payload);
-    this._transactionIds.delete(connectorId);
+  }
+
+  public sendTransactionEvent(event: TransactionLifecycleEvent): void {
+    if (event.phase === "started")
+      this.sendStartTransaction(event.transaction, event.connectorId);
+    else this.sendStopTransaction(event.transaction, event.connectorId);
   }
 
   public sendMeterValue(
@@ -301,22 +383,28 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.getArray(
-      "MeterValuesSampledData",
-    ) ?? ["Energy.Active.Import.Register"];
+    const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
+    if (sampledValues.length === 0) {
+      this._logger.debug(
+        `[v2.0.1] sendMeterValue: no sampled values for connector ${connectorId}`,
+        LogType.METER_VALUE,
+      );
+      return;
+    }
+
+    const sampledValue = sampledValues.map((sv) => ({
+      value: Number(sv.value),
+      measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
+      unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
+    })) as [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]];
 
     const payload: MeterValuesRequestV201 = {
-      evseId: connectorId,
+      evseId: v201MeterEvseId(connectorId),
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: sampledValues.map((sv) => ({
-            value: String(sv.value),
-            measurand:
-              sv.measurand as MeterValuesRequestV201["meterValue"][0]["sampledValue"][0]["measurand"],
-            unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
-          })),
+          sampledValue,
         },
       ],
     };
@@ -355,6 +443,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void {
+    if (
+      this._bootStatus.status === status.status &&
+      status.status !== "Rejected"
+    ) {
+      return;
+    }
     this._bootStatus = status;
   }
 
@@ -362,9 +456,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this._dataTransferHandler;
   }
 
-  public onWebSocketClosed(): void {
-    this._seqNo = 0;
-  }
+  public onWebSocketClosed(): void {}
 
   public flushPendingQueue(): void {
     // OCPP 2.0.1: pending queue handled by TransactionEvent seqNo mechanism

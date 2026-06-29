@@ -1,0 +1,32 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OCPP 1.6 boot handshake (golden) boots, accepts, then reports connector-0 availability 1`] = `
+[
+  [
+    2,
+    "<uuid>",
+    "BootNotification",
+    {
+      "chargeBoxSerialNumber": "123456",
+      "chargePointModel": "Model",
+      "chargePointSerialNumber": "123456",
+      "chargePointVendor": "Vendor",
+      "firmwareVersion": "1.0",
+      "iccid": "",
+      "imsi": "",
+      "meterSerialNumber": "123456",
+      "meterType": "",
+    },
+  ],
+  [
+    2,
+    "<uuid>",
+    "StatusNotification",
+    {
+      "connectorId": 0,
+      "errorCode": "NoError",
+      "status": "Available",
+    },
+  ],
+]
+`;

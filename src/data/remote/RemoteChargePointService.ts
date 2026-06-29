@@ -59,6 +59,7 @@ interface ServerCpStatus {
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
   config?: {
     wsUrl: string;
+    ocppVersion?: string;
     connectors: number;
     vendor: string;
     model: string;
@@ -133,6 +134,7 @@ function toChargePointSnapshot(s: ServerCpStatus): ChargePointSnapshot {
     config: s.config
       ? {
           wsUrl: s.config.wsUrl,
+          ocppVersion: s.config.ocppVersion,
           connectors: s.config.connectors,
           vendor: s.config.vendor,
           model: s.config.model,

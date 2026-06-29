@@ -273,6 +273,7 @@ export class CLIChargePointService {
       this.database,
       init.extraWsHeaders ?? {},
       init.extraWsSubprotocols ?? [],
+      init.ocppVersion ?? "OCPP-1.6J",
     );
 
     this.attachEventForwarders();
@@ -293,6 +294,7 @@ export class CLIChargePointService {
         connectors: options.connectors,
         vendor: options.vendor,
         model: options.model,
+        ocppVersion: options.ocppVersion,
         basicAuth: options.basicAuth,
       },
       database,
@@ -383,6 +385,7 @@ export class CLIChargePointService {
         vendor: this._init.vendor,
         model: this._init.model,
         basicAuth: this._init.basicAuth,
+        ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
         bootNotification: this._init.bootNotification ?? null,
       },
     };

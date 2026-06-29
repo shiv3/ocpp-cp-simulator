@@ -140,6 +140,45 @@ export class ConfigurationStore {
     return entry.value as string[];
   }
 
+  /** Canonical key `MeterValuesSampledData`; default `["Energy.Active.Import.Register"]`. */
+  meterValuesSampledData(): string[] {
+    return (
+      this.getArray("MeterValuesSampledData") ?? [
+        "Energy.Active.Import.Register",
+      ]
+    );
+  }
+
+  /** Canonical key `TransactionMessageAttempts`; default `3`. */
+  transactionMessageAttempts(): number {
+    return this.getInteger("TransactionMessageAttempts") ?? 3;
+  }
+
+  /** Canonical key `AuthorizeRemoteTxRequests`; default `false`. */
+  authorizeRemoteTxRequests(): boolean {
+    return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;
+  }
+
+  /** Canonical key `LocalAuthListEnabled`; default `true`. */
+  localAuthListEnabled(): boolean {
+    return this.getBoolean("LocalAuthListEnabled") ?? true;
+  }
+
+  /** Canonical key `LocalAuthListMaxLength`; default `1000`. */
+  localAuthListMaxLength(): number {
+    return this.getInteger("LocalAuthListMaxLength") ?? 1000;
+  }
+
+  /** Canonical key `SendLocalListMaxLength`; default `100`. */
+  sendLocalListMaxLength(): number {
+    return this.getInteger("SendLocalListMaxLength") ?? 100;
+  }
+
+  /** Canonical key `ConnectionTimeOut`; default `60`. */
+  connectionTimeOut(): number {
+    return this.getInteger("ConnectionTimeOut") ?? 60;
+  }
+
   /**
    * Apply a ChangeConfiguration.req: parses the string value into the key's
    * declared type, persists, fires listeners, and returns the spec-defined

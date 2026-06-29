@@ -3,8 +3,8 @@ import type {
   ChargePointErrorCode,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-import type { Transaction } from "../../domain/connector/Transaction";
 import type { ReadingContext } from "../../domain/connector/MeterValueBuilder";
+import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { DataTransferHandler } from "./handlers";
 
 export interface IChargePointMessageHandler {
@@ -22,8 +22,7 @@ export interface IChargePointMessageHandler {
     },
   ): void;
   authorize(tagId: string): void;
-  startTransaction(transaction: Transaction, connectorId: number): void;
-  stopTransaction(transaction: Transaction, connectorId: number): void;
+  sendTransactionEvent(event: TransactionLifecycleEvent): void;
   sendMeterValue(
     transactionId: number | undefined,
     connectorId: number,

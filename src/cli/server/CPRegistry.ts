@@ -9,6 +9,7 @@ interface ChargePointRow {
   connectors: number;
   vendor: string;
   model: string;
+  ocpp_version: string | null;
   basic_auth: string | null;
   boot_notif: string | null;
   created_at: string;
@@ -42,7 +43,7 @@ export class CPRegistry {
   restoreFromDatabase(): string[] {
     if (!this.database) return [];
     const rows = this.database.all<ChargePointRow>(
-      "SELECT cp_id, ws_url, connectors, vendor, model, basic_auth, boot_notif, created_at " +
+      "SELECT cp_id, ws_url, connectors, vendor, model, ocpp_version, basic_auth, boot_notif, created_at " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -54,6 +55,7 @@ export class CPRegistry {
         connectors: row.connectors,
         vendor: row.vendor,
         model: row.model,
+        ocppVersion: row.ocpp_version ?? "OCPP-1.6J",
         basicAuth: safeJsonParse<ChargePointInitOptions["basicAuth"]>(
           row.basic_auth,
         ),
@@ -95,7 +97,6 @@ export class CPRegistry {
       // background), and we don't want one slow CSMS to block restore of
       // the others.
       svc.connect().catch((err) => {
-        // eslint-disable-next-line no-console
         console.error(
           `[CPRegistry] auto-connect failed for restored CP "${row.cp_id}":`,
           err,
@@ -181,7 +182,6 @@ export class CPRegistry {
       try {
         svc.loadScenario(connectorId, definition);
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.warn(
           `[CPRegistry] Failed to re-attach scenario ${definition.id} to ${init.cpId}/connector ${connectorId} during update:`,
           err,
@@ -206,11 +206,12 @@ export class CPRegistry {
     if (!this.database) return;
     this.database.run(
       "INSERT INTO charge_points " +
-        "(cp_id, ws_url, connectors, vendor, model, basic_auth, boot_notif, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+        "(cp_id, ws_url, connectors, vendor, model, ocpp_version, basic_auth, boot_notif, created_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, connectors = excluded.connectors, " +
         "vendor = excluded.vendor, model = excluded.model, " +
+        "ocpp_version = excluded.ocpp_version, " +
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif",
       [
         init.cpId,
@@ -218,6 +219,7 @@ export class CPRegistry {
         init.connectors,
         init.vendor,
         init.model,
+        init.ocppVersion ?? "OCPP-1.6J",
         init.basicAuth ? JSON.stringify(init.basicAuth) : null,
         init.bootNotification ? JSON.stringify(init.bootNotification) : null,
         new Date().toISOString(),

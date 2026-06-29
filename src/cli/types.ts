@@ -24,6 +24,7 @@ export interface CLIOptions {
   } | null;
   readonly vendor: string;
   readonly model: string;
+  readonly ocppVersion?: string;
   readonly scenario: string | null;
   readonly scenarioTemplate: string | null;
   /** Path to a JSON file containing a cpId-independent scenario template.
@@ -93,6 +94,7 @@ export interface ChargePointInitOptions {
     readonly username: string;
     readonly password: string;
   } | null;
+  readonly ocppVersion?: string;
   readonly bootNotification?: {
     readonly firmwareVersion?: string;
     readonly chargePointSerialNumber?: string;
@@ -181,6 +183,7 @@ export interface ChargePointStatus {
       readonly username: string;
       readonly password: string;
     } | null;
+    readonly ocppVersion?: string;
     readonly bootNotification: {
       readonly firmwareVersion?: string;
       readonly chargePointSerialNumber?: string;

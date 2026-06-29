@@ -102,6 +102,8 @@ describe("BunSqliteDatabase", () => {
           startTime,
           stopTime: null,
           meterSent: false,
+          cpTransactionId: "cp-tx-abc",
+          cpNextSeqNo: 1,
         },
         meterValueWh: 12345,
         socPercent: 42.5,
@@ -113,6 +115,8 @@ describe("BunSqliteDatabase", () => {
       expect(loaded?.status).toBe(OCPPStatus.Charging);
       expect(loaded?.transaction?.id).toBe(1583);
       expect(loaded?.transaction?.tagId).toBe("TAG001");
+      expect(loaded?.transaction?.cpTransactionId).toBe("cp-tx-abc");
+      expect(loaded?.transaction?.cpNextSeqNo).toBe(1);
       // Date round-trip: JSON.stringify reduces Date to ISO string;
       // deserializeTransaction re-hydrates it. The instance identity
       // changes (toMatchObject doesn't help) so just compare the epoch.

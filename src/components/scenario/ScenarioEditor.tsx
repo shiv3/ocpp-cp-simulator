@@ -46,6 +46,10 @@ import {
   applyCurveConfigToMeterNode,
 } from "./meterValueNodeConfig";
 import {
+  persistEditorScenario,
+  retargetScenarioToConnector,
+} from "./scenarioPersistence";
+import {
   type EVSettings,
   EV_PRESETS,
 } from "../../cp/domain/connector/EVSettings";
@@ -1109,18 +1113,46 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
       try {
         const imported = await importScenarioFromJSON(file);
-        setScenario(imported);
-        setNodes(imported.nodes);
-        setEdges(imported.edges);
+        // Retarget the uploaded scenario to the connector it's imported into.
+        // A file exported from a different connector keeps its old targetId,
+        // which the connector-scoped filters drop on the next refresh — so the
+        // upload would appear to "not save" (#101).
+        const targeted = retargetScenarioToConnector(
+          imported,
+          connectorId,
+          new Date().toISOString(),
+        );
+        setScenario(targeted);
+        setNodes(targeted.nodes);
+        setEdges(targeted.edges);
+        // Mirror the props-reload effect so the metadata fields reflect the
+        // uploaded scenario instead of the previously-open one.
+        setScenarioName(targeted.name);
+        setScenarioDescription(targeted.description || "");
+        setDefaultExecutionMode(targeted.defaultExecutionMode || "oneshot");
+        setScenarioEnabled(targeted.enabled !== false);
+        setScenarioEvSettings(targeted.evSettings ?? {});
 
-        // Repository.save is upsert (`INSERT … ON CONFLICT DO UPDATE`),
-        // so we don't need to look the existing row up first.
-        await scenarioRepository.save(cpId, connectorId, imported);
+        // Persist mode-aware: in remote mode the browser sql.js repository is a
+        // no-op, so the upload has to be pushed to the daemon (and prior
+        // scenarios cleaned up) or it's silently lost on reload (#101).
+        await persistEditorScenario(
+          { mode, chargePointService, scenarioRepository, cpId, connectorId },
+          targeted,
+        );
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [cpId, connectorId, scenarioRepository, setNodes, setEdges],
+    [
+      cpId,
+      connectorId,
+      mode,
+      chargePointService,
+      scenarioRepository,
+      setNodes,
+      setEdges,
+    ],
   );
 
   const handleLoadTemplate = useCallback(
@@ -1142,50 +1174,24 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setScenario(templateScenario);
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
+      // Keep the metadata fields in sync with the loaded template.
+      setScenarioName(templateScenario.name);
+      setScenarioDescription(templateScenario.description || "");
+      setDefaultExecutionMode(
+        templateScenario.defaultExecutionMode || "oneshot",
+      );
+      setScenarioEnabled(templateScenario.enabled !== false);
+      setScenarioEvSettings(templateScenario.evSettings ?? {});
 
-      void (async () => {
-        // Remote mode: scenarioRepository.save no-ops (sql.js isn't loaded),
-        // so a save here would vanish on reload — the daemon would still
-        // hand us the previous scenario via listScenarios on next mount.
-        // Push through chargePointService.loadScenario instead, and clean
-        // up the prior scenarios so listScenarios doesn't keep returning
-        // them at index 0 (the daemon orders by insertion / updated_at).
-        if (mode === "remote") {
-          try {
-            const existing = await chargePointService.listScenarios(
-              cpId,
-              connectorId,
-            );
-            await Promise.all(
-              existing
-                .filter((item) => item.scenarioId !== templateScenario.id)
-                .map((item) =>
-                  chargePointService
-                    .removeScenario(cpId, connectorId, item.scenarioId)
-                    .catch((err) =>
-                      console.warn(
-                        `Failed to remove stale scenario ${item.scenarioId}`,
-                        err,
-                      ),
-                    ),
-                ),
-            );
-            await chargePointService.loadScenario(
-              cpId,
-              connectorId,
-              templateScenario,
-            );
-          } catch (err) {
-            console.error("Failed to persist template scenario", err);
-          }
-          return;
-        }
-        try {
-          await scenarioRepository.save(cpId, connectorId, templateScenario);
-        } catch (err) {
-          console.error("Failed to save template scenario", err);
-        }
-      })();
+      // Same mode-aware persistence as the file-upload path: remote mode pushes
+      // through the daemon and prunes stale scenarios; local mode upserts into
+      // the browser sql.js repository (#101).
+      void persistEditorScenario(
+        { mode, chargePointService, scenarioRepository, cpId, connectorId },
+        templateScenario,
+      ).catch((err) =>
+        console.error("Failed to persist template scenario", err),
+      );
     },
     [
       cpId,

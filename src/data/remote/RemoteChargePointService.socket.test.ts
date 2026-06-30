@@ -23,6 +23,19 @@ interface PendingAck {
   reject: (reason?: unknown) => void;
 }
 
+interface ExpectedRpcRequest {
+  cpId?: string;
+  method: string;
+  params: Record<string, unknown>;
+}
+
+interface RemoteReachCase {
+  name: string;
+  invoke: (service: RemoteChargePointService) => unknown;
+  expected: ExpectedRpcRequest[];
+  results: unknown[];
+}
+
 const socketMockState = vi.hoisted(() => {
   class MockSocket {
     connected = false;
@@ -218,6 +231,16 @@ function autoMeterConfig(): AutoMeterValueConfig {
   };
 }
 
+function evSettings() {
+  return {
+    modelName: "Test EV",
+    batteryCapacityKwh: 64,
+    maxChargingPowerKw: 90,
+    initialSoc: 12,
+    targetSoc: 88,
+  };
+}
+
 function subscribeResult(scope = "cp-1"): SubscribeResult {
   return {
     subscribed: [scope],
@@ -228,12 +251,824 @@ function subscribeResult(scope = "cp-1"): SubscribeResult {
   };
 }
 
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "then" in value &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
 beforeEach(() => {
   socketMockState.sockets.splice(0);
   socketMockState.io.mockClear();
 });
 
 describe("RemoteChargePointService socket.io rpc", () => {
+  it("round-trips every wire-meaningful port method through the Remote adapter", async () => {
+    const definition = scenarioDefinition("reach-definition");
+    const definitionTwo = scenarioDefinition("reach-definition-two");
+    const autoMeter = autoMeterConfig();
+    const ev = evSettings();
+    const statusWithConnector = {
+      ...statusWire("cp-1"),
+      connectors: [
+        connectorWire(1, {
+          evSettings: ev,
+          autoMeterValueConfig: autoMeter as unknown as Record<string, unknown>,
+          chargingProfiles: [{ id: 99 }],
+        }),
+      ],
+    };
+
+    const cases: RemoteReachCase[] = [
+      {
+        name: "listChargePoints",
+        invoke: (service) => service.listChargePoints(),
+        expected: [{ method: "cp.list", params: {} }],
+        results: [[cpItem("cp-1")]],
+      },
+      {
+        name: "getChargePoint",
+        invoke: (service) => service.getChargePoint("cp-1"),
+        expected: [{ cpId: "cp-1", method: "status", params: {} }],
+        results: [statusWire("cp-1")],
+      },
+      {
+        name: "createChargePoint",
+        invoke: (service) =>
+          service.createChargePoint({
+            cpId: "cp-new",
+            wsUrl: "ws://example.test/ocpp",
+            connectors: 1,
+            vendor: "Vendor",
+            model: "Model",
+            basicAuth: { username: "user", password: "secret" },
+          }),
+        expected: [
+          {
+            method: "cp.create",
+            params: {
+              cpId: "cp-new",
+              wsUrl: "ws://example.test/ocpp",
+              connectors: 1,
+              vendor: "Vendor",
+              model: "Model",
+              basicAuth: { username: "user", password: "secret" },
+            },
+          },
+        ],
+        results: [{ cpId: "cp-new" }],
+      },
+      {
+        name: "updateChargePoint",
+        invoke: (service) =>
+          service.updateChargePoint({
+            cpId: "cp-1",
+            wsUrl: "ws://example.test/updated",
+            connectors: 2,
+            vendor: "Vendor",
+            model: "Model",
+            basicAuth: { username: "user" },
+          }),
+        expected: [
+          {
+            method: "cp.update",
+            params: {
+              cpId: "cp-1",
+              wsUrl: "ws://example.test/updated",
+              connectors: 2,
+              vendor: "Vendor",
+              model: "Model",
+              basicAuth: { username: "user" },
+            },
+          },
+        ],
+        results: [{ cpId: "cp-1" }],
+      },
+      {
+        name: "removeChargePoint",
+        invoke: (service) => service.removeChargePoint("cp-1"),
+        expected: [{ method: "cp.delete", params: { cpId: "cp-1" } }],
+        results: [{ ok: true }],
+      },
+      {
+        name: "ping",
+        invoke: (service) => service.ping(),
+        expected: [{ method: "cp.list", params: {} }],
+        results: [[]],
+      },
+      {
+        name: "resetAllState",
+        invoke: (service) => service.resetAllState(),
+        expected: [{ method: "state.reset", params: {} }],
+        results: [{ ok: true }],
+      },
+      {
+        name: "clearStoredLogs",
+        invoke: (service) => service.clearStoredLogs("cp-1"),
+        expected: [{ method: "logs.clear", params: { cpId: "cp-1" } }],
+        results: [{ ok: true }],
+      },
+      {
+        name: "listStoredLogs",
+        invoke: (service) => service.listStoredLogs("cp-1"),
+        expected: [{ method: "logs.get", params: { cpId: "cp-1" } }],
+        results: [[]],
+      },
+      {
+        name: "loadConfig",
+        invoke: (service) => service.loadConfig(),
+        expected: [{ method: "config.get", params: {} }],
+        results: [null],
+      },
+      {
+        name: "saveConfig",
+        invoke: (service) =>
+          service.saveConfig({
+            wsURL: "ws://example.test/ocpp",
+            ChargePointID: "cp-1",
+            connectorNumber: 1,
+            tagID: "TAG-1",
+            ocppVersion: "OCPP-1.6J",
+            basicAuthSettings: {
+              enabled: true,
+              username: "user",
+              password: "secret",
+            },
+            autoMeterValueSetting: {
+              enabled: false,
+              interval: 30,
+              value: 10,
+            },
+            Experimental: null,
+            BootNotification: null,
+          }),
+        expected: [
+          {
+            method: "config.save",
+            params: {
+              config: {
+                wsURL: "ws://example.test/ocpp",
+                ChargePointID: "cp-1",
+                connectorNumber: 1,
+                tagID: "TAG-1",
+                ocppVersion: "OCPP-1.6J",
+                basicAuthSettings: {
+                  enabled: true,
+                  username: "user",
+                  password: "secret",
+                },
+                autoMeterValueSetting: {
+                  enabled: false,
+                  interval: 30,
+                  value: 10,
+                },
+                Experimental: null,
+                BootNotification: null,
+              },
+            },
+          },
+        ],
+        results: [{ ok: true }],
+      },
+      {
+        name: "subscribeConfig",
+        invoke: (service) => service.subscribeConfig(() => undefined),
+        expected: [{ method: "config.get", params: {} }],
+        results: [null],
+      },
+      {
+        name: "connect",
+        invoke: (service) => service.connect("cp-1"),
+        expected: [{ cpId: "cp-1", method: "connect", params: {} }],
+        results: [undefined],
+      },
+      {
+        name: "disconnect",
+        invoke: (service) => service.disconnect("cp-1"),
+        expected: [{ cpId: "cp-1", method: "disconnect", params: {} }],
+        results: [undefined],
+      },
+      {
+        name: "reset",
+        invoke: (service) => service.reset("cp-1"),
+        expected: [
+          { cpId: "cp-1", method: "disconnect", params: {} },
+          { cpId: "cp-1", method: "connect", params: {} },
+        ],
+        results: [undefined, undefined],
+      },
+      {
+        name: "sendHeartbeat",
+        invoke: (service) => service.sendHeartbeat("cp-1"),
+        expected: [{ cpId: "cp-1", method: "heartbeat", params: {} }],
+        results: [undefined],
+      },
+      {
+        name: "startHeartbeat",
+        invoke: (service) => service.startHeartbeat("cp-1", 30),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "start_heartbeat",
+            params: { interval: 30 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "stopHeartbeat",
+        invoke: (service) => service.stopHeartbeat("cp-1"),
+        expected: [{ cpId: "cp-1", method: "stop_heartbeat", params: {} }],
+        results: [undefined],
+      },
+      {
+        name: "authorize",
+        invoke: (service) => service.authorize("cp-1", "TAG-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "authorize",
+            params: { tagId: "TAG-1" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "startTransaction",
+        invoke: (service) => service.startTransaction("cp-1", 1, "TAG-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "start_transaction",
+            params: { connector: 1, tagId: "TAG-1" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "stopTransaction",
+        invoke: (service) => service.stopTransaction("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "stop_transaction",
+            params: { connector: 1 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "sendStatusNotification",
+        invoke: (service) =>
+          service.sendStatusNotification("cp-1", 0, OCPPStatus.Available),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "update_connector_status",
+            params: { connector: 0, status: "Available" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "sendDiagnosticsStatusNotification",
+        invoke: (service) =>
+          service.sendDiagnosticsStatusNotification("cp-1", "Uploading"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "diagnostics_status_notification",
+            params: { status: "Uploading" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "sendFirmwareStatusNotification",
+        invoke: (service) =>
+          service.sendFirmwareStatusNotification("cp-1", "Downloaded"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "firmware_status_notification",
+            params: { status: "Downloaded" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "sendSecurityEventNotification",
+        invoke: (service) =>
+          service.sendSecurityEventNotification(
+            "cp-1",
+            "SettingSystemTime",
+            "clock adjusted",
+          ),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "security_event_notification",
+            params: { type: "SettingSystemTime", techInfo: "clock adjusted" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "sendSignCertificate",
+        invoke: (service) => service.sendSignCertificate("cp-1", "CSR"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "sign_certificate",
+            params: { csr: "CSR" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "setMeterValue",
+        invoke: (service) => service.setMeterValue("cp-1", 1, 1200),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_meter_value",
+            params: { connector: 1, value: 1200 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "sendMeterValue",
+        invoke: (service) => service.sendMeterValue("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "send_meter_value",
+            params: { connector: 1 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "removeConnector",
+        invoke: (service) => service.removeConnector("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "remove_connector",
+            params: { connector: 1 },
+          },
+        ],
+        results: [{ removed: true }],
+      },
+      {
+        name: "setEVSettings",
+        invoke: (service) => service.setEVSettings("cp-1", 1, ev),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_ev_settings",
+            params: { connector: 1, settings: ev },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "getEVSettings",
+        invoke: (service) => service.getEVSettings("cp-1", 1),
+        expected: [{ cpId: "cp-1", method: "status", params: {} }],
+        results: [statusWithConnector],
+      },
+      {
+        name: "applyDefaultEVSettings",
+        invoke: (service) => service.applyDefaultEVSettings(ev),
+        expected: [
+          { method: "cp.list", params: {} },
+          {
+            cpId: "cp-1",
+            method: "set_ev_settings",
+            params: { connector: 1, settings: ev },
+          },
+        ],
+        results: [[cpItem("cp-1")], undefined],
+      },
+      {
+        name: "setAutoMeterValueConfig",
+        invoke: (service) =>
+          service.setAutoMeterValueConfig("cp-1", 1, autoMeter),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_auto_meter_config",
+            params: { connector: 1, config: autoMeter },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "getAutoMeterValueConfig",
+        invoke: (service) => service.getAutoMeterValueConfig("cp-1", 1),
+        expected: [{ cpId: "cp-1", method: "status", params: {} }],
+        results: [statusWithConnector],
+      },
+      {
+        name: "getAutoMeterConfig",
+        invoke: (service) => service.getAutoMeterConfig("cp-1", 1),
+        expected: [
+          {
+            method: "connector_settings.auto_meter.get",
+            params: { cpId: "cp-1", connectorId: 1 },
+          },
+        ],
+        results: [autoMeter],
+      },
+      {
+        name: "saveAutoMeterConfig",
+        invoke: (service) => service.saveAutoMeterConfig("cp-1", 1, autoMeter),
+        expected: [
+          {
+            method: "connector_settings.auto_meter.save",
+            params: { cpId: "cp-1", connectorId: 1, config: autoMeter },
+          },
+        ],
+        results: [{ ok: true }],
+      },
+      {
+        name: "setAutoResetToAvailable",
+        invoke: (service) => service.setAutoResetToAvailable("cp-1", 1, false),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_auto_reset_to_available",
+            params: { connector: 1, enabled: false },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "setConnectorMode",
+        invoke: (service) => service.setConnectorMode("cp-1", 1, "scenario"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_mode",
+            params: { connector: 1, mode: "scenario" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "setConnectorSoc",
+        invoke: (service) => service.setConnectorSoc("cp-1", 1, 42),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_soc",
+            params: { connector: 1, soc: 42 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "setConnectorSocMeterSync",
+        invoke: (service) => service.setConnectorSocMeterSync("cp-1", 1, true),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "set_soc_meter_sync",
+            params: { connector: 1, enabled: true },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "getSocMeterSync",
+        invoke: (service) => service.getSocMeterSync("cp-1", 1),
+        expected: [
+          {
+            method: "connector_settings.soc_meter_sync.get",
+            params: { cpId: "cp-1", connectorId: 1 },
+          },
+        ],
+        results: [true],
+      },
+      {
+        name: "saveSocMeterSync",
+        invoke: (service) => service.saveSocMeterSync("cp-1", 1, true),
+        expected: [
+          {
+            method: "connector_settings.soc_meter_sync.save",
+            params: { cpId: "cp-1", connectorId: 1, enabled: true },
+          },
+        ],
+        results: [{ ok: true }],
+      },
+      {
+        name: "getChargingProfiles",
+        invoke: (service) => service.getChargingProfiles("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "get_charging_profiles",
+            params: { connector: 1 },
+          },
+        ],
+        results: [[{ id: 99 }]],
+      },
+      {
+        name: "getStateHistory",
+        invoke: (service) => service.getStateHistory("cp-1", { limit: 10 }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "get_state_history",
+            params: { options: { limit: 10 } },
+          },
+        ],
+        results: [[]],
+      },
+      {
+        name: "listScenarioDefinitions",
+        invoke: (service) => service.listScenarioDefinitions("cp-1", null),
+        expected: [
+          {
+            method: "scenario.definitions.list",
+            params: { cpId: "cp-1", connectorId: null },
+          },
+        ],
+        results: [[]],
+      },
+      {
+        name: "saveScenarioDefinition",
+        invoke: (service) =>
+          service.saveScenarioDefinition("cp-1", 1, definition),
+        expected: [
+          {
+            method: "scenario.definitions.save",
+            params: { cpId: "cp-1", connectorId: 1, definition },
+          },
+        ],
+        results: [definition],
+      },
+      {
+        name: "replaceConnectorScenarioDefinitions",
+        invoke: (service) =>
+          service.replaceConnectorScenarioDefinitions("cp-1", 1, [
+            definition,
+            definitionTwo,
+          ]),
+        expected: [
+          {
+            method: "scenario.definitions.replace",
+            params: {
+              cpId: "cp-1",
+              connectorId: 1,
+              definitions: [definition, definitionTwo],
+            },
+          },
+        ],
+        results: [[definition, definitionTwo]],
+      },
+      {
+        name: "deleteScenarioDefinition",
+        invoke: (service) =>
+          service.deleteScenarioDefinition("cp-1", 1, definition.id),
+        expected: [
+          {
+            method: "scenario.definitions.delete",
+            params: {
+              cpId: "cp-1",
+              connectorId: 1,
+              definitionId: definition.id,
+            },
+          },
+        ],
+        results: [{ ok: true }],
+      },
+      {
+        name: "subscribeScenarioDefinitions",
+        invoke: (service) =>
+          service.subscribeScenarioDefinitions("cp-1", 1, () => undefined),
+        expected: [
+          {
+            method: "scenario.definitions.list",
+            params: { cpId: "cp-1", connectorId: 1 },
+          },
+        ],
+        results: [[]],
+      },
+      {
+        name: "getScenarioTemplates",
+        invoke: (service) => service.getScenarioTemplates(),
+        expected: [{ method: "scenario.templates", params: {} }],
+        results: [[]],
+      },
+      {
+        name: "loadScenarioTemplate",
+        invoke: (service) =>
+          service.loadScenarioTemplate("cp-1", "template-1", 1, {
+            maxChargingPowerKw: 3,
+          }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "load_scenario_template",
+            params: {
+              connector: 1,
+              templateId: "template-1",
+              evSettings: { maxChargingPowerKw: 3 },
+            },
+          },
+        ],
+        results: [{ scenarioId: "template-scenario" }],
+      },
+      {
+        name: "loadScenario",
+        invoke: (service) => service.loadScenario("cp-1", 1, definition),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "load_scenario",
+            params: { connector: 1, scenario: definition },
+          },
+        ],
+        results: [{ scenarioId: "loaded-scenario" }],
+      },
+      {
+        name: "listScenarios",
+        invoke: (service) => service.listScenarios("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "list_scenarios",
+            params: { connector: 1 },
+          },
+        ],
+        results: [[]],
+      },
+      {
+        name: "runScenario",
+        invoke: (service) => service.runScenario("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "run_scenario",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "runScenarioFile",
+        invoke: (service) =>
+          service.runScenarioFile("cp-1", "/tmp/scenario.json", {
+            connectorId: 1,
+          }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "run_scenario_file",
+            params: { connector: 1, file: "/tmp/scenario.json" },
+          },
+        ],
+        results: [{ scenarioId: "file-scenario" }],
+      },
+      {
+        name: "runScenarioTemplate",
+        invoke: (service) =>
+          service.runScenarioTemplate("cp-1", "template-1", {
+            connectorId: 1,
+            evSettings: { maxChargingPowerKw: 3 },
+          }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "run_scenario_template",
+            params: {
+              connector: 1,
+              templateId: "template-1",
+              evSettings: { maxChargingPowerKw: 3 },
+            },
+          },
+        ],
+        results: [{ scenarioId: "template-scenario" }],
+      },
+      {
+        name: "stopScenario",
+        invoke: (service) => service.stopScenario("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "stop_scenario",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "stepScenario",
+        invoke: (service) => service.stepScenario("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "step_scenario",
+            params: { connector: 1, scenarioId: "scenario-1", force: false },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "stopAllScenarios",
+        invoke: (service) => service.stopAllScenarios("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "stop_all_scenarios",
+            params: { connector: 1 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "removeScenario",
+        invoke: (service) => service.removeScenario("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "remove_scenario",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [{ removed: true }],
+      },
+      {
+        name: "getScenarioStatus",
+        invoke: (service) => service.getScenarioStatus("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "scenario_status",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [null],
+      },
+      {
+        name: "getScenario",
+        invoke: (service) => service.getScenario("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "get_scenario",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [definition],
+      },
+      {
+        name: "subscribe",
+        invoke: (service) => service.subscribe("cp-1", () => undefined),
+        expected: [{ method: "events.subscribe", params: { scope: "cp-1" } }],
+        results: [subscribeResult("cp-1")],
+      },
+      {
+        name: "subscribeRegistry",
+        invoke: (service) => service.subscribeRegistry(() => undefined),
+        expected: [
+          { method: "events.subscribe", params: { scope: "registry" } },
+        ],
+        results: [subscribeResult("registry")],
+      },
+    ];
+
+    for (const testCase of cases) {
+      socketMockState.sockets.splice(0);
+      socketMockState.io.mockClear();
+      const service = new RemoteChargePointService("http://127.0.0.1:9700");
+      const returned = testCase.invoke(service);
+
+      for (const [index, expected] of testCase.expected.entries()) {
+        const ack = latestSocket().acks.shift();
+        if (!ack) {
+          throw new Error(
+            `missing pending ack for ${testCase.name} -> ${expected.method}`,
+          );
+        }
+        expect(ack.event, testCase.name).toBe("rpc");
+        expect(ack.request, testCase.name).toEqual(expected);
+        ack.resolve({ ok: true, result: testCase.results[index] });
+        await flush();
+        await flush();
+      }
+
+      if (isPromiseLike(returned)) await returned;
+      service.dispose();
+    }
+  });
+
   it("resolves rpc calls from an ok ack", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
     const promise = service.connect("cp-1");

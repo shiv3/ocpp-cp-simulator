@@ -10,6 +10,7 @@ vi.mock("@socket.io/bun-engine", () => ({
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { registerSocketHandlers } from "../socketServer";
+import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 import type { SimulatorConfigInput } from "../../../protocol";
 
 type Handler = (...args: unknown[]) => void;
@@ -80,7 +81,7 @@ describe("socket.io rpc dispatch", () => {
     const bus = new EventBus();
     const registry = new CPRegistry(bus, null);
     const facade = {
-      loadConfig: vi.fn().mockResolvedValue(simulatorConfig()),
+      loadConfig: vi.fn().mockResolvedValue(secretSimulatorConfig()),
     };
     const io = new FakeIo();
     const socket = new FakeSocket();
@@ -102,14 +103,208 @@ describe("socket.io rpc dispatch", () => {
     expect(facade.loadConfig).toHaveBeenCalledTimes(1);
     if (!ack.ok) return;
     const result = ack.result as {
+      wsURL: string;
       basicAuthSettings: Record<string, unknown>;
     };
     expect(result.basicAuthSettings).toEqual({
       enabled: true,
       username: "user",
     });
+    expect(result.wsURL).toBe("ws://example.test/ocpp");
     expect("password" in result.basicAuthSettings).toBe(false);
-    expect(JSON.stringify(result)).not.toContain("secret");
+    expectNoWireSecrets(result);
+  });
+
+  it("deep-redacts every socket read and subscribe snapshot that carries CP config", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const snapshot = secretChargePointSnapshot();
+    const facade = {
+      listChargePoints: vi.fn().mockResolvedValue([snapshot]),
+      getChargePoint: vi.fn().mockResolvedValue(snapshot),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    const reads = [
+      {
+        label: "cp.list",
+        request: { method: "cp.list", params: {} },
+      },
+      {
+        label: "getChargePoint/status",
+        request: { cpId: "cp-redact", method: "status", params: {} },
+      },
+      {
+        label: "registry subscribe snapshot",
+        request: { method: "events.subscribe", params: { scope: "registry" } },
+      },
+      {
+        label: "star subscribe snapshot",
+        request: { method: "events.subscribe", params: { scope: "*" } },
+      },
+    ];
+
+    for (const { label, request } of reads) {
+      const ack = await socket.emitRpc(request);
+      expect(ack.ok, label).toBe(true);
+      if (!ack.ok) continue;
+      expectNoWireSecrets(ack.result);
+    }
+
+    expect(facade.listChargePoints).toHaveBeenCalledTimes(3);
+    expect(facade.getChargePoint).toHaveBeenCalledWith("cp-redact");
+  });
+
+  it("accepts create/update secrets as write-only inputs without echoing them", async () => {
+    const bus = new EventBus();
+    const existing = {
+      getInit: () => ({
+        cpId: "cp-write",
+        wsUrl: "wss://old-user:wire-url-secret@example.test/ocpp",
+        connectors: 1,
+        vendor: "Vendor",
+        model: "Model",
+        basicAuth: { username: "existing-user", password: "wire-basic-secret" },
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 3,
+        authorizationKey: "wire-authorization-key",
+        cpoName: "Example CPO",
+        tls: {
+          ca: "wire-tls-ca-material",
+          cert: "wire-tls-cert-material",
+          key: "wire-tls-key-material",
+          serverName: "old.example.test",
+        },
+        tlsCaPath: "/safe/ca.pem",
+        tlsCertPath: "/safe/cert.pem",
+        tlsKeyPath: "/safe/key.pem",
+      }),
+    };
+    const registry = {
+      get: vi.fn((cpId: string) => (cpId === "cp-write" ? existing : null)),
+      has: vi.fn(() => false),
+      list: vi.fn(() => []),
+    };
+    const facade = {
+      createChargePoint: vi.fn().mockResolvedValue(undefined),
+      updateChargePoint: vi.fn().mockResolvedValue(undefined),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry: registry as never,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    const createAck = await socket.emitRpc({
+      method: "cp.create",
+      params: {
+        cpId: "cp-create",
+        wsUrl: "wss://new-user:wire-url-secret@example.test/ocpp",
+        connectors: 1,
+        vendor: "Vendor",
+        model: "Model",
+        basicAuth: { username: "new-user", password: "wire-basic-secret" },
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 3,
+        authorizationKey: "wire-authorization-key",
+        tls: {
+          ca: "wire-tls-ca-material",
+          cert: "wire-tls-cert-material",
+          key: "wire-tls-key-material",
+          serverName: "new.example.test",
+        },
+      },
+    });
+    expect(createAck.ok).toBe(true);
+    if (createAck.ok) expectNoWireSecrets(createAck.result);
+    expect(facade.createChargePoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cpId: "cp-create",
+        basicAuth: { username: "new-user", password: "wire-basic-secret" },
+        tls: expect.objectContaining({
+          ca: "wire-tls-ca-material",
+          cert: "wire-tls-cert-material",
+          key: "wire-tls-key-material",
+        }),
+      }),
+    );
+
+    const blankUpdateAck = await socket.emitRpc({
+      method: "cp.update",
+      params: {
+        cpId: "cp-write",
+        wsUrl: "wss://updated.example.test/ocpp",
+        connectors: 2,
+        vendor: "Vendor",
+        model: "Model",
+        basicAuth: { username: "updated-user", password: "" },
+        ocppVersion: "OCPP-1.6J",
+        tls: { serverName: "updated.example.test" },
+      },
+    });
+    expect(blankUpdateAck.ok).toBe(true);
+    if (blankUpdateAck.ok) expectNoWireSecrets(blankUpdateAck.result);
+
+    const omittedUpdateAck = await socket.emitRpc({
+      method: "cp.update",
+      params: {
+        cpId: "cp-write",
+        wsUrl: "wss://omitted.example.test/ocpp",
+        connectors: 2,
+        vendor: "Vendor",
+        model: "Model",
+        ocppVersion: "OCPP-1.6J",
+      },
+    });
+    expect(omittedUpdateAck.ok).toBe(true);
+    if (omittedUpdateAck.ok) expectNoWireSecrets(omittedUpdateAck.result);
+
+    expect(facade.updateChargePoint).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        cpId: "cp-write",
+        basicAuth: {
+          username: "updated-user",
+          password: "wire-basic-secret",
+        },
+        tls: expect.objectContaining({
+          ca: "wire-tls-ca-material",
+          cert: "wire-tls-cert-material",
+          key: "wire-tls-key-material",
+          serverName: "updated.example.test",
+        }),
+      }),
+    );
+    expect(facade.updateChargePoint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        cpId: "cp-write",
+        basicAuth: {
+          username: "existing-user",
+          password: "wire-basic-secret",
+        },
+        tls: expect.objectContaining({
+          ca: "wire-tls-ca-material",
+          cert: "wire-tls-cert-material",
+          key: "wire-tls-key-material",
+          serverName: "old.example.test",
+        }),
+      }),
+    );
   });
 
   it("redacts facade CP snapshots at the socket boundary", async () => {
@@ -438,6 +633,17 @@ function simulatorConfig(
   };
 }
 
+function secretSimulatorConfig(): SimulatorConfigInput {
+  return simulatorConfig({
+    wsURL: "ws://config-user:wire-config-url-secret@example.test/ocpp",
+    basicAuthSettings: {
+      enabled: true,
+      username: "user",
+      password: "wire-config-secret",
+    },
+  });
+}
+
 function memoryConfigRepository(store: { value: SimulatorConfigInput | null }) {
   const listeners = new Set<(value: SimulatorConfigInput | null) => void>();
   return {
@@ -475,4 +681,92 @@ function chargePointSnapshot() {
       bootNotification: null,
     },
   };
+}
+
+function secretChargePointSnapshot(): ChargePointSnapshot {
+  return {
+    id: "cp-redact",
+    status: "Available" as ChargePointSnapshot["status"],
+    error: "",
+    connectors: [],
+    heartbeat: { intervalSeconds: 0, lastSentAt: null },
+    config: {
+      wsUrl: "ws://user:wire-url-secret@example.test/ocpp",
+      centralSystemUrl:
+        "https://central:wire-central-secret@central.example.test/ocpp",
+      soapCallbackUrl:
+        "https://soap:wire-soap-secret@cp.example.test/ocpp/soap",
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: { username: "user", password: "wire-basic-secret" },
+      ocppVersion: "OCPP-1.6J",
+      securityProfile: 3,
+      cpoName: "Example CPO",
+      tlsCaPath: "/safe/ca.pem",
+      tlsCertPath: "/safe/cert.pem",
+      tlsKeyPath: "/safe/key.pem",
+      bootNotification: null,
+      tls: {
+        ca: "wire-tls-ca-material",
+        cert: "wire-tls-cert-material",
+        key: "wire-tls-key-material",
+      },
+      authorizationKey: "wire-authorization-key",
+    } as ChargePointSnapshot["config"],
+  };
+}
+
+const WIRE_SECRET_VALUES = [
+  "wire-basic-secret",
+  "wire-url-secret",
+  "wire-central-secret",
+  "wire-soap-secret",
+  "wire-config-secret",
+  "wire-config-url-secret",
+  "wire-tls-ca-material",
+  "wire-tls-cert-material",
+  "wire-tls-key-material",
+  "wire-authorization-key",
+];
+
+function expectNoWireSecrets(value: unknown): void {
+  expect(secretValueHits(value)).toEqual([]);
+  expect(passwordKeyHits(value)).toEqual([]);
+}
+
+function secretValueHits(value: unknown, path = "$"): string[] {
+  if (typeof value === "string") {
+    return WIRE_SECRET_VALUES.filter((secret) => value.includes(secret)).map(
+      (secret) => `${path} contains ${secret}`,
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      secretValueHits(item, `${path}[${index}]`),
+    );
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(
+      ([key, nested]) => secretValueHits(nested, `${path}.${key}`),
+    );
+  }
+  return [];
+}
+
+function passwordKeyHits(value: unknown, path = "$"): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      passwordKeyHits(item, `${path}[${index}]`),
+    );
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(
+      ([key, nested]) => [
+        ...(key === "password" ? [`${path}.${key}`] : []),
+        ...passwordKeyHits(nested, `${path}.${key}`),
+      ],
+    );
+  }
+  return [];
 }

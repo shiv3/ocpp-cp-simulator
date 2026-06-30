@@ -67,7 +67,9 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     centralSystemUrl: config.centralSystemUrl
       ? redactUrl(config.centralSystemUrl)
       : undefined,
-    soapCallbackUrl: config.soapCallbackUrl,
+    soapCallbackUrl: config.soapCallbackUrl
+      ? redactUrl(config.soapCallbackUrl)
+      : undefined,
     soapPath: config.soapPath,
     ocppVersion: config.ocppVersion,
     connectors: config.connectors,
@@ -210,6 +212,7 @@ export function redactSimulatorConfig(
 ): WireSimulatorConfig {
   return {
     ...config,
+    wsURL: redactUrl(config.wsURL),
     basicAuthSettings: {
       enabled: config.basicAuthSettings.enabled,
       username: config.basicAuthSettings.username,
@@ -318,6 +321,14 @@ export const cliEventWireSchema = z
 export type CliEventWire = z.infer<typeof cliEventWireSchema>;
 
 const URL_WITH_CREDS = /^[a-zA-Z][\w+.-]*:\/\/[^@/]*@/;
+const TLS_MATERIAL_KEY_NAMES = new Set([
+  "ca",
+  "cert",
+  "certificate",
+  "key",
+  "passphrase",
+  "privatekey",
+]);
 
 /**
  * Defensively redact event data: drop sensitive keys AND strip embedded
@@ -335,11 +346,29 @@ function deepRedact(value: unknown): unknown {
   if (withoutSecrets && typeof withoutSecrets === "object") {
     return Object.fromEntries(
       Object.entries(withoutSecrets as Record<string, unknown>).map(
-        ([k, v]) => [k, deepRedact(v)],
+        ([k, v]) => [
+          k,
+          normalizedKey(k) === "tls" ? redactTlsMaterial(v) : deepRedact(v),
+        ],
       ),
     );
   }
   return withoutSecrets;
+}
+
+function redactTlsMaterial(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactTlsMaterial);
+  if (!value || typeof value !== "object") return deepRedact(value);
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !TLS_MATERIAL_KEY_NAMES.has(normalizedKey(key)))
+      .map(([key, nested]) => [key, redactTlsMaterial(nested)]),
+  );
+}
+
+function normalizedKey(key: string): string {
+  return key.replace(/[-_]/g, "").toLowerCase();
 }
 
 /** Bound + defensively redact a CLIEvent for the wire. */

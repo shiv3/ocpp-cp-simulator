@@ -40,6 +40,18 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // The OCPP 1.5 SOAP transport (daemon-only) pulls in xmlbuilder2, whose
+      // streaming builder declares `class XMLBuilderCBImpl extends
+      // require("events").EventEmitter` at module load. That code is never
+      // executed in the browser web console, but it is statically reachable
+      // from the shared ChargePoint domain class and therefore bundled. Vite
+      // externalizes Node's `events` for the browser, leaving EventEmitter
+      // undefined, so the class declaration throws "Class extends value
+      // undefined" while the bundle initializes — blanking the whole console.
+      // Resolve `events` to its browser polyfill (the `events` npm package) so
+      // the otherwise-unused module evaluates cleanly. Keep the `events`
+      // devDependency in sync; it has no direct import and exists only for this.
+      events: path.resolve(__dirname, "node_modules/events/events.js"),
     },
   },
 });

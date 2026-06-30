@@ -589,6 +589,16 @@ export class RemoteChargePointService implements ChargePointService {
     this.socket = io(baseUrl, {
       path: "/socket.io/",
       auth: authFromUrl(baseUrl),
+      // Pin the polling transport instead of upgrading to WebSocket. When the
+      // daemon is exposed behind an L7 proxy (e.g. the staging GCE Ingress),
+      // the WebSocket upgrade often can't complete — the upgrade request fails
+      // ("closed before the connection is established"), which then invalidates
+      // the engine.io session and the console churns through reconnects /
+      // "disconnected". HTTP long-polling traverses the proxy reliably (each
+      // poll is a normal request well under the LB's response timeout), so the
+      // session stays up. The cost is slightly higher update latency, which is
+      // immaterial for a status console.
+      transports: ["polling"],
     });
     this.connectionState = this.socket.connected ? "connected" : "connecting";
 

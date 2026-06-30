@@ -473,10 +473,12 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
     const scenarioId = this.requireService(id).loadScenarioTemplate(
       templateId,
       connectorId,
+      evSettings,
     );
     return { scenarioId };
   }

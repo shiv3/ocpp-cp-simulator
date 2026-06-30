@@ -9,9 +9,16 @@ import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
 import { createHttpHandlers, type CorsPolicy } from "./httpServer";
-import { attachSocketIo, isSocketIoPath } from "./socketServer";
+import {
+  attachSocketIo,
+  createSocketConfigRepository,
+  isSocketIoPath,
+} from "./socketServer";
+import { RegistryChargePointService } from "./RegistryChargePointService";
 import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../cp/domain/persistence/Database";
+import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
+import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
 
 /**
@@ -95,11 +102,24 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms,
   });
+  const configRepository = createSocketConfigRepository(database);
+  const scenarioRepository = new SqliteScenarioRepository(database);
+  const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
+    database,
+  );
+  const chargePointService = new RegistryChargePointService(registry, {
+    database,
+    configRepository,
+    scenarioRepository,
+    connectorSettingsRepository,
+  });
   // Re-create CPs that were registered before the previous daemon shut
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
   // re-run with the same --cp-id is treated as "update wsUrl/connectors"
   // rather than "create + collide".
-  const restored = await Promise.resolve(registry.restoreFromDatabase());
+  const restored = await Promise.resolve(
+    chargePointService.restoreFromDatabase(),
+  );
   if (restored.length > 0) {
     serverLog(
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
@@ -110,6 +130,10 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     registry,
     bus,
     database,
+    configRepository,
+    scenarioRepository,
+    connectorSettingsRepository,
+    chargePointService,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
     requestShutdown: () => {
       lifecycle?.requestShutdown();

@@ -79,7 +79,9 @@ describe("socket.io rpc dispatch", () => {
   it("returns redacted config.get results", async () => {
     const bus = new EventBus();
     const registry = new CPRegistry(bus, null);
-    const store = { value: simulatorConfig() as SimulatorConfigInput | null };
+    const facade = {
+      loadConfig: vi.fn().mockResolvedValue(simulatorConfig()),
+    };
     const io = new FakeIo();
     const socket = new FakeSocket();
 
@@ -87,7 +89,7 @@ describe("socket.io rpc dispatch", () => {
       registry,
       bus,
       database: null,
-      configRepository: memoryConfigRepository(store),
+      chargePointService: facade as never,
     });
     io.connect(socket);
 
@@ -97,6 +99,7 @@ describe("socket.io rpc dispatch", () => {
     });
 
     expect(ack.ok).toBe(true);
+    expect(facade.loadConfig).toHaveBeenCalledTimes(1);
     if (!ack.ok) return;
     const result = ack.result as {
       basicAuthSettings: Record<string, unknown>;
@@ -107,6 +110,127 @@ describe("socket.io rpc dispatch", () => {
     });
     expect("password" in result.basicAuthSettings).toBe(false);
     expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it("redacts facade CP snapshots at the socket boundary", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const snapshot = chargePointSnapshot();
+    const facade = {
+      listChargePoints: vi.fn().mockResolvedValue([snapshot]),
+      getChargePoint: vi.fn().mockResolvedValue(snapshot),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    const listAck = await socket.emitRpc({
+      method: "cp.list",
+      params: {},
+    });
+    const statusAck = await socket.emitRpc({
+      cpId: "cp-redact",
+      method: "status",
+      params: {},
+    });
+
+    expect(listAck.ok).toBe(true);
+    expect(statusAck.ok).toBe(true);
+    expect(facade.listChargePoints).toHaveBeenCalledTimes(1);
+    expect(facade.getChargePoint).toHaveBeenCalledWith("cp-redact");
+    if (!listAck.ok || !statusAck.ok) return;
+    expect(listAck.result).toEqual([
+      expect.objectContaining({
+        cpId: "cp-redact",
+        wsUrl: "ws://example.test/ocpp",
+        basicAuth: { username: "user" },
+      }),
+    ]);
+    expect(statusAck.result).toEqual(
+      expect.objectContaining({
+        id: "cp-redact",
+        config: expect.objectContaining({
+          wsUrl: "ws://example.test/ocpp",
+          basicAuth: { username: "user" },
+        }),
+      }),
+    );
+    expect(JSON.stringify(listAck.result)).not.toContain("secret");
+    expect(JSON.stringify(statusAck.result)).not.toContain("secret");
+  });
+
+  it("dispatches representative per-CP and global methods through the facade", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const facade = {
+      sendDiagnosticsStatusNotification: vi.fn().mockResolvedValue(undefined),
+      setConnectorSocMeterSync: vi.fn().mockResolvedValue(undefined),
+      getScenarioTemplates: vi.fn().mockResolvedValue([
+        {
+          id: "template-a",
+          name: "Template A",
+          description: "Template fixture",
+        },
+      ]),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    await expect(
+      socket.emitRpc({
+        cpId: "cp-alpha",
+        method: "diagnostics_status_notification",
+        params: { status: "Uploading" },
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(facade.sendDiagnosticsStatusNotification).toHaveBeenCalledWith(
+      "cp-alpha",
+      "Uploading",
+    );
+
+    await expect(
+      socket.emitRpc({
+        cpId: "cp-alpha",
+        method: "set_soc_meter_sync",
+        params: { connector: 1, enabled: true },
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(facade.setConnectorSocMeterSync).toHaveBeenCalledWith(
+      "cp-alpha",
+      1,
+      true,
+    );
+
+    const templatesAck = await socket.emitRpc({
+      method: "scenario.templates",
+      params: {},
+    });
+    expect(templatesAck).toMatchObject({
+      ok: true,
+      result: [
+        {
+          id: "template-a",
+          name: "Template A",
+          description: "Template fixture",
+        },
+      ],
+    });
+    expect(facade.getScenarioTemplates).toHaveBeenCalledTimes(1);
   });
 
   it("preserves the stored config password on omitted or blank config.save secrets", async () => {
@@ -315,12 +439,40 @@ function simulatorConfig(
 }
 
 function memoryConfigRepository(store: { value: SimulatorConfigInput | null }) {
+  const listeners = new Set<(value: SimulatorConfigInput | null) => void>();
   return {
     async load() {
       return store.value;
     },
     async save(config: SimulatorConfigInput | null) {
       store.value = config;
+      listeners.forEach((listener) => listener(config));
+    },
+    subscribe(handler: (config: SimulatorConfigInput | null) => void) {
+      listeners.add(handler);
+      void Promise.resolve(store.value).then(handler);
+      return () => {
+        listeners.delete(handler);
+      };
+    },
+  };
+}
+
+function chargePointSnapshot() {
+  return {
+    id: "cp-redact",
+    status: "Available",
+    error: "",
+    connectors: [],
+    heartbeat: { intervalSeconds: 0, lastSentAt: null },
+    config: {
+      wsUrl: "ws://user:secret@example.test/ocpp",
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: { username: "user", password: "secret" },
+      ocppVersion: "OCPP-1.6J",
+      bootNotification: null,
     },
   };
 }

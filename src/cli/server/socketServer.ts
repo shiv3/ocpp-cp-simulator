@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import type { Server as BunServer, WebSocketHandler } from "bun";
 import { Server as Engine } from "@socket.io/bun-engine";
 import {
@@ -5,7 +6,15 @@ import {
   type Socket as SocketIoSocket,
 } from "socket.io";
 
-import { handleJsonCommand } from "../jsonMode";
+import {
+  handleJsonCommand,
+  requireBoolean,
+  requireNonNegativeInt,
+  requireNumber,
+  requireObject,
+  requirePositiveInt,
+  requireString,
+} from "../jsonMode";
 import type { CLIChargePointService } from "../service";
 import {
   EXPLICIT_METHODS,
@@ -29,12 +38,27 @@ import {
   type StatusWire,
   type SubscribeResult,
 } from "../../protocol";
+import type {
+  ChargePointSnapshot,
+  ConnectorSnapshot,
+  CreateChargePointParams,
+} from "../../data/interfaces/ChargePointService";
+import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
 import type { Database } from "../../cp/domain/persistence/Database";
-import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
-import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
+import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
+import type {
+  ScenarioDefinition,
+  ScenarioMode,
+} from "../../cp/application/scenario/ScenarioTypes";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
-import { LogLevel } from "../../cp/shared/Logger";
+import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
+import {
+  hasStatusNotificationOptions,
+  OCPPStatus,
+  type StatusNotificationOptions,
+} from "../../cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import type { CPRegistry } from "./CPRegistry";
@@ -48,7 +72,10 @@ import {
   createRegistryEventBridge,
   type RegistryEventBridge,
 } from "./registryEvents";
-import { scenarioTemplates } from "../../utils/scenarioTemplates";
+import {
+  RegistryChargePointService,
+  type RegistryConfigRepository,
+} from "./RegistryChargePointService";
 
 export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
@@ -78,7 +105,16 @@ export interface SocketIoDeps {
     readonly password: string;
   } | null;
   readonly configRepository?: SocketConfigRepository;
+  readonly scenarioRepository?: ScenarioRepository;
+  readonly connectorSettingsRepository?: ConnectorSettingsRepository;
+  readonly chargePointService?: RegistryChargePointService;
   readonly registryEvents?: RegistryEventBridge | null;
+}
+
+interface RuntimeSocketIoDeps extends SocketIoDeps {
+  readonly configRepository: SocketConfigRepository;
+  readonly chargePointService: RegistryChargePointService;
+  readonly registryEvents: RegistryEventBridge | null;
 }
 
 interface SocketRpcState {
@@ -92,14 +128,19 @@ type RpcAckFn = (ack: RpcAck) => void;
 type DirectAckFn = (ack: unknown) => void;
 type FullCp = Parameters<typeof registryCpToWire>[0];
 type RpcMethod = keyof typeof METHODS;
+type FacadeDispatchResult =
+  | { readonly handled: true; readonly value: unknown }
+  | { readonly handled: false };
 
 const EXPLICIT_METHOD_SET = new Set<string>(EXPLICIT_METHODS);
 const CONFIG_KEY = "global_config";
+const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
+  "manual",
+  "scenario",
+];
+const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
-export interface SocketConfigRepository {
-  load(): Promise<SimulatorConfigInput | null>;
-  save(config: SimulatorConfigInput | null): Promise<void>;
-}
+export interface SocketConfigRepository extends RegistryConfigRepository {}
 
 export function isSocketIoPath(pathname: string): boolean {
   return pathname === "/socket.io" || pathname.startsWith(SOCKET_IO_PATH);
@@ -124,13 +165,7 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
     ? createRegistryEventBridge(io, { registry: deps.registry, bus: deps.bus })
     : null;
   const runtimeDeps = deps
-    ? {
-        ...deps,
-        configRepository:
-          deps.configRepository ??
-          createSocketConfigRepository(deps.database ?? null),
-        registryEvents,
-      }
+    ? createRuntimeDeps(deps, registryEvents)
     : undefined;
   registerSocketHandlers(io, runtimeDeps);
 
@@ -162,13 +197,7 @@ export function registerSocketHandlers(
   io: SocketIoServer,
   deps?: SocketIoDeps,
 ): void {
-  const runtimeDeps =
-    deps && !deps.configRepository
-      ? {
-          ...deps,
-          configRepository: createSocketConfigRepository(deps.database ?? null),
-        }
-      : deps;
+  const runtimeDeps = deps ? createRuntimeDeps(deps) : undefined;
 
   registerSocketAuth(io, runtimeDeps?.webConsoleBasicAuth ?? null);
 
@@ -189,11 +218,10 @@ export function registerSocketHandlers(
 
     socket.on("events.subscribe", (request: unknown, ack?: DirectAckFn) => {
       if (typeof ack !== "function") return;
-      try {
-        ack(subscribeSocket(socket, state, runtimeDeps, request));
-      } catch (err) {
-        ack(directError(err));
-      }
+      void subscribeSocket(socket, state, runtimeDeps, request).then(
+        (result) => ack(result),
+        (err) => ack(directError(err)),
+      );
     });
 
     socket.on("events.unsubscribe", (request: unknown, ack?: DirectAckFn) => {
@@ -213,10 +241,36 @@ export function registerSocketHandlers(
   });
 }
 
+function createRuntimeDeps(
+  deps: SocketIoDeps,
+  registryEvents: RegistryEventBridge | null = deps.registryEvents ?? null,
+): RuntimeSocketIoDeps {
+  const database = deps.database ?? null;
+  const configRepository =
+    deps.configRepository ?? createSocketConfigRepository(database);
+  return {
+    ...deps,
+    database,
+    configRepository,
+    registryEvents,
+    chargePointService:
+      deps.chargePointService ??
+      new RegistryChargePointService(deps.registry, {
+        database,
+        configRepository,
+        scenarioRepository:
+          deps.scenarioRepository ?? new SqliteScenarioRepository(database),
+        connectorSettingsRepository:
+          deps.connectorSettingsRepository ??
+          new SqliteConnectorSettingsRepository(database),
+      }),
+  };
+}
+
 async function handleRpc(
   socket: SocketIoSocket,
   state: SocketRpcState,
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   request: unknown,
   ack: RpcAckFn,
 ): Promise<void> {
@@ -245,7 +299,7 @@ async function handleRpc(
 async function dispatchRpc(
   socket: SocketIoSocket,
   state: SocketRpcState,
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   request: unknown,
 ): Promise<unknown> {
   const parsedRequest = rpcRequestSchema.safeParse(request);
@@ -275,14 +329,14 @@ async function dispatchRpc(
 async function dispatchValidatedRpc(
   socket: SocketIoSocket,
   state: SocketRpcState,
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   method: RpcMethod,
   cpId: string | undefined,
   rawParams: unknown,
 ): Promise<unknown> {
   switch (method) {
     case "cp.list":
-      return listCps(deps.registry);
+      return listCps(deps.chargePointService);
     case "cp.create":
       return createCp(deps, rawParams);
     case "cp.update":
@@ -296,11 +350,11 @@ async function dispatchValidatedRpc(
     case "state.reset":
       return resetState(deps);
     case "config.get":
-      return getConfig(deps);
+      return getConfig(deps.chargePointService);
     case "config.save":
       return saveConfig(deps, rawParams);
     case "scenario.templates":
-      return getScenarioTemplates();
+      return deps.chargePointService.getScenarioTemplates();
     case "scenario.definitions.list":
       return listScenarioDefinitions(deps, rawParams);
     case "scenario.definitions.save":
@@ -332,6 +386,14 @@ async function dispatchValidatedRpc(
     throw new RpcFailure("not_found", "");
   }
 
+  const facadeResult = await dispatchFacadeCpCommand(
+    deps.chargePointService,
+    method,
+    cpId,
+    rawParams,
+  );
+  if (facadeResult.handled) return facadeResult.value;
+
   if (!cpId) throw new RpcFailure("not_found", "");
   const service = deps.registry.get(cpId);
   if (!service) throw new RpcFailure("not_found", "");
@@ -345,46 +407,49 @@ async function dispatchValidatedRpc(
     : result;
 }
 
-function listCps(registry: CPRegistry): CpListItem[] {
-  return registry
-    .list()
-    .map((cpId) => {
-      const service = registry.get(cpId);
-      return service
-        ? registryCpToWire(statusCpForWire(cpId, service, service.getStatus()))
-        : null;
-    })
-    .filter((cp): cp is CpListItem => cp !== null);
+async function listCps(
+  chargePointService: RegistryChargePointService,
+): Promise<CpListItem[]> {
+  return runFacadeOperation(async () =>
+    (await chargePointService.listChargePoints()).map(snapshotToRegistryCpWire),
+  );
 }
 
-function createCp(deps: SocketIoDeps, rawParams: unknown): { cpId: string } {
+async function createCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ cpId: string }> {
   const init = parseCreateInput(rawParams);
-  try {
-    const service = deps.registry.create(init);
-    if (rawParamsAsRecord(rawParams).autoConnect === true) {
-      void service.connect().catch((err) => {
-        process.stderr.write(
-          `[server] autoConnect failed for ${init.cpId}: ${safeLogMessage(err)}\n`,
-        );
-      });
-    }
-    return { cpId: init.cpId };
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("already exists")) {
-      throw new RpcFailure("invalid_params", "");
-    }
-    throw err;
+  await runFacadeOperation(() =>
+    deps.chargePointService.createChargePoint(
+      init as unknown as CreateChargePointParams,
+    ),
+  );
+  if (rawParamsAsRecord(rawParams).autoConnect === true) {
+    void deps.chargePointService.connect(init.cpId).catch((err) => {
+      process.stderr.write(
+        `[server] autoConnect failed for ${init.cpId}: ${safeLogMessage(err)}\n`,
+      );
+    });
   }
+  return { cpId: init.cpId };
 }
 
-function updateCp(deps: SocketIoDeps, rawParams: unknown): { cpId: string } {
+async function updateCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ cpId: string }> {
   const cpId = stringParam(rawParams, "cpId");
   const existing = deps.registry.get(cpId);
   if (!existing) throw new RpcFailure("not_found", "");
   const init = parseCreateInput(mergeUpdateParams(rawParams, existing));
-  const service = deps.registry.update(init);
+  await runFacadeOperation(() =>
+    deps.chargePointService.updateChargePoint(
+      init as unknown as CreateChargePointParams,
+    ),
+  );
   if (rawParamsAsRecord(rawParams).autoConnect === true) {
-    void service.connect().catch((err) => {
+    void deps.chargePointService.connect(init.cpId).catch((err) => {
       process.stderr.write(
         `[server] reconnect after update failed for ${init.cpId}: ${safeLogMessage(err)}\n`,
       );
@@ -393,125 +458,85 @@ function updateCp(deps: SocketIoDeps, rawParams: unknown): { cpId: string } {
   return { cpId: init.cpId };
 }
 
-function deleteCp(deps: SocketIoDeps, rawParams: unknown): { ok: true } {
+async function deleteCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
   const cpId = stringParam(rawParams, "cpId");
-  if (!deps.registry.remove(cpId)) throw new RpcFailure("not_found", "");
+  await runFacadeOperation(() =>
+    deps.chargePointService.removeChargePoint(cpId),
+  );
   return { ok: true };
 }
 
-function getLogs(
-  deps: SocketIoDeps,
+async function getLogs(
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
-): ReadonlyArray<Record<string, unknown>> {
+): Promise<ReadonlyArray<unknown>> {
   const params = rawParamsAsRecord(rawParams);
   const cpId = stringParam(params, "cpId");
-  const service = deps.registry.get(cpId);
-  service?.flushLogs();
-
-  let entries: Array<Record<string, unknown>> = [];
-  if (deps.database) {
-    const rows = deps.database.all<{
-      timestamp: string;
-      level: string;
-      log_type: string;
-      message: string;
-    }>(
-      "SELECT timestamp, level, log_type, message FROM logs " +
-        "WHERE cp_id = ? ORDER BY id ASC",
-      [cpId],
-    );
-    if (rows.length > 0) {
-      entries = rows.map((row) => ({
-        timestamp: row.timestamp,
-        level: row.level,
-        type: row.log_type,
-        cpId,
-        message: redactSensitiveText(row.message),
-      }));
-    }
-  }
-
-  if (entries.length === 0) {
-    entries = (service?.getInMemoryLogs() ?? []).map((entry) => ({
-      timestamp: entry.timestamp.toISOString(),
-      level: LogLevel[entry.level] ?? "INFO",
-      type: entry.type,
-      cpId,
-      message: redactSensitiveText(entry.message),
-    }));
-  }
-
+  const entries = await runFacadeOperation(() =>
+    deps.chargePointService.listStoredLogs(cpId),
+  );
   const limit = params.limit;
   return typeof limit === "number" ? entries.slice(0, limit) : entries;
 }
 
-function clearLogs(deps: SocketIoDeps, rawParams: unknown): { ok: true } {
+async function clearLogs(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
   const cpId = stringParam(rawParams, "cpId");
-  if (deps.database) {
-    deps.database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
-    void deps.database.flush?.();
-  }
+  await runFacadeOperation(() => deps.chargePointService.clearStoredLogs(cpId));
   return { ok: true };
 }
 
-function resetState(deps: SocketIoDeps): { ok: true } {
-  for (const cpId of [...deps.registry.list()]) {
-    deps.registry.remove(cpId, { notify: false });
-  }
-  if (deps.database) {
-    resetSimulatorState(deps.database);
-    void deps.database.flush?.();
-  }
+async function resetState(deps: RuntimeSocketIoDeps): Promise<{ ok: true }> {
+  await runFacadeOperation(() => deps.chargePointService.resetAllState());
   deps.registryEvents?.emitReset();
   return { ok: true };
 }
 
-async function getConfig(deps: SocketIoDeps): Promise<unknown> {
-  const config = await getConfigRepository(deps).load();
+async function getConfig(
+  chargePointService: RegistryChargePointService,
+): Promise<unknown> {
+  const config = await runFacadeOperation(() =>
+    chargePointService.loadConfig(),
+  );
   return config ? redactSimulatorConfig(config) : null;
 }
 
 async function saveConfig(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<{ ok: true }> {
   const params = METHODS["config.save"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  const repository = getConfigRepository(deps);
-  const existing = await repository.load();
-  await repository.save(mergeSocketConfigSecrets(params.data.config, existing));
+  await runFacadeOperation(() =>
+    deps.chargePointService.saveConfig(params.data.config),
+  );
   return { ok: true };
 }
 
-function getScenarioTemplates(): ReadonlyArray<{
-  readonly id: string;
-  readonly name: string;
-  readonly description: string;
-}> {
-  return scenarioTemplates.map((template) => ({
-    id: template.id,
-    name: template.name,
-    description: template.description,
-  }));
-}
-
-function listScenarioDefinitions(
-  deps: SocketIoDeps,
+async function listScenarioDefinitions(
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
-): ScenarioDefinition[] {
+): Promise<ScenarioDefinition[]> {
   const params =
     METHODS["scenario.definitions.list"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  return new SqliteScenarioRepository(deps.database ?? null).listByConnector(
-    params.data.cpId,
-    params.data.connectorId,
+  return runFacadeOperation(() =>
+    deps.chargePointService.listScenarioDefinitions(
+      params.data.cpId,
+      params.data.connectorId,
+    ),
   );
 }
 
 async function saveScenarioDefinition(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<ScenarioDefinition> {
   const params =
@@ -519,17 +544,17 @@ async function saveScenarioDefinition(
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
   const definition = params.data.definition as unknown as ScenarioDefinition;
-  await new SqliteScenarioRepository(deps.database ?? null).save(
-    params.data.cpId,
-    params.data.connectorId,
-    definition,
+  return runFacadeOperation(() =>
+    deps.chargePointService.saveScenarioDefinition(
+      params.data.cpId,
+      params.data.connectorId,
+      definition,
+    ),
   );
-  await deps.database?.flush?.();
-  return definition;
 }
 
 async function replaceConnectorScenarioDefinitions(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<ScenarioDefinition[]> {
   const params =
@@ -538,66 +563,69 @@ async function replaceConnectorScenarioDefinitions(
 
   const definitions = params.data
     .definitions as unknown as ScenarioDefinition[];
-  await new SqliteScenarioRepository(deps.database ?? null).replaceConnector(
-    params.data.cpId,
-    params.data.connectorId,
-    definitions,
+  return runFacadeOperation(() =>
+    deps.chargePointService.replaceConnectorScenarioDefinitions(
+      params.data.cpId,
+      params.data.connectorId,
+      definitions,
+    ),
   );
-  await deps.database?.flush?.();
-  return definitions;
 }
 
 async function deleteScenarioDefinition(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<{ ok: true }> {
   const params =
     METHODS["scenario.definitions.delete"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  new SqliteScenarioRepository(deps.database ?? null).deleteOne(
-    params.data.cpId,
-    params.data.connectorId,
-    params.data.definitionId,
+  await runFacadeOperation(() =>
+    deps.chargePointService.deleteScenarioDefinition(
+      params.data.cpId,
+      params.data.connectorId,
+      params.data.definitionId,
+    ),
   );
-  await deps.database?.flush?.();
   return { ok: true };
 }
 
 async function getAutoMeterConfig(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<AutoMeterValueConfig | null> {
   const params =
     METHODS["connector_settings.auto_meter.get"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  return new SqliteConnectorSettingsRepository(
-    deps.database ?? null,
-  ).loadAutoMeterValueConfig(params.data.cpId, params.data.connectorId);
+  return runFacadeOperation(() =>
+    deps.chargePointService.getAutoMeterConfig(
+      params.data.cpId,
+      params.data.connectorId,
+    ),
+  );
 }
 
 async function saveAutoMeterConfig(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<{ ok: true }> {
   const params =
     METHODS["connector_settings.auto_meter.save"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  await new SqliteConnectorSettingsRepository(
-    deps.database ?? null,
-  ).saveAutoMeterValueConfig(
-    params.data.cpId,
-    params.data.connectorId,
-    params.data.config as unknown as AutoMeterValueConfig,
+  await runFacadeOperation(() =>
+    deps.chargePointService.saveAutoMeterConfig(
+      params.data.cpId,
+      params.data.connectorId,
+      params.data.config as unknown as AutoMeterValueConfig,
+    ),
   );
-  await deps.database?.flush?.();
   return { ok: true };
 }
 
 async function getSocMeterSync(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<boolean> {
   const params =
@@ -606,13 +634,16 @@ async function getSocMeterSync(
     );
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  return new SqliteConnectorSettingsRepository(
-    deps.database ?? null,
-  ).loadSocMeterSync();
+  return runFacadeOperation(() =>
+    deps.chargePointService.getSocMeterSync(
+      params.data.cpId,
+      params.data.connectorId,
+    ),
+  );
 }
 
 async function saveSocMeterSync(
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<{ ok: true }> {
   const params =
@@ -621,33 +652,39 @@ async function saveSocMeterSync(
     );
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  await new SqliteConnectorSettingsRepository(
-    deps.database ?? null,
-  ).saveSocMeterSync(params.data.enabled);
-  await deps.database?.flush?.();
+  await runFacadeOperation(() =>
+    deps.chargePointService.saveSocMeterSync(
+      params.data.cpId,
+      params.data.connectorId,
+      params.data.enabled,
+    ),
+  );
   return { ok: true };
 }
 
-function shutdownServer(deps: SocketIoDeps): { ok: true } {
+function shutdownServer(deps: RuntimeSocketIoDeps): { ok: true } {
   if (deps.requestShutdown) {
     setTimeout(() => deps.requestShutdown?.(), 100);
   }
   return { ok: true };
 }
 
-function getConfigRepository(deps: SocketIoDeps): SocketConfigRepository {
-  return (
-    deps.configRepository ?? createSocketConfigRepository(deps.database ?? null)
-  );
-}
-
-function createSocketConfigRepository(
+export function createSocketConfigRepository(
   db: Database | null,
 ): SocketConfigRepository {
   let cached: SimulatorConfigInput | null = null;
   let cacheValid = false;
-
-  return {
+  const listeners = new Set<(config: SimulatorConfigInput | null) => void>();
+  const notify = (config: SimulatorConfigInput | null) => {
+    listeners.forEach((listener) => {
+      try {
+        listener(config);
+      } catch (error) {
+        console.error("[SocketConfigRepository] listener error", error);
+      }
+    });
+  };
+  const repository: SocketConfigRepository = {
     async load() {
       if (!db) return cacheValid ? cached : null;
       const row = db.get<{ value: string }>(
@@ -667,6 +704,7 @@ function createSocketConfigRepository(
       if (!db) {
         cached = config;
         cacheValid = true;
+        notify(config);
         return;
       }
       if (config === null) {
@@ -679,37 +717,503 @@ function createSocketConfigRepository(
         );
       }
       await db.flush?.();
+      notify(config);
+    },
+    subscribe(handler) {
+      listeners.add(handler);
+      void repository.load().then(handler);
+      return () => {
+        listeners.delete(handler);
+      };
     },
   };
+  return repository;
 }
 
-function mergeSocketConfigSecrets(
-  next: SimulatorConfigInput | null,
-  existing: SimulatorConfigInput | null,
-): SimulatorConfigInput | null {
-  if (next === null) return null;
+async function dispatchFacadeCpCommand(
+  chargePointService: RegistryChargePointService,
+  method: RpcMethod,
+  cpId: string | undefined,
+  rawParams: unknown,
+): Promise<FacadeDispatchResult> {
+  const params = rawParamsAsRecord(rawParams);
 
-  const suppliedPassword = next.basicAuthSettings.password;
-  const password =
-    typeof suppliedPassword === "string" && suppliedPassword.length > 0
-      ? suppliedPassword
-      : (existing?.basicAuthSettings.password ?? "");
-
-  return {
-    ...next,
-    basicAuthSettings: {
-      ...next.basicAuthSettings,
-      password,
-    },
-  };
+  switch (method) {
+    case "connect": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() => chargePointService.connect(id));
+      return handled(undefined);
+    }
+    case "disconnect": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() => chargePointService.disconnect(id));
+      return handled(undefined);
+    }
+    case "status": {
+      const snapshot = await requireChargePointSnapshot(
+        chargePointService,
+        requireFacadeCpId(cpId),
+      );
+      return handled(snapshotToWireStatus(snapshot));
+    }
+    case "heartbeat": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() => chargePointService.sendHeartbeat(id));
+      return handled(undefined);
+    }
+    case "start_heartbeat": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.startHeartbeat(
+          id,
+          requireNumber(params, "interval"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "stop_heartbeat": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() => chargePointService.stopHeartbeat(id));
+      return handled(undefined);
+    }
+    case "start_transaction": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.startTransaction(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "tagId"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "stop_transaction": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.stopTransaction(
+          id,
+          requirePositiveInt(params, "connector"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "authorize": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.authorize(id, requireString(params, "tagId")),
+      );
+      return handled(undefined);
+    }
+    case "diagnostics_status_notification": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.sendDiagnosticsStatusNotification(
+          id,
+          requireString(params, "status"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "firmware_status_notification": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.sendFirmwareStatusNotification(
+          id,
+          requireString(params, "status"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "security_event_notification": {
+      const id = requireFacadeCpId(cpId);
+      const techInfo =
+        params.techInfo === undefined
+          ? undefined
+          : requireString(params, "techInfo");
+      await runFacadeOperation(() =>
+        chargePointService.sendSecurityEventNotification(
+          id,
+          requireString(params, "type"),
+          techInfo,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "sign_certificate": {
+      const id = requireFacadeCpId(cpId);
+      const csr =
+        params.csr === undefined ? undefined : requireString(params, "csr");
+      await runFacadeOperation(() =>
+        chargePointService.sendSignCertificate(id, csr),
+      );
+      return handled(undefined);
+    }
+    case "update_connector_status": {
+      const id = requireFacadeCpId(cpId);
+      const status = requireString(params, "status");
+      if (!VALID_STATUSES.has(status as OCPPStatus)) {
+        throw new Error(
+          `Invalid status: ${status}. Valid: ${[...VALID_STATUSES].join(", ")}`,
+        );
+      }
+      await runFacadeOperation(() =>
+        chargePointService.sendStatusNotification(
+          id,
+          requireNonNegativeInt(params, "connector"),
+          status as OCPPStatus,
+          readStatusNotificationOptions(params),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "set_meter_value": {
+      const id = requireFacadeCpId(cpId);
+      const value = requireNumber(params, "value");
+      if (value < 0 || !Number.isInteger(value)) {
+        throw new Error("value must be a non-negative integer (Wh)");
+      }
+      await runFacadeOperation(() =>
+        chargePointService.setMeterValue(
+          id,
+          requirePositiveInt(params, "connector"),
+          value,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "send_meter_value": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.sendMeterValue(
+          id,
+          requirePositiveInt(params, "connector"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "remove_connector": {
+      const id = requireFacadeCpId(cpId);
+      const connectorId = requirePositiveInt(params, "connector");
+      const before = await requireChargePointSnapshot(chargePointService, id);
+      await runFacadeOperation(() =>
+        chargePointService.removeConnector(id, connectorId),
+      );
+      const after = await chargePointService.getChargePoint(id);
+      return handled({
+        removed:
+          before.connectors.some((connector) => connector.id === connectorId) &&
+          !after?.connectors.some((connector) => connector.id === connectorId),
+      });
+    }
+    case "set_ev_settings": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.setEVSettings(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireObject(params, "settings") as unknown as EVSettings,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "get_ev_settings": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getEVSettings(
+            id,
+            requirePositiveInt(params, "connector"),
+          ),
+        ),
+      );
+    }
+    case "set_auto_meter_config": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.setAutoMeterValueConfig(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireObject(params, "config") as unknown as AutoMeterValueConfig,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "get_auto_meter_config": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getAutoMeterValueConfig(
+            id,
+            requirePositiveInt(params, "connector"),
+          ),
+        ),
+      );
+    }
+    case "set_auto_reset_to_available": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.setAutoResetToAvailable(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireBoolean(params, "enabled"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "set_mode": {
+      const id = requireFacadeCpId(cpId);
+      const mode = requireString(params, "mode");
+      if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
+        throw new Error(
+          `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
+        );
+      }
+      await runFacadeOperation(() =>
+        chargePointService.setConnectorMode(
+          id,
+          requirePositiveInt(params, "connector"),
+          mode as ScenarioMode,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "set_soc": {
+      const id = requireFacadeCpId(cpId);
+      const rawSoc = params.soc;
+      const soc: number | null =
+        rawSoc === null || rawSoc === undefined
+          ? null
+          : typeof rawSoc === "number"
+            ? rawSoc
+            : (() => {
+                throw new Error("'soc' must be a number or null");
+              })();
+      await runFacadeOperation(() =>
+        chargePointService.setConnectorSoc(
+          id,
+          requirePositiveInt(params, "connector"),
+          soc,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "set_soc_meter_sync": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.setConnectorSocMeterSync(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireBoolean(params, "enabled"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "get_charging_profiles": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getChargingProfiles(
+            id,
+            requirePositiveInt(params, "connector"),
+          ),
+        ),
+      );
+    }
+    case "get_state_history": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getStateHistory(
+            id,
+            parseHistoryOptions(params.options),
+          ),
+        ),
+      );
+    }
+    case "list_scenario_templates": {
+      await requireChargePointSnapshot(
+        chargePointService,
+        requireFacadeCpId(cpId),
+      );
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getScenarioTemplates(),
+        ),
+      );
+    }
+    case "load_scenario_template": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.loadScenarioTemplate(
+            id,
+            requireString(params, "templateId"),
+            requirePositiveInt(params, "connector"),
+            params.evSettings as Partial<EVSettings> | undefined,
+          ),
+        ),
+      );
+    }
+    case "load_scenario": {
+      const id = requireFacadeCpId(cpId);
+      const connectorId = requirePositiveInt(params, "connector");
+      if (typeof params.file === "string") {
+        const definition = JSON.parse(
+          fs.readFileSync(params.file, "utf-8"),
+        ) as ScenarioDefinition;
+        return handled(
+          await runFacadeOperation(() =>
+            chargePointService.loadScenario(id, connectorId, definition),
+          ),
+        );
+      }
+      if (params.scenario) {
+        return handled(
+          await runFacadeOperation(() =>
+            chargePointService.loadScenario(
+              id,
+              connectorId,
+              params.scenario as ScenarioDefinition,
+            ),
+          ),
+        );
+      }
+      throw new Error("Either 'file' or 'scenario' parameter is required");
+    }
+    case "list_scenarios": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.listScenarios(
+            id,
+            requirePositiveInt(params, "connector"),
+          ),
+        ),
+      );
+    }
+    case "run_scenario": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.runScenario(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "scenario_status": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getScenarioStatus(
+            id,
+            requirePositiveInt(params, "connector"),
+            requireString(params, "scenarioId"),
+          ),
+        ),
+      );
+    }
+    case "get_scenario": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getScenario(
+            id,
+            requirePositiveInt(params, "connector"),
+            requireString(params, "scenarioId"),
+          ),
+        ),
+      );
+    }
+    case "stop_scenario": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.stopScenario(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "step_scenario": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.stepScenario(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+          params.force === true,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "stop_all_scenarios": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.stopAllScenarios(
+          id,
+          requirePositiveInt(params, "connector"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "remove_scenario": {
+      const id = requireFacadeCpId(cpId);
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const before = await runFacadeOperation(() =>
+        chargePointService.listScenarios(id, connectorId),
+      );
+      await runFacadeOperation(() =>
+        chargePointService.removeScenario(id, connectorId, scenarioId),
+      );
+      const after = await chargePointService.listScenarios(id, connectorId);
+      return handled({
+        removed:
+          before.some((scenario) => scenario.scenarioId === scenarioId) &&
+          !after.some((scenario) => scenario.scenarioId === scenarioId),
+      });
+    }
+    case "run_scenario_file": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.runScenarioFile(
+            id,
+            requireString(params, "file"),
+            { connectorId: requirePositiveInt(params, "connector") },
+          ),
+        ),
+      );
+    }
+    case "run_scenario_template": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.runScenarioTemplate(
+            id,
+            requireString(params, "templateId"),
+            {
+              connectorId: requirePositiveInt(params, "connector"),
+              evSettings: params.evSettings as Partial<EVSettings> | undefined,
+            },
+          ),
+        ),
+      );
+    }
+    default:
+      return { handled: false };
+  }
 }
 
-function subscribeSocket(
+async function subscribeSocket(
   socket: SocketIoSocket,
   state: SocketRpcState,
-  deps: SocketIoDeps,
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
-): SubscribeResult {
+): Promise<SubscribeResult> {
   const params = METHODS["events.subscribe"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
@@ -723,7 +1227,7 @@ function subscribeSocket(
 
   void socket.join(scope);
   state.joinedScopes.add(scope);
-  const result = captureSubscribeSnapshot(deps.registry, scope);
+  const result = await captureSubscribeSnapshot(deps.chargePointService, scope);
   const parsed = subscribeResultSchema.safeParse(result);
   if (!parsed.success) throw new Error("subscribe snapshot failed validation");
   return parsed.data;
@@ -741,31 +1245,17 @@ function unsubscribeSocket(
   state.joinedScopes.delete(scope);
 }
 
-function captureSubscribeSnapshot(
-  registry: CPRegistry,
+async function captureSubscribeSnapshot(
+  chargePointService: RegistryChargePointService,
   scope: string,
-): SubscribeResult {
-  const entries = registry
-    .list()
-    .map((cpId) => {
-      const service = registry.get(cpId);
-      if (!service) return null;
-      const status = service.getStatus();
-      return {
-        cpId,
-        cp: statusCpForWire(cpId, service, status),
-        status: statusToWire(status),
-      };
-    })
-    .filter(
-      (
-        entry,
-      ): entry is {
-        cpId: string;
-        cp: FullCp;
-        status: StatusWire;
-      } => entry !== null,
-    );
+): Promise<SubscribeResult> {
+  const entries = (await chargePointService.listChargePoints()).map(
+    (snapshot) => ({
+      cpId: snapshot.id,
+      cp: snapshotToFullCp(snapshot),
+      status: snapshotToWireStatus(snapshot),
+    }),
+  );
 
   const perCp: Record<string, StatusWire> = {};
   for (const entry of entries) {
@@ -783,33 +1273,107 @@ function captureSubscribeSnapshot(
   };
 }
 
-function statusCpForWire(
+function handled(value: unknown): FacadeDispatchResult {
+  return { handled: true, value };
+}
+
+async function runFacadeOperation<T>(
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (err) {
+    if (err instanceof RpcFailure) throw err;
+    if (err instanceof Error) {
+      if (err.message.includes("already exists")) {
+        throw new RpcFailure("invalid_params", "");
+      }
+      if (
+        err.message.includes("cpId not found") ||
+        err.message.includes("not registered in LocalChargePointService")
+      ) {
+        throw new RpcFailure("not_found", "");
+      }
+    }
+    throw err;
+  }
+}
+
+function requireFacadeCpId(cpId: string | undefined): string {
+  if (!cpId) throw new RpcFailure("not_found", "");
+  return cpId;
+}
+
+async function requireChargePointSnapshot(
+  chargePointService: RegistryChargePointService,
   cpId: string,
-  service: CLIChargePointService,
-  status: ReturnType<CLIChargePointService["getStatus"]>,
-): FullCp {
-  const init = service.getInit();
+): Promise<ChargePointSnapshot> {
+  const snapshot = await runFacadeOperation(() =>
+    chargePointService.getChargePoint(cpId),
+  );
+  if (!snapshot) throw new RpcFailure("not_found", "");
+  return snapshot;
+}
+
+function snapshotToRegistryCpWire(snapshot: ChargePointSnapshot): CpListItem {
+  return registryCpToWire(snapshotToFullCp(snapshot));
+}
+
+function snapshotToFullCp(snapshot: ChargePointSnapshot): FullCp {
+  if (!snapshot.config) {
+    throw new Error(`CP snapshot missing config: ${snapshot.id}`);
+  }
   return {
-    id: cpId,
-    status: status.status,
-    config: status.config ?? {
-      wsUrl: init.wsUrl,
-      centralSystemUrl: init.centralSystemUrl,
-      soapCallbackUrl: init.soapCallbackUrl,
-      soapPath: init.soapPath,
-      connectors: init.connectors,
-      vendor: init.vendor,
-      model: init.model,
-      basicAuth: init.basicAuth,
-      ocppVersion: init.ocppVersion,
-      securityProfile: init.securityProfile,
-      cpoName: init.cpoName,
-      tlsCaPath: init.tlsCaPath,
-      tlsCertPath: init.tlsCertPath,
-      tlsKeyPath: init.tlsKeyPath,
-      bootNotification: init.bootNotification ?? null,
-    },
+    id: snapshot.id,
+    status: snapshot.status,
+    config: snapshot.config,
   };
+}
+
+function snapshotToWireStatus(snapshot: ChargePointSnapshot): StatusWire {
+  return statusToWire({
+    id: snapshot.id,
+    status: snapshot.status,
+    error: snapshot.error,
+    connectors: snapshot.connectors.map(connectorSnapshotToWire),
+    heartbeat: snapshot.heartbeat,
+    config: snapshot.config,
+  });
+}
+
+function connectorSnapshotToWire(
+  connector: ConnectorSnapshot,
+): StatusWire["connectors"][number] {
+  return {
+    id: connector.id,
+    status: connector.status,
+    availability: connector.availability,
+    meterValue: connector.meterValue,
+    transactionId: connector.transactionId,
+    soc: connector.soc,
+    mode: connector.mode,
+    autoResetToAvailable: connector.autoResetToAvailable,
+    autoMeterValueConfig: connector.autoMeterValueConfig as Record<
+      string,
+      unknown
+    > | null,
+    evSettings: connector.evSettings as Record<string, unknown> | null,
+    chargingProfile: connector.chargingProfile as Record<
+      string,
+      unknown
+    > | null,
+    chargingProfiles: connector.chargingProfiles.map(
+      (profile) => profile as unknown as Record<string, unknown>,
+    ),
+    transactionStartTime: toIsoStringOrNull(connector.transactionStartTime),
+    transactionTagId: connector.transactionTagId,
+    transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+  };
+}
+
+function toIsoStringOrNull(value: Date | string | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function parseCreateInput(
@@ -904,6 +1468,92 @@ function stringParam(rawParams: unknown, key: string): string {
     throw new RpcFailure("invalid_params", "");
   }
   return value;
+}
+
+function readStatusNotificationOptions(
+  params: Record<string, unknown>,
+): StatusNotificationOptions | undefined {
+  const opts: StatusNotificationOptions = {};
+  readOptionalString(params, "errorCode", opts);
+  readOptionalString(params, "info", opts);
+  readOptionalString(params, "vendorErrorCode", opts);
+  readOptionalString(params, "vendorId", opts);
+  readOptionalTimestamp(params, "timestamp", opts);
+  readOptionalBoolean(params, "suppressChargingStateTransactionEvent", opts);
+  return hasStatusNotificationOptions(opts) ? opts : undefined;
+}
+
+function readOptionalString(
+  params: Record<string, unknown>,
+  key: "errorCode" | "info" | "vendorErrorCode" | "vendorId",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  if (typeof val !== "string") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
+  }
+  target[key] = val;
+}
+
+function readOptionalTimestamp(
+  params: Record<string, unknown>,
+  key: "timestamp",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  const date =
+    val instanceof Date ? val : typeof val === "string" ? new Date(val) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected ISO timestamp)`,
+    );
+  }
+  target[key] = date;
+}
+
+function readOptionalBoolean(
+  params: Record<string, unknown>,
+  key: "suppressChargingStateTransactionEvent",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  if (typeof val !== "boolean") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
+  }
+  target[key] = val;
+}
+
+function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: HistoryOptions = {};
+  if (typeof src.entity === "string") {
+    out.entity = src.entity as HistoryOptions["entity"];
+  }
+  if (typeof src.entityId === "number") {
+    out.entityId = src.entityId;
+  }
+  if (typeof src.transitionType === "string") {
+    out.transitionType = src.transitionType as HistoryOptions["transitionType"];
+  }
+  if (typeof src.limit === "number") {
+    out.limit = src.limit;
+  }
+  if (typeof src.fromTimestamp === "string") {
+    out.fromTimestamp = new Date(src.fromTimestamp);
+  } else if (src.fromTimestamp instanceof Date) {
+    out.fromTimestamp = src.fromTimestamp;
+  }
+  if (typeof src.toTimestamp === "string") {
+    out.toTimestamp = new Date(src.toTimestamp);
+  } else if (src.toTimestamp instanceof Date) {
+    out.toTimestamp = src.toTimestamp;
+  }
+  return out;
 }
 
 function consumeRpcToken(state: SocketRpcState): boolean {

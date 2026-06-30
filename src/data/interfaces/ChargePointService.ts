@@ -311,6 +311,14 @@ export interface ChargePointService {
     connectorId: number,
     settings: EVSettings,
   ): Promise<void>;
+  /**
+   * Push the (new) Default EV Settings onto every existing connector. New
+   * connectors already pick the default up at construction via
+   * `getDefaultEVSettings()`; this propagates a mid-session change to the
+   * connectors that are already live so the editor reflects it without a page
+   * reload (#107).
+   */
+  applyDefaultEVSettings(settings: EVSettings): Promise<void>;
   setAutoMeterValueConfig(
     id: string,
     connectorId: number,

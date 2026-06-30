@@ -350,6 +350,19 @@ export class LocalChargePointService implements ChargePointService {
     connector.evSettings = settings;
   }
 
+  async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
+    // Connectors freeze getDefaultEVSettings() at construction, so a mid-session
+    // change to the Default EV Settings wouldn't reach the ones already live.
+    // Push it onto every connector (per-connector EV settings aren't a
+    // user-editable, persisted concept — they only come from the default or a
+    // running scenario) so the editor reflects the new default immediately (#107).
+    this.chargePoints.forEach((chargePoint) => {
+      chargePoint.connectors.forEach((connector) => {
+        connector.evSettings = { ...settings };
+      });
+    });
+  }
+
   async setAutoMeterValueConfig(
     id: string,
     connectorId: number,

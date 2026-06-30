@@ -273,6 +273,19 @@ export const DataProvider: React.FC<DataProviderProps> = ({
   const chargePointService: ChargePointService =
     remoteChargePointService ?? localChargePointService;
 
+  // Keep already-live connectors in sync with the Default EV Settings. They
+  // freeze getDefaultEVSettings() at construction, so a mid-session change
+  // would otherwise only take effect after a page reload (#107). Firing on
+  // mount too is a harmless no-op: fresh connectors already hold the default.
+  useEffect(() => {
+    if (!defaultEvSettings) return;
+    void chargePointService
+      .applyDefaultEVSettings(defaultEvSettings)
+      .catch((err) =>
+        console.error("Failed to apply default EV settings", err),
+      );
+  }, [defaultEvSettings, chargePointService]);
+
   // Wait for mode resolution (so we don't render local UI just to swap to
   // remote a moment later) AND for the DB to be ready in local mode. In
   // remote mode `dbReady` flips immediately because there's no DB to wait on.

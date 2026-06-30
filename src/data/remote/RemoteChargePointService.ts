@@ -161,6 +161,11 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     basicAuth: config.basicAuth
       ? { username: config.basicAuth.username, password: "" }
       : null,
+    securityProfile: config.securityProfile,
+    cpoName: config.cpoName,
+    tlsCaPath: config.tlsCaPath,
+    tlsCertPath: config.tlsCertPath,
+    tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
   };
 }

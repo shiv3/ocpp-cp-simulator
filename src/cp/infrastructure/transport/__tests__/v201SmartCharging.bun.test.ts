@@ -82,6 +82,7 @@ describe("OCPP 2.0.1 Smart Charging", () => {
       {},
       [],
       "OCPP-2.0.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 
@@ -198,6 +199,7 @@ describe("OCPP 2.1 shared Smart Charging handler", () => {
       {},
       [],
       "OCPP-2.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

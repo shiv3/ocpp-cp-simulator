@@ -28,8 +28,7 @@ const OBJ = () => boundedObject(OBJ_MAX_BYTES);
 /** A bounded scenario-definition object param: ≤ 256 KB. */
 const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
 
-/** create/update CP — password is accepted here as WRITE-ONLY input. */
-const createParamsSchema = z.object({
+const cpParamsBaseSchema = z.object({
   cpId: STR_64K,
   wsUrl: STR_64K,
   centralSystemUrl: STR_64K.optional(),
@@ -39,11 +38,40 @@ const createParamsSchema = z.object({
   connectors: z.number().int().min(1).optional(),
   vendor: STR_64K.optional(),
   model: STR_64K.optional(),
+  securityProfile: z
+    .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+    .optional(),
+  authorizationKey: STR_64K.optional(),
+  cpoName: STR_64K.optional(),
+  tlsCaPath: STR_64K.optional(),
+  tlsCertPath: STR_64K.optional(),
+  tlsKeyPath: STR_64K.optional(),
+  tls: z
+    .object({
+      ca: STR_64K.optional(),
+      cert: STR_64K.optional(),
+      key: STR_64K.optional(),
+      rejectUnauthorized: z.boolean().optional(),
+      serverName: STR_64K.optional(),
+    })
+    .optional(),
+  bootNotification: OBJ().nullable().optional(),
+});
+
+/** create CP — password is accepted here as WRITE-ONLY input. */
+const createParamsSchema = cpParamsBaseSchema.extend({
   basicAuth: z
     .object({ username: STR_64K, password: STR_64K })
     .nullable()
     .optional(),
-  bootNotification: OBJ().nullable().optional(),
+});
+
+/** update CP — redacted snapshots may omit password; server preserves it. */
+const updateParamsSchema = cpParamsBaseSchema.extend({
+  basicAuth: z
+    .object({ username: STR_64K, password: STR_64K.optional() })
+    .nullable()
+    .optional(),
 });
 
 export const METHODS = {
@@ -75,6 +103,11 @@ export const METHODS = {
     params: z.object({ status: STR_64K }),
     result: ANY,
   },
+  security_event_notification: {
+    params: z.object({ type: STR_64K, techInfo: STR_64K.optional() }),
+    result: ANY,
+  },
+  sign_certificate: { params: EMPTY, result: ANY },
 
   // -- connector --
   update_connector_status: {
@@ -194,7 +227,7 @@ export const METHODS = {
   // -- explicit non-jsonMode ops (~10) --
   "cp.list": { params: EMPTY, result: ARRAY_1000(cpListItemSchema) },
   "cp.create": { params: createParamsSchema, result: ANY },
-  "cp.update": { params: createParamsSchema, result: ANY },
+  "cp.update": { params: updateParamsSchema, result: ANY },
   "cp.delete": { params: z.object({ cpId: STR_64K }), result: ANY },
   "logs.get": {
     params: z.object({

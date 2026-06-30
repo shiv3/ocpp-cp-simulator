@@ -45,6 +45,7 @@ describe("OCPP 2.1 inbound CSMS calls", () => {
       {},
       [],
       "OCPP-2.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

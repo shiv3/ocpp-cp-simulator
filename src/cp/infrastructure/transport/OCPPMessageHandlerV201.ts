@@ -500,6 +500,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("DataTransfer", id, payload);
   }
 
+  public sendSecurityEventNotification(
+    _type: string,
+    _techInfo?: string,
+  ): void {
+    this._logger.warn(
+      "[v2.0.1] SecurityEventNotification is not wired through this handler",
+      LogType.OCPP,
+    );
+  }
+
+  public async sendSignCertificate(): Promise<void> {
+    this._logger.warn(
+      "[v2.0.1] SignCertificate is not wired through this handler",
+      LogType.OCPP,
+    );
+  }
+
   public sendDiagnosticsStatusNotification(_status: string): void {
     this._logger.warn(
       "[v2.0.1] DiagnosticsStatusNotification not supported in OCPP 2.0.1",

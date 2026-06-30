@@ -57,6 +57,7 @@ describe("OCPP 2.0.1 transaction control", () => {
       {},
       [],
       "OCPP-2.0.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

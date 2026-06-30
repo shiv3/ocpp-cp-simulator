@@ -75,6 +75,7 @@ export interface ServerOptions {
     readonly username: string;
     readonly password: string;
   } | null;
+  readonly insecureTlsKeyPerms: boolean;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -91,7 +92,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   }
 
   const bus = new EventBus();
-  const registry = new CPRegistry(bus, database);
+  const registry = new CPRegistry(bus, database, {
+    allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms,
+  });
   // Re-create CPs that were registered before the previous daemon shut
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
   // re-run with the same --cp-id is treated as "update wsUrl/connectors"

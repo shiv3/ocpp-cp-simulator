@@ -123,6 +123,7 @@ function newChargePoint(
     {},
     [],
     version,
+    {},
   );
   cp.events.on("error", () => undefined);
   return { csms, cp };
@@ -311,6 +312,7 @@ describe("OCPP 2.0.1 Reset", () => {
     const { csms, cp } = newChargePoint(
       "CP21-RESET-IMMEDIATE-AND-RESUME",
       "OCPP-2.1",
+      {},
     );
 
     try {

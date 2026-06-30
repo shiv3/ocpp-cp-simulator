@@ -1,3 +1,8 @@
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../cp/infrastructure/transport/wsUrlWithBasic";
+
 export interface CLIOptions {
   readonly wsUrl: string;
   readonly cpId: string | null;
@@ -90,6 +95,14 @@ export interface CLIOptions {
   readonly soapCallbackUrl: string | null;
   /** Base path reserved for the later CSMS→CP SOAP callback server. */
   readonly soapPath: string;
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly authorizationKey?: string;
+  readonly cpoName?: string;
+  readonly tls?: OcppTlsOptions;
+  readonly tlsCaPath?: string;
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
+  readonly insecureTlsKeyPerms: boolean;
 }
 
 export interface ChargePointInitOptions {
@@ -127,6 +140,13 @@ export interface ChargePointInitOptions {
   readonly soapCallbackUrl?: string;
   /** Base path reserved for the later CSMS→CP SOAP callback server. */
   readonly soapPath?: string;
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly authorizationKey?: string;
+  readonly cpoName?: string;
+  readonly tls?: OcppTlsOptions;
+  readonly tlsCaPath?: string;
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
 }
 
 export interface JsonCommand {
@@ -195,11 +215,16 @@ export interface ChargePointStatus {
     readonly model: string;
     readonly basicAuth: {
       readonly username: string;
-      readonly password: string;
+      readonly password?: string;
     } | null;
     readonly centralSystemUrl?: string;
     readonly soapCallbackUrl?: string;
     readonly soapPath?: string;
+    readonly securityProfile?: OcppSecurityProfile;
+    readonly cpoName?: string;
+    readonly tlsCaPath?: string;
+    readonly tlsCertPath?: string;
+    readonly tlsKeyPath?: string;
     readonly ocppVersion?: string;
     readonly bootNotification: {
       readonly firmwareVersion?: string;

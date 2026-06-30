@@ -520,17 +520,32 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     <div className="panel p-3">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-4 text-sm flex-wrap">
+          {/* Labels use an explicit AA-contrast muted gray (≥4.5:1) rather
+              than the lighter `text-muted`, and values stay dark, so the
+              header stays readable (issue #92). */}
           <div className="flex items-center gap-2">
-            <span className="text-muted text-xs">ID:</span>
-            <span className="font-semibold text-primary">{cpId}</span>
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              ID:
+            </span>
+            <span className="font-semibold text-gray-900 dark:text-white">
+              {cpId}
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-muted text-xs">Connectors:</span>
-            <span className="text-secondary">{connectorCount}</span>
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              Connectors:
+            </span>
+            <span className="text-gray-900 dark:text-gray-100">
+              {connectorCount}
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-muted text-xs">Tag:</span>
-            <span className="font-mono text-secondary text-xs">{TagID}</span>
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              Tag:
+            </span>
+            <span className="font-mono text-xs text-gray-900 dark:text-gray-100">
+              {TagID}
+            </span>
           </div>
         </div>
         <button

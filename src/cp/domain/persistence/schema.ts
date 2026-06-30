@@ -110,6 +110,12 @@ CREATE TABLE IF NOT EXISTS charge_points (
   central_system_url TEXT,
   soap_callback_url TEXT,
   soap_path      TEXT,
+  security_profile INTEGER,
+  authorization_key TEXT,
+  cpo_name       TEXT,
+  tls_ca_path    TEXT,
+  tls_cert_path  TEXT,
+  tls_key_path   TEXT,
   basic_auth     TEXT,
   boot_notif     TEXT,
   created_at     TEXT NOT NULL
@@ -238,7 +244,10 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // v4 → v5: persist OCPP 1.5 SOAP transport fields for daemon restores.
+  // v4 → v5: persist OCPP 1.5 SOAP transport fields plus OCPP 1.6
+  // security-profile metadata and TLS file paths for daemon restore.
+  // Private key material stays out of SQLite; restore re-reads
+  // tls_key_path and fails closed if it cannot.
   if (stored < 5) {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     const have = new Set(cols.map((c) => c.name));
@@ -250,6 +259,24 @@ export function runMigrations(db: Database): void {
     }
     if (!have.has("soap_path")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN soap_path TEXT");
+    }
+    if (!have.has("security_profile")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN security_profile INTEGER");
+    }
+    if (!have.has("authorization_key")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN authorization_key TEXT");
+    }
+    if (!have.has("cpo_name")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN cpo_name TEXT");
+    }
+    if (!have.has("tls_ca_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN tls_ca_path TEXT");
+    }
+    if (!have.has("tls_cert_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN tls_cert_path TEXT");
+    }
+    if (!have.has("tls_key_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN tls_key_path TEXT");
     }
   }
 

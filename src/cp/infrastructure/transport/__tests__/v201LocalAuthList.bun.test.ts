@@ -62,6 +62,7 @@ describe("OCPP 2.0.1 local authorization list", () => {
       {},
       [],
       "OCPP-2.0.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

@@ -294,6 +294,10 @@ export class CLIChargePointService {
         soapCallbackUrl: init.soapCallbackUrl,
         soapPath: init.soapPath,
       },
+      init.securityProfile,
+      init.authorizationKey,
+      init.cpoName,
+      init.tls,
     );
     this._soapServer =
       ocppVersion === OCPP_1_5
@@ -331,6 +335,15 @@ export class CLIChargePointService {
         soapCallbackUrl: options.soapCallbackUrl ?? undefined,
         soapPath: options.soapPath,
         basicAuth: options.basicAuth,
+        extraWsHeaders: options.extraWsHeaders,
+        extraWsSubprotocols: options.extraWsSubprotocols,
+        securityProfile: options.securityProfile,
+        authorizationKey: options.authorizationKey,
+        cpoName: options.cpoName,
+        tls: options.tls,
+        tlsCaPath: options.tlsCaPath,
+        tlsCertPath: options.tlsCertPath,
+        tlsKeyPath: options.tlsKeyPath,
       },
       database,
     );
@@ -431,6 +444,11 @@ export class CLIChargePointService {
         soapCallbackUrl: this._init.soapCallbackUrl,
         soapPath: this._init.soapPath,
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
+        securityProfile: this._init.securityProfile,
+        cpoName: this._init.cpoName,
+        tlsCaPath: this._init.tlsCaPath,
+        tlsCertPath: this._init.tlsCertPath,
+        tlsKeyPath: this._init.tlsKeyPath,
         bootNotification: this._init.bootNotification ?? null,
       },
     };
@@ -479,6 +497,14 @@ export class CLIChargePointService {
         | "Installing"
         | "Installed",
     );
+  }
+
+  sendSecurityEventNotification(type: string, techInfo?: string): void {
+    this._chargePoint.sendSecurityEventNotification(type, techInfo);
+  }
+
+  sendSignCertificate(): Promise<void> {
+    return this._chargePoint.sendSignCertificate();
   }
 
   startHeartbeat(intervalSeconds: number): void {

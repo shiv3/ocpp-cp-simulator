@@ -7,6 +7,10 @@ import type { ChargePointEvents } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "../../infrastructure/transport/wsUrlWithBasic";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
@@ -31,6 +35,7 @@ import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
+import { CertificateStore } from "../security/CertificateStore";
 
 interface BasicAuthSettings {
   username: string;
@@ -82,6 +87,7 @@ export class ChargePoint {
   // onto every connector. Connectors consult this store at composite time.
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
+  private readonly _certificateStore = new CertificateStore();
   private readonly _configuration: ConfigurationStore;
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
@@ -121,6 +127,10 @@ export class ChargePoint {
     extraWsSubprotocols: ReadonlyArray<string> = [],
     private readonly _ocppVersion: string = "OCPP-1.6J",
     transportOptions: ChargePointTransportOptions = {},
+    securityProfile?: OcppSecurityProfile,
+    authorizationKey?: string,
+    cpoName?: string,
+    tls?: OcppTlsOptions,
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
@@ -215,6 +225,10 @@ export class ChargePoint {
         extraWsHeaders,
         extraWsSubprotocols,
         this._ocppVersion,
+        securityProfile,
+        authorizationKey,
+        cpoName,
+        tls,
       );
       this._messageHandler = getProtocolProfile(
         this._ocppVersion,
@@ -260,6 +274,18 @@ export class ChargePoint {
       this,
       this._database,
     );
+    if (securityProfile !== undefined) {
+      this._configuration.applyChange(
+        "SecurityProfile",
+        String(securityProfile),
+      );
+    }
+    if (authorizationKey !== undefined) {
+      this._configuration.applyChange("AuthorizationKey", authorizationKey);
+    }
+    if (cpoName !== undefined) {
+      this._configuration.applyChange("CpoName", cpoName);
+    }
     this.wireConfigurationListeners();
 
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
@@ -377,6 +403,10 @@ export class ChargePoint {
   /** Standard OCPP Configuration Keys store. */
   get configuration(): ConfigurationStore {
     return this._configuration;
+  }
+
+  get certificateStore(): CertificateStore {
+    return this._certificateStore;
   }
 
   /**
@@ -622,6 +652,16 @@ export class ChargePoint {
     this._outbox.sendDataTransfer(vendorId, messageId, data);
   }
 
+  /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */
+  sendSecurityEventNotification(type: string, techInfo?: string): void {
+    this._outbox.sendSecurityEventNotification(type, techInfo);
+  }
+
+  /** Generate a CSR and send OCPP 1.6 SignCertificate.req. */
+  sendSignCertificate(): Promise<void> {
+    return this._outbox.sendSignCertificate();
+  }
+
   /** Send DiagnosticsStatusNotification.req — see OCPPMessageHandler doc. */
   sendDiagnosticsStatusNotification(
     status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
@@ -696,6 +736,12 @@ export class ChargePoint {
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
+    if (
+      this._ocppVersion === "OCPP-1.6J" &&
+      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
+    ) {
+      this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+    }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
     // any post-boot StatusNotification fan-out goes first.

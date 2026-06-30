@@ -633,6 +633,40 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       basicAuth = { username, password };
     }
   }
+  let securityProfile: ChargePointInitOptions["securityProfile"];
+  if (Object.prototype.hasOwnProperty.call(body, "securityProfile")) {
+    const value = body.securityProfile;
+    if (value === 0 || value === 1 || value === 2 || value === 3) {
+      securityProfile = value;
+    } else {
+      throw new Error("securityProfile must be 0, 1, 2, or 3");
+    }
+  }
+  const authorizationKey =
+    typeof body.authorizationKey === "string"
+      ? body.authorizationKey
+      : undefined;
+  const cpoName = typeof body.cpoName === "string" ? body.cpoName : undefined;
+  const tlsCaPath =
+    typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
+  const tlsCertPath =
+    typeof body.tlsCertPath === "string" ? body.tlsCertPath : undefined;
+  const tlsKeyPath =
+    typeof body.tlsKeyPath === "string" ? body.tlsKeyPath : undefined;
+  let tls: ChargePointInitOptions["tls"];
+  if (isRecord(body.tls)) {
+    tls = {
+      ...(typeof body.tls.ca === "string" ? { ca: body.tls.ca } : {}),
+      ...(typeof body.tls.cert === "string" ? { cert: body.tls.cert } : {}),
+      ...(typeof body.tls.key === "string" ? { key: body.tls.key } : {}),
+      ...(typeof body.tls.rejectUnauthorized === "boolean"
+        ? { rejectUnauthorized: body.tls.rejectUnauthorized }
+        : {}),
+      ...(typeof body.tls.serverName === "string"
+        ? { serverName: body.tls.serverName }
+        : {}),
+    };
+  }
   const bn = isRecord(body.bootNotification) ? body.bootNotification : null;
   const bootNotification: ChargePointInitOptions["bootNotification"] = bn
     ? {
@@ -666,6 +700,13 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     ocppVersion,
     ...(soapCallbackUrl ? { soapCallbackUrl } : {}),
     ...(soapPath ? { soapPath } : {}),
+    securityProfile,
+    authorizationKey,
+    cpoName,
+    tls,
+    tlsCaPath,
+    tlsCertPath,
+    tlsKeyPath,
     ...(bootNotification ? { bootNotification } : {}),
   };
 }

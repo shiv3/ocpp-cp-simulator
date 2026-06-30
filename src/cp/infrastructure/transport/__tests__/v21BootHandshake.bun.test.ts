@@ -17,6 +17,7 @@ describe("OCPP 2.1 boot handshake", () => {
       {},
       [],
       "OCPP-2.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

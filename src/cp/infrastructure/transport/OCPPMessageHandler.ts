@@ -3,6 +3,7 @@ import type {
   AuthorizeResponseV16,
   BootNotificationResponseV16,
   CancelReservationRequestV16,
+  CertificateSignedRequestV16,
   ChangeAvailabilityRequestV16,
   ChangeConfigurationRequestV16,
   ChangeConfigurationResponseV16,
@@ -28,6 +29,10 @@ import type {
   ResetRequestV16,
   SendLocalListRequestV16,
   SetChargingProfileRequestV16,
+  SecurityEventNotificationRequestV16,
+  SecurityEventNotificationResponseV16,
+  SignCertificateRequestV16,
+  SignCertificateResponseV16,
   StartTransactionRequestV16,
   StartTransactionResponseV16,
   StatusNotificationRequestV16,
@@ -95,6 +100,7 @@ import {
   GetLocalListVersionHandler,
   SendLocalListHandler,
   UpdateFirmwareHandler,
+  CertificateSignedHandler,
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
@@ -126,13 +132,16 @@ type SmartChargingOcppMessagePayloadCall =
 
 type RemoteTriggerOcppMessagePayloadCall = TriggerMessageRequestV16;
 
+type SecurityExtensionOcppMessagePayloadCall = CertificateSignedRequestV16;
+
 type OcppMessagePayloadCall =
   | CoreOcppMessagePayloadCall
   | FirmwareManagementOcppMessagePayloadCall
   | LocalAuthListManagementOcppMessagePayloadCall
   | ReservationOcppMessagePayloadCall
   | SmartChargingOcppMessagePayloadCall
-  | RemoteTriggerOcppMessagePayloadCall;
+  | RemoteTriggerOcppMessagePayloadCall
+  | SecurityExtensionOcppMessagePayloadCall;
 
 type CoreOcppMessagePayloadCallResult =
   | AuthorizeResponseV16
@@ -149,9 +158,14 @@ type FirmwareManagementOcppMessagePayloadCallResult =
   | DiagnosticsStatusNotificationResponseV16
   | FirmwareStatusNotificationResponseV16;
 
+type SecurityExtensionOcppMessagePayloadCallResult =
+  | SecurityEventNotificationResponseV16
+  | SignCertificateResponseV16;
+
 type OcppMessagePayloadCallResult =
   | CoreOcppMessagePayloadCallResult
-  | FirmwareManagementOcppMessagePayloadCallResult;
+  | FirmwareManagementOcppMessagePayloadCallResult
+  | SecurityExtensionOcppMessagePayloadCallResult;
 
 interface OCPPRequest {
   type: OCPPMessageType;
@@ -351,6 +365,10 @@ export class OCPPMessageHandler {
       OCPPAction.UpdateFirmware,
       new UpdateFirmwareHandler(),
     );
+    this._registry.registerCallHandler(
+      OCPPAction.CertificateSigned,
+      new CertificateSignedHandler(),
+    );
 
     // Register CALLRESULT handlers (incoming responses from central system)
     this._registry.registerCallResultHandler(
@@ -512,6 +530,29 @@ export class OCPPMessageHandler {
       ...(data !== undefined ? { data } : {}),
     };
     this.sendRequest(OCPPAction.DataTransfer, id, payload);
+  }
+
+  /** OCPP 1.6 Security Whitepaper: CP-initiated security event. */
+  public sendSecurityEventNotification(type: string, techInfo?: string): void {
+    const messageId = this.generateMessageId();
+    const payload: SecurityEventNotificationRequestV16 = {
+      type,
+      timestamp: new Date().toISOString(),
+      ...(techInfo !== undefined ? { techInfo } : {}),
+    };
+    this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
+  }
+
+  /** Generate and send a CSR for the charge point certificate signing flow. */
+  public async sendSignCertificate(): Promise<void> {
+    const cpoName = this._chargePoint.configuration.getString("CpoName") ?? "";
+    const csr = await this._chargePoint.certificateStore.generateNewCsr(
+      this._chargePoint.id,
+      cpoName,
+    );
+    const messageId = this.generateMessageId();
+    const payload: SignCertificateRequestV16 = { csr };
+    this.sendRequest(OCPPAction.SignCertificate, messageId, payload);
   }
 
   /**

@@ -227,6 +227,11 @@ function newChargePoint(id: string): ChargePoint {
     "ws://127.0.0.1:9/",
     null,
     null,
+    null,
+    {},
+    [],
+    "OCPP-1.6J",
+    {},
   );
   cp.events.on("error", () => undefined);
   return cp;

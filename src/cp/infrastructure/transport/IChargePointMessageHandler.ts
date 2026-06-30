@@ -30,6 +30,8 @@ export interface IChargePointMessageHandler {
     context?: ReadingContext,
   ): void;
   sendDataTransfer(vendorId: string, messageId?: string, data?: string): void;
+  sendSecurityEventNotification(type: string, techInfo?: string): void;
+  sendSignCertificate(): Promise<void>;
   sendDiagnosticsStatusNotification(status: string): void;
   sendFirmwareStatusNotification(status: string): void;
   setBootStatus(

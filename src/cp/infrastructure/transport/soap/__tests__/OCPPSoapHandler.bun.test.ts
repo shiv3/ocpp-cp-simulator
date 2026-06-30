@@ -277,6 +277,27 @@ function expectSoapRequest(
   expect(request.body).toContain("<cs:chargeBoxIdentity>" + cpId);
 }
 
+function expectElementOrder(xml: string, elementNames: string[]): void {
+  let previousIndex = -1;
+  for (const elementName of elementNames) {
+    const index = firstElementIndex(xml, elementName);
+    expect(index).toBeGreaterThan(previousIndex);
+    previousIndex = index;
+  }
+}
+
+function firstElementIndex(xml: string, elementName: string): number {
+  const indices = [
+    `<cs:${elementName}>`,
+    `<cs:${elementName} `,
+    `<cs:${elementName}/>`,
+  ]
+    .map((needle) => xml.indexOf(needle))
+    .filter((index) => index >= 0);
+  expect(indices.length).toBeGreaterThan(0);
+  return Math.min(...indices);
+}
+
 function bootNotification(): BootNotification {
   return {
     chargePointVendor: "TestVendor",
@@ -434,9 +455,11 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
         );
         expect(status.parsed.payload).toMatchObject({
           connectorId: "1",
-          status: "Preparing",
+          status: "Occupied",
           errorCode: "NoError",
         });
+        expect(status.body).toContain("<cs:status>Occupied</cs:status>");
+        expectElementOrder(status.body, ["connectorId", "status", "errorCode"]);
 
         cp.startTransaction("TAG-DEMO", 1);
         const start = await waitForOperationCount(
@@ -456,6 +479,12 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
           idTag: "TAG-DEMO",
           meterStart: "0",
         });
+        expectElementOrder(start.body, [
+          "connectorId",
+          "idTag",
+          "timestamp",
+          "meterStart",
+        ]);
         await waitUntil(() => cp.getConnector(1)?.transaction?.id === 101);
 
         cp.setMeterValue(1, 1234);
@@ -476,6 +505,19 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
           connectorId: "1",
           transactionId: "101",
         });
+        expectElementOrder(meterValues.body, [
+          "connectorId",
+          "transactionId",
+          "values",
+        ]);
+        expect(meterValues.parsed.payload).not.toHaveProperty("meterValue");
+        expect(meterValues.body).toContain("<cs:values>");
+        expect(meterValues.body).toContain(
+          '<cs:value context="Sample.Periodic" measurand="Energy.Active.Import.Register" unit="Wh">1234</cs:value>',
+        );
+        expect(meterValues.body).toContain(
+          '<cs:value context="Sample.Periodic" measurand="Power.Active.Import" unit="W">',
+        );
 
         cp.stopTransaction(1, "Remote");
         const stop = await waitForOperationCount(
@@ -488,9 +530,114 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
           transactionId: "101",
           idTag: "TAG-DEMO",
         });
+        expectElementOrder(stop.body, [
+          "transactionId",
+          "idTag",
+          "timestamp",
+          "meterStop",
+        ]);
         expect(stop.parsed.payload).not.toHaveProperty("reason");
       } finally {
         cp.disconnect();
+        csms.stop();
+      }
+    });
+  });
+
+  it("maps OCPP 1.6 status values to OCPP 1.5 SOAP ChargePointStatus values", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-STATUS-MAP";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-STATUS-MAP/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      const cases: [OCPPStatus, string][] = [
+        [OCPPStatus.Available, "Available"],
+        [OCPPStatus.Preparing, "Occupied"],
+        [OCPPStatus.Charging, "Occupied"],
+        [OCPPStatus.SuspendedEV, "Occupied"],
+        [OCPPStatus.SuspendedEVSE, "Occupied"],
+        [OCPPStatus.Finishing, "Occupied"],
+        [OCPPStatus.Faulted, "Faulted"],
+        [OCPPStatus.Unavailable, "Unavailable"],
+        [OCPPStatus.Reserved, "Reserved"],
+      ];
+
+      try {
+        cases.forEach(([status]) => handler.sendStatusNotification(1, status));
+
+        for (const [index, [, expected]] of cases.entries()) {
+          const request = await waitForOperationCount(
+            csms.received,
+            "StatusNotification",
+            index + 1,
+          );
+          expect(request.parsed.payload).toMatchObject({
+            connectorId: "1",
+            status: expected,
+            errorCode: "NoError",
+          });
+          expect(request.body).toContain(`<cs:status>${expected}</cs:status>`);
+          expectElementOrder(request.body, [
+            "connectorId",
+            "status",
+            "errorCode",
+          ]);
+        }
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("maps OCPP 1.6-only StatusNotification error codes to OCPP 1.5 SOAP values", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-ERROR-MAP";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-ERROR-MAP/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      const cases = [
+        ["EVCommunicationError", "Mode3Error"],
+        ["InternalError", "OtherError"],
+        ["LocalListConflict", "OtherError"],
+        ["OverVoltage", "OtherError"],
+      ] as const;
+
+      try {
+        cases.forEach(([errorCode]) =>
+          handler.sendStatusNotification(1, OCPPStatus.Faulted, {
+            errorCode,
+          }),
+        );
+
+        for (const [index, [, expected]] of cases.entries()) {
+          const request = await waitForOperationCount(
+            csms.received,
+            "StatusNotification",
+            index + 1,
+          );
+          expect(request.parsed.payload).toMatchObject({
+            status: "Faulted",
+            errorCode: expected,
+          });
+          expect(request.body).toContain(
+            `<cs:errorCode>${expected}</cs:errorCode>`,
+          );
+        }
+      } finally {
         csms.stop();
       }
     });

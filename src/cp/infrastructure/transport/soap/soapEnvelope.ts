@@ -271,6 +271,49 @@ function textForPayloadValue(value: string | number | boolean | Date): string {
   return value instanceof Date ? value.toISOString() : String(value);
 }
 
+function isPayloadScalar(
+  value: unknown,
+): value is string | number | boolean | Date {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value instanceof Date
+  );
+}
+
+function appendPayloadAttributes(
+  element: XmlBuilder,
+  payload: Record<string, unknown>,
+): void {
+  for (const [key, value] of Object.entries(payload)) {
+    if (!key.startsWith("@_")) continue;
+    if (!isPayloadScalar(value)) continue;
+    element.att(key.slice(2), textForPayloadValue(value));
+  }
+}
+
+function appendPayloadText(
+  element: XmlBuilder,
+  payload: Record<string, unknown>,
+): void {
+  const text = payload["#text"];
+  if (text === undefined) return;
+  if (!isPayloadScalar(text)) return;
+  element.txt(textForPayloadValue(text));
+}
+
+function payloadChildren(
+  payload: Record<string, unknown>,
+): SoapPayload | undefined {
+  const children = Object.fromEntries(
+    Object.entries(payload).filter(
+      ([key]) => key !== "#text" && !key.startsWith("@_"),
+    ),
+  ) as SoapPayload;
+  return Object.keys(children).length > 0 ? children : undefined;
+}
+
 function appendPayloadValue(
   parent: XmlBuilder,
   elementName: string,
@@ -291,7 +334,10 @@ function appendPayloadValue(
     return;
   }
   if (isRecord(value)) {
-    appendPayloadChildren(child, value as SoapPayload, undefined, prefix);
+    appendPayloadAttributes(child, value);
+    appendPayloadText(child, value);
+    const children = payloadChildren(value);
+    if (children) appendPayloadChildren(child, children, undefined, prefix);
     child.up();
     return;
   }

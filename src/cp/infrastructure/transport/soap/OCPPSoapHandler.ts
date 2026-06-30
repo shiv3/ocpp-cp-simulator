@@ -7,17 +7,18 @@ import type {
   FirmwareStatusNotificationRequestV16,
   HeartbeatRequestV16,
   HeartbeatResponseV16,
-  MeterValuesRequestV16,
   MeterValuesResponseV16,
   StartTransactionRequestV16,
   StartTransactionResponseV16,
-  StatusNotificationRequestV16,
   StatusNotificationResponseV16,
   StopTransactionRequestV16,
   StopTransactionResponseV16,
 } from "../../../../ocpp";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import type { ReadingContext } from "../../../domain/connector/MeterValueBuilder";
+import type {
+  ReadingContext,
+  SampledValue,
+} from "../../../domain/connector/MeterValueBuilder";
 import { buildSampledValues } from "../../../domain/connector/MeterValueBuilder";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
@@ -79,6 +80,97 @@ type IdTagInfo = {
 };
 
 type Ocpp15StopTransactionRequest = Omit<StopTransactionRequestV16, "reason">;
+
+type Ocpp15ChargePointStatus =
+  | "Available"
+  | "Occupied"
+  | "Faulted"
+  | "Unavailable"
+  | "Reserved";
+
+type Ocpp15ChargePointErrorCode =
+  | "ConnectorLockFailure"
+  | "HighTemperature"
+  | "Mode3Error"
+  | "NoError"
+  | "PowerMeterFailure"
+  | "PowerSwitchFailure"
+  | "ReaderFailure"
+  | "ResetFailure"
+  | "GroundFailure"
+  | "OverCurrentFailure"
+  | "UnderVoltage"
+  | "WeakSignal"
+  | "OtherError";
+
+type Ocpp15ReadingContext =
+  | "Interruption.Begin"
+  | "Interruption.End"
+  | "Sample.Clock"
+  | "Sample.Periodic"
+  | "Transaction.Begin"
+  | "Transaction.End";
+
+type Ocpp15Measurand =
+  | "Energy.Active.Export.Register"
+  | "Energy.Active.Import.Register"
+  | "Energy.Reactive.Export.Register"
+  | "Energy.Reactive.Import.Register"
+  | "Energy.Active.Export.Interval"
+  | "Energy.Active.Import.Interval"
+  | "Energy.Reactive.Export.Interval"
+  | "Energy.Reactive.Import.Interval"
+  | "Power.Active.Export"
+  | "Power.Active.Import"
+  | "Power.Reactive.Export"
+  | "Power.Reactive.Import"
+  | "Current.Export"
+  | "Current.Import"
+  | "Voltage"
+  | "Temperature";
+
+type Ocpp15UnitOfMeasure =
+  | "Wh"
+  | "kWh"
+  | "varh"
+  | "kvarh"
+  | "W"
+  | "kW"
+  | "var"
+  | "kvar"
+  | "Amp"
+  | "Volt"
+  | "Celsius";
+
+type Ocpp15Location = "Inlet" | "Outlet" | "Body";
+
+type Ocpp15StatusNotificationRequest = {
+  connectorId: number;
+  status: Ocpp15ChargePointStatus;
+  errorCode: Ocpp15ChargePointErrorCode;
+  info?: string;
+  timestamp?: string;
+  vendorId?: string;
+  vendorErrorCode?: string;
+};
+
+type Ocpp15MeterSample = {
+  "#text": string;
+  "@_context"?: Ocpp15ReadingContext;
+  "@_format"?: "Raw" | "SignedData";
+  "@_measurand"?: Ocpp15Measurand;
+  "@_location"?: Ocpp15Location;
+  "@_unit"?: Ocpp15UnitOfMeasure;
+};
+
+type Ocpp15MeterValuesRequest = {
+  connectorId: number;
+  transactionId?: number;
+  values: {
+    timestamp: string;
+    value: Ocpp15MeterSample[];
+  }[];
+};
 
 const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
   Authorize: OCPPAction.Authorize,
@@ -159,6 +251,165 @@ function soapPayload(payload: object): SoapPayload {
   return payload as unknown as SoapPayload;
 }
 
+function toOcpp15ChargePointStatus(
+  status: OCPPStatus,
+): Ocpp15ChargePointStatus {
+  // OCPP 1.5 ChargePointStatus only defines Available, Occupied, Faulted,
+  // Unavailable, and Reserved; 1.6 transaction-progress states collapse to
+  // Occupied on the 1.5 SOAP wire.
+  switch (status) {
+    case "Available":
+      return "Available";
+    case "Faulted":
+      return "Faulted";
+    case "Unavailable":
+      return "Unavailable";
+    case "Reserved":
+      return "Reserved";
+    case "Preparing":
+    case "Charging":
+    case "SuspendedEV":
+    case "SuspendedEVSE":
+    case "Finishing":
+      return "Occupied";
+  }
+}
+
+function toOcpp15ChargePointErrorCode(
+  errorCode: ChargePointErrorCode,
+): Ocpp15ChargePointErrorCode {
+  switch (errorCode) {
+    case "ConnectorLockFailure":
+    case "HighTemperature":
+    case "NoError":
+    case "PowerMeterFailure":
+    case "PowerSwitchFailure":
+    case "ReaderFailure":
+    case "ResetFailure":
+    case "GroundFailure":
+    case "OverCurrentFailure":
+    case "UnderVoltage":
+    case "WeakSignal":
+    case "OtherError":
+      return errorCode;
+    case "EVCommunicationError":
+      // OCPP 1.5 has no EVCommunicationError; Mode3Error is the closest
+      // connector/EV communication fault in the 1.5 ChargePointErrorCode set.
+      return "Mode3Error";
+    case "InternalError":
+    case "LocalListConflict":
+    case "OverVoltage":
+      return "OtherError";
+  }
+}
+
+function toOcpp15ReadingContext(
+  context: string | undefined,
+): Ocpp15ReadingContext | undefined {
+  switch (context) {
+    case "Interruption.Begin":
+    case "Interruption.End":
+    case "Sample.Clock":
+    case "Sample.Periodic":
+    case "Transaction.Begin":
+    case "Transaction.End":
+      return context;
+    case "Trigger":
+    case "Other":
+    default:
+      return undefined;
+  }
+}
+
+function toOcpp15Measurand(
+  measurand: string | undefined,
+): Ocpp15Measurand | null | undefined {
+  switch (measurand) {
+    case undefined:
+      return undefined;
+    case "Energy.Active.Export.Register":
+    case "Energy.Active.Import.Register":
+    case "Energy.Reactive.Export.Register":
+    case "Energy.Reactive.Import.Register":
+    case "Energy.Active.Export.Interval":
+    case "Energy.Active.Import.Interval":
+    case "Energy.Reactive.Export.Interval":
+    case "Energy.Reactive.Import.Interval":
+    case "Power.Active.Export":
+    case "Power.Active.Import":
+    case "Power.Reactive.Export":
+    case "Power.Reactive.Import":
+    case "Current.Export":
+    case "Current.Import":
+    case "Voltage":
+    case "Temperature":
+      return measurand;
+    case "Power.Offered":
+      return "Power.Active.Import";
+    case "Current.Offered":
+      return "Current.Import";
+    default:
+      // OCPP 1.5 has no Power.Factor, SoC, Frequency, RPM, phase-aware, or
+      // custom measurand equivalent; drop the sample instead of mislabeling it.
+      return null;
+  }
+}
+
+function toOcpp15UnitOfMeasure(
+  unit: string | undefined,
+): Ocpp15UnitOfMeasure | undefined {
+  switch (unit) {
+    case "Wh":
+    case "kWh":
+    case "varh":
+    case "kvarh":
+    case "W":
+    case "kW":
+    case "var":
+    case "kvar":
+    case "Celsius":
+      return unit;
+    case "A":
+      return "Amp";
+    case "V":
+      return "Volt";
+    case "Celcius":
+      return "Celsius";
+    default:
+      return undefined;
+  }
+}
+
+function toOcpp15Location(
+  location: string | undefined,
+): Ocpp15Location | undefined {
+  switch (location) {
+    case "Inlet":
+    case "Outlet":
+    case "Body":
+      return location;
+    default:
+      return undefined;
+  }
+}
+
+function toOcpp15MeterSample(sample: SampledValue): Ocpp15MeterSample | null {
+  const measurand = toOcpp15Measurand(sample.measurand);
+  if (measurand === null) return null;
+  const context = toOcpp15ReadingContext(sample.context);
+  const location = toOcpp15Location(sample.location);
+  const unit = toOcpp15UnitOfMeasure(sample.unit);
+
+  return {
+    "#text": sample.value,
+    ...(context ? { "@_context": context } : {}),
+    ...(sample.format ? { "@_format": sample.format } : {}),
+    ...(measurand ? { "@_measurand": measurand } : {}),
+    ...(location ? { "@_location": location } : {}),
+    ...(unit ? { "@_unit": unit } : {}),
+  };
+}
+
 export class OCPPSoapHandler implements IChargePointMessageHandler {
   private readonly _dataTransferHandler = new DataTransferHandler();
   private _bootStatus: BootStatus = { status: "Idle" };
@@ -198,16 +449,21 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       suppressChargingStateTransactionEvent?: boolean;
     },
   ): void {
-    const payload: StatusNotificationRequestV16 = {
+    // The SOAP body emits elements in object-key order, so the keys MUST follow
+    // the OCPP 1.5 statusNotificationRequest XSD sequence: connectorId, status,
+    // errorCode, info, timestamp, vendorId, vendorErrorCode. SteVe's JAXB binding
+    // is sequence-sensitive — status before errorCode (the wrong order made SteVe
+    // read `status` as null and throw a Fault during a transaction).
+    const payload: Ocpp15StatusNotificationRequest = {
       connectorId,
-      errorCode: opts?.errorCode ?? "NoError",
-      status,
+      status: toOcpp15ChargePointStatus(status),
+      errorCode: toOcpp15ChargePointErrorCode(opts?.errorCode ?? "NoError"),
       ...(opts?.info ? { info: opts.info } : {}),
+      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
+      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
       ...(opts?.vendorErrorCode
         ? { vendorErrorCode: opts.vendorErrorCode }
         : {}),
-      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
-      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
     };
     this.enqueueRequest("StatusNotification", soapPayload(payload), (env) => {
       new StatusNotificationResultHandler().handle(
@@ -251,14 +507,15 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
 
     const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
-    const payload: MeterValuesRequestV16 = {
-      transactionId,
+    const payload: Ocpp15MeterValuesRequest = {
       connectorId,
-      meterValue: [
+      ...(transactionId !== undefined ? { transactionId } : {}),
+      values: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue:
-            sampledValue as unknown as MeterValuesRequestV16["meterValue"][0]["sampledValue"],
+          value: sampledValue
+            .map(toOcpp15MeterSample)
+            .filter((sample): sample is Ocpp15MeterSample => sample !== null),
         },
       ],
     };
@@ -330,8 +587,8 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const payload: StartTransactionRequestV16 = {
       connectorId,
       idTag: transaction.tagId,
-      meterStart: transaction.meterStart,
       timestamp: transaction.startTime.toISOString(),
+      meterStart: transaction.meterStart,
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
         : {}),
@@ -373,8 +630,8 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const payload: Ocpp15StopTransactionRequest = {
       transactionId: transaction.id,
       idTag: transaction.tagId,
-      meterStop: transaction.meterStop,
       timestamp: transaction.stopTime.toISOString(),
+      meterStop: transaction.meterStop,
     };
     this.enqueueRequest("StopTransaction", soapPayload(payload), (env) => {
       new StopTransactionResultHandler(connectorId).handle(

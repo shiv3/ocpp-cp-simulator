@@ -111,7 +111,16 @@ export const METHODS = {
 
   // -- connector --
   update_connector_status: {
-    params: z.object({ connector: CONN_NONNEG, status: STR_64K }),
+    params: z.object({
+      connector: CONN_NONNEG,
+      status: STR_64K,
+      errorCode: STR_64K.optional(),
+      info: STR_64K.optional(),
+      vendorErrorCode: STR_64K.optional(),
+      vendorId: STR_64K.optional(),
+      timestamp: STR_64K.optional(),
+      suppressChargingStateTransactionEvent: z.boolean().optional(),
+    }),
     result: ANY,
   },
   set_meter_value: {

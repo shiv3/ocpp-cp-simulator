@@ -9,6 +9,7 @@ import {
   type StatusWire,
   type SubscribeResult,
 } from "../../protocol";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
 type Handler = (...args: any[]) => void;
 
@@ -191,6 +192,43 @@ describe("RemoteChargePointService socket.io rpc", () => {
       cpId: "cp-1",
       method: "connect",
       params: {},
+    });
+
+    ack.resolve({ ok: true, result: undefined });
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("sends StatusNotification options on update_connector_status rpc", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const timestamp = new Date("2026-01-02T03:04:05.000Z");
+    const promise = service.sendStatusNotification(
+      "cp-1",
+      1,
+      OCPPStatus.Faulted,
+      {
+        errorCode: "EVCommunicationError",
+        info: "pilot lost",
+        vendorErrorCode: "E-42",
+        vendorId: "Vendor",
+        timestamp,
+        suppressChargingStateTransactionEvent: true,
+      },
+    );
+    const ack = nextAck();
+
+    expect(ack.request).toEqual({
+      cpId: "cp-1",
+      method: "update_connector_status",
+      params: {
+        connector: 1,
+        status: "Faulted",
+        errorCode: "EVCommunicationError",
+        info: "pilot lost",
+        vendorErrorCode: "E-42",
+        vendorId: "Vendor",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        suppressChargingStateTransactionEvent: true,
+      },
     });
 
     ack.resolve({ ok: true, result: undefined });

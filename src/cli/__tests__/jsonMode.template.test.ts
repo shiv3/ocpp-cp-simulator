@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleJsonCommand } from "../jsonMode";
 import type { CLIChargePointService } from "../service";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
 // run_scenario_template / load_scenario_template should accept an optional
 // `evSettings` override so a connector's charging power (=> low-power
@@ -73,5 +74,42 @@ describe("(load|run)_scenario_template evSettings override", () => {
       1,
       undefined,
     );
+  });
+});
+
+describe("update_connector_status status notification options", () => {
+  it("forwards all wire options to the per-CP service", async () => {
+    const updateConnectorStatus = vi.fn();
+    const service = {
+      updateConnectorStatus,
+    } as unknown as CLIChargePointService;
+
+    await handleJsonCommand(service, {
+      command: "update_connector_status",
+      params: {
+        connector: 1,
+        status: "Faulted",
+        errorCode: "EVCommunicationError",
+        info: "pilot lost",
+        vendorErrorCode: "E-42",
+        vendorId: "Vendor",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        suppressChargingStateTransactionEvent: true,
+      },
+    });
+
+    expect(updateConnectorStatus).toHaveBeenCalledTimes(1);
+    const [connectorId, status, opts] = updateConnectorStatus.mock.calls[0];
+    expect(connectorId).toBe(1);
+    expect(status).toBe(OCPPStatus.Faulted);
+    expect(opts).toMatchObject({
+      errorCode: "EVCommunicationError",
+      info: "pilot lost",
+      vendorErrorCode: "E-42",
+      vendorId: "Vendor",
+      suppressChargingStateTransactionEvent: true,
+    });
+    expect(opts.timestamp).toBeInstanceOf(Date);
+    expect(opts.timestamp.toISOString()).toBe("2026-01-02T03:04:05.000Z");
   });
 });

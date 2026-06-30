@@ -3,7 +3,12 @@ import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargeP
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
-import { BootNotification, OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import {
+  BootNotification,
+  hasStatusNotificationOptions,
+  OCPPStatus,
+  type StatusNotificationOptions,
+} from "../../cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,
   ChargePointService,
@@ -307,15 +312,10 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
-    opts?: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts?: StatusNotificationOptions,
   ): Promise<void> {
     const cp = this.getExistingChargePointOrThrow(id);
-    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
+    if (hasStatusNotificationOptions(opts)) {
       // Use the raw sender so errorCode/info ride along with the
       // StatusNotification.req without mutating the connector's runtime
       // status field.

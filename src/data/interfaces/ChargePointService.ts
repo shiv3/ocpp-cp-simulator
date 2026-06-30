@@ -13,6 +13,7 @@ import type {
 import type {
   OCPPAvailability,
   OCPPStatus,
+  StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import type { LogEntry } from "../../cp/shared/Logger";
 import type {
@@ -294,12 +295,7 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
-    opts?: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts?: StatusNotificationOptions,
   ): Promise<void>;
   setMeterValue(id: string, connectorId: number, value: number): Promise<void>;
   sendMeterValue(id: string, connectorId: number): Promise<void>;

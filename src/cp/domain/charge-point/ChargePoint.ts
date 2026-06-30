@@ -16,7 +16,11 @@ import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
-import type { OCPPAvailability } from "../types/OcppTypes";
+import type {
+  ChargePointErrorCode,
+  OCPPAvailability,
+  StatusNotificationOptions,
+} from "../types/OcppTypes";
 import { OCPP_1_5 } from "../types/OcppVersion";
 import {
   BootNotification,
@@ -621,12 +625,7 @@ export class ChargePoint {
   sendStatusNotificationRaw(
     connectorId: number,
     status: OCPPStatus,
-    opts: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts: StatusNotificationOptions,
   ): void {
     if (connectorId === 0 && !isChargePointStatus(status)) {
       this._logger.warn(
@@ -637,13 +636,13 @@ export class ChargePoint {
     }
     this._outbox.sendStatusNotification(connectorId, status, {
       errorCode:
-        (opts.errorCode as
-          | import("../types/OcppTypes").ChargePointErrorCode
-          | undefined) ?? undefined,
+        (opts.errorCode as ChargePointErrorCode | undefined) ?? undefined,
       info: opts.info,
       vendorErrorCode: opts.vendorErrorCode,
       vendorId: opts.vendorId,
-      suppressChargingStateTransactionEvent: true,
+      timestamp: opts.timestamp,
+      suppressChargingStateTransactionEvent:
+        opts.suppressChargingStateTransactionEvent ?? true,
     });
   }
 

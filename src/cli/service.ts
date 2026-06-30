@@ -1,8 +1,14 @@
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../cp/domain/persistence/Database";
-import type { BootNotification } from "../cp/domain/types/OcppTypes";
-import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import type {
+  BootNotification,
+  StatusNotificationOptions,
+} from "../cp/domain/types/OcppTypes";
+import {
+  hasStatusNotificationOptions,
+  OCPPStatus,
+} from "../cp/domain/types/OcppTypes";
 import { OCPP_1_5 } from "../cp/domain/types/OcppVersion";
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type {
@@ -519,7 +525,15 @@ export class CLIChargePointService {
     this._chargePoint.authorize(tagId);
   }
 
-  updateConnectorStatus(connectorId: number, status: OCPPStatus): void {
+  updateConnectorStatus(
+    connectorId: number,
+    status: OCPPStatus,
+    opts?: StatusNotificationOptions,
+  ): void {
+    if (hasStatusNotificationOptions(opts)) {
+      this._chargePoint.sendStatusNotificationRaw(connectorId, status, opts);
+      return;
+    }
     this._chargePoint.updateConnectorStatus(connectorId, status);
   }
 

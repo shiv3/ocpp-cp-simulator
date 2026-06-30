@@ -13,6 +13,7 @@ import type {
 import type {
   OCPPAvailability,
   OCPPStatus,
+  StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -715,22 +716,26 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
-    opts?: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts?: StatusNotificationOptions,
   ): Promise<void> {
-    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
-      console.warn(
-        "Remote mode: StatusNotification errorCode/info/vendorErrorCode not yet supported; dropping",
-        opts,
-      );
-    }
     await this.runCpRpc(id, "update_connector_status", {
       connector: connectorId,
       status,
+      ...(opts?.errorCode !== undefined ? { errorCode: opts.errorCode } : {}),
+      ...(opts?.info !== undefined ? { info: opts.info } : {}),
+      ...(opts?.vendorErrorCode !== undefined
+        ? { vendorErrorCode: opts.vendorErrorCode }
+        : {}),
+      ...(opts?.vendorId !== undefined ? { vendorId: opts.vendorId } : {}),
+      ...(opts?.timestamp !== undefined
+        ? { timestamp: opts.timestamp.toISOString() }
+        : {}),
+      ...(opts?.suppressChargingStateTransactionEvent !== undefined
+        ? {
+            suppressChargingStateTransactionEvent:
+              opts.suppressChargingStateTransactionEvent,
+          }
+        : {}),
     });
   }
 

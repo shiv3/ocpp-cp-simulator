@@ -1,7 +1,11 @@
 import * as readline from "readline";
 import * as fs from "fs";
 import { CLIChargePointService } from "./service";
-import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import {
+  hasStatusNotificationOptions,
+  OCPPStatus,
+  type StatusNotificationOptions,
+} from "../cp/domain/types/OcppTypes";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -183,7 +187,8 @@ export async function handleJsonCommand(
           `Invalid status: ${status}. Valid: ${[...VALID_STATUSES].join(", ")}`,
         );
       }
-      service.updateConnectorStatus(connectorId, status as OCPPStatus);
+      const opts = readStatusNotificationOptions(params);
+      service.updateConnectorStatus(connectorId, status as OCPPStatus, opts);
       return undefined;
     }
 
@@ -456,6 +461,62 @@ export function requireObject(
     throw new Error(`Missing or invalid parameter: ${key} (expected object)`);
   }
   return val as Record<string, unknown>;
+}
+
+function readStatusNotificationOptions(
+  params: Record<string, unknown>,
+): StatusNotificationOptions | undefined {
+  const opts: StatusNotificationOptions = {};
+  readOptionalString(params, "errorCode", opts);
+  readOptionalString(params, "info", opts);
+  readOptionalString(params, "vendorErrorCode", opts);
+  readOptionalString(params, "vendorId", opts);
+  readOptionalTimestamp(params, "timestamp", opts);
+  readOptionalBoolean(params, "suppressChargingStateTransactionEvent", opts);
+  return hasStatusNotificationOptions(opts) ? opts : undefined;
+}
+
+function readOptionalString(
+  params: Record<string, unknown>,
+  key: "errorCode" | "info" | "vendorErrorCode" | "vendorId",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  if (typeof val !== "string") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
+  }
+  target[key] = val;
+}
+
+function readOptionalTimestamp(
+  params: Record<string, unknown>,
+  key: "timestamp",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  const date =
+    val instanceof Date ? val : typeof val === "string" ? new Date(val) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected ISO timestamp)`,
+    );
+  }
+  target[key] = date;
+}
+
+function readOptionalBoolean(
+  params: Record<string, unknown>,
+  key: "suppressChargingStateTransactionEvent",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  if (typeof val !== "boolean") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
+  }
+  target[key] = val;
 }
 
 /**

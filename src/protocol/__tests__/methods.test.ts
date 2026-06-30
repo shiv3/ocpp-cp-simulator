@@ -98,6 +98,32 @@ describe("connector-0 per-command rule (PB3)", () => {
     ).toBe(true);
   });
 
+  it("update_connector_status preserves status notification option params", () => {
+    const parsed = METHODS.update_connector_status.params.safeParse({
+      connector: 1,
+      status: "Faulted",
+      errorCode: "EVCommunicationError",
+      info: "pilot lost",
+      vendorErrorCode: "E-42",
+      vendorId: "Vendor",
+      timestamp: "2026-01-02T03:04:05.000Z",
+      suppressChargingStateTransactionEvent: true,
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data).toMatchObject({
+      connector: 1,
+      status: "Faulted",
+      errorCode: "EVCommunicationError",
+      info: "pilot lost",
+      vendorErrorCode: "E-42",
+      vendorId: "Vendor",
+      timestamp: "2026-01-02T03:04:05.000Z",
+      suppressChargingStateTransactionEvent: true,
+    });
+  });
+
   it("other connector commands reject connector 0", () => {
     expect(
       METHODS.start_transaction.params.safeParse({ connector: 0, tagId: "T" })

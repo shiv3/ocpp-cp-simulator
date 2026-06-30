@@ -21,6 +21,56 @@ function makeService(existing: ScenarioDefinition[] = []) {
     listScenarioDefinitions: vi.fn().mockResolvedValue(existing),
     saveScenarioDefinition: vi.fn().mockResolvedValue(undefined),
     replaceConnectorScenarioDefinitions: vi.fn().mockResolvedValue(undefined),
+    loadScenario: vi
+      .fn()
+      .mockResolvedValue({ scenarioId: existing[0]?.id ?? "" }),
+  };
+}
+
+function makeRemoteStyleService(existing: ScenarioDefinition[] = []) {
+  let stored = [...existing];
+  let active: ScenarioDefinition | null = existing[0] ?? null;
+
+  return {
+    service: {
+      listScenarioDefinitions: vi.fn(async () => stored),
+      saveScenarioDefinition: vi.fn(
+        async (
+          _cpId: string,
+          _connectorId: number | null,
+          definition: ScenarioDefinition,
+        ) => {
+          stored = [
+            ...stored.filter((item) => item.id !== definition.id),
+            definition,
+          ];
+          return definition;
+        },
+      ),
+      replaceConnectorScenarioDefinitions: vi.fn(
+        async (
+          _cpId: string,
+          _connectorId: number | null,
+          definitions: readonly ScenarioDefinition[],
+        ) => {
+          stored = [...definitions];
+          return stored;
+        },
+      ),
+      loadScenario: vi.fn(
+        async (
+          _cpId: string,
+          _connectorId: number,
+          definition: ScenarioDefinition,
+        ) => {
+          active =
+            stored.find((item) => item.id === definition.id) ?? definition;
+          return { scenarioId: definition.id };
+        },
+      ),
+    },
+    getStored: () => stored,
+    getActive: () => active,
   };
 }
 
@@ -53,6 +103,7 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
 
     await persistEditorScenario(
       {
+        mode: "local",
         chargePointService,
         cpId: "CP1",
         connectorId: 1,
@@ -68,6 +119,7 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
       chargePointService.replaceConnectorScenarioDefinitions,
     ).toHaveBeenCalledWith("CP1", 1, [uploaded]);
     expect(chargePointService.saveScenarioDefinition).not.toHaveBeenCalled();
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
   });
 
   it("serializes the graph before replace persistence", async () => {
@@ -105,6 +157,7 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
 
     await persistEditorScenario(
       {
+        mode: "local",
         chargePointService,
         cpId: "CP1",
         connectorId: 1,
@@ -126,6 +179,30 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
       source: "start",
       target: "meter-1",
     });
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+  });
+
+  it("persists and activates the remote runtime after autosave replace", async () => {
+    const stale = scenario("stale");
+    const edited = scenario("edited");
+    const remote = makeRemoteStyleService([stale]);
+
+    await persistEditorScenario(
+      {
+        mode: "remote",
+        chargePointService: remote.service,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      edited,
+    );
+
+    expect(
+      remote.service.replaceConnectorScenarioDefinitions,
+    ).toHaveBeenCalledWith("CP1", 1, [edited]);
+    expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
+    expect(remote.getStored()).toEqual([edited]);
+    expect(remote.getActive()).toEqual(edited);
   });
 });
 
@@ -136,6 +213,7 @@ describe("saveEditorScenario (single definition upsert)", () => {
 
     await saveEditorScenario(
       {
+        mode: "local",
         chargePointService,
         cpId: "CP1",
         connectorId: 1,
@@ -152,6 +230,35 @@ describe("saveEditorScenario (single definition upsert)", () => {
     expect(
       chargePointService.replaceConnectorScenarioDefinitions,
     ).not.toHaveBeenCalled();
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+  });
+
+  it("persists and activates the remote runtime after manual save", async () => {
+    const previous = scenario("edited-1");
+    const edited = {
+      ...scenario("edited-1"),
+      name: "Edited name",
+    };
+    const remote = makeRemoteStyleService([previous]);
+
+    await saveEditorScenario(
+      {
+        mode: "remote",
+        chargePointService: remote.service,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      edited,
+    );
+
+    expect(remote.service.saveScenarioDefinition).toHaveBeenCalledWith(
+      "CP1",
+      1,
+      edited,
+    );
+    expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
+    expect(remote.getStored()).toEqual([edited]);
+    expect(remote.getActive()).toEqual(edited);
   });
 });
 
@@ -200,6 +307,7 @@ describe("createLatestWinsSaver", () => {
     const saveLatest = createLatestWinsSaver<ScenarioDefinition>((definition) =>
       persistEditorScenario(
         {
+          mode: "local",
           chargePointService,
           cpId: "CP1",
           connectorId: 1,

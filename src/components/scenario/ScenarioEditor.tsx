@@ -318,13 +318,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     (scenarioToSave: ScenarioDefinition): Promise<void> =>
       persistEditorScenarioLatest({
         deps: {
+          mode,
           chargePointService,
           cpId,
           connectorId,
         },
         scenario: scenarioToSave,
       }),
-    [chargePointService, cpId, connectorId, persistEditorScenarioLatest],
+    [mode, chargePointService, cpId, connectorId, persistEditorScenarioLatest],
   );
 
   const structuralKey = useCallback((ns: Node[], es: Edge[]): string => {
@@ -855,21 +856,33 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           : undefined,
       updatedAt: new Date().toISOString(),
     };
-    if (scenario.id) {
-      void saveEditorScenario(
-        { chargePointService, cpId, connectorId },
-        updated,
-      ).catch((err) => console.error("Failed to save scenario", err));
-    }
     setScenario(updated);
-    setSaveFeedback("saved");
-    if (saveFeedbackTimerRef.current !== null) {
-      window.clearTimeout(saveFeedbackTimerRef.current);
+    const markSaved = () => {
+      setSaveFeedback("saved");
+      if (saveFeedbackTimerRef.current !== null) {
+        window.clearTimeout(saveFeedbackTimerRef.current);
+      }
+      saveFeedbackTimerRef.current = window.setTimeout(() => {
+        setSaveFeedback("idle");
+        saveFeedbackTimerRef.current = null;
+      }, 1500);
+    };
+    if (scenario.id) {
+      const savePromise = saveEditorScenario(
+        { mode, chargePointService, cpId, connectorId },
+        updated,
+      );
+      if (mode === "remote") {
+        void savePromise
+          .then(markSaved)
+          .catch((err) => console.error("Failed to save scenario", err));
+        return;
+      }
+      void savePromise.catch((err) =>
+        console.error("Failed to save scenario", err),
+      );
     }
-    saveFeedbackTimerRef.current = window.setTimeout(() => {
-      setSaveFeedback("idle");
-      saveFeedbackTimerRef.current = null;
-    }, 1500);
+    markSaved();
   }, [
     scenario,
     scenarioName,
@@ -881,6 +894,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEvSettings,
     cpId,
     connectorId,
+    mode,
     chargePointService,
   ]);
 
@@ -1158,14 +1172,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         // Persist through the replace boundary so stale connector siblings are
         // pruned and reload selects the imported scenario (#101).
         await persistEditorScenario(
-          { chargePointService, cpId, connectorId },
+          { mode, chargePointService, cpId, connectorId },
           targeted,
         );
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [cpId, connectorId, chargePointService, setNodes, setEdges],
+    [cpId, connectorId, mode, chargePointService, setNodes, setEdges],
   );
 
   const handleLoadTemplate = useCallback(
@@ -1199,13 +1213,21 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       // Same replace persistence as the file-upload path: stale scenarios are
       // pruned so reload selects the template scenario (#101).
       void persistEditorScenario(
-        { chargePointService, cpId, connectorId },
+        { mode, chargePointService, cpId, connectorId },
         templateScenario,
       ).catch((err) =>
         console.error("Failed to persist template scenario", err),
       );
     },
-    [cpId, connectorId, chargePointService, nodes.length, setNodes, setEdges],
+    [
+      cpId,
+      connectorId,
+      mode,
+      chargePointService,
+      nodes.length,
+      setNodes,
+      setEdges,
+    ],
   );
 
   // Handle node double-click to open config panel

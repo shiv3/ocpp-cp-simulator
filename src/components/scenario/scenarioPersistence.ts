@@ -1,5 +1,6 @@
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import type { ChargePointService } from "../../data/interfaces/ChargePointService";
+import type { RuntimeMode } from "../../data/RuntimeMode";
 import { serializeScenarioGraph } from "./scenarioSerialize";
 
 /**
@@ -8,16 +9,23 @@ import { serializeScenarioGraph } from "./scenarioSerialize";
  * lightweight mocks.
  */
 export interface PersistEditorScenarioDeps {
+  mode: RuntimeMode;
   chargePointService: Pick<
     ChargePointService,
-    "listScenarioDefinitions" | "replaceConnectorScenarioDefinitions"
+    | "listScenarioDefinitions"
+    | "replaceConnectorScenarioDefinitions"
+    | "loadScenario"
   >;
   cpId: string;
   connectorId: number | null;
 }
 
 export interface SaveEditorScenarioDeps {
-  chargePointService: Pick<ChargePointService, "saveScenarioDefinition">;
+  mode: RuntimeMode;
+  chargePointService: Pick<
+    ChargePointService,
+    "saveScenarioDefinition" | "loadScenario"
+  >;
   cpId: string;
   connectorId: number | null;
 }
@@ -50,6 +58,24 @@ function serializeScenarioForPersistence(
   };
 }
 
+async function activateRemoteScenario(
+  deps: {
+    mode: RuntimeMode;
+    chargePointService: Pick<ChargePointService, "loadScenario">;
+    cpId: string;
+    connectorId: number | null;
+  },
+  scenario: ScenarioDefinition,
+): Promise<void> {
+  const { mode, chargePointService, cpId, connectorId } = deps;
+  if (mode !== "remote") return;
+  if (connectorId === null) {
+    throw new Error("Remote scenario activation requires a connector id");
+  }
+
+  await chargePointService.loadScenario(cpId, connectorId, scenario);
+}
+
 /**
  * Durably persist a scenario the user just dropped into the editor — either by
  * uploading a JSON file (`handleFileChange`) or loading a template
@@ -73,6 +99,7 @@ export async function persistEditorScenario(
     connectorId,
     [scenarioToPersist],
   );
+  await activateRemoteScenario(deps, scenarioToPersist);
 }
 
 /**
@@ -91,6 +118,7 @@ export async function saveEditorScenario(
     connectorId,
     scenarioToPersist,
   );
+  await activateRemoteScenario(deps, scenarioToPersist);
 }
 
 /**

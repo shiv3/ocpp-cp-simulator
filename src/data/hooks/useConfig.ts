@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 import { useDataContext } from "../providers/DataProvider";
@@ -13,9 +13,11 @@ export function useConfig(): UseConfigResult {
   const { chargePointService } = useDataContext();
   const [config, setConfigState] = useState<WireSimulatorConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    mountedRef.current = true;
 
     chargePointService
       .loadConfig()
@@ -37,6 +39,7 @@ export function useConfig(): UseConfigResult {
 
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       unsubscribe();
     };
   }, [chargePointService]);
@@ -44,6 +47,11 @@ export function useConfig(): UseConfigResult {
   const setConfig = useCallback(
     async (next: SimulatorConfigInput | null) => {
       await chargePointService.saveConfig(next);
+      const saved = await chargePointService.loadConfig();
+      if (mountedRef.current) {
+        setConfigState(saved);
+        setIsLoading(false);
+      }
     },
     [chargePointService],
   );

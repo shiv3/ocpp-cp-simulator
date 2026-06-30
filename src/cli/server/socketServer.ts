@@ -134,6 +134,8 @@ type FacadeDispatchResult =
 
 const EXPLICIT_METHOD_SET = new Set<string>(EXPLICIT_METHODS);
 const CONFIG_KEY = "global_config";
+const CONFIG_EVENTS_SCOPE = "config";
+const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
 const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
   "manual",
   "scenario",
@@ -513,9 +515,11 @@ async function saveConfig(
   const params = METHODS["config.save"].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveConfig(params.data.config),
-  );
+  const saved = await runFacadeOperation(async () => {
+    await deps.chargePointService.saveConfig(params.data.config);
+    return deps.chargePointService.loadConfig();
+  });
+  deps.registryEvents?.emitConfigChanged(saved);
   return { ok: true };
 }
 
@@ -544,13 +548,19 @@ async function saveScenarioDefinition(
   if (!params.success) throw new RpcFailure("invalid_params", "");
 
   const definition = params.data.definition as unknown as ScenarioDefinition;
-  return runFacadeOperation(() =>
+  const saved = await runFacadeOperation(() =>
     deps.chargePointService.saveScenarioDefinition(
       params.data.cpId,
       params.data.connectorId,
       definition,
     ),
   );
+  await emitScenarioDefinitionsChanged(
+    deps,
+    params.data.cpId,
+    params.data.connectorId,
+  );
+  return saved;
 }
 
 async function replaceConnectorScenarioDefinitions(
@@ -563,13 +573,19 @@ async function replaceConnectorScenarioDefinitions(
 
   const definitions = params.data
     .definitions as unknown as ScenarioDefinition[];
-  return runFacadeOperation(() =>
+  const saved = await runFacadeOperation(() =>
     deps.chargePointService.replaceConnectorScenarioDefinitions(
       params.data.cpId,
       params.data.connectorId,
       definitions,
     ),
   );
+  deps.registryEvents?.emitScenarioDefinitionsChanged(
+    params.data.cpId,
+    params.data.connectorId,
+    saved,
+  );
+  return saved;
 }
 
 async function deleteScenarioDefinition(
@@ -587,7 +603,28 @@ async function deleteScenarioDefinition(
       params.data.definitionId,
     ),
   );
+  await emitScenarioDefinitionsChanged(
+    deps,
+    params.data.cpId,
+    params.data.connectorId,
+  );
   return { ok: true };
+}
+
+async function emitScenarioDefinitionsChanged(
+  deps: RuntimeSocketIoDeps,
+  cpId: string,
+  connectorId: number | null,
+): Promise<void> {
+  if (!deps.registryEvents) return;
+  const definitions = await runFacadeOperation(() =>
+    deps.chargePointService.listScenarioDefinitions(cpId, connectorId),
+  );
+  deps.registryEvents.emitScenarioDefinitionsChanged(
+    cpId,
+    connectorId,
+    definitions,
+  );
 }
 
 async function getAutoMeterConfig(
@@ -1259,7 +1296,11 @@ async function captureSubscribeSnapshot(
 
   const perCp: Record<string, StatusWire> = {};
   for (const entry of entries) {
-    if (scope === "*" || scope === "registry" || scope === entry.cpId) {
+    if (
+      scope !== CONFIG_EVENTS_SCOPE &&
+      scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE &&
+      (scope === "*" || scope === "registry" || scope === entry.cpId)
+    ) {
       perCp[entry.cpId] = entry.status;
     }
   }
@@ -1387,7 +1428,13 @@ function parseCreateInput(
 }
 
 function isValidSubscribeScope(registry: CPRegistry, scope: string): boolean {
-  return scope === "*" || scope === "registry" || registry.has(scope);
+  return (
+    scope === "*" ||
+    scope === "registry" ||
+    scope === CONFIG_EVENTS_SCOPE ||
+    scope === SCENARIO_DEFINITIONS_EVENTS_SCOPE ||
+    registry.has(scope)
+  );
 }
 
 function readRawParams(request: unknown): unknown {

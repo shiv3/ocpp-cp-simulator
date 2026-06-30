@@ -9,21 +9,44 @@ vi.mock("@socket.io/bun-engine", () => ({
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
+import { createRegistryEventBridge } from "../registryEvents";
 import { registerSocketHandlers } from "../socketServer";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 import type { SimulatorConfigInput } from "../../../protocol";
+import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 
 type Handler = (...args: unknown[]) => void;
 type RpcAck = { ok: true; result: unknown } | { ok: false; error: unknown };
 
 class FakeIo {
   connectionHandler: Handler | null = null;
+  readonly emitted: Array<{
+    rooms: string[];
+    event: string;
+    payload: unknown;
+  }> = [];
+  private emitRooms: string[] = [];
 
   readonly use = vi.fn(() => this);
 
   readonly on = vi.fn((event: string, handler: Handler) => {
     if (event === "connection") this.connectionHandler = handler;
     return this;
+  });
+
+  readonly to = vi.fn((room: string) => {
+    this.emitRooms.push(room);
+    return this;
+  });
+
+  readonly emit = vi.fn((event: string, payload: unknown) => {
+    this.emitted.push({
+      rooms: [...this.emitRooms],
+      event,
+      payload,
+    });
+    this.emitRooms = [];
+    return true;
   });
 
   connect(socket: FakeSocket): void {
@@ -477,6 +500,140 @@ describe("socket.io rpc dispatch", () => {
     expect(store.value?.basicAuthSettings.password).toBe("secret");
   });
 
+  it("emits a redacted config-changed event after config.save", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const store = { value: simulatorConfig() as SimulatorConfigInput | null };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    const bridge = createRegistryEventBridge(io as never, { registry, bus });
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      configRepository: memoryConfigRepository(store),
+      registryEvents: bridge,
+    });
+    io.connect(socket);
+
+    const ack = await socket.emitRpc({
+      method: "config.save",
+      params: { config: secretSimulatorConfig() },
+    });
+
+    expect(ack.ok).toBe(true);
+    const emitted = io.emitted.find(
+      (entry) =>
+        (entry.payload as { kind?: string }).kind === "config" &&
+        (entry.payload as { event?: string }).event === "config-changed",
+    );
+    expect(emitted).toBeDefined();
+    expect(emitted?.event).toBe("event");
+    expect(emitted?.rooms).toEqual(["config", "*"]);
+    expect(emitted?.payload).toMatchObject({
+      kind: "config",
+      event: "config-changed",
+      config: {
+        wsURL: "ws://example.test/ocpp",
+        basicAuthSettings: { enabled: true, username: "user" },
+      },
+    });
+    expectNoWireSecrets(emitted?.payload);
+    bridge.close();
+  });
+
+  it("emits scenario-definitions-changed events with the connector definition list", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const scenarioRepository = memoryScenarioRepository();
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    const bridge = createRegistryEventBridge(io as never, { registry, bus });
+    const first = scenarioDefinition("first");
+    const second = scenarioDefinition("second");
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      scenarioRepository,
+      registryEvents: bridge,
+    });
+    io.connect(socket);
+
+    await expect(
+      socket.emitRpc({
+        method: "scenario.definitions.save",
+        params: {
+          cpId: "cp-alpha",
+          connectorId: 1,
+          definition: first,
+        },
+      }),
+    ).resolves.toMatchObject({ ok: true, result: first });
+
+    await expect(
+      socket.emitRpc({
+        method: "scenario.definitions.replace",
+        params: {
+          cpId: "cp-alpha",
+          connectorId: 1,
+          definitions: [first, second],
+        },
+      }),
+    ).resolves.toMatchObject({ ok: true, result: [first, second] });
+
+    await expect(
+      socket.emitRpc({
+        method: "scenario.definitions.delete",
+        params: {
+          cpId: "cp-alpha",
+          connectorId: 1,
+          definitionId: first.id,
+        },
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { ok: true } });
+
+    const payloads = io.emitted
+      .map((entry) => entry.payload)
+      .filter(
+        (
+          payload,
+        ): payload is {
+          kind: "scenario-definitions";
+          event: "scenario-definitions-changed";
+          cpId: string;
+          connectorId: number | null;
+          definitions: ScenarioDefinition[];
+        } => (payload as { kind?: string }).kind === "scenario-definitions",
+      );
+
+    expect(payloads).toHaveLength(3);
+    expect(
+      payloads.map((payload) => payload.definitions.map((d) => d.id)),
+    ).toEqual([["first"], ["first", "second"], ["second"]]);
+    expect(payloads[0]).toMatchObject({
+      event: "scenario-definitions-changed",
+      cpId: "cp-alpha",
+      connectorId: 1,
+    });
+    expect(
+      io.emitted
+        .filter(
+          (entry) =>
+            (entry.payload as { kind?: string }).kind ===
+            "scenario-definitions",
+        )
+        .every((entry) =>
+          ["scenario-definitions", "cp-alpha", "*"].every((room) =>
+            entry.rooms.includes(room),
+          ),
+        ),
+    ).toBe(true);
+    bridge.close();
+  });
+
   it("dispatches A1.1d CP commands through the jsonMode whitelist", async () => {
     const bus = new EventBus();
     const service = {
@@ -642,6 +799,71 @@ function secretSimulatorConfig(): SimulatorConfigInput {
       password: "wire-config-secret",
     },
   });
+}
+
+function scenarioDefinition(id: string): ScenarioDefinition {
+  return {
+    id,
+    name: `Scenario ${id}`,
+    targetType: "connector",
+    targetId: 1,
+    nodes: [],
+    edges: [],
+    createdAt: "2026-06-30T00:00:00.000Z",
+    updatedAt: "2026-06-30T00:00:01.000Z",
+    enabled: true,
+  };
+}
+
+function memoryScenarioRepository() {
+  const rows = new Map<string, ScenarioDefinition[]>();
+  const keyOf = (cpId: string, connectorId: number | null) =>
+    `${cpId}\u0000${connectorId ?? "cp"}`;
+
+  return {
+    async load(cpId: string, connectorId: number | null) {
+      return rows.get(keyOf(cpId, connectorId))?.[0] ?? null;
+    },
+    async save(
+      cpId: string,
+      connectorId: number | null,
+      scenario: ScenarioDefinition,
+    ) {
+      const key = keyOf(cpId, connectorId);
+      const existing = rows
+        .get(key)
+        ?.filter((stored) => stored.id !== scenario.id);
+      rows.set(key, [scenario, ...(existing ?? [])]);
+    },
+    async delete(cpId: string, connectorId: number | null) {
+      rows.delete(keyOf(cpId, connectorId));
+    },
+    async list(cpId: string) {
+      return [...rows.entries()]
+        .filter(([key]) => key.startsWith(`${cpId}\u0000`))
+        .flatMap(([, definitions]) => definitions);
+    },
+    listByConnector(cpId: string, connectorId: number | null) {
+      return [...(rows.get(keyOf(cpId, connectorId)) ?? [])];
+    },
+    async replaceConnector(
+      cpId: string,
+      connectorId: number | null,
+      scenarios: readonly ScenarioDefinition[],
+    ) {
+      rows.set(keyOf(cpId, connectorId), [...scenarios]);
+    },
+    deleteOne(cpId: string, connectorId: number | null, scenarioId: string) {
+      const key = keyOf(cpId, connectorId);
+      rows.set(
+        key,
+        (rows.get(key) ?? []).filter((scenario) => scenario.id !== scenarioId),
+      );
+    },
+    subscribe() {
+      return () => undefined;
+    },
+  };
 }
 
 function memoryConfigRepository(store: { value: SimulatorConfigInput | null }) {

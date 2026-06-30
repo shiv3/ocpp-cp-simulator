@@ -8,6 +8,7 @@ import {
   type EventEnvelope,
   type StatusWire,
   type SubscribeResult,
+  type WireSimulatorConfig,
 } from "../../protocol";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
@@ -216,6 +217,36 @@ function scenarioDefinition(id = "scenario-1"): ScenarioDefinition {
     createdAt: "2026-06-30T00:00:00.000Z",
     updatedAt: "2026-06-30T00:00:01.000Z",
     enabled: true,
+  };
+}
+
+function scenarioDefinitionsPayload(
+  ...definitions: ScenarioDefinition[]
+): Record<string, unknown>[] {
+  return definitions as unknown as Record<string, unknown>[];
+}
+
+function wireSimulatorConfig(
+  cpId = "cp-1",
+  username = "user",
+): WireSimulatorConfig {
+  return {
+    wsURL: "ws://example.test/ocpp",
+    ChargePointID: cpId,
+    connectorNumber: 1,
+    tagID: "TAG-1",
+    ocppVersion: "OCPP-1.6J",
+    basicAuthSettings: {
+      enabled: true,
+      username,
+    },
+    autoMeterValueSetting: {
+      enabled: false,
+      interval: 30,
+      value: 10,
+    },
+    Experimental: null,
+    BootNotification: null,
   };
 }
 
@@ -436,8 +467,11 @@ describe("RemoteChargePointService socket.io rpc", () => {
       {
         name: "subscribeConfig",
         invoke: (service) => service.subscribeConfig(() => undefined),
-        expected: [{ method: "config.get", params: {} }],
-        results: [null],
+        expected: [
+          { method: "events.subscribe", params: { scope: "config" } },
+          { method: "config.get", params: {} },
+        ],
+        results: [subscribeResult("config"), null],
       },
       {
         name: "connect",
@@ -854,11 +888,15 @@ describe("RemoteChargePointService socket.io rpc", () => {
           service.subscribeScenarioDefinitions("cp-1", 1, () => undefined),
         expected: [
           {
+            method: "events.subscribe",
+            params: { scope: "scenario-definitions" },
+          },
+          {
             method: "scenario.definitions.list",
             params: { cpId: "cp-1", connectorId: 1 },
           },
         ],
-        results: [[]],
+        results: [subscribeResult("scenario-definitions"), []],
       },
       {
         name: "getScenarioTemplates",
@@ -1365,6 +1403,67 @@ describe("RemoteChargePointService socket.io rpc", () => {
     expect("password" in config.basicAuthSettings).toBe(false);
   });
 
+  it("subscribeConfig delivers live redacted updates and stops after unsubscribe", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const configs: Array<WireSimulatorConfig | null> = [];
+
+    const unsubscribe = service.subscribeConfig((config) => {
+      configs.push(config);
+    });
+
+    const subscribeAck = nextAck();
+    expect(subscribeAck.request).toEqual({
+      method: "events.subscribe",
+      params: { scope: "config" },
+    });
+    subscribeAck.resolve({ ok: true, result: subscribeResult("config") });
+    await flush();
+    await flush();
+
+    const initial = wireSimulatorConfig("cp-initial");
+    const getAck = nextAck();
+    expect(getAck.request).toEqual({
+      method: "config.get",
+      params: {},
+    });
+    getAck.resolve({ ok: true, result: initial });
+    await flush();
+    await flush();
+
+    expect(configs).toEqual([initial]);
+
+    const changed = wireSimulatorConfig("cp-changed", "changed-user");
+    latestSocket().serverEvent({
+      kind: "config",
+      event: "config-changed",
+      config: changed,
+    });
+
+    expect(configs).toEqual([initial, changed]);
+    expect(configs[1]?.basicAuthSettings).toEqual({
+      enabled: true,
+      username: "changed-user",
+    });
+    expect("password" in (configs[1]?.basicAuthSettings ?? {})).toBe(false);
+    expect(JSON.stringify(configs[1])).not.toContain("secret");
+
+    unsubscribe();
+    const unsubscribeAck = nextAck();
+    expect(unsubscribeAck.request).toEqual({
+      method: "events.unsubscribe",
+      params: { scope: "config" },
+    });
+    unsubscribeAck.resolve({ ok: true, result: { ok: true } });
+
+    latestSocket().serverEvent({
+      kind: "config",
+      event: "config-changed",
+      config: wireSimulatorConfig("cp-ignored"),
+    });
+
+    expect(configs).toEqual([initial, changed]);
+  });
+
   it("sends scenario definition persistence rpc payloads", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
     const first = scenarioDefinition("first");
@@ -1413,6 +1512,90 @@ describe("RemoteChargePointService socket.io rpc", () => {
     });
     deleteAck.resolve({ ok: true, result: { ok: true } });
     await expect(deletePromise).resolves.toBeUndefined();
+  });
+
+  it("subscribeScenarioDefinitions delivers filtered live updates and stops after unsubscribe", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const initial = scenarioDefinition("initial");
+    const changed = scenarioDefinition("changed");
+    const ignored = scenarioDefinition("ignored");
+    const updates: ScenarioDefinition[][] = [];
+
+    const unsubscribe = service.subscribeScenarioDefinitions(
+      "cp-1",
+      1,
+      (definitions) => {
+        updates.push(definitions);
+      },
+    );
+
+    const subscribeAck = nextAck();
+    expect(subscribeAck.request).toEqual({
+      method: "events.subscribe",
+      params: { scope: "scenario-definitions" },
+    });
+    subscribeAck.resolve({
+      ok: true,
+      result: subscribeResult("scenario-definitions"),
+    });
+    await flush();
+    await flush();
+
+    const listAck = nextAck();
+    expect(listAck.request).toEqual({
+      method: "scenario.definitions.list",
+      params: { cpId: "cp-1", connectorId: 1 },
+    });
+    listAck.resolve({ ok: true, result: [initial] });
+    await flush();
+    await flush();
+
+    expect(updates).toEqual([[initial]]);
+
+    latestSocket().serverEvent({
+      kind: "scenario-definitions",
+      event: "scenario-definitions-changed",
+      cpId: "cp-2",
+      connectorId: 1,
+      definitions: scenarioDefinitionsPayload(ignored),
+    });
+    latestSocket().serverEvent({
+      kind: "scenario-definitions",
+      event: "scenario-definitions-changed",
+      cpId: "cp-1",
+      connectorId: 2,
+      definitions: scenarioDefinitionsPayload(ignored),
+    });
+
+    expect(updates).toEqual([[initial]]);
+
+    latestSocket().serverEvent({
+      kind: "scenario-definitions",
+      event: "scenario-definitions-changed",
+      cpId: "cp-1",
+      connectorId: 1,
+      definitions: scenarioDefinitionsPayload(changed),
+    });
+
+    expect(updates).toEqual([[initial], [changed]]);
+
+    unsubscribe();
+    const unsubscribeAck = nextAck();
+    expect(unsubscribeAck.request).toEqual({
+      method: "events.unsubscribe",
+      params: { scope: "scenario-definitions" },
+    });
+    unsubscribeAck.resolve({ ok: true, result: { ok: true } });
+
+    latestSocket().serverEvent({
+      kind: "scenario-definitions",
+      event: "scenario-definitions-changed",
+      cpId: "cp-1",
+      connectorId: 1,
+      definitions: scenarioDefinitionsPayload(ignored),
+    });
+
+    expect(updates).toEqual([[initial], [changed]]);
   });
 
   it("sends connector settings persistence rpc payloads", async () => {

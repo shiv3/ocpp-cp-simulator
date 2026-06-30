@@ -254,7 +254,69 @@ describe("envelopes", () => {
       }).success,
     ).toBe(true);
     expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "config",
+        event: "config-changed",
+        config: redactSimulatorConfig({
+          wsURL: "ws://host:9000/ocpp",
+          ChargePointID: "CP1",
+          connectorNumber: 1,
+          tagID: "TAG",
+          ocppVersion: "OCPP-1.6J",
+          basicAuthSettings: {
+            enabled: true,
+            username: "config-user",
+            password: "wire-config-password",
+          },
+          autoMeterValueSetting: {
+            enabled: false,
+            interval: 30,
+            value: 10,
+          },
+          Experimental: null,
+          BootNotification: null,
+        }),
+      }).success,
+    ).toBe(true);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "scenario-definitions",
+        event: "scenario-definitions-changed",
+        cpId: "CP1",
+        connectorId: 1,
+        definitions: [{ id: "scenario-1" }],
+      }).success,
+    ).toBe(true);
+    expect(
       eventEnvelopeSchema.safeParse({ cpId: "CP1", evt: {} }).success,
+    ).toBe(false);
+  });
+
+  it("config event envelopes reject unredacted passwords", () => {
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "config",
+        event: "config-changed",
+        config: {
+          wsURL: "ws://host:9000/ocpp",
+          ChargePointID: "CP1",
+          connectorNumber: 1,
+          tagID: "TAG",
+          ocppVersion: "OCPP-1.6J",
+          basicAuthSettings: {
+            enabled: true,
+            username: "config-user",
+            password: "wire-config-password",
+          },
+          autoMeterValueSetting: {
+            enabled: false,
+            interval: 30,
+            value: 10,
+          },
+          Experimental: null,
+          BootNotification: null,
+        },
+      }).success,
     ).toBe(false);
   });
 

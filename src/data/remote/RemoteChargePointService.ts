@@ -48,9 +48,17 @@ import {
 
 type CpEventEnvelope = Extract<EventEnvelope, { kind: "cp" }>;
 type RegistryEventEnvelope = Extract<EventEnvelope, { kind: "registry" }>;
+type ConfigEventEnvelope = Extract<EventEnvelope, { kind: "config" }>;
+type ScenarioDefinitionsEventEnvelope = Extract<
+  EventEnvelope,
+  { kind: "scenario-definitions" }
+>;
 type ServerCpEvent = CpEventEnvelope["evt"];
 type ServerConnectorStatus = StatusWire["connectors"][number];
 type WireConfig = NonNullable<StatusWire["config"]>;
+
+const CONFIG_EVENTS_SCOPE = "config";
+const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
 
 export type RemoteConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -86,6 +94,22 @@ interface ActiveRegistrySubscription {
   handlers: Set<(event: RemoteRegistrySubscriptionEvent) => void>;
   ready: boolean;
   queued: RegistryEventEnvelope[];
+}
+
+interface ActiveConfigSubscription {
+  handlers: Set<(config: WireSimulatorConfig | null) => void>;
+  ready: boolean;
+  queued: ConfigEventEnvelope[];
+  current: WireSimulatorConfig | null;
+}
+
+interface ActiveScenarioDefinitionsSubscription {
+  cpId: string;
+  connectorId: number | null;
+  handlers: Set<(definitions: ScenarioDefinition[]) => void>;
+  ready: boolean;
+  queued: ScenarioDefinitionsEventEnvelope[];
+  current: ScenarioDefinition[];
 }
 
 interface ScenarioStatusRequest {
@@ -585,6 +609,10 @@ export class RemoteChargePointService implements ChargePointService {
   >();
   private readonly snapshotCache = new Map<string, ChargePointSnapshot>();
   private readonly registryCache = new Map<string, ChargePointSnapshot>();
+  private readonly scenarioDefinitionSubs = new Map<
+    string,
+    ActiveScenarioDefinitionsSubscription
+  >();
   private readonly activeStateHistory = new Map<
     string,
     HistoryOptions | undefined
@@ -594,6 +622,9 @@ export class RemoteChargePointService implements ChargePointService {
     ScenarioStatusRequest
   >();
   private registrySub: ActiveRegistrySubscription | null = null;
+  private configSub: ActiveConfigSubscription | null = null;
+  private configScopeSubscribe: Promise<void> | null = null;
+  private scenarioDefinitionsScopeSubscribe: Promise<void> | null = null;
   private nextRpcId = 1;
   private connectionState: RemoteConnectionState = "connecting";
   private hasConnected = false;
@@ -1037,19 +1068,45 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number | null,
     handler: (definitions: ScenarioDefinition[]) => void,
   ): () => void {
-    let active = true;
-    void this.listScenarioDefinitions(id, connectorId)
-      .then((definitions) => {
-        if (active) handler(definitions);
-      })
-      .catch((err) => {
-        console.warn(
-          "[RemoteChargePointService] scenario definitions subscribe failed",
-          err,
-        );
+    const key = scenarioDefinitionsKey(id, connectorId);
+    let sub = this.scenarioDefinitionSubs.get(key);
+    if (!sub) {
+      sub = {
+        cpId: id,
+        connectorId,
+        handlers: new Set(),
+        ready: false,
+        queued: [],
+        current: [],
+      };
+      this.scenarioDefinitionSubs.set(key, sub);
+      void this.refreshScenarioDefinitionsSubscription(key, sub);
+    }
+
+    sub.handlers.add(handler);
+    if (sub.ready) {
+      const definitions = [...sub.current];
+      queueMicrotask(() => {
+        if (!this.scenarioDefinitionSubs.get(key)?.handlers.has(handler)) {
+          return;
+        }
+        handler(definitions);
       });
+    }
+
     return () => {
-      active = false;
+      const current = this.scenarioDefinitionSubs.get(key);
+      if (!current) return;
+      current.handlers.delete(handler);
+      if (current.handlers.size === 0) {
+        this.scenarioDefinitionSubs.delete(key);
+        if (this.scenarioDefinitionSubs.size === 0) {
+          this.scenarioDefinitionsScopeSubscribe = null;
+          void this.rpc("events.unsubscribe", {
+            scope: SCENARIO_DEFINITIONS_EVENTS_SCOPE,
+          }).catch(() => {});
+        }
+      }
     };
   }
 
@@ -1309,16 +1366,38 @@ export class RemoteChargePointService implements ChargePointService {
   subscribeConfig(
     handler: (config: WireSimulatorConfig | null) => void,
   ): () => void {
-    let active = true;
-    void this.loadConfig()
-      .then((config) => {
-        if (active) handler(config);
-      })
-      .catch((err) => {
-        console.warn("[RemoteChargePointService] config subscribe failed", err);
+    let sub = this.configSub;
+    if (!sub) {
+      sub = {
+        handlers: new Set(),
+        ready: false,
+        queued: [],
+        current: null,
+      };
+      this.configSub = sub;
+      void this.refreshConfigSubscription(sub);
+    }
+
+    sub.handlers.add(handler);
+    if (sub.ready) {
+      const config = sub.current;
+      queueMicrotask(() => {
+        if (!this.configSub?.handlers.has(handler)) return;
+        handler(config);
       });
+    }
+
     return () => {
-      active = false;
+      const current = this.configSub;
+      if (!current) return;
+      current.handlers.delete(handler);
+      if (current.handlers.size === 0) {
+        this.configSub = null;
+        this.configScopeSubscribe = null;
+        void this.rpc("events.unsubscribe", {
+          scope: CONFIG_EVENTS_SCOPE,
+        }).catch(() => {});
+      }
     };
   }
 
@@ -1355,6 +1434,10 @@ export class RemoteChargePointService implements ChargePointService {
     this.rejectPending("disconnected");
     this.subs.clear();
     this.registrySub = null;
+    this.configSub = null;
+    this.configScopeSubscribe = null;
+    this.scenarioDefinitionSubs.clear();
+    this.scenarioDefinitionsScopeSubscribe = null;
     this.connectionHandlers.clear();
     this.socket.disconnect();
   }
@@ -1469,6 +1552,14 @@ export class RemoteChargePointService implements ChargePointService {
       this.registrySub.ready = false;
       this.registrySub.queued = [];
     }
+    if (this.configSub) {
+      this.configSub.ready = false;
+      this.configSub.queued = [];
+    }
+    for (const sub of this.scenarioDefinitionSubs.values()) {
+      sub.ready = false;
+      sub.queued = [];
+    }
   }
 
   private scheduleReconnectResync(): void {
@@ -1483,6 +1574,10 @@ export class RemoteChargePointService implements ChargePointService {
     this.markSubscriptionsNotReady();
     const scopes = [
       ...(this.registrySub ? ["registry"] : []),
+      ...(this.configSub ? [CONFIG_EVENTS_SCOPE] : []),
+      ...(this.scenarioDefinitionSubs.size > 0
+        ? [SCENARIO_DEFINITIONS_EVENTS_SCOPE]
+        : []),
       ...this.subs.keys(),
     ];
     for (const scope of scopes) {
@@ -1518,7 +1613,84 @@ export class RemoteChargePointService implements ChargePointService {
         req.cpId,
       ).catch(() => undefined),
     );
-    await Promise.all([...logFetches, ...historyFetches, ...scenarioFetches]);
+    const configFetch = this.configSub
+      ? this.refreshConfigSubscription(this.configSub)
+      : Promise.resolve();
+    const scenarioDefinitionFetches = [
+      ...this.scenarioDefinitionSubs.entries(),
+    ].map(([key, sub]) =>
+      this.refreshScenarioDefinitionsSubscription(key, sub),
+    );
+    await Promise.all([
+      ...logFetches,
+      ...historyFetches,
+      ...scenarioFetches,
+      configFetch,
+      ...scenarioDefinitionFetches,
+    ]);
+  }
+
+  private ensureConfigEventsSubscribed(): Promise<void> {
+    if (!this.configScopeSubscribe) {
+      this.configScopeSubscribe = this.subscribeScope(
+        CONFIG_EVENTS_SCOPE,
+      ).catch((err) => {
+        console.warn(
+          "[RemoteChargePointService] config event subscribe failed",
+          err,
+        );
+      });
+    }
+    return this.configScopeSubscribe;
+  }
+
+  private ensureScenarioDefinitionsEventsSubscribed(): Promise<void> {
+    if (!this.scenarioDefinitionsScopeSubscribe) {
+      this.scenarioDefinitionsScopeSubscribe = this.subscribeScope(
+        SCENARIO_DEFINITIONS_EVENTS_SCOPE,
+      ).catch((err) => {
+        console.warn(
+          "[RemoteChargePointService] scenario definitions event subscribe failed",
+          err,
+        );
+      });
+    }
+    return this.scenarioDefinitionsScopeSubscribe;
+  }
+
+  private async refreshConfigSubscription(
+    sub: ActiveConfigSubscription,
+  ): Promise<void> {
+    try {
+      await this.ensureConfigEventsSubscribed();
+      const config = await this.loadConfig();
+      if (this.configSub !== sub) return;
+      this.applyConfigValue(sub, config);
+      this.flushConfigQueue(sub);
+    } catch (err) {
+      console.warn("[RemoteChargePointService] config subscribe failed", err);
+    }
+  }
+
+  private async refreshScenarioDefinitionsSubscription(
+    key: string,
+    sub: ActiveScenarioDefinitionsSubscription,
+  ): Promise<void> {
+    try {
+      await this.ensureScenarioDefinitionsEventsSubscribed();
+      const definitions = await this.listScenarioDefinitions(
+        sub.cpId,
+        sub.connectorId,
+      );
+      if (this.scenarioDefinitionSubs.get(key) !== sub) return;
+      this.applyScenarioDefinitionsValue(sub, definitions);
+      this.flushScenarioDefinitionsQueue(key, sub);
+    } catch (err) {
+      console.warn(
+        "[RemoteChargePointService] scenario definitions subscribe failed",
+        err,
+      );
+    }
   }
 
   private async subscribeScope(scope: string): Promise<void> {
@@ -1545,6 +1717,13 @@ export class RemoteChargePointService implements ChargePointService {
         });
       });
       this.flushRegistryQueue(registry);
+      return;
+    }
+
+    if (
+      scope === CONFIG_EVENTS_SCOPE ||
+      scope === SCENARIO_DEFINITIONS_EVENTS_SCOPE
+    ) {
       return;
     }
 
@@ -1579,6 +1758,29 @@ export class RemoteChargePointService implements ChargePointService {
       return;
     }
 
+    if (envelope.kind === "config") {
+      const sub = this.configSub;
+      if (!sub) return;
+      if (!sub.ready) {
+        sub.queued.push(envelope);
+        return;
+      }
+      this.deliverConfigEnvelope(envelope, sub);
+      return;
+    }
+
+    if (envelope.kind === "scenario-definitions") {
+      const key = scenarioDefinitionsKey(envelope.cpId, envelope.connectorId);
+      const sub = this.scenarioDefinitionSubs.get(key);
+      if (!sub) return;
+      if (!sub.ready) {
+        sub.queued.push(envelope);
+        return;
+      }
+      this.deliverScenarioDefinitionsEnvelope(envelope, sub);
+      return;
+    }
+
     const registry = this.registrySub;
     if (!registry) return;
     if (!registry.ready) {
@@ -1604,6 +1806,27 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  private flushConfigQueue(sub: ActiveConfigSubscription): void {
+    const queued = sub.queued;
+    sub.queued = [];
+    queued.forEach((envelope) => {
+      this.deliverConfigEnvelope(envelope, sub);
+    });
+  }
+
+  private flushScenarioDefinitionsQueue(
+    key: string,
+    sub: ActiveScenarioDefinitionsSubscription,
+  ): void {
+    const queued = sub.queued;
+    sub.queued = [];
+    queued.forEach((envelope) => {
+      if (scenarioDefinitionsKey(envelope.cpId, envelope.connectorId) === key) {
+        this.deliverScenarioDefinitionsEnvelope(envelope, sub);
+      }
+    });
+  }
+
   private deliverCpEnvelope(
     envelope: CpEventEnvelope,
     sub: ActiveSubscription,
@@ -1611,6 +1834,23 @@ export class RemoteChargePointService implements ChargePointService {
     const mapped = mapServerEventToChargePointEvent(envelope.evt);
     if (!mapped) return;
     sub.handlers.forEach((handler) => this.safeCpHandler(handler, mapped));
+  }
+
+  private deliverConfigEnvelope(
+    envelope: ConfigEventEnvelope,
+    sub: ActiveConfigSubscription,
+  ): void {
+    this.applyConfigValue(sub, envelope.config);
+  }
+
+  private deliverScenarioDefinitionsEnvelope(
+    envelope: ScenarioDefinitionsEventEnvelope,
+    sub: ActiveScenarioDefinitionsSubscription,
+  ): void {
+    this.applyScenarioDefinitionsValue(
+      sub,
+      envelope.definitions as unknown as ScenarioDefinition[],
+    );
   }
 
   private deliverRegistryEnvelope(
@@ -1643,6 +1883,28 @@ export class RemoteChargePointService implements ChargePointService {
         change: envelope.change,
         cp,
       });
+    });
+  }
+
+  private applyConfigValue(
+    sub: ActiveConfigSubscription,
+    config: WireSimulatorConfig | null,
+  ): void {
+    sub.ready = true;
+    sub.current = config;
+    sub.handlers.forEach((handler) => {
+      this.safeConfigHandler(handler, config);
+    });
+  }
+
+  private applyScenarioDefinitionsValue(
+    sub: ActiveScenarioDefinitionsSubscription,
+    definitions: ScenarioDefinition[],
+  ): void {
+    sub.ready = true;
+    sub.current = [...definitions];
+    sub.handlers.forEach((handler) => {
+      this.safeScenarioDefinitionsHandler(handler, [...definitions]);
     });
   }
 
@@ -1685,4 +1947,36 @@ export class RemoteChargePointService implements ChargePointService {
       console.error("[RemoteChargePointService] registry handler error", err);
     }
   }
+
+  private safeConfigHandler(
+    handler: (config: WireSimulatorConfig | null) => void,
+    config: WireSimulatorConfig | null,
+  ): void {
+    try {
+      handler(config);
+    } catch (err) {
+      console.error("[RemoteChargePointService] config handler error", err);
+    }
+  }
+
+  private safeScenarioDefinitionsHandler(
+    handler: (definitions: ScenarioDefinition[]) => void,
+    definitions: ScenarioDefinition[],
+  ): void {
+    try {
+      handler(definitions);
+    } catch (err) {
+      console.error(
+        "[RemoteChargePointService] scenario definitions handler error",
+        err,
+      );
+    }
+  }
+}
+
+function scenarioDefinitionsKey(
+  cpId: string,
+  connectorId: number | null,
+): string {
+  return `${cpId}\u0000${connectorId ?? "cp"}`;
 }

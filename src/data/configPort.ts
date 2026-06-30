@@ -1,5 +1,13 @@
-import type { SimulatorConfigInput } from "../protocol";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "../protocol";
 import type { Config } from "../store/store";
+
+export function getConfigBasicAuthPassword(
+  config: WireSimulatorConfig | SimulatorConfigInput | null,
+): string {
+  if (!config) return "";
+  const settings = config.basicAuthSettings as { password?: unknown };
+  return typeof settings.password === "string" ? settings.password : "";
+}
 
 export function mergeWriteOnlyConfigSecrets(
   next: SimulatorConfigInput | null,

@@ -19,8 +19,9 @@ import { useChargePoints } from "../data/hooks/useChargePoints";
 import { useDataContext } from "../data/providers/DataProvider";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import type { ChargePointSnapshot } from "../data/interfaces/ChargePointService";
+import { getConfigBasicAuthPassword } from "../data/configPort";
 import { getTemplateById } from "../utils/scenarioTemplates";
-import type { Config } from "../store/store";
+import type { SimulatorConfigInput } from "../protocol";
 
 const DEFAULT_TAG_ID = "TAG001";
 
@@ -40,7 +41,7 @@ const TopPage: React.FC = () => {
   const { chargePoints, refresh } = useChargePoints(config, { isLoading });
 
   const updateConfig = useCallback(
-    (next: Config | null) => {
+    (next: SimulatorConfigInput | null) => {
       void persistConfig(next);
     },
     [persistConfig],
@@ -123,7 +124,7 @@ const TopPage: React.FC = () => {
         ocppVersion: config.ocppVersion,
         basicAuthEnabled: config.basicAuthSettings?.enabled || false,
         basicAuthUsername: config.basicAuthSettings?.username || "",
-        basicAuthPassword: config.basicAuthSettings?.password || "",
+        basicAuthPassword: getConfigBasicAuthPassword(config),
         autoMeterValueEnabled: config.autoMeterValueSetting?.enabled || false,
         autoMeterValueInterval: config.autoMeterValueSetting?.interval || 30,
         autoMeterValue: config.autoMeterValueSetting?.value || 10,
@@ -262,7 +263,7 @@ const TopPage: React.FC = () => {
     }
     setChargePointConfigs(updatedConfigs);
 
-    const newConfig: Config = {
+    const newConfig: SimulatorConfigInput = {
       ...(config || {}),
       wsURL: cpConfig.wsURL,
       connectorNumber: cpConfig.connectorNumber,
@@ -346,8 +347,10 @@ const TopPage: React.FC = () => {
       return;
     }
 
-    const newConfig: Config = {
-      ...(config || {}),
+    if (!config) return;
+
+    const newConfig: SimulatorConfigInput = {
+      ...config,
       Experimental: {
         ChargePointIDs: updatedConfigs.map((cfg) => ({
           ChargePointID: cfg.cpId,

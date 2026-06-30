@@ -29,6 +29,8 @@ import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useDataContext } from "../data/providers/DataProvider";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import { saveConnectorAutoMeterConfig } from "./connectorAutoMeterConfig";
+import { useSocMeterSync } from "./hooks/useSocMeterSync";
 
 // Dynamic imports for heavy components (bundle-dynamic-imports)
 const StateTransitionViewer = lazy(
@@ -172,6 +174,11 @@ const getStatusColor = (status: string) => {
   }
 };
 
+const clampMeterValue = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, value);
+};
+
 // Collapsed Panel View
 const CollapsedPanelView: React.FC<{
   connectorId: number;
@@ -240,8 +247,7 @@ const FullPanelContent: React.FC<{
   initialTab,
   tabResetNonce,
 }) => {
-  const { chargePointService, mode, connectorSettingsRepository } =
-    useDataContext();
+  const { chargePointService, mode } = useDataContext();
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
@@ -279,8 +285,14 @@ const FullPanelContent: React.FC<{
 
   const { scenarios } = useScenarios(cpId, connectorId);
   const connector = localCp ? localCp.getConnector(connectorId) : null;
-  const [meterValueInput, setMeterValueInput] =
-    useState<number>(liveMeterValue);
+  const [persistedAutoMeterValueConfig, setPersistedAutoMeterValueConfig] =
+    useState<AutoMeterValueConfig | null>(null);
+  const [meterValueInput, setMeterValueInput] = useState<number>(() =>
+    clampMeterValue(liveMeterValue),
+  );
+  const [isMeterValueInputFocused, setIsMeterValueInputFocused] =
+    useState(false);
+  const [isMeterValueInputDirty, setIsMeterValueInputDirty] = useState(false);
   // Transaction TagID is always picked from the CP profile's configured
   // tagIds. Falls back to the single `idTag` when the parent didn't pass a
   // list (older callers / standalone usage).
@@ -303,65 +315,43 @@ const FullPanelContent: React.FC<{
   // → Faulted button (§7.6). Defaults to InternalError because it's the
   // most generic non-NoError value.
   const [faultErrorCode, setFaultErrorCode] = useState<string>("InternalError");
-  // When ON, moving the SoC slider also writes a derived meter value, and
-  // bumping the meter value writes back a derived SoC, using the EV
-  // battery capacity and `initialSoc` from evSettings. Persisted globally
-  // (one flag per browser, not per CP/connector) via the SQLite kv table
-  // through `connectorSettingsRepository.loadSocMeterSync` /
-  // `saveSocMeterSync`. Disabled automatically when capacity is 0.
-  const [autoSyncSocMeter, setAutoSyncSocMeter] = useState<boolean>(true);
-  // One-shot async load on mount: the repo is async (sql.js DB roundtrip),
-  // but the toggle UI needs a sync initial value. We start at `true`
-  // (legacy default) and overwrite once the repo resolves.
+  const { autoSyncSocMeter, handleToggleAutoSync, meterFromSoc, socFromMeter } =
+    useSocMeterSync({
+      chargePointService,
+      cpId,
+      connectorId,
+      evSettings,
+    });
+
+  const capacityKwh = evSettings.batteryCapacityKwh;
+  const canAutoSync = autoSyncSocMeter && capacityKwh > 0;
+
   useEffect(() => {
     let cancelled = false;
-    void connectorSettingsRepository.loadSocMeterSync().then((value) => {
-      if (!cancelled) setAutoSyncSocMeter(value);
-    });
+    void chargePointService
+      .getAutoMeterConfig(cpId, connectorId)
+      .then((config) => {
+        if (!cancelled) setPersistedAutoMeterValueConfig(config);
+      })
+      .catch((err) => {
+        console.warn(
+          `Failed to load auto-meter config for ${cpId}/${connectorId}`,
+          err,
+        );
+      });
     return () => {
       cancelled = true;
     };
-  }, [connectorSettingsRepository]);
-  // Push the persisted flag down to the connector on mount so the domain's
-  // applyMeterValue (scenario auto-meter, direct setters) honours it. Also
-  // re-apply when cpId / connectorId changes.
+  }, [chargePointService, cpId, connectorId]);
+
   useEffect(() => {
-    void chargePointService.setConnectorSocMeterSync(
-      cpId,
-      connectorId,
-      autoSyncSocMeter,
-    );
-  }, [chargePointService, cpId, connectorId, autoSyncSocMeter]);
-  const handleToggleAutoSync = useCallback(() => {
-    setAutoSyncSocMeter((prev) => {
-      const next = !prev;
-      void connectorSettingsRepository.saveSocMeterSync(next);
-      return next;
-    });
-  }, [connectorSettingsRepository]);
+    if (autoMeterValueConfig) {
+      setPersistedAutoMeterValueConfig(autoMeterValueConfig);
+    }
+  }, [autoMeterValueConfig]);
 
-  const capacityKwh = evSettings.batteryCapacityKwh;
-  const initialSoc = evSettings.initialSoc ?? 0;
-  const canAutoSync = autoSyncSocMeter && capacityKwh > 0;
-
-  const meterFromSoc = useCallback(
-    (soc: number): number => {
-      if (capacityKwh <= 0) return 0;
-      return Math.max(
-        0,
-        Math.round(((soc - initialSoc) / 100) * capacityKwh * 1000),
-      );
-    },
-    [capacityKwh, initialSoc],
-  );
-  const socFromMeter = useCallback(
-    (meterWh: number): number => {
-      if (capacityKwh <= 0) return 0;
-      const computed = initialSoc + (meterWh / 1000 / capacityKwh) * 100;
-      return Math.min(100, Math.max(0, computed));
-    },
-    [capacityKwh, initialSoc],
-  );
+  const effectiveAutoMeterValueConfig =
+    autoMeterValueConfig ?? persistedAutoMeterValueConfig;
   // Width of the left "Connector controls" column inside the Connector tab.
   // The user can drag the gutter between the controls and the Scenario
   // canvas to give more room to whichever side they're focused on.
@@ -414,8 +404,20 @@ const FullPanelContent: React.FC<{
   const scenarioRef = useRef<ScenarioDefinition | null>(null);
 
   useEffect(() => {
-    setMeterValueInput(liveMeterValue);
-  }, [liveMeterValue]);
+    const nextLiveMeterValue = clampMeterValue(liveMeterValue);
+    if (!isMeterValueInputFocused && !isMeterValueInputDirty) {
+      setMeterValueInput(nextLiveMeterValue);
+      return;
+    }
+    if (!isMeterValueInputFocused && meterValueInput === nextLiveMeterValue) {
+      setIsMeterValueInputDirty(false);
+    }
+  }, [
+    isMeterValueInputDirty,
+    isMeterValueInputFocused,
+    liveMeterValue,
+    meterValueInput,
+  ]);
 
   // Track transaction duration
   useEffect(() => {
@@ -703,8 +705,9 @@ const FullPanelContent: React.FC<{
   );
 
   const handleIncreaseMeterValue = useCallback(() => {
-    const nextValue = meterValueInput + 10;
+    const nextValue = clampMeterValue(meterValueInput + 10);
     setMeterValueInput(nextValue);
+    setIsMeterValueInputDirty(false);
     void chargePointService.setMeterValue(cpId, connectorId, nextValue);
     if (canAutoSync) {
       void chargePointService.setConnectorSoc(
@@ -723,14 +726,17 @@ const FullPanelContent: React.FC<{
   ]);
 
   const handleSendMeterValue = useCallback(() => {
+    const nextValue = clampMeterValue(meterValueInput);
+    setMeterValueInput(nextValue);
+    setIsMeterValueInputDirty(false);
     void chargePointService
-      .setMeterValue(cpId, connectorId, meterValueInput)
+      .setMeterValue(cpId, connectorId, nextValue)
       .then(() => chargePointService.sendMeterValue(cpId, connectorId));
     if (canAutoSync) {
       void chargePointService.setConnectorSoc(
         cpId,
         connectorId,
-        socFromMeter(meterValueInput),
+        socFromMeter(nextValue),
       );
     }
   }, [
@@ -752,6 +758,7 @@ const FullPanelContent: React.FC<{
       if (next !== null && canAutoSync) {
         const derivedMeter = meterFromSoc(next);
         setMeterValueInput(derivedMeter);
+        setIsMeterValueInputDirty(false);
         void chargePointService.setMeterValue(cpId, connectorId, derivedMeter);
       }
     },
@@ -764,23 +771,15 @@ const FullPanelContent: React.FC<{
   // storage when applicable.
   const handleSaveAutoMeterValueConfig = useCallback(
     (config: AutoMeterValueConfig) => {
-      void chargePointService.setAutoMeterValueConfig(
+      setPersistedAutoMeterValueConfig(config);
+      saveConnectorAutoMeterConfig(
+        chargePointService,
         cpId,
         connectorId,
         config,
       );
-      if (mode === "local") {
-        // Persist through the repository so the next ChargePoint
-        // construction picks it up out of SQLite (handled by
-        // LocalChargePointService.buildChargePoint).
-        void connectorSettingsRepository.saveAutoMeterValueConfig(
-          cpId,
-          connectorId,
-          config,
-        );
-      }
     },
-    [chargePointService, connectorSettingsRepository, cpId, connectorId, mode],
+    [chargePointService, cpId, connectorId],
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;
@@ -1139,9 +1138,14 @@ const FullPanelContent: React.FC<{
                     <input
                       type="number"
                       value={meterValueInput}
-                      onChange={(e) =>
-                        setMeterValueInput(Number(e.target.value))
-                      }
+                      onFocus={() => setIsMeterValueInputFocused(true)}
+                      onBlur={() => setIsMeterValueInputFocused(false)}
+                      onChange={(e) => {
+                        setIsMeterValueInputDirty(true);
+                        setMeterValueInput(
+                          clampMeterValue(Number(e.target.value)),
+                        );
+                      }}
                       className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono"
                     />
                     <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -1473,7 +1477,7 @@ const FullPanelContent: React.FC<{
         </div>
       </div>
 
-      {isCurveModalOpen && autoMeterValueConfig ? (
+      {isCurveModalOpen && effectiveAutoMeterValueConfig ? (
         <Suspense
           fallback={
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
@@ -1484,7 +1488,7 @@ const FullPanelContent: React.FC<{
           <MeterValueCurveModal
             isOpen={isCurveModalOpen}
             onClose={() => setIsCurveModalOpen(false)}
-            initialConfig={autoMeterValueConfig}
+            initialConfig={effectiveAutoMeterValueConfig}
             onSave={handleSaveAutoMeterValueConfig}
           />
         </Suspense>

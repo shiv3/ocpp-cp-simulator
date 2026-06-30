@@ -11,7 +11,6 @@ import { createStore } from "jotai/vanilla";
 
 import type { RuntimeMode } from "../RuntimeMode";
 import { HEALTH_PATH } from "../healthPath";
-import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import type { ChargePointService } from "../interfaces/ChargePointService";
 import { LocalChargePointService } from "../local/LocalChargePointService";
 import { RemoteChargePointService } from "../remote/RemoteChargePointService";
@@ -19,7 +18,6 @@ import type { Database } from "../../cp/domain/persistence/Database";
 // SqlJsDatabase intentionally NOT imported eagerly — see the mode-gated
 // dynamic import below. Remote mode never needs it, so we keep the
 // ~650 KB WASM wrapper out of that path entirely.
-import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
 import {
   type EVSettings,
   defaultEVSettings,
@@ -75,7 +73,6 @@ interface DataContextValue {
    *  `null` means "no override — fall back to the built-in defaults". */
   defaultEvSettings: EVSettings | null;
   setDefaultEvSettings: (s: EVSettings | null) => void;
-  connectorSettingsRepository: ConnectorSettingsRepository;
   chargePointService: ChargePointService;
 }
 
@@ -225,11 +222,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     };
   }, [mode]);
 
-  // Connector settings still use the direct repository until Phase C3.
-  const connectorSettingsRepository = useMemo<ConnectorSettingsRepository>(
-    () => new SqliteConnectorSettingsRepository(database),
-    [database],
-  );
   const localChargePointService = useMemo(
     () => new LocalChargePointService(database),
     [database],
@@ -284,18 +276,10 @@ export const DataProvider: React.FC<DataProviderProps> = ({
             serverUrl,
             defaultEvSettings,
             setDefaultEvSettings,
-            connectorSettingsRepository,
             chargePointService,
           }
         : null,
-    [
-      ready,
-      mode,
-      serverUrl,
-      defaultEvSettings,
-      connectorSettingsRepository,
-      chargePointService,
-    ],
+    [ready, mode, serverUrl, defaultEvSettings, chargePointService],
   );
 
   if (!ready || !value) {

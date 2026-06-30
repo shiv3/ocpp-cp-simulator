@@ -378,10 +378,9 @@ export interface ChargePointService {
    * Enable/disable SoC ↔ Meter auto-sync for a connector. When on, any
    * meter-value update (UI, scenario auto-meter, etc.) derives a SoC value
    * from EV-settings (initialSoc + delivered_kWh / capacity_kWh × 100) and
-   * pushes it into the connector. UI persists the preference globally via
-   * `connectorSettingsRepository.saveSocMeterSync` (SQLite `kv` table);
-   * pushing it down the service here makes it stick on every connector
-   * instance.
+   * pushes it into the connector. UI persists the preference through
+   * `saveSocMeterSync`; pushing it down here makes it stick on every
+   * connector instance.
    */
   setConnectorSocMeterSync(
     id: string,

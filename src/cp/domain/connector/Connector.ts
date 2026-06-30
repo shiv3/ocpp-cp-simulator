@@ -824,9 +824,51 @@ export class Connector {
     const current = this.effectiveSocPercent();
     if (current === null) return;
     if (current < this._evSettings.targetSoc) return;
+
+    // We've reached or exceeded the target SoC. A coarse curve / increment tick
+    // can land WELL past the target in a single step (e.g. 95% when the target
+    // is 80%), and we only stop *after* the value was applied — so clamp the
+    // meter back to the energy for exactly the target SoC and re-sync before
+    // stopping. Otherwise the session ends at the overshot value (#105).
+    const targetMeterWh = this.meterWhForSoc(this._evSettings.targetSoc);
+    if (targetMeterWh !== null && this.meterValueWh > targetMeterWh) {
+      this.meterValueWh = targetMeterWh;
+      this.eventsEmitter.emit("meterValueChange", {
+        meterValue: targetMeterWh,
+      });
+      if (this.socMeterSyncEnabledValue) {
+        const derived = this.socFromMeterValue(targetMeterWh);
+        if (derived !== null && this.socPercent !== derived) {
+          this.socPercent = derived;
+          this.eventsEmitter.emit("socChange", { soc: derived });
+        }
+      }
+    }
+
     this.meterScheduler.stop();
     this.eventsEmitter.emit("autoStopRequested", {
       reason: "targetSocReached",
     });
+  }
+
+  /**
+   * Inverse of {@link socFromMeterValue}: the integer meter Wh corresponding to
+   * exactly `soc` percent, using the same capacity / initialSoc / meterStart
+   * inputs so the round-trip is consistent. Returns null when capacity is
+   * unknown.
+   */
+  private meterWhForSoc(soc: number): number | null {
+    const transactionCapacity = this.transactionValue?.batteryCapacityKwh;
+    const capacity =
+      transactionCapacity && transactionCapacity > 0
+        ? transactionCapacity
+        : this._evSettings.batteryCapacityKwh;
+    if (capacity <= 0) return null;
+    const initial =
+      this.transactionValue?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const meterStart = this.transactionValue?.meterStart ?? 0;
+    const deliveredKWh = ((soc - initial) / 100) * capacity;
+    if (deliveredKWh <= 0) return meterStart;
+    return Math.round(meterStart + deliveredKWh * 1000);
   }
 }

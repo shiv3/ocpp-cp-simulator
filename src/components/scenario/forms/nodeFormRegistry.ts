@@ -644,5 +644,8 @@ export const NODE_FORM_REGISTRY = {
 } satisfies Record<ScenarioNodeType, NodeFormEntry>;
 
 export function isScenarioNodeType(value: unknown): value is ScenarioNodeType {
-  return typeof value === "string" && value in NODE_FORM_REGISTRY;
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(NODE_FORM_REGISTRY, value)
+  );
 }

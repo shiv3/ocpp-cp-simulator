@@ -74,7 +74,31 @@ ocpp-cp-sim --http-port 5172 --web-console \
 
 > **Behind a reverse proxy?** Bound to a non-loopback host the daemon applies a safe same-origin CORS policy, so the web console served at a public URL will `403` its own assets until you name that origin with `--cors-origin https://your.url` (or, behind a trusted proxy, `--trust-forwarded-headers`). See [docs/server.md → Behind a reverse proxy](docs/server.md#behind-a-reverse-proxy-traefik-nginx-caddy-) for details and an nginx + Authelia example compose.
 
-For OCPP 1.5 SOAP, the ChargePointService callback endpoint uses the configured `--soap-path` and relies on the daemon's existing `--web-console-basic-auth-*` gate or a trusted network boundary. OCPP-S has no per-message authentication field.
+### OCPP 1.5 SOAP
+
+OCPP 1.5 uses SOAP 1.2 / WS-Addressing over HTTP (not WebSocket). It is **CLI /
+server-mode only** — the browser UI can't host the callback endpoint, so selecting
+`OCPP-1.5` there errors. Point `--ws-url` at the CSMS _CentralSystemService_ URL and
+give the callback URL the CSMS should reach the charge point on:
+
+```bash
+bun src/cli/main.ts \
+  --cp-id CP-001 --ocpp-version OCPP-1.5 \
+  --ws-url http://csms-host:8180/steve/services/CentralSystemService \
+  --soap-callback-url http://this-host:9700/ocpp/soap/CP-001/ChargePointService \
+  --json
+```
+
+- **CP → CSMS**: BootNotification, Heartbeat, StatusNotification, Authorize,
+  Start/StopTransaction, MeterValues (1.6 status/error/measurand values are mapped
+  to the 1.5 wire enums; `StopTransaction.reason` is dropped).
+- **CSMS → CP**: the daemon hosts `POST <soap-path>/:cpId/ChargePointService`
+  (default `--soap-path /ocpp/soap`); slice-1 handles **Reset**. The endpoint relies
+  on the daemon's `--web-console-basic-auth-*` gate or a trusted network boundary —
+  OCPP-S has no per-message authentication field.
+
+Pairs with [SteVe](https://github.com/steve-community/steve) (register the charge
+box with protocol `ocpp1.5S`, status Accepted).
 
 ## AI Agent & Automation Testing
 

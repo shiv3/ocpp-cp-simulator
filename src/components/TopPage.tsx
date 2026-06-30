@@ -26,7 +26,7 @@ import type { SimulatorConfigInput } from "../protocol";
 const DEFAULT_TAG_ID = "TAG001";
 
 const TopPage: React.FC = () => {
-  const { mode, chargePointService, scenarioRepository } = useDataContext();
+  const { mode, chargePointService } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
   // Tag IDs live globally now — managed from the Settings page, not per-CP.
   // useGlobalTagIds picks the right backing store (config.Experimental in
@@ -311,8 +311,8 @@ const TopPage: React.FC = () => {
       if (essential) {
         for (let cId = 1; cId <= cpConfig.connectorNumber; cId++) {
           const seeded = essential.createScenario(cpConfig.cpId, cId);
-          void scenarioRepository
-            .save(cpConfig.cpId, cId, seeded)
+          void chargePointService
+            .saveScenarioDefinition(cpConfig.cpId, cId, seeded)
             .catch((err) =>
               console.warn(
                 `Failed to seed Essential CP Behavior for ${cpConfig.cpId}/connector ${cId}`,

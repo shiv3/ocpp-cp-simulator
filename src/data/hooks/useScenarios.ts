@@ -10,8 +10,29 @@ interface UseScenariosResult {
   deleteScenario: () => Promise<void>;
 }
 
-export function useScenarios(chargePointId: string | null, connectorId: number | null): UseScenariosResult {
-  const { scenarioRepository } = useDataContext();
+function filterScenarioDefinitions(
+  scenarios: ScenarioDefinition[],
+  connectorId: number | null,
+): ScenarioDefinition[] {
+  return scenarios.filter((scenario) => {
+    if (connectorId === null) {
+      return scenario.targetType !== "connector";
+    }
+
+    if (scenario.targetType === "connector") {
+      return scenario.targetId === connectorId;
+    }
+
+    // Backward compatibility: scenarios saved before targetType introduction.
+    return scenario.targetType !== "chargePoint";
+  });
+}
+
+export function useScenarios(
+  chargePointId: string | null,
+  connectorId: number | null,
+): UseScenariosResult {
+  const { chargePointService } = useDataContext();
   const [scenarios, setScenarios] = useState<ScenarioDefinition[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(chargePointId));
 
@@ -23,26 +44,19 @@ export function useScenarios(chargePointId: string | null, connectorId: number |
     }
 
     let cancelled = false;
+    const applyDefinitions = (definitions: ScenarioDefinition[]) => {
+      if (!cancelled) {
+        setScenarios(filterScenarioDefinitions(definitions, connectorId));
+      }
+    };
     const load = async () => {
       setIsLoading(true);
       try {
-        const list = await scenarioRepository.list(chargePointId);
-        if (!cancelled) {
-          setScenarios(
-            list.filter((scenario) => {
-              if (connectorId === null) {
-                return scenario.targetType !== "connector";
-              }
-
-              if (scenario.targetType === "connector") {
-                return scenario.targetId === connectorId;
-              }
-
-              // Backward compatibility: scenarios saved before targetType introduction
-              return scenario.targetType !== "chargePoint";
-            }),
-          );
-        }
+        const list = await chargePointService.listScenarioDefinitions(
+          chargePointId,
+          connectorId,
+        );
+        applyDefinitions(list);
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -52,36 +66,39 @@ export function useScenarios(chargePointId: string | null, connectorId: number |
 
     void load();
 
-    const unsubscribe = scenarioRepository.subscribe(chargePointId, connectorId, (scenario) => {
-      if (!scenario) {
-        return;
-      }
-
-      setScenarios((prev) => {
-        const other = prev.filter((item) => item.id !== scenario.id);
-        return [...other, scenario];
-      });
-    });
+    const unsubscribe = chargePointService.subscribeScenarioDefinitions(
+      chargePointId,
+      connectorId,
+      applyDefinitions,
+    );
 
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [chargePointId, connectorId, scenarioRepository]);
+  }, [chargePointId, connectorId, chargePointService]);
 
   const saveScenario = useCallback(
     async (scenario: ScenarioDefinition) => {
       if (!chargePointId) return;
-      await scenarioRepository.save(chargePointId, connectorId, scenario);
+      await chargePointService.saveScenarioDefinition(
+        chargePointId,
+        connectorId,
+        scenario,
+      );
     },
-    [chargePointId, connectorId, scenarioRepository],
+    [chargePointId, connectorId, chargePointService],
   );
 
   const deleteScenario = useCallback(async () => {
     if (!chargePointId) return;
-    await scenarioRepository.delete(chargePointId, connectorId);
+    await chargePointService.replaceConnectorScenarioDefinitions(
+      chargePointId,
+      connectorId,
+      [],
+    );
     setScenarios([]);
-  }, [chargePointId, connectorId, scenarioRepository]);
+  }, [chargePointId, connectorId, chargePointService]);
 
   return {
     scenarios,

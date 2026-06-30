@@ -11,7 +11,6 @@ import { createStore } from "jotai/vanilla";
 
 import type { RuntimeMode } from "../RuntimeMode";
 import { HEALTH_PATH } from "../healthPath";
-import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import type { ChargePointService } from "../interfaces/ChargePointService";
 import { LocalChargePointService } from "../local/LocalChargePointService";
@@ -20,7 +19,6 @@ import type { Database } from "../../cp/domain/persistence/Database";
 // SqlJsDatabase intentionally NOT imported eagerly — see the mode-gated
 // dynamic import below. Remote mode never needs it, so we keep the
 // ~650 KB WASM wrapper out of that path entirely.
-import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
 import {
   type EVSettings,
@@ -77,7 +75,6 @@ interface DataContextValue {
    *  `null` means "no override — fall back to the built-in defaults". */
   defaultEvSettings: EVSettings | null;
   setDefaultEvSettings: (s: EVSettings | null) => void;
-  scenarioRepository: ScenarioRepository;
   connectorSettingsRepository: ConnectorSettingsRepository;
   chargePointService: ChargePointService;
 }
@@ -228,12 +225,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     };
   }, [mode]);
 
-  // Repositories accept `database === null` (remote mode); they no-op
-  // writes and return empty/null reads. Local mode wires the real DB.
-  const scenarioRepository = useMemo<ScenarioRepository>(
-    () => new SqliteScenarioRepository(database),
-    [database],
-  );
+  // Connector settings still use the direct repository until Phase C3.
   const connectorSettingsRepository = useMemo<ConnectorSettingsRepository>(
     () => new SqliteConnectorSettingsRepository(database),
     [database],
@@ -292,7 +284,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
             serverUrl,
             defaultEvSettings,
             setDefaultEvSettings,
-            scenarioRepository,
             connectorSettingsRepository,
             chargePointService,
           }
@@ -302,7 +293,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
       mode,
       serverUrl,
       defaultEvSettings,
-      scenarioRepository,
       connectorSettingsRepository,
       chargePointService,
     ],

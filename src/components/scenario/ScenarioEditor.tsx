@@ -46,9 +46,12 @@ import {
   applyCurveConfigToMeterNode,
 } from "./meterValueNodeConfig";
 import {
+  createLatestWinsSaver,
   persistEditorScenario,
   retargetScenarioToConnector,
+  saveEditorScenario,
 } from "./scenarioPersistence";
+import { serializeScenarioGraph } from "./scenarioSerialize";
 import {
   type EVSettings,
   EV_PRESETS,
@@ -84,6 +87,11 @@ import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
+
+type EditorScenarioSaveRequest = {
+  deps: Parameters<typeof persistEditorScenario>[0];
+  scenario: ScenarioDefinition;
+};
 
 /**
  * Minimal Start → End scenario used as the editor's fallback when no
@@ -211,8 +219,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // callers, but the editor itself no longer self-closes — the parent
   // panel owns its visibility now. Intentionally not destructured.
 }) => {
-  const { chargePointService, mode, defaultEvSettings, scenarioRepository } =
-    useDataContext();
+  const { chargePointService, mode, defaultEvSettings } = useDataContext();
   const { isDark } = useDarkMode();
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
@@ -299,6 +306,26 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [historyTick, setHistoryTick] = useState(0);
   const [saveFeedback, setSaveFeedback] = useState<"idle" | "saved">("idle");
   const saveFeedbackTimerRef = useRef<number | null>(null);
+  const persistEditorScenarioLatest = useMemo(
+    () =>
+      createLatestWinsSaver<EditorScenarioSaveRequest>(({ deps, scenario }) =>
+        persistEditorScenario(deps, scenario),
+      ),
+    [],
+  );
+
+  const saveEditorScenarioLatest = useCallback(
+    (scenarioToSave: ScenarioDefinition): Promise<void> =>
+      persistEditorScenarioLatest({
+        deps: {
+          chargePointService,
+          cpId,
+          connectorId,
+        },
+        scenario: scenarioToSave,
+      }),
+    [chargePointService, cpId, connectorId, persistEditorScenarioLatest],
+  );
 
   const structuralKey = useCallback((ns: Node[], es: Edge[]): string => {
     return JSON.stringify({
@@ -337,34 +364,36 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
 
     if (scenarioId) {
-      // Async lookup via the scenario repository (replaces the legacy
+      // Async lookup via the scenario-definition port (replaces the legacy
       // sync getScenarioById helper backed by localStorage). The
       // cancellation flag prevents a stale fetch from overwriting state
       // after the effect re-runs.
       let cancelled = false;
-      void scenarioRepository.list(cpId).then((all) => {
-        if (cancelled) return;
-        const found = all.find(
-          (s) =>
-            s.id === scenarioId &&
-            // Same filter `getScenarioById` used: prefer the scenario
-            // targeted at this (cp, connector). null connector means
-            // "CP-level scenarios only".
-            (connectorId === null
-              ? s.targetType !== "connector"
-              : s.targetType !== "connector" || s.targetId === connectorId),
-        );
-        if (!found) return;
-        setScenario(found);
-        setNodes(found.nodes);
-        setEdges(found.edges);
-        setScenarioName(found.name);
-        setScenarioDescription(found.description || "");
-        setDefaultExecutionMode(found.defaultExecutionMode || "oneshot");
-        setScenarioEnabled(found.enabled !== false);
-        setScenarioEvSettings(found.evSettings ?? {});
-        resetHistory();
-      });
+      void chargePointService
+        .listScenarioDefinitions(cpId, connectorId)
+        .then((all) => {
+          if (cancelled) return;
+          const found = all.find(
+            (s) =>
+              s.id === scenarioId &&
+              // Same filter `getScenarioById` used: prefer the scenario
+              // targeted at this (cp, connector). null connector means
+              // "CP-level scenarios only".
+              (connectorId === null
+                ? s.targetType !== "connector"
+                : s.targetType !== "connector" || s.targetId === connectorId),
+          );
+          if (!found) return;
+          setScenario(found);
+          setNodes(found.nodes);
+          setEdges(found.edges);
+          setScenarioName(found.name);
+          setScenarioDescription(found.description || "");
+          setDefaultExecutionMode(found.defaultExecutionMode || "oneshot");
+          setScenarioEnabled(found.enabled !== false);
+          setScenarioEvSettings(found.evSettings ?? {});
+          resetHistory();
+        });
       return () => {
         cancelled = true;
       };
@@ -374,7 +403,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioId,
     cpId,
     connectorId,
-    scenarioRepository,
+    chargePointService,
     setNodes,
     setEdges,
   ]);
@@ -707,25 +736,27 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     };
     setScenario(updatedScenario);
     if (scenario.id) {
-      // Auto-save through the repository (upsert). Fire-and-forget; if it
-      // fails we log to console rather than block the in-flight edit.
-      void scenarioRepository
-        .save(cpId, connectorId, updatedScenario)
-        .catch((err) => console.error("Failed to autosave scenario", err));
+      const serializedGraph = serializeScenarioGraph(nodes, cleanedEdges);
+      const scenarioToSave: ScenarioDefinition = {
+        ...updatedScenario,
+        ...serializedGraph,
+      };
+      // Auto-save through the latest-wins replace boundary. Fire-and-forget;
+      // if it fails we log to console rather than block the in-flight edit.
+      void saveEditorScenarioLatest(scenarioToSave).catch((err) =>
+        console.error("Failed to autosave scenario", err),
+      );
     }
 
     // Keep ScenarioManager in sync while editing (local mode only).
     if (localCp) {
       const connector = localCp.getConnector(connectorId || 1);
       if (connector?.scenarioManager) {
-        void scenarioRepository.list(cpId).then((all) => {
-          const scoped = all.filter((s) =>
-            connectorId === null
-              ? s.targetType !== "connector"
-              : s.targetType !== "connector" || s.targetId === connectorId,
-          );
-          connector.scenarioManager?.loadScenarios(scoped);
-        });
+        void chargePointService
+          .listScenarioDefinitions(cpId, connectorId)
+          .then((scoped) => {
+            connector.scenarioManager?.loadScenarios(scoped);
+          });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scenario is intentionally excluded to avoid infinite loop (this effect updates scenario)
@@ -742,6 +773,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     cpId,
     connectorId,
     localCp,
+    chargePointService,
+    saveEditorScenarioLatest,
   ]);
 
   // Track structural changes for undo/redo. Position-only changes update
@@ -823,19 +856,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       updatedAt: new Date().toISOString(),
     };
     if (scenario.id) {
-      // Remote mode talks to the daemon (the browser-side sql.js path is
-      // a no-op there). Local mode keeps the sql.js path.
-      if (mode === "remote") {
-        void chargePointService
-          .loadScenario(cpId, connectorId, updated)
-          .catch((err) =>
-            console.error("Failed to save scenario to daemon", err),
-          );
-      } else {
-        void scenarioRepository
-          .save(cpId, connectorId, updated)
-          .catch((err) => console.error("Failed to save scenario", err));
-      }
+      void saveEditorScenario(
+        { chargePointService, cpId, connectorId },
+        updated,
+      ).catch((err) => console.error("Failed to save scenario", err));
     }
     setScenario(updated);
     setSaveFeedback("saved");
@@ -857,9 +881,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     scenarioEvSettings,
     cpId,
     connectorId,
-    mode,
     chargePointService,
-    scenarioRepository,
   ]);
 
   // Keyboard shortcuts for undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+Y).
@@ -1094,10 +1116,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   // File operations
   const handleExport = useCallback(() => {
+    const serializedGraph = serializeScenarioGraph(nodes, edges);
     const currentScenario: ScenarioDefinition = {
       ...scenario,
-      nodes,
-      edges,
+      ...serializedGraph,
     };
     exportScenarioToJSON(currentScenario);
   }, [scenario, nodes, edges]);
@@ -1133,26 +1155,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         setScenarioEnabled(targeted.enabled !== false);
         setScenarioEvSettings(targeted.evSettings ?? {});
 
-        // Persist mode-aware: in remote mode the browser sql.js repository is a
-        // no-op, so the upload has to be pushed to the daemon (and prior
-        // scenarios cleaned up) or it's silently lost on reload (#101).
+        // Persist through the replace boundary so stale connector siblings are
+        // pruned and reload selects the imported scenario (#101).
         await persistEditorScenario(
-          { mode, chargePointService, scenarioRepository, cpId, connectorId },
+          { chargePointService, cpId, connectorId },
           targeted,
         );
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [
-      cpId,
-      connectorId,
-      mode,
-      chargePointService,
-      scenarioRepository,
-      setNodes,
-      setEdges,
-    ],
+    [cpId, connectorId, chargePointService, setNodes, setEdges],
   );
 
   const handleLoadTemplate = useCallback(
@@ -1183,26 +1196,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setScenarioEnabled(templateScenario.enabled !== false);
       setScenarioEvSettings(templateScenario.evSettings ?? {});
 
-      // Same mode-aware persistence as the file-upload path: remote mode pushes
-      // through the daemon and prunes stale scenarios; local mode upserts into
-      // the browser sql.js repository (#101).
+      // Same replace persistence as the file-upload path: stale scenarios are
+      // pruned so reload selects the template scenario (#101).
       void persistEditorScenario(
-        { mode, chargePointService, scenarioRepository, cpId, connectorId },
+        { chargePointService, cpId, connectorId },
         templateScenario,
       ).catch((err) =>
         console.error("Failed to persist template scenario", err),
       );
     },
-    [
-      cpId,
-      connectorId,
-      mode,
-      chargePointService,
-      scenarioRepository,
-      nodes.length,
-      setNodes,
-      setEdges,
-    ],
+    [cpId, connectorId, chargePointService, nodes.length, setNodes, setEdges],
   );
 
   // Handle node double-click to open config panel

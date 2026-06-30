@@ -55,6 +55,41 @@ describe("socket.io auth", () => {
     }
   });
 
+  it("connects with a Basic Auth handshake header (same-origin web console replay)", async () => {
+    // The bundled web console can't read the browser's cached Basic Auth
+    // credentials to put them in the `auth` payload; it relies on the browser
+    // replaying the `Authorization` header on the same-origin handshake. Pin
+    // the polling transport so the handshake is an HTTP request that carries
+    // the header.
+    const server = await authServer();
+    const socket = await connectTestClient(server, {
+      transports: ["polling"],
+      extraHeaders: {
+        Authorization: basicAuthHeader("operator", "top-secret"),
+      },
+    });
+    try {
+      expect(socket.connected).toBe(true);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("rejects an incorrect Basic Auth handshake header", async () => {
+    const server = await authServer();
+    const socket = createTestClient(server, {
+      transports: ["polling"],
+      extraHeaders: { Authorization: basicAuthHeader("operator", "wrong") },
+    });
+    try {
+      const [err] = await waitForSocketEvent(socket, "connect_error");
+      expect(errorMessage(err)).toBe("unauthorized");
+      expect(socket.connected).toBe(false);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
   it("keeps static Basic Auth while leaving healthz unauthenticated", async () => {
     const staticDir = await mkdtemp(join(tmpdir(), "ocpp-cp-sim-static-"));
     tempDirs.push(staticDir);
@@ -114,6 +149,10 @@ async function authServerWithLogCapture(): Promise<{
       process.stderr.write = originalWrite;
     },
   };
+}
+
+function basicAuthHeader(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
 function errorMessage(err: unknown): string {

@@ -33,7 +33,11 @@ import { LogLevel } from "../../cp/shared/Logger";
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
-import { parseCreateBody } from "./httpServer";
+import {
+  parseCreateBody,
+  parseBasicAuthHeader,
+  credentialsMatch,
+} from "./httpServer";
 import {
   createRegistryEventBridge,
   type RegistryEventBridge,
@@ -695,6 +699,22 @@ function safeLogMessage(err: unknown): string {
   );
 }
 
+/**
+ * Read the `Authorization` header off a Socket.IO handshake, tolerating both
+ * the plain `IncomingHttpHeaders` record (Node/Engine.IO) and a `Headers`
+ * instance, plus the rare repeated-header array form.
+ */
+function handshakeAuthorizationHeader(headers: unknown): string | null {
+  if (!headers) return null;
+  if (typeof (headers as Headers).get === "function") {
+    return (headers as Headers).get("authorization");
+  }
+  const value = (headers as Record<string, unknown>).authorization;
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return null;
+}
+
 function registerSocketAuth(
   io: SocketIoServer,
   expected: SocketIoDeps["webConsoleBasicAuth"],
@@ -704,7 +724,25 @@ function registerSocketAuth(
       next();
       return;
     }
+    // 1) Explicit Socket.IO `auth` payload — used by the CLI client and any
+    //    cross-origin caller that holds the credentials and echoes them in.
     if (socketAuthMatches(socket.handshake.auth, expected)) {
+      next();
+      return;
+    }
+    // 2) HTTP `Authorization: Basic` header on the handshake request. The
+    //    bundled web console is served from the same origin as this daemon, so
+    //    it is loaded behind the browser's Basic Auth prompt; the browser then
+    //    replays those cached credentials on the same-origin Socket.IO
+    //    handshake. They are opaque to page JS and cannot be copied into the
+    //    `auth` payload above, so accepting the header lets the web console
+    //    connect under --web-console-basic-auth without a second credential
+    //    entry. (A WebSocket upgrade can't carry the header, but Socket.IO
+    //    authenticates once at the handshake, before the transport upgrade.)
+    const headerCreds = parseBasicAuthHeader(
+      handshakeAuthorizationHeader(socket.handshake.headers),
+    );
+    if (headerCreds && credentialsMatch(headerCreds, expected)) {
       next();
       return;
     }

@@ -53,5 +53,13 @@ export default defineConfig({
       // devDependency in sync; it has no direct import and exists only for this.
       events: path.resolve(__dirname, "node_modules/events/events.js"),
     },
+    // Force a single React instance across every chunk. The Scenario Editor is
+    // a lazy chunk built around @xyflow/react, which leans heavily on React
+    // context/hooks. If the production build ever splits React such that the
+    // lazy chunk resolves a second copy, those hooks read a null dispatcher and
+    // throw React error #321 ("invalid hook call / more than one copy of
+    // React"), crashing the editor. Deduping pins react/react-dom to one
+    // module so the lazy chunk and the app share the same instance.
+    dedupe: ["react", "react-dom"],
   },
 });

@@ -1318,17 +1318,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       case "idle":
         return "text-gray-600 dark:text-gray-400";
       case "running":
-        return "text-green-600 dark:text-green-400";
+        return "text-green-700 dark:text-green-300";
       case "paused":
-        return "text-yellow-600 dark:text-yellow-400";
+        return "text-yellow-700 dark:text-yellow-300";
       case "waiting":
-        return "text-orange-600 dark:text-orange-400";
+        return "text-orange-700 dark:text-orange-300";
       case "stepping":
-        return "text-purple-600 dark:text-purple-400";
+        return "text-purple-700 dark:text-purple-300";
       case "completed":
-        return "text-emerald-600 dark:text-emerald-400";
+        return "text-emerald-700 dark:text-emerald-300";
       case "error":
-        return "text-red-600 dark:text-red-400";
+        return "text-red-700 dark:text-red-300";
       default:
         return "text-gray-600 dark:text-gray-400";
     }
@@ -1338,21 +1338,31 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const getScenarioStateIndicator = (state: ScenarioExecutionState) => {
     switch (state) {
       case "idle":
-        return <span className="text-gray-500 dark:text-gray-400">●</span>;
+        return <span className="text-gray-700 dark:text-gray-300">●</span>;
       case "running":
-        return <span className="text-green-500 animate-pulse">●</span>;
+        return (
+          <span className="text-green-700 dark:text-green-300 animate-pulse">
+            ●
+          </span>
+        );
       case "paused":
-        return <span className="text-yellow-500">⏸</span>;
+        return <span className="text-yellow-700 dark:text-yellow-300">⏸</span>;
       case "waiting":
-        return <span className="text-orange-500 animate-pulse">⏳</span>;
+        return (
+          <span className="text-orange-700 dark:text-orange-300 animate-pulse">
+            ⏳
+          </span>
+        );
       case "stepping":
-        return <span className="text-purple-500">⏯</span>;
+        return <span className="text-purple-700 dark:text-purple-300">⏯</span>;
       case "completed":
-        return <span className="text-emerald-500">✓</span>;
+        return (
+          <span className="text-emerald-700 dark:text-emerald-300">✓</span>
+        );
       case "error":
-        return <span className="text-red-500">✗</span>;
+        return <span className="text-red-700 dark:text-red-300">✗</span>;
       default:
-        return <span className="text-gray-500 dark:text-gray-400">●</span>;
+        return <span className="text-gray-700 dark:text-gray-300">●</span>;
     }
   };
 
@@ -1571,7 +1581,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                       </option>
                     </select>
                     {formData.stopMode === "evSettings" ? (
-                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                      <p className="mt-1 text-[11px] text-gray-700 dark:text-gray-300 leading-snug">
                         Stops when delivered kWh ≥ capacity × (target − initial)
                         / 100. Uses the scenario's EV settings (above) or the
                         connector's current EV state if the scenario doesn't
@@ -1584,7 +1594,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                   {formData.stopMode !== "evSettings" ? (
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Increment Interval (s)
                         </label>
                         <input
@@ -1605,7 +1615,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Increment Amount (Wh)
                         </label>
                         <input
@@ -1626,7 +1636,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Max Time (s, 0=∞)
                         </label>
                         <input
@@ -1647,7 +1657,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Max Value (Wh, 0=∞)
                         </label>
                         <input
@@ -2015,7 +2025,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             {executionContext && executionContext.currentNodeId && (
               <>
                 <span className="text-muted shrink-0">·</span>
-                <span className="font-mono text-blue-600 dark:text-blue-400 truncate min-w-0">
+                <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
                   {nodes.find((n) => n.id === executionContext.currentNodeId)
                     ?.data?.label || executionContext.currentNodeId}
                 </span>
@@ -2052,7 +2062,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               onClick={handleManualSave}
               className={`text-xs px-2 py-1 ${
                 saveFeedback === "saved"
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                  ? "bg-emerald-700 text-white hover:bg-emerald-800"
                   : "btn-secondary"
               }`}
               title="Save scenario"
@@ -2179,14 +2189,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                   className="w-full flex items-center justify-between px-2 py-1.5 text-xs font-semibold text-primary hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
                   <span>🚗 Scenario EV Settings</span>
-                  <span className="text-gray-500">
+                  <span className="text-gray-700 dark:text-gray-300">
                     {isEvSettingsExpanded ? "▾" : "▸"}
                   </span>
                 </button>
                 {isEvSettingsExpanded ? (
                   <div className="px-2 pb-2 space-y-2">
                     <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                      <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                         EV Model preset
                       </label>
                       <select
@@ -2229,7 +2239,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Battery (kWh)
                         </label>
                         <input
@@ -2255,7 +2265,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Max Power (kW)
                         </label>
                         <input
@@ -2281,7 +2291,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Initial SoC (%)
                         </label>
                         <input
@@ -2308,7 +2318,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
                           Target SoC (%)
                         </label>
                         <input
@@ -2335,7 +2345,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                         />
                       </div>
                     </div>
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug">
+                    <p className="text-xs text-gray-700 dark:text-gray-300 leading-snug">
                       Empty fields fall back to{" "}
                       {defaultEvSettings ? (
                         <>

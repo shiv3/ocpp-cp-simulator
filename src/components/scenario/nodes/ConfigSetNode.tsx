@@ -18,7 +18,7 @@ const ConfigSetNode: React.FC<NodeProps<ConfigSetNodeData>> = ({
       }`}
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         ChangeConfiguration (§5.3)
       </div>
       <div className="text-sm font-mono text-primary truncate" title={data.key}>

@@ -341,7 +341,7 @@ const HeartbeatStatusChip: React.FC<{
 
   if (!isConnected) {
     return (
-      <span className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1 rounded bg-gray-100 dark:bg-gray-800">
+      <span className="text-xs text-gray-700 dark:text-gray-300 px-2 py-1 rounded bg-gray-100 dark:bg-gray-800">
         Heartbeat: not connected
       </span>
     );
@@ -558,7 +558,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="text-sm text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+          className="text-sm text-blue-700 dark:text-blue-300 hover:underline whitespace-nowrap"
         >
           {isExpanded ? "Hide Details" : "Show Details"}
         </button>

@@ -47,9 +47,7 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({
         {isStart ? "🟢 Start" : "🔴 End"}
       </div>
       {isStart && (
-        <div
-          className={`text-center text-[10px] mt-0.5 ${textColor} opacity-80`}
-        >
+        <div className={`text-center text-xs mt-0.5 ${textColor}`}>
           {triggerLabel}
         </div>
       )}

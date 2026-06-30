@@ -15,10 +15,10 @@
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
     --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted-foreground: 215.3 25% 26.7%;
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 74.7% 41.8%;
     --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
@@ -38,7 +38,7 @@
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
     --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted-foreground: 212.7 26.8% 83.9%;
     --accent: 217.2 32.6% 17.5%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
@@ -81,17 +81,17 @@
     @apply text-xl font-semibold text-gray-900 dark:text-white;
   }
 
-  /* Button variants - Softer, modern colors */
+  /* Button variants */
   .btn-primary {
-    @apply bg-blue-500 hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-secondary {
-    @apply bg-gray-400 hover:bg-gray-500 dark:bg-gray-500 dark:hover:bg-gray-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-success {
-    @apply bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-500 dark:hover:bg-emerald-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-700 dark:hover:bg-emerald-800 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   /* rose-600 (not -500) so white text/icons clear WCAG AA (~4.9:1) on the
@@ -101,11 +101,11 @@
   }
 
   .btn-warning {
-    @apply bg-amber-500 hover:bg-amber-600 dark:bg-amber-500 dark:hover:bg-amber-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-amber-700 hover:bg-amber-800 dark:bg-amber-700 dark:hover:bg-amber-800 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-info {
-    @apply bg-indigo-500 hover:bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   /* Panel/Container components - Lighter, more modern */
@@ -127,7 +127,7 @@
   }
 
   .text-muted {
-    @apply text-gray-600 dark:text-gray-400;
+    @apply text-gray-700 dark:text-gray-300;
   }
 
   /* Text size utilities with default colors for Light Mode */
@@ -163,7 +163,7 @@
   }
 
   .badge-primary {
-    @apply badge bg-blue-500 dark:bg-blue-600 text-white;
+    @apply badge bg-blue-600 dark:bg-blue-600 text-white;
   }
 
   .badge-secondary {
@@ -172,11 +172,15 @@
 
   /* Status colors */
   .status-available {
-    @apply text-green-500 dark:text-green-400;
+    @apply text-green-700 dark:text-green-300;
+  }
+
+  .status-preparing {
+    @apply text-amber-700 dark:text-amber-300;
   }
 
   .status-charging {
-    @apply text-blue-500 dark:text-blue-400;
+    @apply text-blue-700 dark:text-blue-300;
   }
 
   .status-unavailable {
@@ -184,7 +188,7 @@
   }
 
   .status-error {
-    @apply text-red-500 dark:text-red-400;
+    @apply text-red-700 dark:text-red-300;
   }
 
   /* Log type colors */
@@ -230,15 +234,15 @@
   }
 
   .log-level-info {
-    @apply text-blue-600 dark:text-blue-400;
+    @apply text-blue-700 dark:text-blue-300;
   }
 
   .log-level-warn {
-    @apply text-yellow-600 dark:text-yellow-400;
+    @apply text-amber-700 dark:text-amber-300;
   }
 
   .log-level-error {
-    @apply text-red-600 dark:text-red-400;
+    @apply text-red-700 dark:text-red-300;
   }
 
   /* Logger specific styles */
@@ -261,4 +265,17 @@
   .logger-input {
     @apply dark:bg-gray-700 dark:text-white dark:border-gray-600;
   }
+}
+
+/*
+  Tailwind also generates .text-muted from the pale `muted` background token.
+  Keep the project's semantic text classes readable by defining them after
+  utilities so labels and hints clear WCAG AA in both themes.
+*/
+.text-muted {
+  @apply text-gray-700 dark:text-gray-300;
+}
+
+.text-secondary {
+  @apply text-gray-700 dark:text-gray-300;
 }

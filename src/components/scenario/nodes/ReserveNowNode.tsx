@@ -14,19 +14,15 @@ const ReserveNowNode: React.FC<NodeProps<ReserveNowNodeData>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
-      <div className="text-xs font-semibold text-amber-600 dark:text-amber-300 mb-1">
+      <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-1">
         Reserve Now
       </div>
       <div className="font-bold text-sm text-primary mb-1">{data.label}</div>
       <div className="text-xs text-muted space-y-0.5">
         <div>ID Tag: {data.idTag}</div>
         <div>Expiry: {data.expiryMinutes} min</div>
-        {data.parentIdTag && (
-          <div>Parent: {data.parentIdTag}</div>
-        )}
-        {data.reservationId && (
-          <div>Reservation ID: {data.reservationId}</div>
-        )}
+        {data.parentIdTag && <div>Parent: {data.parentIdTag}</div>}
+        {data.reservationId && <div>Reservation ID: {data.reservationId}</div>}
       </div>
 
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />

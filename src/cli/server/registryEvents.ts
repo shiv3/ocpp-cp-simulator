@@ -100,6 +100,9 @@ function cpForWire(cpId: string, service: CLIChargePointService): FullCp {
     status: status.status,
     config: status.config ?? {
       wsUrl: init.wsUrl,
+      centralSystemUrl: init.centralSystemUrl,
+      soapCallbackUrl: init.soapCallbackUrl,
+      soapPath: init.soapPath,
       connectors: init.connectors,
       vendor: init.vendor,
       model: init.model,

@@ -25,6 +25,7 @@ describe("ProtocolProfile", () => {
   });
 
   it("parses exact supported versions and keeps the legacy fallback", () => {
+    expect(parseOcppVersion("OCPP-1.5")).toBe("OCPP-1.5");
     expect(parseOcppVersion("OCPP-2.1")).toBe("OCPP-2.1");
     expect(parseOcppVersion("garbage")).toBe("OCPP-1.6J");
   });

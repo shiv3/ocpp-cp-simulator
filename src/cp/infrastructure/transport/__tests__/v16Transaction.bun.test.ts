@@ -49,6 +49,11 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
       csms.url,
       null,
       null,
+      null,
+      {},
+      [],
+      "OCPP-1.6J",
+      {},
     );
     cp.events.on("error", () => undefined);
 

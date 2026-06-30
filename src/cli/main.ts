@@ -16,6 +16,10 @@ import {
 } from "./server/startServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
 import type { ClientLocation } from "./client";
+import {
+  isOcppVersion,
+  SUPPORTED_OCPP_VERSIONS,
+} from "../cp/domain/types/OcppVersion";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
 /**
@@ -37,13 +41,7 @@ function resolveBundledDist(): string | null {
   return null;
 }
 
-const OCPP_VERSION_VALUES = "OCPP-1.6J, OCPP-2.0.1, OCPP-2.1";
-
-function isSupportedOcppVersion(value: string): boolean {
-  return (
-    value === "OCPP-1.6J" || value === "OCPP-2.0.1" || value === "OCPP-2.1"
-  );
-}
+const OCPP_VERSION_VALUES = SUPPORTED_OCPP_VERSIONS.join(", ");
 
 function parseSecurityProfile(
   value: string | undefined,
@@ -134,6 +132,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let trustForwardedHeaders = false;
   const extraWsHeaders: Record<string, string> = {};
   const extraWsSubprotocols: string[] = [];
+  let soapCallbackUrl: string | null = null;
+  let soapPath = "/ocpp/soap";
   let securityProfile: CLIOptions["securityProfile"];
   let authorizationKey: string | undefined;
   let tlsCaPath: string | undefined;
@@ -208,7 +208,7 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       case "--ocpp-version":
-        if (!next || next.startsWith("--") || !isSupportedOcppVersion(next)) {
+        if (!next || next.startsWith("--") || !isOcppVersion(next)) {
           process.stderr.write(
             `Error: --ocpp-version must be one of ${OCPP_VERSION_VALUES}\n`,
           );
@@ -335,6 +335,24 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         extraWsSubprotocols.push(next);
+        i++;
+        break;
+      case "--soap-callback-url":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --soap-callback-url requires a URL\n");
+          process.exit(1);
+        }
+        soapCallbackUrl = next;
+        i++;
+        break;
+      case "--soap-path":
+        if (!next || next.startsWith("--") || !next.startsWith("/")) {
+          process.stderr.write(
+            "Error: --soap-path requires an absolute path starting with '/'\n",
+          );
+          process.exit(1);
+        }
+        soapPath = next.replace(/\/+$/, "") || "/";
         i++;
         break;
       case "--security-profile":
@@ -593,6 +611,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     healthPath,
     extraWsHeaders,
     extraWsSubprotocols,
+    soapCallbackUrl,
+    soapPath,
     securityProfile,
     authorizationKey,
     cpoName,
@@ -665,7 +685,7 @@ Options:
                            Basic auth password for the client modes (see above).
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
-  --ocpp-version <OCPP-1.6J|OCPP-2.0.1|OCPP-2.1>
+  --ocpp-version <OCPP-1.5|OCPP-1.6J|OCPP-2.0.1|OCPP-2.1>
                            OCPP version for a directly-started CP
                            (default: OCPP-1.6J)
   --scenario <file>            Run scenario from JSON file on startup
@@ -711,6 +731,13 @@ Options:
                            (e.g. Cloud Run / GFE). The browser UI build must
                            be given the matching VITE_HEALTH_PATH so its
                            remote-mode auto-detect probe lines up.
+  --soap-callback-url <url>
+                           OCPP 1.5 SOAP ChargePointService callback URL.
+                           Required when --ocpp-version OCPP-1.5 is used.
+  --soap-path <path>       Base path reserved for the SOAP callback server
+                           (default: /ocpp/soap).
+                           OCPP-S has no per-message auth; rely on
+                           --web-console-basic-auth-* or a trusted network.
   -h, --help               Show this help
 
 HTTP endpoints (see docs/server.md):
@@ -770,10 +797,13 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
   return {
     cpId: options.cpId,
     wsUrl: options.wsUrl,
+    centralSystemUrl: options.wsUrl,
     connectors: options.connectors,
     vendor: options.vendor,
     model: options.model,
     ocppVersion: options.ocppVersion,
+    soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+    soapPath: options.soapPath,
     basicAuth: options.basicAuth,
     extraWsHeaders: options.extraWsHeaders,
     extraWsSubprotocols: options.extraWsSubprotocols,

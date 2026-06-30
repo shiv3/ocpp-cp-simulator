@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
   ocpp_version   TEXT,
+  central_system_url TEXT,
+  soap_callback_url TEXT,
+  soap_path      TEXT,
   security_profile INTEGER,
   authorization_key TEXT,
   cpo_name       TEXT,
@@ -241,12 +244,22 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // v4 → v5: persist OCPP 1.6 security-profile metadata and TLS file
-  // paths for daemon restore. Private key material stays out of SQLite;
-  // restore re-reads tls_key_path and fails closed if it cannot.
+  // v4 → v5: persist OCPP 1.5 SOAP transport fields plus OCPP 1.6
+  // security-profile metadata and TLS file paths for daemon restore.
+  // Private key material stays out of SQLite; restore re-reads
+  // tls_key_path and fails closed if it cannot.
   if (stored < 5) {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     const have = new Set(cols.map((c) => c.name));
+    if (!have.has("central_system_url")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN central_system_url TEXT");
+    }
+    if (!have.has("soap_callback_url")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN soap_callback_url TEXT");
+    }
+    if (!have.has("soap_path")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN soap_path TEXT");
+    }
     if (!have.has("security_profile")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN security_profile INTEGER");
     }

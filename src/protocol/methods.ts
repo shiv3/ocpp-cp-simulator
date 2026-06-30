@@ -31,6 +31,9 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
 const cpParamsBaseSchema = z.object({
   cpId: STR_64K,
   wsUrl: STR_64K,
+  centralSystemUrl: STR_64K.optional(),
+  soapCallbackUrl: STR_64K.optional(),
+  soapPath: STR_64K.optional(),
   ocppVersion: STR_64K.optional(),
   connectors: z.number().int().min(1).optional(),
   vendor: STR_64K.optional(),

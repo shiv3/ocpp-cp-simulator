@@ -17,6 +17,7 @@ describe("OCPP 2.0.1 unknown action", () => {
       {},
       [],
       "OCPP-2.0.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

@@ -1,10 +1,13 @@
 import type { Server } from "bun";
 import * as path from "path";
+import type { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
 import type { Database } from "../../cp/domain/persistence/Database";
+import { isOcppVersion, OCPP_1_5 } from "../../cp/domain/types/OcppVersion";
+import { soapFaultResponse } from "../../cp/infrastructure/transport/soap/OCPPSoapServer";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -79,6 +82,9 @@ const COMMON_CORS_HEADERS: Record<string, string> = {
   "access-control-allow-headers": "content-type, authorization",
   "access-control-max-age": "86400",
 };
+
+export const DEFAULT_SOAP_PATH = "/ocpp/soap";
+export const MAX_SOAP_REQUEST_BODY_BYTES = 256 * 1024;
 
 export type CorsPolicy =
   | { kind: "any" }
@@ -204,6 +210,113 @@ function applyCors(res: Response, req: Request, policy: CorsPolicy): Response {
 
 function forbidden(): Response {
   return new Response("origin not allowed", { status: 403 });
+}
+
+interface SoapChargePointServiceRoute {
+  readonly cpId: string;
+  readonly service?: CLIChargePointService;
+}
+
+function matchSoapChargePointService(
+  pathname: string,
+  registry: CPRegistry,
+): SoapChargePointServiceRoute | null {
+  const match = /^(.*)\/([^/]+)\/ChargePointService$/.exec(pathname);
+  if (!match) return null;
+  const basePath = normalizeSoapPath(match[1] || "/");
+  try {
+    const cpId = decodeURIComponent(match[2]);
+    const service = registry.get(cpId);
+    if (!service) {
+      return basePath === DEFAULT_SOAP_PATH ? { cpId } : null;
+    }
+    return soapBasePathsForService(service).has(basePath)
+      ? { cpId, service }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function soapBasePathsForService(
+  service: CLIChargePointService,
+): ReadonlySet<string> {
+  const init = service.getInit();
+  const paths = new Set<string>([
+    normalizeSoapPath(init.soapPath ?? DEFAULT_SOAP_PATH),
+  ]);
+  const callbackBasePath = soapCallbackBasePath(
+    init.soapCallbackUrl,
+    init.cpId,
+  );
+  if (callbackBasePath) paths.add(callbackBasePath);
+  return paths;
+}
+
+function soapCallbackBasePath(
+  callbackUrl: string | undefined,
+  cpId: string,
+): string | null {
+  if (!callbackUrl) return null;
+  try {
+    const pathname = new URL(callbackUrl).pathname;
+    const match = /^(.*)\/([^/]+)\/ChargePointService$/.exec(pathname);
+    if (!match) return null;
+    return decodeURIComponent(match[2]) === cpId
+      ? normalizeSoapPath(match[1] || "/")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSoapPath(value: string): string {
+  const trimmed = value.replace(/\/+$/, "");
+  return trimmed.length > 0 ? trimmed : "/";
+}
+
+function isRegisteredOcpp15SoapService(
+  service: CLIChargePointService,
+): boolean {
+  const init = service.getInit();
+  return init.ocppVersion === OCPP_1_5 && Boolean(init.soapCallbackUrl);
+}
+
+function declaredContentLength(req: Request): number | null {
+  const raw = req.headers.get("content-length");
+  if (raw === null) return null;
+  const value = raw.trim();
+  if (!/^(0|[1-9]\d*)$/.test(value)) return Number.NaN;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
+}
+
+async function readTextWithLimit(
+  req: Request,
+  maxBytes: number,
+): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+
+  let done = false;
+  while (!done) {
+    const chunk = await reader.read();
+    done = chunk.done;
+    if (done) break;
+    const value = chunk.value;
+    if (!value) continue;
+    bytes += value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
 }
 
 /**
@@ -391,6 +504,60 @@ export function createHttpHandlers(deps: {
       return Response.json({ ok: true });
     }
 
+    const soapRoute = matchSoapChargePointService(url.pathname, deps.registry);
+    if (soapRoute) {
+      if (req.method !== "POST") {
+        return new Response("method not allowed", {
+          status: 405,
+          headers: { allow: "POST" },
+        });
+      }
+
+      const service = soapRoute.service;
+      if (!service) {
+        return soapFaultResponse(
+          `Unknown charge point for SOAP callback: ${soapRoute.cpId}`,
+          404,
+        );
+      }
+      if (!isRegisteredOcpp15SoapService(service)) {
+        return soapFaultResponse(
+          `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
+          400,
+        );
+      }
+
+      const contentLength = declaredContentLength(req);
+      if (contentLength !== null && Number.isNaN(contentLength)) {
+        return soapFaultResponse("Invalid SOAP Content-Length header", 400);
+      }
+      if (
+        contentLength !== null &&
+        contentLength > MAX_SOAP_REQUEST_BODY_BYTES
+      ) {
+        return soapFaultResponse("SOAP request body is too large", 413);
+      }
+
+      // OCPP 1.5 SOAP has no per-message authentication field. This callback
+      // endpoint relies on the daemon's existing HTTP Basic-auth gate when
+      // enabled, or an operator-controlled trusted network boundary otherwise;
+      // do not add a non-standard shared secret to the SOAP payload.
+      return readTextWithLimit(req, MAX_SOAP_REQUEST_BODY_BYTES).then(
+        (body) => {
+          if (body === null) {
+            return soapFaultResponse("SOAP request body is too large", 413);
+          }
+          return (
+            service.handleSoapChargePointServiceRequest(soapRoute.cpId, body) ??
+            soapFaultResponse(
+              `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
+              400,
+            )
+          );
+        },
+      );
+    }
+
     if (url.pathname === "/v1" || url.pathname.startsWith("/v1/")) {
       return new Response("not found", { status: 404 });
     }
@@ -421,6 +588,19 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (typeof wsUrl !== "string" || wsUrl.length === 0) {
     throw new Error("wsUrl is required (string)");
   }
+  const centralSystemUrl =
+    typeof body.centralSystemUrl === "string" &&
+    body.centralSystemUrl.length > 0
+      ? body.centralSystemUrl
+      : wsUrl;
+  const soapCallbackUrl =
+    typeof body.soapCallbackUrl === "string" && body.soapCallbackUrl.length > 0
+      ? body.soapCallbackUrl
+      : undefined;
+  const soapPath =
+    typeof body.soapPath === "string" && body.soapPath.startsWith("/")
+      ? normalizeSoapPath(body.soapPath)
+      : undefined;
   const connectors =
     typeof body.connectors === "number" && Number.isInteger(body.connectors)
       ? body.connectors
@@ -436,13 +616,14 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     if (typeof body.ocppVersion !== "string") {
       throw new Error("ocppVersion must be a string");
     }
-    if (
-      body.ocppVersion === "OCPP-1.6J" ||
-      body.ocppVersion === "OCPP-2.0.1" ||
-      body.ocppVersion === "OCPP-2.1"
-    ) {
+    if (isOcppVersion(body.ocppVersion)) {
       ocppVersion = body.ocppVersion;
+    } else {
+      throw new Error("ocppVersion must be a supported OCPP version");
     }
+  }
+  if (ocppVersion === "OCPP-1.5" && !soapCallbackUrl) {
+    throw new Error("soapCallbackUrl is required for OCPP-1.5 SOAP");
   }
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
@@ -511,11 +692,14 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   return {
     cpId,
     wsUrl,
+    centralSystemUrl,
     connectors,
     vendor,
     model,
     basicAuth,
     ocppVersion,
+    ...(soapCallbackUrl ? { soapCallbackUrl } : {}),
+    ...(soapPath ? { soapPath } : {}),
     securityProfile,
     authorizationKey,
     cpoName,

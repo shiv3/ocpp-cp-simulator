@@ -256,6 +256,7 @@ function makeChargePoint(
     {},
     [],
     version,
+    {},
   );
   cp.logger.setEnabledTypes();
   cp.events.on("error", () => undefined);

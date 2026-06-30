@@ -39,6 +39,7 @@ import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
+import { UnsupportedFeatureError as DomainUnsupportedFeatureError } from "../../cp/domain/errors/UnsupportedFeatureError";
 
 function toConnectorSnapshot(
   connector: ReturnType<ChargePoint["getConnector"]>,
@@ -90,6 +91,9 @@ export interface LocalChargePointDefinition {
   connectorNumber: number;
   bootNotification: BootNotification;
   wsUrl: string;
+  centralSystemUrl?: string;
+  soapCallbackUrl?: string;
+  soapPath?: string;
   basicAuth: { username: string; password: string } | null;
   autoMeterValueSetting: AutoMeterValueSetting | null;
   ocppVersion?: string;
@@ -633,6 +637,11 @@ export class LocalChargePointService implements ChargePointService {
   private buildChargePoint(
     definition: LocalChargePointDefinition,
   ): ChargePoint {
+    if (definition.ocppVersion === "OCPP-1.5") {
+      throw new DomainUnsupportedFeatureError(
+        "OCPP 1.5 SOAP is CLI/server-only; browser local mode cannot host the SOAP callback service.",
+      );
+    }
     assertBrowserLocalTlsSupported(definition);
     const chargePoint = new ChargePoint(
       definition.id,
@@ -645,6 +654,11 @@ export class LocalChargePointService implements ChargePointService {
       {},
       [],
       definition.ocppVersion,
+      {
+        centralSystemUrl: definition.centralSystemUrl,
+        soapCallbackUrl: definition.soapCallbackUrl,
+        soapPath: definition.soapPath,
+      },
       definition.securityProfile,
       definition.authorizationKey,
       definition.cpoName,

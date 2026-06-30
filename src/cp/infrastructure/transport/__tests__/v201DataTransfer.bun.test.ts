@@ -18,6 +18,7 @@ describe("OCPP 2.0.1 CP-initiated DataTransfer", () => {
       {},
       [],
       "OCPP-2.0.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

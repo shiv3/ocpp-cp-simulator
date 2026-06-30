@@ -113,6 +113,7 @@ describe.skipIf(!canBindBunServe())(
         {},
         [],
         "OCPP-1.6J",
+        {},
         1,
         "startup-auth-key",
       );
@@ -144,6 +145,7 @@ describe.skipIf(!canBindBunServe())(
         {},
         [],
         "OCPP-1.6J",
+        {},
         1,
         "startup-auth-key",
         "Example CPO",
@@ -186,6 +188,7 @@ describe.skipIf(!canBindBunServe())(
         {},
         [],
         "OCPP-1.6J",
+        {},
         1,
         "startup-auth-key",
       );

@@ -6,7 +6,19 @@ import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 describe("OCPP 1.6 boot handshake (golden)", () => {
   it("boots, accepts, then reports connector-0 availability", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint("CP001", DefaultBootNotification, 1, csms.url, null, null);
+    const cp = new ChargePoint(
+      "CP001",
+      DefaultBootNotification,
+      1,
+      csms.url,
+      null,
+      null,
+      null,
+      {},
+      [],
+      "OCPP-1.6J",
+      {},
+    );
     try {
       cp.connect();
 

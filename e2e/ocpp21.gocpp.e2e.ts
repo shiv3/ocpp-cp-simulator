@@ -38,6 +38,7 @@ function makeChargePoint(cpId: string): ChargePoint {
     {},
     [],
     OCPP_VERSION,
+    {},
   );
   cp.logger.setEnabledTypes();
   cp.events.on("error", () => undefined);

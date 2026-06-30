@@ -20,26 +20,8 @@ export class ResetHandler
       LogType.OCPP,
     );
 
-    const reason = payload.type === "Hard" ? "HardReset" : "SoftReset";
-
     queueMicrotask(() => {
-      // Stop every in-flight transaction with the correct §7.36 reason
-      // BEFORE rebooting, so the StopTransaction.req is on the wire even
-      // for a hard reset (best-effort).
-      for (const connector of context.chargePoint.connectors.values()) {
-        if (connector.transaction) {
-          context.chargePoint.stopTransaction(connector, reason);
-        }
-      }
-      context.logger.info(
-        `Reset chargePoint: ${context.chargePoint.id}`,
-        LogType.OCPP,
-      );
-      if (payload.type === "Hard") {
-        context.chargePoint.reset();
-      } else {
-        context.chargePoint.boot();
-      }
+      context.chargePoint.applyRemoteReset(payload.type);
     });
 
     return { status: "Accepted" };

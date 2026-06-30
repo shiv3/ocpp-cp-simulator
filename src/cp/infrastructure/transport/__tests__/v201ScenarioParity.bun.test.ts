@@ -77,6 +77,7 @@ function newChargePoint(id: string): {
     {},
     [],
     "OCPP-2.0.1",
+    {},
   );
   chargePoint.events.on("error", () => undefined);
   return { csms, chargePoint };

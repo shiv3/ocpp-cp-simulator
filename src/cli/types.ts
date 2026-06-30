@@ -91,6 +91,10 @@ export interface CLIOptions {
   /** Repeatable `--ws-subprotocol TOKEN` — extra subprotocols appended
    *  to the OCPP version subprotocol in the WS upgrade. */
   readonly extraWsSubprotocols: ReadonlyArray<string>;
+  /** OCPP 1.5 SOAP callback URL advertised in WS-Addressing From. */
+  readonly soapCallbackUrl: string | null;
+  /** Base path reserved for the later CSMS→CP SOAP callback server. */
+  readonly soapPath: string;
   readonly securityProfile?: OcppSecurityProfile;
   readonly authorizationKey?: string;
   readonly cpoName?: string;
@@ -130,6 +134,12 @@ export interface ChargePointInitOptions {
    *  (ocpp1.6 / ocpp2.0.1) and ignore the rest, so any extras are visible
    *  to upstream routers but harmless for OCPP negotiation. */
   readonly extraWsSubprotocols?: ReadonlyArray<string>;
+  /** For OCPP 1.5 SOAP, the CSMS CentralSystemService URL. Defaults to wsUrl. */
+  readonly centralSystemUrl?: string;
+  /** For OCPP 1.5 SOAP, the CP ChargePointService callback URL in WS-A From. */
+  readonly soapCallbackUrl?: string;
+  /** Base path reserved for the later CSMS→CP SOAP callback server. */
+  readonly soapPath?: string;
   readonly securityProfile?: OcppSecurityProfile;
   readonly authorizationKey?: string;
   readonly cpoName?: string;
@@ -207,6 +217,9 @@ export interface ChargePointStatus {
       readonly username: string;
       readonly password?: string;
     } | null;
+    readonly centralSystemUrl?: string;
+    readonly soapCallbackUrl?: string;
+    readonly soapPath?: string;
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
     readonly tlsCaPath?: string;

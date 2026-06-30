@@ -38,6 +38,7 @@ function makeChargePoint(cpId: string): ChargePoint {
     {},
     [],
     OCPP_VERSION,
+    {},
   );
   // Keep e2e output focused on assertions; wire evidence comes from FrameLog.
   cp.logger.setEnabledTypes();

@@ -86,6 +86,7 @@ describe("OCPP 2.0.1 GetReport", () => {
       {},
       [],
       "OCPP-2.0.1",
+      {},
     );
     cp.events.on("error", () => undefined);
 

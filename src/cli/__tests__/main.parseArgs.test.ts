@@ -41,6 +41,8 @@ function runParseArgs(args: string[]) {
     "  httpPort: options.httpPort,",
     "  unixSocket: options.unixSocket,",
     "  unsafeRemote: options.unsafeRemote,",
+    "  soapCallbackUrl: options.soapCallbackUrl,",
+    "  soapPath: options.soapPath,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "}));",
   ].join("\n");
@@ -248,6 +250,22 @@ describe("parseArgs OCPP 1.6 security flags", () => {
 });
 
 describe("parseArgs --ocpp-version", () => {
+  it("accepts OCPP-1.5", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "ws://127.0.0.1:9000/ocpp",
+      "--ocpp-version",
+      "OCPP-1.5",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ocppVersion: "OCPP-1.5",
+    });
+  });
+
   it("accepts OCPP-2.0.1", () => {
     const result = runParseArgs([
       "--cp-id",
@@ -276,6 +294,29 @@ describe("parseArgs --ocpp-version", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ ocppVersion: null });
   });
 
+  it("parses OCPP 1.5 SOAP callback flags", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      "--ocpp-version",
+      "OCPP-1.5",
+      "--soap-callback-url",
+      "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService",
+      "--soap-path",
+      "/ocpp/soap",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ocppVersion: "OCPP-1.5",
+      soapCallbackUrl:
+        "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService",
+      soapPath: "/ocpp/soap",
+    });
+  });
+
   it("rejects unsupported versions", () => {
     const result = runParseArgs([
       "--cp-id",
@@ -288,7 +329,7 @@ describe("parseArgs --ocpp-version", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "Error: --ocpp-version must be one of OCPP-1.6J, OCPP-2.0.1, OCPP-2.1",
+      "Error: --ocpp-version must be one of OCPP-1.5, OCPP-1.6J, OCPP-2.0.1, OCPP-2.1",
     );
   });
 });

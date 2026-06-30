@@ -3,6 +3,8 @@ import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoin
 import type { Database } from "../cp/domain/persistence/Database";
 import type { BootNotification } from "../cp/domain/types/OcppTypes";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import { OCPP_1_5 } from "../cp/domain/types/OcppVersion";
+import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type {
   CLIOptions,
   ChargePointInitOptions,
@@ -189,6 +191,7 @@ type EventHandler = (evt: CLIEvent) => void;
 
 export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
+  private readonly _soapServer: OCPPSoapServer | null;
   private readonly _handlers: Set<EventHandler> = new Set();
   private _unsubscribes: Array<() => void> = [];
   private _connectorUnsubscribes: Array<() => void> = [];
@@ -260,8 +263,20 @@ export class CLIChargePointService {
 
     const autoMeterValue: AutoMeterValueSetting | null = null;
 
-    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present
-    const baseUrl = buildBaseUrl(init.wsUrl, init.cpId);
+    const ocppVersion = init.ocppVersion ?? "OCPP-1.6J";
+    const centralSystemUrl = init.centralSystemUrl ?? init.wsUrl;
+    if (ocppVersion === OCPP_1_5 && !init.soapCallbackUrl) {
+      throw new Error(
+        "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
+      );
+    }
+
+    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present.
+    // OCPP 1.5 SOAP posts to the CentralSystemService URL exactly as configured.
+    const baseUrl =
+      ocppVersion === OCPP_1_5
+        ? centralSystemUrl
+        : buildBaseUrl(init.wsUrl, init.cpId);
 
     this._chargePoint = new ChargePoint(
       init.cpId,
@@ -273,12 +288,29 @@ export class CLIChargePointService {
       this.database,
       init.extraWsHeaders ?? {},
       init.extraWsSubprotocols ?? [],
-      init.ocppVersion ?? "OCPP-1.6J",
+      ocppVersion,
+      {
+        centralSystemUrl,
+        soapCallbackUrl: init.soapCallbackUrl,
+        soapPath: init.soapPath,
+      },
       init.securityProfile,
       init.authorizationKey,
       init.cpoName,
       init.tls,
     );
+    this._soapServer =
+      ocppVersion === OCPP_1_5
+        ? new OCPPSoapServer({
+            cpId: init.cpId,
+            applyRemoteReset: (type) =>
+              this._chargePoint.applyRemoteReset(type, "ocpp15-soap"),
+            isRegisteredOcpp15Soap: () =>
+              this._chargePoint.isOcpp15SoapChargePoint() &&
+              this._init.ocppVersion === OCPP_1_5 &&
+              Boolean(this._init.soapCallbackUrl),
+          })
+        : null;
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
@@ -295,10 +327,13 @@ export class CLIChargePointService {
       {
         cpId: options.cpId,
         wsUrl: options.wsUrl,
+        centralSystemUrl: options.wsUrl,
         connectors: options.connectors,
         vendor: options.vendor,
         model: options.model,
         ocppVersion: options.ocppVersion,
+        soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+        soapPath: options.soapPath,
         basicAuth: options.basicAuth,
         extraWsHeaders: options.extraWsHeaders,
         extraWsSubprotocols: options.extraWsSubprotocols,
@@ -352,6 +387,13 @@ export class CLIChargePointService {
     this._chargePoint.disconnect();
   }
 
+  handleSoapChargePointServiceRequest(
+    pathCpId: string,
+    xml: string,
+  ): Response | null {
+    return this._soapServer?.handleRequest(pathCpId, xml) ?? null;
+  }
+
   getStatus(): ChargePointStatus {
     const connectors: ConnectorStatus[] = [];
     this._chargePoint.connectors.forEach((connector) => {
@@ -398,6 +440,9 @@ export class CLIChargePointService {
         vendor: this._init.vendor,
         model: this._init.model,
         basicAuth: this._init.basicAuth,
+        centralSystemUrl: this._init.centralSystemUrl,
+        soapCallbackUrl: this._init.soapCallbackUrl,
+        soapPath: this._init.soapPath,
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
         securityProfile: this._init.securityProfile,
         cpoName: this._init.cpoName,

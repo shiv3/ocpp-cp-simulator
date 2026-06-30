@@ -30,6 +30,12 @@ export interface SaveEditorScenarioDeps {
   connectorId: number | null;
 }
 
+export interface AppliedScenarioAutosaveSuppression {
+  scenarioId: string;
+  updatedAt: string | null;
+  fingerprint: string;
+}
+
 export function createLatestWinsSaver<T>(
   saveFn: (payload: T) => Promise<void>,
 ): (payload: T) => Promise<void> {
@@ -47,6 +53,38 @@ export function createLatestWinsSaver<T>(
     tail = next;
     return next;
   };
+}
+
+export function shouldSuppressAppliedScenarioAutosave(
+  suppression: AppliedScenarioAutosaveSuppression | null,
+  scenario: ScenarioDefinition,
+): boolean {
+  if (!suppression) return false;
+  return (
+    suppression.scenarioId === scenario.id &&
+    suppression.updatedAt === (scenario.updatedAt ?? null) &&
+    suppression.fingerprint === scenarioAutosaveSuppressionFingerprint(scenario)
+  );
+}
+
+export function scenarioAutosaveSuppressionFingerprint(
+  scenario: ScenarioDefinition,
+): string {
+  const serialized = serializeScenarioForPersistence(scenario);
+  return JSON.stringify({
+    id: serialized.id,
+    name: serialized.name,
+    description: serialized.description ?? "",
+    targetType: serialized.targetType ?? null,
+    targetId: serialized.targetId ?? null,
+    nodes: serialized.nodes,
+    edges: serialized.edges,
+    trigger: serialized.trigger ?? null,
+    defaultExecutionMode: serialized.defaultExecutionMode ?? null,
+    enabled: serialized.enabled !== false,
+    evSettings: serialized.evSettings ?? null,
+    updatedAt: serialized.updatedAt ?? null,
+  });
 }
 
 function serializeScenarioForPersistence(

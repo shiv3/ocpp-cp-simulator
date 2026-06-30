@@ -4,6 +4,8 @@ import {
   persistEditorScenario,
   retargetScenarioToConnector,
   saveEditorScenario,
+  scenarioAutosaveSuppressionFingerprint,
+  shouldSuppressAppliedScenarioAutosave,
 } from "../scenarioPersistence";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 
@@ -203,6 +205,59 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
     expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
     expect(remote.getStored()).toEqual([edited]);
     expect(remote.getActive()).toEqual(edited);
+  });
+
+  it("does not re-activate remote import/template applies on the matching autosave pass", async () => {
+    const imported = {
+      ...scenario("imported"),
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const remote = makeRemoteStyleService([scenario("old")]);
+    const suppression = {
+      scenarioId: imported.id,
+      updatedAt: imported.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(imported),
+    };
+
+    await persistEditorScenario(
+      {
+        mode: "remote",
+        chargePointService: remote.service,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      imported,
+    );
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, imported)).toBe(
+      true,
+    );
+    if (!shouldSuppressAppliedScenarioAutosave(suppression, imported)) {
+      await persistEditorScenario(
+        {
+          mode: "remote",
+          chargePointService: remote.service,
+          cpId: "CP1",
+          connectorId: 1,
+        },
+        imported,
+      );
+    }
+
+    expect(remote.service.loadScenario).toHaveBeenCalledTimes(1);
+    expect(remote.service.loadScenario).toHaveBeenCalledWith(
+      "CP1",
+      1,
+      imported,
+    );
+    expect(remote.getStored()).toEqual([imported]);
+    expect(remote.getActive()).toEqual(imported);
+    expect(
+      shouldSuppressAppliedScenarioAutosave(suppression, {
+        ...imported,
+        name: "Autosave-normalized name",
+      }),
+    ).toBe(false);
   });
 });
 

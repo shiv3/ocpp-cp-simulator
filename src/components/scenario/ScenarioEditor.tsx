@@ -46,10 +46,13 @@ import {
   applyCurveConfigToMeterNode,
 } from "./meterValueNodeConfig";
 import {
+  type AppliedScenarioAutosaveSuppression,
   createLatestWinsSaver,
   persistEditorScenario,
   retargetScenarioToConnector,
   saveEditorScenario,
+  scenarioAutosaveSuppressionFingerprint,
+  shouldSuppressAppliedScenarioAutosave,
 } from "./scenarioPersistence";
 import { serializeScenarioGraph } from "./scenarioSerialize";
 import {
@@ -306,6 +309,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [historyTick, setHistoryTick] = useState(0);
   const [saveFeedback, setSaveFeedback] = useState<"idle" | "saved">("idle");
   const saveFeedbackTimerRef = useRef<number | null>(null);
+  const appliedRemoteScenarioAutosaveRef =
+    useRef<AppliedScenarioAutosaveSuppression | null>(null);
   const persistEditorScenarioLatest = useMemo(
     () =>
       createLatestWinsSaver<EditorScenarioSaveRequest>(({ deps, scenario }) =>
@@ -326,6 +331,21 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         scenario: scenarioToSave,
       }),
     [mode, chargePointService, cpId, connectorId, persistEditorScenarioLatest],
+  );
+
+  const prepareAppliedRemoteScenario = useCallback(
+    (next: ScenarioDefinition): ScenarioDefinition => {
+      if (mode !== "remote") return next;
+      const updatedAt = next.updatedAt ?? new Date().toISOString();
+      const applied = { ...next, updatedAt };
+      appliedRemoteScenarioAutosaveRef.current = {
+        scenarioId: applied.id,
+        updatedAt: applied.updatedAt ?? null,
+        fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+      };
+      return applied;
+    },
+    [mode],
   );
 
   const structuralKey = useCallback((ns: Node[], es: Edge[]): string => {
@@ -720,6 +740,12 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       cleanedEvSettings[k] = v;
     });
 
+    const pendingRemoteApply = appliedRemoteScenarioAutosaveRef.current;
+    const appliedUpdatedAt =
+      pendingRemoteApply?.scenarioId === scenario.id
+        ? pendingRemoteApply.updatedAt
+        : null;
+
     const updatedScenario: ScenarioDefinition = {
       ...scenario,
       name: scenarioName,
@@ -733,7 +759,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         Object.keys(cleanedEvSettings).length > 0
           ? cleanedEvSettings
           : undefined,
-      updatedAt: new Date().toISOString(),
+      updatedAt: appliedUpdatedAt ?? new Date().toISOString(),
     };
     setScenario(updatedScenario);
     if (scenario.id) {
@@ -742,11 +768,24 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         ...updatedScenario,
         ...serializedGraph,
       };
-      // Auto-save through the latest-wins replace boundary. Fire-and-forget;
-      // if it fails we log to console rather than block the in-flight edit.
-      void saveEditorScenarioLatest(scenarioToSave).catch((err) =>
-        console.error("Failed to autosave scenario", err),
-      );
+      const suppressAppliedRemoteAutosave =
+        mode === "remote" &&
+        shouldSuppressAppliedScenarioAutosave(
+          pendingRemoteApply,
+          scenarioToSave,
+        );
+      if (suppressAppliedRemoteAutosave) {
+        appliedRemoteScenarioAutosaveRef.current = null;
+      } else {
+        if (pendingRemoteApply) {
+          appliedRemoteScenarioAutosaveRef.current = null;
+        }
+        // Auto-save through the latest-wins replace boundary. Fire-and-forget;
+        // if it fails we log to console rather than block the in-flight edit.
+        void saveEditorScenarioLatest(scenarioToSave).catch((err) =>
+          console.error("Failed to autosave scenario", err),
+        );
+      }
     }
 
     // Keep ScenarioManager in sync while editing (local mode only).
@@ -776,6 +815,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     localCp,
     chargePointService,
     saveEditorScenarioLatest,
+    mode,
   ]);
 
   // Track structural changes for undo/redo. Position-only changes update
@@ -872,15 +912,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         { mode, chargePointService, cpId, connectorId },
         updated,
       );
-      if (mode === "remote") {
-        void savePromise
-          .then(markSaved)
-          .catch((err) => console.error("Failed to save scenario", err));
-        return;
-      }
-      void savePromise.catch((err) =>
-        console.error("Failed to save scenario", err),
-      );
+      appliedRemoteScenarioAutosaveRef.current = null;
+      void savePromise
+        .then(markSaved)
+        .catch((err) => console.error("Failed to save scenario", err));
+      return;
     }
     markSaved();
   }, [
@@ -1158,28 +1194,37 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           connectorId,
           new Date().toISOString(),
         );
-        setScenario(targeted);
-        setNodes(targeted.nodes);
-        setEdges(targeted.edges);
+        const applied = prepareAppliedRemoteScenario(targeted);
+        setScenario(applied);
+        setNodes(applied.nodes);
+        setEdges(applied.edges);
         // Mirror the props-reload effect so the metadata fields reflect the
         // uploaded scenario instead of the previously-open one.
-        setScenarioName(targeted.name);
-        setScenarioDescription(targeted.description || "");
-        setDefaultExecutionMode(targeted.defaultExecutionMode || "oneshot");
-        setScenarioEnabled(targeted.enabled !== false);
-        setScenarioEvSettings(targeted.evSettings ?? {});
+        setScenarioName(applied.name);
+        setScenarioDescription(applied.description || "");
+        setDefaultExecutionMode(applied.defaultExecutionMode || "oneshot");
+        setScenarioEnabled(applied.enabled !== false);
+        setScenarioEvSettings(applied.evSettings ?? {});
 
         // Persist through the replace boundary so stale connector siblings are
         // pruned and reload selects the imported scenario (#101).
         await persistEditorScenario(
           { mode, chargePointService, cpId, connectorId },
-          targeted,
+          applied,
         );
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
     },
-    [cpId, connectorId, mode, chargePointService, setNodes, setEdges],
+    [
+      cpId,
+      connectorId,
+      mode,
+      chargePointService,
+      setNodes,
+      setEdges,
+      prepareAppliedRemoteScenario,
+    ],
   );
 
   const handleLoadTemplate = useCallback(
@@ -1197,7 +1242,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         return;
       }
 
-      const templateScenario = template.createScenario(cpId, connectorId);
+      const templateScenario = prepareAppliedRemoteScenario(
+        template.createScenario(cpId, connectorId),
+      );
       setScenario(templateScenario);
       setNodes(templateScenario.nodes);
       setEdges(templateScenario.edges);
@@ -1227,6 +1274,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       nodes.length,
       setNodes,
       setEdges,
+      prepareAppliedRemoteScenario,
     ],
   );
 

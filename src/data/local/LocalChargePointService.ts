@@ -22,6 +22,7 @@ import type {
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
+  BROWSER_SOAP_UNSUPPORTED_MESSAGE,
   BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
@@ -52,7 +53,6 @@ import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
-import { UnsupportedFeatureError as DomainUnsupportedFeatureError } from "../../cp/domain/errors/UnsupportedFeatureError";
 import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
 import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
@@ -861,8 +861,9 @@ export class LocalChargePointService implements ChargePointService {
     definition: LocalChargePointDefinition,
   ): ChargePoint {
     if (definition.ocppVersion === "OCPP-1.5") {
-      throw new DomainUnsupportedFeatureError(
-        "OCPP 1.5 SOAP is CLI/server-only; browser local mode cannot host the SOAP callback service.",
+      throw new UnsupportedFeatureError(
+        "browser_soap_unsupported",
+        BROWSER_SOAP_UNSUPPORTED_MESSAGE,
       );
     }
     assertBrowserLocalTlsSupported(definition);

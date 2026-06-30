@@ -618,6 +618,8 @@ Options:
                            Required when --ocpp-version OCPP-1.5 is used.
   --soap-path <path>       Base path reserved for the SOAP callback server
                            (default: /ocpp/soap).
+                           OCPP-S has no per-message auth; rely on
+                           --web-console-basic-auth-* or a trusted network.
   -h, --help               Show this help
 
 HTTP endpoints (see docs/server.md):

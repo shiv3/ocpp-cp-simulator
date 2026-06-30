@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSoapEnvelope,
   OCPP15_SOAP_NAMESPACES,
+  parseSoapFaultEnvelope,
   parseSoapEnvelope,
   soapContentTypeForOperation,
   WSA_ANONYMOUS_ADDRESS,
@@ -107,5 +108,21 @@ describe("OCPP 1.5 SOAP envelope parser", () => {
         `<!DOCTYPE s:Envelope [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP15_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>&xxe;</cs:chargeBoxIdentity></s:Header><s:Body><cs:heartbeatRequest/></s:Body></s:Envelope>`,
       ),
     ).toThrow(/DOCTYPE or ENTITY/);
+  });
+
+  it("parses a SOAP 1.2 Fault with detail", () => {
+    const parsed = parseSoapFaultEnvelope(
+      `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}"><s:Body><s:Fault><s:Code><s:Value>s:Sender</s:Value></s:Code><s:Reason><s:Text xml:lang="en">Rejected by CSMS</s:Text></s:Reason><s:Detail><m:error xmlns:m="urn:test"><m:code>E42</m:code></m:error></s:Detail></s:Fault></s:Body></s:Envelope>`,
+    );
+
+    expect(parsed).toEqual({
+      code: "s:Sender",
+      reason: "Rejected by CSMS",
+      detail: {
+        error: {
+          code: "E42",
+        },
+      },
+    });
   });
 });

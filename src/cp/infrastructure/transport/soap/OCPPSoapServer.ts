@@ -16,6 +16,7 @@ import {
 export interface OCPPSoapServerTarget {
   readonly cpId: string;
   readonly applyRemoteReset: (type: ChargePointResetType) => void;
+  readonly isRegisteredOcpp15Soap: () => boolean;
 }
 
 export interface OCPP15SoapInboundContext {
@@ -41,9 +42,18 @@ export type OCPP15SoapInboundRegistry = Map<
 >;
 
 export class OCPPSoapFaultError extends Error {
-  constructor(message: string) {
+  readonly status: number;
+  readonly code: "Sender" | "Receiver";
+
+  constructor(
+    message: string,
+    status = 400,
+    code: "Sender" | "Receiver" = "Sender",
+  ) {
     super(message);
     this.name = "OCPPSoapFaultError";
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -95,7 +105,10 @@ export class OCPPSoapServer {
         },
       });
     } catch (err) {
-      return soapFaultResponse(errorMessage(err));
+      if (err instanceof OCPPSoapFaultError) {
+        return soapFaultResponse(errorMessage(err), err.status, err.code);
+      }
+      return soapFaultResponse(errorMessage(err), 400);
     }
   }
 
@@ -103,6 +116,12 @@ export class OCPPSoapServer {
     pathCpId: string,
     envelope: ParsedSoapEnvelope,
   ): void {
+    if (!this.target.isRegisteredOcpp15Soap()) {
+      throw new OCPPSoapFaultError(
+        "SOAP ChargePointService target is not a registered OCPP 1.5 SOAP charge point",
+        403,
+      );
+    }
     if (envelope.kind !== "request") {
       throw new OCPPSoapFaultError("SOAP ChargePointService expects a request");
     }
@@ -138,8 +157,12 @@ export function buildOCPP15SoapInboundRegistry(): OCPP15SoapInboundRegistry {
   ]);
 }
 
-export function soapFaultResponse(reason: string, status = 500): Response {
-  return new Response(buildSoapFaultEnvelope({ reason }), {
+export function soapFaultResponse(
+  reason: string,
+  status = 500,
+  code: "Sender" | "Receiver" = status >= 500 ? "Receiver" : "Sender",
+): Response {
+  return new Response(buildSoapFaultEnvelope({ reason, code }), {
     status,
     headers: {
       "content-type": soapFaultContentType(),

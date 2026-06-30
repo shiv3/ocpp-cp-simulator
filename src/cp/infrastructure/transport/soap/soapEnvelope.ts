@@ -63,6 +63,26 @@ export type SoapParsedValue =
   | { [key: string]: SoapParsedValue };
 
 export type SoapParsedPayload = Record<string, SoapParsedValue>;
+
+export interface ParsedSoapFault {
+  readonly code: string;
+  readonly reason: string;
+  readonly detail?: SoapParsedPayload;
+}
+
+export class SoapFaultError extends Error {
+  readonly fault: ParsedSoapFault;
+  readonly httpStatus?: number;
+
+  constructor(fault: ParsedSoapFault, httpStatus?: number) {
+    const statusPrefix = httpStatus === undefined ? "" : `HTTP ${httpStatus} `;
+    super(`${statusPrefix}SOAP Fault ${fault.code}: ${fault.reason}`);
+    this.name = "SoapFaultError";
+    this.fault = fault;
+    this.httpStatus = httpStatus;
+  }
+}
+
 export type SoapMessageKind = "request" | "response";
 
 export interface BuildSoapEnvelopeOptions {
@@ -585,6 +605,10 @@ function payloadFromWrapper(wrapperValue: unknown): SoapParsedPayload {
   return isRecord(payload) ? (payload as SoapParsedPayload) : {};
 }
 
+function firstXmlValue(value: unknown): unknown {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function findMetadataByWrapper(wrapper: string): {
   readonly operation: SoapOperation;
   readonly kind: SoapMessageKind;
@@ -707,4 +731,69 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
     wrapper,
     payload: payloadFromWrapper(wrapperValue),
   };
+}
+
+export function parseSoapFaultEnvelope(xml: string): ParsedSoapFault | null {
+  if (FORBIDDEN_XML_DECLARATION_PATTERN.test(xml)) {
+    throw new Error("SOAP XML containing DOCTYPE or ENTITY is not supported");
+  }
+
+  const parsed = SOAP_XML_PARSER.parse(xml) as unknown;
+  const document = requireRecord(parsed, "document");
+  const [envelopeKey, envelopeValue] = requireElement(document, "Envelope");
+  const envelope = requireRecord(envelopeValue, "Envelope");
+  const envelopeNamespace = namespaceForElement(envelopeKey, [envelope]);
+  assertNamespace(
+    envelopeNamespace,
+    OCPP15_SOAP_NAMESPACES.SOAP12,
+    "SOAP Envelope",
+  );
+
+  const [, bodyValue] = requireElement(envelope, "Body");
+  const body = requireRecord(bodyValue, "Body");
+  const [wrapperKey, wrapperValue] = elementEntries(body)[0] ?? [];
+  if (!wrapperKey) {
+    throw new Error("SOAP Body must contain an operation wrapper");
+  }
+  if (localName(wrapperKey) !== "Fault") return null;
+
+  const fault = requireRecord(wrapperValue, "Fault");
+  const faultNamespace = namespaceForElement(wrapperKey, [
+    envelope,
+    body,
+    fault,
+  ]);
+  assertNamespace(faultNamespace, OCPP15_SOAP_NAMESPACES.SOAP12, "SOAP Fault");
+
+  return {
+    code: soapFaultCode(fault),
+    reason: soapFaultReason(fault),
+    ...soapFaultDetail(fault),
+  };
+}
+
+function soapFaultCode(fault: Record<string, unknown>): string {
+  const [, codeValue] = requireElement(fault, "Code");
+  const code = requireRecord(firstXmlValue(codeValue), "Fault.Code");
+  const [, value] = requireElement(code, "Value");
+  return textValue(firstXmlValue(value), "Fault.Code.Value");
+}
+
+function soapFaultReason(fault: Record<string, unknown>): string {
+  const [, reasonValue] = requireElement(fault, "Reason");
+  const reason = requireRecord(firstXmlValue(reasonValue), "Fault.Reason");
+  const [, text] = requireElement(reason, "Text");
+  return textValue(firstXmlValue(text), "Fault.Reason.Text");
+}
+
+function soapFaultDetail(
+  fault: Record<string, unknown>,
+): Pick<ParsedSoapFault, "detail"> {
+  const detailEntry = findElement(fault, "Detail");
+  if (!detailEntry) return {};
+  const detail = normalizeParsedValue(firstXmlValue(detailEntry[1]));
+  if (isRecord(detail)) {
+    return { detail: detail as SoapParsedPayload };
+  }
+  return { detail: { value: detail } };
 }

@@ -74,6 +74,8 @@ ocpp-cp-sim --http-port 5172 --web-console \
 
 > **Behind a reverse proxy?** Bound to a non-loopback host the daemon applies a safe same-origin CORS policy, so the web console served at a public URL will `403` its own assets until you name that origin with `--cors-origin https://your.url` (or, behind a trusted proxy, `--trust-forwarded-headers`). See [docs/server.md → Behind a reverse proxy](docs/server.md#behind-a-reverse-proxy-traefik-nginx-caddy-) for details and an nginx + Authelia example compose.
 
+For OCPP 1.5 SOAP, the ChargePointService callback endpoint uses the configured `--soap-path` and relies on the daemon's existing `--web-console-basic-auth-*` gate or a trusted network boundary. OCPP-S has no per-message authentication field.
+
 ## AI Agent & Automation Testing
 
 The daemon exposes a single Socket.IO control connection and emits structured logs, making it a scriptable OCPP stub that any AI agent or test harness can drive.

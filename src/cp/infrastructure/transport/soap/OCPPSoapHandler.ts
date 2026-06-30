@@ -42,7 +42,9 @@ import {
 } from "../handlers";
 import {
   buildSoapEnvelope,
+  parseSoapFaultEnvelope,
   parseSoapEnvelope,
+  SoapFaultError,
   soapContentTypeForOperation,
   type ParsedSoapEnvelope,
   type SoapOperation,
@@ -54,6 +56,7 @@ import {
 export interface OCPPSoapHandlerOptions {
   readonly centralSystemUrl: string;
   readonly soapCallbackUrl: string;
+  readonly requestTimeoutMs?: number;
 }
 
 type BootStatus =
@@ -103,6 +106,8 @@ const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
   UnlockConnector: OCPPAction.UnlockConnector,
   UpdateFirmware: OCPPAction.UpdateFirmware,
 };
+
+export const DEFAULT_SOAP_REQUEST_TIMEOUT_MS = 30_000;
 
 function textValue(value: SoapParsedValue | undefined): string | undefined {
   if (typeof value === "string") return value;
@@ -426,14 +431,34 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     this._logger.info(`SOAP POST ${operation}: ${xml}`, LogType.OCPP);
     this._chargePoint.notifyOutgoingCall(operation === "Heartbeat");
 
-    const response = await fetch(this._options.centralSystemUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": contentType,
-      },
-      body: xml,
-    });
-    const responseText = await response.text();
+    const timeoutMs =
+      this._options.requestTimeoutMs ?? DEFAULT_SOAP_REQUEST_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    let responseText: string;
+    try {
+      response = await fetch(this._options.centralSystemUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": contentType,
+        },
+        body: xml,
+        signal: controller.signal,
+      });
+      responseText = await response.text();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`SOAP ${operation} timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const fault = this.parseFaultResponse(responseText, response.status);
+    if (fault) throw fault;
+
     if (!response.ok) {
       throw new Error(
         `HTTP ${response.status} ${response.statusText}: ${responseText.slice(0, 240)}`,
@@ -465,6 +490,19 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       );
     }
     return envelope;
+  }
+
+  private parseFaultResponse(
+    responseText: string,
+    status: number,
+  ): SoapFaultError | null {
+    try {
+      const fault = parseSoapFaultEnvelope(responseText);
+      return fault ? new SoapFaultError(fault, status) : null;
+    } catch (error) {
+      if (status >= 200 && status < 300) throw error;
+      return null;
+    }
   }
 
   private handleBootNotificationResponse(payload: SoapParsedPayload): void {

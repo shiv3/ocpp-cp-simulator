@@ -300,7 +300,11 @@ export class CLIChargePointService {
         ? new OCPPSoapServer({
             cpId: init.cpId,
             applyRemoteReset: (type) =>
-              this._chargePoint.applyRemoteReset(type),
+              this._chargePoint.applyRemoteReset(type, "ocpp15-soap"),
+            isRegisteredOcpp15Soap: () =>
+              this._chargePoint.isOcpp15SoapChargePoint() &&
+              this._init.ocppVersion === OCPP_1_5 &&
+              Boolean(this._init.soapCallbackUrl),
           })
         : null;
 

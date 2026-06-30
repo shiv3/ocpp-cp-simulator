@@ -53,11 +53,13 @@ interface StopTransactionOptions {
 }
 
 export type ChargePointResetType = "Hard" | "Soft";
+type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
 export interface ChargePointTransportOptions {
   readonly centralSystemUrl?: string;
   readonly soapCallbackUrl?: string;
   readonly soapPath?: string;
+  readonly soapRequestTimeoutMs?: number;
 }
 
 export class ChargePoint {
@@ -117,7 +119,7 @@ export class ChargePoint {
      *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
     extraWsHeaders: Record<string, string> = {},
     extraWsSubprotocols: ReadonlyArray<string> = [],
-    ocppVersion: string = "OCPP-1.6J",
+    private readonly _ocppVersion: string = "OCPP-1.6J",
     transportOptions: ChargePointTransportOptions = {},
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
@@ -192,7 +194,7 @@ export class ChargePoint {
       this._connectors.set(connectorId, connector);
     }
 
-    if (ocppVersion === OCPP_1_5) {
+    if (this._ocppVersion === OCPP_1_5) {
       if (!transportOptions.soapCallbackUrl) {
         throw new Error(
           "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
@@ -202,6 +204,7 @@ export class ChargePoint {
       this._messageHandler = new OCPPSoapHandler(this, this._logger, {
         centralSystemUrl: this._transportUrl,
         soapCallbackUrl: transportOptions.soapCallbackUrl,
+        requestTimeoutMs: transportOptions.soapRequestTimeoutMs,
       });
     } else {
       this._webSocket = new OCPPWebSocket(
@@ -211,10 +214,10 @@ export class ChargePoint {
         basicAuthSettings,
         extraWsHeaders,
         extraWsSubprotocols,
-        ocppVersion,
+        this._ocppVersion,
       );
       this._messageHandler = getProtocolProfile(
-        ocppVersion,
+        this._ocppVersion,
       ).createMessageHandler(this, this._webSocket, this._logger);
     }
     this._outbox = new Outbox(this._messageHandler);
@@ -402,6 +405,10 @@ export class ChargePoint {
    *  with two sockets fighting for the same cpId. */
   get isWebSocketConnected(): boolean {
     return this._webSocket?.isOpenOrConnecting() ?? false;
+  }
+
+  isOcpp15SoapChargePoint(): boolean {
+    return this._ocppVersion === OCPP_1_5 && this._webSocket === null;
   }
 
   get connectorNumber(): number {
@@ -832,7 +839,17 @@ export class ChargePoint {
     this.connect();
   }
 
-  applyRemoteReset(type: ChargePointResetType): void {
+  applyRemoteReset(
+    type: ChargePointResetType,
+    source: ChargePointResetSource = "ocpp-call",
+  ): void {
+    if (source === "ocpp15-soap" && !this.isOcpp15SoapChargePoint()) {
+      this._logger.warn(
+        "Ignoring SOAP Reset for a charge point that is not registered as OCPP 1.5 SOAP",
+        LogType.OCPP,
+      );
+      return;
+    }
     const reason = type === "Hard" ? "HardReset" : "SoftReset";
     for (const connector of this.connectors.values()) {
       if (connector.transaction) {

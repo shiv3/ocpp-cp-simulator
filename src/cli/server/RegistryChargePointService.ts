@@ -1,3 +1,5 @@
+import * as fs from "fs";
+
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
@@ -28,6 +30,8 @@ import type {
   StoredLogEntry,
 } from "../../data/interfaces/ChargePointService";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
+import { LogLevel, LogType } from "../../cp/shared/Logger";
+import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
 import type {
   CPRegistry,
@@ -60,8 +64,9 @@ export class RegistryChargePointService implements ChargePointService {
     return service ? toChargePointSnapshot(service.getStatus()) : null;
   }
 
-  getLocalChargePoint(_id: string): LocalChargePointHandle | null {
-    return todoA13b("getLocalChargePoint");
+  getLocalChargePoint(id: string): LocalChargePointHandle | null {
+    this.requireService(id);
+    return null;
   }
 
   async createChargePoint(params: CreateChargePointParams): Promise<void> {
@@ -125,129 +130,136 @@ export class RegistryChargePointService implements ChargePointService {
     return todoA13c("subscribeConfig");
   }
 
-  async connect(_id: string): Promise<void> {
-    return todoA13b("connect");
+  async connect(id: string): Promise<void> {
+    await this.requireService(id).connect();
   }
 
-  async disconnect(_id: string): Promise<void> {
-    return todoA13b("disconnect");
+  async disconnect(id: string): Promise<void> {
+    this.requireService(id).disconnect();
   }
 
-  async reset(_id: string): Promise<void> {
-    return todoA13b("reset");
+  async reset(id: string): Promise<void> {
+    const service = this.requireService(id);
+    service.disconnect();
+    await service.connect();
   }
 
-  async sendHeartbeat(_id: string): Promise<void> {
-    return todoA13b("sendHeartbeat");
+  async sendHeartbeat(id: string): Promise<void> {
+    this.requireService(id).sendHeartbeat();
   }
 
-  async startHeartbeat(_id: string, _intervalSeconds: number): Promise<void> {
-    return todoA13b("startHeartbeat");
+  async startHeartbeat(id: string, intervalSeconds: number): Promise<void> {
+    this.requireService(id).startHeartbeat(intervalSeconds);
   }
 
-  async stopHeartbeat(_id: string): Promise<void> {
-    return todoA13b("stopHeartbeat");
+  async stopHeartbeat(id: string): Promise<void> {
+    this.requireService(id).stopHeartbeat();
   }
 
-  async authorize(_id: string, _tagId: string): Promise<void> {
-    return todoA13b("authorize");
+  async authorize(id: string, tagId: string): Promise<void> {
+    this.requireService(id).authorize(tagId);
   }
 
   async startTransaction(
-    _id: string,
-    _connectorId: number,
-    _tagId: string,
+    id: string,
+    connectorId: number,
+    tagId: string,
   ): Promise<void> {
-    return todoA13b("startTransaction");
+    this.requireService(id).startTransaction(connectorId, tagId);
   }
 
-  async stopTransaction(_id: string, _connectorId: number): Promise<void> {
-    return todoA13b("stopTransaction");
+  async stopTransaction(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).stopTransaction(connectorId);
   }
 
   async sendStatusNotification(
-    _id: string,
-    _connectorId: number,
-    _status: OCPPStatus,
-    _opts?: StatusNotificationOptions,
+    id: string,
+    connectorId: number,
+    status: OCPPStatus,
+    opts?: StatusNotificationOptions,
   ): Promise<void> {
-    return todoA13b("sendStatusNotification");
+    this.requireService(id).updateConnectorStatus(connectorId, status, opts);
   }
 
   async sendDiagnosticsStatusNotification(
-    _id: string,
-    _status: string,
+    id: string,
+    status: string,
   ): Promise<void> {
-    return todoA13b("sendDiagnosticsStatusNotification");
+    this.requireService(id).sendDiagnosticsStatusNotification(status);
   }
 
   async sendFirmwareStatusNotification(
-    _id: string,
-    _status: string,
+    id: string,
+    status: string,
   ): Promise<void> {
-    return todoA13b("sendFirmwareStatusNotification");
+    this.requireService(id).sendFirmwareStatusNotification(status);
   }
 
   async sendSecurityEventNotification(
-    _id: string,
-    _type: string,
-    _techInfo?: string,
+    id: string,
+    type: string,
+    techInfo?: string,
   ): Promise<void> {
-    return todoA13b("sendSecurityEventNotification");
+    this.requireService(id).sendSecurityEventNotification(type, techInfo);
   }
 
-  async sendSignCertificate(_id: string, _csr?: string): Promise<void> {
-    return todoA13b("sendSignCertificate");
+  async sendSignCertificate(id: string, csr?: string): Promise<void> {
+    await this.requireService(id).sendSignCertificate(csr);
   }
 
   async setMeterValue(
-    _id: string,
-    _connectorId: number,
-    _value: number,
+    id: string,
+    connectorId: number,
+    value: number,
   ): Promise<void> {
-    return todoA13b("setMeterValue");
+    this.requireService(id).setMeterValue(connectorId, value);
   }
 
-  async sendMeterValue(_id: string, _connectorId: number): Promise<void> {
-    return todoA13b("sendMeterValue");
+  async sendMeterValue(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).sendMeterValue(connectorId);
   }
 
-  async removeConnector(_id: string, _connectorId: number): Promise<void> {
-    return todoA13b("removeConnector");
+  async removeConnector(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).removeConnector(connectorId);
   }
 
   async setEVSettings(
-    _id: string,
-    _connectorId: number,
-    _settings: EVSettings,
+    id: string,
+    connectorId: number,
+    settings: EVSettings,
   ): Promise<void> {
-    return todoA13b("setEVSettings");
+    this.requireService(id).setEVSettings(connectorId, settings);
   }
 
   async getEVSettings(
-    _id: string,
-    _connectorId: number,
+    id: string,
+    connectorId: number,
   ): Promise<EVSettings | null> {
-    return todoA13b("getEVSettings");
+    return this.requireService(id).getEVSettings(connectorId);
   }
 
-  async applyDefaultEVSettings(_settings: EVSettings): Promise<void> {
-    return todoA13b("applyDefaultEVSettings");
+  async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
+    for (const cpId of this.registry.list()) {
+      const service = this.requireService(cpId);
+      for (const connector of service.getStatus().connectors) {
+        service.setEVSettings(connector.id, { ...settings });
+      }
+    }
   }
 
   async setAutoMeterValueConfig(
-    _id: string,
-    _connectorId: number,
-    _config: AutoMeterValueConfig,
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
   ): Promise<void> {
-    return todoA13b("setAutoMeterValueConfig");
+    this.requireService(id).setAutoMeterValueConfig(connectorId, config);
   }
 
   async getAutoMeterValueConfig(
-    _id: string,
-    _connectorId: number,
+    id: string,
+    connectorId: number,
   ): Promise<AutoMeterValueConfig | null> {
-    return todoA13b("getAutoMeterValueConfig");
+    return this.requireService(id).getAutoMeterValueConfig(connectorId);
   }
 
   async getAutoMeterConfig(
@@ -266,35 +278,35 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async setAutoResetToAvailable(
-    _id: string,
-    _connectorId: number,
-    _enabled: boolean,
+    id: string,
+    connectorId: number,
+    enabled: boolean,
   ): Promise<void> {
-    return todoA13b("setAutoResetToAvailable");
+    this.requireService(id).setAutoResetToAvailable(connectorId, enabled);
   }
 
   async setConnectorMode(
-    _id: string,
-    _connectorId: number,
-    _mode: ScenarioMode,
+    id: string,
+    connectorId: number,
+    mode: ScenarioMode,
   ): Promise<void> {
-    return todoA13b("setConnectorMode");
+    this.requireService(id).setConnectorMode(connectorId, mode);
   }
 
   async setConnectorSoc(
-    _id: string,
-    _connectorId: number,
-    _soc: number | null,
+    id: string,
+    connectorId: number,
+    soc: number | null,
   ): Promise<void> {
-    return todoA13b("setConnectorSoc");
+    this.requireService(id).setConnectorSoc(connectorId, soc);
   }
 
   async setConnectorSocMeterSync(
-    _id: string,
-    _connectorId: number,
-    _enabled: boolean,
+    id: string,
+    connectorId: number,
+    enabled: boolean,
   ): Promise<void> {
-    return todoA13b("setConnectorSocMeterSync");
+    this.requireService(id).setConnectorSocMeterSync(connectorId, enabled);
   }
 
   async getSocMeterSync(_id: string, _connectorId: number): Promise<boolean> {
@@ -310,17 +322,17 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async getChargingProfiles(
-    _id: string,
-    _connectorId: number,
+    id: string,
+    connectorId: number,
   ): Promise<ReadonlyArray<ActiveChargingProfile>> {
-    return todoA13b("getChargingProfiles");
+    return this.requireService(id).getChargingProfiles(connectorId);
   }
 
   async getStateHistory(
-    _id: string,
-    _options?: HistoryOptions,
+    id: string,
+    options?: HistoryOptions,
   ): Promise<StateHistoryEntry[]> {
-    return todoA13b("getStateHistory");
+    return [...this.requireService(id).getStateHistory(options)];
   }
 
   async listScenarioDefinitions(
@@ -367,102 +379,128 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async loadScenarioTemplate(
-    _id: string,
-    _templateId: string,
-    _connectorId: number,
+    id: string,
+    templateId: string,
+    connectorId: number,
   ): Promise<{ scenarioId: string }> {
-    return todoA13b("loadScenarioTemplate");
+    const scenarioId = this.requireService(id).loadScenarioTemplate(
+      templateId,
+      connectorId,
+    );
+    return { scenarioId };
   }
 
   async loadScenario(
-    _id: string,
-    _connectorId: number,
-    _definition: ScenarioDefinition,
+    id: string,
+    connectorId: number,
+    definition: ScenarioDefinition,
   ): Promise<{ scenarioId: string }> {
-    return todoA13b("loadScenario");
+    const scenarioId = this.requireService(id).loadScenario(
+      connectorId,
+      definition,
+    );
+    return { scenarioId };
   }
 
   async listScenarios(
-    _id: string,
-    _connectorId: number,
+    id: string,
+    connectorId: number,
   ): Promise<ScenarioListItem[]> {
-    return todoA13b("listScenarios");
+    return [...this.requireService(id).listScenarios(connectorId)];
   }
 
   async runScenario(
-    _id: string,
-    _connectorId: number,
-    _scenarioId: string,
+    id: string,
+    connectorId: number,
+    scenarioId: string,
   ): Promise<void> {
-    return todoA13b("runScenario");
+    this.requireService(id).runScenario(connectorId, scenarioId);
   }
 
   async runScenarioFile(
-    _id: string,
-    _path: string,
-    _opts?: ScenarioRunOptions,
+    id: string,
+    path: string,
+    opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
-    return todoA13b("runScenarioFile");
+    const service = this.requireService(id);
+    const connectorId = opts.connectorId ?? 1;
+    const definition = JSON.parse(
+      fs.readFileSync(path, "utf-8"),
+    ) as ScenarioDefinition;
+    const scenarioId = service.loadScenario(connectorId, definition);
+    service.runScenario(connectorId, scenarioId);
+    return { scenarioId };
   }
 
   async runScenarioTemplate(
-    _id: string,
-    _templateId: string,
-    _opts?: ScenarioRunOptions,
+    id: string,
+    templateId: string,
+    opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
-    return todoA13b("runScenarioTemplate");
+    const service = this.requireService(id);
+    const connectorId = opts.connectorId ?? 1;
+    const scenarioId = service.loadScenarioTemplate(
+      templateId,
+      connectorId,
+      opts.evSettings,
+    );
+    service.runScenario(connectorId, scenarioId);
+    return { scenarioId };
   }
 
   async stopScenario(
-    _id: string,
-    _connectorId: number,
-    _scenarioId: string,
+    id: string,
+    connectorId: number,
+    scenarioId: string,
   ): Promise<void> {
-    return todoA13b("stopScenario");
+    this.requireService(id).stopScenario(connectorId, scenarioId);
   }
 
   async stepScenario(
-    _id: string,
-    _connectorId: number,
-    _scenarioId: string,
-    _force?: boolean,
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    force?: boolean,
   ): Promise<void> {
-    return todoA13b("stepScenario");
+    this.requireService(id).stepScenario(connectorId, scenarioId, force);
   }
 
-  async stopAllScenarios(_id: string, _connectorId: number): Promise<void> {
-    return todoA13b("stopAllScenarios");
+  async stopAllScenarios(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).stopAllScenarios(connectorId);
   }
 
   async removeScenario(
-    _id: string,
-    _connectorId: number,
-    _scenarioId: string,
+    id: string,
+    connectorId: number,
+    scenarioId: string,
   ): Promise<void> {
-    return todoA13b("removeScenario");
+    this.requireService(id).removeScenario(connectorId, scenarioId);
   }
 
   async getScenarioStatus(
-    _id: string,
-    _connectorId: number,
-    _scenarioId: string,
+    id: string,
+    connectorId: number,
+    scenarioId: string,
   ): Promise<ScenarioExecutionContext | null> {
-    return todoA13b("getScenarioStatus");
+    return this.requireService(id).getScenarioStatus(connectorId, scenarioId);
   }
 
   async getScenario(
-    _id: string,
-    _connectorId: number,
-    _scenarioId: string,
+    id: string,
+    connectorId: number,
+    scenarioId: string,
   ): Promise<ScenarioDefinition | null> {
-    return todoA13b("getScenario");
+    return this.requireService(id).getScenario(connectorId, scenarioId);
   }
 
   subscribe(
-    _id: string,
-    _handler: (event: ChargePointEvent) => void,
+    id: string,
+    handler: (event: ChargePointEvent) => void,
   ): () => void {
-    return todoA13b("subscribe");
+    return this.requireService(id).onEvent((evt) => {
+      const mapped = toChargePointEvent(evt);
+      if (mapped) handler(mapped);
+    });
   }
 
   private listChargePointSnapshots(): ChargePointSnapshot[] {
@@ -471,6 +509,12 @@ export class RegistryChargePointService implements ChargePointService {
       .map((cpId) => this.registry.get(cpId)?.getStatus())
       .filter((status): status is ChargePointStatus => Boolean(status))
       .map(toChargePointSnapshot);
+  }
+
+  private requireService(id: string): CLIChargePointService {
+    const service = this.registry.get(id);
+    if (!service) throw new Error(`cpId not found: ${id}`);
+    return service;
   }
 }
 
@@ -584,8 +628,154 @@ function toConnectorSnapshot(
   };
 }
 
-function todoA13b(methodName: string): never {
-  throw new Error(`TODO lane A1.3b: ${methodName}`);
+function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
+  switch (evt.event) {
+    case "connected":
+      return { type: "connected" };
+    case "disconnected":
+      return {
+        type: "disconnected",
+        code: evt.data.code,
+        reason: evt.data.reason,
+      };
+    case "status_change":
+      return { type: "status", status: evt.data.status as OCPPStatus };
+    case "error":
+      return { type: "error", error: evt.data.error };
+    case "connector_status":
+      return {
+        type: "connector-status",
+        connectorId: evt.data.connectorId,
+        status: evt.data.status as OCPPStatus,
+        previousStatus: evt.data.previousStatus as OCPPStatus,
+      };
+    case "transaction_started":
+      return {
+        type: "connector-transaction",
+        connectorId: evt.data.connectorId,
+        transactionId: evt.data.transactionId,
+      };
+    case "transaction_stopped":
+      return {
+        type: "connector-transaction",
+        connectorId: evt.data.connectorId,
+        transactionId: null,
+      };
+    case "meter_value":
+      return {
+        type: "connector-meter",
+        connectorId: evt.data.connectorId,
+        meterValue: evt.data.meterValue,
+      };
+    case "log":
+      return {
+        type: "log",
+        entry: {
+          timestamp: new Date(),
+          level:
+            typeof evt.data.level === "number"
+              ? (evt.data.level as LogLevel)
+              : LogLevel.INFO,
+          type:
+            typeof evt.data.type === "string"
+              ? (evt.data.type as LogType)
+              : LogType.GENERAL,
+          message: evt.data.message,
+        },
+      };
+    case "scenario_started":
+      return {
+        type: "scenario-started",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+      };
+    case "scenario_completed":
+      return {
+        type: "scenario-completed",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+      };
+    case "scenario_error":
+      return {
+        type: "scenario-error",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        error: evt.data.error,
+      };
+    case "scenario_node_execute":
+      return {
+        type: "scenario-node-execute",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        nodeId: evt.data.nodeId,
+      };
+    case "connector_availability":
+      return {
+        type: "connector-availability",
+        connectorId: evt.data.connectorId,
+        availability: evt.data.availability as OCPPAvailability,
+      };
+    case "connector_soc":
+      return {
+        type: "connector-soc",
+        connectorId: evt.data.connectorId,
+        soc: evt.data.soc,
+      };
+    case "connector_mode":
+      return {
+        type: "connector-mode",
+        connectorId: evt.data.connectorId,
+        mode: evt.data.mode as ScenarioMode,
+      };
+    case "connector_auto_reset":
+      return {
+        type: "connector-auto-reset-to-available",
+        connectorId: evt.data.connectorId,
+        enabled: evt.data.enabled,
+      };
+    case "connector_auto_meter":
+      return {
+        type: "connector-auto-meter",
+        connectorId: evt.data.connectorId,
+        config: evt.data.config,
+      };
+    case "connector_ev_settings":
+      return {
+        type: "connector-ev-settings",
+        connectorId: evt.data.connectorId,
+        settings: evt.data.settings,
+      };
+    case "connector_charging_profile":
+      return {
+        type: "connector-charging-profile",
+        connectorId: evt.data.connectorId,
+        profile: evt.data.profile,
+      };
+    case "connector_charging_profiles":
+      return {
+        type: "connector-charging-profiles",
+        connectorId: evt.data.connectorId,
+        profiles: [...evt.data.profiles],
+      };
+    case "heartbeat":
+      return {
+        type: "heartbeat",
+        intervalSeconds: evt.data.intervalSeconds,
+        lastSentAt: evt.data.lastSentAt,
+      };
+    case "state_history_entry":
+      return {
+        type: "state-history-entry",
+        entry: evt.data.entry,
+      };
+    case "connector_removed":
+      return {
+        type: "connector-removed",
+        connectorId: evt.data.connectorId,
+      };
+    default:
+      return null;
+  }
 }
 
 function todoA13c(methodName: string): never {

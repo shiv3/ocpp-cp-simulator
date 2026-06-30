@@ -1,6 +1,6 @@
 // The socket.io wire envelopes:
 //   * `rpc` request/ack  (re-exported from errors.ts)
-//   * `event` push       (tagged union: kind "cp" | "registry")
+//   * `event` push       (tagged union: kind "cp" | "registry" | "config" | "scenario-definitions")
 //   * the subscribe-ack snapshot returned atomically by `events.subscribe`
 //
 // The `event` union exists only at the socket emit boundary; the server-side

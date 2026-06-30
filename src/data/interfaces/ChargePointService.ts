@@ -435,6 +435,7 @@ export interface ChargePointService {
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }>;
   loadScenario(
     id: string,

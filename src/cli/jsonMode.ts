@@ -1,6 +1,5 @@
 import * as readline from "readline";
 import * as fs from "fs";
-import { CLIChargePointService } from "./service";
 import {
   hasStatusNotificationOptions,
   OCPPStatus,
@@ -15,6 +14,13 @@ import type {
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
+import {
+  cleanupSingleCpTarget,
+  getSingleCpCommandOps,
+  getSingleCpEventSource,
+  type SingleCpCommandTarget,
+  type SingleCpProcessTarget,
+} from "./singleCpTarget";
 
 const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
   "manual",
@@ -28,9 +34,9 @@ function writeLine(obj: unknown): void {
 }
 
 export async function startJsonMode(
-  service: CLIChargePointService,
+  service: SingleCpProcessTarget,
 ): Promise<void> {
-  service.onEvent((evt) => {
+  getSingleCpEventSource(service).onEvent((evt) => {
     if (evt.event === "log") return;
     writeLine(toJsonEvent(evt.event, evt.data));
   });
@@ -70,42 +76,43 @@ export async function startJsonMode(
   });
 
   rl.on("close", () => {
-    service.cleanup();
+    cleanupSingleCpTarget(service);
     process.exit(0);
   });
 }
 
 export async function handleJsonCommand(
-  service: CLIChargePointService,
+  service: SingleCpCommandTarget,
   cmd: JsonCommand,
 ): Promise<unknown> {
   const params = cmd.params ?? {};
+  const ops = getSingleCpCommandOps(service);
 
   switch (cmd.command) {
     case "connect": {
-      await service.connect();
+      await ops.connect();
       return undefined;
     }
 
     case "disconnect": {
-      service.disconnect();
+      await ops.disconnect();
       return undefined;
     }
 
     case "status": {
-      return service.getStatus();
+      return ops.getStatus();
     }
 
     case "start_transaction": {
       const connectorId = requirePositiveInt(params, "connector");
       const tagId = requireString(params, "tagId");
-      service.startTransaction(connectorId, tagId);
+      await ops.startTransaction(connectorId, tagId);
       return undefined;
     }
 
     case "stop_transaction": {
       const connectorId = requirePositiveInt(params, "connector");
-      service.stopTransaction(connectorId);
+      await ops.stopTransaction(connectorId);
       return undefined;
     }
 
@@ -115,30 +122,30 @@ export async function handleJsonCommand(
       if (value < 0 || !Number.isInteger(value)) {
         throw new Error("value must be a non-negative integer (Wh)");
       }
-      service.setMeterValue(connectorId, value);
+      await ops.setMeterValue(connectorId, value);
       return undefined;
     }
 
     case "send_meter_value": {
       const connectorId = requirePositiveInt(params, "connector");
-      service.sendMeterValue(connectorId);
+      await ops.sendMeterValue(connectorId);
       return undefined;
     }
 
     case "heartbeat": {
-      service.sendHeartbeat();
+      await ops.sendHeartbeat();
       return undefined;
     }
 
     case "diagnostics_status_notification": {
       const status = requireString(params, "status");
-      service.sendDiagnosticsStatusNotification(status);
+      await ops.sendDiagnosticsStatusNotification(status);
       return undefined;
     }
 
     case "firmware_status_notification": {
       const status = requireString(params, "status");
-      service.sendFirmwareStatusNotification(status);
+      await ops.sendFirmwareStatusNotification(status);
       return undefined;
     }
 
@@ -148,14 +155,14 @@ export async function handleJsonCommand(
         params.techInfo === undefined
           ? undefined
           : requireString(params, "techInfo");
-      service.sendSecurityEventNotification(type, techInfo);
+      await ops.sendSecurityEventNotification(type, techInfo);
       return undefined;
     }
 
     case "sign_certificate": {
       const csr =
         params.csr === undefined ? undefined : requireString(params, "csr");
-      await service.sendSignCertificate(csr);
+      await ops.sendSignCertificate(csr);
       return undefined;
     }
 
@@ -164,18 +171,18 @@ export async function handleJsonCommand(
       if (interval <= 0) {
         throw new Error("interval must be a positive number");
       }
-      service.startHeartbeat(interval);
+      await ops.startHeartbeat(interval);
       return undefined;
     }
 
     case "stop_heartbeat": {
-      service.stopHeartbeat();
+      await ops.stopHeartbeat();
       return undefined;
     }
 
     case "authorize": {
       const tagId = requireString(params, "tagId");
-      service.authorize(tagId);
+      await ops.authorize(tagId);
       return undefined;
     }
 
@@ -190,19 +197,19 @@ export async function handleJsonCommand(
         );
       }
       const opts = readStatusNotificationOptions(params);
-      service.updateConnectorStatus(connectorId, status as OCPPStatus, opts);
+      await ops.updateConnectorStatus(connectorId, status as OCPPStatus, opts);
       return undefined;
     }
 
     case "list_scenario_templates": {
-      return service.getScenarioTemplates();
+      return ops.getScenarioTemplates();
     }
 
     case "load_scenario_template": {
       const templateId = requireString(params, "templateId");
       const connectorId = requirePositiveInt(params, "connector");
       const evSettings = params.evSettings as Partial<EVSettings> | undefined;
-      const scenarioId = service.loadScenarioTemplate(
+      const scenarioId = await ops.loadScenarioTemplate(
         templateId,
         connectorId,
         evSettings,
@@ -215,12 +222,12 @@ export async function handleJsonCommand(
       if (typeof params.file === "string") {
         const content = fs.readFileSync(params.file, "utf-8");
         const definition = JSON.parse(content) as ScenarioDefinition;
-        const scenarioId = service.loadScenario(connectorId, definition);
+        const scenarioId = await ops.loadScenario(connectorId, definition);
         return { scenarioId };
       }
       if (params.scenario) {
         const definition = params.scenario as ScenarioDefinition;
-        const scenarioId = service.loadScenario(connectorId, definition);
+        const scenarioId = await ops.loadScenario(connectorId, definition);
         return { scenarioId };
       }
       throw new Error("Either 'file' or 'scenario' parameter is required");
@@ -228,7 +235,7 @@ export async function handleJsonCommand(
 
     case "list_scenarios": {
       const connectorId = requirePositiveInt(params, "connector");
-      return service.listScenarios(connectorId);
+      return ops.listScenarios(connectorId);
     }
 
     case "run_scenario": {
@@ -236,26 +243,26 @@ export async function handleJsonCommand(
       const scenarioId = requireString(params, "scenarioId");
       // Legacy "mode" param is silently ignored — scenarios always run
       // one-shot now. Kept tolerant so old clients don't break.
-      service.runScenario(connectorId, scenarioId);
+      await ops.runScenario(connectorId, scenarioId);
       return undefined;
     }
 
     case "scenario_status": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      return service.getScenarioStatus(connectorId, scenarioId);
+      return ops.getScenarioStatus(connectorId, scenarioId);
     }
 
     case "get_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      return service.getScenario(connectorId, scenarioId);
+      return ops.getScenario(connectorId, scenarioId);
     }
 
     case "stop_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      service.stopScenario(connectorId, scenarioId);
+      await ops.stopScenario(connectorId, scenarioId);
       return undefined;
     }
 
@@ -263,44 +270,34 @@ export async function handleJsonCommand(
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
       const force = params.force === true;
-      service.stepScenario(connectorId, scenarioId, force);
+      await ops.stepScenario(connectorId, scenarioId, force);
       return undefined;
     }
 
     case "stop_all_scenarios": {
       const connectorId = requirePositiveInt(params, "connector");
-      service.stopAllScenarios(connectorId);
+      await ops.stopAllScenarios(connectorId);
       return undefined;
     }
 
     case "remove_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      const removed = service.removeScenario(connectorId, scenarioId);
+      const removed = await ops.removeScenario(connectorId, scenarioId);
       return { removed };
     }
 
     case "run_scenario_file": {
       const connectorId = requirePositiveInt(params, "connector");
       const filePath = requireString(params, "file");
-      const content = fs.readFileSync(filePath, "utf-8");
-      const definition = JSON.parse(content) as ScenarioDefinition;
-      const scenarioId = service.loadScenario(connectorId, definition);
-      service.runScenario(connectorId, scenarioId);
-      return { scenarioId };
+      return ops.runScenarioFile(connectorId, filePath);
     }
 
     case "run_scenario_template": {
       const connectorId = requirePositiveInt(params, "connector");
       const templateId = requireString(params, "templateId");
       const evSettings = params.evSettings as Partial<EVSettings> | undefined;
-      const scenarioId = service.loadScenarioTemplate(
-        templateId,
-        connectorId,
-        evSettings,
-      );
-      service.runScenario(connectorId, scenarioId);
-      return { scenarioId };
+      return ops.runScenarioTemplate(connectorId, templateId, evSettings);
     }
 
     case "set_ev_settings": {
@@ -309,13 +306,13 @@ export async function handleJsonCommand(
         params,
         "settings",
       ) as unknown as EVSettings;
-      service.setEVSettings(connectorId, settings);
+      await ops.setEVSettings(connectorId, settings);
       return undefined;
     }
 
     case "get_ev_settings": {
       const connectorId = requirePositiveInt(params, "connector");
-      return service.getEVSettings(connectorId);
+      return ops.getEVSettings(connectorId);
     }
 
     case "set_auto_meter_config": {
@@ -324,19 +321,19 @@ export async function handleJsonCommand(
         params,
         "config",
       ) as unknown as AutoMeterValueConfig;
-      service.setAutoMeterValueConfig(connectorId, config);
+      await ops.setAutoMeterValueConfig(connectorId, config);
       return undefined;
     }
 
     case "get_auto_meter_config": {
       const connectorId = requirePositiveInt(params, "connector");
-      return service.getAutoMeterValueConfig(connectorId);
+      return ops.getAutoMeterValueConfig(connectorId);
     }
 
     case "set_auto_reset_to_available": {
       const connectorId = requirePositiveInt(params, "connector");
       const enabled = requireBoolean(params, "enabled");
-      service.setAutoResetToAvailable(connectorId, enabled);
+      await ops.setAutoResetToAvailable(connectorId, enabled);
       return undefined;
     }
 
@@ -348,7 +345,7 @@ export async function handleJsonCommand(
           `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
         );
       }
-      service.setConnectorMode(connectorId, mode as ScenarioMode);
+      await ops.setConnectorMode(connectorId, mode as ScenarioMode);
       return undefined;
     }
 
@@ -363,31 +360,31 @@ export async function handleJsonCommand(
             : (() => {
                 throw new Error("'soc' must be a number or null");
               })();
-      service.setConnectorSoc(connectorId, soc);
+      await ops.setConnectorSoc(connectorId, soc);
       return undefined;
     }
 
     case "set_soc_meter_sync": {
       const connectorId = requirePositiveInt(params, "connector");
       const enabled = requireBoolean(params, "enabled");
-      service.setConnectorSocMeterSync(connectorId, enabled);
+      await ops.setConnectorSocMeterSync(connectorId, enabled);
       return undefined;
     }
 
     case "get_charging_profiles": {
       const connectorId = requirePositiveInt(params, "connector");
-      return service.getChargingProfiles(connectorId);
+      return ops.getChargingProfiles(connectorId);
     }
 
     case "remove_connector": {
       const connectorId = requirePositiveInt(params, "connector");
-      const removed = service.removeConnector(connectorId);
+      const removed = await ops.removeConnector(connectorId);
       return { removed };
     }
 
     case "get_state_history": {
       const options = parseHistoryOptions(params.options);
-      return service.getStateHistory(options);
+      return ops.getStateHistory(options);
     }
 
     default:

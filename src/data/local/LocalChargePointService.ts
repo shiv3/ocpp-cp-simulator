@@ -616,11 +616,18 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
     const connector = this.requireConnector(id, connectorId);
     const template = getTemplateById(templateId);
     if (!template) throw new Error(`Unknown template: ${templateId}`);
     const definition = template.createScenario(id, connectorId);
+    if (evSettings) {
+      definition.evSettings = {
+        ...(definition.evSettings ?? getDefaultEVSettings()),
+        ...evSettings,
+      };
+    }
     const manager = connector.scenarioManager;
     if (!manager) throw new Error("Scenario manager not available");
     manager.loadScenarios([definition]);

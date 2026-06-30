@@ -1039,10 +1039,12 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
     const data = await this.runCpRpc(id, "load_scenario_template", {
       templateId,
       connector: connectorId,
+      ...(evSettings ? { evSettings } : {}),
     });
     return (data as { scenarioId: string }) ?? { scenarioId: "" };
   }

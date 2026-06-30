@@ -12,6 +12,9 @@ import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
+import type { Database } from "../../cp/domain/persistence/Database";
+import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
+import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import type {
   OCPPAvailability,
   OCPPStatus,
@@ -29,8 +32,11 @@ import type {
   ScenarioTemplateInfo,
   StoredLogEntry,
 } from "../../data/interfaces/ChargePointService";
+import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
+import { redactSensitiveText } from "../../cp/shared/redaction";
+import { scenarioTemplates } from "../../utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
 import type {
@@ -47,13 +53,30 @@ export type RegistryChargePointSubscriptionEvent =
       cp: ChargePointSnapshot;
     };
 
+export interface RegistryChargePointServiceDeps {
+  readonly database: Database | null;
+  readonly configRepository: RegistryConfigRepository;
+  readonly scenarioRepository: ScenarioRepository;
+  readonly connectorSettingsRepository: ConnectorSettingsRepository;
+  readonly onReset?: () => void;
+}
+
+export interface RegistryConfigRepository {
+  load(): Promise<SimulatorConfigInput | null>;
+  save(config: SimulatorConfigInput | null): Promise<void>;
+  subscribe(handler: (config: SimulatorConfigInput | null) => void): () => void;
+}
+
 /**
  * CLI/daemon ChargePointService facade with three lanes:
- * A1.3a implements the CPRegistry-backed registry lane here; A1.3b fills
- * per-CP CLIChargePointService delegation; A1.3c fills facade-owned globals.
+ * CPRegistry-backed registry lane; per-CP CLIChargePointService delegation;
+ * facade-owned global persistence/stateless operations.
  */
 export class RegistryChargePointService implements ChargePointService {
-  constructor(private readonly registry: CPRegistry) {}
+  constructor(
+    private readonly registry: CPRegistry,
+    private readonly deps: RegistryChargePointServiceDeps,
+  ) {}
 
   async listChargePoints(): Promise<ChargePointSnapshot[]> {
     return this.listChargePointSnapshots();
@@ -105,29 +128,73 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async resetAllState(): Promise<void> {
-    return todoA13c("resetAllState");
+    for (const cpId of [...this.registry.list()]) {
+      this.registry.remove(cpId, { notify: false });
+    }
+    if (this.deps.database) {
+      resetSimulatorState(this.deps.database);
+      await this.deps.database.flush?.();
+    }
+    this.deps.onReset?.();
   }
 
-  async clearStoredLogs(_cpId: string): Promise<void> {
-    return todoA13c("clearStoredLogs");
+  async clearStoredLogs(cpId: string): Promise<void> {
+    if (!this.deps.database) return;
+    this.deps.database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
+    await this.deps.database.flush?.();
   }
 
-  async listStoredLogs(_cpId: string): Promise<StoredLogEntry[]> {
-    return todoA13c("listStoredLogs");
+  async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
+    const service = this.registry.get(cpId);
+    service?.flushLogs();
+
+    let entries: StoredLogEntry[] = [];
+    if (this.deps.database) {
+      const rows = this.deps.database.all<{
+        timestamp: string;
+        level: string;
+        log_type: string;
+        message: string;
+      }>(
+        "SELECT timestamp, level, log_type, message FROM logs " +
+          "WHERE cp_id = ? ORDER BY id ASC",
+        [cpId],
+      );
+      entries = rows.map((row) => ({
+        timestamp: row.timestamp,
+        level: row.level,
+        type: row.log_type,
+        cpId,
+        message: redactSensitiveText(row.message),
+      }));
+    }
+
+    if (entries.length > 0) return entries;
+    return (service?.getInMemoryLogs() ?? []).map((entry) => ({
+      timestamp: entry.timestamp.toISOString(),
+      level: LogLevel[entry.level] ?? "INFO",
+      type: entry.type,
+      cpId,
+      message: redactSensitiveText(entry.message),
+    }));
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {
-    return todoA13c("loadConfig");
+    return this.deps.configRepository.load();
   }
 
-  async saveConfig(_config: SimulatorConfigInput | null): Promise<void> {
-    return todoA13c("saveConfig");
+  async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
+    const existing = await this.deps.configRepository.load();
+    await this.deps.configRepository.save(
+      mergeRegistryConfigSecrets(config, existing),
+    );
+    await this.deps.database?.flush?.();
   }
 
   subscribeConfig(
-    _handler: (config: WireSimulatorConfig | null) => void,
+    handler: (config: WireSimulatorConfig | null) => void,
   ): () => void {
-    return todoA13c("subscribeConfig");
+    return this.deps.configRepository.subscribe(handler);
   }
 
   async connect(id: string): Promise<void> {
@@ -263,18 +330,26 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async getAutoMeterConfig(
-    _id: string,
-    _connectorId: number,
+    id: string,
+    connectorId: number,
   ): Promise<AutoMeterValueConfig | null> {
-    return todoA13c("getAutoMeterConfig");
+    return this.deps.connectorSettingsRepository.loadAutoMeterValueConfig(
+      id,
+      connectorId,
+    );
   }
 
   async saveAutoMeterConfig(
-    _id: string,
-    _connectorId: number,
-    _config: AutoMeterValueConfig,
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
   ): Promise<void> {
-    return todoA13c("saveAutoMeterConfig");
+    await this.deps.connectorSettingsRepository.saveAutoMeterValueConfig(
+      id,
+      connectorId,
+      config,
+    );
+    await this.deps.database?.flush?.();
   }
 
   async setAutoResetToAvailable(
@@ -310,15 +385,16 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async getSocMeterSync(_id: string, _connectorId: number): Promise<boolean> {
-    return todoA13c("getSocMeterSync");
+    return this.deps.connectorSettingsRepository.loadSocMeterSync();
   }
 
   async saveSocMeterSync(
     _id: string,
     _connectorId: number,
-    _enabled: boolean,
+    enabled: boolean,
   ): Promise<void> {
-    return todoA13c("saveSocMeterSync");
+    await this.deps.connectorSettingsRepository.saveSocMeterSync(enabled);
+    await this.deps.database?.flush?.();
   }
 
   async getChargingProfiles(
@@ -336,46 +412,61 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async listScenarioDefinitions(
-    _id: string,
-    _connectorId: number | null,
+    id: string,
+    connectorId: number | null,
   ): Promise<ScenarioDefinition[]> {
-    return todoA13c("listScenarioDefinitions");
+    return this.deps.scenarioRepository.listByConnector(id, connectorId);
   }
 
   async saveScenarioDefinition(
-    _id: string,
-    _connectorId: number | null,
-    _definition: ScenarioDefinition,
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
   ): Promise<ScenarioDefinition> {
-    return todoA13c("saveScenarioDefinition");
+    await this.deps.scenarioRepository.save(id, connectorId, definition);
+    await this.deps.database?.flush?.();
+    return definition;
   }
 
   async replaceConnectorScenarioDefinitions(
-    _id: string,
-    _connectorId: number | null,
-    _definitions: readonly ScenarioDefinition[],
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
   ): Promise<ScenarioDefinition[]> {
-    return todoA13c("replaceConnectorScenarioDefinitions");
+    await this.deps.scenarioRepository.replaceConnector(
+      id,
+      connectorId,
+      definitions,
+    );
+    await this.deps.database?.flush?.();
+    return [...definitions];
   }
 
   async deleteScenarioDefinition(
-    _id: string,
-    _connectorId: number | null,
-    _definitionId: string,
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
   ): Promise<void> {
-    return todoA13c("deleteScenarioDefinition");
+    this.deps.scenarioRepository.deleteOne(id, connectorId, definitionId);
+    await this.deps.database?.flush?.();
   }
 
   subscribeScenarioDefinitions(
-    _id: string,
-    _connectorId: number | null,
-    _handler: (definitions: ScenarioDefinition[]) => void,
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
   ): () => void {
-    return todoA13c("subscribeScenarioDefinitions");
+    return this.deps.scenarioRepository.subscribe(id, connectorId, () => {
+      handler(this.deps.scenarioRepository.listByConnector(id, connectorId));
+    });
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
-    return todoA13c("getScenarioTemplates");
+    return scenarioTemplates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      description: template.description,
+    }));
   }
 
   async loadScenarioTemplate(
@@ -778,6 +869,45 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
   }
 }
 
-function todoA13c(methodName: string): never {
-  throw new Error(`TODO lane A1.3c: ${methodName}`);
+function mergeRegistryConfigSecrets(
+  next: SimulatorConfigInput | null,
+  existing: SimulatorConfigInput | null,
+): SimulatorConfigInput | null {
+  if (next === null) return null;
+
+  const suppliedPassword = next.basicAuthSettings.password;
+  const password =
+    typeof suppliedPassword === "string" && suppliedPassword.length > 0
+      ? suppliedPassword
+      : (existing?.basicAuthSettings.password ?? "");
+
+  return {
+    wsURL: next.wsURL,
+    ChargePointID: next.ChargePointID,
+    connectorNumber: next.connectorNumber,
+    tagID: next.tagID,
+    ocppVersion: next.ocppVersion,
+    basicAuthSettings: {
+      enabled: next.basicAuthSettings.enabled,
+      username: next.basicAuthSettings.username,
+      password,
+    },
+    autoMeterValueSetting: {
+      enabled: next.autoMeterValueSetting.enabled,
+      interval: next.autoMeterValueSetting.interval,
+      value: next.autoMeterValueSetting.value,
+    },
+    Experimental: next.Experimental
+      ? {
+          ChargePointIDs: next.Experimental.ChargePointIDs.map((cp) => ({
+            ChargePointID: cp.ChargePointID,
+            ConnectorNumber: cp.ConnectorNumber,
+          })),
+          TagIDs: [...next.Experimental.TagIDs],
+        }
+      : null,
+    BootNotification: next.BootNotification
+      ? { ...next.BootNotification }
+      : null,
+  };
 }

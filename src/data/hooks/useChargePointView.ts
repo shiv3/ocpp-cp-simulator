@@ -21,6 +21,15 @@ export interface HeartbeatView {
 
 interface ChargePointViewState {
   status: OCPPStatus;
+  /**
+   * Whether the underlying transport (WebSocket / SOAP) is up, tracked from the
+   * `connected` / `disconnected` lifecycle events. This is distinct from
+   * `status`: after an auto-reconnect the socket is up (`connected`) before
+   * BootNotification is re-Accepted, so the OCPP `status` may still read
+   * `Unavailable`. Use this for Connect/Disconnect affordances; use `status`
+   * for OCPP-readiness actions (#103).
+   */
+  connected: boolean;
   error: string;
   connectors: Map<number, ConnectorSnapshot>;
   heartbeat: HeartbeatView;
@@ -64,6 +73,7 @@ function patchConnector(
 export function useChargePointView(cpId: string | null): ChargePointViewState {
   const { chargePointService } = useDataContext();
   const [status, setStatus] = useState<OCPPStatus>(DEFAULT_STATUS);
+  const [connected, setConnected] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [connectors, setConnectors] = useState<Map<number, ConnectorSnapshot>>(
     new Map(),
@@ -77,6 +87,7 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
   useEffect(() => {
     if (!cpId) {
       setStatus(DEFAULT_STATUS);
+      setConnected(false);
       setError("");
       setConnectors(new Map());
       setLogs([]);
@@ -91,12 +102,16 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
       if (cancelled) return;
       if (!snapshot) {
         setStatus(DEFAULT_STATUS);
+        setConnected(false);
         setError("");
         setConnectors(new Map());
         setHeartbeat({ intervalSeconds: 0, lastSentAt: null });
         return;
       }
       setStatus(snapshot.status);
+      // No explicit transport flag in the snapshot yet; a non-Unavailable
+      // status is the best proxy for "socket is up" on first load / resync.
+      setConnected(snapshot.status !== DEFAULT_STATUS);
       setError(snapshot.error ?? "");
       setConnectors(
         new Map(snapshot.connectors.map((c) => [c.id, c] as const)),
@@ -217,10 +232,13 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
             });
             break;
           case "connected":
-            // status is updated via separate status event; nothing else to do.
+            // Socket is up. This fires on reconnect before BootNotification is
+            // re-Accepted, so it — not `status` — is what flips the
+            // Connect/Disconnect buttons back (#103).
+            setConnected(true);
             break;
           case "disconnected":
-            // ditto — UI shows reason via status snapshot.
+            setConnected(false);
             break;
           default:
             break;
@@ -242,6 +260,7 @@ export function useChargePointView(cpId: string | null): ChargePointViewState {
 
   return {
     status,
+    connected,
     error,
     connectors: connectorsMemo,
     heartbeat,

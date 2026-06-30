@@ -11,12 +11,16 @@ import {
   ALL_CHARGE_POINT_ERROR_CODES,
   OCPPStatus,
 } from "../cp/domain/types/OcppTypes";
+import { ALLOWED_CONNECTOR_STATUS_TRANSITIONS } from "../cp/application/state/machines/ConnectorStateMachine";
+import { useSocMeterSync } from "./hooks/useSocMeterSync";
 
 /** True when the §4.9 transition table allows moving from `current` to Faulted.
  *  Used to decide whether to render the errorCode picker. */
 function allowedNextIncludesFaulted(current: OCPPStatus): boolean {
   return (
-    ALLOWED_STATUS_TRANSITIONS[current]?.includes(OCPPStatus.Faulted) ?? false
+    ALLOWED_CONNECTOR_STATUS_TRANSITIONS[current]?.includes(
+      OCPPStatus.Faulted,
+    ) ?? false
   );
 }
 import type {
@@ -50,65 +54,6 @@ import {
 /** Which view to render on the right side of the panel. The connector
  *  controls always live on the left and are no longer a "tab". */
 type TabType = "scenario" | "stateTransition";
-
-/**
- * Allowed-next-status table — exactly mirrors the OCPP 1.6 connector state
- * diagram encoded in
- * `src/cp/application/state/machines/ConnectorStateMachine.ts`. The Status
- * Control panel only surfaces these targets so the user can't
- * accidentally send a Charging notification from Available, etc.
- *
- * Keep in sync with the machine. If a transition is added there, mirror it
- * here.
- */
-const ALLOWED_STATUS_TRANSITIONS: Readonly<
-  Record<OCPPStatus, ReadonlyArray<OCPPStatus>>
-> = {
-  [OCPPStatus.Available]: [
-    OCPPStatus.Preparing,
-    OCPPStatus.Reserved,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Preparing]: [
-    OCPPStatus.Charging,
-    OCPPStatus.Available,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Charging]: [
-    OCPPStatus.SuspendedEV,
-    OCPPStatus.SuspendedEVSE,
-    OCPPStatus.Finishing,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.SuspendedEV]: [
-    OCPPStatus.Charging,
-    OCPPStatus.SuspendedEVSE,
-    OCPPStatus.Finishing,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.SuspendedEVSE]: [
-    OCPPStatus.Charging,
-    OCPPStatus.SuspendedEV,
-    OCPPStatus.Finishing,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Finishing]: [
-    OCPPStatus.Available,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Reserved]: [
-    OCPPStatus.Preparing,
-    OCPPStatus.Available,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Unavailable]: [OCPPStatus.Available, OCPPStatus.Faulted],
-  [OCPPStatus.Faulted]: [OCPPStatus.Available, OCPPStatus.Unavailable],
-};
 
 /** Per-target tint so the buttons hint at what the destination means. */
 const STATUS_BUTTON_STYLE: Readonly<Record<OCPPStatus, string>> = {
@@ -170,6 +115,11 @@ const getStatusColor = (status: string) => {
     default:
       return "bg-gray-400";
   }
+};
+
+const clampMeterValue = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, value);
 };
 
 // Collapsed Panel View
@@ -279,8 +229,12 @@ const FullPanelContent: React.FC<{
 
   const { scenarios } = useScenarios(cpId, connectorId);
   const connector = localCp ? localCp.getConnector(connectorId) : null;
-  const [meterValueInput, setMeterValueInput] =
-    useState<number>(liveMeterValue);
+  const [meterValueInput, setMeterValueInput] = useState<number>(() =>
+    clampMeterValue(liveMeterValue),
+  );
+  const [isMeterValueInputFocused, setIsMeterValueInputFocused] =
+    useState(false);
+  const [isMeterValueInputDirty, setIsMeterValueInputDirty] = useState(false);
   // Transaction TagID is always picked from the CP profile's configured
   // tagIds. Falls back to the single `idTag` when the parent didn't pass a
   // list (older callers / standalone usage).
@@ -303,65 +257,17 @@ const FullPanelContent: React.FC<{
   // → Faulted button (§7.6). Defaults to InternalError because it's the
   // most generic non-NoError value.
   const [faultErrorCode, setFaultErrorCode] = useState<string>("InternalError");
-  // When ON, moving the SoC slider also writes a derived meter value, and
-  // bumping the meter value writes back a derived SoC, using the EV
-  // battery capacity and `initialSoc` from evSettings. Persisted globally
-  // (one flag per browser, not per CP/connector) via the SQLite kv table
-  // through `connectorSettingsRepository.loadSocMeterSync` /
-  // `saveSocMeterSync`. Disabled automatically when capacity is 0.
-  const [autoSyncSocMeter, setAutoSyncSocMeter] = useState<boolean>(true);
-  // One-shot async load on mount: the repo is async (sql.js DB roundtrip),
-  // but the toggle UI needs a sync initial value. We start at `true`
-  // (legacy default) and overwrite once the repo resolves.
-  useEffect(() => {
-    let cancelled = false;
-    void connectorSettingsRepository.loadSocMeterSync().then((value) => {
-      if (!cancelled) setAutoSyncSocMeter(value);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connectorSettingsRepository]);
-  // Push the persisted flag down to the connector on mount so the domain's
-  // applyMeterValue (scenario auto-meter, direct setters) honours it. Also
-  // re-apply when cpId / connectorId changes.
-  useEffect(() => {
-    void chargePointService.setConnectorSocMeterSync(
+  const { autoSyncSocMeter, handleToggleAutoSync, meterFromSoc, socFromMeter } =
+    useSocMeterSync({
+      chargePointService,
+      connectorSettingsRepository,
       cpId,
       connectorId,
-      autoSyncSocMeter,
-    );
-  }, [chargePointService, cpId, connectorId, autoSyncSocMeter]);
-  const handleToggleAutoSync = useCallback(() => {
-    setAutoSyncSocMeter((prev) => {
-      const next = !prev;
-      void connectorSettingsRepository.saveSocMeterSync(next);
-      return next;
+      evSettings,
     });
-  }, [connectorSettingsRepository]);
 
   const capacityKwh = evSettings.batteryCapacityKwh;
-  const initialSoc = evSettings.initialSoc ?? 0;
   const canAutoSync = autoSyncSocMeter && capacityKwh > 0;
-
-  const meterFromSoc = useCallback(
-    (soc: number): number => {
-      if (capacityKwh <= 0) return 0;
-      return Math.max(
-        0,
-        Math.round(((soc - initialSoc) / 100) * capacityKwh * 1000),
-      );
-    },
-    [capacityKwh, initialSoc],
-  );
-  const socFromMeter = useCallback(
-    (meterWh: number): number => {
-      if (capacityKwh <= 0) return 0;
-      const computed = initialSoc + (meterWh / 1000 / capacityKwh) * 100;
-      return Math.min(100, Math.max(0, computed));
-    },
-    [capacityKwh, initialSoc],
-  );
   // Width of the left "Connector controls" column inside the Connector tab.
   // The user can drag the gutter between the controls and the Scenario
   // canvas to give more room to whichever side they're focused on.
@@ -412,10 +318,25 @@ const FullPanelContent: React.FC<{
   >({});
   const scenarioManagerRef = useRef<ScenarioManager | null>(null);
   const scenarioRef = useRef<ScenarioDefinition | null>(null);
+  const [remoteScenarioListError, setRemoteScenarioListError] = useState(false);
+  const [remoteScenarioStatusError, setRemoteScenarioStatusError] =
+    useState(false);
 
   useEffect(() => {
-    setMeterValueInput(liveMeterValue);
-  }, [liveMeterValue]);
+    const nextLiveMeterValue = clampMeterValue(liveMeterValue);
+    if (!isMeterValueInputFocused && !isMeterValueInputDirty) {
+      setMeterValueInput(nextLiveMeterValue);
+      return;
+    }
+    if (!isMeterValueInputFocused && meterValueInput === nextLiveMeterValue) {
+      setIsMeterValueInputDirty(false);
+    }
+  }, [
+    isMeterValueInputDirty,
+    isMeterValueInputFocused,
+    liveMeterValue,
+    meterValueInput,
+  ]);
 
   // Track transaction duration
   useEffect(() => {
@@ -529,6 +450,7 @@ const FullPanelContent: React.FC<{
     if (mode !== "remote") return;
     const targetScenarioId = scenario?.id;
     if (!targetScenarioId) {
+      setRemoteScenarioStatusError(false);
       setScenarioExecutionContext(null);
       return;
     }
@@ -538,11 +460,16 @@ const FullPanelContent: React.FC<{
       .getScenarioStatus(cpId, connectorId, targetScenarioId)
       .then((ctx) => {
         if (cancelled) return;
+        setRemoteScenarioStatusError(false);
         setScenarioExecutionContext(ctx);
       })
-      .catch(() => {
-        // Daemon may not have started this scenario yet — that's fine,
-        // we'll pick it up on the next scenario-started event.
+      .catch((err) => {
+        if (cancelled) return;
+        setRemoteScenarioStatusError(true);
+        console.warn(
+          `[ConnectorSidePanel] Failed to fetch remote scenario status for ${cpId}/${connectorId}/${targetScenarioId}`,
+          err,
+        );
       });
 
     const unsub = chargePointService.subscribe(cpId, (event) => {
@@ -637,7 +564,9 @@ const FullPanelContent: React.FC<{
     const refresh = async () => {
       try {
         const list = await chargePointService.listScenarios(cpId, connectorId);
-        if (cancelled || list.length === 0) return;
+        if (cancelled) return;
+        setRemoteScenarioListError(false);
+        if (list.length === 0) return;
         const defs = await Promise.all(
           list.map((item) =>
             chargePointService
@@ -664,6 +593,7 @@ const FullPanelContent: React.FC<{
         });
       } catch (err) {
         if (!cancelled) {
+          setRemoteScenarioListError(true);
           console.warn(
             `[ConnectorSidePanel] Failed to fetch remote scenarios for ${cpId}/${connectorId}`,
             err,
@@ -703,8 +633,9 @@ const FullPanelContent: React.FC<{
   );
 
   const handleIncreaseMeterValue = useCallback(() => {
-    const nextValue = meterValueInput + 10;
+    const nextValue = clampMeterValue(meterValueInput + 10);
     setMeterValueInput(nextValue);
+    setIsMeterValueInputDirty(false);
     void chargePointService.setMeterValue(cpId, connectorId, nextValue);
     if (canAutoSync) {
       void chargePointService.setConnectorSoc(
@@ -723,14 +654,17 @@ const FullPanelContent: React.FC<{
   ]);
 
   const handleSendMeterValue = useCallback(() => {
+    const nextValue = clampMeterValue(meterValueInput);
+    setMeterValueInput(nextValue);
+    setIsMeterValueInputDirty(false);
     void chargePointService
-      .setMeterValue(cpId, connectorId, meterValueInput)
+      .setMeterValue(cpId, connectorId, nextValue)
       .then(() => chargePointService.sendMeterValue(cpId, connectorId));
     if (canAutoSync) {
       void chargePointService.setConnectorSoc(
         cpId,
         connectorId,
-        socFromMeter(meterValueInput),
+        socFromMeter(nextValue),
       );
     }
   }, [
@@ -752,6 +686,7 @@ const FullPanelContent: React.FC<{
       if (next !== null && canAutoSync) {
         const derivedMeter = meterFromSoc(next);
         setMeterValueInput(derivedMeter);
+        setIsMeterValueInputDirty(false);
         void chargePointService.setMeterValue(cpId, connectorId, derivedMeter);
       }
     },
@@ -784,6 +719,8 @@ const FullPanelContent: React.FC<{
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;
+  const showRemoteScenarioError =
+    mode === "remote" && (remoteScenarioListError || remoteScenarioStatusError);
 
   return (
     <div className="h-full flex flex-row bg-white dark:bg-gray-900">
@@ -1138,10 +1075,16 @@ const FullPanelContent: React.FC<{
                   <div className="flex items-center gap-1">
                     <input
                       type="number"
+                      min={0}
                       value={meterValueInput}
-                      onChange={(e) =>
-                        setMeterValueInput(Number(e.target.value))
-                      }
+                      onFocus={() => setIsMeterValueInputFocused(true)}
+                      onBlur={() => setIsMeterValueInputFocused(false)}
+                      onChange={(e) => {
+                        setIsMeterValueInputDirty(true);
+                        setMeterValueInput(
+                          clampMeterValue(Number(e.target.value)),
+                        );
+                      }}
                       className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono"
                     />
                     <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -1182,7 +1125,7 @@ const FullPanelContent: React.FC<{
                 </div>
                 {(() => {
                   const allowedNext =
-                    ALLOWED_STATUS_TRANSITIONS[connectorStatus] ?? [];
+                    ALLOWED_CONNECTOR_STATUS_TRANSITIONS[connectorStatus] ?? [];
                   if (allowedNext.length === 0) {
                     return (
                       <p className="text-xs text-gray-400 dark:text-gray-500 italic">
@@ -1406,30 +1349,37 @@ const FullPanelContent: React.FC<{
                     without unmounting the React component. */}
               <div className="flex-1 min-h-0 overflow-hidden relative">
                 <div
-                  className={`absolute inset-0 ${
+                  className={`absolute inset-0 h-full flex flex-col ${
                     activeTab === "scenario" ? "" : "hidden"
                   }`}
                   aria-hidden={activeTab !== "scenario"}
                 >
-                  <Suspense
-                    fallback={
-                      <div className="h-full flex items-center justify-center">
-                        <div className="text-muted">
-                          Loading Scenario Editor...
+                  {showRemoteScenarioError && (
+                    <div className="flex-shrink-0 mx-3 mt-3 rounded border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                      Couldn't reach the daemon. Scenario data is unavailable.
+                    </div>
+                  )}
+                  <div className="flex-1 min-h-0">
+                    <Suspense
+                      fallback={
+                        <div className="h-full flex items-center justify-center">
+                          <div className="text-muted">
+                            Loading Scenario Editor...
+                          </div>
                         </div>
-                      </div>
-                    }
-                  >
-                    <ScenarioEditor
-                      cpId={cpId}
-                      connectorId={connectorId}
-                      scenario={scenario}
-                      scenarioId={scenario?.id}
-                      executionContext={scenarioExecutionContext}
-                      nodeProgress={nodeProgress}
-                      onClose={() => setActiveTab("scenario")}
-                    />
-                  </Suspense>
+                      }
+                    >
+                      <ScenarioEditor
+                        cpId={cpId}
+                        connectorId={connectorId}
+                        scenario={scenario}
+                        scenarioId={scenario?.id}
+                        executionContext={scenarioExecutionContext}
+                        nodeProgress={nodeProgress}
+                        onClose={() => setActiveTab("scenario")}
+                      />
+                    </Suspense>
+                  </div>
                 </div>
                 <div
                   className={`absolute inset-0 ${

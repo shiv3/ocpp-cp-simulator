@@ -19,6 +19,7 @@ import {
   Connection,
   Node,
   Edge,
+  NodeProps,
   NodeTypes,
   ReactFlowInstance,
 } from "@xyflow/react";
@@ -155,6 +156,25 @@ interface ScenarioEditorProps {
   onClose: () => void;
 }
 
+type StartEndNodeWrapperProps = Omit<
+  React.ComponentProps<typeof StartEndNode>,
+  "nodeType"
+>;
+
+const StartScenarioNode: React.ComponentType<NodeProps> = (props) => (
+  <StartEndNode
+    {...(props as unknown as StartEndNodeWrapperProps)}
+    nodeType="start"
+  />
+);
+
+const EndScenarioNode: React.ComponentType<NodeProps> = (props) => (
+  <StartEndNode
+    {...(props as unknown as StartEndNodeWrapperProps)}
+    nodeType="end"
+  />
+);
+
 // Define custom node types
 const nodeTypes: NodeTypes = {
   [ScenarioNodeType.STATUS_CHANGE]: StatusChangeNode,
@@ -173,10 +193,8 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.UNLOCK_OUTCOME]: UnlockOutcomeNode,
   [ScenarioNodeType.CONFIG_SET]: ConfigSetNode,
   [ScenarioNodeType.DATA_TRANSFER]: DataTransferNode,
-  [ScenarioNodeType.START]: (props) => (
-    <StartEndNode {...props} nodeType="start" />
-  ),
-  [ScenarioNodeType.END]: (props) => <StartEndNode {...props} nodeType="end" />,
+  [ScenarioNodeType.START]: StartScenarioNode,
+  [ScenarioNodeType.END]: EndScenarioNode,
 };
 
 // MiniMap fill per node type. Without an explicit nodeColor the minimap falls

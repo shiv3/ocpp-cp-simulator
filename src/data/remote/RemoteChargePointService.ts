@@ -764,6 +764,24 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
+    // The daemon's connectors never see the browser-only Default EV Settings,
+    // so push it onto every connector of every known charge point (#107).
+    const cps = await this.listChargePoints().catch(() => []);
+    await Promise.all(
+      cps.flatMap((cp) =>
+        cp.connectors.map((connector) =>
+          this.setEVSettings(cp.id, connector.id, settings).catch((err) =>
+            console.warn(
+              `Failed to apply default EV settings to ${cp.id}/${connector.id}`,
+              err,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   async setAutoMeterValueConfig(
     id: string,
     connectorId: number,

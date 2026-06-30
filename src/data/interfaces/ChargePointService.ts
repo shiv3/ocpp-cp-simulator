@@ -224,6 +224,11 @@ export interface ScenarioTemplateInfo {
   description: string;
 }
 
+export interface ScenarioRunOptions {
+  connectorId?: number;
+  evSettings?: Partial<EVSettings>;
+}
+
 export interface ChargePointSummary {
   cpId: string;
   status: OCPPStatus | string;
@@ -305,6 +310,14 @@ export interface ChargePointService {
     status: OCPPStatus,
     opts?: StatusNotificationOptions,
   ): Promise<void>;
+  sendDiagnosticsStatusNotification(id: string, status: string): Promise<void>;
+  sendFirmwareStatusNotification(id: string, status: string): Promise<void>;
+  sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void>;
+  sendSignCertificate(id: string, csr?: string): Promise<void>;
   setMeterValue(id: string, connectorId: number, value: number): Promise<void>;
   sendMeterValue(id: string, connectorId: number): Promise<void>;
   removeConnector(id: string, connectorId: number): Promise<void>;
@@ -315,6 +328,7 @@ export interface ChargePointService {
     connectorId: number,
     settings: EVSettings,
   ): Promise<void>;
+  getEVSettings(id: string, connectorId: number): Promise<EVSettings | null>;
   /**
    * Push the (new) Default EV Settings onto every existing connector. New
    * connectors already pick the default up at construction via
@@ -328,6 +342,10 @@ export interface ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void>;
+  getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null>;
   getAutoMeterConfig(
     id: string,
     connectorId: number,
@@ -429,6 +447,16 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void>;
+  runScenarioFile(
+    id: string,
+    path: string,
+    opts?: ScenarioRunOptions,
+  ): Promise<{ scenarioId: string }>;
+  runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts?: ScenarioRunOptions,
+  ): Promise<{ scenarioId: string }>;
   stopScenario(
     id: string,
     connectorId: number,

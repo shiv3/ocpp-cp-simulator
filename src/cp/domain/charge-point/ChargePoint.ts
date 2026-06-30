@@ -656,9 +656,9 @@ export class ChargePoint {
     this._outbox.sendSecurityEventNotification(type, techInfo);
   }
 
-  /** Generate a CSR and send OCPP 1.6 SignCertificate.req. */
-  sendSignCertificate(): Promise<void> {
-    return this._outbox.sendSignCertificate();
+  /** Generate or forward a CSR and send OCPP 1.6 SignCertificate.req. */
+  sendSignCertificate(csr?: string): Promise<void> {
+    return this._outbox.sendSignCertificate(csr);
   }
 
   /** Send DiagnosticsStatusNotification.req — see OCPPMessageHandler doc. */

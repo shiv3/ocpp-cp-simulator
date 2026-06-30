@@ -14,6 +14,7 @@ import type {
   ChargePointService,
   ChargePointSnapshot,
   ConnectorSnapshot,
+  ScenarioRunOptions,
   ScenarioListItem,
   ScenarioTemplateInfo,
   StoredLogEntry,
@@ -21,6 +22,8 @@ import type {
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
+  BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
+  BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
 } from "../interfaces/UnsupportedFeatureError";
@@ -30,7 +33,10 @@ import type {
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import {
+  getDefaultEVSettings,
+  type EVSettings,
+} from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
@@ -358,6 +364,46 @@ export class LocalChargePointService implements ChargePointService {
     cp.updateConnectorStatus(connectorId, status);
   }
 
+  async sendDiagnosticsStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendDiagnosticsStatusNotification(
+      status as "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
+    );
+  }
+
+  async sendFirmwareStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendFirmwareStatusNotification(
+      status as
+        | "Downloaded"
+        | "DownloadFailed"
+        | "Downloading"
+        | "Idle"
+        | "InstallationFailed"
+        | "Installing"
+        | "Installed",
+    );
+  }
+
+  async sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
+      type,
+      techInfo,
+    );
+  }
+
+  async sendSignCertificate(id: string, csr?: string): Promise<void> {
+    await this.getExistingChargePointOrThrow(id).sendSignCertificate(csr);
+  }
+
   async setMeterValue(
     id: string,
     connectorId: number,
@@ -383,6 +429,13 @@ export class LocalChargePointService implements ChargePointService {
     connector.evSettings = settings;
   }
 
+  async getEVSettings(
+    id: string,
+    connectorId: number,
+  ): Promise<EVSettings | null> {
+    return this.requireConnector(id, connectorId).evSettings ?? null;
+  }
+
   async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
     // Connectors freeze getDefaultEVSettings() at construction, so a mid-session
     // change to the Default EV Settings wouldn't reach the ones already live.
@@ -403,6 +456,13 @@ export class LocalChargePointService implements ChargePointService {
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
     connector.autoMeterValueConfig = config;
+  }
+
+  async getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    return this.requireConnector(id, connectorId).autoMeterValueConfig ?? null;
   }
 
   async getAutoMeterConfig(
@@ -603,6 +663,45 @@ export class LocalChargePointService implements ChargePointService {
     const manager = connector.scenarioManager;
     if (!manager) throw new Error("Scenario manager not available");
     await manager.executeScenario(scenarioId);
+  }
+
+  async runScenarioFile(
+    _id: string,
+    _path: string,
+    _opts?: ScenarioRunOptions,
+  ): Promise<{ scenarioId: string }> {
+    throw new UnsupportedFeatureError(
+      "browser_scenario_file_unsupported",
+      BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
+    );
+  }
+
+  async runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const connectorId = opts.connectorId ?? 1;
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) {
+      throw new UnsupportedFeatureError(
+        "browser_scenario_executor_unavailable",
+        BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
+      );
+    }
+    const template = getTemplateById(templateId);
+    if (!template) throw new Error(`Unknown template: ${templateId}`);
+    const definition = template.createScenario(id, connectorId);
+    if (opts.evSettings) {
+      definition.evSettings = {
+        ...(definition.evSettings ?? getDefaultEVSettings()),
+        ...opts.evSettings,
+      };
+    }
+    manager.loadScenarios([definition]);
+    await manager.executeScenario(definition.id);
+    return { scenarioId: definition.id };
   }
 
   async stopScenario(

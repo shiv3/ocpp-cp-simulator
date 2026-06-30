@@ -509,8 +509,8 @@ export class CLIChargePointService {
     this._chargePoint.sendSecurityEventNotification(type, techInfo);
   }
 
-  sendSignCertificate(): Promise<void> {
-    return this._chargePoint.sendSignCertificate();
+  sendSignCertificate(csr?: string): Promise<void> {
+    return this._chargePoint.sendSignCertificate(csr);
   }
 
   startHeartbeat(intervalSeconds: number): void {

@@ -168,6 +168,30 @@ function statusWire(cpId = "cp-1", status = "Available"): StatusWire {
   };
 }
 
+function connectorWire(
+  id = 1,
+  overrides: Partial<StatusWire["connectors"][number]> = {},
+): StatusWire["connectors"][number] {
+  return {
+    id,
+    status: "Available",
+    availability: "Operative",
+    meterValue: 0,
+    transactionId: null,
+    soc: null,
+    mode: "manual",
+    autoResetToAvailable: true,
+    autoMeterValueConfig: null,
+    evSettings: null,
+    chargingProfile: null,
+    chargingProfiles: [],
+    transactionStartTime: null,
+    transactionTagId: null,
+    transactionBatteryCapacityKwh: null,
+    ...overrides,
+  };
+}
+
 function scenarioDefinition(id = "scenario-1"): ScenarioDefinition {
   return {
     id,
@@ -261,6 +285,150 @@ describe("RemoteChargePointService socket.io rpc", () => {
 
     ack.resolve({ ok: true, result: undefined });
     await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("sends CLI OCPP command RPC payloads", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+
+    const diagnostics = service.sendDiagnosticsStatusNotification(
+      "cp-1",
+      "Uploading",
+    );
+    const diagnosticsAck = nextAck();
+    expect(diagnosticsAck.request).toEqual({
+      cpId: "cp-1",
+      method: "diagnostics_status_notification",
+      params: { status: "Uploading" },
+    });
+    diagnosticsAck.resolve({ ok: true, result: undefined });
+    await expect(diagnostics).resolves.toBeUndefined();
+
+    const firmware = service.sendFirmwareStatusNotification(
+      "cp-1",
+      "Downloaded",
+    );
+    const firmwareAck = nextAck();
+    expect(firmwareAck.request).toEqual({
+      cpId: "cp-1",
+      method: "firmware_status_notification",
+      params: { status: "Downloaded" },
+    });
+    firmwareAck.resolve({ ok: true, result: undefined });
+    await expect(firmware).resolves.toBeUndefined();
+
+    const security = service.sendSecurityEventNotification(
+      "cp-1",
+      "SettingSystemTime",
+      "clock adjusted",
+    );
+    const securityAck = nextAck();
+    expect(securityAck.request).toEqual({
+      cpId: "cp-1",
+      method: "security_event_notification",
+      params: { type: "SettingSystemTime", techInfo: "clock adjusted" },
+    });
+    securityAck.resolve({ ok: true, result: undefined });
+    await expect(security).resolves.toBeUndefined();
+
+    const sign = service.sendSignCertificate("cp-1", "-----BEGIN CSR-----");
+    const signAck = nextAck();
+    expect(signAck.request).toEqual({
+      cpId: "cp-1",
+      method: "sign_certificate",
+      params: { csr: "-----BEGIN CSR-----" },
+    });
+    signAck.resolve({ ok: true, result: undefined });
+    await expect(sign).resolves.toBeUndefined();
+  });
+
+  it("reads EV and auto-meter settings from the status snapshot", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const evSettings = {
+      modelName: "Test EV",
+      batteryCapacityKwh: 64,
+      maxChargingPowerKw: 90,
+      initialSoc: 12,
+      targetSoc: 88,
+    };
+    const autoMeter = autoMeterConfig();
+
+    const evPromise = service.getEVSettings("cp-1", 1);
+    const evAck = nextAck();
+    expect(evAck.request).toEqual({
+      cpId: "cp-1",
+      method: "status",
+      params: {},
+    });
+    evAck.resolve({
+      ok: true,
+      result: {
+        ...statusWire("cp-1"),
+        connectors: [connectorWire(1, { evSettings })],
+      },
+    });
+    await expect(evPromise).resolves.toEqual(evSettings);
+
+    const autoPromise = service.getAutoMeterValueConfig("cp-1", 1);
+    const autoAck = nextAck();
+    expect(autoAck.request).toEqual({
+      cpId: "cp-1",
+      method: "status",
+      params: {},
+    });
+    autoAck.resolve({
+      ok: true,
+      result: {
+        ...statusWire("cp-1"),
+        connectors: [
+          connectorWire(1, {
+            autoMeterValueConfig: autoMeter as unknown as Record<
+              string,
+              unknown
+            >,
+          }),
+        ],
+      },
+    });
+    await expect(autoPromise).resolves.toEqual(autoMeter);
+  });
+
+  it("sends scenario file/template run RPC payloads", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+
+    const fileRun = service.runScenarioFile("cp-1", "/tmp/flow.json", {
+      connectorId: 2,
+    });
+    const fileAck = nextAck();
+    expect(fileAck.request).toEqual({
+      cpId: "cp-1",
+      method: "run_scenario_file",
+      params: { connector: 2, file: "/tmp/flow.json" },
+    });
+    fileAck.resolve({ ok: true, result: { scenarioId: "file-scenario" } });
+    await expect(fileRun).resolves.toEqual({ scenarioId: "file-scenario" });
+
+    const templateRun = service.runScenarioTemplate(
+      "cp-1",
+      "essential-cp-behavior",
+      { connectorId: 3, evSettings: { maxChargingPowerKw: 3 } },
+    );
+    const templateAck = nextAck();
+    expect(templateAck.request).toEqual({
+      cpId: "cp-1",
+      method: "run_scenario_template",
+      params: {
+        connector: 3,
+        templateId: "essential-cp-behavior",
+        evSettings: { maxChargingPowerKw: 3 },
+      },
+    });
+    templateAck.resolve({
+      ok: true,
+      result: { scenarioId: "template-scenario" },
+    });
+    await expect(templateRun).resolves.toEqual({
+      scenarioId: "template-scenario",
+    });
   });
 
   it("requests scenario templates through a cp-less rpc", async () => {

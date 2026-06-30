@@ -124,7 +124,10 @@ export const METHODS = {
     params: z.object({ type: STR_64K, techInfo: STR_64K.optional() }),
     result: ANY,
   },
-  sign_certificate: { params: EMPTY, result: ANY },
+  sign_certificate: {
+    params: z.object({ csr: STR_64K.optional() }),
+    result: ANY,
+  },
 
   // -- connector --
   update_connector_status: {

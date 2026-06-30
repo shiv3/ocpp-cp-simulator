@@ -153,7 +153,9 @@ export async function handleJsonCommand(
     }
 
     case "sign_certificate": {
-      await service.sendSignCertificate();
+      const csr =
+        params.csr === undefined ? undefined : requireString(params, "csr");
+      await service.sendSignCertificate(csr);
       return undefined;
     }
 

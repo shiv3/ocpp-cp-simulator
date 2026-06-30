@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 vi.mock("@socket.io/bun-engine", () => ({
   Server: class MockEngine {},
@@ -153,6 +156,129 @@ describe("socket.io rpc dispatch", () => {
 
     expect(store.value?.ChargePointID).toBe("cp-updated-again");
     expect(store.value?.basicAuthSettings.password).toBe("secret");
+  });
+
+  it("dispatches A1.1d CP commands through the jsonMode whitelist", async () => {
+    const bus = new EventBus();
+    const service = {
+      sendDiagnosticsStatusNotification: vi.fn(),
+      sendFirmwareStatusNotification: vi.fn(),
+      sendSecurityEventNotification: vi.fn(),
+      sendSignCertificate: vi.fn().mockResolvedValue(undefined),
+      loadScenario: vi.fn().mockReturnValue("file-scenario"),
+      loadScenarioTemplate: vi.fn().mockReturnValue("template-scenario"),
+      runScenario: vi.fn(),
+    };
+    const registry = {
+      get: vi.fn((cpId: string) => (cpId === "cp-alpha" ? service : undefined)),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-rpc-scenario-"));
+    const scenarioFile = join(tmpDir, "scenario.json");
+    writeFileSync(
+      scenarioFile,
+      JSON.stringify({
+        id: "from-file",
+        name: "From file",
+        targetType: "connector",
+        targetId: 1,
+        nodes: [],
+        edges: [],
+        createdAt: "2026-06-30T00:00:00.000Z",
+        updatedAt: "2026-06-30T00:00:00.000Z",
+      }),
+    );
+
+    try {
+      registerSocketHandlers(io as never, {
+        registry: registry as never,
+        bus,
+        database: null,
+      });
+      io.connect(socket);
+
+      expect(
+        await socket.emitRpc({
+          cpId: "cp-alpha",
+          method: "diagnostics_status_notification",
+          params: { status: "Uploading" },
+        }),
+      ).toMatchObject({ ok: true });
+      expect(service.sendDiagnosticsStatusNotification).toHaveBeenCalledWith(
+        "Uploading",
+      );
+
+      expect(
+        await socket.emitRpc({
+          cpId: "cp-alpha",
+          method: "firmware_status_notification",
+          params: { status: "Downloaded" },
+        }),
+      ).toMatchObject({ ok: true });
+      expect(service.sendFirmwareStatusNotification).toHaveBeenCalledWith(
+        "Downloaded",
+      );
+
+      expect(
+        await socket.emitRpc({
+          cpId: "cp-alpha",
+          method: "security_event_notification",
+          params: { type: "SettingSystemTime", techInfo: "clock adjusted" },
+        }),
+      ).toMatchObject({ ok: true });
+      expect(service.sendSecurityEventNotification).toHaveBeenCalledWith(
+        "SettingSystemTime",
+        "clock adjusted",
+      );
+
+      expect(
+        await socket.emitRpc({
+          cpId: "cp-alpha",
+          method: "sign_certificate",
+          params: { csr: "-----BEGIN CSR-----" },
+        }),
+      ).toMatchObject({ ok: true });
+      expect(service.sendSignCertificate).toHaveBeenCalledWith(
+        "-----BEGIN CSR-----",
+      );
+
+      expect(
+        await socket.emitRpc({
+          cpId: "cp-alpha",
+          method: "run_scenario_file",
+          params: { connector: 1, file: scenarioFile },
+        }),
+      ).toMatchObject({ ok: true, result: { scenarioId: "file-scenario" } });
+      expect(service.loadScenario).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ id: "from-file" }),
+      );
+      expect(service.runScenario).toHaveBeenCalledWith(1, "file-scenario");
+
+      expect(
+        await socket.emitRpc({
+          cpId: "cp-alpha",
+          method: "run_scenario_template",
+          params: {
+            connector: 2,
+            templateId: "essential-cp-behavior",
+            evSettings: { maxChargingPowerKw: 3 },
+          },
+        }),
+      ).toMatchObject({
+        ok: true,
+        result: { scenarioId: "template-scenario" },
+      });
+      expect(service.loadScenarioTemplate).toHaveBeenCalledWith(
+        "essential-cp-behavior",
+        2,
+        { maxChargingPowerKw: 3 },
+      );
+      expect(service.runScenario).toHaveBeenCalledWith(2, "template-scenario");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 

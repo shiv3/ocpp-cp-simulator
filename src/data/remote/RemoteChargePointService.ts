@@ -6,6 +6,7 @@ import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
   CreateChargePointParams,
+  ScenarioRunOptions,
   ScenarioListItem,
   ScenarioTemplateInfo,
   StoredLogEntry,
@@ -741,6 +742,37 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async sendDiagnosticsStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "diagnostics_status_notification", { status });
+  }
+
+  async sendFirmwareStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "firmware_status_notification", { status });
+  }
+
+  async sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "security_event_notification", {
+      type,
+      ...(techInfo !== undefined ? { techInfo } : {}),
+    });
+  }
+
+  async sendSignCertificate(id: string, csr?: string): Promise<void> {
+    await this.runCpRpc(id, "sign_certificate", {
+      ...(csr !== undefined ? { csr } : {}),
+    });
+  }
+
   async setMeterValue(
     id: string,
     connectorId: number,
@@ -771,6 +803,15 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async getEVSettings(
+    id: string,
+    connectorId: number,
+  ): Promise<EVSettings | null> {
+    const snapshot = await this.getChargePoint(id);
+    const connector = snapshot?.connectors.find((c) => c.id === connectorId);
+    return connector?.evSettings ?? null;
+  }
+
   async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
     // The daemon's connectors never see the browser-only Default EV Settings,
     // so push it onto every connector of every known charge point (#107).
@@ -798,6 +839,15 @@ export class RemoteChargePointService implements ChargePointService {
       connector: connectorId,
       config: config as unknown as Record<string, unknown>,
     });
+  }
+
+  async getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    const snapshot = await this.getChargePoint(id);
+    const connector = snapshot?.connectors.find((c) => c.id === connectorId);
+    return connector?.autoMeterValueConfig ?? null;
   }
 
   async getAutoMeterConfig(
@@ -1030,6 +1080,35 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async runScenarioFile(
+    id: string,
+    path: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const data = await this.runCpRpc(id, "run_scenario_file", {
+      connector: opts.connectorId ?? 1,
+      file: path,
+    });
+    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+  }
+
+  async runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const data = await this.runCpRpc(id, "run_scenario_template", {
+      connector: opts.connectorId ?? 1,
+      templateId,
+      ...(opts.evSettings !== undefined
+        ? {
+            evSettings: opts.evSettings as unknown as Record<string, unknown>,
+          }
+        : {}),
+    });
+    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+  }
+
   async stopScenario(
     id: string,
     connectorId: number,
@@ -1170,7 +1249,7 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async createChargePoint(params: CreateChargePointParams): Promise<void> {
-    await this.rpc("cp.create", params);
+    await this.rpc("cp.create", params as Params<"cp.create">);
   }
 
   async updateChargePoint(params: CreateChargePointParams): Promise<void> {

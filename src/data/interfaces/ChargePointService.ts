@@ -20,6 +20,7 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 
 export interface ConnectorSnapshot {
   id: number;
@@ -274,6 +275,13 @@ export interface ChargePointService {
    *  by the Download Logs button — the returned shape is what the JSONL
    *  file ends up containing, one JSON object per line. */
   listStoredLogs?(cpId: string): Promise<StoredLogEntry[]>;
+
+  // Persisted simulator config. Reads may be redacted over wire adapters.
+  loadConfig(): Promise<WireSimulatorConfig | null>;
+  saveConfig(config: SimulatorConfigInput | null): Promise<void>;
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void;
 
   // Lifecycle
   connect(id: string): Promise<void>;

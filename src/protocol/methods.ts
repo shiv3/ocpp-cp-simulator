@@ -16,7 +16,12 @@ import {
   STR_64K,
   boundedObject,
 } from "./limits";
-import { cpListItemSchema, statusWireSchema } from "./events";
+import {
+  cpListItemSchema,
+  simulatorConfigInputSchema,
+  statusWireSchema,
+  wireSimulatorConfigSchema,
+} from "./events";
 import { subscribeResultSchema } from "./envelope";
 
 const CONN_POS = z.number().int().min(1);
@@ -253,6 +258,14 @@ export const METHODS = {
   },
   "logs.clear": { params: z.object({ cpId: STR_64K }), result: ANY },
   "state.reset": { params: EMPTY, result: ANY },
+  "config.get": {
+    params: EMPTY,
+    result: wireSimulatorConfigSchema.nullable(),
+  },
+  "config.save": {
+    params: z.object({ config: simulatorConfigInputSchema.nullable() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "scenario.templates": {
     params: EMPTY,
     result: ARRAY_1000(scenarioTemplateInfoSchema),
@@ -274,6 +287,8 @@ export const EXPLICIT_METHODS = [
   "logs.get",
   "logs.clear",
   "state.reset",
+  "config.get",
+  "config.save",
   "scenario.templates",
   "server.shutdown",
   "events.subscribe",

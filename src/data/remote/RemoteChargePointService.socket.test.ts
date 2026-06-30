@@ -256,6 +256,42 @@ describe("RemoteChargePointService socket.io rpc", () => {
     await expect(promise).resolves.toEqual(templates);
   });
 
+  it("loads redacted config through config.get rpc", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const promise = service.loadConfig();
+    const ack = nextAck();
+    const config = {
+      wsURL: "ws://example.test/ocpp",
+      ChargePointID: "cp-1",
+      connectorNumber: 1,
+      tagID: "TAG-1",
+      ocppVersion: "OCPP-1.6J",
+      basicAuthSettings: {
+        enabled: true,
+        username: "user",
+      },
+      autoMeterValueSetting: {
+        enabled: false,
+        interval: 30,
+        value: 10,
+      },
+      Experimental: null,
+      BootNotification: {
+        chargePointVendor: "Vendor",
+        chargePointModel: "Model",
+      },
+    };
+
+    expect(ack.request).toEqual({
+      method: "config.get",
+      params: {},
+    });
+
+    ack.resolve({ ok: true, result: config });
+    await expect(promise).resolves.toEqual(config);
+    expect("password" in config.basicAuthSettings).toBe(false);
+  });
+
   it("rejects pending rpc calls on disconnect", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
     const promise = service.connect("cp-1");

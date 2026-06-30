@@ -38,8 +38,10 @@ import {
   type RpcAck,
   type RpcErrorCode,
   type RpcMethod,
+  type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
+  type WireSimulatorConfig,
 } from "../../protocol";
 
 type CpEventEnvelope = Extract<EventEnvelope, { kind: "cp" }>;
@@ -1083,6 +1085,30 @@ export class RemoteChargePointService implements ChargePointService {
   async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
     const rows = await this.rpc("logs.get", { cpId });
     return Array.isArray(rows) ? (rows as StoredLogEntry[]) : [];
+  }
+
+  async loadConfig(): Promise<WireSimulatorConfig | null> {
+    return this.rpc("config.get", {});
+  }
+
+  async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
+    await this.rpc("config.save", { config });
+  }
+
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void {
+    let active = true;
+    void this.loadConfig()
+      .then((config) => {
+        if (active) handler(config);
+      })
+      .catch((err) => {
+        console.warn("[RemoteChargePointService] config subscribe failed", err);
+      });
+    return () => {
+      active = false;
+    };
   }
 
   dispose(): void {

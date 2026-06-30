@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { redactSensitiveValue } from "../cp/shared/redaction";
-import { STR_64K } from "./limits";
+import { OBJ_MAX_BYTES, STR_64K, boundedObject } from "./limits";
 import type { OcppSecurityProfile } from "../cp/infrastructure/transport/wsUrlWithBasic";
 
 // ---------------------------------------------------------------------------
@@ -124,6 +124,98 @@ export const wireCpConfigSchema = z
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// WireSimulatorConfig — persisted simulator config reads (no password)
+// ---------------------------------------------------------------------------
+
+const wireSimulatorBootNotificationSchema = z
+  .object({
+    chargePointVendor: STR_64K,
+    chargePointModel: STR_64K,
+    chargePointSerialNumber: STR_64K.optional(),
+    chargeBoxSerialNumber: STR_64K.optional(),
+    firmwareVersion: STR_64K.optional(),
+    iccid: STR_64K.optional(),
+    imsi: STR_64K.optional(),
+    meterType: STR_64K.optional(),
+    meterSerialNumber: STR_64K.optional(),
+  })
+  .strict()
+  .nullable();
+
+const wireBasicAuthSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    username: STR_64K,
+  })
+  .strict();
+
+const simulatorConfigBaseSchema = z
+  .object({
+    wsURL: STR_64K,
+    ChargePointID: STR_64K,
+    connectorNumber: z.number().int().min(0),
+    tagID: STR_64K,
+    ocppVersion: STR_64K,
+    basicAuthSettings: wireBasicAuthSettingsSchema,
+    autoMeterValueSetting: z
+      .object({
+        enabled: z.boolean(),
+        interval: z.number(),
+        value: z.number(),
+      })
+      .strict(),
+    Experimental: z
+      .object({
+        ChargePointIDs: z
+          .array(
+            z
+              .object({
+                ChargePointID: STR_64K,
+                ConnectorNumber: z.number().int().min(0),
+              })
+              .strict(),
+          )
+          .max(1_000),
+        TagIDs: z.array(STR_64K).max(1_000),
+      })
+      .strict()
+      .nullable(),
+    BootNotification: wireSimulatorBootNotificationSchema,
+  })
+  .strict();
+
+export const wireSimulatorConfigSchema = simulatorConfigBaseSchema;
+export type WireSimulatorConfig = z.infer<typeof wireSimulatorConfigSchema>;
+
+export const simulatorConfigInputSchema = simulatorConfigBaseSchema.extend({
+  basicAuthSettings: wireBasicAuthSettingsSchema
+    .extend({ password: STR_64K.optional() })
+    .strict(),
+  BootNotification: boundedObject(OBJ_MAX_BYTES)
+    .nullable()
+    .pipe(wireSimulatorBootNotificationSchema),
+});
+export type SimulatorConfigInput = z.infer<typeof simulatorConfigInputSchema>;
+
+interface FullSimulatorConfig extends SimulatorConfigInput {
+  basicAuthSettings: SimulatorConfigInput["basicAuthSettings"] & {
+    password?: string;
+  };
+}
+
+export function redactSimulatorConfig(
+  config: FullSimulatorConfig,
+): WireSimulatorConfig {
+  return {
+    ...config,
+    basicAuthSettings: {
+      enabled: config.basicAuthSettings.enabled,
+      username: config.basicAuthSettings.username,
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Status (per-CP snapshot) — config redacted via WireCpConfig

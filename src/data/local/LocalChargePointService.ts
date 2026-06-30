@@ -18,6 +18,7 @@ import type {
   ScenarioTemplateInfo,
   StoredLogEntry,
 } from "../interfaces/ChargePointService";
+import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import {
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
@@ -45,6 +46,9 @@ import {
   getTemplateById,
 } from "../../utils/scenarioTemplates";
 import { UnsupportedFeatureError as DomainUnsupportedFeatureError } from "../../cp/domain/errors/UnsupportedFeatureError";
+import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
+import { mergeWriteOnlyConfigSecrets } from "../configPort";
 
 function toConnectorSnapshot(
   connector: ReturnType<ChargePoint["getConnector"]>,
@@ -134,7 +138,11 @@ export class LocalChargePointService implements ChargePointService {
   /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
    *  and per-connector availability. Passed through to every ChargePoint we
    *  build. `null` keeps everything in-memory (test / boot-before-DB). */
-  constructor(private readonly database: Database | null = null) {}
+  private readonly configRepository: ConfigRepository;
+
+  constructor(private readonly database: Database | null = null) {
+    this.configRepository = new SqliteConfigRepository(database);
+  }
 
   registerChargePoint(chargePoint: ChargePoint): void {
     if (this.chargePoints.has(chargePoint.id)) {
@@ -232,6 +240,23 @@ export class LocalChargePointService implements ChargePointService {
       cpId,
       message: r.message,
     }));
+  }
+
+  async loadConfig(): Promise<WireSimulatorConfig | null> {
+    return this.configRepository.load();
+  }
+
+  async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
+    const existing = await this.configRepository.load();
+    await this.configRepository.save(
+      mergeWriteOnlyConfigSecrets(config, existing),
+    );
+  }
+
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void {
+    return this.configRepository.subscribe(handler);
   }
 
   async connect(id: string): Promise<void> {

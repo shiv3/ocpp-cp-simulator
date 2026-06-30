@@ -17,6 +17,7 @@ import {
   RPC_TIMEOUT_MS,
   RpcFailure,
   isRpcMethod,
+  redactSimulatorConfig,
   registryCpToWire,
   rpcRequestSchema,
   statusToWire,
@@ -24,6 +25,7 @@ import {
   type CpListItem,
   type RpcAck,
   type RpcErrorCode,
+  type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
 } from "../../protocol";
@@ -71,6 +73,7 @@ export interface SocketIoDeps {
     readonly username: string;
     readonly password: string;
   } | null;
+  readonly configRepository?: SocketConfigRepository;
   readonly registryEvents?: RegistryEventBridge | null;
 }
 
@@ -87,6 +90,12 @@ type FullCp = Parameters<typeof registryCpToWire>[0];
 type RpcMethod = keyof typeof METHODS;
 
 const EXPLICIT_METHOD_SET = new Set<string>(EXPLICIT_METHODS);
+const CONFIG_KEY = "global_config";
+
+export interface SocketConfigRepository {
+  load(): Promise<SimulatorConfigInput | null>;
+  save(config: SimulatorConfigInput | null): Promise<void>;
+}
 
 export function isSocketIoPath(pathname: string): boolean {
   return pathname === "/socket.io" || pathname.startsWith(SOCKET_IO_PATH);
@@ -110,7 +119,15 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
   const registryEvents = deps
     ? createRegistryEventBridge(io, { registry: deps.registry, bus: deps.bus })
     : null;
-  const runtimeDeps = deps ? { ...deps, registryEvents } : undefined;
+  const runtimeDeps = deps
+    ? {
+        ...deps,
+        configRepository:
+          deps.configRepository ??
+          createSocketConfigRepository(deps.database ?? null),
+        registryEvents,
+      }
+    : undefined;
   registerSocketHandlers(io, runtimeDeps);
 
   const handler = engine.handler();
@@ -141,10 +158,18 @@ export function registerSocketHandlers(
   io: SocketIoServer,
   deps?: SocketIoDeps,
 ): void {
-  registerSocketAuth(io, deps?.webConsoleBasicAuth ?? null);
+  const runtimeDeps =
+    deps && !deps.configRepository
+      ? {
+          ...deps,
+          configRepository: createSocketConfigRepository(deps.database ?? null),
+        }
+      : deps;
+
+  registerSocketAuth(io, runtimeDeps?.webConsoleBasicAuth ?? null);
 
   io.on("connection", (socket) => {
-    if (!deps) return;
+    if (!runtimeDeps) return;
 
     const state: SocketRpcState = {
       inFlight: 0,
@@ -155,13 +180,13 @@ export function registerSocketHandlers(
 
     socket.on("rpc", (request: unknown, ack?: RpcAckFn) => {
       if (typeof ack !== "function") return;
-      void handleRpc(socket, state, deps, request, ack);
+      void handleRpc(socket, state, runtimeDeps, request, ack);
     });
 
     socket.on("events.subscribe", (request: unknown, ack?: DirectAckFn) => {
       if (typeof ack !== "function") return;
       try {
-        ack(subscribeSocket(socket, state, deps, request));
+        ack(subscribeSocket(socket, state, runtimeDeps, request));
       } catch (err) {
         ack(directError(err));
       }
@@ -266,6 +291,10 @@ async function dispatchValidatedRpc(
       return clearLogs(deps, rawParams);
     case "state.reset":
       return resetState(deps);
+    case "config.get":
+      return getConfig(deps);
+    case "config.save":
+      return saveConfig(deps, rawParams);
     case "scenario.templates":
       return getScenarioTemplates();
     case "server.shutdown":
@@ -417,6 +446,24 @@ function resetState(deps: SocketIoDeps): { ok: true } {
   return { ok: true };
 }
 
+async function getConfig(deps: SocketIoDeps): Promise<unknown> {
+  const config = await getConfigRepository(deps).load();
+  return config ? redactSimulatorConfig(config) : null;
+}
+
+async function saveConfig(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params = METHODS["config.save"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  const repository = getConfigRepository(deps);
+  const existing = await repository.load();
+  await repository.save(mergeSocketConfigSecrets(params.data.config, existing));
+  return { ok: true };
+}
+
 function getScenarioTemplates(): ReadonlyArray<{
   readonly id: string;
   readonly name: string;
@@ -434,6 +481,75 @@ function shutdownServer(deps: SocketIoDeps): { ok: true } {
     setTimeout(() => deps.requestShutdown?.(), 100);
   }
   return { ok: true };
+}
+
+function getConfigRepository(deps: SocketIoDeps): SocketConfigRepository {
+  return (
+    deps.configRepository ?? createSocketConfigRepository(deps.database ?? null)
+  );
+}
+
+function createSocketConfigRepository(
+  db: Database | null,
+): SocketConfigRepository {
+  let cached: SimulatorConfigInput | null = null;
+  let cacheValid = false;
+
+  return {
+    async load() {
+      if (!db) return cacheValid ? cached : null;
+      const row = db.get<{ value: string }>(
+        "SELECT value FROM kv WHERE key = ?",
+        [CONFIG_KEY],
+      );
+      if (!row) return null;
+      try {
+        return METHODS["config.save"].params.parse({
+          config: JSON.parse(row.value),
+        }).config;
+      } catch {
+        return null;
+      }
+    },
+    async save(config) {
+      if (!db) {
+        cached = config;
+        cacheValid = true;
+        return;
+      }
+      if (config === null) {
+        db.run("DELETE FROM kv WHERE key = ?", [CONFIG_KEY]);
+      } else {
+        db.run(
+          "INSERT INTO kv (key, value) VALUES (?, ?) " +
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+          [CONFIG_KEY, JSON.stringify(config)],
+        );
+      }
+      await db.flush?.();
+    },
+  };
+}
+
+function mergeSocketConfigSecrets(
+  next: SimulatorConfigInput | null,
+  existing: SimulatorConfigInput | null,
+): SimulatorConfigInput | null {
+  if (next === null) return null;
+
+  const suppliedPassword = next.basicAuthSettings.password;
+  const password =
+    typeof suppliedPassword === "string" && suppliedPassword.length > 0
+      ? suppliedPassword
+      : (existing?.basicAuthSettings.password ?? "");
+
+  return {
+    ...next,
+    basicAuthSettings: {
+      ...next.basicAuthSettings,
+      password,
+    },
+  };
 }
 
 function subscribeSocket(

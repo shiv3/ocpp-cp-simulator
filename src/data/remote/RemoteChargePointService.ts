@@ -867,10 +867,8 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
-    const list = await this.listChargePoints().catch(() => []);
-    if (list.length === 0) return [];
-    const data = await this.runCpRpc(list[0].id, "list_scenario_templates");
-    return (data as ScenarioTemplateInfo[]) ?? [];
+    const data = await this.rpc("scenario.templates", {});
+    return data ?? [];
   }
 
   async loadScenarioTemplate(

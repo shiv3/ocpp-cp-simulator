@@ -62,11 +62,11 @@ describe("method table coverage (Step 3c)", () => {
     }
   });
 
-  it("includes all 10 explicit non-jsonMode ops", () => {
+  it("includes all explicit non-jsonMode ops", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(10);
+    expect(EXPLICIT_METHODS).toHaveLength(11);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {

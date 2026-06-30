@@ -1,7 +1,7 @@
 // The rpc method table — the single typed contract for every client→server
 // call. CP-command keys are the jsonMode command ids VERBATIM (identity
 // dispatch: the server routes them straight through `handleJsonCommand`).
-// The ~10 dotted keys are the non-jsonMode explicit ops.
+// The dotted keys are the non-jsonMode explicit ops.
 //
 // Connector rule (PB3): only `update_connector_status` accepts connector 0
 // (`requireNonNegativeInt`); every other connector-taking command requires
@@ -56,6 +56,12 @@ const cpParamsBaseSchema = z.object({
     })
     .optional(),
   bootNotification: OBJ().nullable().optional(),
+});
+
+const scenarioTemplateInfoSchema = z.object({
+  id: STR_64K,
+  name: STR_64K,
+  description: STR_64K,
 });
 
 /** create CP — password is accepted here as WRITE-ONLY input. */
@@ -247,6 +253,10 @@ export const METHODS = {
   },
   "logs.clear": { params: z.object({ cpId: STR_64K }), result: ANY },
   "state.reset": { params: EMPTY, result: ANY },
+  "scenario.templates": {
+    params: EMPTY,
+    result: ARRAY_1000(scenarioTemplateInfoSchema),
+  },
   "server.shutdown": { params: EMPTY, result: ANY },
   "events.subscribe": {
     params: z.object({ scope: STR_64K }),
@@ -255,7 +265,7 @@ export const METHODS = {
   "events.unsubscribe": { params: z.object({ scope: STR_64K }), result: ANY },
 } satisfies Record<string, { params: z.ZodTypeAny; result: z.ZodTypeAny }>;
 
-/** The 10 explicit (non-jsonMode) op ids — routed to dedicated server handlers. */
+/** The explicit (non-jsonMode) op ids — routed to dedicated server handlers. */
 export const EXPLICIT_METHODS = [
   "cp.list",
   "cp.create",
@@ -264,6 +274,7 @@ export const EXPLICIT_METHODS = [
   "logs.get",
   "logs.clear",
   "state.reset",
+  "scenario.templates",
   "server.shutdown",
   "events.subscribe",
   "events.unsubscribe",

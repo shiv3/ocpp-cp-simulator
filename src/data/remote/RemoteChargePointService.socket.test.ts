@@ -235,6 +235,27 @@ describe("RemoteChargePointService socket.io rpc", () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
+  it("requests scenario templates through a cp-less rpc", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const promise = service.getScenarioTemplates();
+    const ack = nextAck();
+    const templates = [
+      {
+        id: "essential-cp-behavior",
+        name: "Essential CP Behavior",
+        description: "demo template",
+      },
+    ];
+
+    expect(ack.request).toEqual({
+      method: "scenario.templates",
+      params: {},
+    });
+
+    ack.resolve({ ok: true, result: templates });
+    await expect(promise).resolves.toEqual(templates);
+  });
+
   it("rejects pending rpc calls on disconnect", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
     const promise = service.connect("cp-1");

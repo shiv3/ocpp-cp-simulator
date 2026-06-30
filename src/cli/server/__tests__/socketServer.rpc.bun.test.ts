@@ -105,6 +105,27 @@ describe("socket.io rpc dispatch", () => {
     }
   });
 
+  it("returns scenario templates without a CP", async () => {
+    const server = await startTestServer();
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await emitRpc(socket, {
+        method: "scenario.templates",
+        params: {},
+      });
+
+      expect(ack.ok).toBe(true);
+      expect(server.registry.list()).toHaveLength(0);
+      expect(ack.result.length).toBeGreaterThan(0);
+      expect(
+        ack.result.map((template: { id: string }) => template.id),
+      ).toContain("essential-cp-behavior");
+    } finally {
+      socket.disconnect();
+    }
+  });
+
   it("preserves security secrets and TLS material on redacted cp.update", async () => {
     const server = await serverWithCp();
     const socket = await connectTestClient(server);

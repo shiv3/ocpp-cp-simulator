@@ -42,6 +42,7 @@ import {
   createRegistryEventBridge,
   type RegistryEventBridge,
 } from "./registryEvents";
+import { scenarioTemplates } from "../../utils/scenarioTemplates";
 
 export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
@@ -265,6 +266,8 @@ async function dispatchValidatedRpc(
       return clearLogs(deps, rawParams);
     case "state.reset":
       return resetState(deps);
+    case "scenario.templates":
+      return getScenarioTemplates();
     case "server.shutdown":
       return shutdownServer(deps);
     case "events.subscribe":
@@ -412,6 +415,18 @@ function resetState(deps: SocketIoDeps): { ok: true } {
   }
   deps.registryEvents?.emitReset();
   return { ok: true };
+}
+
+function getScenarioTemplates(): ReadonlyArray<{
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+}> {
+  return scenarioTemplates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    description: template.description,
+  }));
 }
 
 function shutdownServer(deps: SocketIoDeps): { ok: true } {

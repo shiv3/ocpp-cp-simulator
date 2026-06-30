@@ -310,7 +310,7 @@ export function LogViewer({
                       </div>
                       <Badge
                         variant="outline"
-                        className="ml-2 text-[10px] px-1.5 py-0"
+                        className="ml-2 text-xs px-1.5 py-0"
                       >
                         {stats.levelCounts[level] || 0}
                       </Badge>
@@ -361,7 +361,7 @@ export function LogViewer({
                       </div>
                       <Badge
                         variant="outline"
-                        className="ml-2 text-[10px] px-1.5 py-0"
+                        className="ml-2 text-xs px-1.5 py-0"
                       >
                         {stats.typeCounts[type] || 0}
                       </Badge>
@@ -419,7 +419,7 @@ export function LogViewer({
                           </div>
                           <Badge
                             variant="outline"
-                            className="ml-2 text-[10px] px-1.5 py-0"
+                            className="ml-2 text-xs px-1.5 py-0"
                           >
                             {stats.connectorCounts.get(value) || 0}
                           </Badge>

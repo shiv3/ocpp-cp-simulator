@@ -24,7 +24,7 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({
     : "text-red-700 dark:text-red-300";
 
   // Show the Start trigger config inline so the operator sees at a glance
-  // what fires the scenario without opening NodeConfigPanel. Missing
+  // what fires the scenario without opening the config panel. Missing
   // `triggerOn` defaults to "connect" (matches the auto-start gate).
   const startData = isStart ? (data as StartNodeData | undefined) : undefined;
   const triggerOn = startData?.triggerOn ?? "connect";

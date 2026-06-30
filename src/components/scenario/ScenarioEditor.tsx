@@ -47,6 +47,11 @@ import {
   applyCurveConfigToMeterNode,
 } from "./meterValueNodeConfig";
 import {
+  NODE_FORM_REGISTRY,
+  isScenarioNodeType,
+} from "./forms/nodeFormRegistry";
+import type { NodeFormData } from "./forms/types";
+import {
   createLatestWinsSaver,
   persistEditorScenario,
   retargetScenarioToConnector,
@@ -269,7 +274,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [executionContext, setExecutionContext] =
     useState<ScenarioExecutionContext | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [formData, setFormData] = useState<NodeFormData>({});
   // Connector status / meter / transactionId / CP status used to drive the
   // now-removed toolbar status strip. We still take the setters from useState
   // so the existing event handlers don't need rewiring, but the values
@@ -1281,29 +1286,38 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     ],
   );
 
-  // Handle node double-click to open config panel
+  // Handle node double-click to open config panel.
+  // Start/End are intentionally read-only from the config panel; Start's
+  // trigger summary is shown inline on the node face.
   const handleNodeDoubleClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      // Don't open config for start/end nodes
+      if (!isScenarioNodeType(node.type)) {
+        return;
+      }
+
       if (
         node.type === ScenarioNodeType.START ||
         node.type === ScenarioNodeType.END
       ) {
         return;
       }
+
+      const entry = NODE_FORM_REGISTRY[node.type];
       setSelectedNode(node);
-      setFormData({ ...node.data });
+      setFormData(entry.nodeDataToForm(node.data));
     },
     [],
   );
 
   // Handle node config save
   const handleNodeConfigSave = useCallback(
-    (nodeId: string, newData: Record<string, unknown>) => {
+    (nodeId: string, nodeType: ScenarioNodeType, newData: NodeFormData) => {
+      const entry = NODE_FORM_REGISTRY[nodeType];
+      const nodeData = entry.formToNodeData(newData);
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
-            return { ...n, data: { ...n.data, ...newData } };
+            return { ...n, data: nodeData };
           }
           return n;
         }),
@@ -1366,614 +1380,23 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     }
   };
 
-  // Get node type display name
-  const getNodeTypeName = (type: string) => {
-    switch (type) {
-      case ScenarioNodeType.STATUS_CHANGE:
-        return "Status Change";
-      case ScenarioNodeType.TRANSACTION:
-        return "Transaction";
-      case ScenarioNodeType.METER_VALUE:
-        return "Meter Value";
-      case ScenarioNodeType.DELAY:
-        return "Delay";
-      case ScenarioNodeType.NOTIFICATION:
-        return "Notification";
-      case ScenarioNodeType.CONNECTOR_PLUG:
-        return "Connector Plug";
-      case ScenarioNodeType.REMOTE_START_TRIGGER:
-        return "Remote Start Trigger";
-      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
-        return "Remote Stop Trigger";
-      case ScenarioNodeType.STATUS_TRIGGER:
-        return "Status Trigger";
-      default:
-        return "Node";
-    }
-  };
+  const getNodeTypeName = (type: string | undefined) =>
+    isScenarioNodeType(type) ? NODE_FORM_REGISTRY[type].title : "Node";
 
-  // Render node config form based on type
+  // Render node config form from the exhaustive registry.
   const renderNodeConfigForm = () => {
-    if (!selectedNode) return null;
+    if (!selectedNode || !isScenarioNodeType(selectedNode.type)) return null;
 
-    switch (selectedNode.type) {
-      case ScenarioNodeType.STATUS_CHANGE:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Status
-              </label>
-              <select
-                className="input-base w-full text-sm"
-                value={formData.status || OCPPStatus.Available}
-                onChange={(e) =>
-                  setFormData({ ...formData, status: e.target.value })
-                }
-              >
-                {Object.values(OCPPStatus).map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        );
+    const entry = NODE_FORM_REGISTRY[selectedNode.type];
+    const NodeForm = entry.Component;
 
-      case ScenarioNodeType.TRANSACTION:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Action
-              </label>
-              <select
-                className="input-base w-full text-sm"
-                value={formData.action || "start"}
-                onChange={(e) =>
-                  setFormData({ ...formData, action: e.target.value })
-                }
-              >
-                <option value="start">Start Transaction</option>
-                <option value="stop">Stop Transaction</option>
-              </select>
-            </div>
-            {formData.action === "start" && (
-              <div>
-                <label className="block text-xs font-semibold text-primary mb-1">
-                  Tag ID
-                </label>
-                <input
-                  type="text"
-                  className="input-base w-full text-sm"
-                  value={formData.tagId || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, tagId: e.target.value })
-                  }
-                  placeholder="RFID123456"
-                />
-              </div>
-            )}
-          </div>
-        );
-
-      case ScenarioNodeType.METER_VALUE:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Initial Value (Wh)
-              </label>
-              <input
-                type="number"
-                className="input-base w-full text-sm"
-                value={formData.value || 0}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    value: parseInt(e.target.value) || 0,
-                  })
-                }
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="sendMessage"
-                checked={formData.sendMessage || false}
-                onChange={(e) =>
-                  setFormData({ ...formData, sendMessage: e.target.checked })
-                }
-                className="w-4 h-4"
-              />
-              <label
-                htmlFor="sendMessage"
-                className="text-xs font-semibold text-primary"
-              >
-                Send MeterValue Message
-              </label>
-            </div>
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="checkbox"
-                  id="autoIncrement"
-                  checked={formData.autoIncrement || false}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      autoIncrement: e.target.checked,
-                    })
-                  }
-                  className="w-4 h-4"
-                />
-                <label
-                  htmlFor="autoIncrement"
-                  className="text-xs font-semibold text-primary"
-                >
-                  Auto Increment
-                </label>
-              </div>
-              {formData.autoIncrement && (
-                <div className="ml-6 space-y-3">
-                  {/* Stop mode toggle. "manual" reads maxTime/maxValue
-                      from this node; "evSettings" derives the stop point
-                      from the scenario's EV settings. */}
-                  <div>
-                    <label className="block text-xs font-semibold text-primary mb-1">
-                      Stop Mode
-                    </label>
-                    <select
-                      className="input-base w-full text-sm"
-                      value={(formData.stopMode as string) || "manual"}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          stopMode: e.target.value as "manual" | "evSettings",
-                        })
-                      }
-                    >
-                      <option value="manual">
-                        Manual (use maxTime / maxValue below)
-                      </option>
-                      <option value="evSettings">
-                        EV Settings (delivered kWh from EV)
-                      </option>
-                    </select>
-                    {formData.stopMode === "evSettings" ? (
-                      <p className="mt-1 text-[11px] text-gray-700 dark:text-gray-300 leading-snug">
-                        Stops when delivered kWh ≥ capacity × (target − initial)
-                        / 100. Uses the scenario's EV settings (above) or the
-                        connector's current EV state if the scenario doesn't
-                        override.
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {/* Manual-mode caps. Hidden in EV-settings mode. */}
-                  {formData.stopMode !== "evSettings" ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Increment Interval (s)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-sm"
-                          value={(formData.incrementInterval as number) ?? ""}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              incrementInterval:
-                                e.target.value === ""
-                                  ? undefined
-                                  : parseInt(e.target.value, 10),
-                            })
-                          }
-                          placeholder="10"
-                          min={1}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Increment Amount (Wh)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-sm"
-                          value={(formData.incrementAmount as number) ?? ""}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              incrementAmount:
-                                e.target.value === ""
-                                  ? undefined
-                                  : parseInt(e.target.value, 10),
-                            })
-                          }
-                          placeholder="1000"
-                          min={1}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Max Time (s, 0=∞)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-sm"
-                          value={(formData.maxTime as number) ?? ""}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              maxTime:
-                                e.target.value === ""
-                                  ? undefined
-                                  : parseInt(e.target.value, 10),
-                            })
-                          }
-                          placeholder="0"
-                          min={0}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Max Value (Wh, 0=∞)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-sm"
-                          value={(formData.maxValue as number) ?? ""}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              maxValue:
-                                e.target.value === ""
-                                  ? undefined
-                                  : parseInt(e.target.value, 10),
-                            })
-                          }
-                          placeholder="0"
-                          min={0}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
-                    <button
-                      onClick={() => setIsCurveModalOpen(true)}
-                      className="btn-primary text-sm w-full"
-                    >
-                      ⚙️ Configure Auto Increment Curve
-                    </button>
-                    <p className="text-xs text-muted mt-1">
-                      {formData.curvePoints && formData.curvePoints.length > 0
-                        ? `Configured with ${formData.curvePoints.length} curve points`
-                        : "Optional: configure meter value auto-increment curve"}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-
-      case ScenarioNodeType.DELAY:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Delay (seconds)
-              </label>
-              <input
-                type="number"
-                className="input-base w-full text-sm"
-                value={formData.delaySeconds || 0}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    delaySeconds: parseInt(e.target.value) || 0,
-                  })
-                }
-                min="0"
-              />
-            </div>
-          </div>
-        );
-
-      case ScenarioNodeType.NOTIFICATION:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Message Type
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.messageType || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, messageType: e.target.value })
-                }
-                placeholder="e.g., Heartbeat, DataTransfer"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Payload (JSON)
-              </label>
-              <textarea
-                className="input-base w-full font-mono text-xs"
-                rows={6}
-                value={
-                  typeof formData.payload === "string"
-                    ? formData.payload
-                    : JSON.stringify(formData.payload || {}, null, 2)
-                }
-                onChange={(e) => {
-                  try {
-                    const parsed = JSON.parse(e.target.value);
-                    setFormData({ ...formData, payload: parsed });
-                  } catch {
-                    setFormData({ ...formData, payload: e.target.value });
-                  }
-                }}
-                placeholder='{"key": "value"}'
-              />
-            </div>
-          </div>
-        );
-
-      case ScenarioNodeType.CONNECTOR_PLUG:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Action
-              </label>
-              <select
-                className="input-base w-full text-sm"
-                value={formData.action || "plugin"}
-                onChange={(e) =>
-                  setFormData({ ...formData, action: e.target.value })
-                }
-              >
-                <option value="plugin">Plugin (Connect)</option>
-                <option value="plugout">Plugout (Disconnect)</option>
-              </select>
-            </div>
-          </div>
-        );
-
-      case ScenarioNodeType.REMOTE_START_TRIGGER:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Timeout (seconds)
-              </label>
-              <input
-                type="number"
-                className="input-base w-full text-sm"
-                value={formData.timeout || 0}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    timeout: parseInt(e.target.value) || 0,
-                  })
-                }
-                min="0"
-              />
-              <p className="text-xs text-muted mt-1">
-                0 = No timeout (wait indefinitely for RemoteStartTransaction)
-              </p>
-            </div>
-          </div>
-        );
-
-      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Timeout (seconds)
-              </label>
-              <input
-                type="number"
-                className="input-base w-full text-sm"
-                value={formData.timeout || 0}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    timeout: parseInt(e.target.value) || 0,
-                  })
-                }
-                min="0"
-              />
-              <p className="text-xs text-muted mt-1">
-                0 = No timeout (wait indefinitely for RemoteStopTransaction)
-              </p>
-            </div>
-          </div>
-        );
-
-      case ScenarioNodeType.STATUS_TRIGGER:
-        return (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                className="input-base w-full text-sm"
-                value={formData.label || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, label: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Target Status
-              </label>
-              <select
-                className="input-base w-full text-sm"
-                value={formData.targetStatus || OCPPStatus.Charging}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    targetStatus: e.target.value as OCPPStatus,
-                  })
-                }
-              >
-                <option value={OCPPStatus.Available}>Available</option>
-                <option value={OCPPStatus.Preparing}>Preparing</option>
-                <option value={OCPPStatus.Charging}>Charging</option>
-                <option value={OCPPStatus.SuspendedEVSE}>SuspendedEVSE</option>
-                <option value={OCPPStatus.SuspendedEV}>SuspendedEV</option>
-                <option value={OCPPStatus.Finishing}>Finishing</option>
-                <option value={OCPPStatus.Reserved}>Reserved</option>
-                <option value={OCPPStatus.Unavailable}>Unavailable</option>
-                <option value={OCPPStatus.Faulted}>Faulted</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-primary mb-1">
-                Timeout (seconds)
-              </label>
-              <input
-                type="number"
-                className="input-base w-full text-sm"
-                value={formData.timeout || 0}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    timeout: parseInt(e.target.value) || 0,
-                  })
-                }
-                min="0"
-              />
-              <p className="text-xs text-muted mt-1">
-                0 = No timeout (wait indefinitely for status change)
-              </p>
-            </div>
-          </div>
-        );
-
-      default:
-        return (
-          <div className="text-sm text-muted">
-            This node type does not have configurable properties.
-          </div>
-        );
-    }
+    return (
+      <NodeForm
+        value={formData}
+        onChange={setFormData}
+        onOpenMeterCurve={() => setIsCurveModalOpen(true)}
+      />
+    );
   };
 
   // Handle curve modal save. Maps the modal's "Charge until battery full"
@@ -2551,7 +1974,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           <div className="w-80 flex-shrink-0 panel p-4 overflow-y-auto max-h-full">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-primary">
-                {getNodeTypeName(selectedNode.type || "")}
+                {getNodeTypeName(selectedNode.type)}
               </h3>
               <button
                 onClick={() => setSelectedNode(null)}
@@ -2570,7 +1993,13 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               </button>
               <button
                 onClick={() => {
-                  handleNodeConfigSave(selectedNode.id, formData);
+                  if (isScenarioNodeType(selectedNode.type)) {
+                    handleNodeConfigSave(
+                      selectedNode.id,
+                      selectedNode.type,
+                      formData,
+                    );
+                  }
                   setSelectedNode(null);
                 }}
                 className="flex-1 btn-primary text-sm"
@@ -2735,10 +2164,10 @@ function createNodeByType(
         id,
         type,
         position,
-        // Default trigger is "connect" — matches the historical behaviour
+        // Default trigger is "connect", matching the historical behavior
         // where the scenario fired as soon as CP became Available after
-        // BootNotification. Operators can switch to "status" via
-        // NodeConfigPanel to gate on connector state instead.
+        // BootNotification. Start is displayed inline and is not editable
+        // through the node config panel.
         data: { label: "Start", triggerOn: "connect" },
       };
     case ScenarioNodeType.END:

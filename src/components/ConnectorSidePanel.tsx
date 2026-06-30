@@ -973,7 +973,7 @@ const FullPanelContent: React.FC<{
                     Sync SoC ↔ Meter
                   </label>
                 </div>
-                <div className="text-[11px] text-gray-700 dark:text-gray-300">
+                <div className="text-xs text-gray-700 dark:text-gray-300">
                   {liveSoc !== null
                     ? `${liveSoc.toFixed(1)}%`
                     : "SoC not reported"}
@@ -1008,7 +1008,7 @@ const FullPanelContent: React.FC<{
                     )}
                     {/* big SoC % overlay */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-[11px] font-bold font-mono text-gray-900 dark:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.6)] dark:drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
+                      <span className="text-xs font-bold font-mono text-gray-900 dark:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.6)] dark:drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
                         {liveSoc !== null ? `${Math.round(liveSoc)}%` : "—"}
                       </span>
                     </div>

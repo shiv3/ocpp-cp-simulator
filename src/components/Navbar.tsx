@@ -83,7 +83,7 @@ const Navbar: React.FC = () => {
     ? health === "down"
       ? "bg-red-500/30 text-red-100 hover:bg-red-500/50"
       : "bg-emerald-500/30 text-emerald-100 hover:bg-emerald-500/50"
-    : "bg-white/20 hover:bg-white/30";
+    : "bg-white/95 text-blue-700 hover:bg-white dark:bg-white/15 dark:text-white dark:hover:bg-white/25";
 
   return (
     <nav className="bg-blue-600 dark:bg-gray-800 text-white shadow-lg transition-colors">

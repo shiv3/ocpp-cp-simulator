@@ -338,7 +338,7 @@ function applyCacheControl(res: Response): Response {
  * Returns null when the header is missing, not Basic, or doesn't decode.
  * Tolerates the rare `Basic` scheme written in any case.
  */
-function parseBasicAuthHeader(
+export function parseBasicAuthHeader(
   header: string | null,
 ): { username: string; password: string } | null {
   if (!header) return null;
@@ -373,7 +373,7 @@ function parseBasicAuthHeader(
  * WWW-Authenticate already announces the server's identity. What we
  * defend against is byte-by-byte secret discovery via response timing.
  */
-function credentialsMatch(
+export function credentialsMatch(
   supplied: { username: string; password: string },
   expected: { username: string; password: string },
 ): boolean {

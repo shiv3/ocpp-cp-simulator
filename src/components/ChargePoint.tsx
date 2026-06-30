@@ -38,6 +38,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({
     tagIDs && tagIDs.length > 0 ? tagIDs : TagID ? [TagID] : [];
   const {
     status: cpStatus,
+    connected: cpConnected,
     error: cpError,
     connectors,
     heartbeat,
@@ -174,6 +175,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({
             <ChargePointControls
               chargePointId={cpId}
               cpStatus={cpStatus}
+              cpConnected={cpConnected}
               cpError={cpError}
               tagID={TagID}
               heartbeat={heartbeat}
@@ -370,6 +372,7 @@ const HeartbeatStatusChip: React.FC<{
 interface ChargePointControlsProps {
   chargePointId: string | null;
   cpStatus: string;
+  cpConnected: boolean;
   cpError: string;
   tagID: string;
   heartbeat: { intervalSeconds: number; lastSentAt: Date | null };
@@ -378,6 +381,7 @@ interface ChargePointControlsProps {
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   chargePointId,
   cpStatus,
+  cpConnected,
   cpError,
   tagID,
   heartbeat,
@@ -420,7 +424,11 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
     }
   };
 
-  const isConnected = cpStatus !== OCPPStatus.Unavailable;
+  // Reflect the actual transport connection for Connect/Disconnect: after an
+  // auto-reconnect the socket is up before BootNotification is re-Accepted, so
+  // the OCPP `cpStatus` can still be Unavailable. Fall back to the status so a
+  // freshly-loaded, already-booted CP still reads as connected (#103).
+  const isConnected = cpConnected || cpStatus !== OCPPStatus.Unavailable;
 
   return (
     <div className="panel p-3">

@@ -10,6 +10,7 @@ import {
   type SubscribeResult,
 } from "../../protocol";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 
 type Handler = (...args: any[]) => void;
 
@@ -166,6 +167,20 @@ function statusWire(cpId = "cp-1", status = "Available"): StatusWire {
   };
 }
 
+function scenarioDefinition(id = "scenario-1"): ScenarioDefinition {
+  return {
+    id,
+    name: `Scenario ${id}`,
+    targetType: "connector",
+    targetId: 1,
+    nodes: [],
+    edges: [],
+    createdAt: "2026-06-30T00:00:00.000Z",
+    updatedAt: "2026-06-30T00:00:01.000Z",
+    enabled: true,
+  };
+}
+
 function subscribeResult(scope = "cp-1"): SubscribeResult {
   return {
     subscribed: [scope],
@@ -290,6 +305,56 @@ describe("RemoteChargePointService socket.io rpc", () => {
     ack.resolve({ ok: true, result: config });
     await expect(promise).resolves.toEqual(config);
     expect("password" in config.basicAuthSettings).toBe(false);
+  });
+
+  it("sends scenario definition persistence rpc payloads", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const first = scenarioDefinition("first");
+    const second = scenarioDefinition("second");
+
+    const listPromise = service.listScenarioDefinitions("cp-1", null);
+    const listAck = nextAck();
+    expect(listAck.request).toEqual({
+      method: "scenario.definitions.list",
+      params: { cpId: "cp-1", connectorId: null },
+    });
+    listAck.resolve({ ok: true, result: [first] });
+    await expect(listPromise).resolves.toEqual([first]);
+
+    const savePromise = service.saveScenarioDefinition("cp-1", 1, first);
+    const saveAck = nextAck();
+    expect(saveAck.request).toEqual({
+      method: "scenario.definitions.save",
+      params: { cpId: "cp-1", connectorId: 1, definition: first },
+    });
+    saveAck.resolve({ ok: true, result: first });
+    await expect(savePromise).resolves.toEqual(first);
+
+    const replacePromise = service.replaceConnectorScenarioDefinitions(
+      "cp-1",
+      1,
+      [first, second],
+    );
+    const replaceAck = nextAck();
+    expect(replaceAck.request).toEqual({
+      method: "scenario.definitions.replace",
+      params: {
+        cpId: "cp-1",
+        connectorId: 1,
+        definitions: [first, second],
+      },
+    });
+    replaceAck.resolve({ ok: true, result: [first, second] });
+    await expect(replacePromise).resolves.toEqual([first, second]);
+
+    const deletePromise = service.deleteScenarioDefinition("cp-1", 1, "first");
+    const deleteAck = nextAck();
+    expect(deleteAck.request).toEqual({
+      method: "scenario.definitions.delete",
+      params: { cpId: "cp-1", connectorId: 1, definitionId: "first" },
+    });
+    deleteAck.resolve({ ok: true, result: { ok: true } });
+    await expect(deletePromise).resolves.toBeUndefined();
   });
 
   it("rejects pending rpc calls on disconnect", async () => {

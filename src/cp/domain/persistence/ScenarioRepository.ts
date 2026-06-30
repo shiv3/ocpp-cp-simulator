@@ -12,6 +12,20 @@ export interface ScenarioRepository {
   ): Promise<void>;
   delete(chargePointId: string, connectorId: number | null): Promise<void>;
   list(chargePointId: string): Promise<ScenarioDefinition[]>;
+  listByConnector(
+    chargePointId: string,
+    connectorId: number | null,
+  ): ScenarioDefinition[];
+  replaceConnector(
+    chargePointId: string,
+    connectorId: number | null,
+    scenarios: readonly ScenarioDefinition[],
+  ): Promise<void>;
+  deleteOne(
+    chargePointId: string,
+    connectorId: number | null,
+    scenarioId: string,
+  ): void;
   subscribe(
     chargePointId: string,
     connectorId: number | null,

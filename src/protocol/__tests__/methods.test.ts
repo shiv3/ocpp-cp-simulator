@@ -66,7 +66,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(13);
+    expect(EXPLICIT_METHODS).toHaveLength(17);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -85,6 +85,14 @@ describe("method table coverage (Step 3c)", () => {
   it("includes set_soc_meter_sync (Comp-1)", () => {
     expect(METHODS.set_soc_meter_sync).toBeDefined();
     expect(isRpcMethod("set_soc_meter_sync")).toBe(true);
+  });
+
+  it("includes scenario definition persistence ops", () => {
+    expect(METHODS["scenario.definitions.list"]).toBeDefined();
+    expect(METHODS["scenario.definitions.save"]).toBeDefined();
+    expect(METHODS["scenario.definitions.replace"]).toBeDefined();
+    expect(METHODS["scenario.definitions.delete"]).toBeDefined();
+    expect(isRpcMethod("scenario.definitions.list")).toBe(true);
   });
 });
 

@@ -873,6 +873,76 @@ export class RemoteChargePointService implements ChargePointService {
     return data ?? [];
   }
 
+  async listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]> {
+    const data = await this.rpc("scenario.definitions.list", {
+      cpId: id,
+      connectorId,
+    });
+    return (data as unknown as ScenarioDefinition[]) ?? [];
+  }
+
+  async saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition> {
+    const data = await this.rpc("scenario.definitions.save", {
+      cpId: id,
+      connectorId,
+      definition: definition as unknown as Record<string, unknown>,
+    });
+    return (data as unknown as ScenarioDefinition) ?? definition;
+  }
+
+  async replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]> {
+    const data = await this.rpc("scenario.definitions.replace", {
+      cpId: id,
+      connectorId,
+      definitions: definitions as unknown as Record<string, unknown>[],
+    });
+    return (data as unknown as ScenarioDefinition[]) ?? [...definitions];
+  }
+
+  async deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void> {
+    await this.rpc("scenario.definitions.delete", {
+      cpId: id,
+      connectorId,
+      definitionId,
+    });
+  }
+
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void {
+    let active = true;
+    void this.listScenarioDefinitions(id, connectorId)
+      .then((definitions) => {
+        if (active) handler(definitions);
+      })
+      .catch((err) => {
+        console.warn(
+          "[RemoteChargePointService] scenario definitions subscribe failed",
+          err,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }
+
   async loadScenarioTemplate(
     id: string,
     templateId: string,

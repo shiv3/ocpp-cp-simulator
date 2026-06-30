@@ -373,6 +373,30 @@ export interface ChargePointService {
   ): Promise<StateHistoryEntry[]>;
 
   // Scenarios
+  listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]>;
+  saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition>;
+  replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]>;
+  deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void>;
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void;
   getScenarioTemplates(): Promise<ScenarioTemplateInfo[]>;
   loadScenarioTemplate(
     id: string,

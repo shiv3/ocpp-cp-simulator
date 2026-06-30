@@ -26,6 +26,7 @@ import { subscribeResultSchema } from "./envelope";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
+const CONN_DEF = CONN_POS.nullable();
 const EMPTY = z.object({});
 const ANY = z.unknown();
 /** A bounded free-form object param (settings/config/options): ≤ 64 KB. */
@@ -270,6 +271,34 @@ export const METHODS = {
     params: EMPTY,
     result: ARRAY_1000(scenarioTemplateInfoSchema),
   },
+  "scenario.definitions.list": {
+    params: z.object({ cpId: STR_64K, connectorId: CONN_DEF }),
+    result: ARRAY_1000(SCENARIO_OBJ()),
+  },
+  "scenario.definitions.save": {
+    params: z.object({
+      cpId: STR_64K,
+      connectorId: CONN_DEF,
+      definition: SCENARIO_OBJ(),
+    }),
+    result: SCENARIO_OBJ(),
+  },
+  "scenario.definitions.replace": {
+    params: z.object({
+      cpId: STR_64K,
+      connectorId: CONN_DEF,
+      definitions: ARRAY_1000(SCENARIO_OBJ()),
+    }),
+    result: ARRAY_1000(SCENARIO_OBJ()),
+  },
+  "scenario.definitions.delete": {
+    params: z.object({
+      cpId: STR_64K,
+      connectorId: CONN_DEF,
+      definitionId: STR_64K,
+    }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "server.shutdown": { params: EMPTY, result: ANY },
   "events.subscribe": {
     params: z.object({ scope: STR_64K }),
@@ -290,6 +319,10 @@ export const EXPLICIT_METHODS = [
   "config.get",
   "config.save",
   "scenario.templates",
+  "scenario.definitions.list",
+  "scenario.definitions.save",
+  "scenario.definitions.replace",
+  "scenario.definitions.delete",
   "server.shutdown",
   "events.subscribe",
   "events.unsubscribe",

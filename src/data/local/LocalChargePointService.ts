@@ -139,9 +139,11 @@ export class LocalChargePointService implements ChargePointService {
    *  and per-connector availability. Passed through to every ChargePoint we
    *  build. `null` keeps everything in-memory (test / boot-before-DB). */
   private readonly configRepository: ConfigRepository;
+  private readonly scenarioRepository: SqliteScenarioRepository;
 
   constructor(private readonly database: Database | null = null) {
     this.configRepository = new SqliteConfigRepository(database);
+    this.scenarioRepository = new SqliteScenarioRepository(database);
   }
 
   registerChargePoint(chargePoint: ChargePoint): void {
@@ -458,6 +460,56 @@ export class LocalChargePointService implements ChargePointService {
     }));
   }
 
+  async listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]> {
+    return this.scenarioRepository.listByConnector(id, connectorId);
+  }
+
+  async saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition> {
+    await this.scenarioRepository.save(id, connectorId, definition);
+    await this.database?.flush?.();
+    return definition;
+  }
+
+  async replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]> {
+    await this.scenarioRepository.replaceConnector(
+      id,
+      connectorId,
+      definitions,
+    );
+    await this.database?.flush?.();
+    return [...definitions];
+  }
+
+  async deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void> {
+    this.scenarioRepository.deleteOne(id, connectorId, definitionId);
+    await this.database?.flush?.();
+  }
+
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void {
+    return this.scenarioRepository.subscribe(id, connectorId, () => {
+      handler(this.scenarioRepository.listByConnector(id, connectorId));
+    });
+  }
+
   async loadScenarioTemplate(
     id: string,
     templateId: string,
@@ -558,17 +610,9 @@ export class LocalChargePointService implements ChargePointService {
     const connector = this.requireConnector(id, connectorId);
     const manager = connector.scenarioManager;
     manager?.removeScenario(scenarioId);
-    // Drop the persisted row too so reloads don't resurrect it. We
-    // bypass the shared scenarioRepository instance the UI uses
-    // (LocalChargePointService doesn't take one in its constructor) and
-    // talk to the same sql.js DB directly via a fresh repository handle
-    // — both ultimately go through the same `scenarios` table.
+    // Drop the persisted row too so reloads don't resurrect it.
     if (this.database) {
-      new SqliteScenarioRepository(this.database).deleteOne(
-        id,
-        connectorId,
-        scenarioId,
-      );
+      this.scenarioRepository.deleteOne(id, connectorId, scenarioId);
       await this.database.flush?.();
     }
   }

@@ -31,6 +31,8 @@ import {
 } from "../../protocol";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
+import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
+import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { LogLevel } from "../../cp/shared/Logger";
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import type { CPRegistry } from "./CPRegistry";
@@ -297,6 +299,14 @@ async function dispatchValidatedRpc(
       return saveConfig(deps, rawParams);
     case "scenario.templates":
       return getScenarioTemplates();
+    case "scenario.definitions.list":
+      return listScenarioDefinitions(deps, rawParams);
+    case "scenario.definitions.save":
+      return saveScenarioDefinition(deps, rawParams);
+    case "scenario.definitions.replace":
+      return replaceConnectorScenarioDefinitions(deps, rawParams);
+    case "scenario.definitions.delete":
+      return deleteScenarioDefinition(deps, rawParams);
     case "server.shutdown":
       return shutdownServer(deps);
     case "events.subscribe":
@@ -474,6 +484,74 @@ function getScenarioTemplates(): ReadonlyArray<{
     name: template.name,
     description: template.description,
   }));
+}
+
+function listScenarioDefinitions(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): ScenarioDefinition[] {
+  const params =
+    METHODS["scenario.definitions.list"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  return new SqliteScenarioRepository(deps.database ?? null).listByConnector(
+    params.data.cpId,
+    params.data.connectorId,
+  );
+}
+
+async function saveScenarioDefinition(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<ScenarioDefinition> {
+  const params =
+    METHODS["scenario.definitions.save"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  const definition = params.data.definition as unknown as ScenarioDefinition;
+  await new SqliteScenarioRepository(deps.database ?? null).save(
+    params.data.cpId,
+    params.data.connectorId,
+    definition,
+  );
+  await deps.database?.flush?.();
+  return definition;
+}
+
+async function replaceConnectorScenarioDefinitions(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<ScenarioDefinition[]> {
+  const params =
+    METHODS["scenario.definitions.replace"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  const definitions = params.data
+    .definitions as unknown as ScenarioDefinition[];
+  await new SqliteScenarioRepository(deps.database ?? null).replaceConnector(
+    params.data.cpId,
+    params.data.connectorId,
+    definitions,
+  );
+  await deps.database?.flush?.();
+  return definitions;
+}
+
+async function deleteScenarioDefinition(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params =
+    METHODS["scenario.definitions.delete"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  new SqliteScenarioRepository(deps.database ?? null).deleteOne(
+    params.data.cpId,
+    params.data.connectorId,
+    params.data.definitionId,
+  );
+  await deps.database?.flush?.();
+  return { ok: true };
 }
 
 function shutdownServer(deps: SocketIoDeps): { ok: true } {

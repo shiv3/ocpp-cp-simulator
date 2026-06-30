@@ -39,6 +39,7 @@ import {
   type RpcAck,
   type RpcErrorCode,
   type RpcMethod,
+  type RpcRequest,
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
@@ -52,6 +53,16 @@ type ServerConnectorStatus = StatusWire["connectors"][number];
 type WireConfig = NonNullable<StatusWire["config"]>;
 
 export type RemoteConnectionState = "connecting" | "connected" | "disconnected";
+
+type RemoteBasicAuth = {
+  readonly username: string;
+  readonly password: string;
+};
+
+export interface RemoteChargePointServiceOptions {
+  /** Socket.IO handshake auth. Undefined preserves URL credential behavior. */
+  readonly basicAuth?: RemoteBasicAuth | null;
+}
 
 export type RemoteRegistrySubscriptionEvent =
   | { type: "snapshot"; cps: ChargePointSnapshot[] }
@@ -588,11 +599,18 @@ export class RemoteChargePointService implements ChargePointService {
   private hasConnected = false;
   private reconnectSerial = 0;
 
-  constructor(serverUrl: string) {
+  constructor(
+    serverUrl: string,
+    options: RemoteChargePointServiceOptions = {},
+  ) {
     const baseUrl = serverUrl.replace(/\/+$/, "");
+    const auth =
+      options.basicAuth === undefined
+        ? authFromUrl(baseUrl)
+        : (options.basicAuth ?? undefined);
     this.socket = io(baseUrl, {
       path: "/socket.io/",
-      auth: authFromUrl(baseUrl),
+      auth,
       // Pin the polling transport instead of upgrading to WebSocket. When the
       // daemon is exposed behind an L7 proxy (e.g. the staging GCE Ingress),
       // the WebSocket upgrade often can't complete — the upgrade request fails
@@ -1304,6 +1322,35 @@ export class RemoteChargePointService implements ChargePointService {
     };
   }
 
+  /**
+   * Raw control-plane passthrough for the bundled CLI client. Port consumers
+   * should use the typed methods above; this preserves `--send`'s JSON command
+   * contract, where the daemon receives the verbatim method/params pair.
+   */
+  async runRawRpc(
+    method: string,
+    params: unknown = {},
+    cpId?: string,
+  ): Promise<RpcAck> {
+    return this.emitRpcAck({
+      ...(cpId ? { cpId } : {}),
+      method,
+      params,
+    });
+  }
+
+  async subscribeRawEvents(
+    scope: string,
+    handler: (event: EventEnvelope) => void,
+  ): Promise<void> {
+    this.socket.on("event", handler);
+    const ack = await this.runRawRpc("events.subscribe", { scope });
+    if (!ack.ok) {
+      this.socket.off("event", handler);
+      throw new RpcFailure(ack.error.code, ack.error.message);
+    }
+  }
+
   dispose(): void {
     this.rejectPending("disconnected");
     this.subs.clear();
@@ -1325,14 +1372,31 @@ export class RemoteChargePointService implements ChargePointService {
     params: Params<M>,
     cpId?: string,
   ): Promise<Result<M>> {
-    const request = {
+    const request: RpcRequest = {
       ...(cpId ? { cpId } : {}),
       method,
       params,
     };
+
+    return this.emitRpcRequest(request, (ack) => {
+      if (!ack.ok) {
+        throw new RpcFailure(ack.error.code, ack.error.message);
+      }
+      return ack.result as Result<M>;
+    });
+  }
+
+  private emitRpcAck(request: RpcRequest): Promise<RpcAck> {
+    return this.emitRpcRequest(request, (ack) => ack);
+  }
+
+  private emitRpcRequest<T>(
+    request: RpcRequest,
+    mapAck: (ack: RpcAck) => T,
+  ): Promise<T> {
     const id = this.nextRpcId++;
 
-    return new Promise<Result<M>>((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       let settled = false;
       const settle = (fn: () => void) => {
         if (settled) return;
@@ -1352,19 +1416,19 @@ export class RemoteChargePointService implements ChargePointService {
         .emitWithAck("rpc", request)
         .then(
           (ack: unknown) => {
-            if (!isRpcAck<Result<M>>(ack)) {
+            if (!isRpcAck(ack)) {
               settle(() =>
                 reject(new RpcFailure("internal", "invalid rpc ack")),
               );
               return;
             }
-            if (!ack.ok) {
-              settle(() =>
-                reject(new RpcFailure(ack.error.code, ack.error.message)),
-              );
-              return;
-            }
-            settle(() => resolve(ack.result));
+            settle(() => {
+              try {
+                resolve(mapAck(ack));
+              } catch (err) {
+                reject(err);
+              }
+            });
           },
           () => {
             this.rejectPending("timeout");

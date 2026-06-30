@@ -1085,6 +1085,48 @@ describe("RemoteChargePointService socket.io rpc", () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
+  it("uses explicit handshake auth when supplied by the CLI client", () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700", {
+      basicAuth: { username: "admin", password: "secret" },
+    });
+
+    expect(socketMockState.io).toHaveBeenCalledWith(
+      "http://127.0.0.1:9700",
+      expect.objectContaining({
+        auth: { username: "admin", password: "secret" },
+      }),
+    );
+
+    service.dispose();
+  });
+
+  it("returns raw rpc acks without translating server failures", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const promise = service.runRawRpc(
+      "load_scenario",
+      { connector: 1, file: "/tmp/scenario.json" },
+      "cp-1",
+    );
+    const ack = nextAck();
+
+    expect(ack.event).toBe("rpc");
+    expect(ack.request).toEqual({
+      cpId: "cp-1",
+      method: "load_scenario",
+      params: { connector: 1, file: "/tmp/scenario.json" },
+    });
+
+    ack.resolve({
+      ok: false,
+      error: { code: "not_found", message: "not found" },
+    });
+
+    await expect(promise).resolves.toEqual({
+      ok: false,
+      error: { code: "not_found", message: "not found" },
+    });
+  });
+
   it("sends StatusNotification options on update_connector_status rpc", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
     const timestamp = new Date("2026-01-02T03:04:05.000Z");

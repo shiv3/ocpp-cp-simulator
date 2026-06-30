@@ -1,6 +1,6 @@
 import path from "path";
 import { readFileSync } from "fs";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
 
 // Surface the package version to the app (footer link, issue #93). Stays
@@ -27,6 +27,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    environmentMatchGlobs: [["**/*.dom.test.{ts,tsx}", "jsdom"]],
+    setupFiles: ["src/test/setup.dom.ts"],
     // bun:sqlite is a runtime built-in that vite can't resolve. Tests
     // ending in `.bun.test.ts` run under `bun test` instead (see the
     // `test:bun` npm script); skip them here.

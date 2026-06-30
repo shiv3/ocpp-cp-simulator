@@ -33,8 +33,10 @@ import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
+import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import { LogLevel } from "../../cp/shared/Logger";
 import { redactSensitiveText } from "../../cp/shared/redaction";
+import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import {
@@ -307,6 +309,14 @@ async function dispatchValidatedRpc(
       return replaceConnectorScenarioDefinitions(deps, rawParams);
     case "scenario.definitions.delete":
       return deleteScenarioDefinition(deps, rawParams);
+    case "connector_settings.auto_meter.get":
+      return getAutoMeterConfig(deps, rawParams);
+    case "connector_settings.auto_meter.save":
+      return saveAutoMeterConfig(deps, rawParams);
+    case "connector_settings.soc_meter_sync.get":
+      return getSocMeterSync(deps, rawParams);
+    case "connector_settings.soc_meter_sync.save":
+      return saveSocMeterSync(deps, rawParams);
     case "server.shutdown":
       return shutdownServer(deps);
     case "events.subscribe":
@@ -550,6 +560,70 @@ async function deleteScenarioDefinition(
     params.data.connectorId,
     params.data.definitionId,
   );
+  await deps.database?.flush?.();
+  return { ok: true };
+}
+
+async function getAutoMeterConfig(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<AutoMeterValueConfig | null> {
+  const params =
+    METHODS["connector_settings.auto_meter.get"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  return new SqliteConnectorSettingsRepository(
+    deps.database ?? null,
+  ).loadAutoMeterValueConfig(params.data.cpId, params.data.connectorId);
+}
+
+async function saveAutoMeterConfig(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params =
+    METHODS["connector_settings.auto_meter.save"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  await new SqliteConnectorSettingsRepository(
+    deps.database ?? null,
+  ).saveAutoMeterValueConfig(
+    params.data.cpId,
+    params.data.connectorId,
+    params.data.config as unknown as AutoMeterValueConfig,
+  );
+  await deps.database?.flush?.();
+  return { ok: true };
+}
+
+async function getSocMeterSync(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<boolean> {
+  const params =
+    METHODS["connector_settings.soc_meter_sync.get"].params.safeParse(
+      rawParams,
+    );
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  return new SqliteConnectorSettingsRepository(
+    deps.database ?? null,
+  ).loadSocMeterSync();
+}
+
+async function saveSocMeterSync(
+  deps: SocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params =
+    METHODS["connector_settings.soc_meter_sync.save"].params.safeParse(
+      rawParams,
+    );
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  await new SqliteConnectorSettingsRepository(
+    deps.database ?? null,
+  ).saveSocMeterSync(params.data.enabled);
   await deps.database?.flush?.();
   return { ok: true };
 }

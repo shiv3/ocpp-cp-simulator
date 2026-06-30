@@ -66,7 +66,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(17);
+    expect(EXPLICIT_METHODS).toHaveLength(21);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -93,6 +93,14 @@ describe("method table coverage (Step 3c)", () => {
     expect(METHODS["scenario.definitions.replace"]).toBeDefined();
     expect(METHODS["scenario.definitions.delete"]).toBeDefined();
     expect(isRpcMethod("scenario.definitions.list")).toBe(true);
+  });
+
+  it("includes connector settings persistence ops", () => {
+    expect(METHODS["connector_settings.auto_meter.get"]).toBeDefined();
+    expect(METHODS["connector_settings.auto_meter.save"]).toBeDefined();
+    expect(METHODS["connector_settings.soc_meter_sync.get"]).toBeDefined();
+    expect(METHODS["connector_settings.soc_meter_sync.save"]).toBeDefined();
+    expect(isRpcMethod("connector_settings.auto_meter.get")).toBe(true);
   });
 });
 

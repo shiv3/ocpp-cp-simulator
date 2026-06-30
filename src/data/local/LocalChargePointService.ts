@@ -19,6 +19,7 @@ import type {
   StoredLogEntry,
 } from "../interfaces/ChargePointService";
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
+import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
@@ -47,6 +48,7 @@ import {
 } from "../../utils/scenarioTemplates";
 import { UnsupportedFeatureError as DomainUnsupportedFeatureError } from "../../cp/domain/errors/UnsupportedFeatureError";
 import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
+import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 import { mergeWriteOnlyConfigSecrets } from "../configPort";
 
@@ -139,10 +141,14 @@ export class LocalChargePointService implements ChargePointService {
    *  and per-connector availability. Passed through to every ChargePoint we
    *  build. `null` keeps everything in-memory (test / boot-before-DB). */
   private readonly configRepository: ConfigRepository;
+  private readonly connectorSettingsRepository: ConnectorSettingsRepository;
   private readonly scenarioRepository: SqliteScenarioRepository;
 
   constructor(private readonly database: Database | null = null) {
     this.configRepository = new SqliteConfigRepository(database);
+    this.connectorSettingsRepository = new SqliteConnectorSettingsRepository(
+      database,
+    );
     this.scenarioRepository = new SqliteScenarioRepository(database);
   }
 
@@ -399,6 +405,29 @@ export class LocalChargePointService implements ChargePointService {
     connector.autoMeterValueConfig = config;
   }
 
+  async getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    return this.connectorSettingsRepository.loadAutoMeterValueConfig(
+      id,
+      connectorId,
+    );
+  }
+
+  async saveAutoMeterConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    await this.connectorSettingsRepository.saveAutoMeterValueConfig(
+      id,
+      connectorId,
+      config,
+    );
+    await this.database?.flush?.();
+  }
+
   async setAutoResetToAvailable(
     id: string,
     connectorId: number,
@@ -433,6 +462,19 @@ export class LocalChargePointService implements ChargePointService {
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
     connector.socMeterSyncEnabled = enabled;
+  }
+
+  async getSocMeterSync(_id: string, _connectorId: number): Promise<boolean> {
+    return this.connectorSettingsRepository.loadSocMeterSync();
+  }
+
+  async saveSocMeterSync(
+    _id: string,
+    _connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.connectorSettingsRepository.saveSocMeterSync(enabled);
+    await this.database?.flush?.();
   }
 
   async getChargingProfiles(

@@ -328,6 +328,15 @@ export interface ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void>;
+  getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null>;
+  saveAutoMeterConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void>;
   setAutoResetToAvailable(
     id: string,
     connectorId: number,
@@ -357,6 +366,12 @@ export interface ChargePointService {
    * instance.
    */
   setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void>;
+  getSocMeterSync(id: string, connectorId: number): Promise<boolean>;
+  saveSocMeterSync(
     id: string,
     connectorId: number,
     enabled: boolean,

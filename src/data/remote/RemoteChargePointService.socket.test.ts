@@ -11,6 +11,7 @@ import {
 } from "../../protocol";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
+import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 
 type Handler = (...args: any[]) => void;
 
@@ -178,6 +179,18 @@ function scenarioDefinition(id = "scenario-1"): ScenarioDefinition {
     createdAt: "2026-06-30T00:00:00.000Z",
     updatedAt: "2026-06-30T00:00:01.000Z",
     enabled: true,
+  };
+}
+
+function autoMeterConfig(): AutoMeterValueConfig {
+  return {
+    enabled: true,
+    curvePoints: [
+      { time: 0, value: 0 },
+      { time: 900, value: 18 },
+    ],
+    intervalSeconds: 30,
+    autoCalculateInterval: false,
   };
 }
 
@@ -355,6 +368,47 @@ describe("RemoteChargePointService socket.io rpc", () => {
     });
     deleteAck.resolve({ ok: true, result: { ok: true } });
     await expect(deletePromise).resolves.toBeUndefined();
+  });
+
+  it("sends connector settings persistence rpc payloads", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const config = autoMeterConfig();
+
+    const autoGetPromise = service.getAutoMeterConfig("cp-1", 1);
+    const autoGetAck = nextAck();
+    expect(autoGetAck.request).toEqual({
+      method: "connector_settings.auto_meter.get",
+      params: { cpId: "cp-1", connectorId: 1 },
+    });
+    autoGetAck.resolve({ ok: true, result: config });
+    await expect(autoGetPromise).resolves.toEqual(config);
+
+    const autoSavePromise = service.saveAutoMeterConfig("cp-1", 1, config);
+    const autoSaveAck = nextAck();
+    expect(autoSaveAck.request).toEqual({
+      method: "connector_settings.auto_meter.save",
+      params: { cpId: "cp-1", connectorId: 1, config },
+    });
+    autoSaveAck.resolve({ ok: true, result: { ok: true } });
+    await expect(autoSavePromise).resolves.toBeUndefined();
+
+    const socGetPromise = service.getSocMeterSync("cp-1", 1);
+    const socGetAck = nextAck();
+    expect(socGetAck.request).toEqual({
+      method: "connector_settings.soc_meter_sync.get",
+      params: { cpId: "cp-1", connectorId: 1 },
+    });
+    socGetAck.resolve({ ok: true, result: false });
+    await expect(socGetPromise).resolves.toBe(false);
+
+    const socSavePromise = service.saveSocMeterSync("cp-1", 1, true);
+    const socSaveAck = nextAck();
+    expect(socSaveAck.request).toEqual({
+      method: "connector_settings.soc_meter_sync.save",
+      params: { cpId: "cp-1", connectorId: 1, enabled: true },
+    });
+    socSaveAck.resolve({ ok: true, result: { ok: true } });
+    await expect(socSavePromise).resolves.toBeUndefined();
   });
 
   it("rejects pending rpc calls on disconnect", async () => {

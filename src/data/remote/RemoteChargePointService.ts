@@ -800,6 +800,29 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    const data = await this.rpc("connector_settings.auto_meter.get", {
+      cpId: id,
+      connectorId,
+    });
+    return (data as unknown as AutoMeterValueConfig | null) ?? null;
+  }
+
+  async saveAutoMeterConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    await this.rpc("connector_settings.auto_meter.save", {
+      cpId: id,
+      connectorId,
+      config: config as unknown as Record<string, unknown>,
+    });
+  }
+
   async setAutoResetToAvailable(
     id: string,
     connectorId: number,
@@ -834,6 +857,25 @@ export class RemoteChargePointService implements ChargePointService {
   ): Promise<void> {
     await this.runCpRpc(id, "set_soc_meter_sync", {
       connector: connectorId,
+      enabled,
+    });
+  }
+
+  async getSocMeterSync(id: string, connectorId: number): Promise<boolean> {
+    return this.rpc("connector_settings.soc_meter_sync.get", {
+      cpId: id,
+      connectorId,
+    });
+  }
+
+  async saveSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.rpc("connector_settings.soc_meter_sync.save", {
+      cpId: id,
+      connectorId,
       enabled,
     });
   }

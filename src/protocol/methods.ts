@@ -70,6 +70,11 @@ const scenarioTemplateInfoSchema = z.object({
   description: STR_64K,
 });
 
+const connectorSettingsParamsSchema = z.object({
+  cpId: STR_64K,
+  connectorId: CONN_POS,
+});
+
 /** create CP — password is accepted here as WRITE-ONLY input. */
 const createParamsSchema = cpParamsBaseSchema.extend({
   basicAuth: z
@@ -299,6 +304,22 @@ export const METHODS = {
     }),
     result: z.object({ ok: z.literal(true) }),
   },
+  "connector_settings.auto_meter.get": {
+    params: connectorSettingsParamsSchema,
+    result: OBJ().nullable(),
+  },
+  "connector_settings.auto_meter.save": {
+    params: connectorSettingsParamsSchema.extend({ config: OBJ() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "connector_settings.soc_meter_sync.get": {
+    params: connectorSettingsParamsSchema,
+    result: z.boolean(),
+  },
+  "connector_settings.soc_meter_sync.save": {
+    params: connectorSettingsParamsSchema.extend({ enabled: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "server.shutdown": { params: EMPTY, result: ANY },
   "events.subscribe": {
     params: z.object({ scope: STR_64K }),
@@ -323,6 +344,10 @@ export const EXPLICIT_METHODS = [
   "scenario.definitions.save",
   "scenario.definitions.replace",
   "scenario.definitions.delete",
+  "connector_settings.auto_meter.get",
+  "connector_settings.auto_meter.save",
+  "connector_settings.soc_meter_sync.get",
+  "connector_settings.soc_meter_sync.save",
   "server.shutdown",
   "events.subscribe",
   "events.unsubscribe",

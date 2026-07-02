@@ -8,12 +8,16 @@ import {
 } from "socket.io-client";
 
 import type { Database } from "../../../cp/domain/persistence/Database";
+import { SqliteScenarioRepository } from "../../../cp/domain/persistence/SqliteScenarioRepository";
+import { SqliteConnectorSettingsRepository } from "../../../data/sqlite/SqliteConnectorSettingsRepository";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createHttpHandlers, type CorsPolicy } from "../httpServer";
 import { createLifecycle } from "../lifecycle";
+import { RegistryChargePointService } from "../RegistryChargePointService";
 import {
   attachSocketIo,
+  createSocketConfigRepository,
   isSocketIoPath,
   SOCKET_IO_PATH,
   type SocketIoAttachment,
@@ -55,12 +59,29 @@ export async function startTestServer(
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms ?? false,
   });
-  const restored = await Promise.resolve(registry.restoreFromDatabase());
+  const configRepository = createSocketConfigRepository(database);
+  const scenarioRepository = new SqliteScenarioRepository(database);
+  const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
+    database,
+  );
+  const chargePointService = new RegistryChargePointService(registry, {
+    database,
+    configRepository,
+    scenarioRepository,
+    connectorSettingsRepository,
+  });
+  const restored = await Promise.resolve(
+    chargePointService.restoreFromDatabase(),
+  );
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
     bus,
     database,
+    configRepository,
+    scenarioRepository,
+    connectorSettingsRepository,
+    chargePointService,
     webConsoleBasicAuth: options.webConsoleBasicAuth ?? null,
     requestShutdown: () => {
       lifecycle?.requestShutdown();

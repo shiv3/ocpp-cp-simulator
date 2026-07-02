@@ -4,6 +4,8 @@ import {
   persistEditorScenario,
   retargetScenarioToConnector,
   saveEditorScenario,
+  scenarioAutosaveSuppressionFingerprint,
+  shouldSuppressAppliedScenarioAutosave,
 } from "../scenarioPersistence";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 
@@ -16,13 +18,61 @@ const scenario = (id: string): ScenarioDefinition =>
     trigger: { type: "manual" },
   }) as unknown as ScenarioDefinition;
 
-function makeService(existingIds: string[] = []) {
+function makeService(existing: ScenarioDefinition[] = []) {
   return {
-    listScenarios: vi
+    listScenarioDefinitions: vi.fn().mockResolvedValue(existing),
+    saveScenarioDefinition: vi.fn().mockResolvedValue(undefined),
+    replaceConnectorScenarioDefinitions: vi.fn().mockResolvedValue(undefined),
+    loadScenario: vi
       .fn()
-      .mockResolvedValue(existingIds.map((scenarioId) => ({ scenarioId }))),
-    removeScenario: vi.fn().mockResolvedValue(undefined),
-    loadScenario: vi.fn().mockResolvedValue({ scenarioId: "x" }),
+      .mockResolvedValue({ scenarioId: existing[0]?.id ?? "" }),
+  };
+}
+
+function makeRemoteStyleService(existing: ScenarioDefinition[] = []) {
+  let stored = [...existing];
+  let active: ScenarioDefinition | null = existing[0] ?? null;
+
+  return {
+    service: {
+      listScenarioDefinitions: vi.fn(async () => stored),
+      saveScenarioDefinition: vi.fn(
+        async (
+          _cpId: string,
+          _connectorId: number | null,
+          definition: ScenarioDefinition,
+        ) => {
+          stored = [
+            ...stored.filter((item) => item.id !== definition.id),
+            definition,
+          ];
+          return definition;
+        },
+      ),
+      replaceConnectorScenarioDefinitions: vi.fn(
+        async (
+          _cpId: string,
+          _connectorId: number | null,
+          definitions: readonly ScenarioDefinition[],
+        ) => {
+          stored = [...definitions];
+          return stored;
+        },
+      ),
+      loadScenario: vi.fn(
+        async (
+          _cpId: string,
+          _connectorId: number,
+          definition: ScenarioDefinition,
+        ) => {
+          active =
+            stored.find((item) => item.id === definition.id) ?? definition;
+          return { scenarioId: definition.id };
+        },
+      ),
+    },
+    getStored: () => stored,
+    getActive: () => active,
   };
 }
 
@@ -46,36 +96,36 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
 }
 
-describe("persistEditorScenario (scenario upload / template persistence — #101)", () => {
-  it("remote mode pushes the scenario to the daemon (not the no-op sql.js repo)", async () => {
-    const chargePointService = makeService([]);
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
+describe("persistEditorScenario (scenario upload / template replace persistence — #101)", () => {
+  it("replaces the connector definition set with the uploaded scenario through the service port", async () => {
+    const stale = scenario("old-a");
+    const keep = scenario("new-1");
+    const chargePointService = makeService([stale, keep]);
     const uploaded = scenario("new-1");
 
     await persistEditorScenario(
       {
-        mode: "remote",
+        mode: "local",
         chargePointService,
-        scenarioRepository,
         cpId: "CP1",
         connectorId: 1,
       },
       uploaded,
     );
 
-    // The bug: upload only called scenarioRepository.save, a no-op in remote
-    // mode, so the upload vanished on reload. It must reach the daemon.
-    expect(chargePointService.loadScenario).toHaveBeenCalledWith(
+    expect(chargePointService.listScenarioDefinitions).toHaveBeenCalledWith(
       "CP1",
       1,
-      uploaded,
     );
-    expect(scenarioRepository.save).not.toHaveBeenCalled();
+    expect(
+      chargePointService.replaceConnectorScenarioDefinitions,
+    ).toHaveBeenCalledWith("CP1", 1, [uploaded]);
+    expect(chargePointService.saveScenarioDefinition).not.toHaveBeenCalled();
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
   });
 
-  it("serializes the graph before remote persistence", async () => {
+  it("serializes the graph before replace persistence", async () => {
     const chargePointService = makeService([]);
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
     const uploaded = {
       ...scenario("new-1"),
       nodes: [
@@ -109,16 +159,17 @@ describe("persistEditorScenario (scenario upload / template persistence — #101
 
     await persistEditorScenario(
       {
-        mode: "remote",
+        mode: "local",
         chargePointService,
-        scenarioRepository,
         cpId: "CP1",
         connectorId: 1,
       },
       uploaded,
     );
 
-    const persisted = chargePointService.loadScenario.mock.calls[0][2];
+    const persisted =
+      chargePointService.replaceConnectorScenarioDefinitions.mock
+        .calls[0][2][0];
     expect(persisted.nodes[0]).not.toHaveProperty("selected");
     expect(persisted.nodes[0]).not.toHaveProperty("dragging");
     expect(persisted.nodes[0].data).not.toHaveProperty("progress");
@@ -130,138 +181,139 @@ describe("persistEditorScenario (scenario upload / template persistence — #101
       source: "start",
       target: "meter-1",
     });
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
   });
 
-  it("remote mode removes stale prior scenarios but keeps the one being saved", async () => {
-    const chargePointService = makeService(["old-a", "old-b", "new-1"]);
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
+  it("persists and activates the remote runtime after autosave replace", async () => {
+    const stale = scenario("stale");
+    const edited = scenario("edited");
+    const remote = makeRemoteStyleService([stale]);
 
     await persistEditorScenario(
       {
         mode: "remote",
-        chargePointService,
-        scenarioRepository,
+        chargePointService: remote.service,
         cpId: "CP1",
-        connectorId: 2,
+        connectorId: 1,
       },
-      scenario("new-1"),
+      edited,
     );
 
-    expect(chargePointService.removeScenario).toHaveBeenCalledWith(
-      "CP1",
-      2,
-      "old-a",
-    );
-    expect(chargePointService.removeScenario).toHaveBeenCalledWith(
-      "CP1",
-      2,
-      "old-b",
-    );
-    // The incoming scenario id must NOT be removed.
-    expect(chargePointService.removeScenario).not.toHaveBeenCalledWith(
-      "CP1",
-      2,
-      "new-1",
-    );
-    expect(chargePointService.removeScenario).toHaveBeenCalledTimes(2);
+    expect(
+      remote.service.replaceConnectorScenarioDefinitions,
+    ).toHaveBeenCalledWith("CP1", 1, [edited]);
+    expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
+    expect(remote.getStored()).toEqual([edited]);
+    expect(remote.getActive()).toEqual(edited);
   });
 
-  it("remote mode still saves when a stale removal fails", async () => {
-    const chargePointService = makeService(["old-a"]);
-    chargePointService.removeScenario.mockRejectedValueOnce(new Error("boom"));
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
-    const uploaded = scenario("new-1");
+  it("does not re-activate remote import/template applies on the matching autosave pass", async () => {
+    const imported = {
+      ...scenario("imported"),
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const remote = makeRemoteStyleService([scenario("old")]);
+    const suppression = {
+      scenarioId: imported.id,
+      updatedAt: imported.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(imported),
+    };
 
-    await expect(
-      persistEditorScenario(
+    await persistEditorScenario(
+      {
+        mode: "remote",
+        chargePointService: remote.service,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      imported,
+    );
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, imported)).toBe(
+      true,
+    );
+    if (!shouldSuppressAppliedScenarioAutosave(suppression, imported)) {
+      await persistEditorScenario(
         {
           mode: "remote",
-          chargePointService,
-          scenarioRepository,
+          chargePointService: remote.service,
           cpId: "CP1",
           connectorId: 1,
         },
-        uploaded,
-      ),
-    ).resolves.toBeUndefined();
+        imported,
+      );
+    }
 
-    expect(chargePointService.loadScenario).toHaveBeenCalledWith(
+    expect(remote.service.loadScenario).toHaveBeenCalledTimes(1);
+    expect(remote.service.loadScenario).toHaveBeenCalledWith(
       "CP1",
       1,
-      uploaded,
+      imported,
     );
-  });
-
-  it("local mode upserts into the sql.js repository and never touches the daemon", async () => {
-    const chargePointService = makeService(["old-a"]);
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
-    const uploaded = scenario("new-1");
-
-    await persistEditorScenario(
-      {
-        mode: "local",
-        chargePointService,
-        scenarioRepository,
-        cpId: "CP1",
-        connectorId: 1,
-      },
-      uploaded,
-    );
-
-    expect(scenarioRepository.save).toHaveBeenCalledWith("CP1", 1, uploaded);
-    expect(chargePointService.listScenarios).not.toHaveBeenCalled();
-    expect(chargePointService.removeScenario).not.toHaveBeenCalled();
-    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+    expect(remote.getStored()).toEqual([imported]);
+    expect(remote.getActive()).toEqual(imported);
+    expect(
+      shouldSuppressAppliedScenarioAutosave(suppression, {
+        ...imported,
+        name: "Autosave-normalized name",
+      }),
+    ).toBe(false);
   });
 });
 
-describe("saveEditorScenario (editor autosave / manual save upsert)", () => {
-  it("remote mode upserts through daemon loadScenario without pruning siblings", async () => {
-    const chargePointService = makeService(["old-a"]);
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
+describe("saveEditorScenario (single definition upsert)", () => {
+  it("upserts through saveScenarioDefinition without pruning siblings", async () => {
+    const chargePointService = makeService([scenario("old-a")]);
     const edited = scenario("edited-1");
+
+    await saveEditorScenario(
+      {
+        mode: "local",
+        chargePointService,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      edited,
+    );
+
+    expect(chargePointService.saveScenarioDefinition).toHaveBeenCalledWith(
+      "CP1",
+      1,
+      edited,
+    );
+    expect(chargePointService.listScenarioDefinitions).not.toHaveBeenCalled();
+    expect(
+      chargePointService.replaceConnectorScenarioDefinitions,
+    ).not.toHaveBeenCalled();
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+  });
+
+  it("persists and activates the remote runtime after manual save", async () => {
+    const previous = scenario("edited-1");
+    const edited = {
+      ...scenario("edited-1"),
+      name: "Edited name",
+    };
+    const remote = makeRemoteStyleService([previous]);
 
     await saveEditorScenario(
       {
         mode: "remote",
-        chargePointService,
-        scenarioRepository,
+        chargePointService: remote.service,
         cpId: "CP1",
         connectorId: 1,
       },
       edited,
     );
 
-    expect(chargePointService.loadScenario).toHaveBeenCalledWith(
+    expect(remote.service.saveScenarioDefinition).toHaveBeenCalledWith(
       "CP1",
       1,
       edited,
     );
-    expect(chargePointService.listScenarios).not.toHaveBeenCalled();
-    expect(chargePointService.removeScenario).not.toHaveBeenCalled();
-    expect(scenarioRepository.save).not.toHaveBeenCalled();
-  });
-
-  it("local mode upserts through the repository without touching daemon scenario APIs", async () => {
-    const chargePointService = makeService(["old-a"]);
-    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
-    const edited = scenario("edited-1");
-
-    await saveEditorScenario(
-      {
-        mode: "local",
-        chargePointService,
-        scenarioRepository,
-        cpId: "CP1",
-        connectorId: 1,
-      },
-      edited,
-    );
-
-    expect(scenarioRepository.save).toHaveBeenCalledWith("CP1", 1, edited);
-    expect(chargePointService.listScenarios).not.toHaveBeenCalled();
-    expect(chargePointService.removeScenario).not.toHaveBeenCalled();
-    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+    expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
+    expect(remote.getStored()).toEqual([edited]);
+    expect(remote.getActive()).toEqual(edited);
   });
 });
 
@@ -297,36 +349,53 @@ describe("createLatestWinsSaver", () => {
     expect(persisted).toEqual(["A", "B"]);
   });
 
-  it("lets an even newer queued save supersede an older queued save", async () => {
+  it("lets an even newer queued replace supersede an older queued replace", async () => {
     const gates: Deferred[] = [];
-    const persisted: string[] = [];
-    const saveFn = vi.fn((payload: string) => {
-      const gate = deferred();
-      gates.push(gate);
-      return gate.promise.then(() => {
-        persisted.push(payload);
-      });
-    });
-    const saveLatest = createLatestWinsSaver(saveFn);
+    const chargePointService = makeService([]);
+    chargePointService.replaceConnectorScenarioDefinitions.mockImplementation(
+      async () => {
+        const gate = deferred();
+        gates.push(gate);
+        return gate.promise.then(() => []);
+      },
+    );
+    const saveLatest = createLatestWinsSaver<ScenarioDefinition>((definition) =>
+      persistEditorScenario(
+        {
+          mode: "local",
+          chargePointService,
+          cpId: "CP1",
+          connectorId: 1,
+        },
+        definition,
+      ),
+    );
 
-    const saveA = saveLatest("A");
+    const saveA = saveLatest(scenario("A"));
     await flushPromises();
-    const saveB = saveLatest("B");
-    const saveC = saveLatest("C");
+    const saveB = saveLatest(scenario("B"));
+    const saveC = saveLatest(scenario("C"));
 
     gates[0].resolve();
     await saveA;
     await saveB;
     await flushPromises();
 
-    expect(saveFn).toHaveBeenCalledTimes(2);
-    expect(saveFn).toHaveBeenNthCalledWith(1, "A");
-    expect(saveFn).toHaveBeenNthCalledWith(2, "C");
-    expect(saveFn).not.toHaveBeenCalledWith("B");
+    expect(
+      chargePointService.replaceConnectorScenarioDefinitions,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      chargePointService.replaceConnectorScenarioDefinitions,
+    ).toHaveBeenNthCalledWith(1, "CP1", 1, [scenario("A")]);
+    expect(
+      chargePointService.replaceConnectorScenarioDefinitions,
+    ).toHaveBeenLastCalledWith("CP1", 1, [scenario("C")]);
+    expect(
+      chargePointService.replaceConnectorScenarioDefinitions,
+    ).not.toHaveBeenCalledWith("CP1", 1, [scenario("B")]);
 
     gates[1].resolve();
     await saveC;
-    expect(persisted).toEqual(["A", "C"]);
   });
 
   it("continues with the latest queued save after an in-flight failure", async () => {
@@ -372,7 +441,6 @@ describe("retargetScenarioToConnector (upload retargeting — #101)", () => {
     expect(out.targetType).toBe("connector");
     expect(out.targetId).toBe(2);
     expect(out.updatedAt).toBe(now);
-    // Content is preserved; only targeting/timestamp change.
     expect(out.id).toBe("up-1");
     expect(out.nodes).toBe(fromConnector1.nodes);
   });

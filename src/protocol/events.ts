@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { redactSensitiveValue } from "../cp/shared/redaction";
-import { STR_64K } from "./limits";
+import { OBJ_MAX_BYTES, STR_64K, boundedObject } from "./limits";
 import type { OcppSecurityProfile } from "../cp/infrastructure/transport/wsUrlWithBasic";
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,9 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     centralSystemUrl: config.centralSystemUrl
       ? redactUrl(config.centralSystemUrl)
       : undefined,
-    soapCallbackUrl: config.soapCallbackUrl,
+    soapCallbackUrl: config.soapCallbackUrl
+      ? redactUrl(config.soapCallbackUrl)
+      : undefined,
     soapPath: config.soapPath,
     ocppVersion: config.ocppVersion,
     connectors: config.connectors,
@@ -124,6 +126,99 @@ export const wireCpConfigSchema = z
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// WireSimulatorConfig — persisted simulator config reads (no password)
+// ---------------------------------------------------------------------------
+
+const wireSimulatorBootNotificationSchema = z
+  .object({
+    chargePointVendor: STR_64K,
+    chargePointModel: STR_64K,
+    chargePointSerialNumber: STR_64K.optional(),
+    chargeBoxSerialNumber: STR_64K.optional(),
+    firmwareVersion: STR_64K.optional(),
+    iccid: STR_64K.optional(),
+    imsi: STR_64K.optional(),
+    meterType: STR_64K.optional(),
+    meterSerialNumber: STR_64K.optional(),
+  })
+  .strict()
+  .nullable();
+
+const wireBasicAuthSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    username: STR_64K,
+  })
+  .strict();
+
+const simulatorConfigBaseSchema = z
+  .object({
+    wsURL: STR_64K,
+    ChargePointID: STR_64K,
+    connectorNumber: z.number().int().min(0),
+    tagID: STR_64K,
+    ocppVersion: STR_64K,
+    basicAuthSettings: wireBasicAuthSettingsSchema,
+    autoMeterValueSetting: z
+      .object({
+        enabled: z.boolean(),
+        interval: z.number(),
+        value: z.number(),
+      })
+      .strict(),
+    Experimental: z
+      .object({
+        ChargePointIDs: z
+          .array(
+            z
+              .object({
+                ChargePointID: STR_64K,
+                ConnectorNumber: z.number().int().min(0),
+              })
+              .strict(),
+          )
+          .max(1_000),
+        TagIDs: z.array(STR_64K).max(1_000),
+      })
+      .strict()
+      .nullable(),
+    BootNotification: wireSimulatorBootNotificationSchema,
+  })
+  .strict();
+
+export const wireSimulatorConfigSchema = simulatorConfigBaseSchema;
+export type WireSimulatorConfig = z.infer<typeof wireSimulatorConfigSchema>;
+
+export const simulatorConfigInputSchema = simulatorConfigBaseSchema.extend({
+  basicAuthSettings: wireBasicAuthSettingsSchema
+    .extend({ password: STR_64K.optional() })
+    .strict(),
+  BootNotification: boundedObject(OBJ_MAX_BYTES)
+    .nullable()
+    .pipe(wireSimulatorBootNotificationSchema),
+});
+export type SimulatorConfigInput = z.infer<typeof simulatorConfigInputSchema>;
+
+interface FullSimulatorConfig extends SimulatorConfigInput {
+  basicAuthSettings: SimulatorConfigInput["basicAuthSettings"] & {
+    password?: string;
+  };
+}
+
+export function redactSimulatorConfig(
+  config: FullSimulatorConfig,
+): WireSimulatorConfig {
+  return {
+    ...config,
+    wsURL: redactUrl(config.wsURL),
+    basicAuthSettings: {
+      enabled: config.basicAuthSettings.enabled,
+      username: config.basicAuthSettings.username,
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Status (per-CP snapshot) — config redacted via WireCpConfig
@@ -226,6 +321,14 @@ export const cliEventWireSchema = z
 export type CliEventWire = z.infer<typeof cliEventWireSchema>;
 
 const URL_WITH_CREDS = /^[a-zA-Z][\w+.-]*:\/\/[^@/]*@/;
+const TLS_MATERIAL_KEY_NAMES = new Set([
+  "ca",
+  "cert",
+  "certificate",
+  "key",
+  "passphrase",
+  "privatekey",
+]);
 
 /**
  * Defensively redact event data: drop sensitive keys AND strip embedded
@@ -243,11 +346,29 @@ function deepRedact(value: unknown): unknown {
   if (withoutSecrets && typeof withoutSecrets === "object") {
     return Object.fromEntries(
       Object.entries(withoutSecrets as Record<string, unknown>).map(
-        ([k, v]) => [k, deepRedact(v)],
+        ([k, v]) => [
+          k,
+          normalizedKey(k) === "tls" ? redactTlsMaterial(v) : deepRedact(v),
+        ],
       ),
     );
   }
   return withoutSecrets;
+}
+
+function redactTlsMaterial(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactTlsMaterial);
+  if (!value || typeof value !== "object") return deepRedact(value);
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !TLS_MATERIAL_KEY_NAMES.has(normalizedKey(key)))
+      .map(([key, nested]) => [key, redactTlsMaterial(nested)]),
+  );
+}
+
+function normalizedKey(key: string): string {
+  return key.replace(/[-_]/g, "").toLowerCase();
 }
 
 /** Bound + defensively redact a CLIEvent for the wire. */

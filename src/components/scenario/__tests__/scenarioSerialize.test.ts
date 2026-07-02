@@ -1,9 +1,12 @@
 import type { Edge, Node } from "@xyflow/react";
 import { describe, expect, it } from "vitest";
 import { ScenarioNodeType } from "../../../cp/application/scenario/ScenarioTypes";
-import { serializeScenarioGraph } from "../scenarioSerialize";
+import {
+  deserializeScenarioGraph,
+  serializeScenarioGraph,
+} from "../scenarioSerialize";
 
-describe("serializeScenarioGraph", () => {
+describe("scenario graph serializer", () => {
   it("strips runtime overlays while preserving scenario graph data", () => {
     const nodes = [
       {
@@ -70,5 +73,30 @@ describe("serializeScenarioGraph", () => {
     });
     expect(serialized.nodes[0]).not.toBe(nodes[0]);
     expect(serialized.nodes[0].position).not.toBe(nodes[0].position);
+  });
+
+  it("round-trips deserialized graphs back to the same persisted shape", () => {
+    const serialized = serializeScenarioGraph(
+      [
+        {
+          id: "status-1",
+          type: ScenarioNodeType.STATUS_CHANGE,
+          position: { x: 10, y: 20 },
+          data: { label: "Available", status: "Available" },
+        },
+      ],
+      [{ id: "edge-1", source: "start", target: "status-1" } as Edge],
+    );
+
+    const deserialized = deserializeScenarioGraph(
+      serialized.nodes,
+      serialized.edges,
+    );
+
+    expect(
+      serializeScenarioGraph(deserialized.nodes, deserialized.edges),
+    ).toEqual(serialized);
+    expect(deserialized.nodes[0]).not.toBe(serialized.nodes[0]);
+    expect(deserialized.edges[0]).not.toBe(serialized.edges[0]);
   });
 });

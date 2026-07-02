@@ -174,6 +174,28 @@ export class CPRegistry {
   }
 
   /**
+   * Attach an already-constructed single-CP service to the registry without
+   * persisting, preparing, or seeding it. Standalone CLI mode uses this to
+   * preserve the legacy `CLIChargePointService.fromOptions` bootstrap while
+   * exposing that one CP through the RegistryChargePointService facade.
+   */
+  registerExisting(service: CLIChargePointService): CLIChargePointService {
+    const init = service.getInit();
+    if (this.services.has(init.cpId)) {
+      throw new Error(`cpId already exists: ${init.cpId}`);
+    }
+    const unsub = service.onEvent((evt) => this.bus.publish(init.cpId, evt));
+    this.services.set(init.cpId, service);
+    this.unsubscribes.set(init.cpId, unsub);
+    this.notifyRegistryMembership({
+      change: "added",
+      cpId: init.cpId,
+      service,
+    });
+    return service;
+  }
+
+  /**
    * Create + register a brand-new CP. Pass `opts.seedDefault: false` to
    * skip the auto-seeded Essential CP Behavior template — used by the
    * CLI bootstrap path when the operator supplied their own --scenario /

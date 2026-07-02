@@ -11,9 +11,6 @@ import { createStore } from "jotai/vanilla";
 
 import type { RuntimeMode } from "../RuntimeMode";
 import { HEALTH_PATH } from "../healthPath";
-import type { ConfigRepository } from "../interfaces/ConfigRepository";
-import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
-import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import type { ChargePointService } from "../interfaces/ChargePointService";
 import { LocalChargePointService } from "../local/LocalChargePointService";
 import { RemoteChargePointService } from "../remote/RemoteChargePointService";
@@ -21,9 +18,6 @@ import type { Database } from "../../cp/domain/persistence/Database";
 // SqlJsDatabase intentionally NOT imported eagerly — see the mode-gated
 // dynamic import below. Remote mode never needs it, so we keep the
 // ~650 KB WASM wrapper out of that path entirely.
-import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
-import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
-import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
 import {
   type EVSettings,
   defaultEVSettings,
@@ -79,9 +73,6 @@ interface DataContextValue {
    *  `null` means "no override — fall back to the built-in defaults". */
   defaultEvSettings: EVSettings | null;
   setDefaultEvSettings: (s: EVSettings | null) => void;
-  configRepository: ConfigRepository;
-  scenarioRepository: ScenarioRepository;
-  connectorSettingsRepository: ConnectorSettingsRepository;
   chargePointService: ChargePointService;
 }
 
@@ -231,20 +222,6 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     };
   }, [mode]);
 
-  // Repositories accept `database === null` (remote mode); they no-op
-  // writes and return empty/null reads. Local mode wires the real DB.
-  const configRepository = useMemo<ConfigRepository>(
-    () => new SqliteConfigRepository(database),
-    [database],
-  );
-  const scenarioRepository = useMemo<ScenarioRepository>(
-    () => new SqliteScenarioRepository(database),
-    [database],
-  );
-  const connectorSettingsRepository = useMemo<ConnectorSettingsRepository>(
-    () => new SqliteConnectorSettingsRepository(database),
-    [database],
-  );
   const localChargePointService = useMemo(
     () => new LocalChargePointService(database),
     [database],
@@ -302,22 +279,10 @@ export const DataProvider: React.FC<DataProviderProps> = ({
             serverUrl,
             defaultEvSettings,
             setDefaultEvSettings,
-            configRepository,
-            scenarioRepository,
-            connectorSettingsRepository,
             chargePointService,
           }
         : null,
-    [
-      ready,
-      mode,
-      serverUrl,
-      defaultEvSettings,
-      configRepository,
-      scenarioRepository,
-      connectorSettingsRepository,
-      chargePointService,
-    ],
+    [ready, mode, serverUrl, defaultEvSettings, chargePointService],
   );
 
   if (!ready || !value) {

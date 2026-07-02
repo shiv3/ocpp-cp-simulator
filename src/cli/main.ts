@@ -8,14 +8,21 @@ import { startJsonMode } from "./jsonMode";
 import { resolveClientLocation } from "./clientLocation";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
+import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import { setGlobalLogFormat } from "../cp/shared/Logger";
 import {
   startServer,
   DEFAULT_HTTP_PORT,
   DEFAULT_PID_PATH,
 } from "./server/startServer";
+import { CPRegistry } from "./server/CPRegistry";
+import { EventBus } from "./server/eventBus";
+import { RegistryChargePointService } from "./server/RegistryChargePointService";
+import { createSocketConfigRepository } from "./server/socketServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
 import type { ClientLocation } from "./client";
+import type { SingleCpRuntimeTarget } from "./singleCpTarget";
+import { SqliteConnectorSettingsRepository } from "../data/sqlite/SqliteConnectorSettingsRepository";
 import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
@@ -817,6 +824,44 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
   };
 }
 
+function createStandaloneChargePointRuntime(
+  options: CLIOptions,
+  database: Database | null,
+): SingleCpRuntimeTarget {
+  const bootstrap = buildBootstrap(options);
+  if (!bootstrap) {
+    throw new Error("cpId is required");
+  }
+
+  const bus = new EventBus();
+  const registry = new CPRegistry(bus, database, {
+    allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms,
+  });
+  const configRepository = createSocketConfigRepository(database);
+  const scenarioRepository = new SqliteScenarioRepository(database);
+  const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
+    database,
+  );
+  const chargePointService = new RegistryChargePointService(registry, {
+    database,
+    configRepository,
+    scenarioRepository,
+    connectorSettingsRepository,
+  });
+  const eventSource = registry.registerExisting(
+    CLIChargePointService.fromOptions(options, database),
+  );
+
+  return {
+    chargePointService,
+    cpId: bootstrap.cpId,
+    eventSource,
+    cleanup: () => {
+      registry.shutdownAll();
+    },
+  };
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv);
   // Apply log format BEFORE constructing any service / charge point so
@@ -898,7 +943,7 @@ async function main(): Promise<void> {
   if (options.stateDb) {
     replDatabase = BunSqliteDatabase.open(options.stateDb);
   }
-  const service = CLIChargePointService.fromOptions(options, replDatabase);
+  const service = createStandaloneChargePointRuntime(options, replDatabase);
 
   let shuttingDown = false;
   const shutdown = () => {

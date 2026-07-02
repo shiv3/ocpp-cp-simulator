@@ -2,17 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { ChargePointService } from "../../data/interfaces/ChargePointService";
-import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
 
-type SocMeterSyncService = Pick<ChargePointService, "setConnectorSocMeterSync">;
-type SocMeterSyncRepository = Pick<
-  ConnectorSettingsRepository,
-  "loadSocMeterSync" | "saveSocMeterSync"
+type SocMeterSyncService = Pick<
+  ChargePointService,
+  "getSocMeterSync" | "saveSocMeterSync" | "setConnectorSocMeterSync"
 >;
 
 interface UseSocMeterSyncArgs {
   chargePointService: SocMeterSyncService;
-  connectorSettingsRepository: SocMeterSyncRepository;
   cpId: string;
   connectorId: number;
   evSettings: EVSettings;
@@ -44,7 +41,6 @@ export function socFromMeter(meterWh: number, evSettings: EVSettings): number {
 
 export function useSocMeterSync({
   chargePointService,
-  connectorSettingsRepository,
   cpId,
   connectorId,
   evSettings,
@@ -57,8 +53,8 @@ export function useSocMeterSync({
     let cancelled = false;
     const loadSeq = ++loadSeqRef.current;
 
-    void connectorSettingsRepository
-      .loadSocMeterSync()
+    void chargePointService
+      .getSocMeterSync(cpId, connectorId)
       .then((value) => {
         if (cancelled || touchedRef.current || loadSeq !== loadSeqRef.current) {
           return;
@@ -72,7 +68,7 @@ export function useSocMeterSync({
     return () => {
       cancelled = true;
     };
-  }, [connectorSettingsRepository]);
+  }, [chargePointService, cpId, connectorId]);
 
   useEffect(() => {
     void chargePointService.setConnectorSocMeterSync(
@@ -87,11 +83,11 @@ export function useSocMeterSync({
       touchedRef.current = true;
       setAutoSyncSocMeterState((prev) => {
         const resolved = typeof next === "function" ? next(prev) : next;
-        void connectorSettingsRepository.saveSocMeterSync(resolved);
+        void chargePointService.saveSocMeterSync(cpId, connectorId, resolved);
         return resolved;
       });
     },
-    [connectorSettingsRepository],
+    [chargePointService, cpId, connectorId],
   );
 
   const handleToggleAutoSync = useCallback(() => {

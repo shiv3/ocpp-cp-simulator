@@ -6,6 +6,7 @@ import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
   CreateChargePointParams,
+  ScenarioRunOptions,
   ScenarioListItem,
   ScenarioTemplateInfo,
   StoredLogEntry,
@@ -13,6 +14,7 @@ import type {
 import type {
   OCPPAvailability,
   OCPPStatus,
+  StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -37,17 +39,38 @@ import {
   type RpcAck,
   type RpcErrorCode,
   type RpcMethod,
+  type RpcRequest,
+  type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
+  type WireSimulatorConfig,
 } from "../../protocol";
 
 type CpEventEnvelope = Extract<EventEnvelope, { kind: "cp" }>;
 type RegistryEventEnvelope = Extract<EventEnvelope, { kind: "registry" }>;
+type ConfigEventEnvelope = Extract<EventEnvelope, { kind: "config" }>;
+type ScenarioDefinitionsEventEnvelope = Extract<
+  EventEnvelope,
+  { kind: "scenario-definitions" }
+>;
 type ServerCpEvent = CpEventEnvelope["evt"];
 type ServerConnectorStatus = StatusWire["connectors"][number];
 type WireConfig = NonNullable<StatusWire["config"]>;
 
+const CONFIG_EVENTS_SCOPE = "config";
+const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
+
 export type RemoteConnectionState = "connecting" | "connected" | "disconnected";
+
+type RemoteBasicAuth = {
+  readonly username: string;
+  readonly password: string;
+};
+
+export interface RemoteChargePointServiceOptions {
+  /** Socket.IO handshake auth. Undefined preserves URL credential behavior. */
+  readonly basicAuth?: RemoteBasicAuth | null;
+}
 
 export type RemoteRegistrySubscriptionEvent =
   | { type: "snapshot"; cps: ChargePointSnapshot[] }
@@ -71,6 +94,22 @@ interface ActiveRegistrySubscription {
   handlers: Set<(event: RemoteRegistrySubscriptionEvent) => void>;
   ready: boolean;
   queued: RegistryEventEnvelope[];
+}
+
+interface ActiveConfigSubscription {
+  handlers: Set<(config: WireSimulatorConfig | null) => void>;
+  ready: boolean;
+  queued: ConfigEventEnvelope[];
+  current: WireSimulatorConfig | null;
+}
+
+interface ActiveScenarioDefinitionsSubscription {
+  cpId: string;
+  connectorId: number | null;
+  handlers: Set<(definitions: ScenarioDefinition[]) => void>;
+  ready: boolean;
+  queued: ScenarioDefinitionsEventEnvelope[];
+  current: ScenarioDefinition[];
 }
 
 interface ScenarioStatusRequest {
@@ -570,6 +609,10 @@ export class RemoteChargePointService implements ChargePointService {
   >();
   private readonly snapshotCache = new Map<string, ChargePointSnapshot>();
   private readonly registryCache = new Map<string, ChargePointSnapshot>();
+  private readonly scenarioDefinitionSubs = new Map<
+    string,
+    ActiveScenarioDefinitionsSubscription
+  >();
   private readonly activeStateHistory = new Map<
     string,
     HistoryOptions | undefined
@@ -579,16 +622,26 @@ export class RemoteChargePointService implements ChargePointService {
     ScenarioStatusRequest
   >();
   private registrySub: ActiveRegistrySubscription | null = null;
+  private configSub: ActiveConfigSubscription | null = null;
+  private configScopeSubscribe: Promise<void> | null = null;
+  private scenarioDefinitionsScopeSubscribe: Promise<void> | null = null;
   private nextRpcId = 1;
   private connectionState: RemoteConnectionState = "connecting";
   private hasConnected = false;
   private reconnectSerial = 0;
 
-  constructor(serverUrl: string) {
+  constructor(
+    serverUrl: string,
+    options: RemoteChargePointServiceOptions = {},
+  ) {
     const baseUrl = serverUrl.replace(/\/+$/, "");
+    const auth =
+      options.basicAuth === undefined
+        ? authFromUrl(baseUrl)
+        : (options.basicAuth ?? undefined);
     this.socket = io(baseUrl, {
       path: "/socket.io/",
-      auth: authFromUrl(baseUrl),
+      auth,
       // Pin the polling transport instead of upgrading to WebSocket. When the
       // daemon is exposed behind an L7 proxy (e.g. the staging GCE Ingress),
       // the WebSocket upgrade often can't complete — the upgrade request fails
@@ -715,22 +768,57 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
-    opts?: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts?: StatusNotificationOptions,
   ): Promise<void> {
-    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
-      console.warn(
-        "Remote mode: StatusNotification errorCode/info/vendorErrorCode not yet supported; dropping",
-        opts,
-      );
-    }
     await this.runCpRpc(id, "update_connector_status", {
       connector: connectorId,
       status,
+      ...(opts?.errorCode !== undefined ? { errorCode: opts.errorCode } : {}),
+      ...(opts?.info !== undefined ? { info: opts.info } : {}),
+      ...(opts?.vendorErrorCode !== undefined
+        ? { vendorErrorCode: opts.vendorErrorCode }
+        : {}),
+      ...(opts?.vendorId !== undefined ? { vendorId: opts.vendorId } : {}),
+      ...(opts?.timestamp !== undefined
+        ? { timestamp: opts.timestamp.toISOString() }
+        : {}),
+      ...(opts?.suppressChargingStateTransactionEvent !== undefined
+        ? {
+            suppressChargingStateTransactionEvent:
+              opts.suppressChargingStateTransactionEvent,
+          }
+        : {}),
+    });
+  }
+
+  async sendDiagnosticsStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "diagnostics_status_notification", { status });
+  }
+
+  async sendFirmwareStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "firmware_status_notification", { status });
+  }
+
+  async sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "security_event_notification", {
+      type,
+      ...(techInfo !== undefined ? { techInfo } : {}),
+    });
+  }
+
+  async sendSignCertificate(id: string, csr?: string): Promise<void> {
+    await this.runCpRpc(id, "sign_certificate", {
+      ...(csr !== undefined ? { csr } : {}),
     });
   }
 
@@ -764,6 +852,15 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async getEVSettings(
+    id: string,
+    connectorId: number,
+  ): Promise<EVSettings | null> {
+    const snapshot = await this.getChargePoint(id);
+    const connector = snapshot?.connectors.find((c) => c.id === connectorId);
+    return connector?.evSettings ?? null;
+  }
+
   async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
     // The daemon's connectors never see the browser-only Default EV Settings,
     // so push it onto every connector of every known charge point (#107).
@@ -789,6 +886,38 @@ export class RemoteChargePointService implements ChargePointService {
   ): Promise<void> {
     await this.runCpRpc(id, "set_auto_meter_config", {
       connector: connectorId,
+      config: config as unknown as Record<string, unknown>,
+    });
+  }
+
+  async getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    const snapshot = await this.getChargePoint(id);
+    const connector = snapshot?.connectors.find((c) => c.id === connectorId);
+    return connector?.autoMeterValueConfig ?? null;
+  }
+
+  async getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    const data = await this.rpc("connector_settings.auto_meter.get", {
+      cpId: id,
+      connectorId,
+    });
+    return (data as unknown as AutoMeterValueConfig | null) ?? null;
+  }
+
+  async saveAutoMeterConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    await this.rpc("connector_settings.auto_meter.save", {
+      cpId: id,
+      connectorId,
       config: config as unknown as Record<string, unknown>,
     });
   }
@@ -831,6 +960,25 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async getSocMeterSync(id: string, connectorId: number): Promise<boolean> {
+    return this.rpc("connector_settings.soc_meter_sync.get", {
+      cpId: id,
+      connectorId,
+    });
+  }
+
+  async saveSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.rpc("connector_settings.soc_meter_sync.save", {
+      cpId: id,
+      connectorId,
+      enabled,
+    });
+  }
+
   async getChargingProfiles(
     id: string,
     connectorId: number,
@@ -862,20 +1010,116 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
-    const list = await this.listChargePoints().catch(() => []);
-    if (list.length === 0) return [];
-    const data = await this.runCpRpc(list[0].id, "list_scenario_templates");
-    return (data as ScenarioTemplateInfo[]) ?? [];
+    const data = await this.rpc("scenario.templates", {});
+    return data ?? [];
+  }
+
+  async listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]> {
+    const data = await this.rpc("scenario.definitions.list", {
+      cpId: id,
+      connectorId,
+    });
+    return (data as unknown as ScenarioDefinition[]) ?? [];
+  }
+
+  async saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition> {
+    const data = await this.rpc("scenario.definitions.save", {
+      cpId: id,
+      connectorId,
+      definition: definition as unknown as Record<string, unknown>,
+    });
+    return (data as unknown as ScenarioDefinition) ?? definition;
+  }
+
+  async replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]> {
+    const data = await this.rpc("scenario.definitions.replace", {
+      cpId: id,
+      connectorId,
+      definitions: definitions as unknown as Record<string, unknown>[],
+    });
+    return (data as unknown as ScenarioDefinition[]) ?? [...definitions];
+  }
+
+  async deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void> {
+    await this.rpc("scenario.definitions.delete", {
+      cpId: id,
+      connectorId,
+      definitionId,
+    });
+  }
+
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void {
+    const key = scenarioDefinitionsKey(id, connectorId);
+    let sub = this.scenarioDefinitionSubs.get(key);
+    if (!sub) {
+      sub = {
+        cpId: id,
+        connectorId,
+        handlers: new Set(),
+        ready: false,
+        queued: [],
+        current: [],
+      };
+      this.scenarioDefinitionSubs.set(key, sub);
+      void this.refreshScenarioDefinitionsSubscription(key, sub);
+    }
+
+    sub.handlers.add(handler);
+    if (sub.ready) {
+      const definitions = [...sub.current];
+      queueMicrotask(() => {
+        if (!this.scenarioDefinitionSubs.get(key)?.handlers.has(handler)) {
+          return;
+        }
+        handler(definitions);
+      });
+    }
+
+    return () => {
+      const current = this.scenarioDefinitionSubs.get(key);
+      if (!current) return;
+      current.handlers.delete(handler);
+      if (current.handlers.size === 0) {
+        this.scenarioDefinitionSubs.delete(key);
+        if (this.scenarioDefinitionSubs.size === 0) {
+          this.scenarioDefinitionsScopeSubscribe = null;
+          void this.rpc("events.unsubscribe", {
+            scope: SCENARIO_DEFINITIONS_EVENTS_SCOPE,
+          }).catch(() => {});
+        }
+      }
+    };
   }
 
   async loadScenarioTemplate(
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
     const data = await this.runCpRpc(id, "load_scenario_template", {
       templateId,
       connector: connectorId,
+      ...(evSettings ? { evSettings } : {}),
     });
     return (data as { scenarioId: string }) ?? { scenarioId: "" };
   }
@@ -911,6 +1155,35 @@ export class RemoteChargePointService implements ChargePointService {
       connector: connectorId,
       scenarioId,
     });
+  }
+
+  async runScenarioFile(
+    id: string,
+    path: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const data = await this.runCpRpc(id, "run_scenario_file", {
+      connector: opts.connectorId ?? 1,
+      file: path,
+    });
+    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+  }
+
+  async runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const data = await this.runCpRpc(id, "run_scenario_template", {
+      connector: opts.connectorId ?? 1,
+      templateId,
+      ...(opts.evSettings !== undefined
+        ? {
+            evSettings: opts.evSettings as unknown as Record<string, unknown>,
+          }
+        : {}),
+    });
+    return (data as { scenarioId: string }) ?? { scenarioId: "" };
   }
 
   async stopScenario(
@@ -1053,7 +1326,7 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async createChargePoint(params: CreateChargePointParams): Promise<void> {
-    await this.rpc("cp.create", params);
+    await this.rpc("cp.create", params as Params<"cp.create">);
   }
 
   async updateChargePoint(params: CreateChargePointParams): Promise<void> {
@@ -1082,10 +1355,89 @@ export class RemoteChargePointService implements ChargePointService {
     return Array.isArray(rows) ? (rows as StoredLogEntry[]) : [];
   }
 
+  async loadConfig(): Promise<WireSimulatorConfig | null> {
+    return this.rpc("config.get", {});
+  }
+
+  async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
+    await this.rpc("config.save", { config });
+  }
+
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void {
+    let sub = this.configSub;
+    if (!sub) {
+      sub = {
+        handlers: new Set(),
+        ready: false,
+        queued: [],
+        current: null,
+      };
+      this.configSub = sub;
+      void this.refreshConfigSubscription(sub);
+    }
+
+    sub.handlers.add(handler);
+    if (sub.ready) {
+      const config = sub.current;
+      queueMicrotask(() => {
+        if (!this.configSub?.handlers.has(handler)) return;
+        handler(config);
+      });
+    }
+
+    return () => {
+      const current = this.configSub;
+      if (!current) return;
+      current.handlers.delete(handler);
+      if (current.handlers.size === 0) {
+        this.configSub = null;
+        this.configScopeSubscribe = null;
+        void this.rpc("events.unsubscribe", {
+          scope: CONFIG_EVENTS_SCOPE,
+        }).catch(() => {});
+      }
+    };
+  }
+
+  /**
+   * Raw control-plane passthrough for the bundled CLI client. Port consumers
+   * should use the typed methods above; this preserves `--send`'s JSON command
+   * contract, where the daemon receives the verbatim method/params pair.
+   */
+  async runRawRpc(
+    method: string,
+    params: unknown = {},
+    cpId?: string,
+  ): Promise<RpcAck> {
+    return this.emitRpcAck({
+      ...(cpId ? { cpId } : {}),
+      method,
+      params,
+    });
+  }
+
+  async subscribeRawEvents(
+    scope: string,
+    handler: (event: EventEnvelope) => void,
+  ): Promise<void> {
+    this.socket.on("event", handler);
+    const ack = await this.runRawRpc("events.subscribe", { scope });
+    if (!ack.ok) {
+      this.socket.off("event", handler);
+      throw new RpcFailure(ack.error.code, ack.error.message);
+    }
+  }
+
   dispose(): void {
     this.rejectPending("disconnected");
     this.subs.clear();
     this.registrySub = null;
+    this.configSub = null;
+    this.configScopeSubscribe = null;
+    this.scenarioDefinitionSubs.clear();
+    this.scenarioDefinitionsScopeSubscribe = null;
     this.connectionHandlers.clear();
     this.socket.disconnect();
   }
@@ -1103,14 +1455,31 @@ export class RemoteChargePointService implements ChargePointService {
     params: Params<M>,
     cpId?: string,
   ): Promise<Result<M>> {
-    const request = {
+    const request: RpcRequest = {
       ...(cpId ? { cpId } : {}),
       method,
       params,
     };
+
+    return this.emitRpcRequest(request, (ack) => {
+      if (!ack.ok) {
+        throw new RpcFailure(ack.error.code, ack.error.message);
+      }
+      return ack.result as Result<M>;
+    });
+  }
+
+  private emitRpcAck(request: RpcRequest): Promise<RpcAck> {
+    return this.emitRpcRequest(request, (ack) => ack);
+  }
+
+  private emitRpcRequest<T>(
+    request: RpcRequest,
+    mapAck: (ack: RpcAck) => T,
+  ): Promise<T> {
     const id = this.nextRpcId++;
 
-    return new Promise<Result<M>>((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       let settled = false;
       const settle = (fn: () => void) => {
         if (settled) return;
@@ -1130,19 +1499,19 @@ export class RemoteChargePointService implements ChargePointService {
         .emitWithAck("rpc", request)
         .then(
           (ack: unknown) => {
-            if (!isRpcAck<Result<M>>(ack)) {
+            if (!isRpcAck(ack)) {
               settle(() =>
                 reject(new RpcFailure("internal", "invalid rpc ack")),
               );
               return;
             }
-            if (!ack.ok) {
-              settle(() =>
-                reject(new RpcFailure(ack.error.code, ack.error.message)),
-              );
-              return;
-            }
-            settle(() => resolve(ack.result));
+            settle(() => {
+              try {
+                resolve(mapAck(ack));
+              } catch (err) {
+                reject(err);
+              }
+            });
           },
           () => {
             this.rejectPending("timeout");
@@ -1183,6 +1552,14 @@ export class RemoteChargePointService implements ChargePointService {
       this.registrySub.ready = false;
       this.registrySub.queued = [];
     }
+    if (this.configSub) {
+      this.configSub.ready = false;
+      this.configSub.queued = [];
+    }
+    for (const sub of this.scenarioDefinitionSubs.values()) {
+      sub.ready = false;
+      sub.queued = [];
+    }
   }
 
   private scheduleReconnectResync(): void {
@@ -1197,6 +1574,10 @@ export class RemoteChargePointService implements ChargePointService {
     this.markSubscriptionsNotReady();
     const scopes = [
       ...(this.registrySub ? ["registry"] : []),
+      ...(this.configSub ? [CONFIG_EVENTS_SCOPE] : []),
+      ...(this.scenarioDefinitionSubs.size > 0
+        ? [SCENARIO_DEFINITIONS_EVENTS_SCOPE]
+        : []),
       ...this.subs.keys(),
     ];
     for (const scope of scopes) {
@@ -1232,7 +1613,84 @@ export class RemoteChargePointService implements ChargePointService {
         req.cpId,
       ).catch(() => undefined),
     );
-    await Promise.all([...logFetches, ...historyFetches, ...scenarioFetches]);
+    const configFetch = this.configSub
+      ? this.refreshConfigSubscription(this.configSub)
+      : Promise.resolve();
+    const scenarioDefinitionFetches = [
+      ...this.scenarioDefinitionSubs.entries(),
+    ].map(([key, sub]) =>
+      this.refreshScenarioDefinitionsSubscription(key, sub),
+    );
+    await Promise.all([
+      ...logFetches,
+      ...historyFetches,
+      ...scenarioFetches,
+      configFetch,
+      ...scenarioDefinitionFetches,
+    ]);
+  }
+
+  private ensureConfigEventsSubscribed(): Promise<void> {
+    if (!this.configScopeSubscribe) {
+      this.configScopeSubscribe = this.subscribeScope(
+        CONFIG_EVENTS_SCOPE,
+      ).catch((err) => {
+        console.warn(
+          "[RemoteChargePointService] config event subscribe failed",
+          err,
+        );
+      });
+    }
+    return this.configScopeSubscribe;
+  }
+
+  private ensureScenarioDefinitionsEventsSubscribed(): Promise<void> {
+    if (!this.scenarioDefinitionsScopeSubscribe) {
+      this.scenarioDefinitionsScopeSubscribe = this.subscribeScope(
+        SCENARIO_DEFINITIONS_EVENTS_SCOPE,
+      ).catch((err) => {
+        console.warn(
+          "[RemoteChargePointService] scenario definitions event subscribe failed",
+          err,
+        );
+      });
+    }
+    return this.scenarioDefinitionsScopeSubscribe;
+  }
+
+  private async refreshConfigSubscription(
+    sub: ActiveConfigSubscription,
+  ): Promise<void> {
+    try {
+      await this.ensureConfigEventsSubscribed();
+      const config = await this.loadConfig();
+      if (this.configSub !== sub) return;
+      this.applyConfigValue(sub, config);
+      this.flushConfigQueue(sub);
+    } catch (err) {
+      console.warn("[RemoteChargePointService] config subscribe failed", err);
+    }
+  }
+
+  private async refreshScenarioDefinitionsSubscription(
+    key: string,
+    sub: ActiveScenarioDefinitionsSubscription,
+  ): Promise<void> {
+    try {
+      await this.ensureScenarioDefinitionsEventsSubscribed();
+      const definitions = await this.listScenarioDefinitions(
+        sub.cpId,
+        sub.connectorId,
+      );
+      if (this.scenarioDefinitionSubs.get(key) !== sub) return;
+      this.applyScenarioDefinitionsValue(sub, definitions);
+      this.flushScenarioDefinitionsQueue(key, sub);
+    } catch (err) {
+      console.warn(
+        "[RemoteChargePointService] scenario definitions subscribe failed",
+        err,
+      );
+    }
   }
 
   private async subscribeScope(scope: string): Promise<void> {
@@ -1259,6 +1717,13 @@ export class RemoteChargePointService implements ChargePointService {
         });
       });
       this.flushRegistryQueue(registry);
+      return;
+    }
+
+    if (
+      scope === CONFIG_EVENTS_SCOPE ||
+      scope === SCENARIO_DEFINITIONS_EVENTS_SCOPE
+    ) {
       return;
     }
 
@@ -1293,6 +1758,29 @@ export class RemoteChargePointService implements ChargePointService {
       return;
     }
 
+    if (envelope.kind === "config") {
+      const sub = this.configSub;
+      if (!sub) return;
+      if (!sub.ready) {
+        sub.queued.push(envelope);
+        return;
+      }
+      this.deliverConfigEnvelope(envelope, sub);
+      return;
+    }
+
+    if (envelope.kind === "scenario-definitions") {
+      const key = scenarioDefinitionsKey(envelope.cpId, envelope.connectorId);
+      const sub = this.scenarioDefinitionSubs.get(key);
+      if (!sub) return;
+      if (!sub.ready) {
+        sub.queued.push(envelope);
+        return;
+      }
+      this.deliverScenarioDefinitionsEnvelope(envelope, sub);
+      return;
+    }
+
     const registry = this.registrySub;
     if (!registry) return;
     if (!registry.ready) {
@@ -1318,6 +1806,27 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  private flushConfigQueue(sub: ActiveConfigSubscription): void {
+    const queued = sub.queued;
+    sub.queued = [];
+    queued.forEach((envelope) => {
+      this.deliverConfigEnvelope(envelope, sub);
+    });
+  }
+
+  private flushScenarioDefinitionsQueue(
+    key: string,
+    sub: ActiveScenarioDefinitionsSubscription,
+  ): void {
+    const queued = sub.queued;
+    sub.queued = [];
+    queued.forEach((envelope) => {
+      if (scenarioDefinitionsKey(envelope.cpId, envelope.connectorId) === key) {
+        this.deliverScenarioDefinitionsEnvelope(envelope, sub);
+      }
+    });
+  }
+
   private deliverCpEnvelope(
     envelope: CpEventEnvelope,
     sub: ActiveSubscription,
@@ -1325,6 +1834,23 @@ export class RemoteChargePointService implements ChargePointService {
     const mapped = mapServerEventToChargePointEvent(envelope.evt);
     if (!mapped) return;
     sub.handlers.forEach((handler) => this.safeCpHandler(handler, mapped));
+  }
+
+  private deliverConfigEnvelope(
+    envelope: ConfigEventEnvelope,
+    sub: ActiveConfigSubscription,
+  ): void {
+    this.applyConfigValue(sub, envelope.config);
+  }
+
+  private deliverScenarioDefinitionsEnvelope(
+    envelope: ScenarioDefinitionsEventEnvelope,
+    sub: ActiveScenarioDefinitionsSubscription,
+  ): void {
+    this.applyScenarioDefinitionsValue(
+      sub,
+      envelope.definitions as unknown as ScenarioDefinition[],
+    );
   }
 
   private deliverRegistryEnvelope(
@@ -1357,6 +1883,28 @@ export class RemoteChargePointService implements ChargePointService {
         change: envelope.change,
         cp,
       });
+    });
+  }
+
+  private applyConfigValue(
+    sub: ActiveConfigSubscription,
+    config: WireSimulatorConfig | null,
+  ): void {
+    sub.ready = true;
+    sub.current = config;
+    sub.handlers.forEach((handler) => {
+      this.safeConfigHandler(handler, config);
+    });
+  }
+
+  private applyScenarioDefinitionsValue(
+    sub: ActiveScenarioDefinitionsSubscription,
+    definitions: ScenarioDefinition[],
+  ): void {
+    sub.ready = true;
+    sub.current = [...definitions];
+    sub.handlers.forEach((handler) => {
+      this.safeScenarioDefinitionsHandler(handler, [...definitions]);
     });
   }
 
@@ -1399,4 +1947,36 @@ export class RemoteChargePointService implements ChargePointService {
       console.error("[RemoteChargePointService] registry handler error", err);
     }
   }
+
+  private safeConfigHandler(
+    handler: (config: WireSimulatorConfig | null) => void,
+    config: WireSimulatorConfig | null,
+  ): void {
+    try {
+      handler(config);
+    } catch (err) {
+      console.error("[RemoteChargePointService] config handler error", err);
+    }
+  }
+
+  private safeScenarioDefinitionsHandler(
+    handler: (definitions: ScenarioDefinition[]) => void,
+    definitions: ScenarioDefinition[],
+  ): void {
+    try {
+      handler(definitions);
+    } catch (err) {
+      console.error(
+        "[RemoteChargePointService] scenario definitions handler error",
+        err,
+      );
+    }
+  }
+}
+
+function scenarioDefinitionsKey(
+  cpId: string,
+  connectorId: number | null,
+): string {
+  return `${cpId}\u0000${connectorId ?? "cp"}`;
 }

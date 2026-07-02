@@ -1,6 +1,6 @@
 // The socket.io wire envelopes:
 //   * `rpc` request/ack  (re-exported from errors.ts)
-//   * `event` push       (tagged union: kind "cp" | "registry")
+//   * `event` push       (tagged union: kind "cp" | "registry" | "config" | "scenario-definitions")
 //   * the subscribe-ack snapshot returned atomically by `events.subscribe`
 //
 // The `event` union exists only at the socket emit boundary; the server-side
@@ -8,11 +8,17 @@
 
 import { z } from "zod";
 
-import { ARRAY_1000 } from "./limits";
+import {
+  ARRAY_1000,
+  SCENARIO_MAX_BYTES,
+  STR_64K,
+  boundedObject,
+} from "./limits";
 import {
   cliEventWireSchema,
   cpListItemSchema,
   statusWireSchema,
+  wireSimulatorConfigSchema,
 } from "./events";
 
 export {
@@ -22,6 +28,14 @@ export {
   RPC_ERROR_CODES,
 } from "./errors";
 export type { RpcRequest, RpcAck, RpcError, RpcErrorCode } from "./errors";
+
+const scenarioDefinitionsChangedEnvelopeSchema = z.object({
+  kind: z.literal("scenario-definitions"),
+  event: z.literal("scenario-definitions-changed"),
+  cpId: STR_64K,
+  connectorId: z.number().int().min(1).nullable(),
+  definitions: ARRAY_1000(boundedObject(SCENARIO_MAX_BYTES)),
+});
 
 /** Server → client push. Distinguished by `kind`. */
 export const eventEnvelopeSchema = z.discriminatedUnion("kind", [
@@ -35,6 +49,12 @@ export const eventEnvelopeSchema = z.discriminatedUnion("kind", [
     change: z.enum(["added", "removed", "updated", "reset"]),
     cp: cpListItemSchema.optional(),
   }),
+  z.object({
+    kind: z.literal("config"),
+    event: z.literal("config-changed"),
+    config: wireSimulatorConfigSchema.nullable(),
+  }),
+  scenarioDefinitionsChangedEnvelopeSchema,
 ]);
 export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
 

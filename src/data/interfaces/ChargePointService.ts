@@ -13,12 +13,14 @@ import type {
 import type {
   OCPPAvailability,
   OCPPStatus,
+  StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import type { LogEntry } from "../../cp/shared/Logger";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 
 export interface ConnectorSnapshot {
   id: number;
@@ -222,6 +224,11 @@ export interface ScenarioTemplateInfo {
   description: string;
 }
 
+export interface ScenarioRunOptions {
+  connectorId?: number;
+  evSettings?: Partial<EVSettings>;
+}
+
 export interface ChargePointSummary {
   cpId: string;
   status: OCPPStatus | string;
@@ -274,6 +281,13 @@ export interface ChargePointService {
    *  file ends up containing, one JSON object per line. */
   listStoredLogs?(cpId: string): Promise<StoredLogEntry[]>;
 
+  // Persisted simulator config. Reads may be redacted over wire adapters.
+  loadConfig(): Promise<WireSimulatorConfig | null>;
+  saveConfig(config: SimulatorConfigInput | null): Promise<void>;
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void;
+
   // Lifecycle
   connect(id: string): Promise<void>;
   disconnect(id: string): Promise<void>;
@@ -294,13 +308,16 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
-    opts?: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts?: StatusNotificationOptions,
   ): Promise<void>;
+  sendDiagnosticsStatusNotification(id: string, status: string): Promise<void>;
+  sendFirmwareStatusNotification(id: string, status: string): Promise<void>;
+  sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void>;
+  sendSignCertificate(id: string, csr?: string): Promise<void>;
   setMeterValue(id: string, connectorId: number, value: number): Promise<void>;
   sendMeterValue(id: string, connectorId: number): Promise<void>;
   removeConnector(id: string, connectorId: number): Promise<void>;
@@ -311,6 +328,7 @@ export interface ChargePointService {
     connectorId: number,
     settings: EVSettings,
   ): Promise<void>;
+  getEVSettings(id: string, connectorId: number): Promise<EVSettings | null>;
   /**
    * Push the (new) Default EV Settings onto every existing connector. New
    * connectors already pick the default up at construction via
@@ -320,6 +338,19 @@ export interface ChargePointService {
    */
   applyDefaultEVSettings(settings: EVSettings): Promise<void>;
   setAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void>;
+  getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null>;
+  getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null>;
+  saveAutoMeterConfig(
     id: string,
     connectorId: number,
     config: AutoMeterValueConfig,
@@ -347,12 +378,17 @@ export interface ChargePointService {
    * Enable/disable SoC ↔ Meter auto-sync for a connector. When on, any
    * meter-value update (UI, scenario auto-meter, etc.) derives a SoC value
    * from EV-settings (initialSoc + delivered_kWh / capacity_kWh × 100) and
-   * pushes it into the connector. UI persists the preference globally via
-   * `connectorSettingsRepository.saveSocMeterSync` (SQLite `kv` table);
-   * pushing it down the service here makes it stick on every connector
-   * instance.
+   * pushes it into the connector. UI persists the preference through
+   * `saveSocMeterSync`; pushing it down here makes it stick on every
+   * connector instance.
    */
   setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void>;
+  getSocMeterSync(id: string, connectorId: number): Promise<boolean>;
+  saveSocMeterSync(
     id: string,
     connectorId: number,
     enabled: boolean,
@@ -369,11 +405,36 @@ export interface ChargePointService {
   ): Promise<StateHistoryEntry[]>;
 
   // Scenarios
+  listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]>;
+  saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition>;
+  replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]>;
+  deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void>;
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void;
   getScenarioTemplates(): Promise<ScenarioTemplateInfo[]>;
   loadScenarioTemplate(
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }>;
   loadScenario(
     id: string,
@@ -386,6 +447,16 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void>;
+  runScenarioFile(
+    id: string,
+    path: string,
+    opts?: ScenarioRunOptions,
+  ): Promise<{ scenarioId: string }>;
+  runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts?: ScenarioRunOptions,
+  ): Promise<{ scenarioId: string }>;
   stopScenario(
     id: string,
     connectorId: number,

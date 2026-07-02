@@ -3,17 +3,28 @@ import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargeP
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
-import { BootNotification, OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import {
+  BootNotification,
+  hasStatusNotificationOptions,
+  OCPPStatus,
+  type StatusNotificationOptions,
+} from "../../cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
   ConnectorSnapshot,
+  ScenarioRunOptions,
   ScenarioListItem,
   ScenarioTemplateInfo,
   StoredLogEntry,
 } from "../interfaces/ChargePointService";
+import type { ConfigRepository } from "../interfaces/ConfigRepository";
+import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
+  BROWSER_SOAP_UNSUPPORTED_MESSAGE,
+  BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
+  BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
 } from "../interfaces/UnsupportedFeatureError";
@@ -23,7 +34,10 @@ import type {
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { LogEntry } from "../../cp/shared/Logger";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import {
+  getDefaultEVSettings,
+  type EVSettings,
+} from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
@@ -39,7 +53,10 @@ import {
   scenarioTemplates,
   getTemplateById,
 } from "../../utils/scenarioTemplates";
-import { UnsupportedFeatureError as DomainUnsupportedFeatureError } from "../../cp/domain/errors/UnsupportedFeatureError";
+import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
+import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
+import { mergeWriteOnlyConfigSecrets } from "../configPort";
 
 function toConnectorSnapshot(
   connector: ReturnType<ChargePoint["getConnector"]>,
@@ -129,7 +146,17 @@ export class LocalChargePointService implements ChargePointService {
   /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
    *  and per-connector availability. Passed through to every ChargePoint we
    *  build. `null` keeps everything in-memory (test / boot-before-DB). */
-  constructor(private readonly database: Database | null = null) {}
+  private readonly configRepository: ConfigRepository;
+  private readonly connectorSettingsRepository: ConnectorSettingsRepository;
+  private readonly scenarioRepository: SqliteScenarioRepository;
+
+  constructor(private readonly database: Database | null = null) {
+    this.configRepository = new SqliteConfigRepository(database);
+    this.connectorSettingsRepository = new SqliteConnectorSettingsRepository(
+      database,
+    );
+    this.scenarioRepository = new SqliteScenarioRepository(database);
+  }
 
   registerChargePoint(chargePoint: ChargePoint): void {
     if (this.chargePoints.has(chargePoint.id)) {
@@ -229,6 +256,23 @@ export class LocalChargePointService implements ChargePointService {
     }));
   }
 
+  async loadConfig(): Promise<WireSimulatorConfig | null> {
+    return this.configRepository.load();
+  }
+
+  async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
+    const existing = await this.configRepository.load();
+    await this.configRepository.save(
+      mergeWriteOnlyConfigSecrets(config, existing),
+    );
+  }
+
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void {
+    return this.configRepository.subscribe(handler);
+  }
+
   async connect(id: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).connect();
     // Remember the operator's intent so a reload re-connects this CP
@@ -307,15 +351,10 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     status: OCPPStatus,
-    opts?: {
-      errorCode?: string;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-    },
+    opts?: StatusNotificationOptions,
   ): Promise<void> {
     const cp = this.getExistingChargePointOrThrow(id);
-    if (opts && (opts.errorCode || opts.info || opts.vendorErrorCode)) {
+    if (hasStatusNotificationOptions(opts)) {
       // Use the raw sender so errorCode/info ride along with the
       // StatusNotification.req without mutating the connector's runtime
       // status field.
@@ -323,6 +362,46 @@ export class LocalChargePointService implements ChargePointService {
       return;
     }
     cp.updateConnectorStatus(connectorId, status);
+  }
+
+  async sendDiagnosticsStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendDiagnosticsStatusNotification(
+      status as "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
+    );
+  }
+
+  async sendFirmwareStatusNotification(
+    id: string,
+    status: string,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendFirmwareStatusNotification(
+      status as
+        | "Downloaded"
+        | "DownloadFailed"
+        | "Downloading"
+        | "Idle"
+        | "InstallationFailed"
+        | "Installing"
+        | "Installed",
+    );
+  }
+
+  async sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
+      type,
+      techInfo,
+    );
+  }
+
+  async sendSignCertificate(id: string, csr?: string): Promise<void> {
+    await this.getExistingChargePointOrThrow(id).sendSignCertificate(csr);
   }
 
   async setMeterValue(
@@ -350,6 +429,13 @@ export class LocalChargePointService implements ChargePointService {
     connector.evSettings = settings;
   }
 
+  async getEVSettings(
+    id: string,
+    connectorId: number,
+  ): Promise<EVSettings | null> {
+    return this.requireConnector(id, connectorId).evSettings ?? null;
+  }
+
   async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
     // Connectors freeze getDefaultEVSettings() at construction, so a mid-session
     // change to the Default EV Settings wouldn't reach the ones already live.
@@ -370,6 +456,36 @@ export class LocalChargePointService implements ChargePointService {
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
     connector.autoMeterValueConfig = config;
+  }
+
+  async getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    return this.requireConnector(id, connectorId).autoMeterValueConfig ?? null;
+  }
+
+  async getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    return this.connectorSettingsRepository.loadAutoMeterValueConfig(
+      id,
+      connectorId,
+    );
+  }
+
+  async saveAutoMeterConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    await this.connectorSettingsRepository.saveAutoMeterValueConfig(
+      id,
+      connectorId,
+      config,
+    );
+    await this.database?.flush?.();
   }
 
   async setAutoResetToAvailable(
@@ -408,6 +524,19 @@ export class LocalChargePointService implements ChargePointService {
     connector.socMeterSyncEnabled = enabled;
   }
 
+  async getSocMeterSync(_id: string, _connectorId: number): Promise<boolean> {
+    return this.connectorSettingsRepository.loadSocMeterSync();
+  }
+
+  async saveSocMeterSync(
+    _id: string,
+    _connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.connectorSettingsRepository.saveSocMeterSync(enabled);
+    await this.database?.flush?.();
+  }
+
   async getChargingProfiles(
     id: string,
     connectorId: number,
@@ -433,15 +562,72 @@ export class LocalChargePointService implements ChargePointService {
     }));
   }
 
+  async listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]> {
+    return this.scenarioRepository.listByConnector(id, connectorId);
+  }
+
+  async saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition> {
+    await this.scenarioRepository.save(id, connectorId, definition);
+    await this.database?.flush?.();
+    return definition;
+  }
+
+  async replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]> {
+    await this.scenarioRepository.replaceConnector(
+      id,
+      connectorId,
+      definitions,
+    );
+    await this.database?.flush?.();
+    return [...definitions];
+  }
+
+  async deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void> {
+    this.scenarioRepository.deleteOne(id, connectorId, definitionId);
+    await this.database?.flush?.();
+  }
+
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void {
+    return this.scenarioRepository.subscribe(id, connectorId, () => {
+      handler(this.scenarioRepository.listByConnector(id, connectorId));
+    });
+  }
+
   async loadScenarioTemplate(
     id: string,
     templateId: string,
     connectorId: number,
+    evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
     const connector = this.requireConnector(id, connectorId);
     const template = getTemplateById(templateId);
     if (!template) throw new Error(`Unknown template: ${templateId}`);
     const definition = template.createScenario(id, connectorId);
+    if (evSettings) {
+      definition.evSettings = {
+        ...(definition.evSettings ?? getDefaultEVSettings()),
+        ...evSettings,
+      };
+    }
     const manager = connector.scenarioManager;
     if (!manager) throw new Error("Scenario manager not available");
     manager.loadScenarios([definition]);
@@ -484,6 +670,45 @@ export class LocalChargePointService implements ChargePointService {
     const manager = connector.scenarioManager;
     if (!manager) throw new Error("Scenario manager not available");
     await manager.executeScenario(scenarioId);
+  }
+
+  async runScenarioFile(
+    _id: string,
+    _path: string,
+    _opts?: ScenarioRunOptions,
+  ): Promise<{ scenarioId: string }> {
+    throw new UnsupportedFeatureError(
+      "browser_scenario_file_unsupported",
+      BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
+    );
+  }
+
+  async runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const connectorId = opts.connectorId ?? 1;
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    if (!manager) {
+      throw new UnsupportedFeatureError(
+        "browser_scenario_executor_unavailable",
+        BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
+      );
+    }
+    const template = getTemplateById(templateId);
+    if (!template) throw new Error(`Unknown template: ${templateId}`);
+    const definition = template.createScenario(id, connectorId);
+    if (opts.evSettings) {
+      definition.evSettings = {
+        ...(definition.evSettings ?? getDefaultEVSettings()),
+        ...opts.evSettings,
+      };
+    }
+    manager.loadScenarios([definition]);
+    await manager.executeScenario(definition.id);
+    return { scenarioId: definition.id };
   }
 
   async stopScenario(
@@ -533,17 +758,9 @@ export class LocalChargePointService implements ChargePointService {
     const connector = this.requireConnector(id, connectorId);
     const manager = connector.scenarioManager;
     manager?.removeScenario(scenarioId);
-    // Drop the persisted row too so reloads don't resurrect it. We
-    // bypass the shared scenarioRepository instance the UI uses
-    // (LocalChargePointService doesn't take one in its constructor) and
-    // talk to the same sql.js DB directly via a fresh repository handle
-    // — both ultimately go through the same `scenarios` table.
+    // Drop the persisted row too so reloads don't resurrect it.
     if (this.database) {
-      new SqliteScenarioRepository(this.database).deleteOne(
-        id,
-        connectorId,
-        scenarioId,
-      );
+      this.scenarioRepository.deleteOne(id, connectorId, scenarioId);
       await this.database.flush?.();
     }
   }
@@ -651,8 +868,9 @@ export class LocalChargePointService implements ChargePointService {
     definition: LocalChargePointDefinition,
   ): ChargePoint {
     if (definition.ocppVersion === "OCPP-1.5") {
-      throw new DomainUnsupportedFeatureError(
-        "OCPP 1.5 SOAP is CLI/server-only; browser local mode cannot host the SOAP callback service.",
+      throw new UnsupportedFeatureError(
+        "browser_soap_unsupported",
+        BROWSER_SOAP_UNSUPPORTED_MESSAGE,
       );
     }
     assertBrowserLocalTlsSupported(definition);

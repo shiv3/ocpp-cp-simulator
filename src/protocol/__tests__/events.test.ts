@@ -4,6 +4,7 @@ import {
   cpListItemSchema,
   eventToWire,
   redactCp,
+  redactSimulatorConfig,
   redactUrl,
   registryCpToWire,
   statusToWire,
@@ -12,12 +13,14 @@ import {
 import { eventEnvelopeSchema, subscribeResultSchema } from "../envelope";
 
 const fullConfig = {
-  wsUrl: "ws://user:pass@host:9000/ocpp",
+  wsUrl: "ws://user:wire-url-secret@host:9000/ocpp",
+  centralSystemUrl: "https://central:wire-central-secret@csms.test/ocpp",
+  soapCallbackUrl: "https://soap:wire-soap-secret@cp.test/ocpp/soap",
   ocppVersion: "OCPP-1.6J",
   connectors: 2,
   vendor: "Acme",
   model: "X1",
-  basicAuth: { username: "u", password: "s3cr3t" },
+  basicAuth: { username: "u", password: "wire-basic-secret" },
   securityProfile: 3 as const,
   cpoName: "Example CPO",
   tlsCaPath: "/etc/ocpp/ca.pem",
@@ -53,6 +56,61 @@ const fullStatus = {
   config: fullConfig,
 };
 
+const secretValues = [
+  "wire-basic-secret",
+  "wire-url-secret",
+  "wire-central-secret",
+  "wire-soap-secret",
+  "wire-config-password",
+  "wire-config-url-secret",
+  "wire-tls-ca-material",
+  "wire-tls-cert-material",
+  "wire-tls-key-material",
+  "wire-tls-passphrase",
+  "wire-authorization-key",
+];
+
+function secretHits(value: unknown, path = "$"): string[] {
+  if (typeof value === "string") {
+    return secretValues
+      .filter((secret) => value.includes(secret))
+      .map((secret) => `${path} contains ${secret}`);
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      secretHits(item, `${path}[${index}]`),
+    );
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(
+      ([key, nested]) => secretHits(nested, `${path}.${key}`),
+    );
+  }
+  return [];
+}
+
+function passwordKeyHits(value: unknown, path = "$"): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      passwordKeyHits(item, `${path}[${index}]`),
+    );
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(
+      ([key, nested]) => [
+        ...(key === "password" ? [`${path}.${key}`] : []),
+        ...passwordKeyHits(nested, `${path}.${key}`),
+      ],
+    );
+  }
+  return [];
+}
+
+function expectNoSecrets(value: unknown): void {
+  expect(secretHits(value)).toEqual([]);
+  expect(passwordKeyHits(value)).toEqual([]);
+}
+
 describe("redaction (Sec-2)", () => {
   it("redactUrl strips embedded credentials", () => {
     expect(redactUrl("ws://user:pass@host:9000/ocpp")).toBe(
@@ -66,6 +124,8 @@ describe("redaction (Sec-2)", () => {
     expect(w.basicAuth).toEqual({ username: "u" });
     expect((w.basicAuth as Record<string, unknown>).password).toBeUndefined();
     expect(w.wsUrl).toBe("ws://host:9000/ocpp");
+    expect(w.centralSystemUrl).toBe("https://csms.test/ocpp");
+    expect(w.soapCallbackUrl).toBe("https://cp.test/ocpp/soap");
     expect(w).toMatchObject({
       securityProfile: 3,
       cpoName: "Example CPO",
@@ -73,7 +133,21 @@ describe("redaction (Sec-2)", () => {
       tlsCertPath: "/etc/ocpp/client.pem",
       tlsKeyPath: "/etc/ocpp/client-key.pem",
     });
-    expect(JSON.stringify(w)).not.toContain("s3cr3t");
+    expectNoSecrets(w);
+  });
+
+  it("redactCp ignores inline TLS material if a caller accidentally supplies it", () => {
+    const w = redactCp({
+      ...fullConfig,
+      tls: {
+        ca: "wire-tls-ca-material",
+        cert: "wire-tls-cert-material",
+        key: "wire-tls-key-material",
+      },
+      authorizationKey: "wire-authorization-key",
+    } as typeof fullConfig);
+
+    expectNoSecrets(w);
   });
 
   it("wireCpConfigSchema is strict and rejects a password field", () => {
@@ -88,7 +162,7 @@ describe("redaction (Sec-2)", () => {
 
   it("statusToWire redacts the embedded config", () => {
     const s = statusToWire(fullStatus);
-    expect(JSON.stringify(s)).not.toContain("s3cr3t");
+    expectNoSecrets(s);
     expect(s.config?.basicAuth).toEqual({ username: "u" });
     expect(s.connectors[0]?.id).toBe(1);
   });
@@ -101,18 +175,65 @@ describe("redaction (Sec-2)", () => {
     });
     expect(cpListItemSchema.safeParse(item).success).toBe(true);
     expect(item.cpId).toBe("CP1");
-    expect(JSON.stringify(item)).not.toContain("s3cr3t");
+    expectNoSecrets(item);
   });
 
-  it("eventToWire defensively strips any password key", () => {
+  it("redactSimulatorConfig drops passwords and strips URL credentials", () => {
+    const wire = redactSimulatorConfig({
+      wsURL: "ws://config-user:wire-config-url-secret@host:9000/ocpp",
+      ChargePointID: "CP1",
+      connectorNumber: 1,
+      tagID: "TAG",
+      ocppVersion: "OCPP-1.6J",
+      basicAuthSettings: {
+        enabled: true,
+        username: "config-user",
+        password: "wire-config-password",
+      },
+      autoMeterValueSetting: {
+        enabled: false,
+        interval: 30,
+        value: 10,
+      },
+      Experimental: null,
+      BootNotification: {
+        chargePointVendor: "Vendor",
+        chargePointModel: "Model",
+      },
+    });
+
+    expect(wire.wsURL).toBe("ws://host:9000/ocpp");
+    expect(wire.basicAuthSettings).toEqual({
+      enabled: true,
+      username: "config-user",
+    });
+    expectNoSecrets(wire);
+  });
+
+  it("eventToWire defensively strips passwords, URL credentials, and TLS material", () => {
     const evt = eventToWire({
       event: "status_change",
       data: {
         status: "Charging",
-        basicAuth: { username: "u", password: "leak" },
+        callbackUrl: "wss://event-user:wire-url-secret@example.test/ocpp",
+        basicAuth: { username: "u", password: "wire-basic-secret" },
+        tls: {
+          ca: "wire-tls-ca-material",
+          cert: "wire-tls-cert-material",
+          key: "wire-tls-key-material",
+          passphrase: "wire-tls-passphrase",
+          serverName: "example.test",
+        },
       },
     });
-    expect(JSON.stringify(evt)).not.toContain("leak");
+
+    expect(evt.data).toEqual({
+      status: "Charging",
+      callbackUrl: "wss://example.test/ocpp",
+      basicAuth: { username: "u" },
+      tls: { serverName: "example.test" },
+    });
+    expectNoSecrets(evt);
   });
 });
 
@@ -133,7 +254,69 @@ describe("envelopes", () => {
       }).success,
     ).toBe(true);
     expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "config",
+        event: "config-changed",
+        config: redactSimulatorConfig({
+          wsURL: "ws://host:9000/ocpp",
+          ChargePointID: "CP1",
+          connectorNumber: 1,
+          tagID: "TAG",
+          ocppVersion: "OCPP-1.6J",
+          basicAuthSettings: {
+            enabled: true,
+            username: "config-user",
+            password: "wire-config-password",
+          },
+          autoMeterValueSetting: {
+            enabled: false,
+            interval: 30,
+            value: 10,
+          },
+          Experimental: null,
+          BootNotification: null,
+        }),
+      }).success,
+    ).toBe(true);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "scenario-definitions",
+        event: "scenario-definitions-changed",
+        cpId: "CP1",
+        connectorId: 1,
+        definitions: [{ id: "scenario-1" }],
+      }).success,
+    ).toBe(true);
+    expect(
       eventEnvelopeSchema.safeParse({ cpId: "CP1", evt: {} }).success,
+    ).toBe(false);
+  });
+
+  it("config event envelopes reject unredacted passwords", () => {
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "config",
+        event: "config-changed",
+        config: {
+          wsURL: "ws://host:9000/ocpp",
+          ChargePointID: "CP1",
+          connectorNumber: 1,
+          tagID: "TAG",
+          ocppVersion: "OCPP-1.6J",
+          basicAuthSettings: {
+            enabled: true,
+            username: "config-user",
+            password: "wire-config-password",
+          },
+          autoMeterValueSetting: {
+            enabled: false,
+            interval: 30,
+            value: 10,
+          },
+          Experimental: null,
+          BootNotification: null,
+        },
+      }).success,
     ).toBe(false);
   });
 

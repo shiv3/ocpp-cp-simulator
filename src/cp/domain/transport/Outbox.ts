@@ -68,10 +68,10 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendSecurityEventNotification(type, techInfo);
   }
 
-  sendSignCertificate(): ReturnType<
-    IChargePointMessageHandler["sendSignCertificate"]
-  > {
-    return this.handler.sendSignCertificate();
+  sendSignCertificate(
+    csr?: Parameters<IChargePointMessageHandler["sendSignCertificate"]>[0],
+  ): ReturnType<IChargePointMessageHandler["sendSignCertificate"]> {
+    return this.handler.sendSignCertificate(csr);
   }
 
   sendDiagnosticsStatusNotification(

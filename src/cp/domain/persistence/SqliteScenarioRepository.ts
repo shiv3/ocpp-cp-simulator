@@ -55,26 +55,7 @@ export class SqliteScenarioRepository implements ScenarioRepository {
       this.notify(chargePointId, connectorId, scenario);
       return;
     }
-    const updatedAt = scenario.updatedAt ?? new Date().toISOString();
-    this.db.run(
-      "INSERT INTO scenarios " +
-        "(cp_id, connector_id, scenario_id, name, enabled, updated_at, definition) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?) " +
-        "ON CONFLICT (cp_id, connector_id, scenario_id) DO UPDATE SET " +
-        "name = excluded.name, " +
-        "enabled = excluded.enabled, " +
-        "updated_at = excluded.updated_at, " +
-        "definition = excluded.definition",
-      [
-        chargePointId,
-        connectorId ?? 0,
-        scenario.id,
-        scenario.name,
-        scenario.enabled ? 1 : 0,
-        updatedAt,
-        JSON.stringify(scenario),
-      ],
-    );
+    this.saveRow(chargePointId, connectorId, scenario);
     this.notify(chargePointId, connectorId, scenario);
   }
 
@@ -122,6 +103,39 @@ export class SqliteScenarioRepository implements ScenarioRepository {
   }
 
   /**
+   * Atomically replace the full persisted definition set for one connector.
+   * This is the durable editor "latest wins" path: stale siblings are pruned
+   * and the provided definitions become the complete connector set.
+   */
+  async replaceConnector(
+    chargePointId: string,
+    connectorId: number | null,
+    scenarios: readonly ScenarioDefinition[],
+  ): Promise<void> {
+    if (!this.db) {
+      this.notify(chargePointId, connectorId, scenarios[0] ?? null);
+      return;
+    }
+
+    this.db.exec("BEGIN IMMEDIATE TRANSACTION");
+    try {
+      this.db.run(
+        "DELETE FROM scenarios WHERE cp_id = ? AND connector_id = ?",
+        [chargePointId, connectorId ?? 0],
+      );
+      for (const scenario of scenarios) {
+        this.saveRow(chargePointId, connectorId, scenario);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    this.notify(chargePointId, connectorId, scenarios[0] ?? null);
+  }
+
+  /**
    * Delete a single scenario row by composite key. The interface's
    * `delete(cpId, connectorId)` wipes the whole connector slot, which is
    * wrong for the daemon — operators expect "drop scenario X" to leave
@@ -132,12 +146,14 @@ export class SqliteScenarioRepository implements ScenarioRepository {
     connectorId: number | null,
     scenarioId: string,
   ): void {
-    if (!this.db) return;
-    this.db.run(
-      "DELETE FROM scenarios " +
-        "WHERE cp_id = ? AND connector_id = ? AND scenario_id = ?",
-      [chargePointId, connectorId ?? 0, scenarioId],
-    );
+    if (this.db) {
+      this.db.run(
+        "DELETE FROM scenarios " +
+          "WHERE cp_id = ? AND connector_id = ? AND scenario_id = ?",
+        [chargePointId, connectorId ?? 0, scenarioId],
+      );
+    }
+    this.notify(chargePointId, connectorId, null);
   }
 
   subscribe(
@@ -174,6 +190,34 @@ export class SqliteScenarioRepository implements ScenarioRepository {
         console.error("[SqliteScenarioRepository] listener error", error);
       }
     });
+  }
+
+  private saveRow(
+    chargePointId: string,
+    connectorId: number | null,
+    scenario: ScenarioDefinition,
+  ): void {
+    if (!this.db) return;
+    const updatedAt = scenario.updatedAt ?? new Date().toISOString();
+    this.db.run(
+      "INSERT INTO scenarios " +
+        "(cp_id, connector_id, scenario_id, name, enabled, updated_at, definition) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT (cp_id, connector_id, scenario_id) DO UPDATE SET " +
+        "name = excluded.name, " +
+        "enabled = excluded.enabled, " +
+        "updated_at = excluded.updated_at, " +
+        "definition = excluded.definition",
+      [
+        chargePointId,
+        connectorId ?? 0,
+        scenario.id,
+        scenario.name,
+        scenario.enabled ? 1 : 0,
+        updatedAt,
+        JSON.stringify(scenario),
+      ],
+    );
   }
 }
 

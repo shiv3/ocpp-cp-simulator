@@ -12,7 +12,6 @@ import {
   OCPPStatus,
 } from "../cp/domain/types/OcppTypes";
 import { ALLOWED_CONNECTOR_STATUS_TRANSITIONS } from "../cp/application/state/machines/ConnectorStateMachine";
-import { useSocMeterSync } from "./hooks/useSocMeterSync";
 
 /** True when the §4.9 transition table allows moving from `current` to Faulted.
  *  Used to decide whether to render the errorCode picker. */
@@ -33,6 +32,8 @@ import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useDataContext } from "../data/providers/DataProvider";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import { saveConnectorAutoMeterConfig } from "./connectorAutoMeterConfig";
+import { useSocMeterSync } from "./hooks/useSocMeterSync";
 
 // Dynamic imports for heavy components (bundle-dynamic-imports)
 const StateTransitionViewer = lazy(
@@ -190,8 +191,7 @@ const FullPanelContent: React.FC<{
   initialTab,
   tabResetNonce,
 }) => {
-  const { chargePointService, mode, connectorSettingsRepository } =
-    useDataContext();
+  const { chargePointService, mode } = useDataContext();
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
@@ -229,6 +229,8 @@ const FullPanelContent: React.FC<{
 
   const { scenarios } = useScenarios(cpId, connectorId);
   const connector = localCp ? localCp.getConnector(connectorId) : null;
+  const [persistedAutoMeterValueConfig, setPersistedAutoMeterValueConfig] =
+    useState<AutoMeterValueConfig | null>(null);
   const [meterValueInput, setMeterValueInput] = useState<number>(() =>
     clampMeterValue(liveMeterValue),
   );
@@ -260,7 +262,6 @@ const FullPanelContent: React.FC<{
   const { autoSyncSocMeter, handleToggleAutoSync, meterFromSoc, socFromMeter } =
     useSocMeterSync({
       chargePointService,
-      connectorSettingsRepository,
       cpId,
       connectorId,
       evSettings,
@@ -268,6 +269,33 @@ const FullPanelContent: React.FC<{
 
   const capacityKwh = evSettings.batteryCapacityKwh;
   const canAutoSync = autoSyncSocMeter && capacityKwh > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    void chargePointService
+      .getAutoMeterConfig(cpId, connectorId)
+      .then((config) => {
+        if (!cancelled) setPersistedAutoMeterValueConfig(config);
+      })
+      .catch((err) => {
+        console.warn(
+          `Failed to load auto-meter config for ${cpId}/${connectorId}`,
+          err,
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chargePointService, cpId, connectorId]);
+
+  useEffect(() => {
+    if (autoMeterValueConfig) {
+      setPersistedAutoMeterValueConfig(autoMeterValueConfig);
+    }
+  }, [autoMeterValueConfig]);
+
+  const effectiveAutoMeterValueConfig =
+    autoMeterValueConfig ?? persistedAutoMeterValueConfig;
   // Width of the left "Connector controls" column inside the Connector tab.
   // The user can drag the gutter between the controls and the Scenario
   // canvas to give more room to whichever side they're focused on.
@@ -699,23 +727,15 @@ const FullPanelContent: React.FC<{
   // storage when applicable.
   const handleSaveAutoMeterValueConfig = useCallback(
     (config: AutoMeterValueConfig) => {
-      void chargePointService.setAutoMeterValueConfig(
+      setPersistedAutoMeterValueConfig(config);
+      saveConnectorAutoMeterConfig(
+        chargePointService,
         cpId,
         connectorId,
         config,
       );
-      if (mode === "local") {
-        // Persist through the repository so the next ChargePoint
-        // construction picks it up out of SQLite (handled by
-        // LocalChargePointService.buildChargePoint).
-        void connectorSettingsRepository.saveAutoMeterValueConfig(
-          cpId,
-          connectorId,
-          config,
-        );
-      }
     },
-    [chargePointService, connectorSettingsRepository, cpId, connectorId, mode],
+    [chargePointService, cpId, connectorId],
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;
@@ -1423,7 +1443,7 @@ const FullPanelContent: React.FC<{
         </div>
       </div>
 
-      {isCurveModalOpen && autoMeterValueConfig ? (
+      {isCurveModalOpen && effectiveAutoMeterValueConfig ? (
         <Suspense
           fallback={
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
@@ -1434,7 +1454,7 @@ const FullPanelContent: React.FC<{
           <MeterValueCurveModal
             isOpen={isCurveModalOpen}
             onClose={() => setIsCurveModalOpen(false)}
-            initialConfig={autoMeterValueConfig}
+            initialConfig={effectiveAutoMeterValueConfig}
             onSave={handleSaveAutoMeterValueConfig}
           />
         </Suspense>

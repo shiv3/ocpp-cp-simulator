@@ -1,7 +1,12 @@
 import * as readline from "readline";
-import { CLIChargePointService } from "./service";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { formatStatus, formatEvent } from "./output";
+import {
+  cleanupSingleCpTarget,
+  getSingleCpCommandOps,
+  getSingleCpEventSource,
+  type SingleCpProcessTarget,
+} from "./singleCpTarget";
 
 const HELP_TEXT = `
 Commands:
@@ -23,7 +28,7 @@ Commands:
 
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
-export async function startRepl(service: CLIChargePointService): Promise<void> {
+export async function startRepl(service: SingleCpProcessTarget): Promise<void> {
   if (!process.stdin.isTTY) {
     process.stderr.write(
       "Interactive REPL requires a TTY on stdin. " +
@@ -32,7 +37,7 @@ export async function startRepl(service: CLIChargePointService): Promise<void> {
     process.exit(1);
   }
 
-  service.onEvent((evt) => {
+  getSingleCpEventSource(service).onEvent((evt) => {
     if (evt.event === "log") return;
     const line = formatEvent(evt.event, evt.data);
     process.stdout.write(`${line}\n`);
@@ -68,32 +73,34 @@ export async function startRepl(service: CLIChargePointService): Promise<void> {
   });
 
   rl.on("close", () => {
-    service.cleanup();
+    cleanupSingleCpTarget(service);
     process.exit(0);
   });
 }
 
 async function handleCommand(
-  service: CLIChargePointService,
+  service: SingleCpProcessTarget,
   cmd: string,
   args: string[],
 ): Promise<void> {
+  const ops = getSingleCpCommandOps(service);
+
   switch (cmd) {
     case "connect": {
       process.stdout.write("Connecting...\n");
-      await service.connect();
+      await ops.connect();
       process.stdout.write("Connected.\n");
       break;
     }
 
     case "disconnect": {
-      service.disconnect();
+      await ops.disconnect();
       process.stdout.write("Disconnected.\n");
       break;
     }
 
     case "status": {
-      const status = service.getStatus();
+      const status = await ops.getStatus();
       process.stdout.write(`${formatStatus(status)}\n`);
       break;
     }
@@ -105,7 +112,7 @@ async function handleCommand(
         process.stderr.write("Usage: start <connector> <tagId>\n");
         return;
       }
-      service.startTransaction(connectorId, tagId);
+      await ops.startTransaction(connectorId, tagId);
       process.stdout.write(
         `Transaction start requested on connector ${connectorId}\n`,
       );
@@ -114,7 +121,7 @@ async function handleCommand(
 
     case "stop": {
       const connectorId = parseConnectorId(args[0]);
-      service.stopTransaction(connectorId);
+      await ops.stopTransaction(connectorId);
       process.stdout.write(
         `Transaction stop requested on connector ${connectorId}\n`,
       );
@@ -128,7 +135,7 @@ async function handleCommand(
         process.stderr.write("Usage: meter <connector> <value>\n");
         return;
       }
-      service.setMeterValue(connectorId, value);
+      await ops.setMeterValue(connectorId, value);
       process.stdout.write(
         `Meter value set to ${value} Wh on connector ${connectorId}\n`,
       );
@@ -137,7 +144,7 @@ async function handleCommand(
 
     case "send-meter": {
       const connectorId = parseConnectorId(args[0]);
-      service.sendMeterValue(connectorId);
+      await ops.sendMeterValue(connectorId);
       process.stdout.write(`Meter value sent for connector ${connectorId}\n`);
       break;
     }
@@ -149,15 +156,15 @@ async function handleCommand(
           process.stderr.write("Usage: heartbeat start <seconds>\n");
           return;
         }
-        service.startHeartbeat(seconds);
+        await ops.startHeartbeat(seconds);
         process.stdout.write(
           `Periodic heartbeat started (every ${seconds}s)\n`,
         );
       } else if (args[0] === "stop") {
-        service.stopHeartbeat();
+        await ops.stopHeartbeat();
         process.stdout.write("Periodic heartbeat stopped\n");
       } else {
-        service.sendHeartbeat();
+        await ops.sendHeartbeat();
         process.stdout.write("Heartbeat sent\n");
       }
       break;
@@ -169,7 +176,7 @@ async function handleCommand(
         process.stderr.write("Usage: authorize <tagId>\n");
         return;
       }
-      service.authorize(tagId);
+      await ops.authorize(tagId);
       process.stdout.write(`Authorization requested for ${tagId}\n`);
       break;
     }
@@ -183,7 +190,7 @@ async function handleCommand(
         );
         return;
       }
-      service.updateConnectorStatus(connectorId, status as OCPPStatus);
+      await ops.updateConnectorStatus(connectorId, status as OCPPStatus);
       process.stdout.write(
         `Connector ${connectorId} status updated to ${status}\n`,
       );
@@ -197,7 +204,7 @@ async function handleCommand(
 
     case "exit":
     case "quit": {
-      service.cleanup();
+      cleanupSingleCpTarget(service);
       process.exit(0);
       break;
     }

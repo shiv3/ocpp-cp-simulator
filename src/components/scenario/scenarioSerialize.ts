@@ -77,3 +77,13 @@ export function serializeScenarioGraph(
     edges: edges.map(serializeEdge),
   };
 }
+
+export function deserializeScenarioGraph(
+  nodes: readonly ScenarioNode[],
+  edges: readonly Edge[],
+): Pick<ScenarioDefinition, "nodes" | "edges"> {
+  return {
+    nodes: nodes.map((node) => deepClone(node)),
+    edges: edges.map((edge) => deepClone(edge)),
+  };
+}

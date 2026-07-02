@@ -85,6 +85,29 @@ export type ChargePointErrorCode =
   | "UnderVoltage"
   | "WeakSignal";
 
+export interface StatusNotificationOptions {
+  errorCode?: string;
+  info?: string;
+  vendorErrorCode?: string;
+  vendorId?: string;
+  timestamp?: Date;
+  suppressChargingStateTransactionEvent?: boolean;
+}
+
+export function hasStatusNotificationOptions(
+  opts: StatusNotificationOptions | undefined,
+): opts is StatusNotificationOptions {
+  return (
+    opts !== undefined &&
+    (opts.errorCode !== undefined ||
+      opts.info !== undefined ||
+      opts.vendorErrorCode !== undefined ||
+      opts.vendorId !== undefined ||
+      opts.timestamp !== undefined ||
+      opts.suppressChargingStateTransactionEvent !== undefined)
+  );
+}
+
 export const ALL_CHARGE_POINT_ERROR_CODES: ChargePointErrorCode[] = [
   "ConnectorLockFailure",
   "EVCommunicationError",

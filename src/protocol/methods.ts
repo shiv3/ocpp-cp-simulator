@@ -1,7 +1,7 @@
 // The rpc method table — the single typed contract for every client→server
 // call. CP-command keys are the jsonMode command ids VERBATIM (identity
 // dispatch: the server routes them straight through `handleJsonCommand`).
-// The ~10 dotted keys are the non-jsonMode explicit ops.
+// The dotted keys are the non-jsonMode explicit ops.
 //
 // Connector rule (PB3): only `update_connector_status` accepts connector 0
 // (`requireNonNegativeInt`); every other connector-taking command requires
@@ -16,11 +16,17 @@ import {
   STR_64K,
   boundedObject,
 } from "./limits";
-import { cpListItemSchema, statusWireSchema } from "./events";
+import {
+  cpListItemSchema,
+  simulatorConfigInputSchema,
+  statusWireSchema,
+  wireSimulatorConfigSchema,
+} from "./events";
 import { subscribeResultSchema } from "./envelope";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
+const CONN_DEF = CONN_POS.nullable();
 const EMPTY = z.object({});
 const ANY = z.unknown();
 /** A bounded free-form object param (settings/config/options): ≤ 64 KB. */
@@ -56,6 +62,17 @@ const cpParamsBaseSchema = z.object({
     })
     .optional(),
   bootNotification: OBJ().nullable().optional(),
+});
+
+const scenarioTemplateInfoSchema = z.object({
+  id: STR_64K,
+  name: STR_64K,
+  description: STR_64K,
+});
+
+const connectorSettingsParamsSchema = z.object({
+  cpId: STR_64K,
+  connectorId: CONN_POS,
 });
 
 /** create CP — password is accepted here as WRITE-ONLY input. */
@@ -107,11 +124,23 @@ export const METHODS = {
     params: z.object({ type: STR_64K, techInfo: STR_64K.optional() }),
     result: ANY,
   },
-  sign_certificate: { params: EMPTY, result: ANY },
+  sign_certificate: {
+    params: z.object({ csr: STR_64K.optional() }),
+    result: ANY,
+  },
 
   // -- connector --
   update_connector_status: {
-    params: z.object({ connector: CONN_NONNEG, status: STR_64K }),
+    params: z.object({
+      connector: CONN_NONNEG,
+      status: STR_64K,
+      errorCode: STR_64K.optional(),
+      info: STR_64K.optional(),
+      vendorErrorCode: STR_64K.optional(),
+      vendorId: STR_64K.optional(),
+      timestamp: STR_64K.optional(),
+      suppressChargingStateTransactionEvent: z.boolean().optional(),
+    }),
     result: ANY,
   },
   set_meter_value: {
@@ -238,6 +267,62 @@ export const METHODS = {
   },
   "logs.clear": { params: z.object({ cpId: STR_64K }), result: ANY },
   "state.reset": { params: EMPTY, result: ANY },
+  "config.get": {
+    params: EMPTY,
+    result: wireSimulatorConfigSchema.nullable(),
+  },
+  "config.save": {
+    params: z.object({ config: simulatorConfigInputSchema.nullable() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "scenario.templates": {
+    params: EMPTY,
+    result: ARRAY_1000(scenarioTemplateInfoSchema),
+  },
+  "scenario.definitions.list": {
+    params: z.object({ cpId: STR_64K, connectorId: CONN_DEF }),
+    result: ARRAY_1000(SCENARIO_OBJ()),
+  },
+  "scenario.definitions.save": {
+    params: z.object({
+      cpId: STR_64K,
+      connectorId: CONN_DEF,
+      definition: SCENARIO_OBJ(),
+    }),
+    result: SCENARIO_OBJ(),
+  },
+  "scenario.definitions.replace": {
+    params: z.object({
+      cpId: STR_64K,
+      connectorId: CONN_DEF,
+      definitions: ARRAY_1000(SCENARIO_OBJ()),
+    }),
+    result: ARRAY_1000(SCENARIO_OBJ()),
+  },
+  "scenario.definitions.delete": {
+    params: z.object({
+      cpId: STR_64K,
+      connectorId: CONN_DEF,
+      definitionId: STR_64K,
+    }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "connector_settings.auto_meter.get": {
+    params: connectorSettingsParamsSchema,
+    result: OBJ().nullable(),
+  },
+  "connector_settings.auto_meter.save": {
+    params: connectorSettingsParamsSchema.extend({ config: OBJ() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "connector_settings.soc_meter_sync.get": {
+    params: connectorSettingsParamsSchema,
+    result: z.boolean(),
+  },
+  "connector_settings.soc_meter_sync.save": {
+    params: connectorSettingsParamsSchema.extend({ enabled: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "server.shutdown": { params: EMPTY, result: ANY },
   "events.subscribe": {
     params: z.object({ scope: STR_64K }),
@@ -246,7 +331,7 @@ export const METHODS = {
   "events.unsubscribe": { params: z.object({ scope: STR_64K }), result: ANY },
 } satisfies Record<string, { params: z.ZodTypeAny; result: z.ZodTypeAny }>;
 
-/** The 10 explicit (non-jsonMode) op ids — routed to dedicated server handlers. */
+/** The explicit (non-jsonMode) op ids — routed to dedicated server handlers. */
 export const EXPLICIT_METHODS = [
   "cp.list",
   "cp.create",
@@ -255,6 +340,17 @@ export const EXPLICIT_METHODS = [
   "logs.get",
   "logs.clear",
   "state.reset",
+  "config.get",
+  "config.save",
+  "scenario.templates",
+  "scenario.definitions.list",
+  "scenario.definitions.save",
+  "scenario.definitions.replace",
+  "scenario.definitions.delete",
+  "connector_settings.auto_meter.get",
+  "connector_settings.auto_meter.save",
+  "connector_settings.soc_meter_sync.get",
+  "connector_settings.soc_meter_sync.save",
   "server.shutdown",
   "events.subscribe",
   "events.unsubscribe",

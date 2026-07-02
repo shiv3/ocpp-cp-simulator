@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { Config } from "../../store/store";
+import type { WireSimulatorConfig } from "../../protocol";
 import { DefaultBootNotification } from "../../cp/domain/types/OcppTypes";
+import { getConfigBasicAuthPassword } from "../configPort";
 import { useDataContext } from "../providers/DataProvider";
 import {
   LocalChargePointService,
@@ -62,7 +63,7 @@ export function applyRegistryEvent(
  * - Remote: subscribes to registry snapshots/events from the server.
  */
 export function useChargePoints(
-  config: Config | null,
+  config: WireSimulatorConfig | null,
   { isLoading = false }: UseChargePointsOptions = {},
 ): UseChargePointsResult {
   const { chargePointService, mode } = useDataContext();
@@ -119,7 +120,7 @@ export function useChargePoints(
           basicAuth: config.basicAuthSettings?.enabled
             ? {
                 username: config.basicAuthSettings.username,
-                password: config.basicAuthSettings.password,
+                password: getConfigBasicAuthPassword(config),
               }
             : null,
           autoMeterValueSetting: config.autoMeterValueSetting ?? null,

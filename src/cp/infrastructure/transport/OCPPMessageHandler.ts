@@ -543,15 +543,17 @@ export class OCPPMessageHandler {
     this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
   }
 
-  /** Generate and send a CSR for the charge point certificate signing flow. */
-  public async sendSignCertificate(): Promise<void> {
+  /** Generate or forward a CSR for the charge point certificate signing flow. */
+  public async sendSignCertificate(csr?: string): Promise<void> {
     const cpoName = this._chargePoint.configuration.getString("CpoName") ?? "";
-    const csr = await this._chargePoint.certificateStore.generateNewCsr(
-      this._chargePoint.id,
-      cpoName,
-    );
+    const payloadCsr =
+      csr ??
+      (await this._chargePoint.certificateStore.generateNewCsr(
+        this._chargePoint.id,
+        cpoName,
+      ));
     const messageId = this.generateMessageId();
-    const payload: SignCertificateRequestV16 = { csr };
+    const payload: SignCertificateRequestV16 = { csr: payloadCsr };
     this.sendRequest(OCPPAction.SignCertificate, messageId, payload);
   }
 

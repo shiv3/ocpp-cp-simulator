@@ -1,24 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { Config } from "../../store/store";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 import { useDataContext } from "../providers/DataProvider";
 
 interface UseConfigResult {
-  config: Config | null;
-  setConfig: (next: Config | null) => Promise<void>;
+  config: WireSimulatorConfig | null;
+  setConfig: (next: SimulatorConfigInput | null) => Promise<void>;
   isLoading: boolean;
 }
 
 export function useConfig(): UseConfigResult {
-  const { configRepository } = useDataContext();
-  const [config, setConfigState] = useState<Config | null>(null);
+  const { chargePointService } = useDataContext();
+  const [config, setConfigState] = useState<WireSimulatorConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    mountedRef.current = true;
 
-    configRepository
-      .load()
+    chargePointService
+      .loadConfig()
       .then((value) => {
         if (!cancelled) {
           setConfigState(value);
@@ -30,22 +32,28 @@ export function useConfig(): UseConfigResult {
         setIsLoading(false);
       });
 
-    const unsubscribe = configRepository.subscribe((value) => {
+    const unsubscribe = chargePointService.subscribeConfig((value) => {
       setConfigState(value);
       setIsLoading(false);
     });
 
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       unsubscribe();
     };
-  }, [configRepository]);
+  }, [chargePointService]);
 
   const setConfig = useCallback(
-    async (next: Config | null) => {
-      await configRepository.save(next);
+    async (next: SimulatorConfigInput | null) => {
+      await chargePointService.saveConfig(next);
+      const saved = await chargePointService.loadConfig();
+      if (mountedRef.current) {
+        setConfigState(saved);
+        setIsLoading(false);
+      }
     },
-    [configRepository],
+    [chargePointService],
   );
 
   return { config, setConfig, isLoading };

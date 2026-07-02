@@ -17,7 +17,7 @@ describe("SoC/Meter conversions", () => {
     expect(meterFromSoc(-10, evSettings)).toBe(0);
   });
 
-  it("clamps derived SoC to 100", () => {
+  it("clamps derived SoC to 100 when the meter overshoots", () => {
     expect(socFromMeter(100_000, evSettings)).toBe(100);
   });
 });

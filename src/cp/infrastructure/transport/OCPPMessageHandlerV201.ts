@@ -510,7 +510,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  public async sendSignCertificate(): Promise<void> {
+  public async sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
       "[v2.0.1] SignCertificate is not wired through this handler",
       LogType.OCPP,

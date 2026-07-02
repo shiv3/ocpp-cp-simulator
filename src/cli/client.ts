@@ -1,16 +1,5 @@
-import {
-  io as createSocketClient,
-  type ManagerOptions,
-  type Socket,
-  type SocketOptions,
-} from "socket.io-client";
-
-import {
-  RPC_TIMEOUT_MS,
-  rpcAckSchema,
-  type EventEnvelope,
-  type RpcAck,
-} from "../protocol";
+import type { EventEnvelope } from "../protocol";
+import { RemoteChargePointService } from "../data/remote/RemoteChargePointService";
 import { toJsonResponse } from "./output";
 import type { JsonCommand } from "./types";
 
@@ -44,14 +33,9 @@ export async function sendCommand(
     return;
   }
 
-  const socket = createClientSocket(loc);
+  const service = createRemoteService(loc);
   try {
-    await connect(socket);
-    const ack = await emitRpc(socket, {
-      cpId,
-      method: cmd.command,
-      params: cmd.params ?? {},
-    });
+    const ack = await service.runRawRpc(cmd.command, cmd.params ?? {}, cpId);
     const id = cmd.id ?? null;
     if (ack.ok) {
       process.stdout.write(
@@ -67,18 +51,14 @@ export async function sendCommand(
     process.stderr.write(`Error: ${formatSocketError(err, loc)}\n`);
     process.exitCode = 1;
   } finally {
-    socket.disconnect();
+    service.dispose();
   }
 }
 
 export async function stopDaemon(loc: ClientLocation): Promise<void> {
-  const socket = createClientSocket(loc);
+  const service = createRemoteService(loc);
   try {
-    await connect(socket);
-    const ack = await emitRpc(socket, {
-      method: "server.shutdown",
-      params: {},
-    });
+    const ack = await service.runRawRpc("server.shutdown", {});
     if (ack.ok) {
       process.stdout.write("Server stopped.\n");
     } else {
@@ -89,7 +69,7 @@ export async function stopDaemon(loc: ClientLocation): Promise<void> {
     process.stderr.write(`Error: ${formatSocketError(err, loc)}\n`);
     process.exitCode = 1;
   } finally {
-    socket.disconnect();
+    service.dispose();
   }
 }
 
@@ -97,105 +77,61 @@ export async function subscribeEvents(
   loc: ClientLocation,
   cpId: string | null,
 ): Promise<void> {
-  const socket = createClientSocket(loc);
+  const service = createRemoteService(loc);
   const scope = cpId ?? "*";
+  let subscribed = false;
+
   await new Promise<void>((resolve) => {
-    socket.on("connect", () => {
-      socket.emit("events.subscribe", { scope }, (ack: unknown) => {
-        if (isDirectErrorAck(ack)) {
-          process.stderr.write(`Error: ${ack.message}\n`);
-          process.exitCode = 1;
-          socket.disconnect();
-          return;
-        }
-        process.stderr.write(
-          `[client] Subscribed to ${loc.httpUrl} (${scope})\n`,
-        );
-      });
-    });
-    socket.on("event", (event: EventEnvelope) => {
-      process.stdout.write(`${JSON.stringify(event)}\n`);
-    });
-    socket.on("connect_error", (err) => {
-      process.stderr.write(`Error: ${formatSocketError(err, loc)}\n`);
-      process.exitCode = 1;
-      socket.disconnect();
+    let done = false;
+    let unsubscribeConnection = () => {};
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      cleanupSignals();
+      unsubscribeConnection();
+      service.dispose();
       resolve();
-    });
-    socket.on("disconnect", () => {
-      resolve();
-    });
+    };
 
     const close = () => {
-      socket.disconnect();
+      finish();
     };
     const cleanupSignals = () => {
       process.off("SIGINT", close);
       process.off("SIGTERM", close);
     };
+
     process.on("SIGINT", close);
     process.on("SIGTERM", close);
-    socket.once("disconnect", cleanupSignals);
-    socket.connect();
-  });
-}
 
-function createClientSocket(loc: ClientLocation): Socket {
-  return createSocketClient(loc.httpUrl, {
-    path: "/socket.io/",
-    reconnection: false,
-    timeout: RPC_TIMEOUT_MS,
-    autoConnect: false,
-    ...authOption(loc.basicAuth ?? null),
-  } satisfies Partial<ManagerOptions & SocketOptions>);
-}
-
-function authOption(
-  basicAuth: ClientLocation["basicAuth"],
-): Pick<SocketOptions, "auth"> | Record<string, never> {
-  return basicAuth
-    ? {
-        auth: {
-          username: basicAuth.username,
-          password: basicAuth.password,
-        },
+    unsubscribeConnection = service.onConnectionChange((state) => {
+      if (state === "disconnected" && subscribed) {
+        finish();
       }
-    : {};
-}
+    });
 
-function connect(socket: Socket): Promise<void> {
-  if (socket.connected) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      socket.off("connect", onConnect);
-      socket.off("connect_error", onConnectError);
-    };
-    const onConnect = () => {
-      cleanup();
-      resolve();
-    };
-    const onConnectError = (err: Error) => {
-      cleanup();
-      reject(err);
-    };
-    socket.once("connect", onConnect);
-    socket.once("connect_error", onConnectError);
-    socket.connect();
+    void service
+      .subscribeRawEvents(scope, (event: EventEnvelope) => {
+        if (done) return;
+        process.stdout.write(`${JSON.stringify(event)}\n`);
+      })
+      .then(
+        () => {
+          if (done) return;
+          subscribed = true;
+          process.stderr.write(
+            `[client] Subscribed to ${loc.httpUrl} (${scope})\n`,
+          );
+        },
+        (err) => {
+          if (done) return;
+          process.stderr.write(`Error: ${formatSocketError(err, loc)}\n`);
+          process.exitCode = 1;
+          finish();
+        },
+      );
   });
-}
-
-async function emitRpc(
-  socket: Socket,
-  request: { cpId?: string; method: string; params: unknown },
-): Promise<RpcAck> {
-  const rawAck = await socket
-    .timeout(RPC_TIMEOUT_MS)
-    .emitWithAck("rpc", request);
-  const parsed = rpcAckSchema.safeParse(rawAck);
-  if (!parsed.success) {
-    throw new Error("invalid rpc ack");
-  }
-  return parsed.data;
 }
 
 function isJsonCommand(value: unknown): value is JsonCommand {
@@ -206,15 +142,10 @@ function isJsonCommand(value: unknown): value is JsonCommand {
   );
 }
 
-function isDirectErrorAck(
-  ack: unknown,
-): ack is { ok: false; code: string; message: string } {
-  return (
-    ack !== null &&
-    typeof ack === "object" &&
-    (ack as { ok?: unknown }).ok === false &&
-    typeof (ack as { message?: unknown }).message === "string"
-  );
+function createRemoteService(loc: ClientLocation): RemoteChargePointService {
+  return new RemoteChargePointService(loc.httpUrl, {
+    basicAuth: loc.basicAuth ?? null,
+  });
 }
 
 function formatSocketError(err: unknown, loc: ClientLocation): string {

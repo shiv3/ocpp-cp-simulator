@@ -4,9 +4,12 @@ import type { CLIChargePointService } from "../service";
 import {
   eventEnvelopeSchema,
   eventToWire,
+  redactSimulatorConfig,
   registryCpToWire,
   statusToWire,
+  type SimulatorConfigInput,
 } from "../../protocol";
+import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus, EventEnvelope as BusEventEnvelope } from "./eventBus";
 
@@ -14,6 +17,12 @@ type FullCp = Parameters<typeof registryCpToWire>[0];
 
 export interface RegistryEventBridge {
   emitReset(): void;
+  emitConfigChanged(config: SimulatorConfigInput | null): void;
+  emitScenarioDefinitionsChanged(
+    cpId: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): void;
   close(): void;
 }
 
@@ -42,6 +51,12 @@ export function createRegistryEventBridge(
     emitReset() {
       lastSummaryByCp.clear();
       emitRegistry(io, "reset");
+    },
+    emitConfigChanged(config) {
+      emitConfigChanged(io, config);
+    },
+    emitScenarioDefinitionsChanged(cpId, connectorId, definitions) {
+      emitScenarioDefinitionsChanged(io, cpId, connectorId, definitions);
     },
     close() {
       unsubscribeBus();
@@ -90,6 +105,34 @@ function emitRegistry(
     ...(cp ? { cp: registryCpToWire(cp) } : {}),
   });
   io.to("registry").to("*").emit("event", envelope);
+}
+
+function emitConfigChanged(
+  io: SocketIoServer,
+  config: SimulatorConfigInput | null,
+): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "config",
+    event: "config-changed",
+    config: config ? redactSimulatorConfig(config) : null,
+  });
+  io.to("config").to("*").emit("event", envelope);
+}
+
+function emitScenarioDefinitionsChanged(
+  io: SocketIoServer,
+  cpId: string,
+  connectorId: number | null,
+  definitions: readonly ScenarioDefinition[],
+): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "scenario-definitions",
+    event: "scenario-definitions-changed",
+    cpId,
+    connectorId,
+    definitions,
+  });
+  io.to("scenario-definitions").to(cpId).to("*").emit("event", envelope);
 }
 
 function cpForWire(cpId: string, service: CLIChargePointService): FullCp {

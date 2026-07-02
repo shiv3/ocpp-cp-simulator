@@ -1,6 +1,6 @@
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import type { ChargePointService } from "../../data/interfaces/ChargePointService";
-import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
+import type { RuntimeMode } from "../../data/RuntimeMode";
 import { serializeScenarioGraph } from "./scenarioSerialize";
 
 /**
@@ -9,15 +9,31 @@ import { serializeScenarioGraph } from "./scenarioSerialize";
  * lightweight mocks.
  */
 export interface PersistEditorScenarioDeps {
-  /** `"remote"` (daemon-backed) or `"local"` (browser sql.js). */
-  mode: string;
+  mode: RuntimeMode;
   chargePointService: Pick<
     ChargePointService,
-    "listScenarios" | "removeScenario" | "loadScenario"
+    | "listScenarioDefinitions"
+    | "replaceConnectorScenarioDefinitions"
+    | "loadScenario"
   >;
-  scenarioRepository: Pick<ScenarioRepository, "save">;
   cpId: string;
   connectorId: number | null;
+}
+
+export interface SaveEditorScenarioDeps {
+  mode: RuntimeMode;
+  chargePointService: Pick<
+    ChargePointService,
+    "saveScenarioDefinition" | "loadScenario"
+  >;
+  cpId: string;
+  connectorId: number | null;
+}
+
+export interface AppliedScenarioAutosaveSuppression {
+  scenarioId: string;
+  updatedAt: string | null;
+  fingerprint: string;
 }
 
 export function createLatestWinsSaver<T>(
@@ -39,6 +55,38 @@ export function createLatestWinsSaver<T>(
   };
 }
 
+export function shouldSuppressAppliedScenarioAutosave(
+  suppression: AppliedScenarioAutosaveSuppression | null,
+  scenario: ScenarioDefinition,
+): boolean {
+  if (!suppression) return false;
+  return (
+    suppression.scenarioId === scenario.id &&
+    suppression.updatedAt === (scenario.updatedAt ?? null) &&
+    suppression.fingerprint === scenarioAutosaveSuppressionFingerprint(scenario)
+  );
+}
+
+export function scenarioAutosaveSuppressionFingerprint(
+  scenario: ScenarioDefinition,
+): string {
+  const serialized = serializeScenarioForPersistence(scenario);
+  return JSON.stringify({
+    id: serialized.id,
+    name: serialized.name,
+    description: serialized.description ?? "",
+    targetType: serialized.targetType ?? null,
+    targetId: serialized.targetId ?? null,
+    nodes: serialized.nodes,
+    edges: serialized.edges,
+    trigger: serialized.trigger ?? null,
+    defaultExecutionMode: serialized.defaultExecutionMode ?? null,
+    enabled: serialized.enabled !== false,
+    evSettings: serialized.evSettings ?? null,
+    updatedAt: serialized.updatedAt ?? null,
+  });
+}
+
 function serializeScenarioForPersistence(
   scenario: ScenarioDefinition,
 ): ScenarioDefinition {
@@ -48,91 +96,67 @@ function serializeScenarioForPersistence(
   };
 }
 
+async function activateRemoteScenario(
+  deps: {
+    mode: RuntimeMode;
+    chargePointService: Pick<ChargePointService, "loadScenario">;
+    cpId: string;
+    connectorId: number | null;
+  },
+  scenario: ScenarioDefinition,
+): Promise<void> {
+  const { mode, chargePointService, cpId, connectorId } = deps;
+  if (mode !== "remote") return;
+  if (connectorId === null) {
+    throw new Error("Remote scenario activation requires a connector id");
+  }
+
+  await chargePointService.loadScenario(cpId, connectorId, scenario);
+}
+
 /**
  * Durably persist a scenario the user just dropped into the editor — either by
  * uploading a JSON file (`handleFileChange`) or loading a template
  * (`handleLoadTemplate`).
  *
- * **Remote (daemon) mode:** the browser-side `scenarioRepository` is a no-op
- * (DataProvider constructs it with `database === null`), so a `repository.save`
- * here would silently vanish on reload and the daemon's `listScenarios` would
- * keep handing back the PREVIOUS scenario on the next mount. We push through the
- * daemon instead, and remove the prior scenarios so a stale one doesn't keep
- * winning index 0 (the daemon orders by insertion / updated_at).
- *
- * **Local mode:** upsert into the browser sql.js repository.
- *
- * `handleLoadTemplate` already did this; `handleFileChange` (upload) did not —
- * uploaded scenarios were lost on refresh in remote mode (GitHub #101). Sharing
- * one helper keeps both paths correct.
+ * This is the editor's replace operation: stale sibling definitions for the
+ * connector are pruned and the incoming definition becomes the complete
+ * persisted set. The service port owns whether that means browser sql.js or the
+ * daemon SQLite store.
  */
 export async function persistEditorScenario(
   deps: PersistEditorScenarioDeps,
   scenario: ScenarioDefinition,
 ): Promise<void> {
-  const { mode, chargePointService, scenarioRepository, cpId, connectorId } =
-    deps;
+  const { chargePointService, cpId, connectorId } = deps;
   const scenarioToPersist = serializeScenarioForPersistence(scenario);
 
-  if (mode === "remote") {
-    // The daemon's scenario RPCs are connector-scoped and require a positive
-    // int (CP-level scenarios go through the local sql.js path), so narrow the
-    // nullable editor connectorId here.
-    const remoteConnectorId = connectorId as number;
-    const existing = await chargePointService.listScenarios(
-      cpId,
-      remoteConnectorId,
-    );
-    await Promise.all(
-      existing
-        .filter((item) => item.scenarioId !== scenarioToPersist.id)
-        .map((item) =>
-          chargePointService
-            .removeScenario(cpId, remoteConnectorId, item.scenarioId)
-            .catch((err) =>
-              console.warn(
-                `Failed to remove stale scenario ${item.scenarioId}`,
-                err,
-              ),
-            ),
-        ),
-    );
-    await chargePointService.loadScenario(
-      cpId,
-      remoteConnectorId,
-      scenarioToPersist,
-    );
-    return;
-  }
-
-  await scenarioRepository.save(cpId, connectorId, scenarioToPersist);
+  await chargePointService.listScenarioDefinitions(cpId, connectorId);
+  await chargePointService.replaceConnectorScenarioDefinitions(
+    cpId,
+    connectorId,
+    [scenarioToPersist],
+  );
+  await activateRemoteScenario(deps, scenarioToPersist);
 }
 
 /**
- * Mode-aware upsert for the scenario currently being edited. Unlike
- * `persistEditorScenario`, this deliberately does not prune sibling daemon
- * scenarios: autosave/manual-save are updates to the open scenario, not a
- * replacement import/template operation.
+ * Upsert the scenario currently being edited without pruning sibling
+ * definitions. Used for explicit single-definition edits.
  */
 export async function saveEditorScenario(
-  deps: PersistEditorScenarioDeps,
+  deps: SaveEditorScenarioDeps,
   scenario: ScenarioDefinition,
 ): Promise<void> {
-  const { mode, chargePointService, scenarioRepository, cpId, connectorId } =
-    deps;
+  const { chargePointService, cpId, connectorId } = deps;
   const scenarioToPersist = serializeScenarioForPersistence(scenario);
 
-  if (mode === "remote") {
-    const remoteConnectorId = connectorId as number;
-    await chargePointService.loadScenario(
-      cpId,
-      remoteConnectorId,
-      scenarioToPersist,
-    );
-    return;
-  }
-
-  await scenarioRepository.save(cpId, connectorId, scenarioToPersist);
+  await chargePointService.saveScenarioDefinition(
+    cpId,
+    connectorId,
+    scenarioToPersist,
+  );
+  await activateRemoteScenario(deps, scenarioToPersist);
 }
 
 /**

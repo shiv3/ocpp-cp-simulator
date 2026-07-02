@@ -62,11 +62,11 @@ describe("method table coverage (Step 3c)", () => {
     }
   });
 
-  it("includes all 10 explicit non-jsonMode ops", () => {
+  it("includes all explicit non-jsonMode ops", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(10);
+    expect(EXPLICIT_METHODS).toHaveLength(21);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -86,6 +86,22 @@ describe("method table coverage (Step 3c)", () => {
     expect(METHODS.set_soc_meter_sync).toBeDefined();
     expect(isRpcMethod("set_soc_meter_sync")).toBe(true);
   });
+
+  it("includes scenario definition persistence ops", () => {
+    expect(METHODS["scenario.definitions.list"]).toBeDefined();
+    expect(METHODS["scenario.definitions.save"]).toBeDefined();
+    expect(METHODS["scenario.definitions.replace"]).toBeDefined();
+    expect(METHODS["scenario.definitions.delete"]).toBeDefined();
+    expect(isRpcMethod("scenario.definitions.list")).toBe(true);
+  });
+
+  it("includes connector settings persistence ops", () => {
+    expect(METHODS["connector_settings.auto_meter.get"]).toBeDefined();
+    expect(METHODS["connector_settings.auto_meter.save"]).toBeDefined();
+    expect(METHODS["connector_settings.soc_meter_sync.get"]).toBeDefined();
+    expect(METHODS["connector_settings.soc_meter_sync.save"]).toBeDefined();
+    expect(isRpcMethod("connector_settings.auto_meter.get")).toBe(true);
+  });
 });
 
 describe("connector-0 per-command rule (PB3)", () => {
@@ -96,6 +112,32 @@ describe("connector-0 per-command rule (PB3)", () => {
         status: "Available",
       }).success,
     ).toBe(true);
+  });
+
+  it("update_connector_status preserves status notification option params", () => {
+    const parsed = METHODS.update_connector_status.params.safeParse({
+      connector: 1,
+      status: "Faulted",
+      errorCode: "EVCommunicationError",
+      info: "pilot lost",
+      vendorErrorCode: "E-42",
+      vendorId: "Vendor",
+      timestamp: "2026-01-02T03:04:05.000Z",
+      suppressChargingStateTransactionEvent: true,
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data).toMatchObject({
+      connector: 1,
+      status: "Faulted",
+      errorCode: "EVCommunicationError",
+      info: "pilot lost",
+      vendorErrorCode: "E-42",
+      vendorId: "Vendor",
+      timestamp: "2026-01-02T03:04:05.000Z",
+      suppressChargingStateTransactionEvent: true,
+    });
   });
 
   it("other connector commands reject connector 0", () => {

@@ -384,6 +384,36 @@ describe("socket.io rpc dispatch", () => {
     expect(JSON.stringify(statusAck.result)).not.toContain("secret");
   });
 
+  it("cp.list tolerates a CP snapshot with no config instead of failing the whole list", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const snapshotWithoutConfig = {
+      ...chargePointSnapshot(),
+      config: undefined,
+    };
+    const facade = {
+      listChargePoints: vi.fn().mockResolvedValue([snapshotWithoutConfig]),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    const listAck = await socket.emitRpc({ method: "cp.list", params: {} });
+
+    expect(listAck.ok).toBe(true);
+    if (!listAck.ok) return;
+    expect(listAck.result).toEqual([
+      expect.objectContaining({ cpId: "cp-redact" }),
+    ]);
+  });
+
   it("dispatches representative per-CP and global methods through the facade", async () => {
     const bus = new EventBus();
     const registry = new CPRegistry(bus, null);
@@ -752,6 +782,52 @@ describe("socket.io rpc dispatch", () => {
         { maxChargingPowerKw: 3 },
       );
       expect(service.runScenario).toHaveBeenCalledWith(2, "template-scenario");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects load_scenario/run_scenario_file when the target file isn't a scenario", async () => {
+    const bus = new EventBus();
+    const service = {
+      loadScenario: vi.fn(),
+      runScenario: vi.fn(),
+    };
+    const registry = {
+      get: vi.fn((cpId: string) => (cpId === "cp-alpha" ? service : undefined)),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-rpc-scenario-reject-"));
+    const notAScenarioFile = join(tmpDir, "not-a-scenario.json");
+    writeFileSync(notAScenarioFile, JSON.stringify({ some: "other data" }));
+
+    try {
+      registerSocketHandlers(io as never, {
+        registry: registry as never,
+        bus,
+        database: null,
+      });
+      io.connect(socket);
+
+      const loadAck = await socket.emitRpc({
+        cpId: "cp-alpha",
+        method: "load_scenario",
+        params: { connector: 1, file: notAScenarioFile },
+      });
+      expect(loadAck.ok).toBe(false);
+      if (!loadAck.ok)
+        expect(loadAck.error).toMatchObject({ code: "invalid_params" });
+
+      const runAck = await socket.emitRpc({
+        cpId: "cp-alpha",
+        method: "run_scenario_file",
+        params: { connector: 1, file: notAScenarioFile },
+      });
+      expect(runAck.ok).toBe(false);
+
+      expect(service.loadScenario).not.toHaveBeenCalled();
+      expect(service.runScenario).not.toHaveBeenCalled();
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

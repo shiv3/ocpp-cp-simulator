@@ -47,9 +47,10 @@ import type { ConnectorSettingsRepository } from "../../data/interfaces/Connecto
 import type { Database } from "../../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
-import type {
-  ScenarioDefinition,
-  ScenarioMode,
+import {
+  isScenarioDefinitionShape,
+  type ScenarioDefinition,
+  type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -611,6 +612,15 @@ async function deleteScenarioDefinition(
   return { ok: true };
 }
 
+/**
+ * Used by save/delete, which only know the single definition they touched.
+ * Unlike `replaceConnectorScenarioDefinitions` (whose own return value already
+ * *is* the resulting full list), an upsert or a delete-by-id has no way to
+ * know the connector's remaining full list without asking for it — this
+ * query is the one unavoidable read, not a redundant one, so don't "optimize"
+ * it away to match replace's call site without also giving save/delete a way
+ * to produce the same answer for free.
+ */
 async function emitScenarioDefinitionsChanged(
   deps: RuntimeSocketIoDeps,
   cpId: string,
@@ -1095,12 +1105,15 @@ async function dispatchFacadeCpCommand(
       const id = requireFacadeCpId(cpId);
       const connectorId = requirePositiveInt(params, "connector");
       if (typeof params.file === "string") {
-        const definition = JSON.parse(
+        const parsed: unknown = JSON.parse(
           fs.readFileSync(params.file, "utf-8"),
-        ) as ScenarioDefinition;
+        );
+        if (!isScenarioDefinitionShape(parsed)) {
+          throw new RpcFailure("invalid_params", "");
+        }
         return handled(
           await runFacadeOperation(() =>
-            chargePointService.loadScenario(id, connectorId, definition),
+            chargePointService.loadScenario(id, connectorId, parsed),
           ),
         );
       }
@@ -1286,29 +1299,33 @@ async function captureSubscribeSnapshot(
   chargePointService: RegistryChargePointService,
   scope: string,
 ): Promise<SubscribeResult> {
-  const entries = (await chargePointService.listChargePoints()).map(
-    (snapshot) => ({
-      cpId: snapshot.id,
-      cp: snapshotToFullCp(snapshot),
-      status: snapshotToWireStatus(snapshot),
-    }),
-  );
+  // `snapshot.cps` (built from snapshotToFullCp) always ships regardless of
+  // scope — the client unconditionally uses it to refresh its registry
+  // cache (see RemoteChargePointService.applySubscribeResult). `perCp`
+  // (built from snapshotToWireStatus, which maps every connector per CP) is
+  // only read for registry/wildcard/single-cpId scopes; the config and
+  // scenario-definitions scopes never populate it, so skip computing it for
+  // those instead of doing the per-connector work and discarding the result.
+  const wantsPerCp =
+    scope !== CONFIG_EVENTS_SCOPE &&
+    scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE;
+  const snapshots = await chargePointService.listChargePoints();
 
   const perCp: Record<string, StatusWire> = {};
-  for (const entry of entries) {
-    if (
-      scope !== CONFIG_EVENTS_SCOPE &&
-      scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE &&
-      (scope === "*" || scope === "registry" || scope === entry.cpId)
-    ) {
-      perCp[entry.cpId] = entry.status;
+  if (wantsPerCp) {
+    for (const snapshot of snapshots) {
+      if (scope === "*" || scope === "registry" || scope === snapshot.id) {
+        perCp[snapshot.id] = snapshotToWireStatus(snapshot);
+      }
     }
   }
 
   return {
     subscribed: [scope],
     snapshot: {
-      cps: entries.map((entry) => registryCpToWire(entry.cp)),
+      cps: snapshots.map((snapshot) =>
+        registryCpToWire(snapshotToFullCp(snapshot)),
+      ),
       perCp,
     },
   };
@@ -1360,9 +1377,32 @@ function snapshotToRegistryCpWire(snapshot: ChargePointSnapshot): CpListItem {
   return registryCpToWire(snapshotToFullCp(snapshot));
 }
 
+/**
+ * `ChargePointSnapshot.config` is typed optional to cover Local mode
+ * (the browser owns config) and older daemons that predate the field —
+ * neither applies to a Registry-produced snapshot today, since
+ * `CLIChargePointService.getStatus()` always populates it. Still, throwing
+ * here would take down `listCps`/`captureSubscribeSnapshot` for every
+ * registered CP over one anomalous snapshot; fall back to a minimal,
+ * clearly-incomplete config and warn instead of crashing the RPC.
+ */
 function snapshotToFullCp(snapshot: ChargePointSnapshot): FullCp {
   if (!snapshot.config) {
-    throw new Error(`CP snapshot missing config: ${snapshot.id}`);
+    console.warn(
+      `[socketServer] CP snapshot missing config, using fallback: ${snapshot.id}`,
+    );
+    return {
+      id: snapshot.id,
+      status: snapshot.status,
+      config: {
+        wsUrl: "",
+        connectors: snapshot.connectors.length,
+        vendor: "",
+        model: "",
+        basicAuth: null,
+        bootNotification: null,
+      },
+    };
   }
   return {
     id: snapshot.id,

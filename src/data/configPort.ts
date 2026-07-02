@@ -9,9 +9,30 @@ export function getConfigBasicAuthPassword(
   return typeof settings.password === "string" ? settings.password : "";
 }
 
+/**
+ * A previously-saved config, only used here to recover the write-only
+ * password when the caller's `next` doesn't resupply one. Accepts either
+ * adapter's own config shape (`Config` in the browser, `SimulatorConfigInput`
+ * on the daemon) — both carry `basicAuthSettings.password` — so one merge
+ * implementation covers both without coupling this shared module to either
+ * adapter's specific type.
+ */
+interface ExistingConfigWithPassword {
+  readonly basicAuthSettings: { readonly password?: string | null };
+}
+
+/**
+ * Reconstructs a full config from `next`, carrying over `existing`'s
+ * basic-auth password when `next` didn't resupply one (the wire schema never
+ * round-trips a stored password back to the client, so a save that isn't
+ * changing credentials arrives with `password` empty/undefined). Shared by
+ * the browser (Local) and daemon (Registry) adapters — see
+ * `RegistryChargePointService.saveConfig` — so a field added to
+ * `SimulatorConfigInput` only needs handling once.
+ */
 export function mergeWriteOnlyConfigSecrets(
   next: SimulatorConfigInput | null,
-  existing: Config | null,
+  existing: ExistingConfigWithPassword | null,
 ): Config | null {
   if (next === null) return null;
 

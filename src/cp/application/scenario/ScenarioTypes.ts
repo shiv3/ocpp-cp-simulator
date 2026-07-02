@@ -351,6 +351,30 @@ export interface ScenarioDefinition {
 }
 
 /**
+ * Minimal runtime shape check for a value read from an operator-supplied
+ * file (`load_scenario`/`run_scenario_file --file <path>`). The daemon
+ * accepts any path the caller names, so without this guard `JSON.parse`
+ * output was accepted via a bare `as ScenarioDefinition` cast — any
+ * readable JSON file on the host, not just an actual scenario, would be
+ * stored and become retrievable through `get_scenario`/`list_scenarios`.
+ * This only checks the fields required to identify a scenario; full
+ * per-node validation still happens downstream when the scenario runs.
+ */
+export function isScenarioDefinitionShape(
+  value: unknown,
+): value is ScenarioDefinition {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    (v.targetType === "chargePoint" || v.targetType === "connector") &&
+    Array.isArray(v.nodes) &&
+    Array.isArray(v.edges)
+  );
+}
+
+/**
  * Scenario execution context
  */
 export interface ScenarioExecutionContext {

@@ -3,10 +3,11 @@ import * as fs from "fs";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
-import type {
-  ScenarioDefinition,
-  ScenarioExecutionContext,
-  ScenarioMode,
+import {
+  isScenarioDefinitionShape,
+  type ScenarioDefinition,
+  type ScenarioExecutionContext,
+  type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type {
   HistoryOptions,
@@ -33,6 +34,7 @@ import type {
   StoredLogEntry,
 } from "../../data/interfaces/ChargePointService";
 import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
+import { mergeWriteOnlyConfigSecrets } from "../../data/configPort";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import { redactSensitiveText } from "../../cp/shared/redaction";
@@ -186,7 +188,7 @@ export class RegistryChargePointService implements ChargePointService {
   async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
     const existing = await this.deps.configRepository.load();
     await this.deps.configRepository.save(
-      mergeRegistryConfigSecrets(config, existing),
+      mergeWriteOnlyConfigSecrets(config, existing),
     );
     await this.deps.database?.flush?.();
   }
@@ -517,10 +519,11 @@ export class RegistryChargePointService implements ChargePointService {
   ): Promise<{ scenarioId: string }> {
     const service = this.requireService(id);
     const connectorId = opts.connectorId ?? 1;
-    const definition = JSON.parse(
-      fs.readFileSync(path, "utf-8"),
-    ) as ScenarioDefinition;
-    const scenarioId = service.loadScenario(connectorId, definition);
+    const parsed: unknown = JSON.parse(fs.readFileSync(path, "utf-8"));
+    if (!isScenarioDefinitionShape(parsed)) {
+      throw new Error(`file does not contain a scenario definition: ${path}`);
+    }
+    const scenarioId = service.loadScenario(connectorId, parsed);
     service.runScenario(connectorId, scenarioId);
     return { scenarioId };
   }
@@ -869,47 +872,4 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
     default:
       return null;
   }
-}
-
-function mergeRegistryConfigSecrets(
-  next: SimulatorConfigInput | null,
-  existing: SimulatorConfigInput | null,
-): SimulatorConfigInput | null {
-  if (next === null) return null;
-
-  const suppliedPassword = next.basicAuthSettings.password;
-  const password =
-    typeof suppliedPassword === "string" && suppliedPassword.length > 0
-      ? suppliedPassword
-      : (existing?.basicAuthSettings.password ?? "");
-
-  return {
-    wsURL: next.wsURL,
-    ChargePointID: next.ChargePointID,
-    connectorNumber: next.connectorNumber,
-    tagID: next.tagID,
-    ocppVersion: next.ocppVersion,
-    basicAuthSettings: {
-      enabled: next.basicAuthSettings.enabled,
-      username: next.basicAuthSettings.username,
-      password,
-    },
-    autoMeterValueSetting: {
-      enabled: next.autoMeterValueSetting.enabled,
-      interval: next.autoMeterValueSetting.interval,
-      value: next.autoMeterValueSetting.value,
-    },
-    Experimental: next.Experimental
-      ? {
-          ChargePointIDs: next.Experimental.ChargePointIDs.map((cp) => ({
-            ChargePointID: cp.ChargePointID,
-            ConnectorNumber: cp.ConnectorNumber,
-          })),
-          TagIDs: [...next.Experimental.TagIDs],
-        }
-      : null,
-    BootNotification: next.BootNotification
-      ? { ...next.BootNotification }
-      : null,
-  };
 }

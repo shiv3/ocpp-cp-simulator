@@ -34,12 +34,14 @@
   "include": [
     "src/cli",
     "src/cp",
+    "src/data/configPort.ts",
     "src/data/interfaces/ChargePointService.ts",
     "src/data/interfaces/ConnectorSettingsRepository.ts",
     "src/data/remote/RemoteChargePointService.ts",
     "src/data/sqlite/SqliteConnectorSettingsRepository.ts",
     "src/ocpp",
     "src/protocol",
+    "src/store/store.ts",
     "src/utils/scenarioTemplates.ts"
   ]
 }

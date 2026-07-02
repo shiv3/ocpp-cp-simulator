@@ -613,6 +613,13 @@ export class RemoteChargePointService implements ChargePointService {
     string,
     ActiveScenarioDefinitionsSubscription
   >();
+  // These two track the "last interesting query" per key so a reconnect can
+  // refetch it (see refetchActiveNonSnapshotViews). Unlike the subscription
+  // maps above, callers never signal "I'm done watching this" — a view
+  // just stops calling getStateHistory/getScenarioStatus for a key. Cap
+  // insertion order (evicting the oldest) so an open-ended session that
+  // touches many CPs/scenarios can't grow these without bound.
+  private static readonly MAX_TRACKED_QUERIES = 200;
   private readonly activeStateHistory = new Map<
     string,
     HistoryOptions | undefined
@@ -621,6 +628,15 @@ export class RemoteChargePointService implements ChargePointService {
     string,
     ScenarioStatusRequest
   >();
+
+  private setBounded<K, V>(map: Map<K, V>, key: K, value: V): void {
+    map.delete(key); // re-insert at the end so it counts as most-recently-used
+    map.set(key, value);
+    if (map.size > RemoteChargePointService.MAX_TRACKED_QUERIES) {
+      const oldest = map.keys().next().value as K;
+      map.delete(oldest);
+    }
+  }
   private registrySub: ActiveRegistrySubscription | null = null;
   private configSub: ActiveConfigSubscription | null = null;
   private configScopeSubscribe: Promise<void> | null = null;
@@ -993,7 +1009,7 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     options?: HistoryOptions,
   ): Promise<StateHistoryEntry[]> {
-    this.activeStateHistory.set(id, options);
+    this.setBounded(this.activeStateHistory, id, options);
     const data = await this.runCpRpc(
       id,
       "get_state_history",
@@ -1233,7 +1249,7 @@ export class RemoteChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null> {
     const key = `${id}\u0000${connectorId}\u0000${scenarioId}`;
-    this.activeScenarioStatus.set(key, {
+    this.setBounded(this.activeScenarioStatus, key, {
       cpId: id,
       connector: connectorId,
       scenarioId,
@@ -1580,14 +1596,19 @@ export class RemoteChargePointService implements ChargePointService {
         : []),
       ...this.subs.keys(),
     ];
-    for (const scope of scopes) {
-      await this.subscribeScope(scope).catch((err) => {
-        console.warn(
-          `[RemoteChargePointService] reconnect resubscribe failed for ${scope}`,
-          err,
-        );
-      });
-    }
+    // Scopes are independent subscriptions; resubscribing to one doesn't
+    // depend on another finishing, so run them concurrently instead of
+    // paying one polling-transport round trip per scope in series.
+    await Promise.all(
+      scopes.map((scope) =>
+        this.subscribeScope(scope).catch((err) => {
+          console.warn(
+            `[RemoteChargePointService] reconnect resubscribe failed for ${scope}`,
+            err,
+          );
+        }),
+      ),
+    );
     await this.refetchActiveNonSnapshotViews();
   }
 

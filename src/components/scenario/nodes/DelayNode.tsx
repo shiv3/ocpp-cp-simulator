@@ -26,7 +26,7 @@ const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         Delay
       </div>
       <div className="flex items-center gap-2">
@@ -36,7 +36,7 @@ const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({
             {data.delaySeconds}s
           </div>
           {progress && progress.remaining > 0 ? (
-            <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold">
+            <div className="text-xs text-blue-700 dark:text-blue-300 font-semibold">
               {progress.remaining.toFixed(1)}s remaining
             </div>
           ) : (

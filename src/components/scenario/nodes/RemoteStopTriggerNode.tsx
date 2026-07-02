@@ -30,7 +30,7 @@ const RemoteStopTriggerNode: React.FC<
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
-      <div className="text-xs font-semibold text-purple-600 dark:text-purple-300 mb-1">
+      <div className="text-xs font-semibold text-purple-700 dark:text-purple-300 mb-1">
         Remote Stop Trigger
       </div>
       <div className="font-bold text-sm text-primary mb-1">{data.label}</div>
@@ -38,7 +38,7 @@ const RemoteStopTriggerNode: React.FC<
         <div className="text-xs text-muted">
           Timeout: {data.timeout}s
           {progress && progress.remaining > 0 && (
-            <span className="ml-1 text-purple-600 dark:text-purple-400 font-semibold">
+            <span className="ml-1 text-purple-700 dark:text-purple-300 font-semibold">
               ({progress.remaining.toFixed(1)}s left)
             </span>
           )}

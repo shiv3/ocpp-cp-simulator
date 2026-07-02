@@ -64,15 +64,13 @@ export const ScenarioList: React.FC<ScenarioListProps> = ({
   /**
    * Get execution mode badge class
    */
-  const getExecutionModeBadgeClass = (
-    mode?: "oneshot" | "step"
-  ): string => {
+  const getExecutionModeBadgeClass = (mode?: "oneshot" | "step"): string => {
     switch (mode) {
       case "step":
-        return "bg-amber-500 hover:bg-amber-600 text-white";
+        return "bg-amber-700 hover:bg-amber-800 text-white";
       case "oneshot":
       default:
-        return "bg-emerald-500 hover:bg-emerald-600 text-white";
+        return "bg-emerald-700 hover:bg-emerald-800 text-white";
     }
   };
 
@@ -82,10 +80,10 @@ export const ScenarioList: React.FC<ScenarioListProps> = ({
   const getTriggerBadgeClass = (type?: "manual" | "statusChange"): string => {
     switch (type) {
       case "statusChange":
-        return "bg-purple-500 hover:bg-purple-600 text-white";
+        return "bg-purple-700 hover:bg-purple-800 text-white";
       case "manual":
       default:
-        return "bg-gray-500 hover:bg-gray-600 text-white";
+        return "bg-gray-700 hover:bg-gray-800 text-white";
     }
   };
 
@@ -105,156 +103,162 @@ export const ScenarioList: React.FC<ScenarioListProps> = ({
           </div>
         </div>
 
-      {/* Scenario List */}
-      <div className="flex-1 overflow-y-auto p-3">
-        {scenarios.length === 0 ? (
-          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-            No scenarios. Click "New Scenario" to create one.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {scenarios.map((scenario) => {
-              const isActive = activeScenarioIds.includes(scenario.id);
-              const isEnabled = scenario.enabled !== false;
+        {/* Scenario List */}
+        <div className="flex-1 overflow-y-auto p-3">
+          {scenarios.length === 0 ? (
+            <div className="text-center py-8 text-gray-700 dark:text-gray-300">
+              No scenarios. Click "New Scenario" to create one.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {scenarios.map((scenario) => {
+                const isActive = activeScenarioIds.includes(scenario.id);
+                const isEnabled = scenario.enabled !== false;
 
-              return (
-                <div
-                  key={scenario.id}
-                  className={`panel p-3 border-l-4 ${
-                    isActive
-                      ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                      : isEnabled
-                        ? "border-blue-500"
-                        : "border-gray-300 dark:border-gray-600 opacity-60"
-                  }`}
-                >
-                  {/* Scenario Header */}
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="font-semibold text-gray-900 dark:text-white">
-                          {scenario.name}
-                        </h4>
-                        {isActive && (
-                          <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white">
-                            Running
-                          </Badge>
+                return (
+                  <div
+                    key={scenario.id}
+                    className={`panel p-3 border-l-4 ${
+                      isActive
+                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                        : isEnabled
+                          ? "border-blue-500"
+                          : "border-gray-300 dark:border-gray-600 opacity-60"
+                    }`}
+                  >
+                    {/* Scenario Header */}
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="font-semibold text-gray-900 dark:text-white">
+                            {scenario.name}
+                          </h4>
+                          {isActive && (
+                            <Badge className="bg-emerald-700 hover:bg-emerald-800 text-white">
+                              Running
+                            </Badge>
+                          )}
+                        </div>
+                        {scenario.description && (
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {scenario.description}
+                          </p>
                         )}
                       </div>
-                      {scenario.description && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          {scenario.description}
-                        </p>
+
+                      {/* Toggle Enable/Disable */}
+                      <div className="flex items-center gap-2 ml-2">
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={isEnabled}
+                            onChange={(e) =>
+                              onToggleEnabled(scenario.id, e.target.checked)
+                            }
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                          <span className="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                            {isEnabled ? "Enabled" : "Disabled"}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Scenario Info */}
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <Badge
+                        className={getTriggerBadgeClass(scenario.trigger?.type)}
+                      >
+                        {getTriggerText(scenario)}
+                      </Badge>
+                      <Badge
+                        className={getExecutionModeBadgeClass(
+                          scenario.defaultExecutionMode,
+                        )}
+                      >
+                        {scenario.defaultExecutionMode || "oneshot"}
+                      </Badge>
+                      <Badge className="bg-gray-700 hover:bg-gray-800 text-white">
+                        {scenario.nodes.length} nodes
+                      </Badge>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2">
+                      {/* Manual Execute/Stop */}
+                      {isActive ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => onStopScenario?.(scenario.id)}
+                            >
+                              <Pause className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Stop Scenario</TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="success"
+                              onClick={() => onManualExecute?.(scenario.id)}
+                              disabled={!isEnabled}
+                            >
+                              <Play className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Run Manually</TooltipContent>
+                        </Tooltip>
                       )}
-                    </div>
 
-                    {/* Toggle Enable/Disable */}
-                    <div className="flex items-center gap-2 ml-2">
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="sr-only peer"
-                          checked={isEnabled}
-                          onChange={(e) =>
-                            onToggleEnabled(scenario.id, e.target.checked)
-                          }
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                        <span className="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
-                          {isEnabled ? "Enabled" : "Disabled"}
-                        </span>
-                      </label>
-                    </div>
-                  </div>
+                      {/* Edit */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="sm"
+                            onClick={() => onEditScenario(scenario.id)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit Scenario</TooltipContent>
+                      </Tooltip>
 
-                  {/* Scenario Info */}
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    <Badge className={getTriggerBadgeClass(scenario.trigger?.type)}>
-                      {getTriggerText(scenario)}
-                    </Badge>
-                    <Badge className={getExecutionModeBadgeClass(scenario.defaultExecutionMode)}>
-                      {scenario.defaultExecutionMode || "oneshot"}
-                    </Badge>
-                    <Badge className="bg-gray-500 hover:bg-gray-600 text-white">
-                      {scenario.nodes.length} nodes
-                    </Badge>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    {/* Manual Execute/Stop */}
-                    {isActive ? (
+                      {/* Delete */}
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => onStopScenario?.(scenario.id)}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Are you sure you want to delete "${scenario.name}"?`,
+                                )
+                              ) {
+                                onDeleteScenario(scenario.id);
+                              }
+                            }}
+                            disabled={isActive}
                           >
-                            <Pause className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>Stop Scenario</TooltipContent>
+                        <TooltipContent>Delete Scenario</TooltipContent>
                       </Tooltip>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            size="sm"
-                            variant="success"
-                            onClick={() => onManualExecute?.(scenario.id)}
-                            disabled={!isEnabled}
-                          >
-                            <Play className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Run Manually</TooltipContent>
-                      </Tooltip>
-                    )}
-
-                    {/* Edit */}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="sm"
-                          onClick={() => onEditScenario(scenario.id)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Edit Scenario</TooltipContent>
-                    </Tooltip>
-
-                    {/* Delete */}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Are you sure you want to delete "${scenario.name}"?`
-                              )
-                            ) {
-                              onDeleteScenario(scenario.id);
-                            }
-                          }}
-                          disabled={isActive}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Delete Scenario</TooltipContent>
-                    </Tooltip>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
     </TooltipProvider>
   );
 };

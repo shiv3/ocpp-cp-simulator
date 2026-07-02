@@ -301,12 +301,12 @@ const TopPage: React.FC = () => {
     };
     updateConfig(newConfig);
 
-    // Brand-new CP (not an edit): seed the Essential CP Behavior template
-    // on every connector so the editor opens with the canonical demo
-    // flow already loaded, mirroring the daemon's CPRegistry.create
-    // path. Edits intentionally skip this — operators may have already
-    // tuned the scenario and we'd clobber it.
-    if (editingIndex === null) {
+    // Brand-new local CP (not an edit): seed the Essential CP Behavior
+    // template on every connector so the editor opens with the canonical demo
+    // flow already loaded, mirroring the daemon's CPRegistry.create path.
+    // Edits intentionally skip this — operators may have already tuned the
+    // scenario and we'd clobber it.
+    if (editingIndex === null && mode === "local") {
       const essential = getTemplateById("essential-cp-behavior");
       if (essential) {
         for (let cId = 1; cId <= cpConfig.connectorNumber; cId++) {

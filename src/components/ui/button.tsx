@@ -10,18 +10,20 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+          "bg-blue-600 text-white shadow hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+          "bg-rose-700 text-white shadow-sm hover:bg-rose-800 dark:bg-rose-700 dark:hover:bg-rose-800",
         outline:
           "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        success: "bg-emerald-500 text-white shadow hover:bg-emerald-600 dark:bg-emerald-500 dark:hover:bg-emerald-600",
-        warning: "bg-amber-500 text-white shadow hover:bg-amber-600 dark:bg-amber-500 dark:hover:bg-amber-600",
-        info: "bg-indigo-500 text-white shadow hover:bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600",
+        success:
+          "bg-emerald-700 text-white shadow hover:bg-emerald-800 dark:bg-emerald-700 dark:hover:bg-emerald-800",
+        warning:
+          "bg-amber-700 text-white shadow hover:bg-amber-800 dark:bg-amber-700 dark:hover:bg-amber-800",
+        info: "bg-indigo-600 text-white shadow hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-700",
       },
       size: {
         default: "h-9 px-4 py-2",
@@ -34,7 +36,7 @@ const buttonVariants = cva(
       variant: "default",
       size: "default",
     },
-  }
+  },
 );
 
 export interface ButtonProps
@@ -53,7 +55,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       />
     );
-  }
+  },
 );
 Button.displayName = "Button";
 

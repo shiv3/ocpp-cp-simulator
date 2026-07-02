@@ -17,7 +17,7 @@ const DataTransferNode: React.FC<NodeProps<DataTransferNodeData>> = ({
       }`}
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         DataTransfer (§4.3)
       </div>
       <div

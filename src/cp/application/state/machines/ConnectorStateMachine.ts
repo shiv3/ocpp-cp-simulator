@@ -36,6 +36,60 @@ const isAuthorized = (ctx: ConnectorContext) => ctx.authorized === true;
 const isOperative = (ctx: ConnectorContext) => ctx.availability === "Operative";
 
 /**
+ * Allowed next OCPP statuses for operator-driven status changes. This mirrors
+ * the Robot3 transitions below and is exported so UI controls do not drift
+ * from the authoritative connector state machine.
+ */
+export const ALLOWED_CONNECTOR_STATUS_TRANSITIONS: Readonly<
+  Record<OCPPStatus, ReadonlyArray<OCPPStatus>>
+> = {
+  [OCPPStatus.Available]: [
+    OCPPStatus.Preparing,
+    OCPPStatus.Reserved,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Preparing]: [
+    OCPPStatus.Charging,
+    OCPPStatus.Available,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Charging]: [
+    OCPPStatus.SuspendedEV,
+    OCPPStatus.SuspendedEVSE,
+    OCPPStatus.Finishing,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.SuspendedEV]: [
+    OCPPStatus.Charging,
+    OCPPStatus.SuspendedEVSE,
+    OCPPStatus.Finishing,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.SuspendedEVSE]: [
+    OCPPStatus.Charging,
+    OCPPStatus.SuspendedEV,
+    OCPPStatus.Finishing,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Finishing]: [
+    OCPPStatus.Available,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Reserved]: [
+    OCPPStatus.Preparing,
+    OCPPStatus.Available,
+    OCPPStatus.Unavailable,
+    OCPPStatus.Faulted,
+  ],
+  [OCPPStatus.Unavailable]: [OCPPStatus.Available, OCPPStatus.Faulted],
+  [OCPPStatus.Faulted]: [OCPPStatus.Available, OCPPStatus.Unavailable],
+};
+
+/**
  * Create Connector State Machine
  * @param initialContext Initial context
  * @returns Robot3 state machine

@@ -132,6 +132,7 @@ export interface MeterValueNodeData extends BaseNodeData {
   maxValue?: number; // Maximum meter value in Wh (0 = unlimited). Manual mode only.
   useCurve?: boolean; // If true, use curve-based auto increment
   curvePoints?: CurvePoint[]; // Control points for the curve
+  autoCalculateInterval?: boolean; // If true, derive the curve interval from curve point spacing
 }
 
 /**

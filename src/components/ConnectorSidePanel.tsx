@@ -11,12 +11,15 @@ import {
   ALL_CHARGE_POINT_ERROR_CODES,
   OCPPStatus,
 } from "../cp/domain/types/OcppTypes";
+import { ALLOWED_CONNECTOR_STATUS_TRANSITIONS } from "../cp/application/state/machines/ConnectorStateMachine";
 
 /** True when the §4.9 transition table allows moving from `current` to Faulted.
  *  Used to decide whether to render the errorCode picker. */
 function allowedNextIncludesFaulted(current: OCPPStatus): boolean {
   return (
-    ALLOWED_STATUS_TRANSITIONS[current]?.includes(OCPPStatus.Faulted) ?? false
+    ALLOWED_CONNECTOR_STATUS_TRANSITIONS[current]?.includes(
+      OCPPStatus.Faulted,
+    ) ?? false
   );
 }
 import type {
@@ -52,65 +55,6 @@ import {
 /** Which view to render on the right side of the panel. The connector
  *  controls always live on the left and are no longer a "tab". */
 type TabType = "scenario" | "stateTransition";
-
-/**
- * Allowed-next-status table — exactly mirrors the OCPP 1.6 connector state
- * diagram encoded in
- * `src/cp/application/state/machines/ConnectorStateMachine.ts`. The Status
- * Control panel only surfaces these targets so the user can't
- * accidentally send a Charging notification from Available, etc.
- *
- * Keep in sync with the machine. If a transition is added there, mirror it
- * here.
- */
-const ALLOWED_STATUS_TRANSITIONS: Readonly<
-  Record<OCPPStatus, ReadonlyArray<OCPPStatus>>
-> = {
-  [OCPPStatus.Available]: [
-    OCPPStatus.Preparing,
-    OCPPStatus.Reserved,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Preparing]: [
-    OCPPStatus.Charging,
-    OCPPStatus.Available,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Charging]: [
-    OCPPStatus.SuspendedEV,
-    OCPPStatus.SuspendedEVSE,
-    OCPPStatus.Finishing,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.SuspendedEV]: [
-    OCPPStatus.Charging,
-    OCPPStatus.SuspendedEVSE,
-    OCPPStatus.Finishing,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.SuspendedEVSE]: [
-    OCPPStatus.Charging,
-    OCPPStatus.SuspendedEV,
-    OCPPStatus.Finishing,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Finishing]: [
-    OCPPStatus.Available,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Reserved]: [
-    OCPPStatus.Preparing,
-    OCPPStatus.Available,
-    OCPPStatus.Unavailable,
-    OCPPStatus.Faulted,
-  ],
-  [OCPPStatus.Unavailable]: [OCPPStatus.Available, OCPPStatus.Faulted],
-  [OCPPStatus.Faulted]: [OCPPStatus.Available, OCPPStatus.Unavailable],
-};
 
 /** Per-target tint so the buttons hint at what the destination means. */
 const STATUS_BUTTON_STYLE: Readonly<Record<OCPPStatus, string>> = {
@@ -160,13 +104,13 @@ interface ConnectorSidePanelProps {
 const getStatusColor = (status: string) => {
   switch (status) {
     case OCPPStatus.Available:
-      return "bg-green-500";
+      return "bg-green-600";
     case OCPPStatus.Charging:
-      return "bg-blue-500";
+      return "bg-blue-600";
     case OCPPStatus.Preparing:
-      return "bg-yellow-500";
+      return "bg-amber-600";
     case OCPPStatus.Faulted:
-      return "bg-red-500";
+      return "bg-red-600";
     case OCPPStatus.Unavailable:
       return "bg-gray-500";
     default:
@@ -402,6 +346,9 @@ const FullPanelContent: React.FC<{
   >({});
   const scenarioManagerRef = useRef<ScenarioManager | null>(null);
   const scenarioRef = useRef<ScenarioDefinition | null>(null);
+  const [remoteScenarioListError, setRemoteScenarioListError] = useState(false);
+  const [remoteScenarioStatusError, setRemoteScenarioStatusError] =
+    useState(false);
 
   useEffect(() => {
     const nextLiveMeterValue = clampMeterValue(liveMeterValue);
@@ -531,6 +478,7 @@ const FullPanelContent: React.FC<{
     if (mode !== "remote") return;
     const targetScenarioId = scenario?.id;
     if (!targetScenarioId) {
+      setRemoteScenarioStatusError(false);
       setScenarioExecutionContext(null);
       return;
     }
@@ -540,11 +488,16 @@ const FullPanelContent: React.FC<{
       .getScenarioStatus(cpId, connectorId, targetScenarioId)
       .then((ctx) => {
         if (cancelled) return;
+        setRemoteScenarioStatusError(false);
         setScenarioExecutionContext(ctx);
       })
-      .catch(() => {
-        // Daemon may not have started this scenario yet — that's fine,
-        // we'll pick it up on the next scenario-started event.
+      .catch((err) => {
+        if (cancelled) return;
+        setRemoteScenarioStatusError(true);
+        console.warn(
+          `[ConnectorSidePanel] Failed to fetch remote scenario status for ${cpId}/${connectorId}/${targetScenarioId}`,
+          err,
+        );
       });
 
     const unsub = chargePointService.subscribe(cpId, (event) => {
@@ -639,7 +592,9 @@ const FullPanelContent: React.FC<{
     const refresh = async () => {
       try {
         const list = await chargePointService.listScenarios(cpId, connectorId);
-        if (cancelled || list.length === 0) return;
+        if (cancelled) return;
+        setRemoteScenarioListError(false);
+        if (list.length === 0) return;
         const defs = await Promise.all(
           list.map((item) =>
             chargePointService
@@ -666,6 +621,7 @@ const FullPanelContent: React.FC<{
         });
       } catch (err) {
         if (!cancelled) {
+          setRemoteScenarioListError(true);
           console.warn(
             `[ConnectorSidePanel] Failed to fetch remote scenarios for ${cpId}/${connectorId}`,
             err,
@@ -783,6 +739,8 @@ const FullPanelContent: React.FC<{
   );
 
   const isCharging = connectorStatus === OCPPStatus.Charging;
+  const showRemoteScenarioError =
+    mode === "remote" && (remoteScenarioListError || remoteScenarioStatusError);
 
   return (
     <div className="h-full flex flex-row bg-white dark:bg-gray-900">
@@ -817,7 +775,7 @@ const FullPanelContent: React.FC<{
             <div className="flex-1 px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
               <Zap className="w-4 h-4 text-blue-500" />
               Connector {connectorId}
-              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+              <span className="text-xs font-normal text-gray-700 dark:text-gray-300">
                 · {cpId}
               </span>
             </div>
@@ -862,7 +820,7 @@ const FullPanelContent: React.FC<{
                   <h2 className="text-lg font-bold text-gray-900 dark:text-white">
                     Connector {connectorId}
                   </h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                  <p className="text-xs text-gray-700 dark:text-gray-300">
                     {cpId}
                   </p>
                 </div>
@@ -871,7 +829,7 @@ const FullPanelContent: React.FC<{
               {/* Status strip — three compact pills. */}
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div className="bg-gray-50 dark:bg-gray-800 rounded p-2">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <div className="text-xs uppercase tracking-wide text-gray-700 dark:text-gray-300">
                     Status
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
@@ -884,23 +842,23 @@ const FullPanelContent: React.FC<{
                   </div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-800 rounded p-2">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <div className="text-xs uppercase tracking-wide text-gray-700 dark:text-gray-300">
                     Meter
                   </div>
                   <div className="font-mono font-semibold text-gray-900 dark:text-white mt-0.5">
                     {liveMeterValue.toLocaleString()}
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 ml-1">
+                    <span className="text-xs text-gray-700 dark:text-gray-300 ml-1">
                       Wh
                     </span>
                   </div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-800 rounded p-2">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <div className="text-xs uppercase tracking-wide text-gray-700 dark:text-gray-300">
                     Availability
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span
-                      className={`w-2 h-2 rounded-full ${availability === "Operative" ? "bg-green-500" : "bg-red-500"}`}
+                      className={`w-2 h-2 rounded-full ${availability === "Operative" ? "bg-green-600" : "bg-red-600"}`}
                     />
                     <span className="font-semibold text-gray-900 dark:text-white">
                       {availability}
@@ -913,7 +871,7 @@ const FullPanelContent: React.FC<{
               {isCharging && transactionId !== null && transactionId !== 0 && (
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/50 dark:to-emerald-950/50 rounded-lg p-4 border-l-4 border-green-500">
                   <h3 className="text-sm font-semibold mb-3 text-green-700 dark:text-green-300 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <span className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
                     Active Transaction
                   </h3>
                   <div className="text-2xl font-bold font-mono text-green-800 dark:text-green-200 mb-3">
@@ -921,7 +879,7 @@ const FullPanelContent: React.FC<{
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                     <div className="flex flex-col min-w-0">
-                      <span className="text-xs text-green-600 dark:text-green-400">
+                      <span className="text-xs text-green-800 dark:text-green-200">
                         ID Tag
                       </span>
                       <span
@@ -932,7 +890,7 @@ const FullPanelContent: React.FC<{
                       </span>
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-xs text-green-600 dark:text-green-400">
+                      <span className="text-xs text-green-800 dark:text-green-200">
                         Started
                       </span>
                       <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
@@ -940,7 +898,7 @@ const FullPanelContent: React.FC<{
                       </span>
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-xs text-green-600 dark:text-green-400">
+                      <span className="text-xs text-green-800 dark:text-green-200">
                         Duration
                       </span>
                       <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
@@ -948,7 +906,7 @@ const FullPanelContent: React.FC<{
                       </span>
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-xs text-green-600 dark:text-green-400">
+                      <span className="text-xs text-green-800 dark:text-green-200">
                         Energy
                       </span>
                       <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
@@ -964,7 +922,7 @@ const FullPanelContent: React.FC<{
                   (label/style flips with isCharging). Matches the connector
                   card so operators get the same controls in both surfaces. */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
                   Transaction
                 </h4>
                 <select
@@ -993,8 +951,8 @@ const FullPanelContent: React.FC<{
                   disabled={!isCharging && !tagIdInput}
                   className={`w-full text-sm py-2 px-3 font-medium text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
                     isCharging
-                      ? "bg-yellow-500 hover:bg-yellow-600"
-                      : "bg-green-500 hover:bg-green-600"
+                      ? "bg-amber-700 hover:bg-amber-800"
+                      : "bg-green-700 hover:bg-green-800"
                   }`}
                 >
                   {isCharging ? "Stop" : "Start"}
@@ -1010,14 +968,14 @@ const FullPanelContent: React.FC<{
                   target-SoC marker (from evSettings) crosses the bar. */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
                     <span aria-hidden>🔋</span> Battery
                   </h4>
                   <label
-                    className={`flex items-center gap-1 text-[10px] cursor-pointer select-none ${
+                    className={`flex items-center gap-1 text-xs cursor-pointer select-none ${
                       capacityKwh > 0
                         ? "text-gray-600 dark:text-gray-300"
-                        : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                        : "text-gray-600 dark:text-gray-400 cursor-not-allowed"
                     }`}
                     title={
                       capacityKwh > 0
@@ -1035,7 +993,7 @@ const FullPanelContent: React.FC<{
                     Sync SoC ↔ Meter
                   </label>
                 </div>
-                <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                <div className="text-xs text-gray-700 dark:text-gray-300">
                   {liveSoc !== null
                     ? `${liveSoc.toFixed(1)}%`
                     : "SoC not reported"}
@@ -1070,7 +1028,7 @@ const FullPanelContent: React.FC<{
                     )}
                     {/* big SoC % overlay */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-[11px] font-bold font-mono text-gray-900 dark:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.6)] dark:drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
+                      <span className="text-xs font-bold font-mono text-gray-900 dark:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.6)] dark:drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
                         {liveSoc !== null ? `${Math.round(liveSoc)}%` : "—"}
                       </span>
                     </div>
@@ -1080,7 +1038,7 @@ const FullPanelContent: React.FC<{
                   <div className="flex-1 min-w-0 space-y-2">
                     {/* SoC slider + nudge buttons */}
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+                      <div className="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300">
                         <span>SoC</span>
                         <span>%</span>
                       </div>
@@ -1130,13 +1088,14 @@ const FullPanelContent: React.FC<{
                     the Battery card because it's the other half of the same
                     MeterValues message. */}
                 <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300">
                     <span>Meter (energy counter)</span>
                     <span>Wh</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <input
                       type="number"
+                      min={0}
                       value={meterValueInput}
                       onFocus={() => setIsMeterValueInputFocused(true)}
                       onBlur={() => setIsMeterValueInputFocused(false)}
@@ -1148,20 +1107,20 @@ const FullPanelContent: React.FC<{
                       }}
                       className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono"
                     />
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="text-xs text-gray-700 dark:text-gray-300">
                       Wh
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={handleIncreaseMeterValue}
-                      className="text-sm py-2 px-3 font-medium bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
+                      className="text-sm py-2 px-3 font-medium bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
                     >
                       +10 Wh
                     </button>
                     <button
                       onClick={handleSendMeterValue}
-                      className="text-sm py-2 px-3 font-medium bg-gray-500 hover:bg-gray-600 text-white rounded transition-colors"
+                      className="text-sm py-2 px-3 font-medium bg-gray-700 hover:bg-gray-800 text-white rounded transition-colors"
                     >
                       Send
                     </button>
@@ -1177,19 +1136,19 @@ const FullPanelContent: React.FC<{
                   up the errorCode from the picker below. */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
                     Status Control
                   </h4>
-                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">
                     next states
                   </span>
                 </div>
                 {(() => {
                   const allowedNext =
-                    ALLOWED_STATUS_TRANSITIONS[connectorStatus] ?? [];
+                    ALLOWED_CONNECTOR_STATUS_TRANSITIONS[connectorStatus] ?? [];
                   if (allowedNext.length === 0) {
                     return (
-                      <p className="text-xs text-gray-400 dark:text-gray-500 italic">
+                      <p className="text-xs text-gray-600 dark:text-gray-400 italic">
                         No transitions defined from this state.
                       </p>
                     );
@@ -1220,7 +1179,7 @@ const FullPanelContent: React.FC<{
                 })()}
                 {allowedNextIncludesFaulted(connectorStatus) && (
                   <div className="flex items-center gap-1 pt-1">
-                    <label className="text-[10px] text-gray-500 dark:text-gray-400">
+                    <label className="text-xs text-gray-700 dark:text-gray-300">
                       Fault errorCode:
                     </label>
                     <select
@@ -1245,7 +1204,7 @@ const FullPanelContent: React.FC<{
                 <summary className="cursor-pointer p-3 text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2 select-none">
                   <Gauge className="w-4 h-4 text-indigo-500" />
                   Charging Profile
-                  <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                  <span className="ml-auto text-xs text-gray-700 dark:text-gray-300">
                     {profilesToDisplay.length}
                   </span>
                 </summary>
@@ -1278,30 +1237,30 @@ const FullPanelContent: React.FC<{
                                   {isPaused ? "⏸ Paused" : "⚡ Active"}
                                   {isActive ? " · Current" : " · Stored"}
                                 </span>
-                                <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                <span className="text-xs text-gray-700 dark:text-gray-300 font-mono">
                                   #{profile.chargingProfileId}
                                 </span>
                               </div>
                               <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                                <span className="text-gray-500 dark:text-gray-400">
+                                <span className="text-gray-700 dark:text-gray-300">
                                   Purpose
                                 </span>
                                 <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
                                   {profile.chargingProfilePurpose}
                                 </span>
-                                <span className="text-gray-500 dark:text-gray-400">
+                                <span className="text-gray-700 dark:text-gray-300">
                                   Kind
                                 </span>
                                 <span className="font-medium text-gray-800 dark:text-gray-200">
                                   {profile.chargingProfileKind}
                                 </span>
-                                <span className="text-gray-500 dark:text-gray-400">
+                                <span className="text-gray-700 dark:text-gray-300">
                                   Stack Level
                                 </span>
                                 <span className="font-medium text-gray-800 dark:text-gray-200">
                                   {profile.stackLevel}
                                 </span>
-                                <span className="text-gray-500 dark:text-gray-400">
+                                <span className="text-gray-700 dark:text-gray-300">
                                   Unit
                                 </span>
                                 <span className="font-medium text-gray-800 dark:text-gray-200">
@@ -1309,7 +1268,7 @@ const FullPanelContent: React.FC<{
                                 </span>
                               </div>
                             </div>
-                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                            <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                               Schedule Periods
                             </div>
                             <div className="space-y-1">
@@ -1319,20 +1278,20 @@ const FullPanelContent: React.FC<{
                                     key={idx}
                                     className="flex items-center justify-between bg-white dark:bg-gray-700 rounded px-2.5 py-1.5 text-xs"
                                   >
-                                    <span className="text-gray-500 dark:text-gray-400">
+                                    <span className="text-gray-700 dark:text-gray-300">
                                       @{period.startPeriod}s
                                     </span>
                                     <span
                                       className={`font-bold font-mono ${
                                         period.limit === 0
-                                          ? "text-orange-600 dark:text-orange-400"
+                                          ? "text-orange-700 dark:text-orange-300"
                                           : "text-indigo-600 dark:text-indigo-400"
                                       }`}
                                     >
                                       {period.limit} {profile.chargingRateUnit}
                                     </span>
                                     {period.numberPhases != null && (
-                                      <span className="text-gray-400 dark:text-gray-500">
+                                      <span className="text-gray-600 dark:text-gray-400">
                                         {period.numberPhases}φ
                                       </span>
                                     )}
@@ -1345,9 +1304,9 @@ const FullPanelContent: React.FC<{
                       })}
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 py-1 space-y-1">
+                    <div className="text-xs text-gray-700 dark:text-gray-300 py-1 space-y-1">
                       <div className="italic">No active charging profile.</div>
-                      <div className="text-gray-400 dark:text-gray-500">
+                      <div className="text-gray-600 dark:text-gray-400">
                         The connector charges at its unrestricted auto-meter
                         rate until a SetChargingProfile.req arrives from the
                         CSMS.
@@ -1377,7 +1336,7 @@ const FullPanelContent: React.FC<{
                   onClick={() => setActiveTab("scenario")}
                   className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 ${
                     activeTab === "scenario"
-                      ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
+                      ? "bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 border-b-2 border-blue-500"
                       : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
                   }`}
                 >
@@ -1388,7 +1347,7 @@ const FullPanelContent: React.FC<{
                   onClick={() => setActiveTab("stateTransition")}
                   className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 ${
                     activeTab === "stateTransition"
-                      ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
+                      ? "bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 border-b-2 border-blue-500"
                       : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
                   }`}
                 >
@@ -1410,30 +1369,37 @@ const FullPanelContent: React.FC<{
                     without unmounting the React component. */}
               <div className="flex-1 min-h-0 overflow-hidden relative">
                 <div
-                  className={`absolute inset-0 ${
+                  className={`absolute inset-0 h-full flex flex-col ${
                     activeTab === "scenario" ? "" : "hidden"
                   }`}
                   aria-hidden={activeTab !== "scenario"}
                 >
-                  <Suspense
-                    fallback={
-                      <div className="h-full flex items-center justify-center">
-                        <div className="text-muted">
-                          Loading Scenario Editor...
+                  {showRemoteScenarioError && (
+                    <div className="flex-shrink-0 mx-3 mt-3 rounded border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                      Couldn't reach the daemon. Scenario data is unavailable.
+                    </div>
+                  )}
+                  <div className="flex-1 min-h-0">
+                    <Suspense
+                      fallback={
+                        <div className="h-full flex items-center justify-center">
+                          <div className="text-muted">
+                            Loading Scenario Editor...
+                          </div>
                         </div>
-                      </div>
-                    }
-                  >
-                    <ScenarioEditor
-                      cpId={cpId}
-                      connectorId={connectorId}
-                      scenario={scenario}
-                      scenarioId={scenario?.id}
-                      executionContext={scenarioExecutionContext}
-                      nodeProgress={nodeProgress}
-                      onClose={() => setActiveTab("scenario")}
-                    />
-                  </Suspense>
+                      }
+                    >
+                      <ScenarioEditor
+                        cpId={cpId}
+                        connectorId={connectorId}
+                        scenario={scenario}
+                        scenarioId={scenario?.id}
+                        executionContext={scenarioExecutionContext}
+                        nodeProgress={nodeProgress}
+                        onClose={() => setActiveTab("scenario")}
+                      />
+                    </Suspense>
+                  </div>
                 </div>
                 <div
                   className={`absolute inset-0 ${
@@ -1444,7 +1410,7 @@ const FullPanelContent: React.FC<{
                   {connector && localCp ? (
                     <div className="h-full flex flex-col">
                       <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                        <p className="text-xs text-gray-700 dark:text-gray-300">
                           OCPP 1.6J state machine for Connector {connectorId}
                         </p>
                       </div>

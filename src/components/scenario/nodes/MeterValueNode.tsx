@@ -36,7 +36,7 @@ const MeterValueNode: React.FC<NodeProps<ExtendedMeterValueNodeData>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         Meter Value
       </div>
       <div className="flex items-center gap-2">
@@ -52,7 +52,7 @@ const MeterValueNode: React.FC<NodeProps<ExtendedMeterValueNodeData>> = ({
       </div>
 
       {data.autoIncrement && (
-        <div className="text-xs text-green-600 dark:text-green-400 mt-1 font-semibold">
+        <div className="text-xs text-green-700 dark:text-green-300 mt-1 font-semibold">
           ⚡ Auto +{data.incrementAmount || 1000}Wh /{" "}
           {data.incrementInterval || 10}s
           {progress && progress.remaining > 0 && (

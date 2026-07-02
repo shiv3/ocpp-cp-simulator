@@ -1,6 +1,7 @@
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import type { ChargePointService } from "../../data/interfaces/ChargePointService";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
+import { serializeScenarioGraph } from "./scenarioSerialize";
 
 /**
  * Dependencies needed to durably persist a scenario the user just loaded into
@@ -17,6 +18,34 @@ export interface PersistEditorScenarioDeps {
   scenarioRepository: Pick<ScenarioRepository, "save">;
   cpId: string;
   connectorId: number | null;
+}
+
+export function createLatestWinsSaver<T>(
+  saveFn: (payload: T) => Promise<void>,
+): (payload: T) => Promise<void> {
+  let latestSeq = 0;
+  let tail: Promise<void> = Promise.resolve();
+
+  return (payload: T): Promise<void> => {
+    const seq = ++latestSeq;
+    const next = tail
+      .catch(() => undefined)
+      .then(async () => {
+        if (seq !== latestSeq) return;
+        await saveFn(payload);
+      });
+    tail = next;
+    return next;
+  };
+}
+
+function serializeScenarioForPersistence(
+  scenario: ScenarioDefinition,
+): ScenarioDefinition {
+  return {
+    ...scenario,
+    ...serializeScenarioGraph(scenario.nodes, scenario.edges),
+  };
 }
 
 /**
@@ -43,6 +72,7 @@ export async function persistEditorScenario(
 ): Promise<void> {
   const { mode, chargePointService, scenarioRepository, cpId, connectorId } =
     deps;
+  const scenarioToPersist = serializeScenarioForPersistence(scenario);
 
   if (mode === "remote") {
     // The daemon's scenario RPCs are connector-scoped and require a positive
@@ -55,7 +85,7 @@ export async function persistEditorScenario(
     );
     await Promise.all(
       existing
-        .filter((item) => item.scenarioId !== scenario.id)
+        .filter((item) => item.scenarioId !== scenarioToPersist.id)
         .map((item) =>
           chargePointService
             .removeScenario(cpId, remoteConnectorId, item.scenarioId)
@@ -67,11 +97,42 @@ export async function persistEditorScenario(
             ),
         ),
     );
-    await chargePointService.loadScenario(cpId, remoteConnectorId, scenario);
+    await chargePointService.loadScenario(
+      cpId,
+      remoteConnectorId,
+      scenarioToPersist,
+    );
     return;
   }
 
-  await scenarioRepository.save(cpId, connectorId, scenario);
+  await scenarioRepository.save(cpId, connectorId, scenarioToPersist);
+}
+
+/**
+ * Mode-aware upsert for the scenario currently being edited. Unlike
+ * `persistEditorScenario`, this deliberately does not prune sibling daemon
+ * scenarios: autosave/manual-save are updates to the open scenario, not a
+ * replacement import/template operation.
+ */
+export async function saveEditorScenario(
+  deps: PersistEditorScenarioDeps,
+  scenario: ScenarioDefinition,
+): Promise<void> {
+  const { mode, chargePointService, scenarioRepository, cpId, connectorId } =
+    deps;
+  const scenarioToPersist = serializeScenarioForPersistence(scenario);
+
+  if (mode === "remote") {
+    const remoteConnectorId = connectorId as number;
+    await chargePointService.loadScenario(
+      cpId,
+      remoteConnectorId,
+      scenarioToPersist,
+    );
+    return;
+  }
+
+  await scenarioRepository.save(cpId, connectorId, scenarioToPersist);
 }
 
 /**

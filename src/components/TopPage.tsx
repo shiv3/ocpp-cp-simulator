@@ -21,6 +21,7 @@ import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import type { ChargePointSnapshot } from "../data/interfaces/ChargePointService";
 import { getTemplateById } from "../utils/scenarioTemplates";
 import type { Config } from "../store/store";
+import { saveEditorScenario } from "./scenario/scenarioPersistence";
 
 const DEFAULT_TAG_ID = "TAG001";
 
@@ -300,24 +301,31 @@ const TopPage: React.FC = () => {
     };
     updateConfig(newConfig);
 
-    // Brand-new CP (not an edit): seed the Essential CP Behavior template
-    // on every connector so the editor opens with the canonical demo
-    // flow already loaded, mirroring the daemon's CPRegistry.create
-    // path. Edits intentionally skip this — operators may have already
-    // tuned the scenario and we'd clobber it.
-    if (editingIndex === null) {
+    // Brand-new local CP (not an edit): seed the Essential CP Behavior
+    // template on every connector so the editor opens with the canonical demo
+    // flow already loaded, mirroring the daemon's CPRegistry.create path.
+    // Edits intentionally skip this — operators may have already tuned the
+    // scenario and we'd clobber it.
+    if (editingIndex === null && mode === "local") {
       const essential = getTemplateById("essential-cp-behavior");
       if (essential) {
         for (let cId = 1; cId <= cpConfig.connectorNumber; cId++) {
           const seeded = essential.createScenario(cpConfig.cpId, cId);
-          void scenarioRepository
-            .save(cpConfig.cpId, cId, seeded)
-            .catch((err) =>
-              console.warn(
-                `Failed to seed Essential CP Behavior for ${cpConfig.cpId}/connector ${cId}`,
-                err,
-              ),
-            );
+          void saveEditorScenario(
+            {
+              mode,
+              chargePointService,
+              scenarioRepository,
+              cpId: cpConfig.cpId,
+              connectorId: cId,
+            },
+            seeded,
+          ).catch((err) =>
+            console.warn(
+              `Failed to seed Essential CP Behavior for ${cpConfig.cpId}/connector ${cId}`,
+              err,
+            ),
+          );
         }
       }
     }

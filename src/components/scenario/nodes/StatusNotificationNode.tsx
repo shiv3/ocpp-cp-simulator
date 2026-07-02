@@ -19,7 +19,7 @@ const StatusNotificationNode: React.FC<
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         StatusNotification (§4.9)
       </div>
       <div className="text-sm font-bold text-primary">
@@ -27,7 +27,7 @@ const StatusNotificationNode: React.FC<
         {data.connectorId !== undefined ? ` · conn ${data.connectorId}` : ""}
       </div>
       {data.errorCode && data.errorCode !== "NoError" && (
-        <div className="text-xs text-red-600 dark:text-red-400 font-mono">
+        <div className="text-xs text-red-700 dark:text-red-300 font-mono">
           {data.errorCode}
         </div>
       )}

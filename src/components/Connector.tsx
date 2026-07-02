@@ -540,8 +540,8 @@ const Connector: React.FC<ConnectorProps> = ({
             disabled={!isCharging && !selectedTagId}
             className={`w-full text-sm py-1.5 px-3 font-medium text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
               isCharging
-                ? "bg-yellow-500 hover:bg-yellow-600"
-                : "bg-green-500 hover:bg-green-600"
+                ? "bg-amber-700 hover:bg-amber-800"
+                : "bg-green-700 hover:bg-green-800"
             }`}
           >
             {isCharging ? "Stop" : "Start"}

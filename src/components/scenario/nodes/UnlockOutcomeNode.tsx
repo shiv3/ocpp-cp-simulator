@@ -12,10 +12,10 @@ const UnlockOutcomeNode: React.FC<NodeProps<UnlockOutcomeNodeData>> = ({
 }) => {
   const tint =
     data.outcome === "Unlocked"
-      ? "text-green-600 dark:text-green-400"
+      ? "text-green-700 dark:text-green-300"
       : data.outcome === "UnlockFailed"
-        ? "text-amber-600 dark:text-amber-400"
-        : "text-gray-500";
+        ? "text-amber-700 dark:text-amber-300"
+        : "text-gray-700 dark:text-gray-300";
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-white dark:bg-gray-800 min-w-[200px] ${
@@ -23,7 +23,7 @@ const UnlockOutcomeNode: React.FC<NodeProps<UnlockOutcomeNodeData>> = ({
       }`}
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         Unlock Outcome (§5.18)
       </div>
       <div className={`text-sm font-bold ${tint}`}>{data.outcome}</div>

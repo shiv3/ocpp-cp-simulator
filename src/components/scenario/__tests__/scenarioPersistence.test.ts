@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createLatestWinsSaver,
   persistEditorScenario,
   retargetScenarioToConnector,
+  saveEditorScenario,
 } from "../scenarioPersistence";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 
@@ -22,6 +24,26 @@ function makeService(existingIds: string[] = []) {
     removeScenario: vi.fn().mockResolvedValue(undefined),
     loadScenario: vi.fn().mockResolvedValue({ scenarioId: "x" }),
   };
+}
+
+type Deferred = {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+};
+
+function deferred(): Deferred {
+  const value = {} as Deferred;
+  value.promise = new Promise<void>((resolve, reject) => {
+    value.resolve = () => resolve();
+    value.reject = (error: Error) => reject(error);
+  });
+  return value;
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("persistEditorScenario (scenario upload / template persistence — #101)", () => {
@@ -49,6 +71,65 @@ describe("persistEditorScenario (scenario upload / template persistence — #101
       uploaded,
     );
     expect(scenarioRepository.save).not.toHaveBeenCalled();
+  });
+
+  it("serializes the graph before remote persistence", async () => {
+    const chargePointService = makeService([]);
+    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
+    const uploaded = {
+      ...scenario("new-1"),
+      nodes: [
+        {
+          id: "meter-1",
+          type: "meterValue",
+          position: { x: 10, y: 20 },
+          data: {
+            label: "Meter",
+            value: 10,
+            sendMessage: true,
+            progress: { remaining: 1 },
+            currentValue: 20,
+            style: { border: "1px solid red" },
+            className: "executing-node",
+          },
+          selected: true,
+          dragging: true,
+        },
+      ],
+      edges: [
+        {
+          id: "edge-1",
+          source: "start",
+          target: "meter-1",
+          selected: true,
+          style: { stroke: "red" },
+        },
+      ],
+    } as unknown as ScenarioDefinition;
+
+    await persistEditorScenario(
+      {
+        mode: "remote",
+        chargePointService,
+        scenarioRepository,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      uploaded,
+    );
+
+    const persisted = chargePointService.loadScenario.mock.calls[0][2];
+    expect(persisted.nodes[0]).not.toHaveProperty("selected");
+    expect(persisted.nodes[0]).not.toHaveProperty("dragging");
+    expect(persisted.nodes[0].data).not.toHaveProperty("progress");
+    expect(persisted.nodes[0].data).not.toHaveProperty("currentValue");
+    expect(persisted.nodes[0].data).not.toHaveProperty("style");
+    expect(persisted.nodes[0].data).not.toHaveProperty("className");
+    expect(persisted.edges[0]).toEqual({
+      id: "edge-1",
+      source: "start",
+      target: "meter-1",
+    });
   });
 
   it("remote mode removes stale prior scenarios but keeps the one being saved", async () => {
@@ -131,6 +212,148 @@ describe("persistEditorScenario (scenario upload / template persistence — #101
     expect(chargePointService.listScenarios).not.toHaveBeenCalled();
     expect(chargePointService.removeScenario).not.toHaveBeenCalled();
     expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+  });
+});
+
+describe("saveEditorScenario (editor autosave / manual save upsert)", () => {
+  it("remote mode upserts through daemon loadScenario without pruning siblings", async () => {
+    const chargePointService = makeService(["old-a"]);
+    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
+    const edited = scenario("edited-1");
+
+    await saveEditorScenario(
+      {
+        mode: "remote",
+        chargePointService,
+        scenarioRepository,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      edited,
+    );
+
+    expect(chargePointService.loadScenario).toHaveBeenCalledWith(
+      "CP1",
+      1,
+      edited,
+    );
+    expect(chargePointService.listScenarios).not.toHaveBeenCalled();
+    expect(chargePointService.removeScenario).not.toHaveBeenCalled();
+    expect(scenarioRepository.save).not.toHaveBeenCalled();
+  });
+
+  it("local mode upserts through the repository without touching daemon scenario APIs", async () => {
+    const chargePointService = makeService(["old-a"]);
+    const scenarioRepository = { save: vi.fn().mockResolvedValue(undefined) };
+    const edited = scenario("edited-1");
+
+    await saveEditorScenario(
+      {
+        mode: "local",
+        chargePointService,
+        scenarioRepository,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      edited,
+    );
+
+    expect(scenarioRepository.save).toHaveBeenCalledWith("CP1", 1, edited);
+    expect(chargePointService.listScenarios).not.toHaveBeenCalled();
+    expect(chargePointService.removeScenario).not.toHaveBeenCalled();
+    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
+  });
+});
+
+describe("createLatestWinsSaver", () => {
+  it("saves a queued newer payload after the in-flight save", async () => {
+    const gates: Deferred[] = [];
+    const persisted: string[] = [];
+    const saveFn = vi.fn((payload: string) => {
+      const gate = deferred();
+      gates.push(gate);
+      return gate.promise.then(() => {
+        persisted.push(payload);
+      });
+    });
+    const saveLatest = createLatestWinsSaver(saveFn);
+
+    const saveA = saveLatest("A");
+    await flushPromises();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+    expect(saveFn).toHaveBeenLastCalledWith("A");
+
+    const saveB = saveLatest("B");
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    gates[0].resolve();
+    await saveA;
+    await flushPromises();
+    expect(saveFn).toHaveBeenCalledTimes(2);
+    expect(saveFn).toHaveBeenLastCalledWith("B");
+
+    gates[1].resolve();
+    await saveB;
+    expect(persisted).toEqual(["A", "B"]);
+  });
+
+  it("lets an even newer queued save supersede an older queued save", async () => {
+    const gates: Deferred[] = [];
+    const persisted: string[] = [];
+    const saveFn = vi.fn((payload: string) => {
+      const gate = deferred();
+      gates.push(gate);
+      return gate.promise.then(() => {
+        persisted.push(payload);
+      });
+    });
+    const saveLatest = createLatestWinsSaver(saveFn);
+
+    const saveA = saveLatest("A");
+    await flushPromises();
+    const saveB = saveLatest("B");
+    const saveC = saveLatest("C");
+
+    gates[0].resolve();
+    await saveA;
+    await saveB;
+    await flushPromises();
+
+    expect(saveFn).toHaveBeenCalledTimes(2);
+    expect(saveFn).toHaveBeenNthCalledWith(1, "A");
+    expect(saveFn).toHaveBeenNthCalledWith(2, "C");
+    expect(saveFn).not.toHaveBeenCalledWith("B");
+
+    gates[1].resolve();
+    await saveC;
+    expect(persisted).toEqual(["A", "C"]);
+  });
+
+  it("continues with the latest queued save after an in-flight failure", async () => {
+    const gates: Deferred[] = [];
+    const persisted: string[] = [];
+    const saveFn = vi.fn((payload: string) => {
+      const gate = deferred();
+      gates.push(gate);
+      return gate.promise.then(() => {
+        persisted.push(payload);
+      });
+    });
+    const saveLatest = createLatestWinsSaver(saveFn);
+
+    const saveA = saveLatest("A");
+    await flushPromises();
+    const saveB = saveLatest("B");
+
+    gates[0].reject(new Error("A failed"));
+    await expect(saveA).rejects.toThrow("A failed");
+    await flushPromises();
+    expect(saveFn).toHaveBeenCalledTimes(2);
+    expect(saveFn).toHaveBeenLastCalledWith("B");
+
+    gates[1].resolve();
+    await saveB;
+    expect(persisted).toEqual(["B"]);
   });
 });
 

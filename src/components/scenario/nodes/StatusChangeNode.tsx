@@ -10,15 +10,15 @@ const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({
   const statusColor = (status: OCPPStatus) => {
     switch (status) {
       case OCPPStatus.Available:
-        return "bg-green-500";
+        return "bg-green-600";
       case OCPPStatus.Charging:
-        return "bg-blue-500";
+        return "bg-blue-600";
       case OCPPStatus.Unavailable:
         return "bg-gray-500";
       case OCPPStatus.Faulted:
-        return "bg-red-500";
+        return "bg-red-600";
       default:
-        return "bg-yellow-500";
+        return "bg-amber-600";
     }
   };
 
@@ -30,7 +30,7 @@ const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
         Status Change
       </div>
       <div className="flex items-center gap-2">

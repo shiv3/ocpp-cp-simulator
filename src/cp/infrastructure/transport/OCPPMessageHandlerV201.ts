@@ -531,6 +531,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
+  public sendLogStatusNotification(_status: string, _requestId?: number): void {
+    this._logger.warn(
+      "[v2.0.1] LogStatusNotification is a 1.6 Security Whitepaper message; not wired through this handler",
+      LogType.OCPP,
+    );
+  }
+
+  public sendSignedFirmwareStatusNotification(
+    _status: string,
+    _requestId?: number,
+  ): void {
+    this._logger.warn(
+      "[v2.0.1] SignedFirmwareStatusNotification is a 1.6 Security Whitepaper message; not wired through this handler",
+      LogType.OCPP,
+    );
+  }
+
   public setBootStatus(
     status:
       | { status: "Idle" }

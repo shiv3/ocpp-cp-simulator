@@ -45,6 +45,22 @@ export class CertificateStore {
     return this.#rootCerts.map((cert) => ({ ...cert }));
   }
 
+  /**
+   * Removes the first stored root certificate matching `predicate`
+   * (DeleteCertificate.req matches by `certificateHashData`, computed by
+   * the caller via `certificateHash.ts` — this store stays decoupled from
+   * the hashing/crypto concern). Returns `true` when a certificate was
+   * removed, `false` when nothing matched.
+   */
+  deleteRootCert(
+    predicate: (cert: InstalledRootCertificate) => boolean,
+  ): boolean {
+    const index = this.#rootCerts.findIndex(predicate);
+    if (index === -1) return false;
+    this.#rootCerts.splice(index, 1);
+    return true;
+  }
+
   clearAll(): void {
     this.#keyPair = undefined;
     this.#pendingCsrPem = undefined;

@@ -201,6 +201,11 @@ export class ConfigurationStore {
     return this.getInteger("ConnectionTimeOut") ?? 60;
   }
 
+  /** Canonical key `CertificateStoreMaxLength`; default `10`. */
+  certificateStoreMaxLength(): number {
+    return this.getInteger("CertificateStoreMaxLength") ?? 10;
+  }
+
   /**
    * Apply a ChangeConfiguration.req: parses the string value into the key's
    * declared type, persists, fires listeners, and returns the spec-defined

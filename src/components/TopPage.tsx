@@ -89,6 +89,8 @@ const TopPage: React.FC = () => {
           basicAuthUsername: c?.basicAuth?.username ?? "",
           basicAuthPassword: c?.basicAuth?.password ?? "",
           securityProfile: c?.securityProfile,
+          soapCallbackUrl: c?.soapCallbackUrl,
+          soapPath: c?.soapPath,
           cpoName: c?.cpoName,
           tlsCaPath: c?.tlsCaPath,
           tlsCertPath: c?.tlsCertPath,
@@ -177,7 +179,18 @@ const TopPage: React.FC = () => {
                 password: cpConfig.basicAuthPassword,
               }
             : null,
+          // OCPP 1.5 SOAP: the existing wsUrl field doubles as the Central
+          // System endpoint (the daemon defaults centralSystemUrl from wsUrl
+          // when omitted); soapCallbackUrl/soapPath are the CP's own
+          // callback listener that the CSMS calls back on.
+          soapCallbackUrl: cpConfig.soapCallbackUrl,
+          soapPath: cpConfig.soapPath,
           securityProfile: cpConfig.securityProfile,
+          // The modal already sanitizes blank secrets to `undefined` before
+          // calling onSave (see sanitizeChargePointConfigForSave), so a
+          // blank AuthorizationKey/TLS cert/key on edit is omitted here too
+          // — cp.update's merge only preserves a field that is entirely
+          // absent from params.
           authorizationKey: cpConfig.authorizationKey,
           cpoName: cpConfig.cpoName,
           tls: cpConfig.tls,

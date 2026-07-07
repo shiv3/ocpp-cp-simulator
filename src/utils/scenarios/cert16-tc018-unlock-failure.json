@@ -1,0 +1,123 @@
+{
+  "id": "cert16-tc018-unlock-failure",
+  "name": "Cert 1.6 Core: TC_018 Unlock Connector (Failure)",
+  "description": "Session running (StartTransaction.req, Charging, MeterValue.req); pre-arms the connector's next UnlockConnector.req response as UnlockFailed so the CSMS can verify the failure path (e.g. stuck lock), then the session ends normally via StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "delay-connect",
+      "type": "delay",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Wait 2s", "delaySeconds": 2 }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Plug In", "action": "plugin" }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 450 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT018"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 650 },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 15,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "unlock-arm",
+      "type": "unlockOutcome",
+      "position": { "x": 400, "y": 750 },
+      "data": {
+        "label": "Pre-arm UnlockConnector response: UnlockFailed",
+        "outcome": "UnlockFailed"
+      }
+    },
+    {
+      "id": "delay-unlock-window",
+      "type": "delay",
+      "position": { "x": 400, "y": 850 },
+      "data": {
+        "label": "Window for CSMS UnlockConnector.req",
+        "delaySeconds": 10
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": { "x": 400, "y": 950 },
+      "data": { "label": "Stop Transaction", "action": "stop" }
+    },
+    {
+      "id": "status-finishing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 1050 },
+      "data": { "label": "Set Finishing", "status": "Finishing" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 1150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 1250 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "delay-connect" },
+    { "id": "e2", "source": "delay-connect", "target": "plug-in" },
+    { "id": "e3", "source": "plug-in", "target": "status-preparing" },
+    { "id": "e4", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e5", "source": "tx-start", "target": "status-charging" },
+    { "id": "e6", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e7", "source": "meter-auto", "target": "unlock-arm" },
+    { "id": "e8", "source": "unlock-arm", "target": "delay-unlock-window" },
+    { "id": "e9", "source": "delay-unlock-window", "target": "tx-stop" },
+    { "id": "e10", "source": "tx-stop", "target": "status-finishing" },
+    { "id": "e11", "source": "status-finishing", "target": "status-available" },
+    { "id": "e12", "source": "status-available", "target": "end-1" }
+  ]
+}

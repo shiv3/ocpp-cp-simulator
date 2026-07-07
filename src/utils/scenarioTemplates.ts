@@ -7,6 +7,18 @@ import multiStatusMonitorJson from "./scenarios/multi-status-monitor.json";
 import statusTriggeredActionsJson from "./scenarios/status-triggered-actions.json";
 import remoteStartAutoMeterJson from "./scenarios/remote-start-auto-meter.json";
 
+// OCPP 1.6 Core certification scenarios (issue #110, first slice). TC
+// numbers follow the issue's own numbering, not an external test suite.
+import cert16Tc001ColdBootJson from "./scenarios/cert16-tc001-cold-boot.json";
+import cert16Tc003ChargingPluginFirstJson from "./scenarios/cert16-tc003-charging-plugin-first.json";
+import cert16Tc004ChargingIdFirstJson from "./scenarios/cert16-tc004-charging-id-first.json";
+import cert16Tc010RemoteStartJson from "./scenarios/cert16-tc010-remote-start.json";
+import cert16Tc011RemoteStartStopJson from "./scenarios/cert16-tc011-remote-start-stop.json";
+import cert16Tc012RemoteStopJson from "./scenarios/cert16-tc012-remote-stop.json";
+import cert16Tc017UnlockOccupiedJson from "./scenarios/cert16-tc017-unlock-occupied.json";
+import cert16Tc018UnlockFailureJson from "./scenarios/cert16-tc018-unlock-failure.json";
+import cert16ReservationBasicJson from "./scenarios/cert16-reservation-basic.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -73,6 +85,18 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(multiStatusMonitorJson as ScenarioDefinition),
   templateFromJson(statusTriggeredActionsJson as ScenarioDefinition),
   templateFromJson(remoteStartAutoMeterJson as ScenarioDefinition),
+
+  // OCPP 1.6 Core certification scenarios (issue #110, first slice) —
+  // grouped together so they surface as a block in the template picker.
+  templateFromJson(cert16Tc001ColdBootJson as ScenarioDefinition),
+  templateFromJson(cert16Tc003ChargingPluginFirstJson as ScenarioDefinition),
+  templateFromJson(cert16Tc004ChargingIdFirstJson as ScenarioDefinition),
+  templateFromJson(cert16Tc010RemoteStartJson as ScenarioDefinition),
+  templateFromJson(cert16Tc011RemoteStartStopJson as ScenarioDefinition),
+  templateFromJson(cert16Tc012RemoteStopJson as ScenarioDefinition),
+  templateFromJson(cert16Tc017UnlockOccupiedJson as ScenarioDefinition),
+  templateFromJson(cert16Tc018UnlockFailureJson as ScenarioDefinition),
+  templateFromJson(cert16ReservationBasicJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

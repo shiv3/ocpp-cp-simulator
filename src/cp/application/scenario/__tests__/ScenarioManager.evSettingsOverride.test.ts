@@ -76,6 +76,43 @@ function scenarioWithEvSettingsOverride(
   };
 }
 
+// Start -> End: runs to natural completion immediately. Only carries
+// `evSettings` when the caller provides them, so tests cover both a
+// scenario that owns an EV settings override and one that never touches
+// EV settings at all.
+function completingScenario(
+  id: string,
+  evSettings?: Partial<EVSettings>,
+): ScenarioDefinition {
+  return {
+    id,
+    name: `completing ${id}`,
+    targetType: "connector",
+    targetId: 1,
+    nodes: [
+      {
+        id: "start",
+        type: ScenarioNodeType.START,
+        position: { x: 0, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "end",
+        type: ScenarioNodeType.END,
+        position: { x: 0, y: 100 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [{ id: "e-start", source: "start", target: "end" }],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+    trigger: { type: "manual" },
+    ...(evSettings ? { evSettings } : {}),
+  };
+}
+
 describe("ScenarioManager EV settings override (#105)", () => {
   it("keeps a running scenario's evSettings override across a default propagation, and clears it on stop", async () => {
     const connector = makeConnector();
@@ -109,6 +146,51 @@ describe("ScenarioManager EV settings override (#105)", () => {
     manager.stopScenario(scenario.id);
 
     // Override cleared: the next default propagation is free to apply.
+    connector.applyDefaultEvSettings({ ...defaultEVSettings, targetSoc: 80 });
+    expect(connector.evSettings.targetSoc).toBe(80);
+  });
+
+  it("does not release an explicit override when a scenario WITHOUT evSettings completes", async () => {
+    const connector = makeConnector();
+    const chargePoint = makeChargePointStub();
+    const callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector,
+    });
+    const manager = new ScenarioManager(connector, chargePoint, callbacks);
+
+    // Explicit (set_ev_settings-style) override, independent of any scenario.
+    connector.applyEvSettingsOverride({ targetSoc: 50 });
+
+    // A scenario that never touches EV settings runs to natural completion
+    // on the same connector (e.g. a status auto-trigger scenario).
+    const scenario = completingScenario("sc-no-ev");
+    manager.loadScenarios([scenario]);
+    await manager.executeScenario(scenario.id);
+
+    // The scenario must not have released the explicit override: a default
+    // propagation afterwards still no-ops.
+    connector.applyDefaultEvSettings({ ...defaultEVSettings, targetSoc: 80 });
+    expect(connector.evSettings.targetSoc).toBe(50);
+  });
+
+  it("releases the override when a scenario WITH evSettings completes naturally", async () => {
+    const connector = makeConnector();
+    const chargePoint = makeChargePointStub();
+    const callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector,
+    });
+    const manager = new ScenarioManager(connector, chargePoint, callbacks);
+
+    const scenario = completingScenario("sc-with-ev", { targetSoc: 50 });
+    manager.loadScenarios([scenario]);
+    await manager.executeScenario(scenario.id);
+
+    expect(connector.evSettings.targetSoc).toBe(50);
+
+    // The scenario owned the override and completed — the next default
+    // propagation applies again.
     connector.applyDefaultEvSettings({ ...defaultEVSettings, targetSoc: 80 });
     expect(connector.evSettings.targetSoc).toBe(80);
   });

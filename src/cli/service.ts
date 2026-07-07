@@ -918,10 +918,14 @@ export class CLIChargePointService {
       // connector_runtime row's transaction_json itself is already
       // null by the time the Stop Transaction node ran).
       this._scenarioPositionByConnector.delete(connectorId);
-      // Release the EV settings override (#105): a future Default EV
-      // Settings propagation should be free to apply now that this
-      // scenario is no longer driving the connector.
-      connector.clearEvSettingsOverride();
+      // Release the EV settings override (#105) — but only if THIS scenario
+      // declared evSettings and therefore owns the override (ScenarioExecutor
+      // only calls onSetEVSettings for declared evSettings). A scenario that
+      // never touched EV settings must not release an explicit
+      // set_ev_settings override on the same connector.
+      if (entry.definition.evSettings) {
+        connector.clearEvSettingsOverride();
+      }
       this.persistConnectorRuntime(connector, connectorId);
     });
   }
@@ -975,9 +979,12 @@ export class CLIChargePointService {
     }
     executor.stop();
     this._executors.delete(scenarioId);
-    // Release the EV settings override (#105) — see runScenario's
+    // Release the EV settings override (#105) — only when this scenario
+    // declared evSettings and therefore owns it; see runScenario's
     // executor.start().finally() for the natural-completion counterpart.
-    this._chargePoint.connectors.get(connectorId)?.clearEvSettingsOverride();
+    if (this._scenarios.get(scenarioId)?.definition.evSettings) {
+      this._chargePoint.connectors.get(connectorId)?.clearEvSettingsOverride();
+    }
     // Surface the stop to remote subscribers — executor.stop() bypasses
     // the onStateChange("completed") path used by runScenario(), so the
     // browser's active-scenario tracker would otherwise still believe
@@ -995,10 +1002,13 @@ export class CLIChargePointService {
         if (executor) {
           executor.stop();
           this._executors.delete(scenarioId);
-          // Release the EV settings override (#105), same as stopScenario.
-          this._chargePoint.connectors
-            .get(connectorId)
-            ?.clearEvSettingsOverride();
+          // Release the EV settings override (#105) only for the owning
+          // (evSettings-declaring) scenario, same as stopScenario.
+          if (entry.definition.evSettings) {
+            this._chargePoint.connectors
+              .get(connectorId)
+              ?.clearEvSettingsOverride();
+          }
           this.emit({
             event: "scenario_completed",
             data: { connectorId, scenarioId },

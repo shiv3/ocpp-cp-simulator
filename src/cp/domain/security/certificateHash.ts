@@ -32,8 +32,12 @@ function toHex(buffer: ArrayBuffer): string {
  *   5280 §4.2.1.2 Subject Key Identifier method (1) formula, and the same
  *   value produced by OpenSSL's X509_pubkey_digest (the de facto
  *   reference implementation behind RFC 6960 issuerKeyHash in real-world
- *   CSMS stacks). Verified against an independent asn1js BIT STRING parse
- *   in certificateHash.test.ts.
+ *   CSMS stacks). Verified in certificateHash.test.ts two independent
+ *   ways: against SHA-256 over the raw EC point exported via WebCrypto
+ *   (`exportKey("raw", ...)` — for EC keys, exactly the BIT STRING
+ *   content with no ASN.1 framing), and against known-answer hashes
+ *   precomputed with `openssl asn1parse` + `openssl dgst -sha256` for a
+ *   fixed certificate.
  * - serialNumber: hex string, sign-padding byte stripped by @peculiar/x509.
  */
 export async function computeCertificateHashData(

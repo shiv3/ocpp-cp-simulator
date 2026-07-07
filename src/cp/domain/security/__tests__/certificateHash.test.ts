@@ -28,21 +28,44 @@ async function selfSignedRootCert(serialNumber: string, cn: string) {
   return { cert, pem: cert.toString("pem") };
 }
 
+/**
+ * Fixed known-answer fixture, generated and hashed entirely OUTSIDE the
+ * library under test (OpenSSL 3.6.2):
+ *
+ *   openssl ecparam -name prime256v1 -genkey -noout -out key.pem
+ *   openssl req -new -x509 -key key.pem -days 7300 -sha256 \
+ *     -subj "/CN=OCPP KAT Root CA/O=Example CPO" -set_serial 0x0aa2b3
+ *
+ * Expected hashes derived from the DER via `openssl asn1parse` offsets and
+ * `openssl dgst -sha256`: issuerNameHash over the issuer Name SEQUENCE
+ * (51 bytes at offset 30); issuerKeyHash over the subjectPublicKey BIT
+ * STRING content minus the leading unused-bits octet (65 bytes at offset
+ * 190 — the 0x04-prefixed uncompressed EC point).
+ */
+const KAT_CERT_PEM = `-----BEGIN CERTIFICATE-----
+MIIBpjCCAUygAwIBAgIDCqKzMAoGCCqGSM49BAMCMDExGTAXBgNVBAMMEE9DUFAg
+S0FUIFJvb3QgQ0ExFDASBgNVBAoMC0V4YW1wbGUgQ1BPMB4XDTI2MDcwNzExNDQw
+NloXDTQ2MDcwMjExNDQwNlowMTEZMBcGA1UEAwwQT0NQUCBLQVQgUm9vdCBDQTEU
+MBIGA1UECgwLRXhhbXBsZSBDUE8wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATF
+sHwsmYjqvegLgl3oDlAHvalUN6+rj99NXr2TgkSFzfIe7fBNb2fzLeV8zLFXJ7if
+z5JXpaljzbIaVkr9N5FIo1MwUTAdBgNVHQ4EFgQU2hS5MJMuHrIOcgETuqpDbQkC
+2gUwHwYDVR0jBBgwFoAU2hS5MJMuHrIOcgETuqpDbQkC2gUwDwYDVR0TAQH/BAUw
+AwEB/zAKBggqhkjOPQQDAgNIADBFAiEAgNy7JC9GKPvwAr0H18p/x78OAlUHPeg9
+8UGq9LUH7SQCICG3tEVQJC6tLIZOar+KzwF3dGbOHRk6kK4tuI+pq1kw
+-----END CERTIFICATE-----`;
+
 describe("computeCertificateHashData", () => {
-  it("computes issuerNameHash as SHA-256 over the DER-encoded issuer Name", async () => {
-    const { cert, pem } = await selfSignedRootCert("01a2b3", "Test Root CA");
-    const result = await computeCertificateHashData(pem);
+  it("matches OpenSSL-derived known-answer hashes for a fixed certificate", async () => {
+    const result = await computeCertificateHashData(KAT_CERT_PEM);
 
-    const expected = await crypto.subtle.digest(
-      "SHA-256",
-      cert.issuerName.toArrayBuffer(),
-    );
-    const expectedHex = Array.from(new Uint8Array(expected))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    expect(result.issuerNameHash).toBe(expectedHex);
-    expect(result.issuerNameHash).toHaveLength(64);
+    expect(result).toEqual({
+      hashAlgorithm: "SHA256",
+      issuerNameHash:
+        "2f1e564ddbf440fc551bf9d5284e6700c64a42fb685d5c9db91f606a721c0fa4",
+      issuerKeyHash:
+        "e5330c333975c58e5d299572140e2663337dfc1714ea5c85f581151b5eae8059",
+      serialNumber: "0aa2b3",
+    });
   });
 
   /**

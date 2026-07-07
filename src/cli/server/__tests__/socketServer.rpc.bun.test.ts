@@ -161,6 +161,39 @@ describe("socket.io rpc dispatch", () => {
     }
   });
 
+  it("returns invalid_params with a human-readable message when cp.update sets securityProfile 3 without a client cert/key", async () => {
+    const server = await serverWithCp();
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await emitRpc(socket, {
+        method: "cp.update",
+        params: {
+          cpId: "cp-alpha",
+          wsUrl: "ws://example.test/updated",
+          connectors: 1,
+          vendor: "UpdatedVendor",
+          model: "UpdatedModel",
+          securityProfile: 3,
+        },
+      });
+
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+      expect(ack.error.message).toContain("securityProfile 3");
+      expect(ack.error.message).toContain(
+        "requires client certificate and key",
+      );
+      // The failure must be atomic: the existing profile-2 registration is
+      // untouched, not left half-updated.
+      expect(server.registry.get("cp-alpha")?.getInit()).toMatchObject({
+        wsUrl: "ws://user:secret@example.test/ocpp",
+        securityProfile: 2,
+      });
+    } finally {
+      socket.disconnect();
+    }
+  });
+
   it("dispatches set_soc_meter_sync through jsonMode", async () => {
     const server = await serverWithCp();
     const socket = await connectTestClient(server);

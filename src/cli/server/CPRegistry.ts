@@ -4,6 +4,7 @@ import { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { EventBus } from "./eventBus";
 import type { Database } from "../../cp/domain/persistence/Database";
+import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -286,12 +287,20 @@ export class CPRegistry {
     return svc;
   }
 
+  /**
+   * Validate config-dependent security-profile requirements eagerly, before
+   * create()/update() persist or mutate anything, so a bad request fails
+   * atomically. Thrown as OcppSecurityProfileConfigError (rather than a
+   * plain Error) so the RPC layer (socketServer.ts runFacadeOperation) can
+   * map it to `invalid_params` with the human-readable message intact,
+   * instead of it falling through to an opaque, unlogged "internal error".
+   */
   private prepareInit(init: ChargePointInitOptions): ChargePointInitOptions {
     if (
       (init.securityProfile === 1 || init.securityProfile === 2) &&
       !init.authorizationKey
     ) {
-      throw new Error(
+      throw new OcppSecurityProfileConfigError(
         `securityProfile ${init.securityProfile} requires authorizationKey.`,
       );
     }
@@ -300,7 +309,7 @@ export class CPRegistry {
       !(init.tls?.cert && init.tls?.key) &&
       !(init.tlsCertPath && init.tlsKeyPath)
     ) {
-      throw new Error(
+      throw new OcppSecurityProfileConfigError(
         "securityProfile 3 requires client certificate and key TLS material.",
       );
     }

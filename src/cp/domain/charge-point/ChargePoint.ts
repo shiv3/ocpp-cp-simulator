@@ -682,6 +682,43 @@ export class ChargePoint {
     this._outbox.sendFirmwareStatusNotification(status);
   }
 
+  /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
+  sendLogStatusNotification(
+    status:
+      | "BadMessage"
+      | "Idle"
+      | "NotSupportedOperation"
+      | "PermissionDenied"
+      | "Uploaded"
+      | "UploadFailure"
+      | "Uploading",
+    requestId?: number,
+  ): void {
+    this._outbox.sendLogStatusNotification(status, requestId);
+  }
+
+  /** Send SignedFirmwareStatusNotification.req — see OCPPMessageHandler doc. */
+  sendSignedFirmwareStatusNotification(
+    status:
+      | "Downloaded"
+      | "DownloadFailed"
+      | "Downloading"
+      | "DownloadScheduled"
+      | "DownloadPaused"
+      | "Idle"
+      | "InstallationFailed"
+      | "Installing"
+      | "Installed"
+      | "InstallRebooting"
+      | "InstallScheduled"
+      | "InstallVerificationFailed"
+      | "InvalidSignature"
+      | "SignatureVerified",
+    requestId?: number,
+  ): void {
+    this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
+  }
+
   /** Set while a simulated firmware update is in flight, so a second
    *  UpdateFirmware.req (the spec allows the CSMS to re-issue) doesn't
    *  fork a parallel status train. */
@@ -730,6 +767,66 @@ export class ChargePoint {
 
     const startTimer = setTimeout(() => fireStep(0), startDelay);
     this._firmwareUpdateTimers.push(startTimer);
+  }
+
+  /** Mirrors `_firmwareUpdateInFlight` / `_firmwareUpdateTimers` for the
+   *  signed variant — kept separate so a SignedUpdateFirmware.req can't
+   *  collide with (or be blocked by) a plain UpdateFirmware.req train. */
+  private _signedFirmwareUpdateInFlight = false;
+  private _signedFirmwareUpdateTimers: NodeJS.Timeout[] = [];
+
+  /**
+   * OCPP 1.6 Security Whitepaper SignedUpdateFirmware.req: schedules a
+   * simulated signed firmware update progression. After `retrieveDate` is
+   * reached, fires SignedFirmwareStatusNotification.req in sequence —
+   * Downloading → Downloaded → SignatureVerified → Installing → Installed
+   * — with `intervalMs` between each transition, carrying `requestId` on
+   * every notification. Same "no real binary, just walk the status
+   * machine" approach as `simulateFirmwareUpdate` — no signature is
+   * actually verified.
+   */
+  simulateSignedFirmwareUpdate(
+    retrieveDate: Date,
+    requestId: number,
+    intervalMs = 2000,
+  ): void {
+    if (this._signedFirmwareUpdateInFlight) {
+      this._logger.warn(
+        "SignedUpdateFirmware: a previous simulated update is still in flight; ignoring",
+        LogType.OCPP,
+      );
+      return;
+    }
+    this._signedFirmwareUpdateInFlight = true;
+
+    const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
+    const sequence: Array<
+      | "Downloading"
+      | "Downloaded"
+      | "SignatureVerified"
+      | "Installing"
+      | "Installed"
+    > = [
+      "Downloading",
+      "Downloaded",
+      "SignatureVerified",
+      "Installing",
+      "Installed",
+    ];
+
+    const fireStep = (index: number) => {
+      if (index >= sequence.length) {
+        this._signedFirmwareUpdateInFlight = false;
+        this._signedFirmwareUpdateTimers = [];
+        return;
+      }
+      this.sendSignedFirmwareStatusNotification(sequence[index], requestId);
+      const t = setTimeout(() => fireStep(index + 1), intervalMs);
+      this._signedFirmwareUpdateTimers.push(t);
+    };
+
+    const startTimer = setTimeout(() => fireStep(0), startDelay);
+    this._signedFirmwareUpdateTimers.push(startTimer);
   }
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
@@ -864,6 +961,10 @@ export class ChargePoint {
     this._firmwareUpdateTimers.forEach((t) => clearTimeout(t));
     this._firmwareUpdateTimers = [];
     this._firmwareUpdateInFlight = false;
+    // ...and the signed variant's simulation too.
+    this._signedFirmwareUpdateTimers.forEach((t) => clearTimeout(t));
+    this._signedFirmwareUpdateTimers = [];
+    this._signedFirmwareUpdateInFlight = false;
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire

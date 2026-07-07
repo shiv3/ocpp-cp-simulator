@@ -15,6 +15,10 @@ export * from "./call/ChangeAvailabilityHandler";
 export * from "./call/LocalAuthListHandlers";
 export * from "./call/UpdateFirmwareHandler";
 export * from "./call/CertificateSignedHandler";
+export * from "./call/ExtendedTriggerMessageHandler";
+export * from "./call/CertificateManagementHandlers";
+export * from "./call/GetLogHandler";
+export * from "./call/SignedUpdateFirmwareHandler";
 
 // Export CALLRESULT handlers
 export * from "./callresult/BootNotificationResultHandler";

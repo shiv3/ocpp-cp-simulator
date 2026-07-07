@@ -34,6 +34,11 @@ export interface IChargePointMessageHandler {
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: string): void;
   sendFirmwareStatusNotification(status: string): void;
+  sendLogStatusNotification(status: string, requestId?: number): void;
+  sendSignedFirmwareStatusNotification(
+    status: string,
+    requestId?: number,
+  ): void;
   setBootStatus(
     status:
       | { status: "Idle" }

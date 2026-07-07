@@ -879,20 +879,15 @@ export class RemoteChargePointService implements ChargePointService {
 
   async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
     // The daemon's connectors never see the browser-only Default EV Settings,
-    // so push it onto every connector of every known charge point (#107).
-    const cps = await this.listChargePoints().catch(() => []);
-    await Promise.all(
-      cps.flatMap((cp) =>
-        cp.connectors.map((connector) =>
-          this.setEVSettings(cp.id, connector.id, settings).catch((err) =>
-            console.warn(
-              `Failed to apply default EV settings to ${cp.id}/${connector.id}`,
-              err,
-            ),
-          ),
-        ),
-      ),
-    );
+    // so push it onto every connector of every known charge point (#107) via
+    // a single daemon-level RPC. This must NOT go through setEVSettings
+    // (per-connector, marks an explicit override, #105) — the daemon-side
+    // RegistryChargePointService.applyDefaultEVSettings routes it through
+    // each connector's default-propagation path instead, so an active
+    // scenario/explicit override isn't clobbered.
+    await this.rpc("ev_settings.apply_default", {
+      settings: settings as unknown as Record<string, unknown>,
+    });
   }
 
   async setAutoMeterValueConfig(

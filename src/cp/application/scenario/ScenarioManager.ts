@@ -298,6 +298,11 @@ export class ScenarioManager {
     } finally {
       // Clean up when completed
       this.executors.delete(scenarioId);
+      // Release the EV settings override (#105) — a running scenario's
+      // evSettings must win over Default EV Settings propagation only
+      // while it's active; once it completes, a future default push may
+      // apply again.
+      this.connector.clearEvSettingsOverride();
     }
   }
 
@@ -310,6 +315,9 @@ export class ScenarioManager {
       console.log(`[ScenarioManager] Stopping scenario: ${scenarioId}`);
       executor.stop();
       this.executors.delete(scenarioId);
+      // Release the EV settings override (#105), same as executeScenario's
+      // natural-completion path above.
+      this.connector.clearEvSettingsOverride();
     }
   }
 

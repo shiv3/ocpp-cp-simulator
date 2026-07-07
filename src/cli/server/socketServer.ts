@@ -374,6 +374,8 @@ async function dispatchValidatedRpc(
       return getSocMeterSync(deps, rawParams);
     case "connector_settings.soc_meter_sync.save":
       return saveSocMeterSync(deps, rawParams);
+    case "ev_settings.apply_default":
+      return applyDefaultEVSettingsRpc(deps, rawParams);
     case "server.shutdown":
       return shutdownServer(deps);
     case "events.subscribe":
@@ -522,6 +524,22 @@ async function saveConfig(
   });
   deps.registryEvents?.emitConfigChanged(saved);
   return { ok: true };
+}
+
+async function applyDefaultEVSettingsRpc(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<undefined> {
+  const params =
+    METHODS["ev_settings.apply_default"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  await runFacadeOperation(() =>
+    deps.chargePointService.applyDefaultEVSettings(
+      params.data.settings as unknown as EVSettings,
+    ),
+  );
+  return undefined;
 }
 
 async function listScenarioDefinitions(

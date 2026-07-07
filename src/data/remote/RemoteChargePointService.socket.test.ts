@@ -680,14 +680,12 @@ describe("RemoteChargePointService socket.io rpc", () => {
         name: "applyDefaultEVSettings",
         invoke: (service) => service.applyDefaultEVSettings(ev),
         expected: [
-          { method: "cp.list", params: {} },
           {
-            cpId: "cp-1",
-            method: "set_ev_settings",
-            params: { connector: 1, settings: ev },
+            method: "ev_settings.apply_default",
+            params: { settings: ev },
           },
         ],
-        results: [[cpItem("cp-1")], undefined],
+        results: [undefined],
       },
       {
         name: "setAutoMeterValueConfig",

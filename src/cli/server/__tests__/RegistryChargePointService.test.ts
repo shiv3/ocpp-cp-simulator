@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "../../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../../cp/domain/connector/MeterValueCurve";
 import type {
   Database,
@@ -347,6 +348,44 @@ describe("RegistryChargePointService", () => {
     await expect(
       service.sendStatusNotification("missing-cp", 1, OCPPStatus.Available),
     ).rejects.toThrow("cpId not found: missing-cp");
+  });
+
+  it("applyDefaultEVSettings respects an active override instead of clobbering it (#105)", async () => {
+    const { registry, service } = createFacade();
+    const perCp = registry.create(
+      {
+        cpId: "cp-ev-default",
+        wsUrl: "ws://example.test/ocpp",
+        connectors: 1,
+        vendor: "FacadeVendor",
+        model: "FacadeModel",
+        basicAuth: null,
+      },
+      { seedDefault: false },
+    );
+
+    const overrideSettings: EVSettings = {
+      modelName: "Override EV",
+      batteryCapacityKwh: 50,
+      maxChargingPowerKw: 40,
+      initialSoc: 20,
+      targetSoc: 50,
+    };
+    const nextDefault: EVSettings = {
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+    };
+
+    // setEVSettings is the explicit/scenario path — it must mark an
+    // override that a later default propagation can't clobber.
+    perCp.setEVSettings(1, overrideSettings);
+
+    await service.applyDefaultEVSettings(nextDefault);
+
+    expect(perCp.getEVSettings(1)).toEqual(overrideSettings);
   });
 
   it("delegates per-CP subscriptions and returns the unsubscribe callback", () => {

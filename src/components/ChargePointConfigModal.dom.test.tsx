@@ -263,6 +263,30 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     );
   });
 
+  it("clears the stale SOAP callback validation message when switching away from OCPP-1.5", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      onSave,
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.5" }),
+    });
+    roots.push(rendered.root);
+
+    await act(async () => {
+      saveButton().click();
+    });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "SOAP Callback URL is required",
+    );
+
+    await selectOption("ocppVersion", "OCPP 1.6J");
+
+    expect(document.body.textContent).not.toContain(
+      "SOAP Callback URL is required",
+    );
+  });
+
   it("blocks save on create when profile 3 is selected without cert/key", async () => {
     const onSave = vi.fn();
     const rendered = await renderModal({

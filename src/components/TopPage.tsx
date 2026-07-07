@@ -160,12 +160,14 @@ const TopPage: React.FC = () => {
 
   const handleSaveChargePoint = async (cpConfig: ChargePointConfig) => {
     if (mode === "remote") {
+      // Re-use the same shape for create and update; the only difference
+      // is which daemon endpoint we hit. Editing an existing CP goes to
+      // PUT /v1/cp/:cpId so the daemon can preserve persisted scenarios
+      // (POST throws "cpId already exists" instead). Declared outside the
+      // try so the catch block's error message can also tell create/update
+      // apart.
+      const isEdit = editingIndex !== null;
       try {
-        // Re-use the same shape for create and update; the only difference
-        // is which daemon endpoint we hit. Editing an existing CP goes to
-        // PUT /v1/cp/:cpId so the daemon can preserve persisted scenarios
-        // (POST throws "cpId already exists" instead).
-        const isEdit = editingIndex !== null;
         const params = {
           cpId: cpConfig.cpId,
           wsUrl: cpConfig.wsURL,
@@ -260,9 +262,10 @@ const TopPage: React.FC = () => {
         }
         await refresh();
       } catch (err) {
-        console.error("Failed to create remote CP", err);
+        const action = isEdit ? "update" : "create";
+        console.error(`Failed to ${action} remote CP`, err);
         alert(
-          `Failed to create CP: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to ${action} CP: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
       return;

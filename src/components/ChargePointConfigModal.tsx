@@ -217,6 +217,22 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   const displayFullUrl = fullUrlDraft ?? composedFullUrl;
   const securityProfile = config.securityProfile ?? 0;
 
+  // The SOAP callback / TLS material save-blocking errors above are only
+  // valid for the config that was on screen when Save was clicked. Once the
+  // operator changes the field that made them invalid (switches away from
+  // OCPP-1.5, fills in the callback URL, or edits the security
+  // profile/cert/key), clear the stale message instead of leaving it
+  // rendered until the next Save click recomputes it.
+  useEffect(() => {
+    setSaveError(null);
+  }, [
+    config.ocppVersion,
+    config.soapCallbackUrl,
+    config.securityProfile,
+    config.tls?.cert,
+    config.tls?.key,
+  ]);
+
   const applyFullUrl = useCallback((raw: string): boolean => {
     const parsed = parseFullOcppUrl(raw);
     if (!parsed) {
@@ -674,6 +690,11 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   </div>
                 )}
               </div>
+            ) : securityProfile === 3 ? (
+              <p className="text-xs text-muted mb-4">
+                Authentication is governed by the mutual TLS client certificate
+                and key in the Security section above (security profile 3).
+              </p>
             ) : (
               <p className="text-xs text-muted mb-4">
                 Authentication is governed by the Authorization Key in the

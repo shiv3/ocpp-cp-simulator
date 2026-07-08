@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
+import {
+  ScenarioNodeType,
+  type ScenarioDefinition,
+} from "../../../cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "../../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../../cp/domain/connector/MeterValueCurve";
 import type {
   Database,
@@ -349,6 +353,130 @@ describe("RegistryChargePointService", () => {
     ).rejects.toThrow("cpId not found: missing-cp");
   });
 
+  it("applyDefaultEVSettings respects an active override instead of clobbering it (#105)", async () => {
+    const { registry, service } = createFacade();
+    const perCp = registry.create(
+      {
+        cpId: "cp-ev-default",
+        wsUrl: "ws://example.test/ocpp",
+        connectors: 1,
+        vendor: "FacadeVendor",
+        model: "FacadeModel",
+        basicAuth: null,
+      },
+      { seedDefault: false },
+    );
+
+    const overrideSettings: EVSettings = {
+      modelName: "Override EV",
+      batteryCapacityKwh: 50,
+      maxChargingPowerKw: 40,
+      initialSoc: 20,
+      targetSoc: 50,
+    };
+    const nextDefault: EVSettings = {
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+    };
+
+    // setEVSettings is the explicit/scenario path — it must mark an
+    // override that a later default propagation can't clobber.
+    perCp.setEVSettings(1, overrideSettings);
+
+    await service.applyDefaultEVSettings(nextDefault);
+
+    expect(perCp.getEVSettings(1)).toEqual(overrideSettings);
+  });
+
+  it("keeps an explicit override after a scenario WITHOUT evSettings completes (#105)", async () => {
+    const { registry, service } = createFacade();
+    const perCp = registry.create(
+      {
+        cpId: "cp-ev-no-scenario-ev",
+        wsUrl: "ws://example.test/ocpp",
+        connectors: 1,
+        vendor: "FacadeVendor",
+        model: "FacadeModel",
+        basicAuth: null,
+      },
+      { seedDefault: false },
+    );
+
+    const overrideSettings: EVSettings = {
+      modelName: "Override EV",
+      batteryCapacityKwh: 50,
+      maxChargingPowerKw: 40,
+      initialSoc: 20,
+      targetSoc: 50,
+    };
+    perCp.setEVSettings(1, overrideSettings);
+
+    // A scenario that never touches EV settings runs to completion on the
+    // same connector — it must NOT release the explicit override.
+    const scenarioId = perCp.loadScenario(
+      1,
+      runnableScenario("scenario-no-ev", 1),
+    );
+    perCp.runScenario(1, scenarioId);
+    await waitForScenarioIdle(perCp, 1, scenarioId);
+
+    await service.applyDefaultEVSettings({
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+    });
+
+    expect(perCp.getEVSettings(1)).toEqual(overrideSettings);
+  });
+
+  it("releases a scenario's evSettings override when the scenario is stopped (#105)", async () => {
+    const { registry, service } = createFacade();
+    const perCp = registry.create(
+      {
+        cpId: "cp-ev-scenario-stop",
+        wsUrl: "ws://example.test/ocpp",
+        connectors: 1,
+        vendor: "FacadeVendor",
+        model: "FacadeModel",
+        basicAuth: null,
+      },
+      { seedDefault: false },
+    );
+
+    // Parks on the STATUS_TRIGGER wait (the connector never reaches
+    // Charging here) after applying its declared evSettings.
+    const scenarioId = perCp.loadScenario(
+      1,
+      parkedScenario("scenario-with-ev", 1, { targetSoc: 50 }),
+    );
+    perCp.runScenario(1, scenarioId);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(perCp.getEVSettings(1).targetSoc).toBe(50);
+
+    const nextDefault: EVSettings = {
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+    };
+
+    // Default propagation while the scenario is active: override wins.
+    await service.applyDefaultEVSettings(nextDefault);
+    expect(perCp.getEVSettings(1).targetSoc).toBe(50);
+
+    perCp.stopScenario(1, scenarioId);
+
+    // The owning scenario stopped — the next default propagation applies.
+    await service.applyDefaultEVSettings(nextDefault);
+    expect(perCp.getEVSettings(1).targetSoc).toBe(80);
+  });
+
   it("delegates per-CP subscriptions and returns the unsubscribe callback", () => {
     const { registry, service } = createFacade();
     const perCp = registry.create(
@@ -565,6 +693,88 @@ function scenarioDefinition(
     updatedAt: "2026-06-30T00:00:01.000Z",
     enabled: true,
   };
+}
+
+/** Start -> End: runs to natural completion immediately; no evSettings. */
+function runnableScenario(id: string, connectorId: number): ScenarioDefinition {
+  return {
+    ...scenarioDefinition(id, connectorId),
+    nodes: [
+      {
+        id: "start",
+        type: ScenarioNodeType.START,
+        position: { x: 0, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "end",
+        type: ScenarioNodeType.END,
+        position: { x: 0, y: 100 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [{ id: "e-start", source: "start", target: "end" }],
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
+  };
+}
+
+/**
+ * Start -> STATUS_TRIGGER wait (a status the test never produces) -> End,
+ * with declared evSettings: applies its EV settings override on start and
+ * then parks so tests can exercise the running-scenario window.
+ */
+function parkedScenario(
+  id: string,
+  connectorId: number,
+  evSettings: Partial<EVSettings>,
+): ScenarioDefinition {
+  return {
+    ...scenarioDefinition(id, connectorId),
+    nodes: [
+      {
+        id: "start",
+        type: ScenarioNodeType.START,
+        position: { x: 0, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "wait",
+        type: ScenarioNodeType.STATUS_TRIGGER,
+        position: { x: 0, y: 100 },
+        data: { label: "Wait", targetStatus: OCPPStatus.Charging, timeout: 0 },
+      },
+      {
+        id: "end",
+        type: ScenarioNodeType.END,
+        position: { x: 0, y: 200 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [
+      { id: "e-start", source: "start", target: "wait" },
+      { id: "e-wait", source: "wait", target: "end" },
+    ],
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
+    evSettings,
+  };
+}
+
+/** Poll until the scenario's executor exits (runScenario is fire-and-forget). */
+async function waitForScenarioIdle(
+  perCp: ReturnType<CPRegistry["create"]>,
+  connectorId: number,
+  scenarioId: string,
+): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    const item = perCp
+      .listScenarios(connectorId)
+      .find((s) => s.scenarioId === scenarioId);
+    if (item && !item.active) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`scenario ${scenarioId} did not complete`);
 }
 
 function autoMeterConfig(): AutoMeterValueConfig {

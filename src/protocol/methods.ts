@@ -323,6 +323,14 @@ export const METHODS = {
     params: connectorSettingsParamsSchema.extend({ enabled: z.boolean() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  // Daemon-wide (not per-CP): pushes Default EV Settings onto every
+  // connector of every registered CP, unless a connector currently has an
+  // explicit/scenario override active (#105). Distinct from the per-CP
+  // `set_ev_settings`, which always marks an override.
+  "ev_settings.apply_default": {
+    params: z.object({ settings: OBJ() }),
+    result: ANY,
+  },
   "server.shutdown": { params: EMPTY, result: ANY },
   "events.subscribe": {
     params: z.object({ scope: STR_64K }),
@@ -351,6 +359,7 @@ export const EXPLICIT_METHODS = [
   "connector_settings.auto_meter.save",
   "connector_settings.soc_meter_sync.get",
   "connector_settings.soc_meter_sync.save",
+  "ev_settings.apply_default",
   "server.shutdown",
   "events.subscribe",
   "events.unsubscribe",

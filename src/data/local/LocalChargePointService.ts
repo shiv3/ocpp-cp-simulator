@@ -425,8 +425,10 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     settings: EVSettings,
   ): Promise<void> {
+    // Explicit set (#105): marks the connector overridden so a later
+    // Default EV Settings propagation doesn't clobber it.
     const connector = this.requireConnector(id, connectorId);
-    connector.evSettings = settings;
+    connector.applyEvSettingsOverride(settings);
   }
 
   async getEVSettings(
@@ -442,9 +444,11 @@ export class LocalChargePointService implements ChargePointService {
     // Push it onto every connector (per-connector EV settings aren't a
     // user-editable, persisted concept — they only come from the default or a
     // running scenario) so the editor reflects the new default immediately (#107).
+    // Connectors with an active explicit/scenario override skip this (#105) —
+    // see Connector.applyDefaultEvSettings.
     this.chargePoints.forEach((chargePoint) => {
       chargePoint.connectors.forEach((connector) => {
-        connector.evSettings = { ...settings };
+        connector.applyDefaultEvSettings(settings);
       });
     });
   }

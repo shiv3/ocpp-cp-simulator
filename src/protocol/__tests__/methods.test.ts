@@ -66,7 +66,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(21);
+    expect(EXPLICIT_METHODS).toHaveLength(22);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -101,6 +101,16 @@ describe("method table coverage (Step 3c)", () => {
     expect(METHODS["connector_settings.soc_meter_sync.get"]).toBeDefined();
     expect(METHODS["connector_settings.soc_meter_sync.save"]).toBeDefined();
     expect(isRpcMethod("connector_settings.auto_meter.get")).toBe(true);
+  });
+
+  it("includes the daemon-wide default EV settings op (#105)", () => {
+    expect(METHODS["ev_settings.apply_default"]).toBeDefined();
+    expect(isRpcMethod("ev_settings.apply_default")).toBe(true);
+    expect(
+      METHODS["ev_settings.apply_default"].params.safeParse({
+        settings: { targetSoc: 80 },
+      }).success,
+    ).toBe(true);
   });
 });
 

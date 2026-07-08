@@ -397,11 +397,14 @@ export const createScenarioExecutorCallbacks = (
       connector.stopAutoMeterValue();
     },
     onSetEVSettings: (settings) => {
-      // Merge — only specified fields land on the connector. The connector
-      // setter spreads `_evSettings = { ...settings }` and emits
+      // Merge — only specified fields land on the connector. Routes through
+      // the override path (#105) so this scenario's evSettings win over any
+      // later Default EV Settings propagation until the scenario
+      // stops/completes (see ScenarioManager/CLIChargePointService scenario
+      // stop paths, which clear the override). Still emits
       // `evSettingsChange`, which surfaces to subscribers and (in remote
       // mode) the browser via the `connector_ev_settings` event.
-      connector.evSettings = { ...connector.evSettings, ...settings };
+      connector.applyEvSettingsOverride(settings);
     },
     onGetEVSettings: () => connector.evSettings,
     onSendNotification: async (messageType, payload) => {

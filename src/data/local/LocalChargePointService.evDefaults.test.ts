@@ -86,4 +86,42 @@ describe("LocalChargePointService.applyDefaultEVSettings (#107)", () => {
       );
     }
   });
+
+  it("keeps a scenario/explicit override across a default propagation, and applies the default again once cleared (#105)", async () => {
+    service = new LocalChargePointService();
+    await service.syncLocalChargePoints([
+      localDefinition({ connectorNumber: 1 }),
+    ]);
+
+    const chargePoint = service.getLocalChargePoint("CP-EV");
+    const connector = chargePoint?.getConnector(1);
+    expect(connector).toBeDefined();
+
+    connector?.applyEvSettingsOverride({ targetSoc: 50 });
+
+    await service.applyDefaultEVSettings({
+      ...defaultEVSettings,
+      targetSoc: 80,
+    });
+
+    // A browser reload re-pushing the default (#107) must not stomp the
+    // active override (#105) — the target SoC set via the scenario/explicit
+    // override stays at 50.
+    await expect(service.getEVSettings("CP-EV", 1)).resolves.toMatchObject({
+      targetSoc: 50,
+    });
+
+    connector?.clearEvSettingsOverride();
+
+    await service.applyDefaultEVSettings({
+      ...defaultEVSettings,
+      targetSoc: 80,
+    });
+
+    // Once the override clears (e.g. the scenario stopped), the next
+    // default propagation is free to apply.
+    await expect(service.getEVSettings("CP-EV", 1)).resolves.toMatchObject({
+      targetSoc: 80,
+    });
+  });
 });

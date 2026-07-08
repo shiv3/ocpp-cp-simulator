@@ -169,6 +169,12 @@ export class Connector {
   private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
   private _evSettings: EVSettings = getDefaultEVSettings();
+  // True while an explicit/scenario override is active (#105): a running
+  // scenario's evSettings must win over any later Default EV Settings
+  // propagation (e.g. a browser reload in remote mode re-pushing the
+  // default onto every connector while a scenario is mid-flight on the
+  // daemon). Cleared when the scenario that set it stops/completes.
+  private _evSettingsOverridden = false;
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   /**
@@ -492,6 +498,36 @@ export class Connector {
   set evSettings(settings: EVSettings) {
     this._evSettings = { ...settings };
     this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
+  }
+
+  /**
+   * Explicit/scenario set (#105): merges `partial` into the current EV
+   * settings and marks the connector as overridden, so a later Default EV
+   * Settings propagation (`applyDefaultEvSettings`) no-ops until
+   * {@link clearEvSettingsOverride} runs.
+   */
+  applyEvSettingsOverride(partial: Partial<EVSettings>): void {
+    this._evSettingsOverridden = true;
+    this.evSettings = { ...this._evSettings, ...partial };
+  }
+
+  /**
+   * Default-EV-settings propagation (#105): replaces the settings wholesale,
+   * same as the `evSettings` setter, but only when no override is active —
+   * a running scenario/explicit override wins over this until cleared.
+   */
+  applyDefaultEvSettings(settings: EVSettings): void {
+    if (this._evSettingsOverridden) return;
+    this.evSettings = { ...settings };
+  }
+
+  /**
+   * Unmark the override (current values are kept as-is) so the next
+   * `applyDefaultEvSettings` call can take effect. Called when the scenario
+   * that set the override stops or completes.
+   */
+  clearEvSettingsOverride(): void {
+    this._evSettingsOverridden = false;
   }
 
   /**

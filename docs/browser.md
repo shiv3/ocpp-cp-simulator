@@ -40,8 +40,8 @@ Available for:
   - Intel: `OCPP.CP.Simulator_*_x64.dmg`
 - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `.msi`
 - **Linux**:
-  - AppImage: `ocpp-cp-simulator_*_amd64.AppImage` (recommended)
-  - Debian/Ubuntu: `ocpp-cp-simulator_*_amd64.deb`
+  - Debian/Ubuntu: `OCPP.CP.Simulator_*_amd64.deb`
+  - Fedora/RHEL: `OCPP.CP.Simulator-*.x86_64.rpm`
 
 ### Installation
 
@@ -62,16 +62,15 @@ Available for:
 
 #### Linux
 
-**AppImage (Recommended)**
-
-1. Download the `.AppImage` file
-2. Make it executable: `chmod +x ocpp-cp-simulator_*.AppImage`
-3. Run: `./ocpp-cp-simulator_*.AppImage`
-
 **Debian/Ubuntu**
 
 1. Download the `.deb` file
-2. Install: `sudo dpkg -i ocpp-cp-simulator_*.deb`
+2. Install: `sudo dpkg -i OCPP.CP.Simulator_*.deb`
+
+**Fedora/RHEL**
+
+1. Download the `.rpm` file
+2. Install: `sudo rpm -i OCPP.CP.Simulator-*.rpm`
 
 ## Development
 

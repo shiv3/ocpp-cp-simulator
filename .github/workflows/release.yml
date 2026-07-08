@@ -20,8 +20,15 @@ jobs:
           - platform: "macos-latest"
             args: "--target x86_64-apple-darwin"
             target: "x86_64-apple-darwin"
+          # Linux ships .deb + .rpm only. AppImage bundling via linuxdeploy
+          # fails on GitHub runners ("failed to run linuxdeploy", #122) — an
+          # unresolved upstream Tauri issue that even APPIMAGE_EXTRACT_AND_RUN
+          # doesn't fix, aggravated by our Bun-compiled sidecar (externalBin)
+          # tripping linuxdeploy's strip step. Leaving AppImage in the target
+          # list fails the whole Linux job, so no .deb/.rpm get uploaded either.
+          # Re-add "appimage" here once the upstream bug is fixed.
           - platform: "ubuntu-22.04"
-            args: ""
+            args: "--bundles deb,rpm"
             target: "x86_64-unknown-linux-gnu"
           - platform: "windows-latest"
             args: ""
@@ -109,10 +116,6 @@ jobs:
           # fails on the Windows MINGW runner, and would pick the wrong arch
           # for the cross-compiled x86_64 macOS build).
           TAURI_TARGET: ${{ matrix.target }}
-          # linuxdeploy and its plugins are AppImages; GitHub runners lack FUSE,
-          # so extract-and-run instead of mounting. Fixes the Linux AppImage
-          # bundle dying with "failed to run linuxdeploy". No-op off Linux.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "OCPP CP Simulator ${{ github.ref_name }}"
@@ -125,7 +128,8 @@ jobs:
             - **macOS (Apple Silicon)**: `OCPP.CP.Simulator_*_aarch64.dmg`
             - **macOS (Intel)**: `OCPP.CP.Simulator_*_x64.dmg`
             - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `.msi`
-            - **Linux**: `ocpp-cp-simulator_*_amd64.AppImage` or `.deb`
+            - **Linux (Debian/Ubuntu)**: `OCPP.CP.Simulator_*_amd64.deb`
+            - **Linux (Fedora/RHEL)**: `OCPP.CP.Simulator-*.x86_64.rpm`
 
             ### Web Version
             The web version is available at: https://shiv3.github.io/ocpp-cp-simulator/

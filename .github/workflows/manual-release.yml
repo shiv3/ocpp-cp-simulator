@@ -48,8 +48,11 @@ jobs:
           - platform: "macos-latest"
             args: "--target x86_64-apple-darwin"
             target: "x86_64-apple-darwin"
+          # Linux ships .deb + .rpm only; AppImage bundling via linuxdeploy
+          # fails on GitHub runners (#122). See release.yml for the full
+          # rationale. Re-add "appimage" once the upstream bug is fixed.
           - platform: "ubuntu-22.04"
-            args: ""
+            args: "--bundles deb,rpm"
             target: "x86_64-unknown-linux-gnu"
           - platform: "windows-latest"
             args: ""
@@ -120,10 +123,6 @@ jobs:
           # fails on the Windows MINGW runner, and would pick the wrong arch
           # for the cross-compiled x86_64 macOS build).
           TAURI_TARGET: ${{ matrix.target }}
-          # linuxdeploy and its plugins are AppImages; GitHub runners lack FUSE,
-          # so extract-and-run instead of mounting. Fixes the Linux AppImage
-          # bundle dying with "failed to run linuxdeploy". No-op off Linux.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}

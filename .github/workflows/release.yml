@@ -151,35 +151,55 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: release } = await github.rest.repos.getReleaseByTag({
+            const tag = context.ref.replace('refs/tags/', '');
+
+            // tauri-action creates the release as a draft, and
+            // getReleaseByTag() (GET /releases/tags/{tag}) does NOT return
+            // draft releases — it 404s, which failed this whole job on every
+            // release. List releases (which includes drafts) and match on
+            // tag_name instead.
+            const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag: context.ref.replace('refs/tags/', '')
+              per_page: 100,
             });
+            const release = releases.find((r) => r.tag_name === tag);
+            if (!release) {
+              core.warning(`No release found for tag ${tag}; skipping notes update.`);
+              return;
+            }
 
-            // Get commit history
-            let body = release.body;
+            // Compare base = most recent published release other than this one
+            // (listReleases is newest-first). The old hardcoded 'v0.0.0' base
+            // dumped the entire project history into every release.
+            const prev = releases.find((r) => r.tag_name !== tag && !r.draft);
 
-            try {
-              const { data: commits } = await github.rest.repos.compareCommits({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                base: 'v0.0.0', // Previous tag - update this
-                head: context.ref.replace('refs/tags/', '')
-              });
-              
-              const commitList = commits.commits
-                .map(c => `- ${c.commit.message.split('\n')[0]} (${c.sha.substring(0, 7)})`)
-                .join('\n');
-              
-              body = body.replace('## What\'s Changed', `## What's Changed\n\n### Commits\n${commitList}\n`);
-            } catch (e) {
-              console.log('Failed to get commit history:', e.message);
+            let body = release.body || '';
+            if (prev) {
+              try {
+                const { data: diff } = await github.rest.repos.compareCommits({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  base: prev.tag_name,
+                  head: tag,
+                });
+                const commitList = diff.commits
+                  .map((c) => `- ${c.commit.message.split('\n')[0]} (${c.sha.substring(0, 7)})`)
+                  .join('\n');
+                if (commitList && body.includes("## What's Changed")) {
+                  body = body.replace(
+                    "## What's Changed",
+                    `## What's Changed\n\n### Commits (since ${prev.tag_name})\n${commitList}\n`,
+                  );
+                }
+              } catch (e) {
+                core.warning(`Failed to get commit history: ${e.message}`);
+              }
             }
 
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.id,
-              body: body
+              body,
             });

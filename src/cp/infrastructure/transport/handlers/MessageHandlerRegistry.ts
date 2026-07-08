@@ -10,13 +10,23 @@ import type {
   ClearCacheRequestV16,
   ClearCacheResponseV16,
   DataTransferResponseV16,
+  DeleteCertificateRequestV16,
+  DeleteCertificateResponseV16,
+  ExtendedTriggerMessageRequestV16,
+  ExtendedTriggerMessageResponseV16,
   GetConfigurationRequestV16,
   GetConfigurationResponseV16,
   GetDiagnosticsRequestV16,
   GetDiagnosticsResponseV16,
+  GetInstalledCertificateIdsRequestV16,
+  GetInstalledCertificateIdsResponseV16,
   GetLocalListVersionRequestV16,
   GetLocalListVersionResponseV16,
+  GetLogRequestV16,
+  GetLogResponseV16,
   HeartbeatResponseV16,
+  InstallCertificateRequestV16,
+  InstallCertificateResponseV16,
   MeterValuesResponseV16,
   RemoteStartTransactionRequestV16,
   RemoteStartTransactionResponseV16,
@@ -28,6 +38,8 @@ import type {
   ResetResponseV16,
   SendLocalListRequestV16,
   SendLocalListResponseV16,
+  SignedUpdateFirmwareRequestV16,
+  SignedUpdateFirmwareResponseV16,
   StartTransactionResponseV16,
   StatusNotificationResponseV16,
   StopTransactionResponseV16,
@@ -51,10 +63,18 @@ export interface HandlerContext {
 }
 
 /**
- * Interface for handling CALL messages (requests from central system to charge point)
+ * Interface for handling CALL messages (requests from central system to charge point).
+ *
+ * `handle()` may return its response synchronously or as a `Promise` — the
+ * latter is needed by handlers that compute certificate hashes via
+ * WebCrypto (GetInstalledCertificateIds/DeleteCertificate). The dispatch
+ * loop (`OCPPMessageHandler.handleCall`) awaits the result either way.
  */
 export interface CallHandler<TRequest = unknown, TResponse = unknown> {
-  handle(payload: TRequest, context: HandlerContext): TResponse;
+  handle(
+    payload: TRequest,
+    context: HandlerContext,
+  ): TResponse | Promise<TResponse>;
 }
 
 /**
@@ -185,6 +205,27 @@ export type CallHandlerMap = {
   [OCPPAction.CertificateSigned]: CallHandler<
     CertificateSignedRequestV16,
     CertificateSignedResponseV16
+  >;
+  [OCPPAction.ExtendedTriggerMessage]: CallHandler<
+    ExtendedTriggerMessageRequestV16,
+    ExtendedTriggerMessageResponseV16
+  >;
+  [OCPPAction.InstallCertificate]: CallHandler<
+    InstallCertificateRequestV16,
+    InstallCertificateResponseV16
+  >;
+  [OCPPAction.GetInstalledCertificateIds]: CallHandler<
+    GetInstalledCertificateIdsRequestV16,
+    GetInstalledCertificateIdsResponseV16
+  >;
+  [OCPPAction.DeleteCertificate]: CallHandler<
+    DeleteCertificateRequestV16,
+    DeleteCertificateResponseV16
+  >;
+  [OCPPAction.GetLog]: CallHandler<GetLogRequestV16, GetLogResponseV16>;
+  [OCPPAction.SignedUpdateFirmware]: CallHandler<
+    SignedUpdateFirmwareRequestV16,
+    SignedUpdateFirmwareResponseV16
   >;
 };
 

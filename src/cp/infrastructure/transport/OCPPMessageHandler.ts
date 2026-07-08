@@ -11,16 +11,23 @@ import type {
   ClearChargingProfileRequestV16,
   DataTransferRequestV16,
   DataTransferResponseV16,
+  DeleteCertificateRequestV16,
   DiagnosticsStatusNotificationRequestV16,
   DiagnosticsStatusNotificationResponseV16,
+  ExtendedTriggerMessageRequestV16,
   FirmwareStatusNotificationRequestV16,
   FirmwareStatusNotificationResponseV16,
   GetCompositeScheduleRequestV16,
   GetConfigurationRequestV16,
   GetDiagnosticsRequestV16,
+  GetInstalledCertificateIdsRequestV16,
   GetLocalListVersionRequestV16,
+  GetLogRequestV16,
   HeartbeatRequestV16,
   HeartbeatResponseV16,
+  InstallCertificateRequestV16,
+  LogStatusNotificationRequestV16,
+  LogStatusNotificationResponseV16,
   MeterValuesRequestV16,
   MeterValuesResponseV16,
   RemoteStartTransactionRequestV16,
@@ -33,6 +40,9 @@ import type {
   SecurityEventNotificationResponseV16,
   SignCertificateRequestV16,
   SignCertificateResponseV16,
+  SignedFirmwareStatusNotificationRequestV16,
+  SignedFirmwareStatusNotificationResponseV16,
+  SignedUpdateFirmwareRequestV16,
   StartTransactionRequestV16,
   StartTransactionResponseV16,
   StatusNotificationRequestV16,
@@ -101,6 +111,12 @@ import {
   SendLocalListHandler,
   UpdateFirmwareHandler,
   CertificateSignedHandler,
+  ExtendedTriggerMessageHandler,
+  InstallCertificateHandler,
+  GetInstalledCertificateIdsHandler,
+  DeleteCertificateHandler,
+  GetLogHandler,
+  SignedUpdateFirmwareHandler,
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
@@ -115,7 +131,8 @@ type CoreOcppMessagePayloadCall =
 
 type FirmwareManagementOcppMessagePayloadCall =
   | GetDiagnosticsRequestV16
-  | UpdateFirmwareRequestV16;
+  | UpdateFirmwareRequestV16
+  | SignedUpdateFirmwareRequestV16;
 
 type LocalAuthListManagementOcppMessagePayloadCall =
   | GetLocalListVersionRequestV16
@@ -130,9 +147,16 @@ type SmartChargingOcppMessagePayloadCall =
   | GetCompositeScheduleRequestV16
   | SetChargingProfileRequestV16;
 
-type RemoteTriggerOcppMessagePayloadCall = TriggerMessageRequestV16;
+type RemoteTriggerOcppMessagePayloadCall =
+  | TriggerMessageRequestV16
+  | ExtendedTriggerMessageRequestV16;
 
-type SecurityExtensionOcppMessagePayloadCall = CertificateSignedRequestV16;
+type SecurityExtensionOcppMessagePayloadCall =
+  | CertificateSignedRequestV16
+  | InstallCertificateRequestV16
+  | GetInstalledCertificateIdsRequestV16
+  | DeleteCertificateRequestV16
+  | GetLogRequestV16;
 
 type OcppMessagePayloadCall =
   | CoreOcppMessagePayloadCall
@@ -156,11 +180,13 @@ type CoreOcppMessagePayloadCallResult =
 
 type FirmwareManagementOcppMessagePayloadCallResult =
   | DiagnosticsStatusNotificationResponseV16
-  | FirmwareStatusNotificationResponseV16;
+  | FirmwareStatusNotificationResponseV16
+  | SignedFirmwareStatusNotificationResponseV16;
 
 type SecurityExtensionOcppMessagePayloadCallResult =
   | SecurityEventNotificationResponseV16
-  | SignCertificateResponseV16;
+  | SignCertificateResponseV16
+  | LogStatusNotificationResponseV16;
 
 type OcppMessagePayloadCallResult =
   | CoreOcppMessagePayloadCallResult
@@ -368,6 +394,33 @@ export class OCPPMessageHandler {
     this._registry.registerCallHandler(
       OCPPAction.CertificateSigned,
       new CertificateSignedHandler(),
+    );
+    // OCPP 1.6 Security Whitepaper (ed. 4): remaining message set —
+    // ExtendedTriggerMessage/InstallCertificate/GetInstalledCertificateIds/
+    // DeleteCertificate/GetLog/SignedUpdateFirmware. Matching outbound
+    // status notifications fire from inside the handlers themselves (or,
+    // for SignedUpdateFirmware, ChargePoint.simulateSignedFirmwareUpdate) —
+    // there is no CALLRESULT counterpart to register for any of these.
+    this._registry.registerCallHandler(
+      OCPPAction.ExtendedTriggerMessage,
+      new ExtendedTriggerMessageHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.InstallCertificate,
+      new InstallCertificateHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.GetInstalledCertificateIds,
+      new GetInstalledCertificateIdsHandler(),
+    );
+    this._registry.registerCallHandler(
+      OCPPAction.DeleteCertificate,
+      new DeleteCertificateHandler(),
+    );
+    this._registry.registerCallHandler(OCPPAction.GetLog, new GetLogHandler());
+    this._registry.registerCallHandler(
+      OCPPAction.SignedUpdateFirmware,
+      new SignedUpdateFirmwareHandler(),
     );
 
     // Register CALLRESULT handlers (incoming responses from central system)
@@ -594,6 +647,65 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: FirmwareStatusNotificationRequestV16 = { status };
     this.sendRequest(OCPPAction.FirmwareStatusNotification, messageId, payload);
+  }
+
+  /**
+   * OCPP 1.6 Security Whitepaper LogStatusNotification.req. `requestId`
+   * carries the id from the triggering GetLog.req (TriggerMessage-driven
+   * `Idle` sends have none).
+   */
+  public sendLogStatusNotification(
+    status:
+      | "BadMessage"
+      | "Idle"
+      | "NotSupportedOperation"
+      | "PermissionDenied"
+      | "Uploaded"
+      | "UploadFailure"
+      | "Uploading",
+    requestId?: number,
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: LogStatusNotificationRequestV16 = {
+      status,
+      ...(requestId !== undefined ? { requestId } : {}),
+    };
+    this.sendRequest(OCPPAction.LogStatusNotification, messageId, payload);
+  }
+
+  /**
+   * OCPP 1.6 Security Whitepaper SignedFirmwareStatusNotification.req —
+   * the signed counterpart to FirmwareStatusNotification, carrying the
+   * `requestId` from the triggering SignedUpdateFirmware.req.
+   */
+  public sendSignedFirmwareStatusNotification(
+    status:
+      | "Downloaded"
+      | "DownloadFailed"
+      | "Downloading"
+      | "DownloadScheduled"
+      | "DownloadPaused"
+      | "Idle"
+      | "InstallationFailed"
+      | "Installing"
+      | "Installed"
+      | "InstallRebooting"
+      | "InstallScheduled"
+      | "InstallVerificationFailed"
+      | "InvalidSignature"
+      | "SignatureVerified",
+    requestId?: number,
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: SignedFirmwareStatusNotificationRequestV16 = {
+      status,
+      ...(requestId !== undefined ? { requestId } : {}),
+    };
+    this.sendRequest(
+      OCPPAction.SignedFirmwareStatusNotification,
+      messageId,
+      payload,
+    );
   }
 
   /**
@@ -849,7 +961,16 @@ export class OCPPMessageHandler {
     );
     switch (messageType) {
       case OCPPMessageType.CALL:
-        this.handleCall(messageId, action, payload as OcppMessagePayloadCall);
+        // Some handlers (e.g. GetInstalledCertificateIds/DeleteCertificate)
+        // compute certificate hashes via WebCrypto and are `async`; handleCall
+        // awaits `handler.handle()` internally. Not awaited here — CALL
+        // handling is fire-and-forget, matching the rest of this dispatch
+        // loop (nothing downstream depends on completion order).
+        void this.handleCall(
+          messageId,
+          action,
+          payload as OcppMessagePayloadCall,
+        );
         break;
       case OCPPMessageType.CALLRESULT:
         this.handleCallResult(
@@ -868,11 +989,11 @@ export class OCPPMessageHandler {
     }
   }
 
-  private handleCall(
+  private async handleCall(
     messageId: string,
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
-  ): void {
+  ): Promise<void> {
     // Use registry to get handler
     const handler = this._registry.getCallHandler(action);
 
@@ -891,7 +1012,10 @@ export class OCPPMessageHandler {
         chargePoint: this._chargePoint,
         logger: this._logger,
       };
-      const response = handler.handle(payload, context);
+      // `handle()` may return its response synchronously or as a Promise
+      // (see `CallHandler` in MessageHandlerRegistry.ts) — `await` resolves
+      // a plain value immediately, so this is a no-op for sync handlers.
+      const response = await handler.handle(payload, context);
       this.sendCallResult(messageId, response);
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);

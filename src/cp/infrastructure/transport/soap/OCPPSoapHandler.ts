@@ -570,6 +570,23 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     );
   }
 
+  public sendLogStatusNotification(status: string, requestId?: number): void {
+    this._logger.warn(
+      `OCPP 1.5 SOAP has no security extension; ignoring LogStatusNotification ${JSON.stringify({ status, requestId })}`,
+      LogType.OCPP,
+    );
+  }
+
+  public sendSignedFirmwareStatusNotification(
+    status: string,
+    requestId?: number,
+  ): void {
+    this._logger.warn(
+      `OCPP 1.5 SOAP has no security extension; ignoring SignedFirmwareStatusNotification ${JSON.stringify({ status, requestId })}`,
+      LogType.OCPP,
+    );
+  }
+
   public sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
       "OCPP 1.5 SOAP has no security extension; ignoring SignCertificate",

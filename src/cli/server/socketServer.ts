@@ -61,6 +61,7 @@ import {
   type StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "../../cp/shared/redaction";
+import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
@@ -293,7 +294,7 @@ async function handleRpc(
     );
     ack({ ok: true, result });
   } catch (err) {
-    ack(errorAck(errorCodeFrom(err)));
+    ack(errorAck(errorCodeFrom(err), rpcFailureMessage(err)));
   } finally {
     state.inFlight = Math.max(0, state.inFlight - 1);
   }
@@ -1342,6 +1343,16 @@ async function runFacadeOperation<T>(
     return await operation();
   } catch (err) {
     if (err instanceof RpcFailure) throw err;
+    // cp.create/cp.update reject bad security-profile config (missing
+    // authorizationKey for profiles 1-2, missing client cert/key for
+    // profile 3) eagerly via CPRegistry.prepareInit, before anything is
+    // mutated. Surface that as invalid_params with the human-readable
+    // message intact (it names the missing field, never a secret) instead
+    // of letting it fall through to an opaque, unlogged "internal error".
+    if (err instanceof OcppSecurityProfileConfigError) {
+      console.warn(`[server] rejected charge point config: ${err.message}`);
+      throw new RpcFailure("invalid_params", err.message);
+    }
     if (err instanceof Error) {
       if (err.message.includes("already exists")) {
         throw new RpcFailure("invalid_params", "");
@@ -1679,18 +1690,34 @@ function errorCodeFrom(err: unknown): RpcErrorCode {
   return "internal";
 }
 
-function errorAck(code: RpcErrorCode): {
+function errorAck(
+  code: RpcErrorCode,
+  message?: string,
+): {
   ok: false;
   error: { code: RpcErrorCode; message: string };
 } {
   return {
     ok: false,
-    error: { code, message: publicErrorMessage(code) },
+    error: { code, message: message ?? publicErrorMessage(code) },
   };
 }
 
+/**
+ * Most RpcFailures carry an empty message and rely on `publicErrorMessage`'s
+ * canned per-code text. A few (e.g. the security-profile config validation
+ * mapped in runFacadeOperation) carry a specific, non-secret message naming
+ * what's wrong — thread that through to the client instead of discarding it.
+ */
+function rpcFailureMessage(err: unknown): string | undefined {
+  if (err instanceof RpcFailure && err.message) {
+    return redactSensitiveText(err.message);
+  }
+  return undefined;
+}
+
 function directError(err: unknown): unknown {
-  const ack = errorAck(errorCodeFrom(err));
+  const ack = errorAck(errorCodeFrom(err), rpcFailureMessage(err));
   return { ...ack, code: ack.error.code, message: ack.error.message };
 }
 

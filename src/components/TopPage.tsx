@@ -89,6 +89,8 @@ const TopPage: React.FC = () => {
           basicAuthUsername: c?.basicAuth?.username ?? "",
           basicAuthPassword: c?.basicAuth?.password ?? "",
           securityProfile: c?.securityProfile,
+          soapCallbackUrl: c?.soapCallbackUrl,
+          soapPath: c?.soapPath,
           cpoName: c?.cpoName,
           tlsCaPath: c?.tlsCaPath,
           tlsCertPath: c?.tlsCertPath,
@@ -158,12 +160,14 @@ const TopPage: React.FC = () => {
 
   const handleSaveChargePoint = async (cpConfig: ChargePointConfig) => {
     if (mode === "remote") {
+      // Re-use the same shape for create and update; the only difference
+      // is which daemon endpoint we hit. Editing an existing CP goes to
+      // PUT /v1/cp/:cpId so the daemon can preserve persisted scenarios
+      // (POST throws "cpId already exists" instead). Declared outside the
+      // try so the catch block's error message can also tell create/update
+      // apart.
+      const isEdit = editingIndex !== null;
       try {
-        // Re-use the same shape for create and update; the only difference
-        // is which daemon endpoint we hit. Editing an existing CP goes to
-        // PUT /v1/cp/:cpId so the daemon can preserve persisted scenarios
-        // (POST throws "cpId already exists" instead).
-        const isEdit = editingIndex !== null;
         const params = {
           cpId: cpConfig.cpId,
           wsUrl: cpConfig.wsURL,
@@ -177,7 +181,18 @@ const TopPage: React.FC = () => {
                 password: cpConfig.basicAuthPassword,
               }
             : null,
+          // OCPP 1.5 SOAP: the existing wsUrl field doubles as the Central
+          // System endpoint (the daemon defaults centralSystemUrl from wsUrl
+          // when omitted); soapCallbackUrl/soapPath are the CP's own
+          // callback listener that the CSMS calls back on.
+          soapCallbackUrl: cpConfig.soapCallbackUrl,
+          soapPath: cpConfig.soapPath,
           securityProfile: cpConfig.securityProfile,
+          // The modal already sanitizes blank secrets to `undefined` before
+          // calling onSave (see sanitizeChargePointConfigForSave), so a
+          // blank AuthorizationKey/TLS cert/key on edit is omitted here too
+          // — cp.update's merge only preserves a field that is entirely
+          // absent from params.
           authorizationKey: cpConfig.authorizationKey,
           cpoName: cpConfig.cpoName,
           tls: cpConfig.tls,
@@ -247,9 +262,10 @@ const TopPage: React.FC = () => {
         }
         await refresh();
       } catch (err) {
-        console.error("Failed to create remote CP", err);
+        const action = isEdit ? "update" : "create";
+        console.error(`Failed to ${action} remote CP`, err);
         alert(
-          `Failed to create CP: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to ${action} CP: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
       return;

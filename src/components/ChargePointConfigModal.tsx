@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
 export interface ChargePointConfig {
@@ -45,6 +46,8 @@ export interface ChargePointConfig {
   meterType: string;
   iccid: string;
   imsi: string;
+  soapCallbackUrl?: string;
+  soapPath?: string;
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   cpoName?: string;
@@ -67,6 +70,42 @@ interface ChargePointConfigModalProps {
   mode?: "local" | "remote";
 }
 
+/**
+ * Strip blank secret-ish fields before handing the config to `onSave`.
+ * Remote mode's cp.update merge only preserves a field that is entirely
+ * *absent* from the request params (see socketServer.ts's
+ * `mergeUpdateParams`), so a blank input here must become `undefined` (not
+ * `""`) — otherwise "leave blank to keep current" would silently wipe the
+ * daemon's stored authorizationKey / TLS cert / TLS key on every edit.
+ */
+export function sanitizeChargePointConfigForSave(
+  config: ChargePointConfig,
+): ChargePointConfig {
+  return {
+    ...config,
+    soapCallbackUrl: config.soapCallbackUrl?.trim() || undefined,
+    soapPath: config.soapPath?.trim() || undefined,
+    authorizationKey: config.authorizationKey?.trim() || undefined,
+    tls: sanitizeTlsForSave(config.tls),
+  };
+}
+
+function sanitizeTlsForSave(
+  tls: OcppTlsOptions | undefined,
+): OcppTlsOptions | undefined {
+  if (!tls) return undefined;
+  const result: OcppTlsOptions = {
+    ...(tls.ca?.trim() ? { ca: tls.ca } : {}),
+    ...(tls.cert?.trim() ? { cert: tls.cert } : {}),
+    ...(tls.key?.trim() ? { key: tls.key } : {}),
+    ...(tls.serverName?.trim() ? { serverName: tls.serverName } : {}),
+    ...(tls.rejectUnauthorized !== undefined
+      ? { rejectUnauthorized: tls.rejectUnauthorized }
+      : {}),
+  };
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export const defaultChargePointConfig: ChargePointConfig = {
   cpId: "CP001",
   connectorNumber: 1,
@@ -87,6 +126,7 @@ export const defaultChargePointConfig: ChargePointConfig = {
   meterType: "",
   iccid: "",
   imsi: "",
+  securityProfile: 0,
 };
 
 const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
@@ -119,7 +159,27 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
       setFullUrlError(BROWSER_TLS_UNSUPPORTED_MESSAGE);
       return;
     }
-    onSave(config);
+    if (
+      mode === "remote" &&
+      config.ocppVersion === "OCPP-1.5" &&
+      !config.soapCallbackUrl?.trim()
+    ) {
+      setSaveError("SOAP Callback URL is required for OCPP 1.5.");
+      return;
+    }
+    if (
+      mode === "remote" &&
+      profile === 3 &&
+      isNewChargePoint &&
+      !(config.tls?.cert?.trim() && config.tls?.key?.trim())
+    ) {
+      setSaveError(
+        "Security profile 3 (mutual TLS) requires a client certificate and private key.",
+      );
+      return;
+    }
+    setSaveError(null);
+    onSave(sanitizeChargePointConfigForSave(config));
     onClose();
   };
 
@@ -128,6 +188,10 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     value: ChargePointConfig[keyof ChargePointConfig],
   ) => {
     setConfig({ ...config, [key]: value });
+  };
+
+  const updateTls = (patch: Partial<OcppTlsOptions>) => {
+    setConfig((prev) => ({ ...prev, tls: { ...prev.tls, ...patch } }));
   };
 
   // Full WebSocket URL field — built from wsURL + basic auth on display,
@@ -149,7 +213,25 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   );
   const [fullUrlDraft, setFullUrlDraft] = useState<string | null>(null);
   const [fullUrlError, setFullUrlError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const displayFullUrl = fullUrlDraft ?? composedFullUrl;
+  const securityProfile = config.securityProfile ?? 0;
+
+  // The SOAP callback / TLS material save-blocking errors above are only
+  // valid for the config that was on screen when Save was clicked. Once the
+  // operator changes the field that made them invalid (switches away from
+  // OCPP-1.5, fills in the callback URL, or edits the security
+  // profile/cert/key), clear the stale message instead of leaving it
+  // rendered until the next Save click recomputes it.
+  useEffect(() => {
+    setSaveError(null);
+  }, [
+    config.ocppVersion,
+    config.soapCallbackUrl,
+    config.securityProfile,
+    config.tls?.cert,
+    config.tls?.key,
+  ]);
 
   const applyFullUrl = useCallback((raw: string): boolean => {
     const parsed = parseFullOcppUrl(raw);
@@ -228,52 +310,56 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   className="logger-input"
                 />
               </div>
-              <div className="col-span-2">
-                <Label htmlFor="fullWsURL" className="mb-2 logger-label">
-                  Full WebSocket URL
-                </Label>
-                <Input
-                  id="fullWsURL"
-                  type="url"
-                  value={displayFullUrl}
-                  onChange={(e) => {
-                    setFullUrlDraft(e.target.value);
-                    setFullUrlError(null);
-                  }}
-                  onBlur={() => {
-                    if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
+              {config.ocppVersion !== "OCPP-1.5" && (
+                <div className="col-span-2">
+                  <Label htmlFor="fullWsURL" className="mb-2 logger-label">
+                    Full WebSocket URL
+                  </Label>
+                  <Input
+                    id="fullWsURL"
+                    type="url"
+                    value={displayFullUrl}
+                    onChange={(e) => {
+                      setFullUrlDraft(e.target.value);
+                      setFullUrlError(null);
+                    }}
+                    onBlur={() => {
                       if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
-                    }
-                  }}
-                  onPaste={(e) => {
-                    const text = e.clipboardData.getData("text").trim();
-                    if (!text) return;
-                    e.preventDefault();
-                    setFullUrlDraft(text);
-                    applyFullUrl(text);
-                  }}
-                  placeholder="wss://user:password@host:8080/path/"
-                  className="logger-input font-mono text-sm"
-                  spellCheck={false}
-                />
-                <p className="text-xs text-muted mt-1">
-                  Composed from WebSocket URL + Basic Auth below. Paste a full
-                  URL to autofill those fields (basic auth from
-                  user:password@host).
-                </p>
-                {fullUrlError && (
-                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                    {fullUrlError}
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
+                      }
+                    }}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text").trim();
+                      if (!text) return;
+                      e.preventDefault();
+                      setFullUrlDraft(text);
+                      applyFullUrl(text);
+                    }}
+                    placeholder="wss://user:password@host:8080/path/"
+                    className="logger-input font-mono text-sm"
+                    spellCheck={false}
+                  />
+                  <p className="text-xs text-muted mt-1">
+                    Composed from WebSocket URL + Basic Auth below. Paste a full
+                    URL to autofill those fields (basic auth from
+                    user:password@host).
                   </p>
-                )}
-              </div>
+                  {fullUrlError && (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                      {fullUrlError}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="col-span-2">
                 <Label htmlFor="wsURL" className="mb-2 logger-label">
-                  WebSocket URL
+                  {config.ocppVersion === "OCPP-1.5"
+                    ? "Central System URL (SOAP endpoint)"
+                    : "WebSocket URL"}
                 </Label>
                 <Input
                   id="wsURL"
@@ -296,12 +382,55 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {mode === "remote" && (
+                      <SelectItem value="OCPP-1.5">OCPP 1.5 (SOAP)</SelectItem>
+                    )}
                     <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
                     <SelectItem value="OCPP-2.0.1">OCPP 2.0.1</SelectItem>
                     <SelectItem value="OCPP-2.1">OCPP 2.1</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {mode === "remote" && config.ocppVersion === "OCPP-1.5" && (
+                <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label
+                      htmlFor="soapCallbackUrl"
+                      className="mb-2 logger-label"
+                    >
+                      SOAP Callback URL
+                    </Label>
+                    <Input
+                      id="soapCallbackUrl"
+                      type="url"
+                      value={config.soapCallbackUrl ?? ""}
+                      onChange={(e) =>
+                        updateConfig("soapCallbackUrl", e.target.value)
+                      }
+                      placeholder="http://cp-host:8080/ocpp/soap/CP001"
+                      required
+                      className="logger-input"
+                    />
+                    <p className="text-xs text-muted mt-1">
+                      OCPP 1.5 ChargePointService callback URL the Central
+                      System uses to reach this CP. Required.
+                    </p>
+                  </div>
+                  <div>
+                    <Label htmlFor="soapPath" className="mb-2 logger-label">
+                      SOAP Path (optional)
+                    </Label>
+                    <Input
+                      id="soapPath"
+                      type="text"
+                      value={config.soapPath ?? ""}
+                      onChange={(e) => updateConfig("soapPath", e.target.value)}
+                      placeholder="/ocpp/soap"
+                      className="logger-input"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -357,63 +486,221 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             </div>
           </div>
 
-          {/* Optional Settings */}
-          <div className="card p-4">
-            <h3 className="card-header mb-4">Optional Settings</h3>
-
-            {/* Basic Auth */}
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Checkbox
-                  id="basicAuthEnabled"
-                  checked={config.basicAuthEnabled}
-                  onCheckedChange={(checked) =>
-                    updateConfig("basicAuthEnabled", checked as boolean)
-                  }
-                />
-                <Label htmlFor="basicAuthEnabled" className="logger-label">
-                  Enable Basic Authentication
-                </Label>
+          {mode === "remote" && (
+            <div className="card p-4">
+              <h3 className="card-header mb-4">Security</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="securityProfile" className="mb-2">
+                    Security Profile
+                  </Label>
+                  <Select
+                    value={String(securityProfile)}
+                    onValueChange={(value) =>
+                      updateConfig(
+                        "securityProfile",
+                        Number(value) as OcppSecurityProfile,
+                      )
+                    }
+                  >
+                    <SelectTrigger id="securityProfile">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">0 — No auth, no TLS</SelectItem>
+                      <SelectItem value="1">1 — Basic Auth</SelectItem>
+                      <SelectItem value="2">
+                        2 — Basic Auth + TLS (server cert)
+                      </SelectItem>
+                      <SelectItem value="3">
+                        3 — Mutual TLS (client cert)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              {config.basicAuthEnabled && (
-                <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label
-                      htmlFor="basicAuthUsername"
-                      className="mb-2 logger-label"
-                    >
-                      Username
+
+              {securityProfile >= 1 && securityProfile <= 2 && (
+                <div className="mt-4">
+                  <Label
+                    htmlFor="authorizationKey"
+                    className="mb-2 logger-label"
+                  >
+                    Authorization Key
+                  </Label>
+                  <Input
+                    id="authorizationKey"
+                    type="password"
+                    value={config.authorizationKey ?? ""}
+                    onChange={(e) =>
+                      updateConfig("authorizationKey", e.target.value)
+                    }
+                    placeholder={
+                      isNewChargePoint ? "" : "Leave blank to keep current"
+                    }
+                    className="logger-input"
+                  />
+                </div>
+              )}
+
+              {securityProfile >= 2 && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <Label htmlFor="tlsCa" className="mb-2 logger-label">
+                      CA Certificate PEM (optional)
                     </Label>
-                    <Input
-                      id="basicAuthUsername"
-                      type="text"
-                      value={config.basicAuthUsername}
-                      onChange={(e) =>
-                        updateConfig("basicAuthUsername", e.target.value)
+                    <Textarea
+                      id="tlsCa"
+                      value={config.tls?.ca ?? ""}
+                      onChange={(e) => updateTls({ ca: e.target.value })}
+                      placeholder={
+                        isNewChargePoint ? "" : "Leave blank to keep current"
                       }
-                      className="logger-input"
+                      className="font-mono text-xs"
+                      rows={4}
                     />
                   </div>
                   <div>
                     <Label
-                      htmlFor="basicAuthPassword"
+                      htmlFor="tlsServerName"
                       className="mb-2 logger-label"
                     >
-                      Password
+                      Server Name (optional)
                     </Label>
                     <Input
-                      id="basicAuthPassword"
-                      type="password"
-                      value={config.basicAuthPassword}
+                      id="tlsServerName"
+                      type="text"
+                      value={config.tls?.serverName ?? ""}
                       onChange={(e) =>
-                        updateConfig("basicAuthPassword", e.target.value)
+                        updateTls({ serverName: e.target.value })
                       }
                       className="logger-input"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 mt-6">
+                    <Checkbox
+                      id="tlsRejectUnauthorized"
+                      checked={config.tls?.rejectUnauthorized ?? true}
+                      onCheckedChange={(checked) =>
+                        updateTls({ rejectUnauthorized: checked as boolean })
+                      }
+                    />
+                    <Label
+                      htmlFor="tlsRejectUnauthorized"
+                      className="logger-label"
+                    >
+                      Verify server certificate
+                    </Label>
+                  </div>
+                </div>
+              )}
+
+              {securityProfile === 3 && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="tlsCert" className="mb-2 logger-label">
+                      Client Certificate PEM
+                    </Label>
+                    <Textarea
+                      id="tlsCert"
+                      value={config.tls?.cert ?? ""}
+                      onChange={(e) => updateTls({ cert: e.target.value })}
+                      placeholder={
+                        isNewChargePoint ? "" : "Leave blank to keep current"
+                      }
+                      className="font-mono text-xs"
+                      rows={4}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="tlsKey" className="mb-2 logger-label">
+                      Private Key PEM
+                    </Label>
+                    <Textarea
+                      id="tlsKey"
+                      value={config.tls?.key ?? ""}
+                      onChange={(e) => updateTls({ key: e.target.value })}
+                      placeholder={
+                        isNewChargePoint ? "" : "Leave blank to keep current"
+                      }
+                      className="font-mono text-xs"
+                      rows={4}
                     />
                   </div>
                 </div>
               )}
             </div>
+          )}
+
+          {/* Optional Settings */}
+          <div className="card p-4">
+            <h3 className="card-header mb-4">Optional Settings</h3>
+
+            {/* Basic Auth */}
+            {mode === "local" || securityProfile === 0 ? (
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Checkbox
+                    id="basicAuthEnabled"
+                    checked={config.basicAuthEnabled}
+                    onCheckedChange={(checked) =>
+                      updateConfig("basicAuthEnabled", checked as boolean)
+                    }
+                  />
+                  <Label htmlFor="basicAuthEnabled" className="logger-label">
+                    Enable Basic Authentication
+                  </Label>
+                </div>
+                {config.basicAuthEnabled && (
+                  <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label
+                        htmlFor="basicAuthUsername"
+                        className="mb-2 logger-label"
+                      >
+                        Username
+                      </Label>
+                      <Input
+                        id="basicAuthUsername"
+                        type="text"
+                        value={config.basicAuthUsername}
+                        onChange={(e) =>
+                          updateConfig("basicAuthUsername", e.target.value)
+                        }
+                        className="logger-input"
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="basicAuthPassword"
+                        className="mb-2 logger-label"
+                      >
+                        Password
+                      </Label>
+                      <Input
+                        id="basicAuthPassword"
+                        type="password"
+                        value={config.basicAuthPassword}
+                        onChange={(e) =>
+                          updateConfig("basicAuthPassword", e.target.value)
+                        }
+                        className="logger-input"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : securityProfile === 3 ? (
+              <p className="text-xs text-muted mb-4">
+                Authentication is governed by the mutual TLS client certificate
+                and key in the Security section above (security profile 3).
+              </p>
+            ) : (
+              <p className="text-xs text-muted mb-4">
+                Authentication is governed by the Authorization Key in the
+                Security section above (security profile {securityProfile}).
+              </p>
+            )}
 
             {/* Auto Meter */}
             <div>
@@ -475,6 +762,11 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             </div>
           </div>
         </div>
+        {saveError && (
+          <p className="text-xs text-red-600 dark:text-red-400 px-1 mb-2">
+            {saveError}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>
             <X className="mr-2 h-5 w-5" />

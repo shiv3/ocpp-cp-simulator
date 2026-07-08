@@ -1,0 +1,117 @@
+{
+  "id": "cert16-tc003-charging-plugin-first",
+  "name": "Cert 1.6 Core: TC_003 Charging Session (Plug-In First)",
+  "description": "Plug-in → StatusNotification(Preparing); idTag presented → StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req while charging; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "delay-connect",
+      "type": "delay",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Wait 2s", "delaySeconds": 2 }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Plug In", "action": "plugin" }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "delay-idtag",
+      "type": "delay",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Present idTag", "delaySeconds": 2 }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT003"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 750 },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": { "x": 400, "y": 850 },
+      "data": { "label": "Stop Transaction", "action": "stop" }
+    },
+    {
+      "id": "status-finishing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 950 },
+      "data": { "label": "Set Finishing", "status": "Finishing" }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 1050 },
+      "data": { "label": "Plug Out", "action": "plugout" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 1150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 1250 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "delay-connect" },
+    { "id": "e2", "source": "delay-connect", "target": "plug-in" },
+    { "id": "e3", "source": "plug-in", "target": "status-preparing" },
+    { "id": "e4", "source": "status-preparing", "target": "delay-idtag" },
+    { "id": "e5", "source": "delay-idtag", "target": "tx-start" },
+    { "id": "e6", "source": "tx-start", "target": "status-charging" },
+    { "id": "e7", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e8", "source": "meter-auto", "target": "tx-stop" },
+    { "id": "e9", "source": "tx-stop", "target": "status-finishing" },
+    { "id": "e10", "source": "status-finishing", "target": "plug-out" },
+    { "id": "e11", "source": "plug-out", "target": "status-available" },
+    { "id": "e12", "source": "status-available", "target": "end-1" }
+  ]
+}

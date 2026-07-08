@@ -1,0 +1,47 @@
+{
+  "id": "cert16-tc001-cold-boot",
+  "name": "Cert 1.6 Core: TC_001 Cold Boot",
+  "description": "BootNotification.req/.conf runs automatically on connect; scenario re-affirms StatusNotification(Available) for the target connector, then idles while the CP's own Heartbeat timer keeps running.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-notify-available",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "StatusNotification: Available",
+        "status": "Available"
+      }
+    },
+    {
+      "id": "delay-idle",
+      "type": "delay",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Idle (Heartbeat continues automatically)",
+        "delaySeconds": 10
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-notify-available" },
+    { "id": "e2", "source": "status-notify-available", "target": "delay-idle" },
+    { "id": "e3", "source": "delay-idle", "target": "end-1" }
+  ]
+}

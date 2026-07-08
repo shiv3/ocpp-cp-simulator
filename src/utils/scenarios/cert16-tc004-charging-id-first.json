@@ -1,0 +1,96 @@
+{
+  "id": "cert16-tc004-charging-id-first",
+  "name": "Cert 1.6 Core: TC_004 Charging Session (Identification First)",
+  "description": "idTag presented before the cable is connected: StatusNotification(Preparing) is entered on identification rather than plug-in, then StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req while charging; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "delay-idtag",
+      "type": "delay",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Present idTag (before plug-in)", "delaySeconds": 2 }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT004"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "Stop Transaction", "action": "stop" }
+    },
+    {
+      "id": "status-finishing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 750 },
+      "data": { "label": "Set Finishing", "status": "Finishing" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 850 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 950 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "delay-idtag" },
+    { "id": "e2", "source": "delay-idtag", "target": "status-preparing" },
+    { "id": "e3", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e4", "source": "tx-start", "target": "status-charging" },
+    { "id": "e5", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e6", "source": "meter-auto", "target": "tx-stop" },
+    { "id": "e7", "source": "tx-stop", "target": "status-finishing" },
+    { "id": "e8", "source": "status-finishing", "target": "status-available" },
+    { "id": "e9", "source": "status-available", "target": "end-1" }
+  ]
+}

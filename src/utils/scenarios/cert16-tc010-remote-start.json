@@ -1,0 +1,79 @@
+{
+  "id": "cert16-tc010-remote-start",
+  "name": "Cert 1.6 Core: TC_010 Remote Start Transaction",
+  "description": "Parks waiting for RemoteStartTransaction.req; on Accepted, StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging), then bounded MeterValue.req while charging.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "remoteStartTrigger",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Wait for RemoteStartTransaction", "timeout": 0 }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT010"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "trigger-remote-start" },
+    {
+      "id": "e2",
+      "source": "trigger-remote-start",
+      "target": "status-preparing"
+    },
+    { "id": "e3", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e4", "source": "tx-start", "target": "status-charging" },
+    { "id": "e5", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e6", "source": "meter-auto", "target": "end-1" }
+  ]
+}

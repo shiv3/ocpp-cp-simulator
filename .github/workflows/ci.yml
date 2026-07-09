@@ -39,3 +39,23 @@ jobs:
       - name: Coverage (non-blocking)
         run: bun run test:coverage
         continue-on-error: true
+
+      # Coverage + test-results reporting (issue #131). Both are non-blocking
+      # (fail_ci_if_error: false) and run even when a test step failed, so a
+      # red build still publishes its numbers. Needs a CODECOV_TOKEN repo
+      # secret; without it the upload is skipped rather than failing CI.
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/junit.xml
+          fail_ci_if_error: false

@@ -1,0 +1,40 @@
+# Automated dependency updates (issue #128).
+#
+# Ecosystems:
+#   * bun            — package.json + bun.lock (CI installs with
+#                      `bun install --frozen-lockfile`, so the JS deps must be
+#                      driven through Bun, not npm, to keep the lockfile in
+#                      sync). Requires Dependabot's Bun support (bun >= 1.1.39).
+#   * github-actions — refreshes the SHA pins from #129 and their version
+#                      comments together.
+#   * docker         — the oven/bun base image in the Dockerfile.
+#
+# Non-major updates are grouped into a single weekly PR per ecosystem to keep
+# the review load low; majors still come as individual PRs so breaking changes
+# get their own scrutiny.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      js-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

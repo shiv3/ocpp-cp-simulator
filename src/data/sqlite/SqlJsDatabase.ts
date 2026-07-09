@@ -11,6 +11,7 @@ import type {
   SqlRow,
 } from "../../cp/domain/persistence/Database";
 import { runMigrations } from "../../cp/domain/persistence/schema";
+import { createDurableFlusher } from "./durableFlush";
 import { loadBlob, saveBlob } from "./IndexedDbBlobStore";
 
 /**
@@ -37,7 +38,13 @@ import { loadBlob, saveBlob } from "./IndexedDbBlobStore";
  */
 export class SqlJsDatabase implements Database {
   private flushHandle: ReturnType<typeof setTimeout> | null = null;
-  private flushPending: Promise<void> | null = null;
+  // Never drops writes that land while an earlier save is still in flight
+  // (#101). The arrow reads `this.db` lazily (at flush time), so it's safe to
+  // build during field init before the constructor assigns `db`.
+  private readonly durableFlush = createDurableFlusher(
+    () => this.db.export(),
+    saveBlob,
+  );
   private static readonly FLUSH_DEBOUNCE_MS = 200;
 
   private constructor(private db: SqlJsBackingDb) {}
@@ -95,20 +102,19 @@ export class SqlJsDatabase implements Database {
   }
 
   /**
-   * Export the in-memory DB to IndexedDB. Coalesces with any pending
-   * debounced flush so callers never see stale data on the next page load.
+   * Export the in-memory DB to IndexedDB. Delegates to {@link createDurableFlusher},
+   * which guarantees the current state reaches storage even when a previous
+   * save is still in flight — so an awaited `flush()` never resolves while the
+   * newest writes are still only in memory (#101).
    */
   flush(): Promise<void> {
+    // The durable flusher always persists the current state, so any pending
+    // debounce timer is redundant once we're flushing explicitly.
     if (this.flushHandle) {
       clearTimeout(this.flushHandle);
       this.flushHandle = null;
     }
-    if (this.flushPending) return this.flushPending;
-    const dump = this.db.export();
-    this.flushPending = saveBlob(dump).finally(() => {
-      this.flushPending = null;
-    });
-    return this.flushPending;
+    return this.durableFlush();
   }
 
   private scheduleFlush(): void {

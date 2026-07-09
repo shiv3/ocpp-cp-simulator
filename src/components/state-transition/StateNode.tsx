@@ -70,9 +70,7 @@ const StateNode: React.FC<NodeProps<StateNodeData>> = ({ data }) => {
           {label}
         </div>
         {isCurrent && (
-          <div className="mt-1 text-xs text-white font-semibold">
-            ● Current
-          </div>
+          <div className="mt-1 text-xs text-white font-semibold">● Current</div>
         )}
       </div>
 

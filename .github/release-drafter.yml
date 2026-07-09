@@ -12,7 +12,16 @@ categories:
   - title: "Bug Fixes"
     labels: ["fix", "bugfix", "bug"]
   - title: "Maintenance"
-    labels: ["chore", "ci", "docs", "documentation", "dependencies", "refactor", "test"]
+    labels:
+      [
+        "chore",
+        "ci",
+        "docs",
+        "documentation",
+        "dependencies",
+        "refactor",
+        "test",
+      ]
 
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: '\<*_&'
@@ -26,7 +35,19 @@ version-resolver:
     labels: ["minor", "feature", "enhancement", "feat"]
   patch:
     labels:
-      ["patch", "fix", "bugfix", "bug", "chore", "ci", "docs", "documentation", "dependencies", "refactor", "test"]
+      [
+        "patch",
+        "fix",
+        "bugfix",
+        "bug",
+        "chore",
+        "ci",
+        "docs",
+        "documentation",
+        "dependencies",
+        "refactor",
+        "test",
+      ]
   default: patch
 
 # Note: categories/version above key off PR labels. This drafter runs only on

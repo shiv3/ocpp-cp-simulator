@@ -118,16 +118,14 @@ describe("useScenarios ChargePointService consumer", () => {
       null;
     const unsubscribe = vi.fn();
     service = {
-      listScenarioDefinitions: vi
-        .fn()
-        .mockResolvedValue([
-          scenario("first"),
-          scenario("other", { targetId: 2 }),
-          scenario("cp-level", {
-            targetType: "chargePoint",
-            targetId: undefined,
-          }),
-        ]),
+      listScenarioDefinitions: vi.fn().mockResolvedValue([
+        scenario("first"),
+        scenario("other", { targetId: 2 }),
+        scenario("cp-level", {
+          targetType: "chargePoint",
+          targetId: undefined,
+        }),
+      ]),
       subscribeScenarioDefinitions: vi.fn((_cpId, _connectorId, handler) => {
         scenarioHandler = handler;
         return unsubscribe;

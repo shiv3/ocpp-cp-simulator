@@ -10,13 +10,13 @@ const V1App: React.FC = () => {
   useEffect(() => {
     // Remove dark class from html element when V1 is mounted
     const root = window.document.documentElement;
-    const hadDarkClass = root.classList.contains('dark');
-    root.classList.remove('dark');
+    const hadDarkClass = root.classList.contains("dark");
+    root.classList.remove("dark");
 
     // Restore dark class when V1 is unmounted
     return () => {
       if (hadDarkClass) {
-        root.classList.add('dark');
+        root.classList.add("dark");
       }
     };
   }, []);

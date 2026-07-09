@@ -12,8 +12,8 @@
       body {
         margin: 0;
         height: 100%;
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
       }
       body {
         display: flex;
@@ -53,8 +53,7 @@
         line-height: 1.4;
       }
       code {
-        font-family:
-          ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         background: #1e293b;
         padding: 0.1rem 0.35rem;
         border-radius: 4px;
@@ -82,7 +81,9 @@
         const started = Date.now();
         while (Date.now() - started < POLL_TIMEOUT_MS) {
           try {
-            const res = await fetch(`${url}${HEALTH_PATH}`, { cache: "no-store" });
+            const res = await fetch(`${url}${HEALTH_PATH}`, {
+              cache: "no-store",
+            });
             if (res.ok) {
               const body = await res.json().catch(() => null);
               if (body && body.ok === true) {
@@ -100,8 +101,7 @@
 
       function showError(url) {
         document.getElementById("spinner").style.display = "none";
-        document.getElementById("title").textContent =
-          "Daemon failed to start";
+        document.getElementById("title").textContent = "Daemon failed to start";
         const sub = document.getElementById("subtitle");
         sub.classList.add("error");
         sub.innerHTML =

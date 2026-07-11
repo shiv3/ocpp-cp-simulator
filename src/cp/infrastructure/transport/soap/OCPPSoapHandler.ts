@@ -29,6 +29,10 @@ import type {
 // OCPPStatus is a string enum: it must be a VALUE import so switch cases can
 // use enum members — string-literal cases do not narrow an enum-typed value.
 import { OCPPAction, OCPPStatus } from "../../../domain/types/OcppTypes";
+import {
+  projectStatusForVersion,
+  projectErrorCodeForVersion,
+} from "../../../domain/types/statusProjection";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
 import type { IChargePointMessageHandler } from "../IChargePointMessageHandler";
@@ -57,7 +61,11 @@ import {
 } from "./soapEnvelope";
 import type { SoapDialect } from "./dialect";
 import { OCPP15_DIALECT } from "./dialect";
-import { OCPP_1_2, OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
+import {
+  OCPP_1_2,
+  OCPP_1_5,
+  OCPP_1_6_SOAP,
+} from "../../../domain/types/OcppVersion";
 
 export interface OCPPSoapHandlerOptions {
   readonly centralSystemUrl: string;
@@ -398,124 +406,6 @@ function soapPayload(payload: object): SoapPayload {
   return payload as unknown as SoapPayload;
 }
 
-function toOcpp15ChargePointStatus(
-  status: OCPPStatus,
-): Ocpp15ChargePointStatus {
-  // OCPP 1.5 ChargePointStatus only defines Available, Occupied, Faulted,
-  // Unavailable, and Reserved; 1.6 transaction-progress states collapse to
-  // Occupied on the 1.5 SOAP wire.
-  switch (status) {
-    case OCPPStatus.Available:
-      return "Available";
-    case OCPPStatus.Faulted:
-      return "Faulted";
-    case OCPPStatus.Unavailable:
-      return "Unavailable";
-    case OCPPStatus.Reserved:
-      return "Reserved";
-    case OCPPStatus.Preparing:
-    case OCPPStatus.Charging:
-    case OCPPStatus.SuspendedEV:
-    case OCPPStatus.SuspendedEVSE:
-    case OCPPStatus.Finishing:
-      return "Occupied";
-    default: {
-      const exhaustive: never = status;
-      return exhaustive;
-    }
-  }
-}
-
-function toOcpp12ChargePointStatus(
-  status: OCPPStatus,
-): Ocpp12ChargePointStatus {
-  // OCPP 1.2 ChargePointStatus only defines Available, Occupied, Faulted,
-  // Unavailable; no Reserved in 1.2 — a reserved connector is unavailable.
-  // 1.6 transaction-progress states collapse to Occupied.
-  switch (status) {
-    case OCPPStatus.Available:
-      return "Available";
-    case OCPPStatus.Faulted:
-      return "Faulted";
-    case OCPPStatus.Unavailable:
-      return "Unavailable";
-    case OCPPStatus.Reserved:
-      // 1.2 has no Reserved; a reserved connector is not usable (Unavailable).
-      return "Unavailable";
-    case OCPPStatus.Preparing:
-    case OCPPStatus.Charging:
-    case OCPPStatus.SuspendedEV:
-    case OCPPStatus.SuspendedEVSE:
-    case OCPPStatus.Finishing:
-      return "Occupied";
-    default: {
-      const exhaustive: never = status;
-      return exhaustive;
-    }
-  }
-}
-
-function toOcpp15ChargePointErrorCode(
-  errorCode: ChargePointErrorCode,
-): Ocpp15ChargePointErrorCode {
-  switch (errorCode) {
-    case "ConnectorLockFailure":
-    case "HighTemperature":
-    case "NoError":
-    case "PowerMeterFailure":
-    case "PowerSwitchFailure":
-    case "ReaderFailure":
-    case "ResetFailure":
-    case "GroundFailure":
-    case "OverCurrentFailure":
-    case "UnderVoltage":
-    case "WeakSignal":
-    case "OtherError":
-      return errorCode;
-    case "EVCommunicationError":
-      // OCPP 1.5 has no EVCommunicationError; Mode3Error is the closest
-      // connector/EV communication fault in the 1.5 ChargePointErrorCode set.
-      return "Mode3Error";
-    case "InternalError":
-    case "LocalListConflict":
-    case "OverVoltage":
-      return "OtherError";
-  }
-}
-
-function toOcpp12ChargePointErrorCode(
-  errorCode: ChargePointErrorCode,
-): Ocpp12ChargePointErrorCode {
-  // OCPP 1.2 ChargePointErrorCode has only 8 values; no generic error bucket.
-  // Codes with no 1.2 equivalent collapse to Mode3Error (closest charging-circuit
-  // fault for EV-communication-ish errors; SteVe JAXB rejects unknown enum values).
-  switch (errorCode) {
-    case "ConnectorLockFailure":
-    case "HighTemperature":
-    case "NoError":
-    case "PowerMeterFailure":
-    case "PowerSwitchFailure":
-    case "ReaderFailure":
-    case "ResetFailure":
-      return errorCode;
-    case "EVCommunicationError":
-      // 1.6 has EVCommunicationError; 1.2 uses Mode3Error.
-      return "Mode3Error";
-    case "GroundFailure":
-    case "OverCurrentFailure":
-    case "OverVoltage":
-    case "UnderVoltage":
-      // Electrical/charging faults → Mode3Error (closest in 1.2).
-      return "Mode3Error";
-    case "WeakSignal":
-    case "OtherError":
-    case "InternalError":
-    case "LocalListConflict":
-      // Generic/unknown → Mode3Error (no better bucket in 1.2).
-      return "Mode3Error";
-  }
-}
-
 function toOcpp15ReadingContext(
   context: string | undefined,
 ): Ocpp15ReadingContext | undefined {
@@ -623,66 +513,6 @@ function toOcpp15MeterSample(sample: SampledValue): Ocpp15MeterSample | null {
   };
 }
 
-// 1.6 conversion functions (passthrough for enums, no collapsing)
-function toOcpp16ChargePointStatus(
-  status: OCPPStatus,
-): Ocpp16ChargePointStatus {
-  // 1.6 wire enums are identical to 1.6J domain: passthrough
-  switch (status) {
-    case OCPPStatus.Available:
-      return "Available";
-    case OCPPStatus.Preparing:
-      return "Preparing";
-    case OCPPStatus.Charging:
-      return "Charging";
-    case OCPPStatus.SuspendedEV:
-      return "SuspendedEV";
-    case OCPPStatus.SuspendedEVSE:
-      return "SuspendedEVSE";
-    case OCPPStatus.Finishing:
-      return "Finishing";
-    case OCPPStatus.Reserved:
-      return "Reserved";
-    case OCPPStatus.Unavailable:
-      return "Unavailable";
-    case OCPPStatus.Faulted:
-      return "Faulted";
-    default: {
-      const exhaustive: never = status;
-      return exhaustive;
-    }
-  }
-}
-
-function toOcpp16ChargePointErrorCode(
-  errorCode: ChargePointErrorCode,
-): Ocpp16ChargePointErrorCode {
-  // 1.6 wire enums are identical to 1.6J domain: passthrough
-  switch (errorCode) {
-    case "ConnectorLockFailure":
-    case "EVCommunicationError":
-    case "GroundFailure":
-    case "HighTemperature":
-    case "InternalError":
-    case "LocalListConflict":
-    case "NoError":
-    case "OtherError":
-    case "OverCurrentFailure":
-    case "OverVoltage":
-    case "PowerMeterFailure":
-    case "PowerSwitchFailure":
-    case "ReaderFailure":
-    case "ResetFailure":
-    case "UnderVoltage":
-    case "WeakSignal":
-      return errorCode;
-    default: {
-      const exhaustive: never = errorCode;
-      return exhaustive;
-    }
-  }
-}
-
 function toOcpp16SampledValue(sample: SampledValue): Ocpp16SampledValue {
   // 1.6 SOAP: SampledValue is a complex type with child elements, all optional except value.
   // Passthrough all fields without mapping or dropping.
@@ -701,8 +531,14 @@ const OCPP15_WIRE_PROFILE: ClientWireProfile = {
   toStatusNotificationRequest(connectorId, status, opts) {
     const payload: Ocpp15StatusNotificationRequest = {
       connectorId,
-      status: toOcpp15ChargePointStatus(status),
-      errorCode: toOcpp15ChargePointErrorCode(opts?.errorCode ?? "NoError"),
+      status: projectStatusForVersion(
+        OCPP_1_5,
+        status,
+      ) as Ocpp15ChargePointStatus,
+      errorCode: projectErrorCodeForVersion(
+        OCPP_1_5,
+        opts?.errorCode ?? "NoError",
+      ) as Ocpp15ChargePointErrorCode,
       ...(opts?.info ? { info: opts.info } : {}),
       ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
       ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
@@ -749,8 +585,14 @@ const OCPP12_WIRE_PROFILE: ClientWireProfile = {
     // Per XSD verification: info/timestamp/vendorId/vendorErrorCode do NOT exist in 1.2.
     const payload: Ocpp12StatusNotificationRequest = {
       connectorId,
-      status: toOcpp12ChargePointStatus(status),
-      errorCode: toOcpp12ChargePointErrorCode(opts?.errorCode ?? "NoError"),
+      status: projectStatusForVersion(
+        OCPP_1_2,
+        status,
+      ) as Ocpp12ChargePointStatus,
+      errorCode: projectErrorCodeForVersion(
+        OCPP_1_2,
+        opts?.errorCode ?? "NoError",
+      ) as Ocpp12ChargePointErrorCode,
     };
     return soapPayload(payload);
   },
@@ -792,8 +634,14 @@ const OCPP16_WIRE_PROFILE: ClientWireProfile = {
     // Field order: connectorId, status, errorCode, info?, timestamp?, vendorId?, vendorErrorCode?
     const payload: Ocpp16StatusNotificationRequest = {
       connectorId,
-      status: toOcpp16ChargePointStatus(status),
-      errorCode: toOcpp16ChargePointErrorCode(opts?.errorCode ?? "NoError"),
+      status: projectStatusForVersion(
+        OCPP_1_6_SOAP,
+        status,
+      ) as Ocpp16ChargePointStatus,
+      errorCode: projectErrorCodeForVersion(
+        OCPP_1_6_SOAP,
+        opts?.errorCode ?? "NoError",
+      ) as Ocpp16ChargePointErrorCode,
       ...(opts?.info ? { info: opts.info } : {}),
       ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
       ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),

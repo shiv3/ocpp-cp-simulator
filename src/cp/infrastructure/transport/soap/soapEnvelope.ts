@@ -1,14 +1,17 @@
 import { XMLParser } from "fast-xml-parser";
-import { create } from "xmlbuilder2";
 
-type XmlBuilder = ReturnType<typeof create>;
+import {
+  OCPP15_DIALECT,
+  OCPP15_SOAP_NAMESPACES,
+  SOAP12_NAMESPACE,
+  WSA_NAMESPACE,
+  type SoapDialect,
+  type SoapOperation,
+} from "./dialect";
 
-export const OCPP15_SOAP_NAMESPACES = {
-  CS: "urn://Ocpp/Cs/2012/06/",
-  CP: "urn://Ocpp/Cp/2012/06/",
-  SOAP12: "http://www.w3.org/2003/05/soap-envelope",
-  WSA: "http://www.w3.org/2005/08/addressing",
-} as const;
+// Re-export for backward compatibility
+export { OCPP15_SOAP_NAMESPACES };
+export type { SoapOperation };
 
 export const WSA_ANONYMOUS_ADDRESS =
   "http://www.w3.org/2005/08/addressing/anonymous";
@@ -17,26 +20,16 @@ export const OCPP15_REGISTRATION_STATUSES = ["Accepted", "Rejected"] as const;
 export type Ocpp15RegistrationStatus =
   (typeof OCPP15_REGISTRATION_STATUSES)[number];
 
-export const BOOT_NOTIFICATION_REQUEST_FIELD_ORDER = [
-  "chargePointVendor",
-  "chargePointModel",
-  "chargePointSerialNumber",
-  "chargeBoxSerialNumber",
-  "firmwareVersion",
-  "iccid",
-  "imsi",
-  "meterType",
-  "meterSerialNumber",
-] as const;
-
-type SoapTargetNamespace =
-  typeof OCPP15_SOAP_NAMESPACES.CS | typeof OCPP15_SOAP_NAMESPACES.CP;
-
 export interface SoapOperationMetadata {
   readonly action: `/${string}`;
   readonly requestWrapper: string;
   readonly responseWrapper: string;
-  readonly namespace: SoapTargetNamespace;
+  readonly namespace: string;
+  /**
+   * Which service the operation targets: "cs" = CentralSystemService (CP→CS),
+   * "cp" = ChargePointService (CS→CP). Doubles as the wire XML prefix.
+   */
+  readonly target: "cs" | "cp";
   readonly requestFieldOrder?: readonly string[];
   readonly responseFieldOrder?: readonly string[];
 }
@@ -93,6 +86,7 @@ export interface BuildSoapEnvelopeOptions {
   readonly to: string;
   readonly payload?: SoapPayload;
   readonly relatesTo?: string;
+  readonly dialect?: SoapDialect;
 }
 
 export interface BuildSoapFaultEnvelopeOptions {
@@ -110,112 +104,17 @@ export interface ParsedSoapEnvelope {
   readonly to: string;
   readonly relatesTo?: string;
   readonly chargeBoxIdentity?: string;
-  readonly namespace: SoapTargetNamespace;
+  readonly namespace: string;
   readonly wrapper: string;
   readonly payload: SoapParsedPayload;
 }
 
-function lowerFirst(value: string): string {
-  return value.length === 0 ? value : value[0].toLowerCase() + value.slice(1);
-}
-
-function operationMetadata(
-  operation: string,
-  namespace: SoapTargetNamespace,
-  overrides: Partial<
-    Pick<SoapOperationMetadata, "requestFieldOrder" | "responseFieldOrder">
-  > = {},
-): SoapOperationMetadata {
-  const wrapperBase = lowerFirst(operation);
-  return {
-    action: `/${operation}`,
-    requestWrapper: `${wrapperBase}Request`,
-    responseWrapper: `${wrapperBase}Response`,
-    namespace,
-    ...overrides,
-  };
-}
-
-export const SOAP_OPERATION_METADATA = {
-  Authorize: operationMetadata("Authorize", OCPP15_SOAP_NAMESPACES.CS),
-  BootNotification: operationMetadata(
-    "BootNotification",
-    OCPP15_SOAP_NAMESPACES.CS,
-    {
-      requestFieldOrder: BOOT_NOTIFICATION_REQUEST_FIELD_ORDER,
-      responseFieldOrder: ["status", "currentTime", "heartbeatInterval"],
-    },
-  ),
-  DataTransfer: operationMetadata("DataTransfer", OCPP15_SOAP_NAMESPACES.CS),
-  DiagnosticsStatusNotification: operationMetadata(
-    "DiagnosticsStatusNotification",
-    OCPP15_SOAP_NAMESPACES.CS,
-  ),
-  FirmwareStatusNotification: operationMetadata(
-    "FirmwareStatusNotification",
-    OCPP15_SOAP_NAMESPACES.CS,
-  ),
-  Heartbeat: operationMetadata("Heartbeat", OCPP15_SOAP_NAMESPACES.CS),
-  MeterValues: operationMetadata("MeterValues", OCPP15_SOAP_NAMESPACES.CS),
-  StartTransaction: operationMetadata(
-    "StartTransaction",
-    OCPP15_SOAP_NAMESPACES.CS,
-  ),
-  StatusNotification: operationMetadata(
-    "StatusNotification",
-    OCPP15_SOAP_NAMESPACES.CS,
-  ),
-  StopTransaction: operationMetadata(
-    "StopTransaction",
-    OCPP15_SOAP_NAMESPACES.CS,
-  ),
-  CancelReservation: operationMetadata(
-    "CancelReservation",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  ChangeAvailability: operationMetadata(
-    "ChangeAvailability",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  ChangeConfiguration: operationMetadata(
-    "ChangeConfiguration",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  ClearCache: operationMetadata("ClearCache", OCPP15_SOAP_NAMESPACES.CP),
-  GetConfiguration: operationMetadata(
-    "GetConfiguration",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  GetDiagnostics: operationMetadata(
-    "GetDiagnostics",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  GetLocalListVersion: operationMetadata(
-    "GetLocalListVersion",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  RemoteStartTransaction: operationMetadata(
-    "RemoteStartTransaction",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  RemoteStopTransaction: operationMetadata(
-    "RemoteStopTransaction",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  ReserveNow: operationMetadata("ReserveNow", OCPP15_SOAP_NAMESPACES.CP),
-  Reset: operationMetadata("Reset", OCPP15_SOAP_NAMESPACES.CP),
-  SendLocalList: operationMetadata("SendLocalList", OCPP15_SOAP_NAMESPACES.CP),
-  UnlockConnector: operationMetadata(
-    "UnlockConnector",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-  UpdateFirmware: operationMetadata(
-    "UpdateFirmware",
-    OCPP15_SOAP_NAMESPACES.CP,
-  ),
-} as const;
-
-export type SoapOperation = keyof typeof SOAP_OPERATION_METADATA;
+// Re-export for backward compatibility. The 1.5 dialect defines every
+// operation in the current SoapOperation union, so the full Record cast holds.
+export const SOAP_OPERATION_METADATA =
+  OCPP15_DIALECT.operationMetadata as Readonly<
+    Record<SoapOperation, SoapOperationMetadata>
+  >;
 
 const SOAP_XML_PARSER = new XMLParser({
   ignoreAttributes: false,
@@ -227,8 +126,82 @@ const SOAP_XML_PARSER = new XMLParser({
 
 const FORBIDDEN_XML_DECLARATION_PATTERN = /<!\s*(?:DOCTYPE|ENTITY)\b/i;
 
-function targetPrefix(namespace: SoapTargetNamespace): "cs" | "cp" {
-  return namespace === OCPP15_SOAP_NAMESPACES.CS ? "cs" : "cp";
+// XML escaping functions for hand-rolled builder
+function escapeXmlText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeXmlAttribute(attr: string): string {
+  return attr
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Hand-rolled XML builder for minified output (no newlines, self-closing tags)
+interface XmlElement {
+  name: string;
+  attributes: Record<string, string>;
+  children: (XmlElement | string)[];
+}
+
+function createElement(
+  name: string,
+  attributes: Record<string, string> = {},
+): XmlElement {
+  return {
+    name,
+    attributes,
+    children: [],
+  };
+}
+
+function addChild(element: XmlElement, child: XmlElement | string): void {
+  element.children.push(child);
+}
+
+function renderXmlElement(element: XmlElement): string {
+  const { name, attributes, children } = element;
+
+  // Build attributes string
+  let attrStr = "";
+  for (const [key, value] of Object.entries(attributes)) {
+    attrStr += ` ${key}="${escapeXmlAttribute(value)}"`;
+  }
+
+  // If no children, use self-closing tag
+  if (children.length === 0) {
+    return `<${name}${attrStr}/>`;
+  }
+
+  // Build children content
+  let childrenStr = "";
+  for (const child of children) {
+    if (typeof child === "string") {
+      childrenStr += escapeXmlText(child);
+    } else {
+      childrenStr += renderXmlElement(child);
+    }
+  }
+
+  return `<${name}${attrStr}>${childrenStr}</${name}>`;
+}
+
+function requireOperationMetadata(
+  dialect: SoapDialect,
+  operation: SoapOperation,
+): SoapOperationMetadata {
+  const metadata = dialect.operationMetadata[operation];
+  if (!metadata) {
+    throw new Error(
+      `SOAP operation ${operation} is not supported by the ${dialect.version} dialect`,
+    );
+  }
+  return metadata;
 }
 
 function actionFor(
@@ -281,27 +254,6 @@ function isPayloadScalar(
   );
 }
 
-function appendPayloadAttributes(
-  element: XmlBuilder,
-  payload: Record<string, unknown>,
-): void {
-  for (const [key, value] of Object.entries(payload)) {
-    if (!key.startsWith("@_")) continue;
-    if (!isPayloadScalar(value)) continue;
-    element.att(key.slice(2), textForPayloadValue(value));
-  }
-}
-
-function appendPayloadText(
-  element: XmlBuilder,
-  payload: Record<string, unknown>,
-): void {
-  const text = payload["#text"];
-  if (text === undefined) return;
-  if (!isPayloadScalar(text)) return;
-  element.txt(textForPayloadValue(text));
-}
-
 function payloadChildren(
   payload: Record<string, unknown>,
 ): SoapPayload | undefined {
@@ -314,7 +266,7 @@ function payloadChildren(
 }
 
 function appendPayloadValue(
-  parent: XmlBuilder,
+  parent: XmlElement,
   elementName: string,
   value: SoapPayloadValue,
   prefix: "cs" | "cp",
@@ -327,25 +279,42 @@ function appendPayloadValue(
     return;
   }
 
-  const child = parent.ele(`${prefix}:${elementName}`);
+  const child = createElement(`${prefix}:${elementName}`);
+
   if (value === null) {
-    child.up();
-    return;
-  }
-  if (isRecord(value)) {
-    appendPayloadAttributes(child, value);
-    appendPayloadText(child, value);
-    const children = payloadChildren(value);
-    if (children) appendPayloadChildren(child, children, undefined, prefix);
-    child.up();
+    addChild(parent, child);
     return;
   }
 
-  child.txt(textForPayloadValue(value)).up();
+  if (isRecord(value)) {
+    // Add attributes
+    for (const [key, attrValue] of Object.entries(value)) {
+      if (!key.startsWith("@_")) continue;
+      if (!isPayloadScalar(attrValue)) continue;
+      child.attributes[key.slice(2)] = textForPayloadValue(attrValue);
+    }
+
+    // Add text
+    const text = value["#text"];
+    if (text !== undefined && isPayloadScalar(text)) {
+      addChild(child, textForPayloadValue(text));
+    }
+
+    // Add children
+    const children = payloadChildren(value);
+    if (children) {
+      appendPayloadChildren(child, children, undefined, prefix);
+    }
+  } else {
+    // Scalar value
+    addChild(child, textForPayloadValue(value));
+  }
+
+  addChild(parent, child);
 }
 
 function appendPayloadChildren(
-  parent: XmlBuilder,
+  parent: XmlElement,
   payload: SoapPayload,
   fieldOrder: readonly string[] | undefined,
   prefix: "cs" | "cp",
@@ -355,31 +324,11 @@ function appendPayloadChildren(
   }
 }
 
-function appendWsaTextHeader(
-  header: XmlBuilder,
-  name: string,
-  value: string,
-): void {
-  header.ele(`a:${name}`, { "s:mustUnderstand": "true" }).txt(value).up();
-}
-
-function appendWsaAddressHeader(
-  header: XmlBuilder,
-  name: string,
-  address: string,
-): void {
-  header
-    .ele(`a:${name}`, { "s:mustUnderstand": "true" })
-    .ele("a:Address")
-    .txt(address)
-    .up()
-    .up();
-}
-
 export function buildSoapEnvelope(options: BuildSoapEnvelopeOptions): string {
+  const dialect = options.dialect ?? OCPP15_DIALECT;
   const kind = options.kind ?? "request";
-  const metadata = SOAP_OPERATION_METADATA[options.operation];
-  const prefix = targetPrefix(metadata.namespace);
+  const metadata = requireOperationMetadata(dialect, options.operation);
+  const prefix = metadata.target;
   const wrapper =
     kind === "response" ? metadata.responseWrapper : metadata.requestWrapper;
 
@@ -387,28 +336,69 @@ export function buildSoapEnvelope(options: BuildSoapEnvelopeOptions): string {
     throw new Error("SOAP responses require relatesTo");
   }
 
-  const envelope = create()
-    .ele("s:Envelope", {
-      "xmlns:s": OCPP15_SOAP_NAMESPACES.SOAP12,
-      "xmlns:a": OCPP15_SOAP_NAMESPACES.WSA,
-      [`xmlns:${prefix}`]: metadata.namespace,
-    })
-    .ele("s:Header");
+  const envelope = createElement("s:Envelope", {
+    "xmlns:s": SOAP12_NAMESPACE,
+    "xmlns:a": WSA_NAMESPACE,
+    [`xmlns:${prefix}`]: metadata.namespace,
+  });
 
-  envelope
-    .ele(`${prefix}:chargeBoxIdentity`)
-    .txt(options.chargeBoxIdentity)
-    .up();
-  appendWsaTextHeader(envelope, "Action", actionFor(metadata, kind));
-  appendWsaTextHeader(envelope, "MessageID", options.messageId);
-  appendWsaAddressHeader(envelope, "From", options.from);
-  appendWsaAddressHeader(envelope, "ReplyTo", WSA_ANONYMOUS_ADDRESS);
-  appendWsaTextHeader(envelope, "To", options.to);
+  const header = createElement("s:Header");
+  addChild(envelope, header);
+
+  // chargeBoxIdentity
+  const chargeBoxIdentityElem = createElement(`${prefix}:chargeBoxIdentity`);
+  addChild(chargeBoxIdentityElem, options.chargeBoxIdentity);
+  addChild(header, chargeBoxIdentityElem);
+
+  // Action header
+  const actionElem = createElement("a:Action", { "s:mustUnderstand": "true" });
+  addChild(actionElem, actionFor(metadata, kind));
+  addChild(header, actionElem);
+
+  // MessageID header
+  const messageIdElem = createElement("a:MessageID", {
+    "s:mustUnderstand": "true",
+  });
+  addChild(messageIdElem, options.messageId);
+  addChild(header, messageIdElem);
+
+  // From header
+  const fromElem = createElement("a:From", { "s:mustUnderstand": "true" });
+  const fromAddress = createElement("a:Address");
+  addChild(fromAddress, options.from);
+  addChild(fromElem, fromAddress);
+  addChild(header, fromElem);
+
+  // ReplyTo header
+  const replyToElem = createElement("a:ReplyTo", {
+    "s:mustUnderstand": "true",
+  });
+  const replyToAddress = createElement("a:Address");
+  addChild(replyToAddress, WSA_ANONYMOUS_ADDRESS);
+  addChild(replyToElem, replyToAddress);
+  addChild(header, replyToElem);
+
+  // To header
+  const toElem = createElement("a:To", { "s:mustUnderstand": "true" });
+  addChild(toElem, options.to);
+  addChild(header, toElem);
+
+  // RelatesTo header (if response)
   if (kind === "response" && options.relatesTo) {
-    appendWsaTextHeader(envelope, "RelatesTo", options.relatesTo);
+    const relatesToElem = createElement("a:RelatesTo", {
+      "s:mustUnderstand": "true",
+    });
+    addChild(relatesToElem, options.relatesTo);
+    addChild(header, relatesToElem);
   }
 
-  const bodyWrapper = envelope.up().ele("s:Body").ele(`${prefix}:${wrapper}`);
+  // Body
+  const body = createElement("s:Body");
+  const bodyWrapper = createElement(`${prefix}:${wrapper}`);
+  addChild(body, bodyWrapper);
+  addChild(envelope, body);
+
+  // Payload
   const payload = options.payload ?? {};
   const fieldOrder =
     kind === "response"
@@ -416,7 +406,7 @@ export function buildSoapEnvelope(options: BuildSoapEnvelopeOptions): string {
       : metadata.requestFieldOrder;
   appendPayloadChildren(bodyWrapper, payload, fieldOrder, prefix);
 
-  return bodyWrapper.doc().end({ headless: true });
+  return renderXmlElement(envelope);
 }
 
 export function buildSoapFaultEnvelope(
@@ -424,26 +414,29 @@ export function buildSoapFaultEnvelope(
 ): string {
   const code = options.code ?? "Sender";
   const reason = options.reason.length > 0 ? options.reason : "SOAP fault";
-  return create()
-    .ele("s:Envelope", {
-      "xmlns:s": OCPP15_SOAP_NAMESPACES.SOAP12,
-    })
-    .ele("s:Body")
-    .ele("s:Fault")
-    .ele("s:Code")
-    .ele("s:Value")
-    .txt(`s:${code}`)
-    .up()
-    .up()
-    .ele("s:Reason")
-    .ele("s:Text", { "xml:lang": "en" })
-    .txt(reason)
-    .up()
-    .up()
-    .up()
-    .up()
-    .doc()
-    .end({ headless: true });
+
+  const envelope = createElement("s:Envelope", {
+    "xmlns:s": SOAP12_NAMESPACE,
+  });
+
+  const body = createElement("s:Body");
+  const fault = createElement("s:Fault");
+  const faultCode = createElement("s:Code");
+  const faultValue = createElement("s:Value");
+  addChild(faultValue, `s:${code}`);
+  addChild(faultCode, faultValue);
+  addChild(fault, faultCode);
+
+  const reason_ = createElement("s:Reason");
+  const reasonText = createElement("s:Text", { "xml:lang": "en" });
+  addChild(reasonText, reason);
+  addChild(reason_, reasonText);
+  addChild(fault, reason_);
+
+  addChild(body, fault);
+  addChild(envelope, body);
+
+  return renderXmlElement(envelope);
 }
 
 export function soapFaultContentType(): string {
@@ -453,8 +446,9 @@ export function soapFaultContentType(): string {
 export function soapContentTypeForOperation(
   operation: SoapOperation,
   kind: SoapMessageKind = "request",
+  dialect: SoapDialect = OCPP15_DIALECT,
 ): string {
-  const metadata = SOAP_OPERATION_METADATA[operation];
+  const metadata = requireOperationMetadata(dialect, operation);
   return `application/soap+xml; charset=utf-8; action="${actionFor(
     metadata,
     kind,
@@ -654,13 +648,16 @@ function firstXmlValue(value: unknown): unknown {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function findMetadataByWrapper(wrapper: string): {
+function findMetadataByWrapper(
+  wrapper: string,
+  dialect: SoapDialect = OCPP15_DIALECT,
+): {
   readonly operation: SoapOperation;
   readonly kind: SoapMessageKind;
   readonly metadata: SoapOperationMetadata;
 } {
   for (const [operation, metadata] of Object.entries(
-    SOAP_OPERATION_METADATA,
+    dialect.operationMetadata,
   ) as [SoapOperation, SoapOperationMetadata][]) {
     if (metadata.requestWrapper === wrapper) {
       return { operation, kind: "request", metadata };
@@ -682,7 +679,10 @@ function assertNamespace(
   }
 }
 
-export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
+export function parseSoapEnvelope(
+  xml: string,
+  dialect: SoapDialect = OCPP15_DIALECT,
+): ParsedSoapEnvelope {
   if (FORBIDDEN_XML_DECLARATION_PATTERN.test(xml)) {
     throw new Error("SOAP XML containing DOCTYPE or ENTITY is not supported");
   }
@@ -692,11 +692,7 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
   const [envelopeKey, envelopeValue] = requireElement(document, "Envelope");
   const envelope = requireRecord(envelopeValue, "Envelope");
   const envelopeNamespace = namespaceForElement(envelopeKey, [envelope]);
-  assertNamespace(
-    envelopeNamespace,
-    OCPP15_SOAP_NAMESPACES.SOAP12,
-    "SOAP Envelope",
-  );
+  assertNamespace(envelopeNamespace, SOAP12_NAMESPACE, "SOAP Envelope");
 
   const [, headerValue] = requireElement(envelope, "Header");
   const header = requireRecord(headerValue, "Header");
@@ -707,7 +703,7 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
     throw new Error("SOAP Body must contain an operation wrapper");
 
   const wrapper = localName(wrapperKey);
-  const { operation, kind, metadata } = findMetadataByWrapper(wrapper);
+  const { operation, kind, metadata } = findMetadataByWrapper(wrapper, dialect);
   const bodyWrapper = isRecord(wrapperValue) ? wrapperValue : {};
   const bodyNamespace = namespaceForElement(wrapperKey, [
     envelope,
@@ -720,7 +716,7 @@ export function parseSoapEnvelope(xml: string): ParsedSoapEnvelope {
   const actionRecord = isRecord(action.value) ? action.value : {};
   assertNamespace(
     namespaceForElement(action.key, [envelope, header, actionRecord]),
-    OCPP15_SOAP_NAMESPACES.WSA,
+    WSA_NAMESPACE,
     "WS-Addressing Action",
   );
   const expectedAction = actionFor(metadata, kind);
@@ -788,11 +784,7 @@ export function parseSoapFaultEnvelope(xml: string): ParsedSoapFault | null {
   const [envelopeKey, envelopeValue] = requireElement(document, "Envelope");
   const envelope = requireRecord(envelopeValue, "Envelope");
   const envelopeNamespace = namespaceForElement(envelopeKey, [envelope]);
-  assertNamespace(
-    envelopeNamespace,
-    OCPP15_SOAP_NAMESPACES.SOAP12,
-    "SOAP Envelope",
-  );
+  assertNamespace(envelopeNamespace, SOAP12_NAMESPACE, "SOAP Envelope");
 
   const [, bodyValue] = requireElement(envelope, "Body");
   const body = requireRecord(bodyValue, "Body");
@@ -808,7 +800,7 @@ export function parseSoapFaultEnvelope(xml: string): ParsedSoapFault | null {
     body,
     fault,
   ]);
-  assertNamespace(faultNamespace, OCPP15_SOAP_NAMESPACES.SOAP12, "SOAP Fault");
+  assertNamespace(faultNamespace, SOAP12_NAMESPACE, "SOAP Fault");
 
   return {
     code: soapFaultCode(fault),

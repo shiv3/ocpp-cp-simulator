@@ -293,6 +293,10 @@ export interface UnlockOutcomeNodeData extends BaseNodeData {
  * Response Override Node Data — arms a one-shot canned `{ status }`
  * response on the charge point for the next incoming CALL whose action
  * matches. Non-blocking pre-arm, like unlockOutcome. Issue #110.
+ *
+ * Overrides are armed charge-point-wide (not connector-scoped) and consumed
+ * once per action, so they're intended for single-connector certification
+ * scenarios rather than multi-connector charge points.
  */
 export interface ResponseOverrideNodeData extends BaseNodeData {
   /** OCPP 1.6 action whose next incoming call gets the canned response. */
@@ -725,4 +729,34 @@ export const RESPONSE_OVERRIDE_ACTIONS = [
   "CancelReservation",
   "SendLocalList",
   "ChangeConfiguration",
+  "ClearCache",
+  "SetChargingProfile",
+  "ClearChargingProfile",
+  "ChangeAvailability",
 ] as const;
+
+/** Statuses valid for each responseOverride action's `{ status }`
+ *  CALLRESULT, per this repo's generated OCPP 1.6 response types
+ *  (src/ocpp/v16/types/*-response.ts). Keeps editor UI from offering
+ *  schema-invalid action/status combinations. */
+export const RESPONSE_OVERRIDE_STATUSES: Record<
+  (typeof RESPONSE_OVERRIDE_ACTIONS)[number],
+  readonly string[]
+> = {
+  RemoteStartTransaction: ["Accepted", "Rejected"],
+  RemoteStopTransaction: ["Accepted", "Rejected"],
+  TriggerMessage: ["Accepted", "Rejected", "NotImplemented"],
+  ReserveNow: ["Accepted", "Faulted", "Occupied", "Rejected", "Unavailable"],
+  CancelReservation: ["Accepted", "Rejected"],
+  SendLocalList: ["Accepted", "Failed", "NotSupported", "VersionMismatch"],
+  ChangeConfiguration: [
+    "Accepted",
+    "Rejected",
+    "RebootRequired",
+    "NotSupported",
+  ],
+  ClearCache: ["Accepted", "Rejected"],
+  SetChargingProfile: ["Accepted", "Rejected", "NotSupported"],
+  ClearChargingProfile: ["Accepted", "Unknown"],
+  ChangeAvailability: ["Accepted", "Rejected", "Scheduled"],
+};

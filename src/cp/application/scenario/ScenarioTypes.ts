@@ -59,6 +59,10 @@ export enum ScenarioNodeType {
   CONFIG_SET = "configSet",
   // §4.3 DataTransfer.req (CP → CSMS, vendor-specific).
   DATA_TRANSFER = "dataTransfer",
+  // Issue #110 certification scenarios: park until the CSMS sends a given
+  // incoming CALL (Reset, GetConfiguration, SendLocalList, …). The CP
+  // core handler still runs; this node only observes the arrival.
+  CSMS_CALL_TRIGGER = "csmsCallTrigger",
 }
 
 /**
@@ -183,6 +187,20 @@ export interface RemoteStopTriggerNodeData extends BaseNodeData {
 }
 
 /**
+ * CSMS Call Trigger Node Data — generic counterpart of the per-action
+ * trigger nodes. Blocks the scenario until the CSMS sends any CALL whose
+ * action matches `action`. The CP core handler for that action still runs
+ * (GetConfiguration still answers from the store, Reset still reboots…);
+ * this node only synchronizes the scenario with the arrival. Issue #110.
+ */
+export interface CsmsCallTriggerNodeData extends BaseNodeData {
+  /** OCPP 1.6 action name of the incoming CSMS call to wait for. */
+  action: string;
+  /** Optional timeout in seconds. 0 (default) = wait forever. */
+  timeout?: number;
+}
+
+/**
  * Status Trigger Node Data
  * This node waits for the connector status to change to a specific state
  */
@@ -295,6 +313,7 @@ export type ScenarioNodeData =
   | ConnectorPlugNodeData
   | RemoteStartTriggerNodeData
   | RemoteStopTriggerNodeData
+  | CsmsCallTriggerNodeData
   | StatusTriggerNodeData
   | ReserveNowNodeData
   | CancelReservationNodeData
@@ -452,6 +471,12 @@ export interface ScenarioExecutorCallbacks {
     reason: string;
     triggerReason?: TransactionStopTriggerReason;
   }>;
+  /** Issue #110: park until the CSMS sends the given incoming CALL
+   *  action. Resolves with the request payload for logging. */
+  onWaitForCsmsCall?: (
+    action: string,
+    timeout?: number,
+  ) => Promise<{ action: string; payload: unknown }>;
   onWaitForStatus?: (
     targetStatus: OCPPStatus,
     timeout?: number,
@@ -642,3 +667,26 @@ export interface ScenarioEvents {
   // These are string-indexed for flexibility with EventEmitter2 wildcards
   [key: string]: unknown;
 }
+
+/** Incoming CSMS→CP calls a csmsCallTrigger node can wait for. */
+export const CSMS_CALL_TRIGGER_ACTIONS = [
+  "Reset",
+  "GetConfiguration",
+  "ChangeConfiguration",
+  "ClearCache",
+  "GetLocalListVersion",
+  "SendLocalList",
+  "TriggerMessage",
+  "SetChargingProfile",
+  "ClearChargingProfile",
+  "GetCompositeSchedule",
+  "UpdateFirmware",
+  "GetDiagnostics",
+  "ReserveNow",
+  "CancelReservation",
+  "UnlockConnector",
+  "RemoteStartTransaction",
+  "RemoteStopTransaction",
+  "DataTransfer",
+  "ChangeAvailability",
+] as const;

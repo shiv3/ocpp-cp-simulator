@@ -15,6 +15,7 @@ import {
   ConnectorPlugNodeData,
   RemoteStartTriggerNodeData,
   RemoteStopTriggerNodeData,
+  CsmsCallTriggerNodeData,
   StatusTriggerNodeData,
   ReserveNowNodeData,
   CancelReservationNodeData,
@@ -566,6 +567,13 @@ export class ScenarioExecutor {
         await this.executeReservationTrigger(
           node.id,
           node.data as ReservationTriggerNodeData,
+        );
+        break;
+
+      case ScenarioNodeType.CSMS_CALL_TRIGGER:
+        await this.executeCsmsCallTrigger(
+          node.id,
+          node.data as CsmsCallTriggerNodeData,
         );
         break;
 
@@ -1463,5 +1471,83 @@ export class ScenarioExecutor {
       new Promise<void>((resolve) => setTimeout(resolve, ms)),
       this.abortPromise,
     ]);
+  }
+
+  /**
+   * Issue #110: park the scenario until the CSMS sends `data.action`.
+   * Mirror of executeRemoteStopTrigger; the CP core handler still runs,
+   * we only synchronize on arrival and log the payload.
+   */
+  private async executeCsmsCallTrigger(
+    nodeId: string,
+    data: CsmsCallTriggerNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onWaitForCsmsCall) return;
+
+    const timeout = data.timeout || 0;
+    if (!timeout || timeout === 0) {
+      const waitPromise = this.callbacks.onWaitForCsmsCall(
+        data.action,
+        timeout,
+      );
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.callbacks.log?.(
+              `CSMS call received: ${res.action} ${JSON.stringify(res.payload)}`,
+              "info",
+            );
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
+      return;
+    }
+
+    const startTime = Date.now();
+    const timeoutMs = timeout * 1000;
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
+      this.callbacks.onNodeProgress?.(nodeId, remaining, timeout);
+      const progressData = {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining,
+        total: timeout,
+      };
+      this.eventEmitter?.emit("nodeProgress", progressData);
+      this.eventEmitter?.emit("node.progress", progressData);
+      if (remaining <= 0) clearInterval(progressInterval);
+    }, 100);
+
+    try {
+      const waitPromise = this.callbacks.onWaitForCsmsCall(
+        data.action,
+        timeout,
+      );
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.callbacks.log?.(
+              `CSMS call received: ${res.action} ${JSON.stringify(res.payload)}`,
+              "info",
+            );
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
+    } finally {
+      clearInterval(progressInterval);
+      this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
+      this.eventEmitter?.emit("nodeProgress", {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining: 0,
+        total: timeout,
+      });
+    }
   }
 }

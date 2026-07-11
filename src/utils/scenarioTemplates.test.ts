@@ -29,10 +29,10 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc019-get-configuration-all",
   "cert16-tc019-get-configuration-key",
   "cert16-tc021-change-configuration",
+  "cert16-tc024-lock-failure",
   "cert16-tc031-unlock-unknown-connector",
   "cert16-tc061-clear-cache",
   "cert16-tc064-data-transfer",
-  "cert16-tc024-lock-failure",
   "cert16-reservation-basic",
 ];
 

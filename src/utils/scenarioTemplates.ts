@@ -112,10 +112,10 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc019GetConfigAllJson as ScenarioDefinition),
   templateFromJson(cert16Tc019GetConfigKeyJson as ScenarioDefinition),
   templateFromJson(cert16Tc021ChangeConfigJson as ScenarioDefinition),
+  templateFromJson(cert16Tc024LockFailureJson as ScenarioDefinition),
   templateFromJson(cert16Tc031UnlockUnknownJson as ScenarioDefinition),
   templateFromJson(cert16Tc061ClearCacheJson as ScenarioDefinition),
   templateFromJson(cert16Tc064DataTransferJson as ScenarioDefinition),
-  templateFromJson(cert16Tc024LockFailureJson as ScenarioDefinition),
   templateFromJson(cert16ReservationBasicJson as ScenarioDefinition),
 ];
 

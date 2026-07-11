@@ -92,6 +92,10 @@ export interface TransactionNodeData extends BaseNodeData {
   tagId?: string; // Only for start
   batteryCapacityKwh?: number; // Battery capacity of the EV in kWh (e.g., 40, 60, 100)
   initialSoc?: number; // Initial State of Charge percentage (0-100)
+  /** Optional OCPP §6.21 stop reason for action="stop" (e.g.
+   *  "EVDisconnected" for TC_005, "PowerLoss"). A reason captured by a
+   *  preceding RemoteStopTrigger node still wins. Issue #110. */
+  stopReason?: string;
 }
 
 export interface RemoteStartDetails {

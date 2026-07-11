@@ -724,7 +724,7 @@ export class ScenarioExecutor {
       }
     } else if (data.action === "stop") {
       if (this.callbacks.onStopTransaction) {
-        const reason = this.remoteStopReason ?? undefined;
+        const reason = this.remoteStopReason ?? data.stopReason ?? undefined;
         const options = this.remoteStopOptions;
         this.remoteStopReason = null;
         this.remoteStopOptions = null;

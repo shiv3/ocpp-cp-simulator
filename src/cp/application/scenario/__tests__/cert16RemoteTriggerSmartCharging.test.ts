@@ -44,9 +44,9 @@ function newChargePoint(id: string): ChargePoint {
   return cp;
 }
 
-describe("cert16 SmartCharging certification scenarios (TC_056–TC_067)", () => {
+describe("cert16 RemoteTrigger + SmartCharging certification scenarios (TC_054–TC_067)", () => {
   it("TC_055 TriggerMessage: parks on csmsCallTrigger, receives TriggerMessage, completes with override cleared", async () => {
-    const template = getTemplateById("cert16-tc054-trigger-message");
+    const template = getTemplateById("cert16-tc055-trigger-message-rejected");
     expect(template).toBeDefined();
 
     const cp = newChargePoint("CP-CERT-TC055-TM");

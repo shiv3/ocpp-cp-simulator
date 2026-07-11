@@ -12,6 +12,10 @@ import {
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
+import {
+  waitForBootAccepted,
+  type WaitForBootAcceptedOptions,
+} from "./server/waitForBootAccepted";
 import type {
   CLIOptions,
   ChargePointInitOptions,
@@ -392,6 +396,18 @@ export class CLIChargePointService {
 
       this._chargePoint.connect();
     });
+  }
+
+  /**
+   * See {@link waitForBootAccepted} — exposed here so callers (the CLI
+   * startup-scenario path in `startServer.ts`) don't need direct access
+   * to the private `_chargePoint`.
+   */
+  waitForBootAccepted(
+    connectorId: number,
+    options?: WaitForBootAcceptedOptions,
+  ): Promise<boolean> {
+    return waitForBootAccepted(this._chargePoint, connectorId, options);
   }
 
   disconnect(): void {

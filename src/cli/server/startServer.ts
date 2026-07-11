@@ -268,7 +268,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       }
     }
     if (opts.startupScenario) {
-      runStartupScenario(svc, opts.startupScenario, opts.bootstrap.connectors);
+      await runStartupScenario(
+        svc,
+        opts.startupScenario,
+        opts.bootstrap.connectors,
+      );
     }
   }
 }
@@ -295,11 +299,37 @@ function resolveConnectorIds(raw: string, connectorCount: number): number[] {
   return [...seen];
 }
 
-function runStartupScenario(
+/**
+ * Start `scenarioId` unless it's already running. Loading a scenario
+ * (loadScenario/loadScenarioTemplate) while the CP is already Available
+ * synchronously triggers CLIChargePointService's own "connect"-trigger
+ * auto-start for manual, `triggerOn: "connect"` scenarios (the common/
+ * default case — see `tryAutoStartForConnector`) — which is exactly the
+ * case for every startup scenario once we've waited for boot acceptance
+ * below. Calling `runScenario` unconditionally after `loadScenario`
+ * would then throw "already running". Checking first keeps this
+ * idempotent for both that auto-started case AND scenarios the
+ * auto-start engine doesn't cover (non-"connect" triggers, disabled-then-
+ * re-enabled, etc.), which still need this explicit call.
+ */
+function startScenarioIfNotAlreadyActive(
+  svc: CLIChargePointService,
+  connectorId: number,
+  scenarioId: string,
+): void {
+  const alreadyActive = svc
+    .listScenarios(connectorId)
+    .some((s) => s.scenarioId === scenarioId && s.active);
+  if (!alreadyActive) {
+    svc.runScenario(connectorId, scenarioId);
+  }
+}
+
+export async function runStartupScenario(
   svc: CLIChargePointService,
   opt: NonNullable<ServerOptions["startupScenario"]>,
   connectorCount: number,
-): void {
+): Promise<void> {
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
     process.stderr.write(
@@ -307,6 +337,29 @@ function runStartupScenario(
     );
     return;
   }
+
+  // Wait (bounded) for each target connector's boot gate to open before
+  // firing anything. `svc.connect()` above only waits for the WebSocket
+  // to open, not for BootNotification.conf — a scenario with no leading
+  // delay before its first transaction node (e.g.
+  // cert16-tc005-ev-side-disconnect) can otherwise send StartTransaction
+  // while the boot gate is still closed. The boot gate silently drops
+  // gated outgoing CALLs sent before Accepted (see
+  // OCPPMessageHandler.sendRequest's isCallAllowed check), so the
+  // scenario would proceed with a locally fabricated transactionId that
+  // the CSMS never sees. See waitForBootAccepted() for the full
+  // rationale and the timeout policy (30s bound, warn-and-proceed).
+  await Promise.all(
+    connectors.map((connectorId) =>
+      svc.waitForBootAccepted(connectorId, {
+        onTimeout: () => {
+          process.stderr.write(
+            `[server] Warning: BootNotification not accepted within 30s for connector ${connectorId}; starting scenario anyway (its outgoing CALLs may be dropped by the boot gate until the CSMS accepts)\n`,
+          );
+        },
+      }),
+    ),
+  );
 
   // 1) Built-in template by id — instantiate per connector.
   if (opt.scenarioTemplate) {
@@ -316,7 +369,7 @@ function runStartupScenario(
           opt.scenarioTemplate,
           connectorId,
         );
-        svc.runScenario(connectorId, scenarioId);
+        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
@@ -350,7 +403,7 @@ function runStartupScenario(
       try {
         const instance = instantiateTemplate(template, connectorId);
         const scenarioId = svc.loadScenario(connectorId, instance);
-        svc.runScenario(connectorId, scenarioId);
+        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
@@ -388,7 +441,7 @@ function runStartupScenario(
             ? definition
             : instantiateTemplate(definition, connectorId);
         const scenarioId = svc.loadScenario(connectorId, instance);
-        svc.runScenario(connectorId, scenarioId);
+        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
         );

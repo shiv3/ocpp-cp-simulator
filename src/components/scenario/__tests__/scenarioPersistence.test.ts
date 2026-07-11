@@ -259,6 +259,53 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
       }),
     ).toBe(false);
   });
+
+  it("does not arm autosave suppression when a delayed apply persist rejects (#101 / #165)", async () => {
+    // ScenarioEditor arms the applied-scenario autosave suppression only in
+    // persistEditorScenario(...).then(...). If the replace rejects, arm() must
+    // never run — otherwise the 400ms fallback autosave matches the
+    // fingerprint, clears the marker, skips its write, and silently drops the
+    // imported/template scenario.
+    const imported = {
+      ...scenario("imported"),
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const remote = makeRemoteStyleService([scenario("old")]);
+    const gate = deferred();
+    remote.service.replaceConnectorScenarioDefinitions.mockImplementationOnce(
+      () => gate.promise as unknown as Promise<readonly ScenarioDefinition[]>,
+    );
+
+    let armed: Parameters<typeof shouldSuppressAppliedScenarioAutosave>[0] =
+      null;
+    const apply = persistEditorScenario(
+      {
+        mode: "remote",
+        chargePointService: remote.service,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      imported,
+    )
+      .then(() => {
+        armed = {
+          scenarioId: imported.id,
+          updatedAt: imported.updatedAt,
+          fingerprint: scenarioAutosaveSuppressionFingerprint(imported),
+        };
+      })
+      .catch(() => {
+        /* apply failed → suppression intentionally left unarmed */
+      });
+
+    gate.reject(new Error("replace failed"));
+    await apply;
+    await flushPromises();
+
+    expect(armed).toBeNull();
+    // Unarmed suppression → the fallback autosave is free to persist the import.
+    expect(shouldSuppressAppliedScenarioAutosave(armed, imported)).toBe(false);
+  });
 });
 
 describe("saveEditorScenario (single definition upsert)", () => {
@@ -423,6 +470,99 @@ describe("createLatestWinsSaver", () => {
     gates[1].resolve();
     await saveB;
     expect(persisted).toEqual(["B"]);
+  });
+});
+
+describe("shouldSuppressAppliedScenarioAutosave (fingerprint guard)", () => {
+  it("returns true for identical scenario (unedited after apply)", () => {
+    const applied = {
+      ...scenario("applied-1"),
+      name: "Applied Scenario",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const suppression = {
+      scenarioId: applied.id,
+      updatedAt: applied.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+    };
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, applied)).toBe(
+      true,
+    );
+  });
+
+  it("returns false when scenario name changes (real user edit)", () => {
+    const applied = {
+      ...scenario("applied-1"),
+      name: "Original Name",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const suppression = {
+      scenarioId: applied.id,
+      updatedAt: applied.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+    };
+    const edited = {
+      ...applied,
+      name: "Edited Name",
+    };
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, edited)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when a node property changes", () => {
+    const applied = {
+      ...scenario("applied-1"),
+      updatedAt: "2026-06-30T00:00:00.000Z",
+      nodes: [
+        {
+          id: "node-1",
+          type: "start",
+          position: { x: 0, y: 0 },
+          data: { label: "Start" },
+        },
+      ],
+    } as unknown as ScenarioDefinition;
+    const suppression = {
+      scenarioId: applied.id,
+      updatedAt: applied.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+    };
+    const edited = {
+      ...applied,
+      nodes: [
+        {
+          id: "node-1",
+          type: "start",
+          position: { x: 100, y: 100 },
+          data: { label: "Start Modified" },
+        },
+      ],
+    } as unknown as ScenarioDefinition;
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, edited)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when null suppression record is passed", () => {
+    const scenario1 = scenario("any-scenario");
+    expect(shouldSuppressAppliedScenarioAutosave(null, scenario1)).toBe(false);
+  });
+
+  it("returns false when scenario id differs from suppression record", () => {
+    const suppression = {
+      scenarioId: "other-id",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+      fingerprint: "some-fingerprint",
+    };
+    const applied = scenario("applied-1");
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, applied)).toBe(
+      false,
+    );
   });
 });
 

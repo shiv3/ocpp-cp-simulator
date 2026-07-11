@@ -1463,8 +1463,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               <>
                 <span className="text-muted shrink-0">·</span>
                 <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
-                  {nodes.find((n) => n.id === executionContext.currentNodeId)
-                    ?.data?.label || executionContext.currentNodeId}
+                  {String(
+                    nodes.find((n) => n.id === executionContext.currentNodeId)
+                      ?.data?.label || executionContext.currentNodeId,
+                  )}
                 </span>
               </>
             )}

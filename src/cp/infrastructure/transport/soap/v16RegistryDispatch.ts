@@ -3,6 +3,7 @@ import { Logger } from "../../../shared/Logger";
 import type {
   SoapOperation,
   SoapParsedPayload,
+  SoapParsedValue,
   SoapPayload,
 } from "./soapEnvelope";
 import type { SoapDialect } from "./dialect";
@@ -173,19 +174,52 @@ function getSchemaForOperation(operation: SoapOperation): {
   };
 }
 
+/** True only for plain objects — excludes null and arrays. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /**
- * Coerce SOAP-parsed payload (all strings from fast-xml-parser) to proper types
- * according to the v16 JSON schema for the operation.
+ * Coerce a single SOAP-parsed value (a string, or a fast-xml-parser
+ * object/array of them) to the type its JSON schema node declares.
  *
- * Schema walk rules:
- * - "integer"/"number" fields: Number(value) if value is a string
- * - "boolean" fields: value === "true"
- * - array fields: if schema expects array but payload has single object/string,
- *   wrap in [ ]
- * - nested objects: recurse
- * - unknown keys: pass through untouched
- *
- * Returns the coerced payload object, ready for handler dispatch.
+ * - integer/number: Number(string)
+ * - boolean: "true" → true
+ * - array: normalize a lone element to a 1-tuple, then coerce EACH element
+ *   through `items` (so nested numeric fields inside e.g. chargingSchedulePeriod
+ *   or localAuthorizationList are converted, not left as strings)
+ * - object: recurse ONLY for a plain record (null/arrays pass through untouched
+ *   rather than throwing or being walked as index-keyed records)
+ */
+function coerceValueWithSchema(
+  value: SoapParsedValue,
+  schema: Record<string, unknown> | undefined,
+): unknown {
+  if (!schema) return value;
+  const type = schema.type;
+
+  if (type === "integer" || type === "number") {
+    return typeof value === "string" ? Number(value) : value;
+  }
+  if (type === "boolean") {
+    return value === "true" || value === true;
+  }
+  if (type === "array") {
+    if (value === undefined || value === null) return value;
+    const items = Array.isArray(value) ? value : [value];
+    const itemSchema = schema.items as Record<string, unknown> | undefined;
+    return items.map((item) => coerceValueWithSchema(item, itemSchema));
+  }
+  if (type === "object" && isPlainRecord(value)) {
+    return coerceSoapPayloadWithSchema(value as SoapParsedPayload, schema);
+  }
+  return value;
+}
+
+/**
+ * Coerce a SOAP-parsed payload (all strings from fast-xml-parser) to proper
+ * types according to the v16 JSON schema for the operation. Unknown keys pass
+ * through untouched. Returns the coerced object, ready for handler dispatch.
  */
 export function coerceSoapPayloadWithSchema(
   payload: SoapParsedPayload,
@@ -201,40 +235,9 @@ export function coerceSoapPayloadWithSchema(
 
   for (const [key, value] of Object.entries(payload)) {
     const propSchema = properties[key] as Record<string, unknown> | undefined;
-    if (!propSchema) {
-      // Unknown key; pass through untouched
-      coerced[key] = value;
-      continue;
-    }
-
-    const propType = propSchema.type;
-
-    if (propType === "integer") {
-      // Coerce string to number
-      coerced[key] = typeof value === "string" ? Number(value) : value;
-    } else if (propType === "number") {
-      coerced[key] = typeof value === "string" ? Number(value) : value;
-    } else if (propType === "boolean") {
-      coerced[key] = value === "true" || value === true;
-    } else if (propType === "array") {
-      // If schema says array but we got a single element, wrap it
-      if (Array.isArray(value)) {
-        coerced[key] = value;
-      } else if (value !== undefined && value !== null) {
-        coerced[key] = [value];
-      } else {
-        coerced[key] = value;
-      }
-    } else if (propType === "object" && typeof value === "object") {
-      // Recurse into nested objects
-      coerced[key] = coerceSoapPayloadWithSchema(
-        value as SoapParsedPayload,
-        propSchema,
-      );
-    } else {
-      // Default: pass through
-      coerced[key] = value;
-    }
+    coerced[key] = propSchema
+      ? coerceValueWithSchema(value, propSchema)
+      : value;
   }
 
   return coerced;

@@ -78,6 +78,8 @@ import NotificationNode from "./nodes/NotificationNode";
 import ConnectorPlugNode from "./nodes/ConnectorPlugNode";
 import RemoteStartTriggerNode from "./nodes/RemoteStartTriggerNode";
 import RemoteStopTriggerNode from "./nodes/RemoteStopTriggerNode";
+import CsmsCallTriggerNode from "./nodes/CsmsCallTriggerNode";
+import ResponseOverrideNode from "./nodes/ResponseOverrideNode";
 import StatusTriggerNode from "./nodes/StatusTriggerNode";
 import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
@@ -193,6 +195,8 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.CONNECTOR_PLUG]: ConnectorPlugNode,
   [ScenarioNodeType.REMOTE_START_TRIGGER]: RemoteStartTriggerNode,
   [ScenarioNodeType.REMOTE_STOP_TRIGGER]: RemoteStopTriggerNode,
+  [ScenarioNodeType.CSMS_CALL_TRIGGER]: CsmsCallTriggerNode,
+  [ScenarioNodeType.RESPONSE_OVERRIDE]: ResponseOverrideNode,
   [ScenarioNodeType.STATUS_TRIGGER]: StatusTriggerNode,
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
@@ -1962,6 +1966,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 icon="⏹"
               />
               <NodePaletteItem
+                type={ScenarioNodeType.CSMS_CALL_TRIGGER}
+                label="CSMS Call"
+                icon="📥"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.RESPONSE_OVERRIDE}
+                label="Override"
+                icon="🚫"
+              />
+              <NodePaletteItem
                 type={ScenarioNodeType.STATUS_NOTIFICATION}
                 label="StatusNotif"
                 icon="📡"
@@ -2199,6 +2213,24 @@ function createNodeByType(
         type,
         position,
         data: { label: "Wait for RemoteStop", timeout: 0 },
+      };
+    case ScenarioNodeType.CSMS_CALL_TRIGGER:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Wait for CSMS Call", action: "Reset", timeout: 0 },
+      };
+    case ScenarioNodeType.RESPONSE_OVERRIDE:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Response Override",
+          action: "RemoteStartTransaction",
+          status: "Rejected",
+        },
       };
     case ScenarioNodeType.STATUS_TRIGGER:
       return {

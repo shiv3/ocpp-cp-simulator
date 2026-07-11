@@ -3,12 +3,14 @@ import {
   type CancelReservationNodeData,
   type ConfigSetNodeData,
   type ConnectorPlugNodeData,
+  type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
   type DelayNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
   type RemoteStartTriggerNodeData,
   type RemoteStopTriggerNodeData,
+  type ResponseOverrideNodeData,
   type ReservationTriggerNodeData,
   type ReserveNowNodeData,
   type ScenarioNodeData,
@@ -25,6 +27,7 @@ import type { CurvePoint } from "../../../cp/domain/connector/MeterValueCurve";
 import CancelReservationForm from "./CancelReservationForm";
 import ConfigSetForm from "./ConfigSetForm";
 import ConnectorPlugForm from "./ConnectorPlugForm";
+import CsmsCallTriggerForm from "./CsmsCallTriggerForm";
 import DataTransferForm from "./DataTransferForm";
 import DelayForm from "./DelayForm";
 import EndForm from "./EndForm";
@@ -32,6 +35,7 @@ import MeterValueForm from "./MeterValueForm";
 import NotificationForm from "./NotificationForm";
 import RemoteStartTriggerForm from "./RemoteStartTriggerForm";
 import RemoteStopTriggerForm from "./RemoteStopTriggerForm";
+import ResponseOverrideForm from "./ResponseOverrideForm";
 import ReservationTriggerForm from "./ReservationTriggerForm";
 import ReserveNowForm from "./ReserveNowForm";
 import StartForm from "./StartForm";
@@ -532,6 +536,54 @@ function dataTransferFormToNodeData(
   }) as DataTransferNodeData;
 }
 
+function csmsCallTriggerNodeDataToForm(
+  nodeData: ScenarioNodeData,
+): NodeFormData {
+  return compactDefined({
+    ...baseToForm(nodeData),
+    action: (nodeData as Partial<CsmsCallTriggerNodeData>).action ?? "Reset",
+    timeout: optionalNumber(
+      (nodeData as Partial<CsmsCallTriggerNodeData>).timeout,
+    ),
+  });
+}
+
+function csmsCallTriggerFormToNodeData(
+  formData: NodeFormData,
+): CsmsCallTriggerNodeData {
+  return compactDefined({
+    ...baseFromForm(formData),
+    action: typeof formData.action === "string" ? formData.action : "Reset",
+    timeout: optionalNumber(formData.timeout),
+  }) as CsmsCallTriggerNodeData;
+}
+
+function responseOverrideNodeDataToForm(
+  nodeData: ScenarioNodeData,
+): NodeFormData {
+  return compactDefined({
+    ...baseToForm(nodeData),
+    action:
+      (nodeData as Partial<ResponseOverrideNodeData>).action ??
+      "RemoteStartTransaction",
+    status:
+      (nodeData as Partial<ResponseOverrideNodeData>).status ?? "Rejected",
+  });
+}
+
+function responseOverrideFormToNodeData(
+  formData: NodeFormData,
+): ResponseOverrideNodeData {
+  return {
+    ...baseFromForm(formData),
+    action:
+      typeof formData.action === "string"
+        ? formData.action
+        : "RemoteStartTransaction",
+    status: typeof formData.status === "string" ? formData.status : "Rejected",
+  };
+}
+
 export const NODE_FORM_REGISTRY = {
   [ScenarioNodeType.STATUS_CHANGE]: {
     title: "Status Change",
@@ -628,6 +680,18 @@ export const NODE_FORM_REGISTRY = {
     Component: UnlockOutcomeForm,
     nodeDataToForm: unlockOutcomeNodeDataToForm,
     formToNodeData: unlockOutcomeFormToNodeData,
+  },
+  [ScenarioNodeType.CSMS_CALL_TRIGGER]: {
+    title: "CSMS Call Trigger",
+    Component: CsmsCallTriggerForm,
+    nodeDataToForm: csmsCallTriggerNodeDataToForm,
+    formToNodeData: csmsCallTriggerFormToNodeData,
+  },
+  [ScenarioNodeType.RESPONSE_OVERRIDE]: {
+    title: "Response Override",
+    Component: ResponseOverrideForm,
+    nodeDataToForm: responseOverrideNodeDataToForm,
+    formToNodeData: responseOverrideFormToNodeData,
   },
   [ScenarioNodeType.CONFIG_SET]: {
     title: "Config Set",

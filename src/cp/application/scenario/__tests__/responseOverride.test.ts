@@ -16,6 +16,16 @@ function timeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+async function waitUntil(predicate: () => boolean, ms = 500): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > ms) {
+      throw new Error("Timed out waiting for predicate");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function newChargePoint(id: string): ChargePoint {
   const cp = new ChargePoint(
     id,
@@ -153,8 +163,10 @@ describe("responseOverride node (issue #110)", () => {
 
     const startPromise = executor.start();
 
-    // Give the executor time to arm the override and reach the parked state
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for the csmsCallTrigger node to attach its listener — that's
+    // when the executor has armed the override and reached the parked
+    // state (mirrors csmsCallTrigger.test.ts:98-100).
+    await waitUntil(() => cp.events.listenerCount("incomingCallReceived") > 0);
 
     // Stop the scenario while parked (the override is armed)
     executor.stop();

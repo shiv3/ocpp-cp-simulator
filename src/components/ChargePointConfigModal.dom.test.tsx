@@ -272,7 +272,7 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
       "SOAP Callback URL is required",
     );
 
-    await selectOption("ocppVersion", "OCPP 1.6J");
+    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
 
     expect(document.body.textContent).not.toContain(
       "SOAP Callback URL is required",
@@ -428,7 +428,7 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
       "SOAP Callback URL is required",
     );
 
-    await selectOption("ocppVersion", "OCPP 1.6J");
+    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
 
     expect(document.body.textContent).not.toContain(
       "SOAP Callback URL is required",
@@ -452,10 +452,36 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
       "SOAP Callback URL is required",
     );
 
-    await selectOption("ocppVersion", "OCPP 1.6J");
+    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
 
     expect(document.body.textContent).not.toContain(
       "SOAP Callback URL is required",
+    );
+  });
+
+  it("converts the Central System URL scheme to match the selected transport (#164)", async () => {
+    const rendered = await renderModal({
+      mode: "local",
+      initialConfig: baseConfig({
+        ocppVersion: "OCPP-1.6J",
+        wsURL: "ws://localhost:8080/steve/websocket/CentralSystemService/",
+      }),
+    });
+    roots.push(rendered.root);
+
+    const wsURLValue = () =>
+      (document.getElementById("wsURL") as HTMLInputElement).value;
+
+    // JSON -> SOAP: ws:// becomes http://; host/port/path preserved.
+    await selectOption("ocppVersion", "OCPP 1.2 (SOAP)");
+    expect(wsURLValue()).toBe(
+      "http://localhost:8080/steve/websocket/CentralSystemService/",
+    );
+
+    // SOAP -> JSON: http:// converts back to ws://.
+    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
+    expect(wsURLValue()).toBe(
+      "ws://localhost:8080/steve/websocket/CentralSystemService/",
     );
   });
 });

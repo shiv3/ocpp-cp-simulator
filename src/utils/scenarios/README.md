@@ -52,6 +52,10 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 | cert16-tc059-remote-start-with-profile              | TC_059   | Remote Start with Charging Profile        | SmartCharging | Send RemoteStartTransaction with attached ChargingProfile. Verify the CP accepts and starts the transaction but does not store or apply the profile (per §5.11; Core CP may ignore SmartCharging profiles).                                    |
 | cert16-tc066-get-composite-schedule                 | TC_066   | Get Composite Schedule                    | SmartCharging | Send SetChargingProfile then GetCompositeSchedule in sequence (tests dual-park re-entry). Verify both requests are accepted.                                                                                                                   |
 | cert16-tc067-clear-charging-profile                 | TC_067   | Clear Charging Profile                    | SmartCharging | Send SetChargingProfile to store a profile. Send ClearChargingProfile. Verify CP clears the profile and responds with Accepted.                                                                                                                |
+| cert16-tc044-1-firmware-update                      | TC_044.1 | Firmware Update — Download and Install    | Firmware      | CSMS sends UpdateFirmware.req. Verify CP progresses through FirmwareStatusNotification states Downloading → Downloaded → Installing → Installed (~6 seconds simulated).                                                                        |
+| cert16-tc044-2-firmware-download-failed             | TC_044.2 | Firmware Update — Download Failed         | Firmware      | Pre-arms SimulatedFirmwareUpdateFailure=DownloadFailed (one-shot config auto-cleared after next UpdateFirmware). CSMS sends UpdateFirmware.req. Verify CP sends Downloading then DownloadFailed.                                               |
+| cert16-tc044-3-firmware-install-failed              | TC_044.3 | Firmware Update — Installation Failed     | Firmware      | Pre-arms SimulatedFirmwareUpdateFailure=InstallationFailed (one-shot config auto-cleared after next UpdateFirmware). CSMS sends UpdateFirmware.req. Verify CP progresses Downloading → Downloaded → Installing → InstallationFailed.           |
+| cert16-tc045-1-get-diagnostics                      | TC_045.1 | Get Diagnostics                           | Firmware      | CSMS sends GetDiagnostics.req with an upload location. CP responds with fileName and sends DiagnosticsStatusNotification (Uploading, then Uploaded or UploadFailed depending on HTTP response).                                                |
 
 ## Numbering Note
 
@@ -85,13 +89,11 @@ When using the `responseOverride` node to arm a one-shot response override for a
 
 ## Out-of-Scope
 
-The following test cases are not yet covered by scenarios:
+The following test cases are not covered by scenarios:
 
-- **TC_007** (Cached Authorization) — No scenario-drivable authorization flow with caching infrastructure.
+- **TC_007** (Cached Authorization) — No scenario-drivable Authorize flow with cache orchestration.
 - **TC_023** (Authorize Outcome Variants) — No scenario-drivable Authorize request/response orchestration.
-- **TC_032, TC_037, TC_039** (Offline Power Failure, Offline Transactions) — No offline transaction queue or transaction replication orchestration in the scenario engine.
-- **TC_047** (Reservation Expiry) — CP core expires reservations passively. The Reserved → Available transition is not emitted as a status change; it occurs internally on TTL expiry. No observable flow for scenario verification.
-- **TC_049** (Charge-Point-Wide Reservation) — CP has no connector 0. ReserveNow requests for connectorId 0 are rejected by core. No distinct behavior to verify beyond the rejection itself.
+- **TC_032, TC_037, TC_039** (Offline Power Failure, Offline Transactions) — No offline transaction queue or transaction replication in the scenario engine.
+- **TC_047** (Reservation Expiry) — CP expires reservations passively on TTL; transition is internal, not observable as a status change.
+- **TC_049** (Charge-Point-Wide Reservation) — CP has no connector 0; ReserveNow(connectorId=0) is rejected by core; no distinct behavior to verify.
 - **TC_073–TC_088** (Security, Certificates, Key Provisioning) — TLS/PKI infrastructure and security setup are outside the requested feature profiles.
-
-Support for additional RemoteTrigger cases, SmartCharging, and Firmware Management profiles will be added in follow-up releases.

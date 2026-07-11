@@ -42,6 +42,11 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc043-3-send-local-list-failed",
   "cert16-tc043-4-send-local-list-full",
   "cert16-tc043-5-send-local-list-differential",
+  "cert16-tc048-1-reserve-now-faulted",
+  "cert16-tc048-2-reserve-now-occupied",
+  "cert16-tc048-3-reserve-now-unavailable",
+  "cert16-tc048-4-reserve-now-rejected",
+  "cert16-tc052-cancel-reservation-rejected",
 ];
 
 /** BFS from the single start node; true if any END node is reachable. */

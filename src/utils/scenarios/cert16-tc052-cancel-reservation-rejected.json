@@ -1,0 +1,49 @@
+{
+  "id": "cert16-tc052-cancel-reservation-rejected",
+  "name": "Cert 1.6 Reservation: TC_052 Cancel Reservation — Rejected",
+  "description": "Connector Available; CSMS sends CancelReservation with a reservationId that does not exist; CP core CancelReservationHandler (src/cp/infrastructure/transport/handlers/call/ReservationHandlers.ts:103) answers Rejected; no override needed.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-cancel-reservation",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Wait for CancelReservation (will be Rejected by core)",
+        "action": "CancelReservation",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    {
+      "id": "e2",
+      "source": "status-available",
+      "target": "trigger-cancel-reservation"
+    },
+    { "id": "e3", "source": "trigger-cancel-reservation", "target": "end-1" }
+  ]
+}

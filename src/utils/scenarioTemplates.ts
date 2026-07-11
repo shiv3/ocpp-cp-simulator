@@ -39,6 +39,13 @@ import cert16Tc043_3SendLocalListFailedJson from "./scenarios/cert16-tc043-3-sen
 import cert16Tc043_4SendLocalListFullJson from "./scenarios/cert16-tc043-4-send-local-list-full.json";
 import cert16Tc043_5SendLocalListDifferentialJson from "./scenarios/cert16-tc043-5-send-local-list-differential.json";
 
+// OCPP 1.6 Reservation certification scenarios (issue #110, PR 3).
+import cert16Tc048_1ReserveNowFaultedJson from "./scenarios/cert16-tc048-1-reserve-now-faulted.json";
+import cert16Tc048_2ReserveNowOccupiedJson from "./scenarios/cert16-tc048-2-reserve-now-occupied.json";
+import cert16Tc048_3ReserveNowUnavailableJson from "./scenarios/cert16-tc048-3-reserve-now-unavailable.json";
+import cert16Tc048_4ReserveNowRejectedJson from "./scenarios/cert16-tc048-4-reserve-now-rejected.json";
+import cert16Tc052CancelReservationRejectedJson from "./scenarios/cert16-tc052-cancel-reservation-rejected.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -145,6 +152,18 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc043_4SendLocalListFullJson as ScenarioDefinition),
   templateFromJson(
     cert16Tc043_5SendLocalListDifferentialJson as ScenarioDefinition,
+  ),
+
+  // OCPP 1.6 Reservation certification scenarios (issue #110, PR 3) —
+  // grouped together so they surface as a block in the template picker.
+  templateFromJson(cert16Tc048_1ReserveNowFaultedJson as ScenarioDefinition),
+  templateFromJson(cert16Tc048_2ReserveNowOccupiedJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc048_3ReserveNowUnavailableJson as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc048_4ReserveNowRejectedJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc052CancelReservationRejectedJson as ScenarioDefinition,
   ),
 ];
 

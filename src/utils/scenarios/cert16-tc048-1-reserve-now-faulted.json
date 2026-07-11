@@ -1,0 +1,80 @@
+{
+  "id": "cert16-tc048-1-reserve-now-faulted",
+  "name": "Cert 1.6 Reservation: TC_048_1 Reserve Now — Faulted",
+  "description": "Connector set to Faulted with errorCode InternalError; CSMS sends ReserveNow; CP responds with Faulted status via pre-armed response override; reset to Available.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-faulted",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Connector Faulted for Reservation Test",
+        "status": "Faulted",
+        "errorCode": "InternalError",
+        "info": "Connector faulted for reservation test"
+      }
+    },
+    {
+      "id": "arm-faulted-response",
+      "type": "responseOverride",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Arm Faulted response for ReserveNow",
+        "action": "ReserveNow",
+        "status": "Faulted"
+      }
+    },
+    {
+      "id": "trigger-reserve-now",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for ReserveNow (will be Faulted)",
+        "action": "ReserveNow",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-faulted" },
+    {
+      "id": "e2",
+      "source": "status-faulted",
+      "target": "arm-faulted-response"
+    },
+    {
+      "id": "e3",
+      "source": "arm-faulted-response",
+      "target": "trigger-reserve-now"
+    },
+    {
+      "id": "e4",
+      "source": "trigger-reserve-now",
+      "target": "status-available"
+    },
+    { "id": "e5", "source": "status-available", "target": "end-1" }
+  ]
+}

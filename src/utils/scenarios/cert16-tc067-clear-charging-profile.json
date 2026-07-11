@@ -1,0 +1,76 @@
+{
+  "id": "cert16-tc067-clear-charging-profile",
+  "name": "Cert 1.6 SmartCharging: TC_067 Clear Charging Profile",
+  "description": "SetChargingProfile then ClearChargingProfile",
+  "targetType": "chargePoint",
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "csms-set-charging-profile",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Wait for SetChargingProfile",
+        "action": "SetChargingProfile",
+        "connectorId": 0,
+        "timeout": 0
+      }
+    },
+    {
+      "id": "csms-clear-charging-profile",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for ClearChargingProfile",
+        "action": "ClearChargingProfile",
+        "connectorId": 0,
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-2",
+      "type": "delay",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Delay 2s", "delaySeconds": 2 }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    {
+      "id": "e2",
+      "source": "status-available",
+      "target": "csms-set-charging-profile"
+    },
+    {
+      "id": "e3",
+      "source": "csms-set-charging-profile",
+      "target": "csms-clear-charging-profile"
+    },
+    {
+      "id": "e4",
+      "source": "csms-clear-charging-profile",
+      "target": "delay-2"
+    },
+    { "id": "e5", "source": "delay-2", "target": "end-1" }
+  ]
+}

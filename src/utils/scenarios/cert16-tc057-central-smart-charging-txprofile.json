@@ -1,0 +1,122 @@
+{
+  "id": "cert16-tc057-central-smart-charging-txprofile",
+  "name": "Cert 1.6 SmartCharging: TC_057 Central Smart Charging — TxProfile",
+  "description": "Plugin → Preparing → tx-start(CERT057) → Charging → meter-auto(unbounded) → csmsCallTrigger(SetChargingProfile, connectorId 1, label 'Wait for SetChargingProfile (TxProfile)') → delay(10) → tx-stop → Finishing → Available → end",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Plug In", "action": "plugin" }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT057"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Unbounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 0,
+        "incrementAmount": 0,
+        "maxTime": 0,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "csms-set-charging-profile",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 650 },
+      "data": {
+        "label": "Wait for SetChargingProfile (TxProfile)",
+        "action": "SetChargingProfile",
+        "connectorId": 1,
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-10",
+      "type": "delay",
+      "position": { "x": 400, "y": 750 },
+      "data": { "label": "Delay 10s", "delaySeconds": 10 }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": { "x": 400, "y": 850 },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "status-finishing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 950 },
+      "data": { "label": "Set Finishing", "status": "Finishing" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 1050 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 1150 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "plug-in" },
+    { "id": "e2", "source": "plug-in", "target": "status-preparing" },
+    { "id": "e3", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e4", "source": "tx-start", "target": "status-charging" },
+    { "id": "e5", "source": "status-charging", "target": "meter-auto" },
+    {
+      "id": "e6",
+      "source": "meter-auto",
+      "target": "csms-set-charging-profile"
+    },
+    { "id": "e7", "source": "csms-set-charging-profile", "target": "delay-10" },
+    { "id": "e8", "source": "delay-10", "target": "tx-stop" },
+    { "id": "e9", "source": "tx-stop", "target": "status-finishing" },
+    { "id": "e10", "source": "status-finishing", "target": "status-available" },
+    { "id": "e11", "source": "status-available", "target": "end-1" }
+  ]
+}

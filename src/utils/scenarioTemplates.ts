@@ -51,6 +51,13 @@ import cert16Tc052CancelReservationRejectedJson from "./scenarios/cert16-tc052-c
 import cert16Tc054TriggerMessageJson from "./scenarios/cert16-tc054-trigger-message.json";
 import cert16Tc055TriggerMessageRejectedJson from "./scenarios/cert16-tc055-trigger-message-rejected.json";
 
+// OCPP 1.6 SmartCharging certification scenarios (issue #110, PR 4).
+import cert16Tc056CentralSmartChargingTxDefaultJson from "./scenarios/cert16-tc056-central-smart-charging-txdefault.json";
+import cert16Tc057CentralSmartChargingTxProfileJson from "./scenarios/cert16-tc057-central-smart-charging-txprofile.json";
+import cert16Tc059RemoteStartWithProfileJson from "./scenarios/cert16-tc059-remote-start-with-profile.json";
+import cert16Tc066GetCompositeScheduleJson from "./scenarios/cert16-tc066-get-composite-schedule.json";
+import cert16Tc067ClearChargingProfileJson from "./scenarios/cert16-tc067-clear-charging-profile.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -176,6 +183,18 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   // grouped together so they surface as a block in the template picker.
   templateFromJson(cert16Tc054TriggerMessageJson as ScenarioDefinition),
   templateFromJson(cert16Tc055TriggerMessageRejectedJson as ScenarioDefinition),
+
+  // OCPP 1.6 SmartCharging certification scenarios (issue #110, PR 4) —
+  // grouped together so they surface as a block in the template picker.
+  templateFromJson(
+    cert16Tc056CentralSmartChargingTxDefaultJson as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc057CentralSmartChargingTxProfileJson as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc059RemoteStartWithProfileJson as ScenarioDefinition),
+  templateFromJson(cert16Tc066GetCompositeScheduleJson as ScenarioDefinition),
+  templateFromJson(cert16Tc067ClearChargingProfileJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

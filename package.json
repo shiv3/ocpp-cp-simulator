@@ -53,7 +53,7 @@
     "ajv-draft-04": "^1.0.0",
     "eventemitter2": "^6.4.9",
     "fast-xml-parser": "^5.9.3",
-    "flowbite": "^3.1.2",
+    "flowbite": "^4.0.2",
     "flowbite-react": "^0.12.10",
     "idb-keyval": "^6.2.4",
     "jotai": "^2.12.5",

@@ -15,12 +15,14 @@ import {
   ConnectorPlugNodeData,
   RemoteStartTriggerNodeData,
   RemoteStopTriggerNodeData,
+  CsmsCallTriggerNodeData,
   StatusTriggerNodeData,
   ReserveNowNodeData,
   CancelReservationNodeData,
   ReservationTriggerNodeData,
   StatusNotificationNodeData,
   UnlockOutcomeNodeData,
+  ResponseOverrideNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
   StartTransactionOptions,
@@ -99,6 +101,9 @@ export class ScenarioExecutor {
   private remoteStopOptions: StopTransactionOptions | null = null;
   private currentNodeId: string | null = null;
   private executedNodes: string[] = [];
+  // Issue #110: track which response overrides were armed during this run,
+  // so they can be cleared when the run ends (both normal completion and stop()).
+  private armedOverrideActions: string[] = [];
 
   constructor(
     scenario: ScenarioDefinition,
@@ -162,6 +167,7 @@ export class ScenarioExecutor {
     this.executedNodes = [];
     this.stepResolve = null;
     this.pendingSteps = 0;
+    this.armedOverrideActions = [];
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
@@ -241,9 +247,18 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Scenario execution failed: ${errorMessage}`,
         "error",
       );
-    }
+    } finally {
+      // Issue #110: clear any response overrides armed during this run,
+      // both on normal completion and on stop(). Iterate through the
+      // tracking list (which was populated by executeResponseOverride)
+      // and call the clear callback for each one.
+      for (const action of this.armedOverrideActions) {
+        this.callbacks.onClearResponseOverride?.(action);
+      }
+      this.armedOverrideActions = [];
 
-    this.notifyStateChange();
+      this.notifyStateChange();
+    }
   }
 
   /**
@@ -569,6 +584,13 @@ export class ScenarioExecutor {
         );
         break;
 
+      case ScenarioNodeType.CSMS_CALL_TRIGGER:
+        await this.executeCsmsCallTrigger(
+          node.id,
+          node.data as CsmsCallTriggerNodeData,
+        );
+        break;
+
       case ScenarioNodeType.STATUS_NOTIFICATION:
         await this.executeStatusNotification(
           node.data as StatusNotificationNodeData,
@@ -577,6 +599,12 @@ export class ScenarioExecutor {
 
       case ScenarioNodeType.UNLOCK_OUTCOME:
         await this.executeUnlockOutcome(node.data as UnlockOutcomeNodeData);
+        break;
+
+      case ScenarioNodeType.RESPONSE_OVERRIDE:
+        await this.executeResponseOverride(
+          node.data as ResponseOverrideNodeData,
+        );
         break;
 
       case ScenarioNodeType.CONFIG_SET:
@@ -629,6 +657,28 @@ export class ScenarioExecutor {
     }
     this.callbacks.onSetUnlockOutcome(data.outcome);
     this.callbacks.log?.(`Connector unlockResponse → ${data.outcome}`, "info");
+  }
+
+  /** Issue #110: pre-arm a one-shot `{ status }` response override. */
+  private async executeResponseOverride(
+    data: ResponseOverrideNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onArmResponseOverride) {
+      this.callbacks.log?.(
+        "ResponseOverride: no onArmResponseOverride callback wired",
+        "warn",
+      );
+      return;
+    }
+    this.callbacks.onArmResponseOverride(data.action, data.status);
+    // Issue #110: track this action so we can clear it when the run ends.
+    if (!this.armedOverrideActions.includes(data.action)) {
+      this.armedOverrideActions.push(data.action);
+    }
+    this.callbacks.log?.(
+      `Armed response override: ${data.action} → ${data.status}`,
+      "info",
+    );
   }
 
   /** Apply a ChangeConfiguration locally via the ConfigurationStore. */
@@ -691,7 +741,7 @@ export class ScenarioExecutor {
       }
     } else if (data.action === "stop") {
       if (this.callbacks.onStopTransaction) {
-        const reason = this.remoteStopReason ?? undefined;
+        const reason = this.remoteStopReason ?? data.stopReason ?? undefined;
         const options = this.remoteStopOptions;
         this.remoteStopReason = null;
         this.remoteStopOptions = null;
@@ -1463,5 +1513,77 @@ export class ScenarioExecutor {
       new Promise<void>((resolve) => setTimeout(resolve, ms)),
       this.abortPromise,
     ]);
+  }
+
+  /**
+   * Issue #110: park the scenario until the CSMS sends `data.action`.
+   * Mirror of executeRemoteStopTrigger; the CP core handler still runs,
+   * we only synchronize on arrival and log the payload.
+   */
+  private async executeCsmsCallTrigger(
+    nodeId: string,
+    data: CsmsCallTriggerNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onWaitForCsmsCall) return;
+
+    const timeout = Math.max(0, data.timeout || 0);
+    if (!timeout || timeout === 0) {
+      const waitPromise = this.callbacks.onWaitForCsmsCall(
+        data.action,
+        timeout,
+      );
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.callbacks.log?.(`CSMS call received: ${res.action}`, "info");
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
+      return;
+    }
+
+    const startTime = Date.now();
+    const timeoutMs = timeout * 1000;
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
+      this.callbacks.onNodeProgress?.(nodeId, remaining, timeout);
+      const progressData = {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining,
+        total: timeout,
+      };
+      this.eventEmitter?.emit("nodeProgress", progressData);
+      this.eventEmitter?.emit("node.progress", progressData);
+      if (remaining <= 0) clearInterval(progressInterval);
+    }, 100);
+
+    try {
+      const waitPromise = this.callbacks.onWaitForCsmsCall(
+        data.action,
+        timeout,
+      );
+      try {
+        await this.waitWithOptionalForceSkip(
+          waitPromise.then((res) => {
+            this.callbacks.log?.(`CSMS call received: ${res.action}`, "info");
+          }),
+        );
+      } finally {
+        cancelIfCancellable(waitPromise);
+      }
+    } finally {
+      clearInterval(progressInterval);
+      this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
+      this.eventEmitter?.emit("nodeProgress", {
+        scenarioId: this.scenario.id,
+        nodeId,
+        remaining: 0,
+        total: timeout,
+      });
+    }
   }
 }

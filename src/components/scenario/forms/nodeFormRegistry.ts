@@ -3,12 +3,17 @@ import {
   type CancelReservationNodeData,
   type ConfigSetNodeData,
   type ConnectorPlugNodeData,
+  CSMS_CALL_TRIGGER_ACTIONS,
+  type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
   type DelayNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
   type RemoteStartTriggerNodeData,
   type RemoteStopTriggerNodeData,
+  RESPONSE_OVERRIDE_ACTIONS,
+  RESPONSE_OVERRIDE_STATUSES,
+  type ResponseOverrideNodeData,
   type ReservationTriggerNodeData,
   type ReserveNowNodeData,
   type ScenarioNodeData,
@@ -25,6 +30,7 @@ import type { CurvePoint } from "../../../cp/domain/connector/MeterValueCurve";
 import CancelReservationForm from "./CancelReservationForm";
 import ConfigSetForm from "./ConfigSetForm";
 import ConnectorPlugForm from "./ConnectorPlugForm";
+import CsmsCallTriggerForm from "./CsmsCallTriggerForm";
 import DataTransferForm from "./DataTransferForm";
 import DelayForm from "./DelayForm";
 import EndForm from "./EndForm";
@@ -32,6 +38,7 @@ import MeterValueForm from "./MeterValueForm";
 import NotificationForm from "./NotificationForm";
 import RemoteStartTriggerForm from "./RemoteStartTriggerForm";
 import RemoteStopTriggerForm from "./RemoteStopTriggerForm";
+import ResponseOverrideForm from "./ResponseOverrideForm";
 import ReservationTriggerForm from "./ReservationTriggerForm";
 import ReserveNowForm from "./ReserveNowForm";
 import StartForm from "./StartForm";
@@ -87,6 +94,40 @@ function asOcppStatus(value: unknown, fallback: OCPPStatus): OCPPStatus {
   return typeof value === "string" && OCPP_STATUS_VALUES.has(value)
     ? (value as OCPPStatus)
     : fallback;
+}
+
+const CSMS_CALL_TRIGGER_ACTIONS_SET = new Set<string>(
+  CSMS_CALL_TRIGGER_ACTIONS,
+);
+
+function asCsmsCallTriggerAction(
+  value: unknown,
+): (typeof CSMS_CALL_TRIGGER_ACTIONS)[number] {
+  return typeof value === "string" && CSMS_CALL_TRIGGER_ACTIONS_SET.has(value)
+    ? (value as (typeof CSMS_CALL_TRIGGER_ACTIONS)[number])
+    : "Reset";
+}
+
+const RESPONSE_OVERRIDE_ACTIONS_SET = new Set<string>(
+  RESPONSE_OVERRIDE_ACTIONS,
+);
+
+function asResponseOverrideAction(
+  value: unknown,
+): (typeof RESPONSE_OVERRIDE_ACTIONS)[number] {
+  return typeof value === "string" && RESPONSE_OVERRIDE_ACTIONS_SET.has(value)
+    ? (value as (typeof RESPONSE_OVERRIDE_ACTIONS)[number])
+    : "RemoteStartTransaction";
+}
+
+function asResponseOverrideStatus(
+  value: unknown,
+  action: (typeof RESPONSE_OVERRIDE_ACTIONS)[number],
+): string {
+  const validStatuses = RESPONSE_OVERRIDE_STATUSES[action];
+  return typeof value === "string" && validStatuses.includes(value)
+    ? value
+    : validStatuses[0];
 }
 
 function baseToForm(nodeData: ScenarioNodeData): NodeFormData {
@@ -532,6 +573,57 @@ function dataTransferFormToNodeData(
   }) as DataTransferNodeData;
 }
 
+function csmsCallTriggerNodeDataToForm(
+  nodeData: ScenarioNodeData,
+): NodeFormData {
+  return compactDefined({
+    ...baseToForm(nodeData),
+    action: asCsmsCallTriggerAction(
+      (nodeData as Partial<CsmsCallTriggerNodeData>).action,
+    ),
+    timeout: optionalNumber(
+      (nodeData as Partial<CsmsCallTriggerNodeData>).timeout,
+    ),
+  });
+}
+
+function csmsCallTriggerFormToNodeData(
+  formData: NodeFormData,
+): CsmsCallTriggerNodeData {
+  return compactDefined({
+    ...baseFromForm(formData),
+    action: asCsmsCallTriggerAction(formData.action),
+    timeout: optionalNumber(formData.timeout),
+  }) as CsmsCallTriggerNodeData;
+}
+
+function responseOverrideNodeDataToForm(
+  nodeData: ScenarioNodeData,
+): NodeFormData {
+  const action = asResponseOverrideAction(
+    (nodeData as Partial<ResponseOverrideNodeData>).action,
+  );
+  return compactDefined({
+    ...baseToForm(nodeData),
+    action,
+    status: asResponseOverrideStatus(
+      (nodeData as Partial<ResponseOverrideNodeData>).status,
+      action,
+    ),
+  });
+}
+
+function responseOverrideFormToNodeData(
+  formData: NodeFormData,
+): ResponseOverrideNodeData {
+  const action = asResponseOverrideAction(formData.action);
+  return {
+    ...baseFromForm(formData),
+    action,
+    status: asResponseOverrideStatus(formData.status, action),
+  };
+}
+
 export const NODE_FORM_REGISTRY = {
   [ScenarioNodeType.STATUS_CHANGE]: {
     title: "Status Change",
@@ -628,6 +720,18 @@ export const NODE_FORM_REGISTRY = {
     Component: UnlockOutcomeForm,
     nodeDataToForm: unlockOutcomeNodeDataToForm,
     formToNodeData: unlockOutcomeFormToNodeData,
+  },
+  [ScenarioNodeType.CSMS_CALL_TRIGGER]: {
+    title: "CSMS Call Trigger",
+    Component: CsmsCallTriggerForm,
+    nodeDataToForm: csmsCallTriggerNodeDataToForm,
+    formToNodeData: csmsCallTriggerFormToNodeData,
+  },
+  [ScenarioNodeType.RESPONSE_OVERRIDE]: {
+    title: "Response Override",
+    Component: ResponseOverrideForm,
+    nodeDataToForm: responseOverrideNodeDataToForm,
+    formToNodeData: responseOverrideFormToNodeData,
   },
   [ScenarioNodeType.CONFIG_SET]: {
     title: "Config Set",

@@ -1,0 +1,49 @@
+{
+  "id": "cert16-tc019-get-configuration-key",
+  "name": "Cert 1.6 Core: TC_019_2 Retrieve Specific Configuration Key",
+  "description": "CSMS sends GetConfiguration requesting a specific key (e.g., HeartbeatInterval). CP retrieves and returns the requested configuration value.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-get-config",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Wait for GetConfiguration (specific key)",
+        "action": "GetConfiguration",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    {
+      "id": "e2",
+      "source": "status-available",
+      "target": "trigger-get-config"
+    },
+    { "id": "e3", "source": "trigger-get-config", "target": "end-1" }
+  ]
+}

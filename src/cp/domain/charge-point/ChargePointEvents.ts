@@ -54,6 +54,14 @@ export interface ChargePointEvents {
     connectorId: number;
     transactionId: number;
   };
+  /** Emitted for every CSMS-initiated CALL as it enters the dispatch
+   *  layer, before (and regardless of) handler execution or a response
+   *  override. Lets scenario csmsCallTrigger nodes park on arbitrary
+   *  incoming actions without per-action wiring (issue #110). */
+  incomingCallReceived: {
+    action: string;
+    payload: unknown;
+  };
   transactionStarted: {
     connectorId: number;
     transactionId: number;

@@ -1,0 +1,64 @@
+{
+  "id": "cert16-tc042-2-get-local-list-version-empty",
+  "name": "Cert 1.6 LocalList: TC_042_2 Get Local List Version — Empty List",
+  "description": "Local list enabled; CSMS sends GetLocalListVersion; fresh CP returns listVersion 0.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "config-enable-list",
+      "type": "configSet",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Enable LocalAuthListEnabled",
+        "key": "LocalAuthListEnabled",
+        "value": "true"
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-get-local-list",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for GetLocalListVersion",
+        "action": "GetLocalListVersion",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "config-enable-list" },
+    {
+      "id": "e2",
+      "source": "config-enable-list",
+      "target": "status-available"
+    },
+    {
+      "id": "e3",
+      "source": "status-available",
+      "target": "trigger-get-local-list"
+    },
+    { "id": "e4", "source": "trigger-get-local-list", "target": "end-1" }
+  ]
+}

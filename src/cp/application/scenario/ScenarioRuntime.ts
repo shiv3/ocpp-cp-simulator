@@ -270,6 +270,75 @@ const waitForRemoteStop = (
   };
 };
 
+/** Issue #110: generic wait for any incoming CSMS CALL by action name.
+ *  Subscribes to the `incomingCallReceived` event emitted by the message
+ *  dispatch layer. Unlike waitForRemoteStop this does NOT register any
+ *  scenario handler — the CP core handler for the action still runs. */
+const waitForCsmsCall = (
+  chargePoint: ChargePoint,
+  action: string,
+  timeout?: number,
+): CancellableWait<{ action: string; payload: unknown }> => {
+  // Fail-fast if this transport can never receive CSMS-initiated calls.
+  if (!chargePoint.canReceiveCsmsCall(action)) {
+    const errorMsg =
+      `csmsCallTrigger(${action}) requires a transport that can receive ` +
+      `CSMS-initiated calls; this charge point cannot — the scenario ` +
+      `would wait forever`;
+    return {
+      promise: Promise.reject(new Error(errorMsg)),
+      cancel: () => {},
+    };
+  }
+
+  let cleanupFn: (() => void) | null = null;
+
+  const promise = new Promise<{ action: string; payload: unknown }>(
+    (resolve, reject) => {
+      let timeoutId: NodeJS.Timeout | null = null;
+      let settled = false;
+
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        chargePoint.events.off("incomingCallReceived", handler);
+        chargePoint.events.off("disconnected", disconnectHandler);
+      };
+
+      cleanupFn = cleanup;
+
+      const handler = (data: { action: string; payload: unknown }) => {
+        if (data.action !== action) return;
+        cleanup();
+        resolve(data);
+      };
+
+      const disconnectHandler = () => {
+        cleanup();
+        reject(new Error(`Disconnected while waiting for CSMS call ${action}`));
+      };
+
+      chargePoint.events.on("incomingCallReceived", handler);
+      chargePoint.events.on("disconnected", disconnectHandler);
+
+      if (timeout && timeout > 0) {
+        timeoutId = setTimeout(() => {
+          cleanup();
+          reject(
+            new Error(`Timeout waiting for CSMS call ${action} (${timeout}s)`),
+          );
+        }, timeout * 1000);
+      }
+    },
+  );
+
+  return {
+    promise,
+    cancel: () => cleanupFn?.(),
+  };
+};
+
 const waitForReservation = (
   chargePoint: ChargePoint,
   connector: Connector,
@@ -489,6 +558,9 @@ export const createScenarioExecutorCallbacks = (
         waitForRemoteStop(chargePoint, connector, timeout),
       );
     },
+    onWaitForCsmsCall: (action, timeout) => {
+      return cancellablePromise(waitForCsmsCall(chargePoint, action, timeout));
+    },
     onWaitForStatus: async (targetStatus, timeout) =>
       waitForStatus(connector, targetStatus, timeout),
     onWaitForMeterValue: async (targetValue, timeout) =>
@@ -542,6 +614,12 @@ export const createScenarioExecutorCallbacks = (
     },
     onSetUnlockOutcome: (outcome) => {
       connector.unlockResponse = outcome;
+    },
+    onArmResponseOverride: (action, status) => {
+      chargePoint.armResponseOverride(action, status);
+    },
+    onClearResponseOverride: (action) => {
+      chargePoint.clearResponseOverride(action);
     },
     onConfigSet: (key, value) => {
       chargePoint.configuration.applyChange(key, value);

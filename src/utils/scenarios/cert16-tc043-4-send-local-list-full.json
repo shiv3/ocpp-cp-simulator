@@ -1,0 +1,64 @@
+{
+  "id": "cert16-tc043-4-send-local-list-full",
+  "name": "Cert 1.6 LocalList: TC_043_4 Send Local List — Full Update",
+  "description": "Local list enabled; CSMS sends SendLocalList with Full updateType; CP stores the list and bumps its version.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "config-enable-list",
+      "type": "configSet",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Enable LocalAuthListEnabled",
+        "key": "LocalAuthListEnabled",
+        "value": "true"
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-send-local-list",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for SendLocalList (Full)",
+        "action": "SendLocalList",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "config-enable-list" },
+    {
+      "id": "e2",
+      "source": "config-enable-list",
+      "target": "status-available"
+    },
+    {
+      "id": "e3",
+      "source": "status-available",
+      "target": "trigger-send-local-list"
+    },
+    { "id": "e4", "source": "trigger-send-local-list", "target": "end-1" }
+  ]
+}

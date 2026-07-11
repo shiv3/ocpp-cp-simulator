@@ -112,6 +112,9 @@ export class ChargePoint {
   // itself — the scenario is parked on a RemoteStopTrigger node and will
   // resume into its own Transaction Stop step.
   private readonly _scenarioStopHandledConnectors: Set<number> = new Set();
+  /** One-shot canned `{ status }` responses per incoming action,
+   *  armed by a scenario responseOverride node (issue #110). */
+  private readonly _responseOverrides = new Map<string, string>();
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
@@ -607,6 +610,33 @@ export class ChargePoint {
     this._events.emit("remoteStopReceived", { connectorId, transactionId });
   }
 
+  notifyIncomingCall(action: string, payload: unknown): void {
+    this._events.emit("incomingCallReceived", { action, payload });
+  }
+
+  armResponseOverride(action: string, status: string): void {
+    this._responseOverrides.set(action, status);
+  }
+
+  /** Returns and clears the armed status for `action`, or null. */
+  consumeResponseOverride(action: string): string | null {
+    const status = this._responseOverrides.get(action);
+    if (status === undefined) return null;
+    this._responseOverrides.delete(action);
+    return status;
+  }
+
+  /** Read-only probe: is an override armed for `action`? Test/diagnostic
+   *  helper — does not consume. */
+  hasResponseOverride(action: string): boolean {
+    return this._responseOverrides.has(action);
+  }
+
+  /** Clear an armed response override. No-op if not armed. */
+  clearResponseOverride(action: string): void {
+    this._responseOverrides.delete(action);
+  }
+
   set loggingCallback(callback: (entry: LogEntry) => void) {
     this._logger._loggingCallback = callback;
   }
@@ -790,9 +820,15 @@ export class ChargePoint {
    *
    * Real charge points download a binary, install it, and reboot. The
    * simulator just walks the status machine so the CSMS observes the
-   * full happy-path. Failure paths (DownloadFailed / InstallationFailed)
-   * are reachable via TriggerMessage(FirmwareStatusNotification) for
-   * tests that want to drive them manually.
+   * full happy-path by default. Failure paths are also reachable via
+   * TriggerMessage(FirmwareStatusNotification) for tests that want to
+   * drive them manually, or pre-armed for certification scenarios (cert
+   * 1.6 Firmware TC_044_2 / TC_044_3) via the `SimulatedFirmwareUpdateFailure`
+   * custom config key (set through a scenario `configSet` node before
+   * UpdateFirmware fires): `"DownloadFailed"` diverts at the Downloaded
+   * step, `"InstallationFailed"` diverts at the Installed step. The armed
+   * value is one-shot: it is consumed and cleared on the next UpdateFirmware,
+   * so a second UpdateFirmware without re-arming will run the happy path.
    */
   simulateFirmwareUpdate(retrieveDate: Date, intervalMs = 2000): void {
     if (this._firmwareUpdateInFlight) {
@@ -808,6 +844,14 @@ export class ChargePoint {
     const sequence: Array<
       "Downloading" | "Downloaded" | "Installing" | "Installed"
     > = ["Downloading", "Downloaded", "Installing", "Installed"];
+    const failureMode = this._configuration.getString(
+      "SimulatedFirmwareUpdateFailure",
+    );
+    // One-shot: clear the armed failure immediately so the next UpdateFirmware
+    // runs the happy path unless re-armed.
+    if (failureMode) {
+      this._configuration.applyChange("SimulatedFirmwareUpdateFailure", "");
+    }
 
     const fireStep = (index: number) => {
       if (index >= sequence.length) {
@@ -815,7 +859,20 @@ export class ChargePoint {
         this._firmwareUpdateTimers = [];
         return;
       }
-      this.sendFirmwareStatusNotification(sequence[index]);
+      const step = sequence[index];
+      if (step === "Downloaded" && failureMode === "DownloadFailed") {
+        this.sendFirmwareStatusNotification("DownloadFailed");
+        this._firmwareUpdateInFlight = false;
+        this._firmwareUpdateTimers = [];
+        return;
+      }
+      if (step === "Installed" && failureMode === "InstallationFailed") {
+        this.sendFirmwareStatusNotification("InstallationFailed");
+        this._firmwareUpdateInFlight = false;
+        this._firmwareUpdateTimers = [];
+        return;
+      }
+      this.sendFirmwareStatusNotification(step);
       const t = setTimeout(() => fireStep(index + 1), intervalMs);
       this._firmwareUpdateTimers.push(t);
     };
@@ -1022,6 +1079,9 @@ export class ChargePoint {
     this._signedFirmwareUpdateInFlight = false;
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
+    // Issue #110: stale response overrides must not survive a
+    // disconnect — they would silently answer the next real CSMS call.
+    this._responseOverrides.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
     this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));

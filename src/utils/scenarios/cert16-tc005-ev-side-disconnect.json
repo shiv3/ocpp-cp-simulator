@@ -1,0 +1,100 @@
+{
+  "id": "cert16-tc005-ev-side-disconnect",
+  "name": "Cert 1.6 Core: TC_005 EV Side Disconnected",
+  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req; EV-side disconnect (plugout) → StopTransaction.req with EVDisconnected reason → StatusNotification(Available).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Plug In", "action": "plugin" }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT005"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Auto MeterValue (5s intervals, 500 Wh, 15s max)",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 15,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "Plug Out", "action": "plugout" }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": { "x": 400, "y": 750 },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop",
+        "stopReason": "EVDisconnected"
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 850 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 950 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "plug-in" },
+    { "id": "e2", "source": "plug-in", "target": "status-preparing" },
+    { "id": "e3", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e4", "source": "tx-start", "target": "status-charging" },
+    { "id": "e5", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e6", "source": "meter-auto", "target": "plug-out" },
+    { "id": "e7", "source": "plug-out", "target": "tx-stop" },
+    { "id": "e8", "source": "tx-stop", "target": "status-available" },
+    { "id": "e9", "source": "status-available", "target": "end-1" }
+  ]
+}

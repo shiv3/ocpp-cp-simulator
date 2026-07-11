@@ -47,6 +47,10 @@ import cert16Tc048_4ReserveNowRejectedJson from "./scenarios/cert16-tc048-4-rese
 import cert16Tc051CancelReservationJson from "./scenarios/cert16-tc051-cancel-reservation.json";
 import cert16Tc052CancelReservationRejectedJson from "./scenarios/cert16-tc052-cancel-reservation-rejected.json";
 
+// OCPP 1.6 RemoteTrigger certification scenarios (issue #110, PR 4).
+import cert16Tc054TriggerMessageJson from "./scenarios/cert16-tc054-trigger-message.json";
+import cert16Tc055TriggerMessageRejectedJson from "./scenarios/cert16-tc055-trigger-message-rejected.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -167,6 +171,11 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(
     cert16Tc052CancelReservationRejectedJson as ScenarioDefinition,
   ),
+
+  // OCPP 1.6 RemoteTrigger certification scenarios (issue #110, PR 4) —
+  // grouped together so they surface as a block in the template picker.
+  templateFromJson(cert16Tc054TriggerMessageJson as ScenarioDefinition),
+  templateFromJson(cert16Tc055TriggerMessageRejectedJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

@@ -1,0 +1,64 @@
+{
+  "id": "cert16-tc055-trigger-message-rejected",
+  "name": "Cert 1.6 RemoteTrigger: TC_055 Trigger Message — Rejected",
+  "description": "CSMS sends TriggerMessage. The pre-armed CP answers Rejected and sends nothing.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "arm-rejected-response",
+      "type": "responseOverride",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Arm Rejected response for TriggerMessage",
+        "action": "TriggerMessage",
+        "status": "Rejected"
+      }
+    },
+    {
+      "id": "trigger-message",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for TriggerMessage (will be Rejected)",
+        "action": "TriggerMessage",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    {
+      "id": "e2",
+      "source": "status-available",
+      "target": "arm-rejected-response"
+    },
+    {
+      "id": "e3",
+      "source": "arm-rejected-response",
+      "target": "trigger-message"
+    },
+    { "id": "e4", "source": "trigger-message", "target": "end-1" }
+  ]
+}

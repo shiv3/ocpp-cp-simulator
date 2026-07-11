@@ -48,6 +48,8 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc048-4-reserve-now-rejected",
   "cert16-tc051-cancel-reservation",
   "cert16-tc052-cancel-reservation-rejected",
+  "cert16-tc054-trigger-message",
+  "cert16-tc055-trigger-message-rejected",
 ];
 
 /** BFS from the single start node; true if any END node is reachable. */

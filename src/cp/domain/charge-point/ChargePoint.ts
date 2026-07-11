@@ -21,8 +21,12 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { isSoapVersion } from "../types/OcppVersion";
-import { soapDialectForVersion } from "../../infrastructure/transport/soap/dialect";
+import { isSoapVersion, OCPP_1_5 } from "../types/OcppVersion";
+import {
+  SOAP_OPERATION_NAMES,
+  soapDialectForVersion,
+  type SoapOperation,
+} from "../../infrastructure/transport/soap/dialect";
 import {
   BootNotification,
   ChargePointStatus,
@@ -113,6 +117,9 @@ export class ChargePoint {
   // timer fires we auto-transition the connector to Finishing.
   private readonly _connectionTimeoutTimers: Map<number, NodeJS.Timeout> =
     new Map();
+  // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
+  // send-only (browser local mode). For non-SOAP versions, always false.
+  private readonly _hasSoapCallbackUrl: boolean;
 
   constructor(
     private readonly _id: string,
@@ -141,6 +148,9 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
+    // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
+    // (server-hosted with callback) vs send-only (no callback URL).
+    this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
 
     // Setup logger callback to emit log events
     this._logger.loggingCallback = (entry) => {
@@ -441,6 +451,46 @@ export class ChargePoint {
 
   isSoapChargePoint(): boolean {
     return isSoapVersion(this._ocppVersion) && this._webSocket === null;
+  }
+
+  get ocppVersion(): string {
+    return this._ocppVersion;
+  }
+
+  /**
+   * §4.9 S3: check whether this charge point can receive a CSMS-initiated call.
+   *
+   * WebSocket versions can receive all CSMS calls. SOAP versions depend on:
+   * - Send-only (no soapCallbackUrl): cannot receive any calls (no server).
+   * - Server-hosted (with callback): depends on the version's dialect:
+   *   - OCPP-1.5: only Reset can be received (its server registry is Reset-only).
+   *   - OCPP-1.2 / 1.6S: check if the action exists in the dialect with target "cp".
+   */
+  canReceiveCsmsCall(action: string): boolean {
+    // WebSocket versions can receive all CSMS calls
+    if (!isSoapVersion(this._ocppVersion)) {
+      return true;
+    }
+
+    // SOAP versions without a callback URL (send-only, e.g. browser local mode)
+    // cannot receive any CSMS-initiated calls — there's no server to host the callback.
+    if (!this._hasSoapCallbackUrl) {
+      return false;
+    }
+
+    // SOAP with callback: consult the dialect's operationMetadata.
+    // Special case: OCPP-1.5 server registry is Reset-only.
+    if (this._ocppVersion === OCPP_1_5) {
+      return action === "Reset";
+    }
+
+    // For OCPP-1.2 / 1.6S: check if the action exists in the dialect with target "cp".
+    if (!(SOAP_OPERATION_NAMES as readonly string[]).includes(action)) {
+      return false;
+    }
+    const dialect = soapDialectForVersion(this._ocppVersion);
+    const metadata = dialect.operationMetadata[action as SoapOperation];
+    return metadata?.target === "cp";
   }
 
   get connectorNumber(): number {

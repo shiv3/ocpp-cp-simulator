@@ -1,0 +1,66 @@
+{
+  "id": "cert16-tc026-remote-start-rejected",
+  "name": "Cert 1.6 Core: TC_026 Remote Start — Rejected",
+  "description": "Connector Available; CSMS sends RemoteStartTransaction.req; CP responds with Rejected status; no transaction starts.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "arm-override",
+      "type": "responseOverride",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Arm Rejected response for RemoteStartTransaction",
+        "action": "RemoteStartTransaction",
+        "status": "Rejected"
+      }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for RemoteStartTransaction (will be Rejected)",
+        "action": "RemoteStartTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-verify",
+      "type": "delay",
+      "position": { "x": 400, "y": 450 },
+      "data": {
+        "label": "Verify no transaction starts",
+        "delaySeconds": 3
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    { "id": "e2", "source": "status-available", "target": "arm-override" },
+    { "id": "e3", "source": "arm-override", "target": "trigger-remote-start" },
+    { "id": "e4", "source": "trigger-remote-start", "target": "delay-verify" },
+    { "id": "e5", "source": "delay-verify", "target": "end-1" }
+  ]
+}

@@ -27,6 +27,8 @@ import cert16Tc031UnlockUnknownJson from "./scenarios/cert16-tc031-unlock-unknow
 import cert16Tc061ClearCacheJson from "./scenarios/cert16-tc061-clear-cache.json";
 import cert16Tc064DataTransferJson from "./scenarios/cert16-tc064-data-transfer.json";
 import cert16Tc024LockFailureJson from "./scenarios/cert16-tc024-lock-failure.json";
+import cert16Tc026RemoteStartRejectedJson from "./scenarios/cert16-tc026-remote-start-rejected.json";
+import cert16Tc028RemoteStopRejectedJson from "./scenarios/cert16-tc028-remote-stop-rejected.json";
 import cert16ReservationBasicJson from "./scenarios/cert16-reservation-basic.json";
 
 export interface ScenarioTemplate {
@@ -113,6 +115,8 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc019GetConfigKeyJson as ScenarioDefinition),
   templateFromJson(cert16Tc021ChangeConfigJson as ScenarioDefinition),
   templateFromJson(cert16Tc024LockFailureJson as ScenarioDefinition),
+  templateFromJson(cert16Tc026RemoteStartRejectedJson as ScenarioDefinition),
+  templateFromJson(cert16Tc028RemoteStopRejectedJson as ScenarioDefinition),
   templateFromJson(cert16Tc031UnlockUnknownJson as ScenarioDefinition),
   templateFromJson(cert16Tc061ClearCacheJson as ScenarioDefinition),
   templateFromJson(cert16Tc064DataTransferJson as ScenarioDefinition),

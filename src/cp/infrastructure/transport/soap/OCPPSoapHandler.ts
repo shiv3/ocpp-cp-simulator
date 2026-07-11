@@ -53,11 +53,14 @@ import {
   type SoapParsedValue,
   type SoapPayload,
 } from "./soapEnvelope";
+import type { SoapDialect } from "./dialect";
+import { OCPP15_DIALECT } from "./dialect";
 
 export interface OCPPSoapHandlerOptions {
   readonly centralSystemUrl: string;
   readonly soapCallbackUrl: string;
   readonly requestTimeoutMs?: number;
+  readonly dialect?: SoapDialect;
 }
 
 type BootStatus =
@@ -406,12 +409,15 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   private readonly _dataTransferHandler = new DataTransferHandler();
   private _bootStatus: BootStatus = { status: "Idle" };
   private _requestChain: Promise<void> = Promise.resolve();
+  private readonly _dialect: SoapDialect;
 
   constructor(
     private readonly _chargePoint: ChargePoint,
     private readonly _logger: Logger,
     private readonly _options: OCPPSoapHandlerOptions,
-  ) {}
+  ) {
+    this._dialect = this._options.dialect ?? OCPP15_DIALECT;
+  }
 
   public sendBootNotification(bootPayload: BootNotification): void {
     this.enqueueRequest("BootNotification", soapPayload(bootPayload), (env) =>
@@ -706,8 +712,13 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       from: this._options.soapCallbackUrl,
       to: this._options.centralSystemUrl,
       payload,
+      dialect: this._dialect,
     });
-    const contentType = soapContentTypeForOperation(operation);
+    const contentType = soapContentTypeForOperation(
+      operation,
+      "request",
+      this._dialect,
+    );
 
     this._logger.info(`SOAP POST ${operation}: ${xml}`, LogType.OCPP);
     this._chargePoint.notifyOutgoingCall(operation === "Heartbeat");
@@ -752,7 +763,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       LogType.OCPP,
     );
 
-    const envelope = parseSoapEnvelope(responseText);
+    const envelope = parseSoapEnvelope(responseText, this._dialect);
     if (envelope.kind !== "response") {
       throw new Error(`SOAP ${operation} expected a response envelope`);
     }

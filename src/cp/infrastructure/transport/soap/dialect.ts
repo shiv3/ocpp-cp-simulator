@@ -148,7 +148,9 @@ export const OCPP15_DIALECT: SoapDialect = {
   operationMetadata: buildOcpp15OperationMetadata(),
 };
 
-export function soapDialectForVersion(version: OcppVersion): SoapDialect {
+export function soapDialectForVersion(
+  version: string | OcppVersion,
+): SoapDialect {
   if (version === OCPP_1_5) {
     return OCPP15_DIALECT;
   }

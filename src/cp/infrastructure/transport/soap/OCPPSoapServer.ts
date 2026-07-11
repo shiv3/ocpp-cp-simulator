@@ -2,7 +2,6 @@ import type { ChargePointResetType } from "../../../domain/charge-point/ChargePo
 import {
   buildSoapEnvelope,
   buildSoapFaultEnvelope,
-  OCPP15_SOAP_NAMESPACES,
   parseSoapEnvelope,
   soapContentTypeForOperation,
   soapFaultContentType,
@@ -12,11 +11,13 @@ import {
   type SoapParsedValue,
   type SoapPayload,
 } from "./soapEnvelope";
+import type { SoapDialect } from "./dialect";
+import { OCPP15_DIALECT } from "./dialect";
 
 export interface OCPPSoapServerTarget {
   readonly cpId: string;
   readonly applyRemoteReset: (type: ChargePointResetType) => void;
-  readonly isRegisteredOcpp15Soap: () => boolean;
+  readonly isRegisteredSoapChargePoint: () => boolean;
 }
 
 export interface OCPP15SoapInboundContext {
@@ -59,18 +60,21 @@ export class OCPPSoapFaultError extends Error {
 
 export class OCPPSoapServer {
   private readonly registry: OCPP15SoapInboundRegistry;
+  private readonly dialect: SoapDialect;
 
   constructor(
     private readonly target: OCPPSoapServerTarget,
     registry: OCPP15SoapInboundRegistry = buildOCPP15SoapInboundRegistry(),
+    dialect: SoapDialect = OCPP15_DIALECT,
   ) {
     this.registry = registry;
+    this.dialect = dialect;
   }
 
   handleRequest(pathCpId: string, xml: string): Response {
     let envelope: ParsedSoapEnvelope;
     try {
-      envelope = parseSoapEnvelope(xml);
+      envelope = parseSoapEnvelope(xml, this.dialect);
       this.assertRequestForTarget(pathCpId, envelope);
 
       const handler = this.registry.get(envelope.operation);
@@ -93,6 +97,7 @@ export class OCPPSoapServer {
         to: responseToAddress(envelope),
         relatesTo: envelope.messageId,
         payload: result.payload,
+        dialect: this.dialect,
       });
       result.afterResponse?.();
       return new Response(responseXml, {
@@ -101,6 +106,7 @@ export class OCPPSoapServer {
           "content-type": soapContentTypeForOperation(
             envelope.operation,
             "response",
+            this.dialect,
           ),
         },
       });
@@ -116,18 +122,18 @@ export class OCPPSoapServer {
     pathCpId: string,
     envelope: ParsedSoapEnvelope,
   ): void {
-    if (!this.target.isRegisteredOcpp15Soap()) {
+    if (!this.target.isRegisteredSoapChargePoint()) {
       throw new OCPPSoapFaultError(
-        "SOAP ChargePointService target is not a registered OCPP 1.5 SOAP charge point",
+        "SOAP ChargePointService target is not a registered SOAP charge point",
         403,
       );
     }
     if (envelope.kind !== "request") {
       throw new OCPPSoapFaultError("SOAP ChargePointService expects a request");
     }
-    if (envelope.namespace !== OCPP15_SOAP_NAMESPACES.CP) {
+    if (envelope.namespace !== this.dialect.namespaces.CP) {
       throw new OCPPSoapFaultError(
-        `SOAP ChargePointService namespace must be ${OCPP15_SOAP_NAMESPACES.CP}`,
+        `SOAP ChargePointService namespace must be ${this.dialect.namespaces.CP}`,
       );
     }
     if (!envelope.chargeBoxIdentity) {

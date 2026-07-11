@@ -9,6 +9,7 @@ import {
   OCPPStatus,
   type StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
+import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import type {
   ChargePointEvent,
   ChargePointService,
@@ -871,7 +872,7 @@ export class LocalChargePointService implements ChargePointService {
   private buildChargePoint(
     definition: LocalChargePointDefinition,
   ): ChargePoint {
-    if (definition.ocppVersion === "OCPP-1.5") {
+    if (isSoapVersion(definition.ocppVersion)) {
       throw new UnsupportedFeatureError(
         "browser_soap_unsupported",
         BROWSER_SOAP_UNSUPPORTED_MESSAGE,

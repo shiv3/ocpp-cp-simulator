@@ -241,7 +241,7 @@ describe("httpServer OCPP 1.5 SOAP ChargePointService", () => {
 
       expect(res.status).toBe(400);
       expect(body).toContain("<s:Fault>");
-      expect(body).toContain("not configured for OCPP 1.5 SOAP");
+      expect(body).toContain("not configured for OCPP SOAP");
     } finally {
       registry.shutdownAll();
     }

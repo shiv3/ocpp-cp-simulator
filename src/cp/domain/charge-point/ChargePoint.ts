@@ -21,7 +21,8 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { OCPP_1_5 } from "../types/OcppVersion";
+import { isSoapVersion } from "../types/OcppVersion";
+import { soapDialectForVersion } from "../../infrastructure/transport/soap/dialect";
 import {
   BootNotification,
   ChargePointStatus,
@@ -208,17 +209,19 @@ export class ChargePoint {
       this._connectors.set(connectorId, connector);
     }
 
-    if (this._ocppVersion === OCPP_1_5) {
+    if (isSoapVersion(this._ocppVersion)) {
       if (!transportOptions.soapCallbackUrl) {
         throw new Error(
-          "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
+          "OCPP SOAP versions require soapCallbackUrl (--soap-callback-url)",
         );
       }
       this._webSocket = null;
+      const dialect = soapDialectForVersion(this._ocppVersion);
       this._messageHandler = new OCPPSoapHandler(this, this._logger, {
         centralSystemUrl: this._transportUrl,
         soapCallbackUrl: transportOptions.soapCallbackUrl,
         requestTimeoutMs: transportOptions.soapRequestTimeoutMs,
+        dialect,
       });
     } else {
       this._webSocket = new OCPPWebSocket(
@@ -441,8 +444,8 @@ export class ChargePoint {
     return this._webSocket?.isOpenOrConnecting() ?? false;
   }
 
-  isOcpp15SoapChargePoint(): boolean {
-    return this._ocppVersion === OCPP_1_5 && this._webSocket === null;
+  isSoapChargePoint(): boolean {
+    return isSoapVersion(this._ocppVersion) && this._webSocket === null;
   }
 
   get connectorNumber(): number {
@@ -989,9 +992,9 @@ export class ChargePoint {
     type: ChargePointResetType,
     source: ChargePointResetSource = "ocpp-call",
   ): void {
-    if (source === "ocpp15-soap" && !this.isOcpp15SoapChargePoint()) {
+    if (source === "ocpp15-soap" && !this.isSoapChargePoint()) {
       this._logger.warn(
-        "Ignoring SOAP Reset for a charge point that is not registered as OCPP 1.5 SOAP",
+        "Ignoring SOAP Reset for a charge point that is not registered as a SOAP charge point",
         LogType.OCPP,
       );
       return;

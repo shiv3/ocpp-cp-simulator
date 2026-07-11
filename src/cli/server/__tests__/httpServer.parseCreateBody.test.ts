@@ -13,7 +13,11 @@ function createBody(ocppVersion: string) {
     wsUrl: "ws://127.0.0.1:9000/ocpp",
     ocppVersion,
   };
-  if (ocppVersion === "OCPP-1.5") {
+  if (
+    ocppVersion === "OCPP-1.2" ||
+    ocppVersion === "OCPP-1.5" ||
+    ocppVersion === "OCPP-1.6S"
+  ) {
     body.soapCallbackUrl =
       "http://127.0.0.1:9700/ocpp/soap/CP-1/ChargePointService";
   }
@@ -21,17 +25,21 @@ function createBody(ocppVersion: string) {
 }
 
 describe("parseCreateBody ocppVersion", () => {
-  it.each(["OCPP-1.5", "OCPP-1.6J", "OCPP-2.0.1", "OCPP-2.1"])(
-    "accepts %s",
-    (ocppVersion) => {
-      expect(parseCreateBody(createBody(ocppVersion)).ocppVersion).toBe(
-        ocppVersion,
-      );
-    },
-  );
+  it.each([
+    "OCPP-1.2",
+    "OCPP-1.5",
+    "OCPP-1.6J",
+    "OCPP-1.6S",
+    "OCPP-2.0.1",
+    "OCPP-2.1",
+  ])("accepts %s", (ocppVersion) => {
+    expect(parseCreateBody(createBody(ocppVersion)).ocppVersion).toBe(
+      ocppVersion,
+    );
+  });
 
   it("rejects unsupported versions", () => {
-    expect(() => parseCreateBody(createBody("OCPP-1.2"))).toThrow(
+    expect(() => parseCreateBody(createBody("OCPP-1.3"))).toThrow(
       "ocppVersion must be a supported OCPP version",
     );
   });
@@ -61,6 +69,26 @@ describe("parseCreateBody ocppVersion", () => {
         wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
         ocppVersion: "OCPP-1.5",
       }),
-    ).toThrow("soapCallbackUrl is required for OCPP-1.5 SOAP");
+    ).toThrow("soapCallbackUrl is required for OCPP SOAP versions");
+  });
+
+  it("rejects OCPP-1.2 without a SOAP callback URL", () => {
+    expect(() =>
+      parseCreateBody({
+        cpId: "CP-1",
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        ocppVersion: "OCPP-1.2",
+      }),
+    ).toThrow("soapCallbackUrl is required for OCPP SOAP versions");
+  });
+
+  it("rejects OCPP-1.6S without a SOAP callback URL", () => {
+    expect(() =>
+      parseCreateBody({
+        cpId: "CP-1",
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+      }),
+    ).toThrow("soapCallbackUrl is required for OCPP SOAP versions");
   });
 });

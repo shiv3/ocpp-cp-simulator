@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc057-central-smart-charging-txprofile",
   "name": "Cert 1.6 SmartCharging: TC_057 Central Smart Charging — TxProfile",
-  "description": "Plugin → Preparing → tx-start(CERT057) → Charging → meter-auto(unbounded) → csmsCallTrigger(SetChargingProfile, connectorId 1, label 'Wait for SetChargingProfile (TxProfile)') → delay(10) → tx-stop → Finishing → Available → end",
+  "description": "Charging session runs with a live transaction; CSMS sends SetChargingProfile with a TxProfile for the running transaction on connector 1. CP validates and stores the profile and applies the schedule, then the scenario stops the transaction and returns to Available.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

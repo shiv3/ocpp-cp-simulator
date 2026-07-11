@@ -28,8 +28,7 @@ export class ChargePoint {
   private _autoMeterValueIntervals: Map<number, number> = new Map();
 
   private _statusChangeCallback:
-    | ((status: string, message?: string) => void)
-    | null = null;
+    ((status: string, message?: string) => void) | null = null;
   private _availabilityChangeCallbacks: Map<
     number,
     (availability: OCPPAvailability) => void

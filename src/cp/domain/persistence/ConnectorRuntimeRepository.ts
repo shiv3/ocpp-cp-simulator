@@ -116,9 +116,7 @@ export interface ConnectorRuntimeRepository {
  * local mode, daemon started without `--state-db`). Lets the rest of the
  * code stay unconditional without sprinkling `if (repo)` everywhere.
  */
-export class NoopConnectorRuntimeRepository
-  implements ConnectorRuntimeRepository
-{
+export class NoopConnectorRuntimeRepository implements ConnectorRuntimeRepository {
   load(): ConnectorRuntimeSnapshot | null {
     return null;
   }

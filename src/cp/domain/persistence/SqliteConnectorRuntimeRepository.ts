@@ -24,9 +24,7 @@ interface ConnectorRuntimeRow {
  * shape (especially the optional reservation/stop-reason/EV fields) is
  * driven by OCPP and changes too often to track as relational columns.
  */
-export class SqliteConnectorRuntimeRepository
-  implements ConnectorRuntimeRepository
-{
+export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeRepository {
   constructor(private readonly database: Database) {}
 
   load(cpId: string, connectorId: number): ConnectorRuntimeSnapshot | null {

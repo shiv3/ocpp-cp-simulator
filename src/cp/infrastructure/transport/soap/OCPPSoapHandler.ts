@@ -67,11 +67,7 @@ type BootStatus =
   | { status: "Rejected"; retryAfter: Date };
 
 type IdTagInfoStatus =
-  | "Accepted"
-  | "Blocked"
-  | "Expired"
-  | "Invalid"
-  | "ConcurrentTx";
+  "Accepted" | "Blocked" | "Expired" | "Invalid" | "ConcurrentTx";
 
 type IdTagInfo = {
   expiryDate?: string;
@@ -82,11 +78,7 @@ type IdTagInfo = {
 type Ocpp15StopTransactionRequest = Omit<StopTransactionRequestV16, "reason">;
 
 type Ocpp15ChargePointStatus =
-  | "Available"
-  | "Occupied"
-  | "Faulted"
-  | "Unavailable"
-  | "Reserved";
+  "Available" | "Occupied" | "Faulted" | "Unavailable" | "Reserved";
 
 type Ocpp15ChargePointErrorCode =
   | "ConnectorLockFailure"

@@ -17,13 +17,10 @@ import { LogType } from "../../../../shared/Logger";
  * fetch or signature to check, so `SignatureVerified` always fires on the
  * happy path. `retries` / `retryInterval` are logged but not exercised.
  */
-export class SignedUpdateFirmwareHandler
-  implements
-    CallHandler<
-      SignedUpdateFirmwareRequestV16,
-      SignedUpdateFirmwareResponseV16
-    >
-{
+export class SignedUpdateFirmwareHandler implements CallHandler<
+  SignedUpdateFirmwareRequestV16,
+  SignedUpdateFirmwareResponseV16
+> {
   handle(
     payload: SignedUpdateFirmwareRequestV16,
     context: HandlerContext,

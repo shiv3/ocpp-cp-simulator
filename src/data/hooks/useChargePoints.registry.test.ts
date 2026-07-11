@@ -68,8 +68,7 @@ describe("useChargePoints remote registry subscription", () => {
   it("populates from snapshot, updates from registry events, and schedules no timer", async () => {
     const harness = createHookHarness();
     let registryHandler:
-      | ((event: RemoteRegistrySubscriptionEvent) => void)
-      | null = null;
+      ((event: RemoteRegistrySubscriptionEvent) => void) | null = null;
     const unsubscribe = vi.fn();
     const service = {
       listChargePoints: vi.fn(),

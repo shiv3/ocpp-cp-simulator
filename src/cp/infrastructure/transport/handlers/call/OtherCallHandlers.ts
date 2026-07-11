@@ -12,10 +12,10 @@ import type {
 import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";
 
-export class ChangeConfigurationHandler
-  implements
-    CallHandler<ChangeConfigurationRequestV16, ChangeConfigurationResponseV16>
-{
+export class ChangeConfigurationHandler implements CallHandler<
+  ChangeConfigurationRequestV16,
+  ChangeConfigurationResponseV16
+> {
   handle(
     payload: ChangeConfigurationRequestV16,
     context: HandlerContext,
@@ -37,9 +37,10 @@ export class ChangeConfigurationHandler
   }
 }
 
-export class TriggerMessageHandler
-  implements CallHandler<TriggerMessageRequestV16, TriggerMessageResponseV16>
-{
+export class TriggerMessageHandler implements CallHandler<
+  TriggerMessageRequestV16,
+  TriggerMessageResponseV16
+> {
   handle(
     payload: TriggerMessageRequestV16,
     context: HandlerContext,
@@ -109,9 +110,10 @@ export class TriggerMessageHandler
   }
 }
 
-export class ClearCacheHandler
-  implements CallHandler<ClearCacheRequestV16, ClearCacheResponseV16>
-{
+export class ClearCacheHandler implements CallHandler<
+  ClearCacheRequestV16,
+  ClearCacheResponseV16
+> {
   handle(
     payload: ClearCacheRequestV16,
     context: HandlerContext,
@@ -130,9 +132,10 @@ export class ClearCacheHandler
  * configured unlock response. The default is `Unlocked`; scenarios can
  * flip this to `UnlockFailed` or `NotSupported` to verify CSMS error paths.
  */
-export class UnlockConnectorHandler
-  implements CallHandler<UnlockConnectorRequestV16, UnlockConnectorResponseV16>
-{
+export class UnlockConnectorHandler implements CallHandler<
+  UnlockConnectorRequestV16,
+  UnlockConnectorResponseV16
+> {
   handle(
     payload: UnlockConnectorRequestV16,
     context: HandlerContext,

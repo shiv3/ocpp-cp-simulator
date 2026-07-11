@@ -2,12 +2,7 @@
 
 export type MessagePriorityEnumType = "AlwaysFront" | "InFront" | "NormalCycle";
 export type MessageStateEnumType =
-  | "Charging"
-  | "Faulted"
-  | "Idle"
-  | "Unavailable"
-  | "Suspended"
-  | "Discharging";
+  "Charging" | "Faulted" | "Idle" | "Unavailable" | "Suspended" | "Discharging";
 
 export interface GetDisplayMessagesRequestV21 {
   id?: [number, ...number[]];

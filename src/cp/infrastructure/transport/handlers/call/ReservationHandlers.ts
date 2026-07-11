@@ -12,9 +12,10 @@ import {
  * This handler processes reservation requests from the central system.
  * The reservation allows a specific ID tag to use a connector at a future time.
  */
-export class ReserveNowHandler
-  implements CallHandler<ReserveNowRequestV16, ReserveNowResponseV16>
-{
+export class ReserveNowHandler implements CallHandler<
+  ReserveNowRequestV16,
+  ReserveNowResponseV16
+> {
   handle(
     payload: ReserveNowRequestV16,
     context: HandlerContext,
@@ -70,10 +71,10 @@ export class ReserveNowHandler
  *
  * This handler processes cancellation requests for existing reservations.
  */
-export class CancelReservationHandler
-  implements
-    CallHandler<CancelReservationRequestV16, CancelReservationResponseV16>
-{
+export class CancelReservationHandler implements CallHandler<
+  CancelReservationRequestV16,
+  CancelReservationResponseV16
+> {
   handle(
     payload: CancelReservationRequestV16,
     context: HandlerContext,

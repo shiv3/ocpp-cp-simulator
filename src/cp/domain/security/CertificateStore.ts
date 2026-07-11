@@ -1,8 +1,7 @@
 import { generateCsr } from "./csr";
 
 export type RootCertificateType =
-  | "CentralSystemRootCertificate"
-  | "ManufacturerRootCertificate";
+  "CentralSystemRootCertificate" | "ManufacturerRootCertificate";
 
 export interface InstalledRootCertificate {
   type: RootCertificateType;

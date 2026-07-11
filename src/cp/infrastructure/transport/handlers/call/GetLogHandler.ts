@@ -11,9 +11,10 @@ import { LogType } from "../../../../shared/Logger";
  * — the sequence is purely timer-driven, mirroring
  * `ChargePoint.simulateFirmwareUpdate`'s fixed-interval status train.
  */
-export class GetLogHandler
-  implements CallHandler<GetLogRequestV16, GetLogResponseV16>
-{
+export class GetLogHandler implements CallHandler<
+  GetLogRequestV16,
+  GetLogResponseV16
+> {
   handle(
     payload: GetLogRequestV16,
     context: HandlerContext,

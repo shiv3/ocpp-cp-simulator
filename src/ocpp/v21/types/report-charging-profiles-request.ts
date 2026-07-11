@@ -8,10 +8,7 @@ export type ChargingProfilePurposeEnumType =
   | "PriorityCharging"
   | "LocalGeneration";
 export type ChargingProfileKindEnumType =
-  | "Absolute"
-  | "Recurring"
-  | "Relative"
-  | "Dynamic";
+  "Absolute" | "Recurring" | "Relative" | "Dynamic";
 export type RecurrencyKindEnumType = "Daily" | "Weekly";
 export type ChargingRateUnitEnumType = "W" | "A";
 export type OperationModeEnumType =

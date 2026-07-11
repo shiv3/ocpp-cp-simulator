@@ -38,9 +38,7 @@ export enum OCPPStatus {
  * `Reserved` etc. — those belong to individual connectors (id > 0).
  */
 export type ChargePointStatus =
-  | OCPPStatus.Available
-  | OCPPStatus.Unavailable
-  | OCPPStatus.Faulted;
+  OCPPStatus.Available | OCPPStatus.Unavailable | OCPPStatus.Faulted;
 
 /**
  * Returns `true` if `status` is a valid `ChargePointStatus`. Useful when

@@ -21,9 +21,7 @@ const SOC_METER_SYNC_KEY = "soc_meter_sync";
  * SoC↔Meter sync is a global UI pref shared across all CPs/connectors;
  * stored once in the `kv` table.
  */
-export class SqliteConnectorSettingsRepository
-  implements ConnectorSettingsRepository
-{
+export class SqliteConnectorSettingsRepository implements ConnectorSettingsRepository {
   // Remote-mode path: the daemon owns connector settings, so when there's
   // no DB every reader returns the default (null / empty / sync=ON) and
   // every writer is a no-op. Same shape as the legacy localStorage code

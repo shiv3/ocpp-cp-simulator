@@ -196,10 +196,10 @@ function applyProfileStatus(
  * connector defaults, ChargePointMaxProfile min-merge) is enforced
  * downstream by Connector.getActiveChargingProfile + the resolver.
  */
-export class SetChargingProfileHandler
-  implements
-    CallHandler<SetChargingProfileRequestV16, SetChargingProfileResponseV16>
-{
+export class SetChargingProfileHandler implements CallHandler<
+  SetChargingProfileRequestV16,
+  SetChargingProfileResponseV16
+> {
   handle(
     payload: SetChargingProfileRequestV16,
     context: HandlerContext,
@@ -236,8 +236,7 @@ export class SetChargingProfileHandler
       chargingRateUnit: csChargingProfiles.chargingSchedule
         .chargingRateUnit as ChargingRateUnitType,
       recurrencyKind: csChargingProfiles.recurrencyKind as
-        | RecurrencyKindType
-        | undefined,
+        RecurrencyKindType | undefined,
       validFrom: csChargingProfiles.validFrom,
       validTo: csChargingProfiles.validTo,
       chargingSchedulePeriods: periods,
@@ -286,13 +285,10 @@ export class SetChargingProfileHandler
  * even when zero profiles matched (this matches §5.4's "the CP MAY return
  * Accepted regardless of whether profiles were cleared").
  */
-export class ClearChargingProfileHandler
-  implements
-    CallHandler<
-      ClearChargingProfileRequestV16,
-      ClearChargingProfileResponseV16
-    >
-{
+export class ClearChargingProfileHandler implements CallHandler<
+  ClearChargingProfileRequestV16,
+  ClearChargingProfileResponseV16
+> {
   handle(
     payload: ClearChargingProfileRequestV16,
     context: HandlerContext,
@@ -305,8 +301,7 @@ export class ClearChargingProfileHandler
     const criteria = {
       profileId: payload.id,
       purpose: payload.chargingProfilePurpose as
-        | ChargingProfilePurposeType
-        | undefined,
+        ChargingProfilePurposeType | undefined,
       stackLevel: payload.stackLevel,
     };
     let totalCleared = 0;
@@ -387,13 +382,10 @@ function wattsToUnit(watts: number, unit: ChargingRateUnitType): number {
  * ChargePointMaxProfile (the simulator does not track parallel
  * transactions for total-power roll-up).
  */
-export class GetCompositeScheduleHandler
-  implements
-    CallHandler<
-      GetCompositeScheduleRequestV16,
-      GetCompositeScheduleResponseV16
-    >
-{
+export class GetCompositeScheduleHandler implements CallHandler<
+  GetCompositeScheduleRequestV16,
+  GetCompositeScheduleResponseV16
+> {
   handle(
     payload: GetCompositeScheduleRequestV16,
     context: HandlerContext,

@@ -13,13 +13,10 @@ import { LogType } from "../../../../shared/Logger";
  * the requested message via `queueMicrotask` so the CALLRESULT is on the
  * wire before the new CALL.
  */
-export class ExtendedTriggerMessageHandler
-  implements
-    CallHandler<
-      ExtendedTriggerMessageRequestV16,
-      ExtendedTriggerMessageResponseV16
-    >
-{
+export class ExtendedTriggerMessageHandler implements CallHandler<
+  ExtendedTriggerMessageRequestV16,
+  ExtendedTriggerMessageResponseV16
+> {
   handle(
     payload: ExtendedTriggerMessageRequestV16,
     context: HandlerContext,

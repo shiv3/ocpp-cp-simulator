@@ -2,8 +2,7 @@ import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { ReservationTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedReservationTriggerNodeData
-  extends ReservationTriggerNodeData {
+interface ExtendedReservationTriggerNodeData extends ReservationTriggerNodeData {
   progress?: {
     remaining: number;
     total: number;

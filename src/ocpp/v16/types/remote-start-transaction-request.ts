@@ -8,9 +8,7 @@ export interface RemoteStartTransactionRequestV16 {
     transactionId?: number;
     stackLevel: number;
     chargingProfilePurpose:
-      | "ChargePointMaxProfile"
-      | "TxDefaultProfile"
-      | "TxProfile";
+      "ChargePointMaxProfile" | "TxDefaultProfile" | "TxProfile";
     chargingProfileKind: "Absolute" | "Recurring" | "Relative";
     recurrencyKind?: "Daily" | "Weekly";
     validFrom?: string;

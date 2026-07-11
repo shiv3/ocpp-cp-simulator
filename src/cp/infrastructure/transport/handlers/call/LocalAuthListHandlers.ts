@@ -24,10 +24,10 @@ function maxSendLength(context: HandlerContext): number {
  * §6.10 GetLocalListVersion.req — returns the current list version, or
  * `-1` when LocalAuthListManagement is disabled in Configuration.
  */
-export class GetLocalListVersionHandler
-  implements
-    CallHandler<GetLocalListVersionRequestV16, GetLocalListVersionResponseV16>
-{
+export class GetLocalListVersionHandler implements CallHandler<
+  GetLocalListVersionRequestV16,
+  GetLocalListVersionResponseV16
+> {
   handle(
     _payload: GetLocalListVersionRequestV16,
     context: HandlerContext,
@@ -50,9 +50,10 @@ export class GetLocalListVersionHandler
  * upserts entries (and deletes those whose `idTagInfo` is omitted). The
  * CP returns `NotSupported` when LocalAuthListManagement is disabled.
  */
-export class SendLocalListHandler
-  implements CallHandler<SendLocalListRequestV16, SendLocalListResponseV16>
-{
+export class SendLocalListHandler implements CallHandler<
+  SendLocalListRequestV16,
+  SendLocalListResponseV16
+> {
   handle(
     payload: SendLocalListRequestV16,
     context: HandlerContext,
@@ -73,8 +74,7 @@ export class SendLocalListHandler
     // shape matches because idTag is a top-level required field and
     // status lives at the documented path.
     const items = payload.localAuthorizationList as
-      | SendLocalListItem[]
-      | undefined;
+      SendLocalListItem[] | undefined;
 
     const manager = context.chargePoint.localAuthListManager;
     const status =

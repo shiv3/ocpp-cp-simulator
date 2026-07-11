@@ -2,8 +2,7 @@ import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { RemoteStartTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedRemoteStartTriggerNodeData
-  extends RemoteStartTriggerNodeData {
+interface ExtendedRemoteStartTriggerNodeData extends RemoteStartTriggerNodeData {
   progress?: {
     remaining: number;
     total: number;

@@ -13,9 +13,10 @@ import { LogType } from "../../../../shared/Logger";
  * Non-HTTP schemes will throw inside `fetch` and we surface that as
  * UploadFailed.
  */
-export class GetDiagnosticsHandler
-  implements CallHandler<GetDiagnosticsRequestV16, GetDiagnosticsResponseV16>
-{
+export class GetDiagnosticsHandler implements CallHandler<
+  GetDiagnosticsRequestV16,
+  GetDiagnosticsResponseV16
+> {
   handle(
     payload: GetDiagnosticsRequestV16,
     context: HandlerContext,

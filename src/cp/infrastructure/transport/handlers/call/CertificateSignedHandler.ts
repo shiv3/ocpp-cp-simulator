@@ -14,10 +14,10 @@ x509.cryptoProvider.set(globalThis.crypto as Crypto);
 const CERTIFICATE_PEM_RE =
   /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
 
-export class CertificateSignedHandler
-  implements
-    CallHandler<CertificateSignedRequestV16, CertificateSignedResponseV16>
-{
+export class CertificateSignedHandler implements CallHandler<
+  CertificateSignedRequestV16,
+  CertificateSignedResponseV16
+> {
   handle(
     payload: CertificateSignedRequestV16,
     context: HandlerContext,

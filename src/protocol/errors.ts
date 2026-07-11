@@ -49,5 +49,4 @@ export const rpcAckSchema = z.union([
   z.object({ ok: z.literal(false), error: rpcErrorSchema }),
 ]);
 export type RpcAck<R = unknown> =
-  | { ok: true; result: R }
-  | { ok: false; error: RpcError };
+  { ok: true; result: R } | { ok: false; error: RpcError };

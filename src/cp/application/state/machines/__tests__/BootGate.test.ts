@@ -254,7 +254,9 @@ describe("BootGate", () => {
 
     it("transitions from Idle → Rejected", () => {
       const gate = new BootGate();
-      const retryAfter = new Date("2026-07-11T12:00:00Z");
+      // Relative future date: this test exercises the default-clock path of
+      // isCallAllowed, so a hardcoded date becomes a time bomb once it passes.
+      const retryAfter = new Date(Date.now() + 60_000);
       gate.set({ status: "Rejected", retryAfter });
       expect(gate.status.status).toBe("Rejected");
       expect(gate.isCallAllowed(OCPPAction.Authorize)).toBe(false);
@@ -272,7 +274,8 @@ describe("BootGate", () => {
     it("transitions from Pending → Rejected", () => {
       const gate = new BootGate();
       gate.set({ status: "Pending" });
-      const retryAfter = new Date("2026-07-11T12:00:00Z");
+      // Relative future date — same default-clock reasoning as Idle → Rejected.
+      const retryAfter = new Date(Date.now() + 60_000);
       gate.set({ status: "Rejected", retryAfter });
       expect(gate.status.status).toBe("Rejected");
       expect(gate.isCallAllowed(OCPPAction.Authorize)).toBe(false);

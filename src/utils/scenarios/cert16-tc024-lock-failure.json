@@ -28,7 +28,7 @@
         "label": "Connector Lock Failure",
         "status": "Faulted",
         "errorCode": "ConnectorLockFailure",
-        "errorInfo": "Connector lock failure, no transaction started"
+        "info": "Connector lock failure, no transaction started"
       }
     },
     {

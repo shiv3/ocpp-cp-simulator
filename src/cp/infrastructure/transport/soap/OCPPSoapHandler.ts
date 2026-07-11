@@ -30,6 +30,10 @@ import type {
 // use enum members — string-literal cases do not narrow an enum-typed value.
 import { OCPPAction, OCPPStatus } from "../../../domain/types/OcppTypes";
 import {
+  BootGate,
+  type BootGateStatus,
+} from "../../../application/state/machines/BootGate";
+import {
   projectStatusForVersion,
   projectErrorCodeForVersion,
 } from "../../../domain/types/statusProjection";
@@ -73,12 +77,6 @@ export interface OCPPSoapHandlerOptions {
   readonly requestTimeoutMs?: number;
   readonly dialect?: SoapDialect;
 }
-
-type BootStatus =
-  | { status: "Idle" }
-  | { status: "Accepted" }
-  | { status: "Pending" }
-  | { status: "Rejected"; retryAfter: Date };
 
 type IdTagInfoStatus =
   "Accepted" | "Blocked" | "Expired" | "Invalid" | "ConcurrentTx";
@@ -687,7 +685,7 @@ const OCPP16_WIRE_PROFILE: ClientWireProfile = {
 
 export class OCPPSoapHandler implements IChargePointMessageHandler {
   private readonly _dataTransferHandler = new DataTransferHandler();
-  private _bootStatus: BootStatus = { status: "Idle" };
+  private readonly _bootGate: BootGate = new BootGate();
   private _requestChain: Promise<void> = Promise.resolve();
   private readonly _dialect: SoapDialect;
   private readonly _wireProfile: ClientWireProfile;
@@ -917,8 +915,8 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     return Promise.resolve();
   }
 
-  public setBootStatus(status: BootStatus): void {
-    this._bootStatus = status;
+  public setBootStatus(status: BootGateStatus): void {
+    this._bootGate.set(status);
   }
 
   public getDataTransferHandler(): DataTransferHandler {
@@ -1009,7 +1007,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const action = OPERATION_ACTION[operation];
     if (action && !this.isCallAllowed(action)) {
       this._logger.warn(
-        `Suppressing ${operation}: blocked by boot gate (status=${this._bootStatus.status})`,
+        `Suppressing ${operation}: blocked by boot gate (status=${this._bootGate.status.status})`,
         LogType.OCPP,
       );
       return;
@@ -1180,17 +1178,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   }
 
   private isCallAllowed(action: OCPPAction): boolean {
-    if (action === OCPPAction.BootNotification) return true;
-    switch (this._bootStatus.status) {
-      case "Accepted":
-        return true;
-      case "Pending":
-        return false;
-      case "Rejected":
-        return Date.now() >= this._bootStatus.retryAfter.getTime();
-      case "Idle":
-        return false;
-    }
+    return this._bootGate.isCallAllowed(action);
   }
 
   private generateMessageId(): string {

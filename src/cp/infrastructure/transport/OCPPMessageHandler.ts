@@ -78,6 +78,7 @@ import {
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
+import { BootGate } from "../../application/state/machines/BootGate";
 
 // Import handler registry and handlers
 import {
@@ -218,11 +219,7 @@ export class OCPPMessageHandler {
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
   // arrives we restrict outgoing CALLs. The BootNotification.req itself
   // is exempt so the handshake can complete.
-  private _bootStatus:
-    | { status: "Idle" }
-    | { status: "Accepted" }
-    | { status: "Pending" }
-    | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
+  private _bootGate: BootGate = new BootGate();
 
   // §4.7/§4.8/§4.10 + errata 3.18: transaction-related messages that fail
   // to deliver are queued and retried. Persists across reboots so power
@@ -304,7 +301,7 @@ export class OCPPMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void {
-    this._bootStatus = status;
+    this._bootGate.set(status);
     if (status.status === "Accepted") {
       // Drain anything that was queued behind the boot gate while we
       // waited for BootNotification.conf. Microtask so the BootNotification
@@ -324,17 +321,7 @@ export class OCPPMessageHandler {
    * - Idle (pre-handshake): allow BootNotification only.
    */
   private isCallAllowed(action: OCPPAction): boolean {
-    if (action === OCPPAction.BootNotification) return true;
-    switch (this._bootStatus.status) {
-      case "Accepted":
-        return true;
-      case "Pending":
-        return false;
-      case "Rejected":
-        return Date.now() >= this._bootStatus.retryAfter.getTime();
-      case "Idle":
-        return false;
-    }
+    return this._bootGate.isCallAllowed(action);
   }
 
   public authorize(tagId: string): void {
@@ -636,7 +623,7 @@ export class OCPPMessageHandler {
   ): void {
     if (!this.isCallAllowed(action)) {
       this._logger.warn(
-        `Suppressing ${action}: blocked by boot gate (status=${this._bootStatus.status})`,
+        `Suppressing ${action}: blocked by boot gate (status=${this._bootGate.status.status})`,
         LogType.OCPP,
       );
       return;

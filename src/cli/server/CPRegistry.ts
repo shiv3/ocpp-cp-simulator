@@ -537,6 +537,7 @@ function readRestoredPem(cpId: string, flag: string, filePath: string): string {
     throw new Error(
       `Refusing to restore CP "${cpId}": failed to read ${flag} file ` +
         `'${filePath}': ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 }

@@ -730,7 +730,9 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       responseText = await response.text();
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error(`SOAP ${operation} timed out after ${timeoutMs}ms`);
+        throw new Error(`SOAP ${operation} timed out after ${timeoutMs}ms`, {
+          cause: error,
+        });
       }
       throw error;
     } finally {

@@ -50,6 +50,21 @@ describe("adaptCentralSystemUrlScheme (#164)", () => {
     });
   });
 
+  it("matches schemes case-insensitively (RFC 3986)", () => {
+    expect(adaptCentralSystemUrlScheme(`WS://${STEVE}`, true)).toBe(
+      `http://${STEVE}`,
+    );
+    expect(adaptCentralSystemUrlScheme(`WSS://${STEVE}`, true)).toBe(
+      `https://${STEVE}`,
+    );
+    expect(adaptCentralSystemUrlScheme(`HTTP://${STEVE}`, false)).toBe(
+      `ws://${STEVE}`,
+    );
+    expect(adaptCentralSystemUrlScheme(`HTTPS://${STEVE}`, false)).toBe(
+      `wss://${STEVE}`,
+    );
+  });
+
   it("preserves a custom URL with an unrecognised scheme", () => {
     expect(adaptCentralSystemUrlScheme("example.com/ocpp", true)).toBe(
       "example.com/ocpp",

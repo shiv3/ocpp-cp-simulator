@@ -12,12 +12,14 @@ export function adaptCentralSystemUrlScheme(
   url: string,
   toSoap: boolean,
 ): string {
+  // URL schemes are case-insensitive (RFC 3986), so match accordingly. Each
+  // prefix has the same length regardless of case, so the slice offsets hold.
   if (toSoap) {
-    if (url.startsWith("ws://")) return `http://${url.slice(5)}`;
-    if (url.startsWith("wss://")) return `https://${url.slice(6)}`;
+    if (/^ws:\/\//i.test(url)) return `http://${url.slice(5)}`;
+    if (/^wss:\/\//i.test(url)) return `https://${url.slice(6)}`;
     return url;
   }
-  if (url.startsWith("http://")) return `ws://${url.slice(7)}`;
-  if (url.startsWith("https://")) return `wss://${url.slice(8)}`;
+  if (/^http:\/\//i.test(url)) return `ws://${url.slice(7)}`;
+  if (/^https:\/\//i.test(url)) return `wss://${url.slice(8)}`;
   return url;
 }

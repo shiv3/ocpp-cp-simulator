@@ -839,7 +839,12 @@ export class OCPPMessageHandler {
         `Response override: ${action} → { status: "${overrideStatus}" }`,
         LogType.OCPP,
       );
-      this.sendCallResult(messageId, { status: overrideStatus });
+      // Response overrides intentionally carry a caller-chosen status
+      // string (e.g. "Rejected" for TC_026); the closed response union
+      // can't express that, so assert the shape at this one call site.
+      this.sendCallResult(messageId, {
+        status: overrideStatus,
+      } as OcppMessageResponsePayload);
       return;
     }
 

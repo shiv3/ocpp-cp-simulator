@@ -114,7 +114,7 @@ export class ChargePoint {
   private readonly _scenarioStopHandledConnectors: Set<number> = new Set();
   /** One-shot canned `{ status }` responses per incoming action,
    *  armed by a scenario responseOverride node (issue #110). */
-  private _responseOverrides = new Map<string, string>();
+  private readonly _responseOverrides = new Map<string, string>();
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.

@@ -27,9 +27,10 @@ export interface DataTransferResponder {
  * tests / scenarios can register custom responders without leaking state
  * between charge points.
  */
-export class DataTransferHandler
-  implements CallHandler<DataTransferRequestV16, DataTransferResponseV16>
-{
+export class DataTransferHandler implements CallHandler<
+  DataTransferRequestV16,
+  DataTransferResponseV16
+> {
   private readonly vendors = new Map<string, DataTransferResponder>();
 
   /**

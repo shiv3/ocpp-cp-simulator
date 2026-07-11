@@ -17,13 +17,10 @@ import { LogType } from "../../../../shared/Logger";
  * §5.11, a Charge Point without Smart Charging MAY ignore them.
  * SmartCharging support is wired in a later phase.
  */
-export class RemoteStartTransactionHandler
-  implements
-    CallHandler<
-      RemoteStartTransactionRequestV16,
-      RemoteStartTransactionResponseV16
-    >
-{
+export class RemoteStartTransactionHandler implements CallHandler<
+  RemoteStartTransactionRequestV16,
+  RemoteStartTransactionResponseV16
+> {
   handle(
     payload: RemoteStartTransactionRequestV16,
     context: HandlerContext,

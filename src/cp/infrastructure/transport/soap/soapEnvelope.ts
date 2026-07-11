@@ -30,8 +30,7 @@ export const BOOT_NOTIFICATION_REQUEST_FIELD_ORDER = [
 ] as const;
 
 type SoapTargetNamespace =
-  | typeof OCPP15_SOAP_NAMESPACES.CS
-  | typeof OCPP15_SOAP_NAMESPACES.CP;
+  typeof OCPP15_SOAP_NAMESPACES.CS | typeof OCPP15_SOAP_NAMESPACES.CP;
 
 export interface SoapOperationMetadata {
   readonly action: `/${string}`;

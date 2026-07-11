@@ -17,10 +17,7 @@ export type SendLocalListItem = {
 };
 
 export type SendLocalListStatus =
-  | "Accepted"
-  | "Failed"
-  | "NotSupported"
-  | "VersionMismatch";
+  "Accepted" | "Failed" | "NotSupported" | "VersionMismatch";
 
 export interface LocalAuthListLimits {
   /** Max total entries kept in the list. Mirrors LocalAuthListMaxLength. */

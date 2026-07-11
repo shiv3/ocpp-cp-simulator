@@ -487,8 +487,7 @@ export function handleGetCompositeScheduleV201(
   const chargePointMaxProfile =
     ctx.chargePoint.getActiveChargePointMaxProfile(anchor);
   const unit = (req.chargingRateUnit ?? ChargingRateUnitType.W) as
-    | ChargingRateUnitType.W
-    | ChargingRateUnitType.A;
+    ChargingRateUnitType.W | ChargingRateUnitType.A;
   const finitePeriods = buildCompositeWattsSchedule(
     { txProfile, chargePointMaxProfile },
     anchor,

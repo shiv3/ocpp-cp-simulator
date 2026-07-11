@@ -127,16 +127,13 @@ type CoreOcppMessagePayloadCall =
   | UnlockConnectorRequestV16;
 
 type FirmwareManagementOcppMessagePayloadCall =
-  | GetDiagnosticsRequestV16
-  | UpdateFirmwareRequestV16;
+  GetDiagnosticsRequestV16 | UpdateFirmwareRequestV16;
 
 type LocalAuthListManagementOcppMessagePayloadCall =
-  | GetLocalListVersionRequestV16
-  | SendLocalListRequestV16;
+  GetLocalListVersionRequestV16 | SendLocalListRequestV16;
 
 type ReservationOcppMessagePayloadCall =
-  | CancelReservationRequestV16
-  | ReserveNowRequestV16;
+  CancelReservationRequestV16 | ReserveNowRequestV16;
 
 type SmartChargingOcppMessagePayloadCall =
   | ClearChargingProfileRequestV16
@@ -709,8 +706,7 @@ export class OCPPMessageHandler {
       chargingRateUnit: csChargingProfiles.chargingSchedule
         .chargingRateUnit as ChargingRateUnitType,
       recurrencyKind: csChargingProfiles.recurrencyKind as
-        | RecurrencyKindType
-        | undefined,
+        RecurrencyKindType | undefined,
       validFrom: csChargingProfiles.validFrom,
       validTo: csChargingProfiles.validTo,
       chargingSchedulePeriods: periods,

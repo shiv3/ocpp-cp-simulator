@@ -13,10 +13,10 @@ import type {
 import { OcppConfigurationKey } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
-export class GetConfigurationHandler
-  implements
-    CallHandler<GetConfigurationRequestV16, GetConfigurationResponseV16>
-{
+export class GetConfigurationHandler implements CallHandler<
+  GetConfigurationRequestV16,
+  GetConfigurationResponseV16
+> {
   handle(
     payload: GetConfigurationRequestV16,
     context: HandlerContext,

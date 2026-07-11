@@ -78,12 +78,7 @@ export type PhaseEnumType =
   | "L2-L3"
   | "L3-L1";
 export type LocationEnumType =
-  | "Body"
-  | "Cable"
-  | "EV"
-  | "Inlet"
-  | "Outlet"
-  | "Upstream";
+  "Body" | "Cable" | "EV" | "Inlet" | "Outlet" | "Upstream";
 
 export interface MeterValuesRequestV21 {
   evseId: number;

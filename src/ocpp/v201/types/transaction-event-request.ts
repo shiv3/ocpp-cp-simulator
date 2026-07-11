@@ -71,11 +71,7 @@ export type TriggerReasonEnumType =
   | "SignedDataReceived"
   | "ResetCommand";
 export type ChargingStateEnumType =
-  | "Charging"
-  | "EVConnected"
-  | "SuspendedEV"
-  | "SuspendedEVSE"
-  | "Idle";
+  "Charging" | "EVConnected" | "SuspendedEV" | "SuspendedEVSE" | "Idle";
 export type ReasonEnumType =
   | "DeAuthorized"
   | "EmergencyStop"

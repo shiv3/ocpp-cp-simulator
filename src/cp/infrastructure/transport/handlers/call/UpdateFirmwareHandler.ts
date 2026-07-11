@@ -12,9 +12,10 @@ import { LogType } from "../../../../shared/Logger";
  * the simulated flow never fails. CSMS can still test the failure paths
  * via TriggerMessage(FirmwareStatusNotification).
  */
-export class UpdateFirmwareHandler
-  implements CallHandler<UpdateFirmwareRequestV16, UpdateFirmwareResponseV16>
-{
+export class UpdateFirmwareHandler implements CallHandler<
+  UpdateFirmwareRequestV16,
+  UpdateFirmwareResponseV16
+> {
   handle(
     payload: UpdateFirmwareRequestV16,
     context: HandlerContext,

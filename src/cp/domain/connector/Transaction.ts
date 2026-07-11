@@ -20,15 +20,10 @@ export type StopTransactionReason =
 export type TransactionStartTriggerReason = "Authorized" | "RemoteStart";
 
 export type TransactionStopTriggerReason =
-  | "EnergyLimitReached"
-  | "RemoteStop"
-  | "ResetCommand"
-  | "StopAuthorized";
+  "EnergyLimitReached" | "RemoteStop" | "ResetCommand" | "StopAuthorized";
 
 export type TransactionChargingState =
-  | "Charging"
-  | "SuspendedEV"
-  | "SuspendedEVSE";
+  "Charging" | "SuspendedEV" | "SuspendedEVSE";
 
 export interface Transaction {
   id: number | null;

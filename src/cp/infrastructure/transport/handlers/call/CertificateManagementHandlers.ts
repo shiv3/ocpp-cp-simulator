@@ -31,10 +31,10 @@ x509.cryptoProvider.set(globalThis.crypto as Crypto);
  * covers both a malformed/unparseable PEM and a full certificate store —
  * there is no dedicated status for the latter in the 1.6 whitepaper.
  */
-export class InstallCertificateHandler
-  implements
-    CallHandler<InstallCertificateRequestV16, InstallCertificateResponseV16>
-{
+export class InstallCertificateHandler implements CallHandler<
+  InstallCertificateRequestV16,
+  InstallCertificateResponseV16
+> {
   handle(
     payload: InstallCertificateRequestV16,
     context: HandlerContext,
@@ -84,13 +84,10 @@ export class InstallCertificateHandler
  * computation is async (WebCrypto digest), so the registry's dispatch
  * loop awaits `handle()` — see `MessageHandlerRegistry.CallHandler`.
  */
-export class GetInstalledCertificateIdsHandler
-  implements
-    CallHandler<
-      GetInstalledCertificateIdsRequestV16,
-      GetInstalledCertificateIdsResponseV16
-    >
-{
+export class GetInstalledCertificateIdsHandler implements CallHandler<
+  GetInstalledCertificateIdsRequestV16,
+  GetInstalledCertificateIdsResponseV16
+> {
   async handle(
     payload: GetInstalledCertificateIdsRequestV16,
     context: HandlerContext,
@@ -134,10 +131,10 @@ export class GetInstalledCertificateIdsHandler
  * against every stored root cert (across both types — the request itself
  * carries no `certificateType`) and deletes on the first match.
  */
-export class DeleteCertificateHandler
-  implements
-    CallHandler<DeleteCertificateRequestV16, DeleteCertificateResponseV16>
-{
+export class DeleteCertificateHandler implements CallHandler<
+  DeleteCertificateRequestV16,
+  DeleteCertificateResponseV16
+> {
   async handle(
     payload: DeleteCertificateRequestV16,
     context: HandlerContext,

@@ -11,9 +11,10 @@ import { LogType } from "../../../../shared/Logger";
  * We schedule the work via `queueMicrotask` so Reset.conf is flushed
  * before any StopTransaction.req goes out.
  */
-export class ResetHandler
-  implements CallHandler<ResetRequestV16, ResetResponseV16>
-{
+export class ResetHandler implements CallHandler<
+  ResetRequestV16,
+  ResetResponseV16
+> {
   handle(payload: ResetRequestV16, context: HandlerContext): ResetResponseV16 {
     context.logger.info(
       `Reset request received: ${payload.type}`,

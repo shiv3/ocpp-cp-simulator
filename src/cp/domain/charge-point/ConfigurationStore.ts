@@ -23,10 +23,7 @@ import type { Database } from "../persistence/Database";
  * OCPP 1.6 §5.3 / §7.22 ConfigurationStatus.
  */
 export type ConfigurationChangeStatus =
-  | "Accepted"
-  | "Rejected"
-  | "RebootRequired"
-  | "NotSupported";
+  "Accepted" | "Rejected" | "RebootRequired" | "NotSupported";
 
 /**
  * Subset of keys whose effects only take hold after a reboot. ChangeConfiguration

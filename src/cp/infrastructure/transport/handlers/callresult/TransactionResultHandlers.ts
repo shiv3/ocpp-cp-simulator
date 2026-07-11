@@ -3,9 +3,7 @@ import type {} from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
-export class StartTransactionResultHandler
-  implements CallResultHandler<StartTransactionResponseV16>
-{
+export class StartTransactionResultHandler implements CallResultHandler<StartTransactionResponseV16> {
   constructor(private connectorId: number) {}
 
   handle(payload: StartTransactionResponseV16, context: HandlerContext): void {
@@ -44,9 +42,7 @@ export class StartTransactionResultHandler
   }
 }
 
-export class StopTransactionResultHandler
-  implements CallResultHandler<StopTransactionResponseV16>
-{
+export class StopTransactionResultHandler implements CallResultHandler<StopTransactionResponseV16> {
   constructor(private connectorId: number) {}
 
   handle(payload: StopTransactionResponseV16, context: HandlerContext): void {
@@ -68,9 +64,7 @@ export class StopTransactionResultHandler
   }
 }
 
-export class AuthorizeResultHandler
-  implements CallResultHandler<AuthorizeResponseV16>
-{
+export class AuthorizeResultHandler implements CallResultHandler<AuthorizeResponseV16> {
   handle(payload: AuthorizeResponseV16, context: HandlerContext): void {
     const { idTagInfo } = payload;
     if (idTagInfo.status === "Accepted") {

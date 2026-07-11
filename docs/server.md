@@ -361,7 +361,7 @@ ocpp-cp-sim --daemon ...
 | `logs`               | Persisted log entries — every OCPP message, scenario step, state transition. Batched writes (50 entries / 500 ms) and trimmed to 10 k rows per CP.      |
 | `charge_points`      | Daemon-side CP registry. Re-created on restart by `CPRegistry.restoreFromDatabase` and **auto-connected**, so the CSMS sees BootNotification fly again. |
 | `charge_point_state` | Per-CP runtime flags (currently `desired_connected`). Browser local mode writes this on Connect/Disconnect so a reload restores the WebSocket.          |
-| `kv`                 | App-level prefs (global config, SoC↔Meter sync, etc.).                                                                                                 |
+| `kv`                 | App-level prefs (global config, SoC↔Meter sync, etc.).                                                                                                  |
 
 ### Reset
 

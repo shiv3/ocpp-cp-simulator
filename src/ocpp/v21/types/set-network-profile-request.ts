@@ -2,12 +2,7 @@
 
 export type APNAuthenticationEnumType = "PAP" | "CHAP" | "NONE" | "AUTO";
 export type OCPPVersionEnumType =
-  | "OCPP12"
-  | "OCPP15"
-  | "OCPP16"
-  | "OCPP20"
-  | "OCPP201"
-  | "OCPP21";
+  "OCPP12" | "OCPP15" | "OCPP16" | "OCPP20" | "OCPP201" | "OCPP21";
 export type OCPPInterfaceEnumType =
   | "Wired0"
   | "Wired1"

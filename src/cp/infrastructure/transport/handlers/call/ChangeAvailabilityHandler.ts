@@ -20,10 +20,10 @@ import {
  *   StatusNotification.req reflecting the new state. `updateConnectorStatus`
  *   already fires that.
  */
-export class ChangeAvailabilityHandler
-  implements
-    CallHandler<ChangeAvailabilityRequestV16, ChangeAvailabilityResponseV16>
-{
+export class ChangeAvailabilityHandler implements CallHandler<
+  ChangeAvailabilityRequestV16,
+  ChangeAvailabilityResponseV16
+> {
   handle(
     payload: ChangeAvailabilityRequestV16,
     context: HandlerContext,

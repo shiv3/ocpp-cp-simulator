@@ -2,10 +2,7 @@
 
 export type MessagePriorityEnumType = "AlwaysFront" | "InFront" | "NormalCycle";
 export type MessageStateEnumType =
-  | "Charging"
-  | "Faulted"
-  | "Idle"
-  | "Unavailable";
+  "Charging" | "Faulted" | "Idle" | "Unavailable";
 
 export interface GetDisplayMessagesRequestV201 {
   customData?: CustomDataType;

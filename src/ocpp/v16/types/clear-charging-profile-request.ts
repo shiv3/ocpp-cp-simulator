@@ -4,8 +4,6 @@ export interface ClearChargingProfileRequestV16 {
   id?: number;
   connectorId?: number;
   chargingProfilePurpose?:
-    | "ChargePointMaxProfile"
-    | "TxDefaultProfile"
-    | "TxProfile";
+    "ChargePointMaxProfile" | "TxDefaultProfile" | "TxProfile";
   stackLevel?: number;
 }

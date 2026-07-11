@@ -135,12 +135,10 @@ type FirmwareManagementOcppMessagePayloadCall =
   | SignedUpdateFirmwareRequestV16;
 
 type LocalAuthListManagementOcppMessagePayloadCall =
-  | GetLocalListVersionRequestV16
-  | SendLocalListRequestV16;
+  GetLocalListVersionRequestV16 | SendLocalListRequestV16;
 
 type ReservationOcppMessagePayloadCall =
-  | CancelReservationRequestV16
-  | ReserveNowRequestV16;
+  CancelReservationRequestV16 | ReserveNowRequestV16;
 
 type SmartChargingOcppMessagePayloadCall =
   | ClearChargingProfileRequestV16
@@ -148,8 +146,7 @@ type SmartChargingOcppMessagePayloadCall =
   | SetChargingProfileRequestV16;
 
 type RemoteTriggerOcppMessagePayloadCall =
-  | TriggerMessageRequestV16
-  | ExtendedTriggerMessageRequestV16;
+  TriggerMessageRequestV16 | ExtendedTriggerMessageRequestV16;
 
 type SecurityExtensionOcppMessagePayloadCall =
   | CertificateSignedRequestV16

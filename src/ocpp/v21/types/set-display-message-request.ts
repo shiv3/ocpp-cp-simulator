@@ -2,18 +2,9 @@
 
 export type MessagePriorityEnumType = "AlwaysFront" | "InFront" | "NormalCycle";
 export type MessageStateEnumType =
-  | "Charging"
-  | "Faulted"
-  | "Idle"
-  | "Unavailable"
-  | "Suspended"
-  | "Discharging";
+  "Charging" | "Faulted" | "Idle" | "Unavailable" | "Suspended" | "Discharging";
 export type MessageFormatEnumType =
-  | "ASCII"
-  | "HTML"
-  | "URI"
-  | "UTF8"
-  | "QRCODE";
+  "ASCII" | "HTML" | "URI" | "UTF8" | "QRCODE";
 
 export interface SetDisplayMessageRequestV21 {
   message: MessageInfoType;

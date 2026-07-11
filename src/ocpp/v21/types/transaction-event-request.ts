@@ -88,12 +88,7 @@ export type PhaseEnumType =
   | "L2-L3"
   | "L3-L1";
 export type LocationEnumType =
-  | "Body"
-  | "Cable"
-  | "EV"
-  | "Inlet"
-  | "Outlet"
-  | "Upstream";
+  "Body" | "Cable" | "EV" | "Inlet" | "Outlet" | "Upstream";
 export type TriggerReasonEnumType =
   | "AbnormalCondition"
   | "Authorized"
@@ -125,16 +120,9 @@ export type TriggerReasonEnumType =
   | "TxResumed"
   | "UnlockCommand";
 export type PreconditioningStatusEnumType =
-  | "Unknown"
-  | "Ready"
-  | "NotReady"
-  | "Preconditioning";
+  "Unknown" | "Ready" | "NotReady" | "Preconditioning";
 export type ChargingStateEnumType =
-  | "EVConnected"
-  | "Charging"
-  | "SuspendedEV"
-  | "SuspendedEVSE"
-  | "Idle";
+  "EVConnected" | "Charging" | "SuspendedEV" | "SuspendedEVSE" | "Idle";
 export type ReasonEnumType =
   | "DeAuthorized"
   | "EmergencyStop"

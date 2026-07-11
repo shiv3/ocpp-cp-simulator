@@ -35,12 +35,10 @@ export interface SingleCpRuntimeTarget extends FacadeSingleCpTarget {
 }
 
 export type SingleCpCommandTarget =
-  | CLIChargePointService
-  | FacadeSingleCpTarget;
+  CLIChargePointService | FacadeSingleCpTarget;
 
 export type SingleCpProcessTarget =
-  | CLIChargePointService
-  | SingleCpRuntimeTarget;
+  CLIChargePointService | SingleCpRuntimeTarget;
 
 export interface SingleCpCommandOps {
   connect(): Promise<void>;

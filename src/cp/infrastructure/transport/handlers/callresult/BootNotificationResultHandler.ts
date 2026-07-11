@@ -13,9 +13,7 @@ import type { BootNotificationResponseV16 } from "../../../../../ocpp";
  * - **Rejected**: heartbeat off, no further messages for `interval`
  *   seconds, then auto-retry BootNotification.
  */
-export class BootNotificationResultHandler
-  implements CallResultHandler<BootNotificationResponseV16>
-{
+export class BootNotificationResultHandler implements CallResultHandler<BootNotificationResponseV16> {
   handle(payload: BootNotificationResponseV16, context: HandlerContext): void {
     const interval =
       typeof payload.interval === "number" && payload.interval > 0

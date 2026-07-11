@@ -72,9 +72,7 @@ function createRuntimeMocks(connectorIds = [1]) {
     status: OCPPStatus.Available,
     meterValue: 0,
     unlockResponse: "UnlockFailed" as
-      | "Unlocked"
-      | "UnlockFailed"
-      | "NotSupported",
+      "Unlocked" | "UnlockFailed" | "NotSupported",
     evSettings: {
       batteryCapacityKwh: 40,
       initialSoc: 20,

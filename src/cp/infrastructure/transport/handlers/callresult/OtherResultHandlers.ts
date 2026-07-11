@@ -2,9 +2,7 @@ import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
-export class HeartbeatResultHandler
-  implements CallResultHandler<HeartbeatResponseV16>
-{
+export class HeartbeatResultHandler implements CallResultHandler<HeartbeatResponseV16> {
   handle(payload: HeartbeatResponseV16, context: HandlerContext): void {
     context.logger.debug(
       `Received heartbeat response: ${payload.currentTime}`,
@@ -13,9 +11,7 @@ export class HeartbeatResultHandler
   }
 }
 
-export class MeterValuesResultHandler
-  implements CallResultHandler<MeterValuesResponseV16>
-{
+export class MeterValuesResultHandler implements CallResultHandler<MeterValuesResponseV16> {
   constructor(private requestPayload?: MeterValuesRequestV16) {}
 
   handle(payload: MeterValuesResponseV16, context: HandlerContext): void {
@@ -34,9 +30,7 @@ export class MeterValuesResultHandler
   }
 }
 
-export class StatusNotificationResultHandler
-  implements CallResultHandler<StatusNotificationResponseV16>
-{
+export class StatusNotificationResultHandler implements CallResultHandler<StatusNotificationResponseV16> {
   handle(
     payload: StatusNotificationResponseV16,
     context: HandlerContext,
@@ -48,9 +42,7 @@ export class StatusNotificationResultHandler
   }
 }
 
-export class DataTransferResultHandler
-  implements CallResultHandler<DataTransferResponseV16>
-{
+export class DataTransferResultHandler implements CallResultHandler<DataTransferResponseV16> {
   handle(payload: DataTransferResponseV16, context: HandlerContext): void {
     context.logger.info(
       `Data transfer sent successfully: ${JSON.stringify(payload)}`,

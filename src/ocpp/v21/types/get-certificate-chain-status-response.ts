@@ -3,10 +3,7 @@
 export type HashAlgorithmEnumType = "SHA256" | "SHA384" | "SHA512";
 export type CertificateStatusSourceEnumType = "CRL" | "OCSP";
 export type CertificateStatusEnumType =
-  | "Good"
-  | "Revoked"
-  | "Unknown"
-  | "Failed";
+  "Good" | "Revoked" | "Unknown" | "Failed";
 
 export interface GetCertificateChainStatusResponseV21 {
   certificateStatus:

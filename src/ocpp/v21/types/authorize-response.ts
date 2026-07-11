@@ -12,11 +12,7 @@ export type AuthorizationStatusEnumType =
   | "NotAtThisTime"
   | "Unknown";
 export type MessageFormatEnumType =
-  | "ASCII"
-  | "HTML"
-  | "URI"
-  | "UTF8"
-  | "QRCODE";
+  "ASCII" | "HTML" | "URI" | "UTF8" | "QRCODE";
 export type AuthorizeCertificateStatusEnumType =
   | "Accepted"
   | "SignatureError"

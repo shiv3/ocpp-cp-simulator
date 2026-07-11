@@ -84,7 +84,7 @@
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@types/sql.js": "^1.4.11",
-    "@types/uuid": "^10.0.0",
+    "@types/uuid": "^11.0.0",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",

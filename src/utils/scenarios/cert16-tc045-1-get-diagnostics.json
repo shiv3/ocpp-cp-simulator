@@ -1,0 +1,63 @@
+{
+  "id": "cert16-tc045-1-get-diagnostics",
+  "name": "Cert 1.6 Firmware: TC_045_1 Get Diagnostics",
+  "description": "CSMS sends GetDiagnostics.req with an upload location; CP responds with fileName 'diagnostics.txt' and sends DiagnosticsStatusNotification (Uploading, then Uploaded on successful POST to the location, or UploadFailed if the location is unreachable or returns non-2xx HTTP status — both outcomes are certification-relevant).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-get-diagnostics",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Wait for GetDiagnostics",
+        "action": "GetDiagnostics",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-diagnostics-upload",
+      "type": "delay",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "CP uploads diagnostics and reports status",
+        "delaySeconds": 5
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    {
+      "id": "e2",
+      "source": "status-available",
+      "target": "trigger-get-diagnostics"
+    },
+    {
+      "id": "e3",
+      "source": "trigger-get-diagnostics",
+      "target": "delay-diagnostics-upload"
+    },
+    { "id": "e4", "source": "delay-diagnostics-upload", "target": "end-1" }
+  ]
+}

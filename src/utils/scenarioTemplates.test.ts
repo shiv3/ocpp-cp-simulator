@@ -55,6 +55,8 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc059-remote-start-with-profile",
   "cert16-tc066-get-composite-schedule",
   "cert16-tc067-clear-charging-profile",
+  "cert16-tc044-1-firmware-update",
+  "cert16-tc045-1-get-diagnostics",
 ];
 
 /** BFS from the single start node; true if any END node is reachable. */

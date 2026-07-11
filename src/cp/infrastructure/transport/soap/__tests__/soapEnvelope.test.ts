@@ -89,6 +89,34 @@ describe("OCPP 1.5 SOAP envelope parser", () => {
     expect(parsed.payload).not.toHaveProperty("interval");
   });
 
+  it("accepts a fully-qualified wsa:Action from a real OCA WSDL server (SteVe)", () => {
+    // SteVe (and other JAXB/CXF servers) emit the fully-qualified action URI
+    // "<namespace><PortType>/<Operation>Response", not the bare
+    // "/<Operation>Response" the simulator sends. Verified live against SteVe
+    // 1.2S/1.6S: the response was rejected until we matched on the trailing
+    // "/<Operation>Response" segment. Guard that here.
+    const parsed = parseSoapEnvelope(
+      `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP15_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>CP-001</cs:chargeBoxIdentity><a:Action s:mustUnderstand="true">urn://Ocpp/Cs/2012/06/CentralSystemService/BootNotificationResponse</a:Action><a:MessageID s:mustUnderstand="true">urn:uuid:boot-conf-2</a:MessageID><a:To s:mustUnderstand="true">${WSA_ANONYMOUS_ADDRESS}</a:To><a:RelatesTo s:mustUnderstand="true">uuid:boot-2</a:RelatesTo></s:Header><s:Body><cs:bootNotificationResponse><cs:status>Accepted</cs:status><cs:currentTime>2026-06-30T00:00:00Z</cs:currentTime><cs:heartbeatInterval>300</cs:heartbeatInterval></cs:bootNotificationResponse></s:Body></s:Envelope>`,
+    );
+
+    expect(parsed).toMatchObject({
+      operation: "BootNotification",
+      kind: "response",
+      action:
+        "urn://Ocpp/Cs/2012/06/CentralSystemService/BootNotificationResponse",
+      relatesTo: "uuid:boot-2",
+      payload: { status: "Accepted", heartbeatInterval: "300" },
+    });
+  });
+
+  it("still rejects a wsa:Action whose trailing operation segment is wrong", () => {
+    expect(() =>
+      parseSoapEnvelope(
+        `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP15_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>CP-001</cs:chargeBoxIdentity><a:Action s:mustUnderstand="true">urn://Ocpp/Cs/2012/06/CentralSystemService/HeartbeatResponse</a:Action><a:MessageID s:mustUnderstand="true">urn:uuid:mismatch-1</a:MessageID><a:To s:mustUnderstand="true">${WSA_ANONYMOUS_ADDRESS}</a:To><a:RelatesTo s:mustUnderstand="true">uuid:boot-3</a:RelatesTo></s:Header><s:Body><cs:bootNotificationResponse><cs:status>Accepted</cs:status></cs:bootNotificationResponse></s:Body></s:Envelope>`,
+      ),
+    ).toThrow(/SOAP Action must be \/BootNotificationResponse/);
+  });
+
   it("parses a CSMS-to-CP RemoteStartTransaction request", () => {
     const parsed = parseSoapEnvelope(
       `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cp="${OCPP15_SOAP_NAMESPACES.CP}"><s:Header><cp:chargeBoxIdentity>CP-001</cp:chargeBoxIdentity><a:Action s:mustUnderstand="true">/RemoteStartTransaction</a:Action><a:MessageID s:mustUnderstand="true">uuid:remote-start-1</a:MessageID><a:From s:mustUnderstand="true"><a:Address>${CENTRAL_SYSTEM_URL}</a:Address></a:From><a:ReplyTo s:mustUnderstand="true"><a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address></a:ReplyTo><a:To s:mustUnderstand="true">${CALLBACK_URL}</a:To></s:Header><s:Body><cp:remoteStartTransactionRequest><cp:idTag>TAG-DEMO</cp:idTag><cp:connectorId>1</cp:connectorId></cp:remoteStartTransactionRequest></s:Body></s:Envelope>`,

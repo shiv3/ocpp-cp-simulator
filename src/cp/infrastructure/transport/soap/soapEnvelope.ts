@@ -782,7 +782,12 @@ export function parseSoapEnvelope(
     "WS-Addressing Action",
   );
   const expectedAction = actionFor(metadata, kind);
-  if (action.text !== expectedAction) {
+  // The wsa:Action may be the bare "/<Operation>[Response]" the simulator
+  // emits, or a fully-qualified URI that real OCA WSDL servers use, e.g.
+  // SteVe's "urn://Ocpp/Cs/2010/08/CentralSystemService/BootNotificationResponse".
+  // Match on the trailing "/<Operation>[Response]" segment either way (the
+  // leading slash prevents suffix collisions like "/Reset" vs "/HardReset").
+  if (action.text !== expectedAction && !action.text.endsWith(expectedAction)) {
     throw new Error(`SOAP Action must be ${expectedAction}`);
   }
 

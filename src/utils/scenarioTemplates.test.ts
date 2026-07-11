@@ -46,6 +46,7 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc048-2-reserve-now-occupied",
   "cert16-tc048-3-reserve-now-unavailable",
   "cert16-tc048-4-reserve-now-rejected",
+  "cert16-tc051-cancel-reservation",
   "cert16-tc052-cancel-reservation-rejected",
 ];
 

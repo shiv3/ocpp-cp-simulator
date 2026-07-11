@@ -1,0 +1,56 @@
+{
+  "id": "cert16-tc051-cancel-reservation",
+  "name": "Cert 1.6 Reservation: TC_051 Cancel Reservation",
+  "description": "Connector Available; CSMS sends ReserveNow (connector transitions Reserved internally); scenario waits for reservation then issues CancelReservation.req; CP core flips Reserved → Available; statusTrigger confirms.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "trigger-reservation",
+      "type": "reservationTrigger",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Wait for ReserveNow", "timeout": 0 }
+    },
+    {
+      "id": "trigger-cancel",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Send CancelReservation",
+        "action": "CancelReservation",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for Available",
+        "targetStatus": "Available",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "trigger-reservation" },
+    { "id": "e2", "source": "trigger-reservation", "target": "trigger-cancel" },
+    { "id": "e3", "source": "trigger-cancel", "target": "status-available" },
+    { "id": "e4", "source": "status-available", "target": "end-1" }
+  ]
+}

@@ -44,6 +44,7 @@ import cert16Tc048_1ReserveNowFaultedJson from "./scenarios/cert16-tc048-1-reser
 import cert16Tc048_2ReserveNowOccupiedJson from "./scenarios/cert16-tc048-2-reserve-now-occupied.json";
 import cert16Tc048_3ReserveNowUnavailableJson from "./scenarios/cert16-tc048-3-reserve-now-unavailable.json";
 import cert16Tc048_4ReserveNowRejectedJson from "./scenarios/cert16-tc048-4-reserve-now-rejected.json";
+import cert16Tc051CancelReservationJson from "./scenarios/cert16-tc051-cancel-reservation.json";
 import cert16Tc052CancelReservationRejectedJson from "./scenarios/cert16-tc052-cancel-reservation-rejected.json";
 
 export interface ScenarioTemplate {
@@ -162,6 +163,7 @@ export const scenarioTemplates: ScenarioTemplate[] = [
     cert16Tc048_3ReserveNowUnavailableJson as ScenarioDefinition,
   ),
   templateFromJson(cert16Tc048_4ReserveNowRejectedJson as ScenarioDefinition),
+  templateFromJson(cert16Tc051CancelReservationJson as ScenarioDefinition),
   templateFromJson(
     cert16Tc052CancelReservationRejectedJson as ScenarioDefinition,
   ),

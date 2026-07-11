@@ -814,9 +814,13 @@ export class ChargePoint {
    *
    * Real charge points download a binary, install it, and reboot. The
    * simulator just walks the status machine so the CSMS observes the
-   * full happy-path. Failure paths (DownloadFailed / InstallationFailed)
-   * are reachable via TriggerMessage(FirmwareStatusNotification) for
-   * tests that want to drive them manually.
+   * full happy-path by default. Failure paths are also reachable via
+   * TriggerMessage(FirmwareStatusNotification) for tests that want to
+   * drive them manually, or pre-armed for certification scenarios (cert
+   * 1.6 Firmware TC_044_2 / TC_044_3) via the `SimulatedFirmwareUpdateFailure`
+   * custom config key (set through a scenario `configSet` node before
+   * UpdateFirmware fires): `"DownloadFailed"` diverts at the Downloaded
+   * step, `"InstallationFailed"` diverts at the Installed step.
    */
   simulateFirmwareUpdate(retrieveDate: Date, intervalMs = 2000): void {
     if (this._firmwareUpdateInFlight) {
@@ -832,6 +836,9 @@ export class ChargePoint {
     const sequence: Array<
       "Downloading" | "Downloaded" | "Installing" | "Installed"
     > = ["Downloading", "Downloaded", "Installing", "Installed"];
+    const failureMode = this._configuration.getString(
+      "SimulatedFirmwareUpdateFailure",
+    );
 
     const fireStep = (index: number) => {
       if (index >= sequence.length) {
@@ -839,7 +846,20 @@ export class ChargePoint {
         this._firmwareUpdateTimers = [];
         return;
       }
-      this.sendFirmwareStatusNotification(sequence[index]);
+      const step = sequence[index];
+      if (step === "Downloaded" && failureMode === "DownloadFailed") {
+        this.sendFirmwareStatusNotification("DownloadFailed");
+        this._firmwareUpdateInFlight = false;
+        this._firmwareUpdateTimers = [];
+        return;
+      }
+      if (step === "Installed" && failureMode === "InstallationFailed") {
+        this.sendFirmwareStatusNotification("InstallationFailed");
+        this._firmwareUpdateInFlight = false;
+        this._firmwareUpdateTimers = [];
+        return;
+      }
+      this.sendFirmwareStatusNotification(step);
       const t = setTimeout(() => fireStep(index + 1), intervalMs);
       this._firmwareUpdateTimers.push(t);
     };

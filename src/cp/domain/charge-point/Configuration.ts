@@ -403,6 +403,16 @@ export const ConfigurationKeys = {
       readonly: false,
       type: "string",
     } as StringConfigurationKey,
+    // Cert 1.6 Firmware TC_044_2/TC_044_3: pre-arm `simulateFirmwareUpdate`
+    // to divert onto a failure status instead of completing the happy
+    // path. Set via the scenario `configSet` node before UpdateFirmware
+    // fires. "" (default) = no failure injected.
+    SimulatedFirmwareUpdateFailure: {
+      name: "SimulatedFirmwareUpdateFailure",
+      required: false,
+      readonly: false,
+      type: "string",
+    } as StringConfigurationKey,
   },
 };
 
@@ -560,5 +570,6 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
 
     // ── Custom (non-standard) ──────────────────────────────────────────
     strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),
+    strVal(ConfigurationKeys.Custom.SimulatedFirmwareUpdateFailure, ""),
   ];
 };

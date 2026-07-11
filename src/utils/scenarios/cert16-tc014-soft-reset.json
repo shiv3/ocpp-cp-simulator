@@ -15,15 +15,21 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Plug In", "action": "plugin" }
+    },
+    {
       "id": "status-preparing",
       "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
+      "position": { "x": 400, "y": 250 },
       "data": { "label": "Set Preparing", "status": "Preparing" }
     },
     {
       "id": "tx-start",
       "type": "transaction",
-      "position": { "x": 400, "y": 250 },
+      "position": { "x": 400, "y": 350 },
       "data": {
         "label": "Start Transaction",
         "action": "start",
@@ -33,13 +39,13 @@
     {
       "id": "status-charging",
       "type": "statusChange",
-      "position": { "x": 400, "y": 350 },
+      "position": { "x": 400, "y": 450 },
       "data": { "label": "Set Charging", "status": "Charging" }
     },
     {
       "id": "meter-auto",
       "type": "meterValue",
-      "position": { "x": 400, "y": 450 },
+      "position": { "x": 400, "y": 550 },
       "data": {
         "label": "Auto MeterValue (unbounded background)",
         "value": 0,
@@ -54,7 +60,7 @@
     {
       "id": "trigger-reset",
       "type": "csmsCallTrigger",
-      "position": { "x": 400, "y": 550 },
+      "position": { "x": 400, "y": 650 },
       "data": {
         "label": "Wait for Reset (Soft)",
         "action": "Reset",
@@ -64,16 +70,17 @@
     {
       "id": "end-1",
       "type": "end",
-      "position": { "x": 400, "y": 650 },
+      "position": { "x": 400, "y": 750 },
       "data": { "label": "End" }
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-preparing" },
-    { "id": "e2", "source": "status-preparing", "target": "tx-start" },
-    { "id": "e3", "source": "tx-start", "target": "status-charging" },
-    { "id": "e4", "source": "status-charging", "target": "meter-auto" },
-    { "id": "e5", "source": "meter-auto", "target": "trigger-reset" },
-    { "id": "e6", "source": "trigger-reset", "target": "end-1" }
+    { "id": "e1", "source": "start-1", "target": "plug-in" },
+    { "id": "e2", "source": "plug-in", "target": "status-preparing" },
+    { "id": "e3", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e4", "source": "tx-start", "target": "status-charging" },
+    { "id": "e5", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e6", "source": "meter-auto", "target": "trigger-reset" },
+    { "id": "e7", "source": "trigger-reset", "target": "end-1" }
   ]
 }

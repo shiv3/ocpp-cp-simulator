@@ -1535,10 +1535,7 @@ export class ScenarioExecutor {
       try {
         await this.waitWithOptionalForceSkip(
           waitPromise.then((res) => {
-            this.callbacks.log?.(
-              `CSMS call received: ${res.action}`,
-              "info",
-            );
+            this.callbacks.log?.(`CSMS call received: ${res.action}`, "info");
           }),
         );
       } finally {
@@ -1572,10 +1569,7 @@ export class ScenarioExecutor {
       try {
         await this.waitWithOptionalForceSkip(
           waitPromise.then((res) => {
-            this.callbacks.log?.(
-              `CSMS call received: ${res.action}`,
-              "info",
-            );
+            this.callbacks.log?.(`CSMS call received: ${res.action}`, "info");
           }),
         );
       } finally {

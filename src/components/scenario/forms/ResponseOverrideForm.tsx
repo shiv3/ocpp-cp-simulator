@@ -17,8 +17,7 @@ export default function ResponseOverrideForm({
     label: action,
   }));
 
-  const currentAction =
-    (value.action as string | undefined) ?? DEFAULT_ACTION;
+  const currentAction = (value.action as string | undefined) ?? DEFAULT_ACTION;
   const validStatuses =
     RESPONSE_OVERRIDE_STATUSES[
       currentAction as keyof typeof RESPONSE_OVERRIDE_STATUSES

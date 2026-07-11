@@ -544,12 +544,15 @@ export function createHttpHandlers(deps: {
       // enabled, or an operator-controlled trusted network boundary otherwise;
       // do not add a non-standard shared secret to the SOAP payload.
       return readTextWithLimit(req, MAX_SOAP_REQUEST_BODY_BYTES).then(
-        (body) => {
+        async (body) => {
           if (body === null) {
             return soapFaultResponse("SOAP request body is too large", 413);
           }
           return (
-            service.handleSoapChargePointServiceRequest(soapRoute.cpId, body) ??
+            (await service.handleSoapChargePointServiceRequest(
+              soapRoute.cpId,
+              body,
+            )) ??
             soapFaultResponse(
               `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
               400,

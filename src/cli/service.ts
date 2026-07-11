@@ -315,6 +315,8 @@ export class CLIChargePointService {
               this._chargePoint.isSoapChargePoint() &&
               isSoapVersion(this._init.ocppVersion) &&
               Boolean(this._init.soapCallbackUrl),
+            chargePoint: this._chargePoint,
+            logger: this._chargePoint.logger,
           },
           undefined,
           soapDialectForVersion(ocppVersion),
@@ -396,11 +398,11 @@ export class CLIChargePointService {
     this._chargePoint.disconnect();
   }
 
-  handleSoapChargePointServiceRequest(
+  async handleSoapChargePointServiceRequest(
     pathCpId: string,
     xml: string,
-  ): Response | null {
-    return this._soapServer?.handleRequest(pathCpId, xml) ?? null;
+  ): Promise<Response | null> {
+    return (await this._soapServer?.handleRequest(pathCpId, xml)) ?? null;
   }
 
   getStatus(): ChargePointStatus {

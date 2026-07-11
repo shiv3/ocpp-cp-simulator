@@ -50,6 +50,14 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 
 Scenario identifiers follow the OCPP Certification Test Cases (OCPPSC) specification test-case numbering: TC_001, TC_003, TC_004, etc. The unlock scenarios TC_017 (Unlock Connector — Occupied, Succeeds) and TC_018 (Unlock Connector — Failure) predate the formal OCPPSC mapping; TC_017 ≈ "unlock with active session" and TC_018 ≈ "unlock failure / stuck lock".
 
+## Configuration Side Effects
+
+The Local Auth List scenarios flip the `LocalAuthListEnabled` configuration
+key via a local config-set step. Scenarios that disable it (TC_042_1,
+TC_043_1) leave it disabled for the rest of the charge point session; run
+TC_042_2 (or set the key back manually) before exercising list features
+outside a scenario.
+
 ## Response-Override Valid Statuses
 
 When using the `responseOverride` node to arm a one-shot response override for an incoming OCPP request, the following status values are valid per action:

@@ -1,6 +1,7 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+/* Keep the existing v3-style JS config (theme tokens, keyframes, flowbite +
+   animate plugins) under Tailwind v4 via the @config bridge. */
+@config "../tailwind.config.js";
 
 @layer base {
   :root {
@@ -162,12 +163,14 @@
     @apply px-2 py-1 rounded text-xs font-semibold;
   }
 
+  /* Tailwind v4's @apply can't reference custom classes (`badge`), so the
+     shared badge utilities are inlined here. */
   .badge-primary {
-    @apply badge bg-blue-600 dark:bg-blue-600 text-white;
+    @apply px-2 py-1 rounded text-xs font-semibold bg-blue-600 dark:bg-blue-600 text-white;
   }
 
   .badge-secondary {
-    @apply badge bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200;
+    @apply px-2 py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200;
   }
 
   /* Status colors */

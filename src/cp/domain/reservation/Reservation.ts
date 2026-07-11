@@ -42,13 +42,13 @@ export class ReservationManager {
     expiryDate: Date,
     idTag: string,
     parentIdTag: string | undefined,
-    reservationId: number
+    reservationId: number,
   ): ReservationStatus {
     // Check if reservation ID already exists
     if (this.reservations.has(reservationId)) {
       this.logger.warn(
         `Reservation ID ${reservationId} already exists`,
-        LogType.GENERAL
+        LogType.GENERAL,
       );
       return ReservationStatus.Rejected;
     }
@@ -58,7 +58,7 @@ export class ReservationManager {
     if (existingReservation) {
       this.logger.warn(
         `Connector ${connectorId} already has an active reservation`,
-        LogType.GENERAL
+        LogType.GENERAL,
       );
       return ReservationStatus.Occupied;
     }
@@ -67,7 +67,7 @@ export class ReservationManager {
     if (expiryDate <= new Date()) {
       this.logger.warn(
         `Reservation expiry date is in the past: ${expiryDate}`,
-        LogType.GENERAL
+        LogType.GENERAL,
       );
       return ReservationStatus.Rejected;
     }
@@ -85,7 +85,7 @@ export class ReservationManager {
 
     this.logger.info(
       `Created reservation ${reservationId} for connector ${connectorId} (idTag: ${idTag}, expiry: ${expiryDate})`,
-      LogType.GENERAL
+      LogType.GENERAL,
     );
 
     return ReservationStatus.Accepted;
@@ -101,7 +101,7 @@ export class ReservationManager {
     if (!reservation) {
       this.logger.warn(
         `Reservation ${reservationId} not found`,
-        LogType.GENERAL
+        LogType.GENERAL,
       );
       return false;
     }
@@ -110,7 +110,7 @@ export class ReservationManager {
 
     this.logger.info(
       `Cancelled reservation ${reservationId} (connector: ${reservation.connectorId})`,
-      LogType.GENERAL
+      LogType.GENERAL,
     );
 
     return true;
@@ -132,7 +132,7 @@ export class ReservationManager {
 
     this.logger.info(
       `Used reservation ${reservationId} (connector: ${reservation.connectorId})`,
-      LogType.GENERAL
+      LogType.GENERAL,
     );
 
     return true;
@@ -154,16 +154,13 @@ export class ReservationManager {
     if (reservation.expiryDate <= new Date()) {
       this.logger.warn(
         `Reservation ${reservationId} has expired`,
-        LogType.GENERAL
+        LogType.GENERAL,
       );
       return false;
     }
 
     // Check if ID tag matches (or parent ID tag matches)
-    if (
-      reservation.idTag === idTag ||
-      reservation.parentIdTag === idTag
-    ) {
+    if (reservation.idTag === idTag || reservation.parentIdTag === idTag) {
       return true;
     }
 
@@ -243,7 +240,7 @@ export class ReservationManager {
       this.reservations.delete(id);
       this.logger.info(
         `Cleaned up expired reservation ${id} (connector: ${reservation?.connectorId})`,
-        LogType.GENERAL
+        LogType.GENERAL,
       );
     }
   }

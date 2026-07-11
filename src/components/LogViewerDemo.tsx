@@ -1,8 +1,14 @@
-import { useState, useEffect } from 'react';
-import { LogViewer } from '@/components/ui/log-viewer';
-import { Logger, LogLevel, LogType, LogEntry } from '@/cp/shared/Logger';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect } from "react";
+import { LogViewer } from "@/components/ui/log-viewer";
+import { Logger, LogLevel, LogType, LogEntry } from "@/cp/shared/Logger";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export function LogViewerDemo() {
   const [logger] = useState(() => new Logger(LogLevel.DEBUG));
@@ -10,7 +16,7 @@ export function LogViewerDemo() {
 
   useEffect(() => {
     // Subscribe to all log events
-    const unsubscribe = logger.on('log', (entry) => {
+    const unsubscribe = logger.on("log", (entry) => {
       setLogs((prev) => [...prev, entry]);
     });
 
@@ -18,17 +24,20 @@ export function LogViewerDemo() {
   }, [logger]);
 
   const addSampleLogs = () => {
-    logger.debug('WebSocket connection established', LogType.WEBSOCKET);
-    logger.info('OCPP handshake completed', LogType.OCPP);
-    logger.info('BootNotification sent', LogType.OCPP);
-    logger.debug('Heartbeat sent', LogType.HEARTBEAT);
-    logger.info('Transaction started with ID: 12345', LogType.TRANSACTION);
-    logger.debug('Meter value: 1234.5 kWh', LogType.METER_VALUE);
-    logger.warn('Low battery warning', LogType.STATUS);
-    logger.error('Failed to send StatusNotification', LogType.STATUS);
-    logger.info('Configuration updated: HeartbeatInterval = 60', LogType.CONFIGURATION);
-    logger.debug('Diagnostics data collected', LogType.DIAGNOSTICS);
-    logger.info('Scenario step completed: Connect to CSMS', LogType.SCENARIO);
+    logger.debug("WebSocket connection established", LogType.WEBSOCKET);
+    logger.info("OCPP handshake completed", LogType.OCPP);
+    logger.info("BootNotification sent", LogType.OCPP);
+    logger.debug("Heartbeat sent", LogType.HEARTBEAT);
+    logger.info("Transaction started with ID: 12345", LogType.TRANSACTION);
+    logger.debug("Meter value: 1234.5 kWh", LogType.METER_VALUE);
+    logger.warn("Low battery warning", LogType.STATUS);
+    logger.error("Failed to send StatusNotification", LogType.STATUS);
+    logger.info(
+      "Configuration updated: HeartbeatInterval = 60",
+      LogType.CONFIGURATION,
+    );
+    logger.debug("Diagnostics data collected", LogType.DIAGNOSTICS);
+    logger.info("Scenario step completed: Connect to CSMS", LogType.SCENARIO);
   };
 
   const handleClear = () => {
@@ -42,7 +51,8 @@ export function LogViewerDemo() {
         <CardHeader>
           <CardTitle>Log Viewer Demo</CardTitle>
           <CardDescription>
-            A structured log viewer component with filtering capabilities for OCPP charge point simulator
+            A structured log viewer component with filtering capabilities for
+            OCPP charge point simulator
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

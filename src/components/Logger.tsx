@@ -122,10 +122,18 @@ const Logger: React.FC<LoggerProps> = ({ logs, onClear }) => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Levels</SelectItem>
-              <SelectItem value={LogLevel.DEBUG.toString()}>DEBUG and above</SelectItem>
-              <SelectItem value={LogLevel.INFO.toString()}>INFO and above</SelectItem>
-              <SelectItem value={LogLevel.WARN.toString()}>WARN and above</SelectItem>
-              <SelectItem value={LogLevel.ERROR.toString()}>ERROR only</SelectItem>
+              <SelectItem value={LogLevel.DEBUG.toString()}>
+                DEBUG and above
+              </SelectItem>
+              <SelectItem value={LogLevel.INFO.toString()}>
+                INFO and above
+              </SelectItem>
+              <SelectItem value={LogLevel.WARN.toString()}>
+                WARN and above
+              </SelectItem>
+              <SelectItem value={LogLevel.ERROR.toString()}>
+                ERROR only
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -183,10 +191,7 @@ const Logger: React.FC<LoggerProps> = ({ logs, onClear }) => {
       </div>
 
       {/* Log Display */}
-      <AutoScrollingLogDisplay
-        logs={filteredLogs}
-        autoScroll={autoScroll}
-      />
+      <AutoScrollingLogDisplay logs={filteredLogs} autoScroll={autoScroll} />
     </div>
   );
 };
@@ -264,7 +269,9 @@ const AutoScrollingLogDisplay: React.FC<AutoScrollingLogDisplayProps> = ({
             <span className={`font-semibold ${getLogLevelColor(log.level)}`}>
               [{LogLevel[log.level]}]
             </span>{" "}
-            <span className={`px-1 py-0.5 rounded text-xs ${getLogTypeColor(log.type)}`}>
+            <span
+              className={`px-1 py-0.5 rounded text-xs ${getLogTypeColor(log.type)}`}
+            >
               {log.type}
             </span>{" "}
             <span className="text-primary">{log.message}</span>

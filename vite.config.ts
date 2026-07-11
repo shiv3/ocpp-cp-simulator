@@ -29,6 +29,11 @@ export default defineConfig({
     environment: "node",
     environmentMatchGlobs: [["**/*.dom.test.{ts,tsx}", "jsdom"]],
     setupFiles: ["src/test/setup.dom.ts"],
+    // In CI, also emit a JUnit report next to coverage so it can be uploaded
+    // to Codecov (test analytics / flaky-test surfacing, issue #131). Local
+    // runs keep the plain default reporter.
+    reporters: process.env.CI ? ["default", "junit"] : "default",
+    outputFile: { junit: "./coverage/junit.xml" },
     // bun:sqlite is a runtime built-in that vite can't resolve. Tests
     // ending in `.bun.test.ts` run under `bun test` instead (see the
     // `test:bun` npm script); skip them here.

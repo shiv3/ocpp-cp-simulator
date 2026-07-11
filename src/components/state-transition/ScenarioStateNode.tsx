@@ -1,7 +1,14 @@
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 
-export type ScenarioState = "idle" | "running" | "paused" | "waiting" | "stepping" | "completed" | "error";
+export type ScenarioState =
+  | "idle"
+  | "running"
+  | "paused"
+  | "waiting"
+  | "stepping"
+  | "completed"
+  | "error";
 
 interface ScenarioStateNodeData {
   state: ScenarioState;
@@ -9,7 +16,9 @@ interface ScenarioStateNodeData {
   isCurrent: boolean;
 }
 
-const ScenarioStateNode: React.FC<NodeProps<ScenarioStateNodeData>> = ({ data }) => {
+const ScenarioStateNode: React.FC<NodeProps<ScenarioStateNodeData>> = ({
+  data,
+}) => {
   const { state, label, isCurrent } = data;
 
   // Color settings based on state
@@ -64,9 +73,7 @@ const ScenarioStateNode: React.FC<NodeProps<ScenarioStateNodeData>> = ({ data })
           {label}
         </div>
         {isCurrent && (
-          <div className="mt-1 text-xs text-white font-semibold">
-            ● Current
-          </div>
+          <div className="mt-1 text-xs text-white font-semibold">● Current</div>
         )}
       </div>
 

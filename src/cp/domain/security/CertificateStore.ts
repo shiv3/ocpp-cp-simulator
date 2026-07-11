@@ -16,6 +16,9 @@ export interface CertificateStoreJson {
 }
 
 export class CertificateStore {
+  // Holds the CSR's generated private key so it can be paired with the signed
+  // certificate; written at CSR time and cleared on reset, not read back yet.
+  // eslint-disable-next-line no-unused-private-class-members
   #keyPair: CryptoKeyPair | undefined;
   #pendingCsrPem: string | undefined;
   #signedChains: string[][] = [];

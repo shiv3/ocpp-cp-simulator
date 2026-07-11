@@ -84,7 +84,7 @@ const Settings: React.FC = () => {
       // subscriber state, useChargePoints snapshot) starts fresh against
       // the now-empty DB.
       window.location.reload();
-    } catch (err) {
+    } catch {
       setResetState("error");
       setResetError(err instanceof Error ? err.message : String(err));
     }
@@ -150,7 +150,7 @@ const Settings: React.FC = () => {
         setError("");
         setSuccess("Configuration imported successfully!");
         setTimeout(() => setSuccess(""), 3000);
-      } catch (err) {
+      } catch {
         setError("Invalid JSON file. Please check the file format.");
         setTimeout(() => setError(""), 5000);
       }
@@ -165,7 +165,7 @@ const Settings: React.FC = () => {
       setError("");
       setSuccess("Configuration applied successfully!");
       setTimeout(() => setSuccess(""), 3000);
-    } catch (err) {
+    } catch {
       setError("Invalid JSON. Please check the syntax.");
       setTimeout(() => setError(""), 5000);
     }

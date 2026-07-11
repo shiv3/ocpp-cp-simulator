@@ -1,5 +1,5 @@
 import type { OcppVersion } from "../../../domain/types/OcppVersion";
-import { OCPP_1_5 } from "../../../domain/types/OcppVersion";
+import { OCPP_1_2, OCPP_1_5 } from "../../../domain/types/OcppVersion";
 import type { SoapOperationMetadata } from "./soapEnvelope";
 
 // Shared SOAP and WS-Addressing namespaces (dialect-independent)
@@ -148,9 +148,60 @@ export const OCPP15_DIALECT: SoapDialect = {
   operationMetadata: buildOcpp15OperationMetadata(),
 };
 
+export const OCPP12_SOAP_NAMESPACES = {
+  CS: "urn://Ocpp/Cs/2010/08/",
+  CP: "urn://Ocpp/Cp/2010/08/",
+  SOAP12: SOAP12_NAMESPACE,
+  WSA: WSA_NAMESPACE,
+} as const;
+
+function buildOcpp12OperationMetadata(): Readonly<
+  Partial<Record<SoapOperation, SoapOperationMetadata>>
+> {
+  const ns = OCPP12_SOAP_NAMESPACES;
+  const cs = (name: SoapOperation, overrides?: OperationMetadataOverrides) =>
+    operationMetadataFor(name, ns.CS, "cs", overrides);
+  const cp = (name: SoapOperation) => operationMetadataFor(name, ns.CP, "cp");
+  return {
+    // CP → CS (9 operations; no DataTransfer in 1.2)
+    Authorize: cs("Authorize"),
+    BootNotification: cs("BootNotification", {
+      requestFieldOrder: BOOT_NOTIFICATION_REQUEST_FIELD_ORDER,
+      responseFieldOrder: ["status", "currentTime", "heartbeatInterval"],
+    }),
+    DiagnosticsStatusNotification: cs("DiagnosticsStatusNotification"),
+    FirmwareStatusNotification: cs("FirmwareStatusNotification"),
+    Heartbeat: cs("Heartbeat"),
+    MeterValues: cs("MeterValues"),
+    StartTransaction: cs("StartTransaction"),
+    StatusNotification: cs("StatusNotification"),
+    StopTransaction: cs("StopTransaction"),
+    // CS → CP (9 operations; no GetConfiguration, ReserveNow, CancelReservation,
+    // SendLocalList, GetLocalListVersion in 1.2)
+    ChangeAvailability: cp("ChangeAvailability"),
+    ChangeConfiguration: cp("ChangeConfiguration"),
+    ClearCache: cp("ClearCache"),
+    GetDiagnostics: cp("GetDiagnostics"),
+    RemoteStartTransaction: cp("RemoteStartTransaction"),
+    RemoteStopTransaction: cp("RemoteStopTransaction"),
+    Reset: cp("Reset"),
+    UnlockConnector: cp("UnlockConnector"),
+    UpdateFirmware: cp("UpdateFirmware"),
+  };
+}
+
+export const OCPP12_DIALECT: SoapDialect = {
+  version: OCPP_1_2,
+  namespaces: OCPP12_SOAP_NAMESPACES,
+  operationMetadata: buildOcpp12OperationMetadata(),
+};
+
 export function soapDialectForVersion(
   version: string | OcppVersion,
 ): SoapDialect {
+  if (version === OCPP_1_2) {
+    return OCPP12_DIALECT;
+  }
   if (version === OCPP_1_5) {
     return OCPP15_DIALECT;
   }

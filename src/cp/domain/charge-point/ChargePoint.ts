@@ -210,11 +210,6 @@ export class ChargePoint {
     }
 
     if (isSoapVersion(this._ocppVersion)) {
-      if (!transportOptions.soapCallbackUrl) {
-        throw new Error(
-          "OCPP SOAP versions require soapCallbackUrl (--soap-callback-url)",
-        );
-      }
       this._webSocket = null;
       const dialect = soapDialectForVersion(this._ocppVersion);
       this._messageHandler = new OCPPSoapHandler(this, this._logger, {

@@ -48,6 +48,7 @@ import {
   parseSoapEnvelope,
   SoapFaultError,
   soapContentTypeForOperation,
+  WSA_ANONYMOUS_ADDRESS,
   type ParsedSoapEnvelope,
   type SoapOperation,
   type SoapParsedPayload,
@@ -60,7 +61,7 @@ import { OCPP_1_2, OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 
 export interface OCPPSoapHandlerOptions {
   readonly centralSystemUrl: string;
-  readonly soapCallbackUrl: string;
+  readonly soapCallbackUrl?: string;
   readonly requestTimeoutMs?: number;
   readonly dialect?: SoapDialect;
 }
@@ -1190,7 +1191,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       operation,
       chargeBoxIdentity: this._chargePoint.id,
       messageId,
-      from: this._options.soapCallbackUrl,
+      from: this._options.soapCallbackUrl ?? WSA_ANONYMOUS_ADDRESS,
       to: this._options.centralSystemUrl,
       payload,
       dialect: this._dialect,

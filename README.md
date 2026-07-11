@@ -77,9 +77,10 @@ ocpp-cp-sim --http-port 5172 --web-console \
 ### SOAP Versions (1.2, 1.5, 1.6S)
 
 OCPP 1.2, 1.5, and 1.6 (SOAP) all use SOAP 1.2 / WS-Addressing over HTTP (not WebSocket).
-They are **CLI / server-mode only** — the browser UI can't host the callback endpoint.
-Point `--ws-url` at the CSMS _CentralSystemService_ URL and give the callback URL the
-CSMS should reach the charge point on:
+The browser UI can run them in **send-only mode** (CP→CSMS calls work; CSMS-initiated commands
+like RemoteStart and Reset are unavailable since the browser can't host the callback endpoint).
+Full bidirectional SOAP remains **CLI / server-mode only**. Point `--ws-url` at the CSMS
+_CentralSystemService_ URL and give the callback URL the CSMS should reach the charge point on:
 
 **OCPP 1.2:**
 

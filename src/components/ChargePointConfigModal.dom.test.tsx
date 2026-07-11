@@ -177,11 +177,11 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     document.body.innerHTML = "";
   });
 
-  it("does not offer OCPP-1.5 in local mode", async () => {
+  it("offers OCPP-1.5 in local mode", async () => {
     const rendered = await renderModal({ mode: "local" });
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.5 (SOAP)")).toBeUndefined();
+    expect(queryOptionByText("OCPP 1.5 (SOAP)")).toBeDefined();
 
     await unmount(rendered);
   });
@@ -337,11 +337,11 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     expect(saved.authorizationKey).toBeUndefined();
   });
 
-  it("does not offer OCPP-1.2 in local mode", async () => {
+  it("offers OCPP-1.2 in local mode", async () => {
     const rendered = await renderModal({ mode: "local" });
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.2 (SOAP)")).toBeUndefined();
+    expect(queryOptionByText("OCPP 1.2 (SOAP)")).toBeDefined();
 
     await unmount(rendered);
   });
@@ -374,11 +374,11 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     );
   });
 
-  it("does not offer OCPP-1.6S in local mode", async () => {
+  it("offers OCPP-1.6S in local mode", async () => {
     const rendered = await renderModal({ mode: "local" });
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.6 (SOAP)")).toBeUndefined();
+    expect(queryOptionByText("OCPP 1.6 (SOAP)")).toBeDefined();
 
     await unmount(rendered);
   });

@@ -1126,4 +1126,54 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
       }
     });
   });
+
+  it("uses WSA anonymous address for From when soapCallbackUrl is undefined (browser send-only mode)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-SEND-ONLY";
+      // No callback URL — browser local mode scenario
+      const cp = new ChargePoint(
+        cpId,
+        bootNotification(),
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.5",
+        {
+          centralSystemUrl: csms.url,
+          // soapCallbackUrl is undefined — browser send-only mode
+          soapPath: "/ocpp/soap",
+        },
+      );
+      cp.events.on("error", () => undefined);
+
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: undefined, // explicitly undefined for send-only mode
+        dialect: OCPP15_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        handler.sendHeartbeat();
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "Heartbeat",
+          1,
+        );
+        // Verify the From address is the anonymous WSA address, not undefined
+        expect(request.parsed.from).toBe(WSA_ANONYMOUS_ADDRESS);
+        expect(request.body).toContain(
+          `<a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address>`,
+        );
+      } finally {
+        csms.stop();
+      }
+    });
+  });
 });

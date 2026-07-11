@@ -48,31 +48,6 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // The OCPP 1.5 SOAP transport is daemon-only: it needs
-      // `--soap-callback-url` and an inbound SOAP server the web console can't
-      // run, so the browser never instantiates OCPPSoapHandler. But
-      // ChargePoint statically imports it, so soapEnvelope.ts — and with it
-      // xmlbuilder2's CommonJS DOM stack (@oozcitak/*, plus fast-xml-parser) —
-      // lands in the browser bundle's static init graph anyway. That CJS<->ESM
-      // interop crashes browser startup under some production module-init
-      // orderings with "Object.defineProperty called on non-object", blanking
-      // the whole SPA (issue #127; the earlier `events` polyfill only papered
-      // over an earlier symptom of the same root cause). Alias both XML
-      // libraries to a tiny stub for the browser build/dev server so that code
-      // path is never bundled. Skipped under vitest (process.env.VITEST), where
-      // the real SOAP code runs in Node.
-      ...(process.env.VITEST
-        ? {}
-        : {
-            xmlbuilder2: path.resolve(
-              __dirname,
-              "./src/build/soapXmlBrowserStub.ts",
-            ),
-            "fast-xml-parser": path.resolve(
-              __dirname,
-              "./src/build/soapXmlBrowserStub.ts",
-            ),
-          }),
     },
     // Force a single React instance across every chunk. The Scenario Editor is
     // a lazy chunk built around @xyflow/react, which leans heavily on React

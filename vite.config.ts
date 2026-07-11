@@ -27,7 +27,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    environmentMatchGlobs: [["**/*.dom.test.{ts,tsx}", "jsdom"]],
+    // vitest 4 removed environmentMatchGlobs; the dom tests select jsdom via a
+    // `// @vitest-environment jsdom` docblock instead.
     setupFiles: ["src/test/setup.dom.ts"],
     // In CI, also emit a JUnit report next to coverage so it can be uploaded
     // to Codecov (test analytics / flaky-test surfacing, issue #131). Local

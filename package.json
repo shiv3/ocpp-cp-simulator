@@ -88,8 +88,8 @@
     "@types/sql.js": "^1.4.11",
     "@types/uuid": "^11.0.0",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react-swc": "^3.11.0",
-    "@vitest/coverage-v8": "^2.1.8",
+    "@vitejs/plugin-react-swc": "^4",
+    "@vitest/coverage-v8": "^4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "eslint": "^9",
@@ -109,8 +109,8 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8",
-    "vite": "^5.4.19",
-    "vitest": "^2.1.8"
+    "vite": "^6",
+    "vitest": "^4"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,css,md,json}": "prettier --write",

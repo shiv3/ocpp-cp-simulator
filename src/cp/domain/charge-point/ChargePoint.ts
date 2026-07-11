@@ -820,7 +820,9 @@ export class ChargePoint {
    * 1.6 Firmware TC_044_2 / TC_044_3) via the `SimulatedFirmwareUpdateFailure`
    * custom config key (set through a scenario `configSet` node before
    * UpdateFirmware fires): `"DownloadFailed"` diverts at the Downloaded
-   * step, `"InstallationFailed"` diverts at the Installed step.
+   * step, `"InstallationFailed"` diverts at the Installed step. The armed
+   * value is one-shot: it is consumed and cleared on the next UpdateFirmware,
+   * so a second UpdateFirmware without re-arming will run the happy path.
    */
   simulateFirmwareUpdate(retrieveDate: Date, intervalMs = 2000): void {
     if (this._firmwareUpdateInFlight) {
@@ -839,6 +841,11 @@ export class ChargePoint {
     const failureMode = this._configuration.getString(
       "SimulatedFirmwareUpdateFailure",
     );
+    // One-shot: clear the armed failure immediately so the next UpdateFirmware
+    // runs the happy path unless re-armed.
+    if (failureMode) {
+      this._configuration.applyChange("SimulatedFirmwareUpdateFailure", "");
+    }
 
     const fireStep = (index: number) => {
       if (index >= sequence.length) {

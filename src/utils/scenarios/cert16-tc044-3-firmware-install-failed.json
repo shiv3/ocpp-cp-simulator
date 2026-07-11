@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc044-3-firmware-install-failed",
   "name": "Cert 1.6 Firmware: TC_044_3 Firmware Update — Installation Failed",
-  "description": "Pre-arms the CP via the custom `SimulatedFirmwareUpdateFailure` config key (set to 'InstallationFailed' through a local configSet step) so the simulated firmware train diverts after Installing: CSMS sends UpdateFirmware.req with a retrieveDate in the near past; the CP progresses through FirmwareStatusNotification states Downloading → Downloaded → Installing, then sends FirmwareStatusNotification(InstallationFailed) instead of Installed.",
+  "description": "Pre-arms the CP via the custom `SimulatedFirmwareUpdateFailure` config key (set to 'InstallationFailed' through a local configSet step) so the simulated firmware train diverts after Installing: CSMS sends UpdateFirmware.req with a retrieveDate in the near past; the CP progresses through FirmwareStatusNotification states Downloading → Downloaded → Installing, then sends FirmwareStatusNotification(InstallationFailed) instead of Installed. The arm applies to the next UpdateFirmware only and clears itself automatically.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

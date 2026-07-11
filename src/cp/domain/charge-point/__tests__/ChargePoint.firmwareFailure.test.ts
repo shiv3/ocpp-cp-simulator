@@ -111,4 +111,33 @@ describe("ChargePoint.simulateFirmwareUpdate — pre-armed failure outcomes", ()
       "Installed",
     ]);
   });
+
+  it("one-shot: after DownloadFailed, second UpdateFirmware (without re-arm) completes happy path", async () => {
+    const cp = buildChargePoint();
+    const sent: string[] = [];
+    vi.spyOn(cp, "sendFirmwareStatusNotification").mockImplementation((s) => {
+      sent.push(s);
+    });
+
+    // First UpdateFirmware: arm the failure
+    cp.configuration.applyChange(
+      "SimulatedFirmwareUpdateFailure",
+      "DownloadFailed",
+    );
+    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(sent).toEqual(["Downloading", "DownloadFailed"]);
+
+    // Second UpdateFirmware: no re-arm — arm was auto-cleared by the first call
+    // Should now complete the happy path
+    sent.length = 0;
+    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(sent).toEqual([
+      "Downloading",
+      "Downloaded",
+      "Installing",
+      "Installed",
+    ]);
+  });
 });

@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc044-2-firmware-download-failed",
   "name": "Cert 1.6 Firmware: TC_044_2 Firmware Update — Download Failed",
-  "description": "Pre-arms the CP via the custom `SimulatedFirmwareUpdateFailure` config key (set to 'DownloadFailed' through a local configSet step) so the simulated firmware train diverts after Downloading: CSMS sends UpdateFirmware.req with a retrieveDate in the near past; the CP sends FirmwareStatusNotification(Downloading) then FirmwareStatusNotification(DownloadFailed) and stops — Installing/Installed are never reached.",
+  "description": "Pre-arms the CP via the custom `SimulatedFirmwareUpdateFailure` config key (set to 'DownloadFailed' through a local configSet step) so the simulated firmware train diverts after Downloading: CSMS sends UpdateFirmware.req with a retrieveDate in the near past; the CP sends FirmwareStatusNotification(Downloading) then FirmwareStatusNotification(DownloadFailed) and stops — Installing/Installed are never reached. The arm applies to the next UpdateFirmware only and clears itself automatically.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

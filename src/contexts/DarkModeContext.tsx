@@ -26,18 +26,13 @@ export const DarkModeProvider: React.FC<{ children: React.ReactNode }> = ({
     const root = window.document.documentElement;
 
     const applyTheme = () => {
-      let shouldBeDark = false;
-
-      if (theme === "dark") {
-        shouldBeDark = true;
-      } else if (theme === "light") {
-        shouldBeDark = false;
-      } else {
-        // system
-        shouldBeDark = window.matchMedia(
-          "(prefers-color-scheme: dark)",
-        ).matches;
-      }
+      const shouldBeDark =
+        theme === "dark"
+          ? true
+          : theme === "light"
+            ? false
+            : // system
+              window.matchMedia("(prefers-color-scheme: dark)").matches;
 
       if (shouldBeDark) {
         root.classList.add("dark");

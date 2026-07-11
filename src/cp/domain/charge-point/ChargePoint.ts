@@ -1041,6 +1041,9 @@ export class ChargePoint {
     this._signedFirmwareUpdateInFlight = false;
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
+    // Issue #110: stale response overrides must not survive a
+    // disconnect — they would silently answer the next real CSMS call.
+    this._responseOverrides.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
     this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));

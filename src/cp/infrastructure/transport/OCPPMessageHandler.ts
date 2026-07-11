@@ -832,7 +832,9 @@ export class OCPPMessageHandler {
 
     // Issue #110: a scenario responseOverride node may have armed a
     // one-shot canned response for this action (e.g. RemoteStartTransaction
-    // → Rejected for TC_026). It replaces the handler entirely.
+    // → Rejected for TC_026). It replaces the handler entirely, so the legacy
+    // remoteStartReceived/remoteStopReceived delegation never fires — scenarios
+    // combining an override with a wait must use the generic csmsCallTrigger.
     const overrideStatus = this._chargePoint.consumeResponseOverride(action);
     if (overrideStatus !== null) {
       this._logger.info(

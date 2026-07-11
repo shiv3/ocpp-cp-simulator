@@ -51,4 +51,21 @@ describe("incoming CSMS call observability (issue #110 engine hooks)", () => {
     expect(cp.consumeResponseOverride("ReserveNow")).toBeNull();
     expect(cp.consumeResponseOverride("TriggerMessage")).toBe("Rejected");
   });
+
+  it("teardownAfterClose clears armed overrides (issue #110)", () => {
+    const cp = newChargePoint("CP-TEARDOWN-OVERRIDE");
+    cp.armResponseOverride("RemoteStartTransaction", "Rejected");
+    expect(cp.consumeResponseOverride("RemoteStartTransaction")).toBe(
+      "Rejected",
+    );
+
+    // The consumed override is already gone, but re-arm one and verify
+    // that disconnect() (which triggers teardownAfterClose) clears all
+    // armed overrides so they don't survive the disconnect/reconnect cycle.
+    cp.armResponseOverride("RemoteStopTransaction", "Accepted");
+    cp.disconnect();
+
+    // After teardownAfterClose runs, the armed override is cleared
+    expect(cp.consumeResponseOverride("RemoteStopTransaction")).toBeNull();
+  });
 });

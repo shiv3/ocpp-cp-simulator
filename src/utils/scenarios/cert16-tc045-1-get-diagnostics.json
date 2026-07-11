@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc045-1-get-diagnostics",
   "name": "Cert 1.6 Firmware: TC_045_1 Get Diagnostics",
-  "description": "CSMS sends GetDiagnostics.req with an upload location; CP responds with fileName 'diagnostics.txt' and sends DiagnosticsStatusNotification (Uploading, then Uploaded on successful POST to the location, or UploadFailed if the location is unreachable or returns non-2xx HTTP status — both outcomes are certification-relevant).",
+  "description": "CSMS sends GetDiagnostics.req with an upload location; CP responds with fileName 'diagnostics.txt' and sends DiagnosticsStatusNotification (Uploading, then Uploaded on successful POST to the location, or UploadFailed if the location is unreachable or returns non-2xx HTTP status — both outcomes are certification-relevant). If the upload is slow, status notifications may continue to arrive after the scenario itself has ended.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },
@@ -35,8 +35,8 @@
       "type": "delay",
       "position": { "x": 400, "y": 350 },
       "data": {
-        "label": "CP uploads diagnostics and reports status",
-        "delaySeconds": 5
+        "label": "Wait for upload + status notifications",
+        "delaySeconds": 15
       }
     },
     {

@@ -3,6 +3,7 @@ import {
   type CancelReservationNodeData,
   type ConfigSetNodeData,
   type ConnectorPlugNodeData,
+  CSMS_CALL_TRIGGER_ACTIONS,
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
   type DelayNodeData,
@@ -10,6 +11,8 @@ import {
   type NotificationNodeData,
   type RemoteStartTriggerNodeData,
   type RemoteStopTriggerNodeData,
+  RESPONSE_OVERRIDE_ACTIONS,
+  RESPONSE_OVERRIDE_STATUSES,
   type ResponseOverrideNodeData,
   type ReservationTriggerNodeData,
   type ReserveNowNodeData,
@@ -91,6 +94,40 @@ function asOcppStatus(value: unknown, fallback: OCPPStatus): OCPPStatus {
   return typeof value === "string" && OCPP_STATUS_VALUES.has(value)
     ? (value as OCPPStatus)
     : fallback;
+}
+
+const CSMS_CALL_TRIGGER_ACTIONS_SET = new Set<string>(
+  CSMS_CALL_TRIGGER_ACTIONS,
+);
+
+function asCsmsCallTriggerAction(
+  value: unknown,
+): (typeof CSMS_CALL_TRIGGER_ACTIONS)[number] {
+  return typeof value === "string" && CSMS_CALL_TRIGGER_ACTIONS_SET.has(value)
+    ? (value as (typeof CSMS_CALL_TRIGGER_ACTIONS)[number])
+    : "Reset";
+}
+
+const RESPONSE_OVERRIDE_ACTIONS_SET = new Set<string>(
+  RESPONSE_OVERRIDE_ACTIONS,
+);
+
+function asResponseOverrideAction(
+  value: unknown,
+): (typeof RESPONSE_OVERRIDE_ACTIONS)[number] {
+  return typeof value === "string" && RESPONSE_OVERRIDE_ACTIONS_SET.has(value)
+    ? (value as (typeof RESPONSE_OVERRIDE_ACTIONS)[number])
+    : "RemoteStartTransaction";
+}
+
+function asResponseOverrideStatus(
+  value: unknown,
+  action: (typeof RESPONSE_OVERRIDE_ACTIONS)[number],
+): string {
+  const validStatuses = RESPONSE_OVERRIDE_STATUSES[action];
+  return typeof value === "string" && validStatuses.includes(value)
+    ? value
+    : validStatuses[0];
 }
 
 function baseToForm(nodeData: ScenarioNodeData): NodeFormData {
@@ -541,7 +578,9 @@ function csmsCallTriggerNodeDataToForm(
 ): NodeFormData {
   return compactDefined({
     ...baseToForm(nodeData),
-    action: (nodeData as Partial<CsmsCallTriggerNodeData>).action ?? "Reset",
+    action: asCsmsCallTriggerAction(
+      (nodeData as Partial<CsmsCallTriggerNodeData>).action,
+    ),
     timeout: optionalNumber(
       (nodeData as Partial<CsmsCallTriggerNodeData>).timeout,
     ),
@@ -553,7 +592,7 @@ function csmsCallTriggerFormToNodeData(
 ): CsmsCallTriggerNodeData {
   return compactDefined({
     ...baseFromForm(formData),
-    action: typeof formData.action === "string" ? formData.action : "Reset",
+    action: asCsmsCallTriggerAction(formData.action),
     timeout: optionalNumber(formData.timeout),
   }) as CsmsCallTriggerNodeData;
 }
@@ -561,26 +600,27 @@ function csmsCallTriggerFormToNodeData(
 function responseOverrideNodeDataToForm(
   nodeData: ScenarioNodeData,
 ): NodeFormData {
+  const action = asResponseOverrideAction(
+    (nodeData as Partial<ResponseOverrideNodeData>).action,
+  );
   return compactDefined({
     ...baseToForm(nodeData),
-    action:
-      (nodeData as Partial<ResponseOverrideNodeData>).action ??
-      "RemoteStartTransaction",
-    status:
-      (nodeData as Partial<ResponseOverrideNodeData>).status ?? "Rejected",
+    action,
+    status: asResponseOverrideStatus(
+      (nodeData as Partial<ResponseOverrideNodeData>).status,
+      action,
+    ),
   });
 }
 
 function responseOverrideFormToNodeData(
   formData: NodeFormData,
 ): ResponseOverrideNodeData {
+  const action = asResponseOverrideAction(formData.action);
   return {
     ...baseFromForm(formData),
-    action:
-      typeof formData.action === "string"
-        ? formData.action
-        : "RemoteStartTransaction",
-    status: typeof formData.status === "string" ? formData.status : "Rejected",
+    action,
+    status: asResponseOverrideStatus(formData.status, action),
   };
 }
 

@@ -626,6 +626,12 @@ export class ChargePoint {
     return status;
   }
 
+  /** Read-only probe: is an override armed for `action`? Test/diagnostic
+   *  helper — does not consume. */
+  hasResponseOverride(action: string): boolean {
+    return this._responseOverrides.has(action);
+  }
+
   /** Clear an armed response override. No-op if not armed. */
   clearResponseOverride(action: string): void {
     this._responseOverrides.delete(action);

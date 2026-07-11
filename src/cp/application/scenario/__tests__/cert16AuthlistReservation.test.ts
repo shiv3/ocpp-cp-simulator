@@ -114,6 +114,11 @@ describe("cert16 Authlist and Reservation certification scenarios", () => {
         3000,
       );
 
+      // Prove the responseOverride node actually armed before the trigger
+      // dispatches — a non-vacuous check that the arm happened, not just
+      // that the trigger is listening.
+      expect(cp.hasResponseOverride("ReserveNow")).toBe(true);
+
       // Simulate the CSMS issuing ReserveNow.req — this will be rejected
       // by the armed override instead of proceeding normally
       cp.notifyIncomingCall("ReserveNow", {
@@ -128,10 +133,11 @@ describe("cert16 Authlist and Reservation certification scenarios", () => {
       await timeout(execution, 5000);
 
       // After completion, the override should be cleared (end-of-run cleanup per brief)
-      // Scope note: this only pins end-of-run cleanup (the executor clears
-      // armed overrides in its finally block whether or not a dispatch
-      // consumed them). The actual override-intercepts-the-handler semantics
-      // are proven at the dispatch layer in handleCallOverride.test.ts; this
+      // Scope note: armed-before-dispatch is asserted above via hasResponseOverride.
+      // This pins end-of-run cleanup (the executor clears armed overrides in its
+      // finally block whether or not a dispatch consumed them). The actual
+      // override-intercepts-the-handler semantics (dispatch consumption) are
+      // proven at the dispatch layer in handleCallOverride.test.ts; this
       // test's main value is that TC_048_4's node graph runs to completion.
       expect(cp.consumeResponseOverride("ReserveNow")).toBeNull();
     } finally {

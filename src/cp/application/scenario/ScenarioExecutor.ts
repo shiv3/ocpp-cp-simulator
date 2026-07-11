@@ -1526,7 +1526,7 @@ export class ScenarioExecutor {
   ): Promise<void> {
     if (!this.callbacks.onWaitForCsmsCall) return;
 
-    const timeout = data.timeout || 0;
+    const timeout = Math.max(0, data.timeout || 0);
     if (!timeout || timeout === 0) {
       const waitPromise = this.callbacks.onWaitForCsmsCall(
         data.action,

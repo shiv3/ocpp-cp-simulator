@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc021-change-configuration",
   "name": "Cert 1.6 Core: TC_021 Change Configuration",
-  "description": "CSMS sends ChangeConfiguration to update a configuration key (e.g., MeterValueSampleInterval). CP applies the change and confirms acceptance.",
+  "description": "CSMS sends ChangeConfiguration to update a configuration key (e.g., MeterValueSampleInterval). The CP answers per its configuration store — Accepted, Rejected, RebootRequired, or NotSupported depending on the key — and the operator can verify the change was applied via GetConfiguration.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

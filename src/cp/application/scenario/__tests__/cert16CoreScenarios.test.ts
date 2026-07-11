@@ -108,6 +108,11 @@ describe("cert16 Core certification scenarios with csmsCallTrigger and responseO
         3000,
       );
 
+      // Prove the responseOverride node actually armed before the trigger
+      // dispatches — a non-vacuous check that the arm happened, not just
+      // that the trigger is listening.
+      expect(cp.hasResponseOverride("RemoteStartTransaction")).toBe(true);
+
       // Simulate the CSMS issuing RemoteStartTransaction.req — this will be rejected
       // by the armed override instead of proceeding normally
       cp.notifyIncomingCall("RemoteStartTransaction", {
@@ -120,10 +125,11 @@ describe("cert16 Core certification scenarios with csmsCallTrigger and responseO
       await timeout(execution, 5000);
 
       // After completion, the override should be cleared (end-of-run cleanup per Task 1)
-      // Scope note: this only pins end-of-run cleanup (the executor clears
-      // armed overrides in its finally block whether or not a dispatch
-      // consumed them). The actual override-intercepts-the-handler semantics
-      // are proven at the dispatch layer in handleCallOverride.test.ts; this
+      // Scope note: armed-before-dispatch is asserted above via hasResponseOverride.
+      // This pins end-of-run cleanup (the executor clears armed overrides in its
+      // finally block whether or not a dispatch consumed them). The actual
+      // override-intercepts-the-handler semantics (dispatch consumption) are
+      // proven at the dispatch layer in handleCallOverride.test.ts; this
       // test's main value is that TC_026's node graph runs to completion.
       expect(cp.consumeResponseOverride("RemoteStartTransaction")).toBeNull();
     } finally {

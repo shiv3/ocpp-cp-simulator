@@ -1,11 +1,11 @@
 # Certification Scenario Templates
 
-These built-in JSON templates implement the Charge Point side of OCPP 1.6 certification test cases. Each scenario encodes a specific flow or condition described in the OCPPSC test-case spec. To run a scenario:
+These built-in JSON templates implement the Charge Point side of OCPP 1.6 certification test cases. Each scenario encodes a specific flow or condition described in the OCPPSC test-case spec. These templates synchronize on incoming CSMS calls and drive CP-side behavior; they do not validate request payloads or CSMS responses — verifying wire content is up to the operator or the CSMS-side test tooling, using the simulator's message log. To run a scenario:
 
 1. Open the Scenario Editor in the web console.
 2. Select one of the cert16-* scenarios from the dropdown.
 3. Connect a real CSMS (or a test harness like GOCPP) to the simulator.
-4. Click **Play** to execute the scenario.
+4. The scenario starts automatically once the connector reaches Available (each template's Start node defaults to `triggerOn: "connect"`) — no manual "Play" control is required.
 5. Follow the CSMS-side operator actions listed below to complete the test case.
 
 ## Scenario Mapping

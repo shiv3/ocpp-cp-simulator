@@ -74,12 +74,27 @@ ocpp-cp-sim --http-port 5172 --web-console \
 
 > **Behind a reverse proxy?** Bound to a non-loopback host the daemon applies a safe same-origin CORS policy, so the web console served at a public URL will `403` its own assets until you name that origin with `--cors-origin https://your.url` (or, behind a trusted proxy, `--trust-forwarded-headers`). See [docs/server.md → Behind a reverse proxy](docs/server.md#behind-a-reverse-proxy-traefik-nginx-caddy-) for details and an nginx + Authelia example compose.
 
-### OCPP 1.5 SOAP
+### SOAP Versions (1.2, 1.5, 1.6S)
 
-OCPP 1.5 uses SOAP 1.2 / WS-Addressing over HTTP (not WebSocket). It is **CLI /
-server-mode only** — the browser UI can't host the callback endpoint, so selecting
-`OCPP-1.5` there errors. Point `--ws-url` at the CSMS _CentralSystemService_ URL and
-give the callback URL the CSMS should reach the charge point on:
+OCPP 1.2, 1.5, and 1.6 (SOAP) all use SOAP 1.2 / WS-Addressing over HTTP (not WebSocket).
+They are **CLI / server-mode only** — the browser UI can't host the callback endpoint.
+Point `--ws-url` at the CSMS _CentralSystemService_ URL and give the callback URL the
+CSMS should reach the charge point on:
+
+**OCPP 1.2:**
+
+```bash
+bun src/cli/main.ts \
+  --cp-id CP-001 --ocpp-version OCPP-1.2 \
+  --ws-url http://csms-host:8180/services/CentralSystemService \
+  --soap-callback-url http://this-host:9700/ocpp/soap/CP-001/ChargePointService \
+  --json
+```
+
+OCPP 1.2 has a narrower message surface: no DataTransfer, GetConfiguration,
+LocalAuthList, or Reservation messages; status values are limited to a 4-value set.
+
+**OCPP 1.5:**
 
 ```bash
 bun src/cli/main.ts \
@@ -89,16 +104,30 @@ bun src/cli/main.ts \
   --json
 ```
 
-- **CP → CSMS**: BootNotification, Heartbeat, StatusNotification, Authorize,
-  Start/StopTransaction, MeterValues (1.6 status/error/measurand values are mapped
-  to the 1.5 wire enums; `StopTransaction.reason` is dropped).
-- **CSMS → CP**: the daemon hosts `POST <soap-path>/:cpId/ChargePointService`
-  (default `--soap-path /ocpp/soap`); slice-1 handles **Reset**. The endpoint relies
-  on the daemon's `--web-console-basic-auth-*` gate or a trusted network boundary —
-  OCPP-S has no per-message authentication field.
+**OCPP 1.6 (SOAP):**
 
-Pairs with [SteVe](https://github.com/steve-community/steve) (register the charge
-box with protocol `ocpp1.5S`, status Accepted).
+```bash
+bun src/cli/main.ts \
+  --cp-id CP-001 --ocpp-version OCPP-1.6S \
+  --ws-url http://csms-host:8180/steve/services/CentralSystemService \
+  --soap-callback-url http://this-host:9700/ocpp/soap/CP-001/ChargePointService \
+  --json
+```
+
+OCPP 1.6S supports the full 1.6 message set including TriggerMessage and
+charging profiles.
+
+All SOAP versions share the same endpoint pattern:
+
+- **CP → CSMS**: BootNotification, Heartbeat, StatusNotification, Authorize,
+  Start/StopTransaction, MeterValues.
+- **CSMS → CP**: the daemon hosts `POST <soap-path>/:cpId/ChargePointService`
+  (default `--soap-path /ocpp/soap`); slice-1 handles **Reset** and other call-ins.
+  The endpoint relies on the daemon's `--web-console-basic-auth-*` gate or a trusted
+  network boundary — OCPP-S has no per-message authentication field.
+
+Pairs with [SteVe](https://github.com/steve-community/steve) (register charge points
+with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 
 ## OCPP 1.6 Security Profiles
 

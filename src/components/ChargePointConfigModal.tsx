@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Save, X } from "lucide-react";
 import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
+import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -161,10 +162,10 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     }
     if (
       mode === "remote" &&
-      config.ocppVersion === "OCPP-1.5" &&
+      isSoapVersion(config.ocppVersion) &&
       !config.soapCallbackUrl?.trim()
     ) {
-      setSaveError("SOAP Callback URL is required for OCPP 1.5.");
+      setSaveError("SOAP Callback URL is required for SOAP versions.");
       return;
     }
     if (
@@ -310,7 +311,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   className="logger-input"
                 />
               </div>
-              {config.ocppVersion !== "OCPP-1.5" && (
+              {!isSoapVersion(config.ocppVersion) && (
                 <div className="col-span-2">
                   <Label htmlFor="fullWsURL" className="mb-2 logger-label">
                     Full WebSocket URL
@@ -357,7 +358,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
               )}
               <div className="col-span-2">
                 <Label htmlFor="wsURL" className="mb-2 logger-label">
-                  {config.ocppVersion === "OCPP-1.5"
+                  {isSoapVersion(config.ocppVersion)
                     ? "Central System URL (SOAP endpoint)"
                     : "WebSocket URL"}
                 </Label>
@@ -383,15 +384,25 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   </SelectTrigger>
                   <SelectContent>
                     {mode === "remote" && (
-                      <SelectItem value="OCPP-1.5">OCPP 1.5 (SOAP)</SelectItem>
+                      <>
+                        <SelectItem value="OCPP-1.2">
+                          OCPP 1.2 (SOAP)
+                        </SelectItem>
+                        <SelectItem value="OCPP-1.5">
+                          OCPP 1.5 (SOAP)
+                        </SelectItem>
+                      </>
                     )}
                     <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
+                    {mode === "remote" && (
+                      <SelectItem value="OCPP-1.6S">OCPP 1.6 (SOAP)</SelectItem>
+                    )}
                     <SelectItem value="OCPP-2.0.1">OCPP 2.0.1</SelectItem>
                     <SelectItem value="OCPP-2.1">OCPP 2.1</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {mode === "remote" && config.ocppVersion === "OCPP-1.5" && (
+              {mode === "remote" && isSoapVersion(config.ocppVersion) && (
                 <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label
@@ -412,8 +423,8 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                       className="logger-input"
                     />
                     <p className="text-xs text-muted mt-1">
-                      OCPP 1.5 ChargePointService callback URL the Central
-                      System uses to reach this CP. Required.
+                      SOAP ChargePointService callback URL the Central System
+                      uses to reach this CP. Required.
                     </p>
                   </div>
                   <div>
@@ -486,7 +497,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             </div>
           </div>
 
-          {mode === "remote" && (
+          {mode === "remote" && !isSoapVersion(config.ocppVersion) && (
             <div className="card p-4">
               <h3 className="card-header mb-4">Security</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

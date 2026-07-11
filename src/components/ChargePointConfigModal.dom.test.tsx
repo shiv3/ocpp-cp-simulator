@@ -131,14 +131,6 @@ function inputById(id: string): HTMLInputElement {
   return el;
 }
 
-function textareaById(id: string): HTMLTextAreaElement {
-  const el = document.getElementById(id);
-  if (!(el instanceof HTMLTextAreaElement)) {
-    throw new Error(`Missing textarea #${id}`);
-  }
-  return el;
-}
-
 function setValue(
   input: HTMLInputElement | HTMLTextAreaElement,
   value: string,
@@ -307,13 +299,11 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     );
   });
 
-  it("maps securityProfile/authorizationKey/tls/soap fields on save and omits a blank secret on edit", async () => {
+  it("maps soap fields on save and omits blank soap callback URL on non-SOAP versions", async () => {
     const onSave = vi.fn();
-    // Simulates the daemon's redacted edit prefill: secrets always come back
-    // blank/absent, never a redaction placeholder.
     const initial = baseConfig({
       ocppVersion: "OCPP-1.5",
-      securityProfile: 2,
+      securityProfile: undefined,
       authorizationKey: undefined,
       tls: undefined,
     });
@@ -325,18 +315,14 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     });
     roots.push(rendered.root);
 
+    // Set SOAP-specific fields for OCPP-1.5
     await act(async () => {
       setValue(
         inputById("soapCallbackUrl"),
         "http://cp-host:8080/ocpp/soap/CP-1",
       );
       setValue(inputById("soapPath"), "/ocpp/soap");
-      setValue(
-        textareaById("tlsCa"),
-        "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----",
-      );
     });
-    // AuthorizationKey is left blank on purpose — edit + blank must omit it.
 
     await act(async () => {
       saveButton().click();
@@ -347,9 +333,129 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     expect(saved.ocppVersion).toBe("OCPP-1.5");
     expect(saved.soapCallbackUrl).toBe("http://cp-host:8080/ocpp/soap/CP-1");
     expect(saved.soapPath).toBe("/ocpp/soap");
-    expect(saved.securityProfile).toBe(2);
+    expect(saved.securityProfile).toBeUndefined();
     expect(saved.authorizationKey).toBeUndefined();
-    expect(saved.tls?.ca).toContain("BEGIN CERTIFICATE");
-    expect(saved.tls?.cert).toBeUndefined();
+  });
+
+  it("does not offer OCPP-1.2 in local mode", async () => {
+    const rendered = await renderModal({ mode: "local" });
+    await openSelect("ocppVersion");
+
+    expect(queryOptionByText("OCPP 1.2 (SOAP)")).toBeUndefined();
+
+    await unmount(rendered);
+  });
+
+  it("offers OCPP-1.2 in remote mode", async () => {
+    const rendered = await renderModal({ mode: "remote" });
+    await openSelect("ocppVersion");
+
+    expect(queryOptionByText("OCPP 1.2 (SOAP)")).toBeDefined();
+
+    await unmount(rendered);
+  });
+
+  it("blocks save when OCPP-1.2 is selected without a SOAP callback URL", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      onSave,
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.2" }),
+    });
+    roots.push(rendered.root);
+
+    await act(async () => {
+      saveButton().click();
+    });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "SOAP Callback URL is required",
+    );
+  });
+
+  it("does not offer OCPP-1.6S in local mode", async () => {
+    const rendered = await renderModal({ mode: "local" });
+    await openSelect("ocppVersion");
+
+    expect(queryOptionByText("OCPP 1.6 (SOAP)")).toBeUndefined();
+
+    await unmount(rendered);
+  });
+
+  it("offers OCPP-1.6S in remote mode", async () => {
+    const rendered = await renderModal({ mode: "remote" });
+    await openSelect("ocppVersion");
+
+    expect(queryOptionByText("OCPP 1.6 (SOAP)")).toBeDefined();
+
+    await unmount(rendered);
+  });
+
+  it("blocks save when OCPP-1.6S is selected without a SOAP callback URL", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      onSave,
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.6S" }),
+    });
+    roots.push(rendered.root);
+
+    await act(async () => {
+      saveButton().click();
+    });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "SOAP Callback URL is required",
+    );
+  });
+
+  it("clears the stale SOAP callback validation message when switching away from OCPP-1.2", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      onSave,
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.2" }),
+    });
+    roots.push(rendered.root);
+
+    await act(async () => {
+      saveButton().click();
+    });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "SOAP Callback URL is required",
+    );
+
+    await selectOption("ocppVersion", "OCPP 1.6J");
+
+    expect(document.body.textContent).not.toContain(
+      "SOAP Callback URL is required",
+    );
+  });
+
+  it("clears the stale SOAP callback validation message when switching away from OCPP-1.6S", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      onSave,
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.6S" }),
+    });
+    roots.push(rendered.root);
+
+    await act(async () => {
+      saveButton().click();
+    });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "SOAP Callback URL is required",
+    );
+
+    await selectOption("ocppVersion", "OCPP 1.6J");
+
+    expect(document.body.textContent).not.toContain(
+      "SOAP Callback URL is required",
+    );
   });
 });

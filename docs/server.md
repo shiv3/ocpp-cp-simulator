@@ -63,12 +63,12 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | GET    | `/v1/healthz`                         | Exempt                                        | `{ "ok": true }`; used for browser Local/Remote detection, readiness checks, and Docker healthchecks. |
 | GET    | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling / upgrade transport. Not a REST control endpoint.                                   |
 | POST   | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling transport. Not a REST control endpoint.                                             |
-| POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP 1.5 SOAP CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.                       |
+| POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP SOAP (1.2 / 1.5 / 1.6S) CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.        |
 | GET    | static asset URL                      | HTTP Basic Auth if enabled                    | Web console assets when `--web-console` is enabled. Unknown page paths fall back to `index.html`.     |
 
 Every other `/v1/*` path returns `404`.
 
-The OCPP 1.5 SOAP callback endpoint relies on the same HTTP Basic-auth gate as
+The OCPP SOAP callback endpoint (1.2 / 1.5 / 1.6S) relies on the same HTTP Basic-auth gate as
 the web console, or on a trusted network boundary when that gate is disabled.
 OCPP-S has no per-message authentication field, so the simulator does not add a
 non-standard shared secret to SOAP payloads.

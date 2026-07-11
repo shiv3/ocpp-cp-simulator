@@ -539,7 +539,7 @@ export function createHttpHandlers(deps: {
         return soapFaultResponse("SOAP request body is too large", 413);
       }
 
-      // OCPP 1.5 SOAP has no per-message authentication field. This callback
+      // OCPP SOAP has no per-message authentication field. This callback
       // endpoint relies on the daemon's existing HTTP Basic-auth gate when
       // enabled, or an operator-controlled trusted network boundary otherwise;
       // do not add a non-standard shared secret to the SOAP payload.
@@ -554,7 +554,7 @@ export function createHttpHandlers(deps: {
               body,
             )) ??
             soapFaultResponse(
-              `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
+              `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
               400,
             )
           );

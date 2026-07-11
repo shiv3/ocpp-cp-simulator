@@ -829,7 +829,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       });
     } else {
       this._logger.warn(
-        `OCPP 1.5 SOAP DataTransfer is not implemented in this client slice: ${JSON.stringify(payload)}`,
+        `${this._dialect.version} SOAP does not support DataTransfer: ${JSON.stringify(payload)}`,
         LogType.OCPP,
       );
     }
@@ -853,7 +853,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       );
     } else {
       this._logger.warn(
-        `OCPP 1.5 SOAP DiagnosticsStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
+        `${this._dialect.version} SOAP DiagnosticsStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
         LogType.OCPP,
       );
     }
@@ -877,7 +877,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       );
     } else {
       this._logger.warn(
-        `OCPP 1.5 SOAP FirmwareStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
+        `${this._dialect.version} SOAP FirmwareStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
         LogType.OCPP,
       );
     }
@@ -885,14 +885,14 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
 
   public sendSecurityEventNotification(type: string, techInfo?: string): void {
     this._logger.warn(
-      `OCPP 1.5 SOAP has no security extension; ignoring SecurityEventNotification ${JSON.stringify({ type, techInfo })}`,
+      `${this._dialect.version} SOAP has no security extension; ignoring SecurityEventNotification ${JSON.stringify({ type, techInfo })}`,
       LogType.OCPP,
     );
   }
 
   public sendLogStatusNotification(status: string, requestId?: number): void {
     this._logger.warn(
-      `OCPP 1.5 SOAP has no security extension; ignoring LogStatusNotification ${JSON.stringify({ status, requestId })}`,
+      `${this._dialect.version} SOAP has no security extension; ignoring LogStatusNotification ${JSON.stringify({ status, requestId })}`,
       LogType.OCPP,
     );
   }
@@ -902,14 +902,14 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     requestId?: number,
   ): void {
     this._logger.warn(
-      `OCPP 1.5 SOAP has no security extension; ignoring SignedFirmwareStatusNotification ${JSON.stringify({ status, requestId })}`,
+      `${this._dialect.version} SOAP has no security extension; ignoring SignedFirmwareStatusNotification ${JSON.stringify({ status, requestId })}`,
       LogType.OCPP,
     );
   }
 
   public sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
-      "OCPP 1.5 SOAP has no security extension; ignoring SignCertificate",
+      `${this._dialect.version} SOAP has no security extension; ignoring SignCertificate`,
       LogType.OCPP,
     );
     return Promise.resolve();
@@ -1007,7 +1007,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const action = OPERATION_ACTION[operation];
     if (action && !this.isCallAllowed(action)) {
       this._logger.warn(
-        `Suppressing ${operation}: blocked by boot gate (status=${this._bootGate.status.status})`,
+        `Suppressing ${operation}: blocked by the boot gate — BootNotification not yet Accepted (status=${this._bootGate.status.status})`,
         LogType.OCPP,
       );
       return;
@@ -1135,7 +1135,12 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
           ? status
           : "Rejected",
       currentTime: textValue(payload.currentTime) ?? new Date().toISOString(),
-      interval: numericValue(payload.heartbeatInterval) ?? 0,
+      // OCPP 1.2/1.5 name this field "heartbeatInterval"; 1.6 renamed it to
+      // "interval" (verified live against SteVe 1.6S). Read whichever is present.
+      interval:
+        numericValue(payload.interval) ??
+        numericValue(payload.heartbeatInterval) ??
+        0,
     };
     new BootNotificationResultHandler().handle(response, this.handlerContext());
   }

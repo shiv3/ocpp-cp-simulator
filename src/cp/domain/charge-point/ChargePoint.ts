@@ -510,6 +510,10 @@ export class ChargePoint {
   }
 
   set error(value: string) {
+    // Only emit on a real transition. boot() clears the error to "" on every
+    // connect, which otherwise emitted a spurious {"event":"error",
+    // "data":{"error":""}} on the JSON/event stream before "connected".
+    if (this._error === value) return;
     this._error = value;
     this._events.emit("error", { error: value });
   }
@@ -609,7 +613,10 @@ export class ChargePoint {
 
   connect(): void {
     if (!this._webSocket) {
-      this._logger.info("Connecting via OCPP 1.5 SOAP client", LogType.OCPP);
+      this._logger.info(
+        `Connecting via ${this._ocppVersion} SOAP client`,
+        LogType.OCPP,
+      );
       this.boot();
       this._events.emit("connected", undefined);
       return;
@@ -983,7 +990,7 @@ export class ChargePoint {
     this._logger.info(
       this._webSocket
         ? "Disconnecting from WebSocket"
-        : "Disconnecting OCPP 1.5 SOAP client",
+        : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
     this.teardownAfterClose();

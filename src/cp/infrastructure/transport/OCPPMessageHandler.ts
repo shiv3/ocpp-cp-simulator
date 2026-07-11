@@ -623,7 +623,7 @@ export class OCPPMessageHandler {
   ): void {
     if (!this.isCallAllowed(action)) {
       this._logger.warn(
-        `Suppressing ${action}: blocked by boot gate (status=${this._bootGate.status.status})`,
+        `Suppressing ${action}: blocked by the boot gate — BootNotification not yet Accepted (status=${this._bootGate.status.status})`,
         LogType.OCPP,
       );
       return;

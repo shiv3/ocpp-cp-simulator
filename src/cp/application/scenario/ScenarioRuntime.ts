@@ -615,6 +615,9 @@ export const createScenarioExecutorCallbacks = (
     onSetUnlockOutcome: (outcome) => {
       connector.unlockResponse = outcome;
     },
+    onArmResponseOverride: (action, status) => {
+      chargePoint.armResponseOverride(action, status);
+    },
     onConfigSet: (key, value) => {
       chargePoint.configuration.applyChange(key, value);
     },

@@ -63,6 +63,10 @@ export enum ScenarioNodeType {
   // incoming CALL (Reset, GetConfiguration, SendLocalList, …). The CP
   // core handler still runs; this node only observes the arrival.
   CSMS_CALL_TRIGGER = "csmsCallTrigger",
+  // Issue #110: arm a one-shot response override for the next incoming
+  // CALL of a given action (e.g. RemoteStartTransaction → Rejected for
+  // TC_026). The armed `{ status }` replaces the handler's response.
+  RESPONSE_OVERRIDE = "responseOverride",
 }
 
 /**
@@ -282,6 +286,18 @@ export interface UnlockOutcomeNodeData extends BaseNodeData {
 }
 
 /**
+ * Response Override Node Data — arms a one-shot canned `{ status }`
+ * response on the charge point for the next incoming CALL whose action
+ * matches. Non-blocking pre-arm, like unlockOutcome. Issue #110.
+ */
+export interface ResponseOverrideNodeData extends BaseNodeData {
+  /** OCPP 1.6 action whose next incoming call gets the canned response. */
+  action: string;
+  /** Status string returned as `{ status }` for that call. */
+  status: string;
+}
+
+/**
  * Config Set Node Data — applies a ChangeConfiguration locally (without
  * round-tripping through CSMS). Useful for tightening
  * MeterValueSampleInterval / changing MeterValuesSampledData mid-scenario.
@@ -320,6 +336,7 @@ export type ScenarioNodeData =
   | ReservationTriggerNodeData
   | StatusNotificationNodeData
   | UnlockOutcomeNodeData
+  | ResponseOverrideNodeData
   | ConfigSetNodeData
   | DataTransferNodeData
   | StartNodeData
@@ -521,6 +538,9 @@ export interface ScenarioExecutorCallbacks {
   onSetUnlockOutcome?: (
     outcome: "Unlocked" | "UnlockFailed" | "NotSupported",
   ) => void;
+  /** Issue #110: arm a one-shot `{ status }` response override for the
+   *  next incoming CALL of the given action. */
+  onArmResponseOverride?: (action: string, status: string) => void;
   /** §5.3: apply a Configuration key change locally. */
   onConfigSet?: (key: string, value: string) => void;
   /** §4.3: send CP-initiated DataTransfer.req. */
@@ -689,4 +709,16 @@ export const CSMS_CALL_TRIGGER_ACTIONS = [
   "RemoteStopTransaction",
   "DataTransfer",
   "ChangeAvailability",
+] as const;
+
+/** Actions a responseOverride node may target: their CALLRESULT payload
+ *  is exactly `{ status }`, so a canned status is schema-valid. */
+export const RESPONSE_OVERRIDE_ACTIONS = [
+  "RemoteStartTransaction",
+  "RemoteStopTransaction",
+  "TriggerMessage",
+  "ReserveNow",
+  "CancelReservation",
+  "SendLocalList",
+  "ChangeConfiguration",
 ] as const;

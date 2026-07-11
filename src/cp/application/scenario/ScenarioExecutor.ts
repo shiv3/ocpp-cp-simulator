@@ -22,6 +22,7 @@ import {
   ReservationTriggerNodeData,
   StatusNotificationNodeData,
   UnlockOutcomeNodeData,
+  ResponseOverrideNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
   StartTransactionOptions,
@@ -587,6 +588,12 @@ export class ScenarioExecutor {
         await this.executeUnlockOutcome(node.data as UnlockOutcomeNodeData);
         break;
 
+      case ScenarioNodeType.RESPONSE_OVERRIDE:
+        await this.executeResponseOverride(
+          node.data as ResponseOverrideNodeData,
+        );
+        break;
+
       case ScenarioNodeType.CONFIG_SET:
         await this.executeConfigSet(node.data as ConfigSetNodeData);
         break;
@@ -637,6 +644,24 @@ export class ScenarioExecutor {
     }
     this.callbacks.onSetUnlockOutcome(data.outcome);
     this.callbacks.log?.(`Connector unlockResponse → ${data.outcome}`, "info");
+  }
+
+  /** Issue #110: pre-arm a one-shot `{ status }` response override. */
+  private async executeResponseOverride(
+    data: ResponseOverrideNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onArmResponseOverride) {
+      this.callbacks.log?.(
+        "ResponseOverride: no onArmResponseOverride callback wired",
+        "warn",
+      );
+      return;
+    }
+    this.callbacks.onArmResponseOverride(data.action, data.status);
+    this.callbacks.log?.(
+      `Armed response override: ${data.action} → ${data.status}`,
+      "info",
+    );
   }
 
   /** Apply a ChangeConfiguration locally via the ConfigurationStore. */

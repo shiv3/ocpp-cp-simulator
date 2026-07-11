@@ -145,6 +145,89 @@ describe("coerceSoapPayloadWithSchema", () => {
     });
   });
 
+  it("coerces numeric fields inside arrays of objects (SetChargingProfile periods)", () => {
+    const schema = {
+      properties: {
+        chargingSchedulePeriod: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              startPeriod: { type: "integer" },
+              limit: { type: "number" },
+            },
+          },
+        },
+      },
+    };
+
+    // Two periods → real array; each period's numeric fields are strings.
+    const payload = {
+      chargingSchedulePeriod: [
+        { startPeriod: "0", limit: "32.0" },
+        { startPeriod: "3600", limit: "16" },
+      ],
+    };
+
+    expect(
+      coerceSoapPayloadWithSchema(payload, schema as Record<string, unknown>),
+    ).toEqual({
+      chargingSchedulePeriod: [
+        { startPeriod: 0, limit: 32.0 },
+        { startPeriod: 3600, limit: 16 },
+      ],
+    });
+  });
+
+  it("wraps a single array element AND coerces its nested numbers", () => {
+    const schema = {
+      properties: {
+        chargingSchedulePeriod: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { startPeriod: { type: "integer" } },
+          },
+        },
+      },
+    };
+
+    // fast-xml-parser yields a lone object (not an array) for a single element.
+    const payload = { chargingSchedulePeriod: { startPeriod: "900" } };
+
+    expect(
+      coerceSoapPayloadWithSchema(payload, schema as Record<string, unknown>),
+    ).toEqual({
+      chargingSchedulePeriod: [{ startPeriod: 900 }],
+    });
+  });
+
+  it("does not throw or mangle when an object-typed field is null or an array", () => {
+    const schema = {
+      properties: {
+        chargingProfile: {
+          type: "object",
+          properties: { chargingProfileId: { type: "integer" } },
+        },
+      },
+    };
+
+    expect(
+      coerceSoapPayloadWithSchema(
+        { chargingProfile: null },
+        schema as Record<string, unknown>,
+      ),
+    ).toEqual({ chargingProfile: null });
+
+    // An array must not be walked as an index-keyed record ({0: ...}).
+    expect(
+      coerceSoapPayloadWithSchema(
+        { chargingProfile: ["x"] },
+        schema as Record<string, unknown>,
+      ),
+    ).toEqual({ chargingProfile: ["x"] });
+  });
+
   it("passes through unknown keys untouched", () => {
     const schema = {
       properties: {

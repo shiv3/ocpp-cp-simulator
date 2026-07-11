@@ -123,9 +123,11 @@ All SOAP versions share the same endpoint pattern:
 - **CP → CSMS**: BootNotification, Heartbeat, StatusNotification, Authorize,
   Start/StopTransaction, MeterValues.
 - **CSMS → CP**: the daemon hosts `POST <soap-path>/:cpId/ChargePointService`
-  (default `--soap-path /ocpp/soap`); slice-1 handles **Reset** and other call-ins.
-  The endpoint relies on the daemon's `--web-console-basic-auth-*` gate or a trusted
-  network boundary — OCPP-S has no per-message authentication field.
+  (default `--soap-path /ocpp/soap`) to answer CSMS-initiated calls — **Reset** on
+  every SOAP version, and the full OCPP 1.6 command set (RemoteStart/Stop,
+  TriggerMessage, ChangeAvailability, charging profiles, …) on 1.6S. The endpoint
+  relies on the daemon's `--web-console-basic-auth-*` gate or a trusted network
+  boundary — OCPP-S has no per-message authentication field.
 
 Pairs with [SteVe](https://github.com/steve-community/steve) (register charge points
 with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).

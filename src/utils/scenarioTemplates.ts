@@ -20,6 +20,12 @@ import cert16Tc013HardResetJson from "./scenarios/cert16-tc013-hard-reset.json";
 import cert16Tc014SoftResetJson from "./scenarios/cert16-tc014-soft-reset.json";
 import cert16Tc017UnlockOccupiedJson from "./scenarios/cert16-tc017-unlock-occupied.json";
 import cert16Tc018UnlockFailureJson from "./scenarios/cert16-tc018-unlock-failure.json";
+import cert16Tc019GetConfigAllJson from "./scenarios/cert16-tc019-get-configuration-all.json";
+import cert16Tc019GetConfigKeyJson from "./scenarios/cert16-tc019-get-configuration-key.json";
+import cert16Tc021ChangeConfigJson from "./scenarios/cert16-tc021-change-configuration.json";
+import cert16Tc031UnlockUnknownJson from "./scenarios/cert16-tc031-unlock-unknown-connector.json";
+import cert16Tc061ClearCacheJson from "./scenarios/cert16-tc061-clear-cache.json";
+import cert16Tc064DataTransferJson from "./scenarios/cert16-tc064-data-transfer.json";
 import cert16Tc024LockFailureJson from "./scenarios/cert16-tc024-lock-failure.json";
 import cert16ReservationBasicJson from "./scenarios/cert16-reservation-basic.json";
 
@@ -103,6 +109,12 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc014SoftResetJson as ScenarioDefinition),
   templateFromJson(cert16Tc017UnlockOccupiedJson as ScenarioDefinition),
   templateFromJson(cert16Tc018UnlockFailureJson as ScenarioDefinition),
+  templateFromJson(cert16Tc019GetConfigAllJson as ScenarioDefinition),
+  templateFromJson(cert16Tc019GetConfigKeyJson as ScenarioDefinition),
+  templateFromJson(cert16Tc021ChangeConfigJson as ScenarioDefinition),
+  templateFromJson(cert16Tc031UnlockUnknownJson as ScenarioDefinition),
+  templateFromJson(cert16Tc061ClearCacheJson as ScenarioDefinition),
+  templateFromJson(cert16Tc064DataTransferJson as ScenarioDefinition),
   templateFromJson(cert16Tc024LockFailureJson as ScenarioDefinition),
   templateFromJson(cert16ReservationBasicJson as ScenarioDefinition),
 ];

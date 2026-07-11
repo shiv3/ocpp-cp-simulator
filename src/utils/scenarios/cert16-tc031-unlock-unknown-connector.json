@@ -1,0 +1,45 @@
+{
+  "id": "cert16-tc031-unlock-unknown-connector",
+  "name": "Cert 1.6 Core: TC_031 Unlock Connector — Unknown Connector",
+  "description": "CSMS sends UnlockConnector for a non-existent connector ID. CP returns NotSupported per §7.46 errata 3.87.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-unlock",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Wait for UnlockConnector (unknown id)",
+        "action": "UnlockConnector",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-available" },
+    { "id": "e2", "source": "status-available", "target": "trigger-unlock" },
+    { "id": "e3", "source": "trigger-unlock", "target": "end-1" }
+  ]
+}

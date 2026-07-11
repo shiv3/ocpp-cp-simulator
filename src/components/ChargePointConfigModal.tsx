@@ -3,6 +3,7 @@ import { Save, X } from "lucide-react";
 import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
+import { adaptCentralSystemUrlScheme } from "../utils/ocppUrlScheme";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -193,6 +194,17 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     setConfig({ ...config, [key]: value });
   };
 
+  // Changing the OCPP version also flips the Central System URL scheme to match
+  // the new transport (SOAP = http(s), JSON = ws(s)), but only when the current
+  // scheme is incompatible — a custom compatible URL is preserved (#164).
+  const changeOcppVersion = (value: string) => {
+    setConfig((prev) => ({
+      ...prev,
+      ocppVersion: value,
+      wsURL: adaptCentralSystemUrlScheme(prev.wsURL, isSoapVersion(value)),
+    }));
+  };
+
   const updateTls = (patch: Partial<OcppTlsOptions>) => {
     setConfig((prev) => ({ ...prev, tls: { ...prev.tls, ...patch } }));
   };
@@ -379,7 +391,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 </Label>
                 <Select
                   value={config.ocppVersion}
-                  onValueChange={(value) => updateConfig("ocppVersion", value)}
+                  onValueChange={changeOcppVersion}
                 >
                   <SelectTrigger id="ocppVersion">
                     <SelectValue />
@@ -387,7 +399,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   <SelectContent>
                     <SelectItem value="OCPP-1.2">OCPP 1.2 (SOAP)</SelectItem>
                     <SelectItem value="OCPP-1.5">OCPP 1.5 (SOAP)</SelectItem>
-                    <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
+                    <SelectItem value="OCPP-1.6J">OCPP 1.6 (JSON)</SelectItem>
                     <SelectItem value="OCPP-1.6S">OCPP 1.6 (SOAP)</SelectItem>
                     <SelectItem value="OCPP-2.0.1">OCPP 2.0.1</SelectItem>
                     <SelectItem value="OCPP-2.1">OCPP 2.1</SelectItem>

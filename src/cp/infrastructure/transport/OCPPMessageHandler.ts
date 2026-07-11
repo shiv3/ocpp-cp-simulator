@@ -83,40 +83,11 @@ import {
 import {
   MessageHandlerRegistry,
   HandlerContext,
-  RemoteStartTransactionHandler,
-  RemoteStopTransactionHandler,
-  ResetHandler,
-  GetDiagnosticsHandler,
-  GetConfigurationHandler,
-  ChangeConfigurationHandler,
-  TriggerMessageHandler,
-  ClearCacheHandler,
-  UnlockConnectorHandler,
-  ReserveNowHandler,
-  CancelReservationHandler,
-  SetChargingProfileHandler,
-  ClearChargingProfileHandler,
-  GetCompositeScheduleHandler,
-  BootNotificationResultHandler,
+  buildV16CallHandlerRegistry,
   StartTransactionResultHandler,
   StopTransactionResultHandler,
-  AuthorizeResultHandler,
-  HeartbeatResultHandler,
   MeterValuesResultHandler,
-  StatusNotificationResultHandler,
-  DataTransferResultHandler,
   DataTransferHandler,
-  ChangeAvailabilityHandler,
-  GetLocalListVersionHandler,
-  SendLocalListHandler,
-  UpdateFirmwareHandler,
-  CertificateSignedHandler,
-  ExtendedTriggerMessageHandler,
-  InstallCertificateHandler,
-  GetInstalledCertificateIdsHandler,
-  DeleteCertificateHandler,
-  GetLogHandler,
-  SignedUpdateFirmwareHandler,
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
@@ -304,142 +275,19 @@ export class OCPPMessageHandler {
    * Initialize all message handlers using the registry pattern
    */
   private initializeHandlers(): void {
-    // Register CALL handlers (incoming requests from central system)
-    this._registry.registerCallHandler(
-      OCPPAction.RemoteStartTransaction,
-      new RemoteStartTransactionHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.RemoteStopTransaction,
-      new RemoteStopTransactionHandler(),
-    );
-    this._registry.registerCallHandler(OCPPAction.Reset, new ResetHandler());
-    this._registry.registerCallHandler(
-      OCPPAction.GetDiagnostics,
-      new GetDiagnosticsHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.TriggerMessage,
-      new TriggerMessageHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.GetConfiguration,
-      new GetConfigurationHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ChangeConfiguration,
-      new ChangeConfigurationHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ClearCache,
-      new ClearCacheHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.UnlockConnector,
-      new UnlockConnectorHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ReserveNow,
-      new ReserveNowHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.CancelReservation,
-      new CancelReservationHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.SetChargingProfile,
-      new SetChargingProfileHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ClearChargingProfile,
-      new ClearChargingProfileHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.GetCompositeSchedule,
-      new GetCompositeScheduleHandler(),
-    );
+    // Use the shared factory to populate the registry with all OCPP 1.6
+    // CALL and CALLRESULT handlers. This factory creates stateless handler
+    // instances that can be reused by multiple transports (WebSocket, SOAP).
+    this._registry = buildV16CallHandlerRegistry();
+
+    // Register the instance-specific DataTransferHandler so scenarios can
+    // register vendor responders via getDataTransferHandler().
     // §4.3/§5.6: DataTransfer is a Core message. Without this handler the
     // registry returns NotImplemented, which is wrong — CSMS-side
     // DataTransfer should be answered with UnknownVendorId at minimum.
     this._registry.registerCallHandler(
       OCPPAction.DataTransfer,
       this._dataTransferHandler,
-    );
-    // §5.2: ChangeAvailability is Core. Without this, CSMS can't put the
-    // CP or any connector into maintenance.
-    this._registry.registerCallHandler(
-      OCPPAction.ChangeAvailability,
-      new ChangeAvailabilityHandler(),
-    );
-    // §9 LocalAuthListManagement
-    this._registry.registerCallHandler(
-      OCPPAction.GetLocalListVersion,
-      new GetLocalListVersionHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.SendLocalList,
-      new SendLocalListHandler(),
-    );
-    // §6.19 FirmwareManagement: UpdateFirmware. (GetDiagnostics is
-    // registered above; the matching outbound status notifications fire
-    // from inside ChargePoint.simulateFirmwareUpdate / the GetDiagnostics
-    // handler — there is no CALLRESULT counterpart to register.)
-    this._registry.registerCallHandler(
-      OCPPAction.UpdateFirmware,
-      new UpdateFirmwareHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.CertificateSigned,
-      new CertificateSignedHandler(),
-    );
-    // OCPP 1.6 Security Whitepaper (ed. 4): remaining message set —
-    // ExtendedTriggerMessage/InstallCertificate/GetInstalledCertificateIds/
-    // DeleteCertificate/GetLog/SignedUpdateFirmware. Matching outbound
-    // status notifications fire from inside the handlers themselves (or,
-    // for SignedUpdateFirmware, ChargePoint.simulateSignedFirmwareUpdate) —
-    // there is no CALLRESULT counterpart to register for any of these.
-    this._registry.registerCallHandler(
-      OCPPAction.ExtendedTriggerMessage,
-      new ExtendedTriggerMessageHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.InstallCertificate,
-      new InstallCertificateHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.GetInstalledCertificateIds,
-      new GetInstalledCertificateIdsHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.DeleteCertificate,
-      new DeleteCertificateHandler(),
-    );
-    this._registry.registerCallHandler(OCPPAction.GetLog, new GetLogHandler());
-    this._registry.registerCallHandler(
-      OCPPAction.SignedUpdateFirmware,
-      new SignedUpdateFirmwareHandler(),
-    );
-
-    // Register CALLRESULT handlers (incoming responses from central system)
-    this._registry.registerCallResultHandler(
-      OCPPAction.BootNotification,
-      new BootNotificationResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.Authorize,
-      new AuthorizeResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.Heartbeat,
-      new HeartbeatResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.StatusNotification,
-      new StatusNotificationResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.DataTransfer,
-      new DataTransferResultHandler(),
     );
   }
 

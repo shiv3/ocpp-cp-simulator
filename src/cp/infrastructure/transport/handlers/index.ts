@@ -1,6 +1,9 @@
 // Export registry
 export * from "./MessageHandlerRegistry";
 
+// Export registry builder
+export { buildV16CallHandlerRegistry } from "./buildV16CallHandlerRegistry";
+
 // Export CALL handlers
 export * from "./call/RemoteStartTransactionHandler";
 export * from "./call/RemoteStopTransactionHandler";

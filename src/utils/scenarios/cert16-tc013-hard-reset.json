@@ -1,0 +1,79 @@
+{
+  "id": "cert16-tc013-hard-reset",
+  "name": "Cert 1.6 Core: TC_013 Hard Reset",
+  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); unbounded MeterValue.req; operator sends Reset(type=Hard) from CSMS, CP stops transaction with HardReset reason and reboots.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "status-preparing",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Set Preparing", "status": "Preparing" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT013"
+      }
+    },
+    {
+      "id": "status-charging",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "Set Charging", "status": "Charging" }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 450 },
+      "data": {
+        "label": "Auto MeterValue (unbounded background)",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 0,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "trigger-reset",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Wait for Reset (Hard)",
+        "action": "Reset",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "status-preparing" },
+    { "id": "e2", "source": "status-preparing", "target": "tx-start" },
+    { "id": "e3", "source": "tx-start", "target": "status-charging" },
+    { "id": "e4", "source": "status-charging", "target": "meter-auto" },
+    { "id": "e5", "source": "meter-auto", "target": "trigger-reset" },
+    { "id": "e6", "source": "trigger-reset", "target": "end-1" }
+  ]
+}

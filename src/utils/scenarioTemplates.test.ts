@@ -18,11 +18,15 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc001-cold-boot",
   "cert16-tc003-charging-plugin-first",
   "cert16-tc004-charging-id-first",
+  "cert16-tc005-ev-side-disconnect",
   "cert16-tc010-remote-start",
   "cert16-tc011-remote-start-stop",
   "cert16-tc012-remote-stop",
+  "cert16-tc013-hard-reset",
+  "cert16-tc014-soft-reset",
   "cert16-tc017-unlock-occupied",
   "cert16-tc018-unlock-failure",
+  "cert16-tc024-lock-failure",
   "cert16-reservation-basic",
 ];
 

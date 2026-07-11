@@ -1,0 +1,67 @@
+{
+  "id": "cert16-tc024-lock-failure",
+  "name": "Cert 1.6 Core: TC_024 Start Charging Session — Lock Failure",
+  "description": "Plug-in; delay 2s; StatusNotification(Faulted, ConnectorLockFailure, no transaction started); delay 2s; plug-out → StatusNotification(Available).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "delay-1",
+      "type": "delay",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Wait 2s", "delaySeconds": 2 }
+    },
+    {
+      "id": "status-faulted",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Connector Lock Failure",
+        "status": "Faulted",
+        "errorCode": "ConnectorLockFailure",
+        "errorInfo": "Connector lock failure, no transaction started"
+      }
+    },
+    {
+      "id": "delay-2",
+      "type": "delay",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "Wait 2s", "delaySeconds": 2 }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Plug Out", "action": "plugout" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 650 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "delay-1" },
+    { "id": "e2", "source": "delay-1", "target": "status-faulted" },
+    { "id": "e3", "source": "status-faulted", "target": "delay-2" },
+    { "id": "e4", "source": "delay-2", "target": "plug-out" },
+    { "id": "e5", "source": "plug-out", "target": "status-available" },
+    { "id": "e6", "source": "status-available", "target": "end-1" }
+  ]
+}

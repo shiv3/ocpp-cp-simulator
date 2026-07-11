@@ -12,11 +12,15 @@ import remoteStartAutoMeterJson from "./scenarios/remote-start-auto-meter.json";
 import cert16Tc001ColdBootJson from "./scenarios/cert16-tc001-cold-boot.json";
 import cert16Tc003ChargingPluginFirstJson from "./scenarios/cert16-tc003-charging-plugin-first.json";
 import cert16Tc004ChargingIdFirstJson from "./scenarios/cert16-tc004-charging-id-first.json";
+import cert16Tc005EvSideDisconnectJson from "./scenarios/cert16-tc005-ev-side-disconnect.json";
 import cert16Tc010RemoteStartJson from "./scenarios/cert16-tc010-remote-start.json";
 import cert16Tc011RemoteStartStopJson from "./scenarios/cert16-tc011-remote-start-stop.json";
 import cert16Tc012RemoteStopJson from "./scenarios/cert16-tc012-remote-stop.json";
+import cert16Tc013HardResetJson from "./scenarios/cert16-tc013-hard-reset.json";
+import cert16Tc014SoftResetJson from "./scenarios/cert16-tc014-soft-reset.json";
 import cert16Tc017UnlockOccupiedJson from "./scenarios/cert16-tc017-unlock-occupied.json";
 import cert16Tc018UnlockFailureJson from "./scenarios/cert16-tc018-unlock-failure.json";
+import cert16Tc024LockFailureJson from "./scenarios/cert16-tc024-lock-failure.json";
 import cert16ReservationBasicJson from "./scenarios/cert16-reservation-basic.json";
 
 export interface ScenarioTemplate {
@@ -91,11 +95,15 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc001ColdBootJson as ScenarioDefinition),
   templateFromJson(cert16Tc003ChargingPluginFirstJson as ScenarioDefinition),
   templateFromJson(cert16Tc004ChargingIdFirstJson as ScenarioDefinition),
+  templateFromJson(cert16Tc005EvSideDisconnectJson as ScenarioDefinition),
   templateFromJson(cert16Tc010RemoteStartJson as ScenarioDefinition),
   templateFromJson(cert16Tc011RemoteStartStopJson as ScenarioDefinition),
   templateFromJson(cert16Tc012RemoteStopJson as ScenarioDefinition),
+  templateFromJson(cert16Tc013HardResetJson as ScenarioDefinition),
+  templateFromJson(cert16Tc014SoftResetJson as ScenarioDefinition),
   templateFromJson(cert16Tc017UnlockOccupiedJson as ScenarioDefinition),
   templateFromJson(cert16Tc018UnlockFailureJson as ScenarioDefinition),
+  templateFromJson(cert16Tc024LockFailureJson as ScenarioDefinition),
   templateFromJson(cert16ReservationBasicJson as ScenarioDefinition),
 ];
 

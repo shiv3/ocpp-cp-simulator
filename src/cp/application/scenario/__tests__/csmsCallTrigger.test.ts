@@ -16,6 +16,16 @@ function timeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+async function waitUntil(predicate: () => boolean, ms = 500): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > ms) {
+      throw new Error("Timed out waiting for predicate");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function newChargePoint(id: string): ChargePoint {
   const cp = new ChargePoint(
     id,
@@ -84,11 +94,18 @@ describe("csmsCallTrigger node (issue #110)", () => {
     const execution = executor.start();
 
     try {
+      // Wait for the csmsCallTrigger node to attach its listener before firing events
+      await waitUntil(
+        () => cp.events.listenerCount("incomingCallReceived") > 0,
+      );
+
       // parked: a non-matching action must not release it
       cp.notifyIncomingCall("GetConfiguration", {});
       await new Promise((resolve) => setTimeout(resolve, 50));
       let done = false;
       void execution.then(() => (done = true));
+      // Yield to microtasks to allow the then callback to fire if the promise has resolved
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(done).toBe(false);
 
       cp.notifyIncomingCall("Reset", { type: "Hard" });

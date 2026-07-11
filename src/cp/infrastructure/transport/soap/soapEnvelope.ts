@@ -32,6 +32,13 @@ export interface SoapOperationMetadata {
   readonly target: "cs" | "cp";
   readonly requestFieldOrder?: readonly string[];
   readonly responseFieldOrder?: readonly string[];
+  /**
+   * When true, this operation can be sent/received in both directions (e.g. DataTransfer
+   * in OCPP 1.5/1.6, which exists in both CS→CP and CP→CS with the same wrapper name
+   * but different namespaces). Enables service-specific namespace selection and
+   * ambiguity resolution during parsing.
+   */
+  readonly bidirectional?: true;
 }
 
 export type SoapPayloadValue =
@@ -87,6 +94,12 @@ export interface BuildSoapEnvelopeOptions {
   readonly payload?: SoapPayload;
   readonly relatesTo?: string;
   readonly dialect?: SoapDialect;
+  /**
+   * For bidirectional operations (e.g. DataTransfer), selects the service's namespace
+   * and prefix ("cs" for CP→CS, "cp" for CS→CP). When unset, uses the metadata.target
+   * (default to "cs" for CP→CS direction). Ignored for non-bidirectional operations.
+   */
+  readonly service?: "cs" | "cp";
 }
 
 export interface BuildSoapFaultEnvelopeOptions {
@@ -328,7 +341,15 @@ export function buildSoapEnvelope(options: BuildSoapEnvelopeOptions): string {
   const dialect = options.dialect ?? OCPP15_DIALECT;
   const kind = options.kind ?? "request";
   const metadata = requireOperationMetadata(dialect, options.operation);
-  const prefix = metadata.target;
+  // For bidirectional operations with explicit service, use the service's namespace/prefix.
+  // Otherwise, use the metadata.target (default CP→CS direction).
+  let prefix = metadata.target;
+  let namespace = metadata.namespace;
+  if (metadata.bidirectional && options.service) {
+    prefix = options.service;
+    namespace =
+      options.service === "cp" ? dialect.namespaces.CP : dialect.namespaces.CS;
+  }
   const wrapper =
     kind === "response" ? metadata.responseWrapper : metadata.requestWrapper;
 
@@ -339,7 +360,7 @@ export function buildSoapEnvelope(options: BuildSoapEnvelopeOptions): string {
   const envelope = createElement("s:Envelope", {
     "xmlns:s": SOAP12_NAMESPACE,
     "xmlns:a": WSA_NAMESPACE,
-    [`xmlns:${prefix}`]: metadata.namespace,
+    [`xmlns:${prefix}`]: namespace,
   });
 
   const header = createElement("s:Header");
@@ -650,21 +671,59 @@ function firstXmlValue(value: unknown): unknown {
 
 function findMetadataByWrapper(
   wrapper: string,
+  namespace: string | undefined,
   dialect: SoapDialect = OCPP15_DIALECT,
 ): {
   readonly operation: SoapOperation;
   readonly kind: SoapMessageKind;
   readonly metadata: SoapOperationMetadata;
+  readonly namespace: string;
 } {
+  let expectedNamespaceForWrapper: string | null = null;
   for (const [operation, metadata] of Object.entries(
     dialect.operationMetadata,
   ) as [SoapOperation, SoapOperationMetadata][]) {
     if (metadata.requestWrapper === wrapper) {
-      return { operation, kind: "request", metadata };
+      // For bidirectional operations, allow either service's namespace.
+      if (metadata.bidirectional && namespace) {
+        const isCorrectNamespace = namespace === metadata.namespace;
+        const isOppositeNamespace =
+          namespace ===
+          (metadata.target === "cs"
+            ? dialect.namespaces.CP
+            : dialect.namespaces.CS);
+        if (isCorrectNamespace || isOppositeNamespace) {
+          return { operation, kind: "request", metadata, namespace };
+        }
+      } else if (!namespace || namespace === metadata.namespace) {
+        return {
+          operation,
+          kind: "request",
+          metadata,
+          namespace: metadata.namespace,
+        };
+      }
+      expectedNamespaceForWrapper = metadata.namespace;
     }
     if (metadata.responseWrapper === wrapper) {
-      return { operation, kind: "response", metadata };
+      // Responses should use the metadata's namespace; bidirectional doesn't affect responses.
+      if (!namespace || namespace === metadata.namespace) {
+        return {
+          operation,
+          kind: "response",
+          metadata,
+          namespace: metadata.namespace,
+        };
+      }
+      expectedNamespaceForWrapper = metadata.namespace;
     }
+  }
+  if (expectedNamespaceForWrapper) {
+    // The wrapper is a known operation of this dialect, but arrived in the
+    // wrong namespace (e.g. a 1.5-namespace Reset posted to a 1.2 CP).
+    throw new Error(
+      `SOAP Body wrapper namespace must be ${expectedNamespaceForWrapper}`,
+    );
   }
   throw new Error(`Unsupported SOAP body wrapper: ${wrapper}`);
 }
@@ -703,14 +762,17 @@ export function parseSoapEnvelope(
     throw new Error("SOAP Body must contain an operation wrapper");
 
   const wrapper = localName(wrapperKey);
-  const { operation, kind, metadata } = findMetadataByWrapper(wrapper, dialect);
   const bodyWrapper = isRecord(wrapperValue) ? wrapperValue : {};
   const bodyNamespace = namespaceForElement(wrapperKey, [
     envelope,
     body,
     bodyWrapper,
   ]);
-  assertNamespace(bodyNamespace, metadata.namespace, "SOAP Body wrapper");
+  const { operation, kind, metadata, namespace } = findMetadataByWrapper(
+    wrapper,
+    bodyNamespace,
+    dialect,
+  );
 
   const action = requireTextElement(header, "Action");
   const actionRecord = isRecord(action.value) ? action.value : {};
@@ -738,7 +800,7 @@ export function parseSoapEnvelope(
         header,
         chargeBoxRecord,
       ]),
-      metadata.namespace,
+      namespace,
       "chargeBoxIdentity",
     );
   }
@@ -768,7 +830,7 @@ export function parseSoapEnvelope(
     to: to.text,
     ...(relatesToText ? { relatesTo: relatesToText } : {}),
     ...(chargeBoxIdentity ? { chargeBoxIdentity: chargeBoxIdentity.text } : {}),
-    namespace: metadata.namespace,
+    namespace,
     wrapper,
     payload: payloadFromWrapper(wrapperValue),
   };

@@ -213,6 +213,9 @@ describe("transaction stop reason (issue #110, TC_005 support)", () => {
     // Wait until transaction is started so we can capture its ID
     await waitUntil(() => connector.transaction !== null, 1000);
     const txId = connector.transaction!.id;
+    if (txId == null) {
+      throw new Error("expected transaction to have an id");
+    }
 
     // Wait until the remote stop trigger has parked and is ready to receive the remote stop
     await waitUntil(() => cp.isScenarioStopHandled(1), 1000);

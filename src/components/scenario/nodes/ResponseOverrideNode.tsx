@@ -1,8 +1,17 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { ResponseOverrideNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const ResponseOverrideNode: React.FC<NodeProps<ResponseOverrideNodeData>> = ({
+// Mapped type (not `extends`) so the result is a fresh object type that
+// satisfies xyflow v12's `Node<Record<string, unknown>>` constraint — a
+// plain interface does not.
+type ResponseOverrideNodeDataMapped = {
+  [K in keyof ResponseOverrideNodeData]: ResponseOverrideNodeData[K];
+};
+
+type ResponseOverrideFlowNode = Node<ResponseOverrideNodeDataMapped>;
+
+const ResponseOverrideNode: React.FC<NodeProps<ResponseOverrideFlowNode>> = ({
   data,
   selected,
 }) => {

@@ -1,17 +1,25 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { CsmsCallTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedCsmsCallTriggerNodeData extends CsmsCallTriggerNodeData {
+// Mapped type (not `extends`) so the result is a fresh object type that
+// satisfies xyflow v12's `Node<Record<string, unknown>>` constraint — a
+// plain interface-extending intersection does not.
+type CsmsCallTriggerNodeDataWithProgress = {
+  [K in keyof CsmsCallTriggerNodeData]: CsmsCallTriggerNodeData[K];
+} & {
   progress?: {
     remaining: number;
     total: number;
   };
-}
+};
 
-const CsmsCallTriggerNode: React.FC<
-  NodeProps<ExtendedCsmsCallTriggerNodeData>
-> = ({ data, selected }) => {
+type CsmsCallTriggerFlowNode = Node<CsmsCallTriggerNodeDataWithProgress>;
+
+const CsmsCallTriggerNode: React.FC<NodeProps<CsmsCallTriggerFlowNode>> = ({
+  data,
+  selected,
+}) => {
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100

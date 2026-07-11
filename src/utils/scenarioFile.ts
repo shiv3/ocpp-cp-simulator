@@ -22,6 +22,15 @@ export function exportScenarioToJSON(scenario: ScenarioDefinition): void {
   URL.revokeObjectURL(url);
 }
 
+/** Parse and validate a scenario from JSON text. Throws on invalid structure. */
+export function parseScenarioJSON(text: string): ScenarioDefinition {
+  const scenario = JSON.parse(text) as ScenarioDefinition;
+  if (!scenario.id || !scenario.nodes || !scenario.edges) {
+    throw new Error("Invalid scenario file format");
+  }
+  return scenario;
+}
+
 /** Parse a user-picked file as a `ScenarioDefinition`. Rejects when the
  *  structure is missing required fields. */
 export function importScenarioFromJSON(
@@ -32,10 +41,7 @@ export function importScenarioFromJSON(
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const scenario = JSON.parse(content) as ScenarioDefinition;
-        if (!scenario.id || !scenario.nodes || !scenario.edges) {
-          throw new Error("Invalid scenario file format");
-        }
+        const scenario = parseScenarioJSON(content);
         resolve(scenario);
       } catch (error) {
         reject(error);

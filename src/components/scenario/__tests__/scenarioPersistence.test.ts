@@ -426,6 +426,99 @@ describe("createLatestWinsSaver", () => {
   });
 });
 
+describe("shouldSuppressAppliedScenarioAutosave (fingerprint guard)", () => {
+  it("returns true for identical scenario (unedited after apply)", () => {
+    const applied = {
+      ...scenario("applied-1"),
+      name: "Applied Scenario",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const suppression = {
+      scenarioId: applied.id,
+      updatedAt: applied.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+    };
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, applied)).toBe(
+      true,
+    );
+  });
+
+  it("returns false when scenario name changes (real user edit)", () => {
+    const applied = {
+      ...scenario("applied-1"),
+      name: "Original Name",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const suppression = {
+      scenarioId: applied.id,
+      updatedAt: applied.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+    };
+    const edited = {
+      ...applied,
+      name: "Edited Name",
+    };
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, edited)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when a node property changes", () => {
+    const applied = {
+      ...scenario("applied-1"),
+      updatedAt: "2026-06-30T00:00:00.000Z",
+      nodes: [
+        {
+          id: "node-1",
+          type: "start",
+          position: { x: 0, y: 0 },
+          data: { label: "Start" },
+        },
+      ],
+    } as unknown as ScenarioDefinition;
+    const suppression = {
+      scenarioId: applied.id,
+      updatedAt: applied.updatedAt,
+      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
+    };
+    const edited = {
+      ...applied,
+      nodes: [
+        {
+          id: "node-1",
+          type: "start",
+          position: { x: 100, y: 100 },
+          data: { label: "Start Modified" },
+        },
+      ],
+    } as unknown as ScenarioDefinition;
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, edited)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when null suppression record is passed", () => {
+    const scenario1 = scenario("any-scenario");
+    expect(shouldSuppressAppliedScenarioAutosave(null, scenario1)).toBe(false);
+  });
+
+  it("returns false when scenario id differs from suppression record", () => {
+    const suppression = {
+      scenarioId: "other-id",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+      fingerprint: "some-fingerprint",
+    };
+    const applied = scenario("applied-1");
+
+    expect(shouldSuppressAppliedScenarioAutosave(suppression, applied)).toBe(
+      false,
+    );
+  });
+});
+
 describe("retargetScenarioToConnector (upload retargeting — #101)", () => {
   const now = "2026-06-30T00:00:00.000Z";
 

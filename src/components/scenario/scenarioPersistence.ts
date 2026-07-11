@@ -107,9 +107,8 @@ async function activateRemoteScenario(
 ): Promise<void> {
   const { mode, chargePointService, cpId, connectorId } = deps;
   if (mode !== "remote") return;
-  if (connectorId === null) {
-    throw new Error("Remote scenario activation requires a connector id");
-  }
+  // CP-level scenarios (connectorId === null) have no connector runtime to activate into; persistence already happened.
+  if (connectorId === null) return;
 
   await chargePointService.loadScenario(cpId, connectorId, scenario);
 }

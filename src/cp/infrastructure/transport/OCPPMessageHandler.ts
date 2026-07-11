@@ -826,6 +826,23 @@ export class OCPPMessageHandler {
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
   ): Promise<void> {
+    // Issue #110: surface every incoming CSMS call to the scenario layer
+    // (csmsCallTrigger nodes), regardless of handler outcome.
+    this._chargePoint.notifyIncomingCall(action, payload);
+
+    // Issue #110: a scenario responseOverride node may have armed a
+    // one-shot canned response for this action (e.g. RemoteStartTransaction
+    // → Rejected for TC_026). It replaces the handler entirely.
+    const overrideStatus = this._chargePoint.consumeResponseOverride(action);
+    if (overrideStatus !== null) {
+      this._logger.info(
+        `Response override: ${action} → { status: "${overrideStatus}" }`,
+        LogType.OCPP,
+      );
+      this.sendCallResult(messageId, { status: overrideStatus });
+      return;
+    }
+
     // Use registry to get handler
     const handler = this._registry.getCallHandler(action);
 

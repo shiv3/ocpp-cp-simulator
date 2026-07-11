@@ -112,6 +112,9 @@ export class ChargePoint {
   // itself — the scenario is parked on a RemoteStopTrigger node and will
   // resume into its own Transaction Stop step.
   private readonly _scenarioStopHandledConnectors: Set<number> = new Set();
+  /** One-shot canned `{ status }` responses per incoming action,
+   *  armed by a scenario responseOverride node (issue #110). */
+  private _responseOverrides = new Map<string, string>();
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
@@ -605,6 +608,22 @@ export class ChargePoint {
 
   notifyRemoteStopReceived(connectorId: number, transactionId: number): void {
     this._events.emit("remoteStopReceived", { connectorId, transactionId });
+  }
+
+  notifyIncomingCall(action: string, payload: unknown): void {
+    this._events.emit("incomingCallReceived", { action, payload });
+  }
+
+  armResponseOverride(action: string, status: string): void {
+    this._responseOverrides.set(action, status);
+  }
+
+  /** Returns and clears the armed status for `action`, or null. */
+  consumeResponseOverride(action: string): string | null {
+    const status = this._responseOverrides.get(action);
+    if (status === undefined) return null;
+    this._responseOverrides.delete(action);
+    return status;
   }
 
   set loggingCallback(callback: (entry: LogEntry) => void) {

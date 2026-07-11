@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc059-remote-start-with-profile",
   "name": "Cert 1.6 SmartCharging: TC_059 Remote Start with Charging Profile",
-  "description": "RemoteStartTransaction with attached profile → Preparing → tx-start(CERT059 fallback) → Charging → meter-auto(interval 5, amount 500, maxTime 30) → tx-stop → Finishing → Available → end",
+  "description": "CSMS sends RemoteStartTransaction with attached ChargingProfile. CP accepts the request and starts the transaction (per §5.11, a CP without Smart Charging may ignore the profile) but does not store or apply the attached profile.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

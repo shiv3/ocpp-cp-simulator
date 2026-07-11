@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc067-clear-charging-profile",
   "name": "Cert 1.6 SmartCharging: TC_067 Clear Charging Profile",
-  "description": "SetChargingProfile then ClearChargingProfile",
+  "description": "CSMS sends SetChargingProfile; CP stores it. Then CSMS sends ClearChargingProfile; CP clears the stored profile and confirms Accepted.",
   "targetType": "chargePoint",
   "trigger": { "type": "manual" },
   "defaultExecutionMode": "oneshot",
@@ -26,7 +26,6 @@
       "data": {
         "label": "Wait for SetChargingProfile",
         "action": "SetChargingProfile",
-        "connectorId": 0,
         "timeout": 0
       }
     },
@@ -37,7 +36,6 @@
       "data": {
         "label": "Wait for ClearChargingProfile",
         "action": "ClearChargingProfile",
-        "connectorId": 0,
         "timeout": 0
       }
     },

@@ -26,7 +26,6 @@
       "data": {
         "label": "Wait for SetChargingProfile",
         "action": "SetChargingProfile",
-        "connectorId": 0,
         "timeout": 0
       }
     },
@@ -37,7 +36,6 @@
       "data": {
         "label": "Wait for GetCompositeSchedule",
         "action": "GetCompositeSchedule",
-        "connectorId": 0,
         "timeout": 0
       }
     },

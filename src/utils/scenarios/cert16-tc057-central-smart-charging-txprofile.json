@@ -64,7 +64,6 @@
       "data": {
         "label": "Wait for SetChargingProfile (TxProfile)",
         "action": "SetChargingProfile",
-        "connectorId": 1,
         "timeout": 0
       }
     },

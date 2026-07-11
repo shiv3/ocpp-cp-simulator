@@ -50,6 +50,11 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc052-cancel-reservation-rejected",
   "cert16-tc054-trigger-message",
   "cert16-tc055-trigger-message-rejected",
+  "cert16-tc056-central-smart-charging-txdefault",
+  "cert16-tc057-central-smart-charging-txprofile",
+  "cert16-tc059-remote-start-with-profile",
+  "cert16-tc066-get-composite-schedule",
+  "cert16-tc067-clear-charging-profile",
 ];
 
 /** BFS from the single start node; true if any END node is reachable. */

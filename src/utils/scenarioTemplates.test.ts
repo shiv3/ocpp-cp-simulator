@@ -36,6 +36,12 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc061-clear-cache",
   "cert16-tc064-data-transfer",
   "cert16-reservation-basic",
+  "cert16-tc042-1-get-local-list-version-not-supported",
+  "cert16-tc042-2-get-local-list-version-empty",
+  "cert16-tc043-1-send-local-list-not-supported",
+  "cert16-tc043-3-send-local-list-failed",
+  "cert16-tc043-4-send-local-list-full",
+  "cert16-tc043-5-send-local-list-differential",
 ];
 
 /** BFS from the single start node; true if any END node is reachable. */

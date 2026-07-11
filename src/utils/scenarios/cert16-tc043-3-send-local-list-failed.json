@@ -1,0 +1,79 @@
+{
+  "id": "cert16-tc043-3-send-local-list-failed",
+  "name": "Cert 1.6 LocalList: TC_043_3 Send Local List — Failed",
+  "description": "Local list enabled; CSMS sends SendLocalList; CP responds with Failed status via pre-armed response override.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "config-enable-list",
+      "type": "configSet",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Enable LocalAuthListEnabled",
+        "key": "LocalAuthListEnabled",
+        "value": "true"
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "arm-failed-response",
+      "type": "responseOverride",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Arm Failed response for SendLocalList",
+        "action": "SendLocalList",
+        "status": "Failed"
+      }
+    },
+    {
+      "id": "trigger-send-local-list",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 450 },
+      "data": {
+        "label": "Wait for SendLocalList (will be Failed)",
+        "action": "SendLocalList",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "config-enable-list" },
+    {
+      "id": "e2",
+      "source": "config-enable-list",
+      "target": "status-available"
+    },
+    {
+      "id": "e3",
+      "source": "status-available",
+      "target": "arm-failed-response"
+    },
+    {
+      "id": "e4",
+      "source": "arm-failed-response",
+      "target": "trigger-send-local-list"
+    },
+    { "id": "e5", "source": "trigger-send-local-list", "target": "end-1" }
+  ]
+}

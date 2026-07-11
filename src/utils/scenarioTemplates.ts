@@ -31,6 +31,14 @@ import cert16Tc026RemoteStartRejectedJson from "./scenarios/cert16-tc026-remote-
 import cert16Tc028RemoteStopRejectedJson from "./scenarios/cert16-tc028-remote-stop-rejected.json";
 import cert16ReservationBasicJson from "./scenarios/cert16-reservation-basic.json";
 
+// OCPP 1.6 LocalList certification scenarios (issue #110, PR 3).
+import cert16Tc042_1GetLocalListVersionNotSupportedJson from "./scenarios/cert16-tc042-1-get-local-list-version-not-supported.json";
+import cert16Tc042_2GetLocalListVersionEmptyJson from "./scenarios/cert16-tc042-2-get-local-list-version-empty.json";
+import cert16Tc043_1SendLocalListNotSupportedJson from "./scenarios/cert16-tc043-1-send-local-list-not-supported.json";
+import cert16Tc043_3SendLocalListFailedJson from "./scenarios/cert16-tc043-3-send-local-list-failed.json";
+import cert16Tc043_4SendLocalListFullJson from "./scenarios/cert16-tc043-4-send-local-list-full.json";
+import cert16Tc043_5SendLocalListDifferentialJson from "./scenarios/cert16-tc043-5-send-local-list-differential.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -121,6 +129,23 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc061ClearCacheJson as ScenarioDefinition),
   templateFromJson(cert16Tc064DataTransferJson as ScenarioDefinition),
   templateFromJson(cert16ReservationBasicJson as ScenarioDefinition),
+
+  // OCPP 1.6 LocalList certification scenarios (issue #110, PR 3) —
+  // grouped together so they surface as a block in the template picker.
+  templateFromJson(
+    cert16Tc042_1GetLocalListVersionNotSupportedJson as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc042_2GetLocalListVersionEmptyJson as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc043_1SendLocalListNotSupportedJson as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc043_3SendLocalListFailedJson as ScenarioDefinition),
+  templateFromJson(cert16Tc043_4SendLocalListFullJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc043_5SendLocalListDifferentialJson as ScenarioDefinition,
+  ),
 ];
 
 export function getTemplateById(

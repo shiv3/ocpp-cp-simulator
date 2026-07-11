@@ -1,0 +1,64 @@
+{
+  "id": "cert16-tc043-1-send-local-list-not-supported",
+  "name": "Cert 1.6 LocalList: TC_043_1 Send Local List — NotSupported",
+  "description": "Local list disabled via configuration; CSMS sends SendLocalList; CP returns NotSupported status.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "config-disable-list",
+      "type": "configSet",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Disable LocalAuthListEnabled",
+        "key": "LocalAuthListEnabled",
+        "value": "false"
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-send-local-list",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for SendLocalList",
+        "action": "SendLocalList",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "config-disable-list" },
+    {
+      "id": "e2",
+      "source": "config-disable-list",
+      "target": "status-available"
+    },
+    {
+      "id": "e3",
+      "source": "status-available",
+      "target": "trigger-send-local-list"
+    },
+    { "id": "e4", "source": "trigger-send-local-list", "target": "end-1" }
+  ]
+}

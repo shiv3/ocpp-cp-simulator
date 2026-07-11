@@ -8,6 +8,12 @@ import {
   soapContentTypeForOperation,
   WSA_ANONYMOUS_ADDRESS,
 } from "../soapEnvelope";
+import {
+  OCPP12_DIALECT,
+  OCPP12_SOAP_NAMESPACES,
+  OCPP16_DIALECT,
+  OCPP16_SOAP_NAMESPACES,
+} from "../dialect";
 
 const CHARGE_BOX_IDENTITY = "CP-001";
 const CALLBACK_URL =
@@ -83,6 +89,34 @@ describe("OCPP 1.5 SOAP envelope parser", () => {
     expect(parsed.payload).not.toHaveProperty("interval");
   });
 
+  it("accepts a fully-qualified wsa:Action from a real OCA WSDL server (SteVe)", () => {
+    // SteVe (and other JAXB/CXF servers) emit the fully-qualified action URI
+    // "<namespace><PortType>/<Operation>Response", not the bare
+    // "/<Operation>Response" the simulator sends. Verified live against SteVe
+    // 1.2S/1.6S: the response was rejected until we matched on the trailing
+    // "/<Operation>Response" segment. Guard that here.
+    const parsed = parseSoapEnvelope(
+      `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP15_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>CP-001</cs:chargeBoxIdentity><a:Action s:mustUnderstand="true">urn://Ocpp/Cs/2012/06/CentralSystemService/BootNotificationResponse</a:Action><a:MessageID s:mustUnderstand="true">urn:uuid:boot-conf-2</a:MessageID><a:To s:mustUnderstand="true">${WSA_ANONYMOUS_ADDRESS}</a:To><a:RelatesTo s:mustUnderstand="true">uuid:boot-2</a:RelatesTo></s:Header><s:Body><cs:bootNotificationResponse><cs:status>Accepted</cs:status><cs:currentTime>2026-06-30T00:00:00Z</cs:currentTime><cs:heartbeatInterval>300</cs:heartbeatInterval></cs:bootNotificationResponse></s:Body></s:Envelope>`,
+    );
+
+    expect(parsed).toMatchObject({
+      operation: "BootNotification",
+      kind: "response",
+      action:
+        "urn://Ocpp/Cs/2012/06/CentralSystemService/BootNotificationResponse",
+      relatesTo: "uuid:boot-2",
+      payload: { status: "Accepted", heartbeatInterval: "300" },
+    });
+  });
+
+  it("still rejects a wsa:Action whose trailing operation segment is wrong", () => {
+    expect(() =>
+      parseSoapEnvelope(
+        `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP15_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>CP-001</cs:chargeBoxIdentity><a:Action s:mustUnderstand="true">urn://Ocpp/Cs/2012/06/CentralSystemService/HeartbeatResponse</a:Action><a:MessageID s:mustUnderstand="true">urn:uuid:mismatch-1</a:MessageID><a:To s:mustUnderstand="true">${WSA_ANONYMOUS_ADDRESS}</a:To><a:RelatesTo s:mustUnderstand="true">uuid:boot-3</a:RelatesTo></s:Header><s:Body><cs:bootNotificationResponse><cs:status>Accepted</cs:status></cs:bootNotificationResponse></s:Body></s:Envelope>`,
+      ),
+    ).toThrow(/SOAP Action must be \/BootNotificationResponse/);
+  });
+
   it("parses a CSMS-to-CP RemoteStartTransaction request", () => {
     const parsed = parseSoapEnvelope(
       `<s:Envelope xmlns:s="${OCPP15_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP15_SOAP_NAMESPACES.WSA}" xmlns:cp="${OCPP15_SOAP_NAMESPACES.CP}"><s:Header><cp:chargeBoxIdentity>CP-001</cp:chargeBoxIdentity><a:Action s:mustUnderstand="true">/RemoteStartTransaction</a:Action><a:MessageID s:mustUnderstand="true">uuid:remote-start-1</a:MessageID><a:From s:mustUnderstand="true"><a:Address>${CENTRAL_SYSTEM_URL}</a:Address></a:From><a:ReplyTo s:mustUnderstand="true"><a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address></a:ReplyTo><a:To s:mustUnderstand="true">${CALLBACK_URL}</a:To></s:Header><s:Body><cp:remoteStartTransactionRequest><cp:idTag>TAG-DEMO</cp:idTag><cp:connectorId>1</cp:connectorId></cp:remoteStartTransactionRequest></s:Body></s:Envelope>`,
@@ -124,5 +158,225 @@ describe("OCPP 1.5 SOAP envelope parser", () => {
         },
       },
     });
+  });
+});
+
+describe("OCPP 1.2 SOAP envelope builder", () => {
+  it("builds a BootNotification request with 1.2 namespace", () => {
+    const xml = buildSoapEnvelope({
+      operation: "BootNotification",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      messageId: "uuid:boot-12-1",
+      from: CALLBACK_URL,
+      to: CENTRAL_SYSTEM_URL,
+      payload: {
+        chargePointVendor: "Vendor-A",
+        chargePointModel: "Model-A",
+        chargePointSerialNumber: "Point-Serial",
+        chargeBoxSerialNumber: "Box-Serial",
+        firmwareVersion: "1.2.3",
+      },
+      dialect: OCPP12_DIALECT,
+    });
+
+    // Assert 1.2 CS namespace in output
+    expect(xml).toContain(`xmlns:cs="${OCPP12_SOAP_NAMESPACES.CS}"`);
+    expect(xml).not.toContain(OCPP15_SOAP_NAMESPACES.CS);
+    expect(xml).toContain("<cs:bootNotificationRequest>");
+  });
+
+  it("throws when trying to build DataTransfer with 1.2 dialect", () => {
+    expect(() =>
+      buildSoapEnvelope({
+        operation: "DataTransfer",
+        chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+        messageId: "uuid:dt-1",
+        from: CALLBACK_URL,
+        to: CENTRAL_SYSTEM_URL,
+        payload: { vendorId: "test" },
+        dialect: OCPP12_DIALECT,
+      }),
+    ).toThrow(
+      /not available.*DataTransfer|operation.*not.*available|OCPP-1.2/i,
+    );
+  });
+});
+
+describe("OCPP 1.2 SOAP envelope parser", () => {
+  it("parses a 1.2 Reset request with 1.2 CP namespace", () => {
+    const parsed = parseSoapEnvelope(
+      `<s:Envelope xmlns:s="${OCPP12_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP12_SOAP_NAMESPACES.WSA}" xmlns:cp="${OCPP12_SOAP_NAMESPACES.CP}"><s:Header><cp:chargeBoxIdentity>CP-001</cp:chargeBoxIdentity><a:Action s:mustUnderstand="true">/Reset</a:Action><a:MessageID s:mustUnderstand="true">uuid:reset-1</a:MessageID><a:From s:mustUnderstand="true"><a:Address>${CENTRAL_SYSTEM_URL}</a:Address></a:From><a:ReplyTo s:mustUnderstand="true"><a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address></a:ReplyTo><a:To s:mustUnderstand="true">${CALLBACK_URL}</a:To></s:Header><s:Body><cp:resetRequest><cp:type>Hard</cp:type></cp:resetRequest></s:Body></s:Envelope>`,
+      OCPP12_DIALECT,
+    );
+
+    expect(parsed).toMatchObject({
+      operation: "Reset",
+      kind: "request",
+      action: "/Reset",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      namespace: OCPP12_SOAP_NAMESPACES.CP,
+      wrapper: "resetRequest",
+      payload: {
+        type: "Hard",
+      },
+    });
+  });
+
+  it("throws when parsing DataTransfer with 1.2 dialect", () => {
+    expect(() => {
+      parseSoapEnvelope(
+        `<s:Envelope xmlns:s="${OCPP12_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP12_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP12_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>CP-001</cs:chargeBoxIdentity><a:Action s:mustUnderstand="true">/DataTransfer</a:Action><a:MessageID s:mustUnderstand="true">uuid:dt-1</a:MessageID><a:From s:mustUnderstand="true"><a:Address>${CENTRAL_SYSTEM_URL}</a:Address></a:From><a:ReplyTo s:mustUnderstand="true"><a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address></a:ReplyTo><a:To s:mustUnderstand="true">${CALLBACK_URL}</a:To></s:Header><s:Body><cs:dataTransferRequest><cs:vendorId>test</cs:vendorId></cs:dataTransferRequest></s:Body></s:Envelope>`,
+        OCPP12_DIALECT,
+      );
+    }).toThrow(
+      /not available.*DataTransfer|operation.*not.*available|Unsupported.*wrapper/i,
+    );
+  });
+});
+
+describe("OCPP 1.6 SOAP envelope builder", () => {
+  it("builds BootNotification request with 1.6 CS namespace", () => {
+    const xml = buildSoapEnvelope({
+      operation: "BootNotification",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      messageId: "uuid:boot-16-1",
+      from: CALLBACK_URL,
+      to: CENTRAL_SYSTEM_URL,
+      payload: {
+        chargePointVendor: "Vendor-B",
+        chargePointModel: "Model-B",
+        chargePointSerialNumber: "Serial-B",
+        chargeBoxSerialNumber: "Box-B",
+        firmwareVersion: "2.0",
+      },
+      dialect: OCPP16_DIALECT,
+    });
+
+    // Assert 1.6 CS namespace (2015/10 year) in output
+    expect(xml).toContain(`xmlns:cs="${OCPP16_SOAP_NAMESPACES.CS}"`);
+    expect(xml).toContain("urn://Ocpp/Cs/2015/10/");
+    expect(xml).not.toContain(OCPP15_SOAP_NAMESPACES.CS);
+    expect(xml).toContain("<cs:bootNotificationRequest>");
+  });
+
+  it("builds StatusNotification request with 1.6 enums (Preparing passthrough)", () => {
+    const xml = buildSoapEnvelope({
+      operation: "StatusNotification",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      messageId: "uuid:status-16-1",
+      from: CALLBACK_URL,
+      to: CENTRAL_SYSTEM_URL,
+      payload: {
+        connectorId: 1,
+        status: "Preparing",
+        errorCode: "EVCommunicationError",
+      },
+      dialect: OCPP16_DIALECT,
+    });
+
+    // Assert 1.6 enums are passed through unchanged (not collapsed to 1.5 equivalents)
+    expect(xml).toContain("<cs:status>Preparing</cs:status>");
+    expect(xml).toContain("<cs:errorCode>EVCommunicationError</cs:errorCode>");
+  });
+
+  it("builds MeterValues request with child elements (not attributes)", () => {
+    const xml = buildSoapEnvelope({
+      operation: "MeterValues",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      messageId: "uuid:meter-16-1",
+      from: CALLBACK_URL,
+      to: CENTRAL_SYSTEM_URL,
+      payload: {
+        connectorId: 1,
+        transactionId: 42,
+        meterValue: [
+          {
+            timestamp: "2026-06-30T12:00:00Z",
+            sampledValue: [
+              {
+                value: "1234",
+                measurand: "Energy.Active.Import.Register",
+                unit: "Wh",
+              },
+            ],
+          },
+        ],
+      },
+      dialect: OCPP16_DIALECT,
+    });
+
+    // Assert child elements structure (not @_ attributes)
+    expect(xml).toContain("<cs:meterValue>");
+    expect(xml).toContain("<cs:sampledValue>");
+    expect(xml).toContain("<cs:value>1234</cs:value>");
+    expect(xml).toContain("<cs:measurand>Energy.Active.Import.Register");
+    expect(xml).toContain("<cs:unit>Wh</cs:unit>");
+    // Should NOT contain attributes
+    expect(xml).not.toContain("@_measurand");
+    expect(xml).not.toContain("@_unit");
+  });
+});
+
+describe("OCPP 1.6 SOAP envelope parser (bidirectional DataTransfer)", () => {
+  it("parses CS→CP DataTransfer request with CP namespace", () => {
+    const parsed = parseSoapEnvelope(
+      `<s:Envelope xmlns:s="${OCPP16_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP16_SOAP_NAMESPACES.WSA}" xmlns:cp="${OCPP16_SOAP_NAMESPACES.CP}"><s:Header><cp:chargeBoxIdentity>CP-001</cp:chargeBoxIdentity><a:Action s:mustUnderstand="true">/DataTransfer</a:Action><a:MessageID s:mustUnderstand="true">uuid:dt-cs-to-cp-1</a:MessageID><a:From s:mustUnderstand="true"><a:Address>${CENTRAL_SYSTEM_URL}</a:Address></a:From><a:ReplyTo s:mustUnderstand="true"><a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address></a:ReplyTo><a:To s:mustUnderstand="true">${CALLBACK_URL}</a:To></s:Header><s:Body><cp:dataTransferRequest><cp:vendorId>vendor-cs-to-cp</cp:vendorId><cp:messageId>test-msg</cp:messageId></cp:dataTransferRequest></s:Body></s:Envelope>`,
+      OCPP16_DIALECT,
+    );
+
+    // Should parse successfully with CP namespace (direction-corrected)
+    expect(parsed).toMatchObject({
+      operation: "DataTransfer",
+      kind: "request",
+      action: "/DataTransfer",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      namespace: OCPP16_SOAP_NAMESPACES.CP,
+      wrapper: "dataTransferRequest",
+      payload: {
+        vendorId: "vendor-cs-to-cp",
+        messageId: "test-msg",
+      },
+    });
+  });
+
+  it("parses CP→CS DataTransfer request with CS namespace", () => {
+    const parsed = parseSoapEnvelope(
+      `<s:Envelope xmlns:s="${OCPP16_SOAP_NAMESPACES.SOAP12}" xmlns:a="${OCPP16_SOAP_NAMESPACES.WSA}" xmlns:cs="${OCPP16_SOAP_NAMESPACES.CS}"><s:Header><cs:chargeBoxIdentity>CP-001</cs:chargeBoxIdentity><a:Action s:mustUnderstand="true">/DataTransfer</a:Action><a:MessageID s:mustUnderstand="true">uuid:dt-cp-to-cs-1</a:MessageID><a:From s:mustUnderstand="true"><a:Address>${CALLBACK_URL}</a:Address></a:From><a:ReplyTo s:mustUnderstand="true"><a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address></a:ReplyTo><a:To s:mustUnderstand="true">${CENTRAL_SYSTEM_URL}</a:To></s:Header><s:Body><cs:dataTransferRequest><cs:vendorId>vendor-cp-to-cs</cs:vendorId></cs:dataTransferRequest></s:Body></s:Envelope>`,
+      OCPP16_DIALECT,
+    );
+
+    // Should parse successfully with CS namespace (default direction)
+    expect(parsed).toMatchObject({
+      operation: "DataTransfer",
+      kind: "request",
+      action: "/DataTransfer",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      namespace: OCPP16_SOAP_NAMESPACES.CS,
+      wrapper: "dataTransferRequest",
+      payload: {
+        vendorId: "vendor-cp-to-cs",
+      },
+    });
+  });
+
+  it("builds DataTransfer with service:cp (CS→CP direction)", () => {
+    const xml = buildSoapEnvelope({
+      operation: "DataTransfer",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      messageId: "uuid:dt-cp-override-1",
+      from: CENTRAL_SYSTEM_URL,
+      to: CALLBACK_URL,
+      payload: {
+        vendorId: "vendor-override",
+        messageId: "msg-override",
+      },
+      service: "cp",
+      dialect: OCPP16_DIALECT,
+    });
+
+    // Should use CP namespace when service:"cp" is specified
+    expect(xml).toContain(`xmlns:cp="${OCPP16_SOAP_NAMESPACES.CP}"`);
+    expect(xml).toContain("<cp:dataTransferRequest>");
+    expect(xml).toContain("<cp:vendorId>vendor-override</cp:vendorId>");
   });
 });

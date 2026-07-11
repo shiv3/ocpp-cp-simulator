@@ -103,6 +103,23 @@ const waitForRemoteStart = (
   connector: Connector,
   timeout?: number,
 ): CancellableWait<{ tagId: string; remoteStartId?: number }> => {
+  // §4.9 S3: fail-fast if the charge point cannot receive RemoteStartTransaction
+  if (!chargePoint.canReceiveCsmsCall("RemoteStartTransaction")) {
+    const version = chargePoint.ocppVersion;
+    const versionDesc = chargePoint.isSoapChargePoint()
+      ? version === "OCPP-1.5"
+        ? "OCPP-1.5 SOAP"
+        : "send-only SOAP"
+      : version;
+    const errorMsg =
+      `RemoteStartTransaction trigger requires a transport that can receive CSMS-initiated calls; ` +
+      `this charge point (${versionDesc}) cannot — the scenario would wait forever`;
+    return {
+      promise: Promise.reject(new Error(errorMsg)),
+      cancel: () => {},
+    };
+  }
+
   // Register so the handler emits remoteStartReceived instead of starting a transaction
   chargePoint.registerScenarioHandler(connector.id);
 
@@ -178,6 +195,23 @@ const waitForRemoteStop = (
   reason: string;
   triggerReason: "RemoteStop";
 }> => {
+  // §4.9 S3: fail-fast if the charge point cannot receive RemoteStopTransaction
+  if (!chargePoint.canReceiveCsmsCall("RemoteStopTransaction")) {
+    const version = chargePoint.ocppVersion;
+    const versionDesc = chargePoint.isSoapChargePoint()
+      ? version === "OCPP-1.5"
+        ? "OCPP-1.5 SOAP"
+        : "send-only SOAP"
+      : version;
+    const errorMsg =
+      `RemoteStopTransaction trigger requires a transport that can receive CSMS-initiated calls; ` +
+      `this charge point (${versionDesc}) cannot — the scenario would wait forever`;
+    return {
+      promise: Promise.reject(new Error(errorMsg)),
+      cancel: () => {},
+    };
+  }
+
   chargePoint.registerScenarioStopHandler(connector.id);
 
   let cleanupFn: (() => void) | null = null;
@@ -241,6 +275,20 @@ const waitForReservation = (
   connector: Connector,
   timeout?: number,
 ): Promise<number> => {
+  // §4.9 S3: fail-fast if the charge point cannot receive ReserveNow
+  if (!chargePoint.canReceiveCsmsCall("ReserveNow")) {
+    const version = chargePoint.ocppVersion;
+    const versionDesc = chargePoint.isSoapChargePoint()
+      ? version === "OCPP-1.5"
+        ? "OCPP-1.5 SOAP"
+        : "send-only SOAP"
+      : version;
+    const errorMsg =
+      `Reservation trigger requires ReserveNow capability; ` +
+      `this charge point (${versionDesc}) does not support it — the scenario would wait forever`;
+    return Promise.reject(new Error(errorMsg));
+  }
+
   const getReservationId = (): number | null => {
     const reservation =
       chargePoint.reservationManager.getReservationForConnector(connector.id);

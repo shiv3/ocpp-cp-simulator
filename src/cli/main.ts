@@ -692,7 +692,7 @@ Options:
                            Basic auth password for the client modes (see above).
   --vendor <vendor>        Charge point vendor (default: CLI-Vendor)
   --model <model>          Charge point model (default: CLI-Model)
-  --ocpp-version <OCPP-1.5|OCPP-1.6J|OCPP-2.0.1|OCPP-2.1>
+  --ocpp-version <OCPP-1.2|OCPP-1.5|OCPP-1.6J|OCPP-1.6S|OCPP-2.0.1|OCPP-2.1>
                            OCPP version for a directly-started CP
                            (default: OCPP-1.6J)
   --scenario <file>            Run scenario from JSON file on startup
@@ -739,8 +739,8 @@ Options:
                            be given the matching VITE_HEALTH_PATH so its
                            remote-mode auto-detect probe lines up.
   --soap-callback-url <url>
-                           OCPP 1.5 SOAP ChargePointService callback URL.
-                           Required when --ocpp-version OCPP-1.5 is used.
+                           SOAP ChargePointService callback URL for OCPP 1.2, 1.5,
+                           or 1.6S. Required when using any SOAP version.
   --soap-path <path>       Base path reserved for the SOAP callback server
                            (default: /ocpp/soap).
                            OCPP-S has no per-message auth; rely on

@@ -1,8 +1,11 @@
-import type { ChargePointResetType } from "../../../domain/charge-point/ChargePoint";
+import type {
+  ChargePointResetType,
+  ChargePoint,
+} from "../../../domain/charge-point/ChargePoint";
+import { Logger } from "../../../shared/Logger";
 import {
   buildSoapEnvelope,
   buildSoapFaultEnvelope,
-  OCPP15_SOAP_NAMESPACES,
   parseSoapEnvelope,
   soapContentTypeForOperation,
   soapFaultContentType,
@@ -12,11 +15,20 @@ import {
   type SoapParsedValue,
   type SoapPayload,
 } from "./soapEnvelope";
+import type { SoapDialect } from "./dialect";
+import { OCPP15_DIALECT } from "./dialect";
+import { OCPP_1_6_SOAP, OCPP_1_2 } from "../../../domain/types/OcppVersion";
+import {
+  dispatchSoapCallViaV16Registry,
+  transformResponseForOcpp12,
+} from "./v16RegistryDispatch";
 
 export interface OCPPSoapServerTarget {
   readonly cpId: string;
   readonly applyRemoteReset: (type: ChargePointResetType) => void;
-  readonly isRegisteredOcpp15Soap: () => boolean;
+  readonly isRegisteredSoapChargePoint: () => boolean;
+  readonly chargePoint?: ChargePoint;
+  readonly logger?: Logger;
 }
 
 export interface OCPP15SoapInboundContext {
@@ -59,31 +71,81 @@ export class OCPPSoapFaultError extends Error {
 
 export class OCPPSoapServer {
   private readonly registry: OCPP15SoapInboundRegistry;
+  private readonly dialect: SoapDialect;
 
   constructor(
     private readonly target: OCPPSoapServerTarget,
     registry: OCPP15SoapInboundRegistry = buildOCPP15SoapInboundRegistry(),
+    dialect: SoapDialect = OCPP15_DIALECT,
   ) {
     this.registry = registry;
+    this.dialect = dialect;
   }
 
-  handleRequest(pathCpId: string, xml: string): Response {
+  async handleRequest(pathCpId: string, xml: string): Promise<Response> {
     let envelope: ParsedSoapEnvelope;
     try {
-      envelope = parseSoapEnvelope(xml);
+      envelope = parseSoapEnvelope(xml, this.dialect);
       this.assertRequestForTarget(pathCpId, envelope);
 
-      const handler = this.registry.get(envelope.operation);
-      if (!handler) {
+      // Dispatch order:
+      // (1) Legacy inbound registry (Reset) — unchanged for all dialects
+      // (2) If 1.6S or 1.2 with v16 registry support — dispatch CS→CP through handlers
+      // (3) Else not-implemented Fault
+
+      let responsePayload: SoapPayload;
+      let afterResponse: (() => void) | undefined;
+
+      const operationMetadata =
+        this.dialect.operationMetadata[envelope.operation];
+      const isV16Supported = this.dialect.version === OCPP_1_6_SOAP;
+      const isV12Supported = this.dialect.version === OCPP_1_2;
+
+      // First try legacy registry (Reset for all dialects)
+      const legacyHandler = this.registry.get(envelope.operation);
+      if (legacyHandler) {
+        const result = legacyHandler.handle(envelope.payload, {
+          target: this.target,
+          envelope,
+        });
+        responsePayload = result.payload;
+        afterResponse = result.afterResponse;
+      } else if (
+        (isV16Supported || isV12Supported) &&
+        operationMetadata &&
+        operationMetadata.target === "cp" &&
+        this.target.chargePoint &&
+        this.target.logger
+      ) {
+        // Dispatch through v16 registry for full 1.6S or filtered 1.2
+        try {
+          responsePayload = await dispatchSoapCallViaV16Registry({
+            operation: envelope.operation,
+            payload: envelope.payload,
+            chargePoint: this.target.chargePoint,
+            logger: this.target.logger,
+            dialect: this.dialect,
+          });
+
+          // Transform response for 1.2 (narrow enum mapping)
+          if (isV12Supported) {
+            responsePayload = transformResponseForOcpp12(
+              envelope.operation,
+              responsePayload,
+            );
+          }
+        } catch (dispatchErr) {
+          // If dispatch fails, treat as not-implemented
+          throw new OCPPSoapFaultError(
+            `Dispatch error for ${envelope.operation}: ${errorMessage(dispatchErr)}`,
+          );
+        }
+      } else {
         throw new OCPPSoapFaultError(
           `${envelope.operation} is not implemented by the SOAP ChargePointService`,
         );
       }
 
-      const result = handler.handle(envelope.payload, {
-        target: this.target,
-        envelope,
-      });
       const responseXml = buildSoapEnvelope({
         operation: envelope.operation,
         kind: "response",
@@ -92,15 +154,17 @@ export class OCPPSoapServer {
         from: envelope.to,
         to: responseToAddress(envelope),
         relatesTo: envelope.messageId,
-        payload: result.payload,
+        payload: responsePayload,
+        dialect: this.dialect,
       });
-      result.afterResponse?.();
+      afterResponse?.();
       return new Response(responseXml, {
         status: 200,
         headers: {
           "content-type": soapContentTypeForOperation(
             envelope.operation,
             "response",
+            this.dialect,
           ),
         },
       });
@@ -116,18 +180,18 @@ export class OCPPSoapServer {
     pathCpId: string,
     envelope: ParsedSoapEnvelope,
   ): void {
-    if (!this.target.isRegisteredOcpp15Soap()) {
+    if (!this.target.isRegisteredSoapChargePoint()) {
       throw new OCPPSoapFaultError(
-        "SOAP ChargePointService target is not a registered OCPP 1.5 SOAP charge point",
+        "SOAP ChargePointService target is not a registered SOAP charge point",
         403,
       );
     }
     if (envelope.kind !== "request") {
       throw new OCPPSoapFaultError("SOAP ChargePointService expects a request");
     }
-    if (envelope.namespace !== OCPP15_SOAP_NAMESPACES.CP) {
+    if (envelope.namespace !== this.dialect.namespaces.CP) {
       throw new OCPPSoapFaultError(
-        `SOAP ChargePointService namespace must be ${OCPP15_SOAP_NAMESPACES.CP}`,
+        `SOAP ChargePointService namespace must be ${this.dialect.namespaces.CP}`,
       );
     }
     if (!envelope.chargeBoxIdentity) {

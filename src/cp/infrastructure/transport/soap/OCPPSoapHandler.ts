@@ -25,9 +25,18 @@ import type { TransactionLifecycleEvent } from "../../../domain/transport/Transa
 import type {
   BootNotification,
   ChargePointErrorCode,
-  OCPPStatus,
 } from "../../../domain/types/OcppTypes";
-import { OCPPAction } from "../../../domain/types/OcppTypes";
+// OCPPStatus is a string enum: it must be a VALUE import so switch cases can
+// use enum members — string-literal cases do not narrow an enum-typed value.
+import { OCPPAction, OCPPStatus } from "../../../domain/types/OcppTypes";
+import {
+  BootGate,
+  type BootGateStatus,
+} from "../../../application/state/machines/BootGate";
+import {
+  projectStatusForVersion,
+  projectErrorCodeForVersion,
+} from "../../../domain/types/statusProjection";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
 import type { IChargePointMessageHandler } from "../IChargePointMessageHandler";
@@ -47,24 +56,27 @@ import {
   parseSoapEnvelope,
   SoapFaultError,
   soapContentTypeForOperation,
+  WSA_ANONYMOUS_ADDRESS,
   type ParsedSoapEnvelope,
   type SoapOperation,
   type SoapParsedPayload,
   type SoapParsedValue,
   type SoapPayload,
 } from "./soapEnvelope";
+import type { SoapDialect } from "./dialect";
+import { OCPP15_DIALECT } from "./dialect";
+import {
+  OCPP_1_2,
+  OCPP_1_5,
+  OCPP_1_6_SOAP,
+} from "../../../domain/types/OcppVersion";
 
 export interface OCPPSoapHandlerOptions {
   readonly centralSystemUrl: string;
-  readonly soapCallbackUrl: string;
+  readonly soapCallbackUrl?: string;
   readonly requestTimeoutMs?: number;
+  readonly dialect?: SoapDialect;
 }
-
-type BootStatus =
-  | { status: "Idle" }
-  | { status: "Accepted" }
-  | { status: "Pending" }
-  | { status: "Rejected"; retryAfter: Date };
 
 type IdTagInfoStatus =
   "Accepted" | "Blocked" | "Expired" | "Invalid" | "ConcurrentTx";
@@ -146,6 +158,72 @@ type Ocpp15StatusNotificationRequest = {
   vendorErrorCode?: string;
 };
 
+type Ocpp12ChargePointStatus =
+  "Available" | "Occupied" | "Faulted" | "Unavailable";
+
+type Ocpp12ChargePointErrorCode =
+  | "ConnectorLockFailure"
+  | "HighTemperature"
+  | "Mode3Error"
+  | "NoError"
+  | "PowerMeterFailure"
+  | "PowerSwitchFailure"
+  | "ReaderFailure"
+  | "ResetFailure";
+
+type Ocpp12StatusNotificationRequest = {
+  connectorId: number;
+  status: Ocpp12ChargePointStatus;
+  errorCode: Ocpp12ChargePointErrorCode;
+};
+
+type Ocpp12MeterSample = string;
+
+type Ocpp12MeterValuesRequest = {
+  connectorId: number;
+  values: {
+    timestamp: string;
+    value: Ocpp12MeterSample;
+  }[];
+};
+
+type Ocpp12StartTransactionRequest = {
+  connectorId: number;
+  idTag: string;
+  timestamp: string;
+  meterStart: number;
+};
+
+/**
+ * Internal seam for version-specific wire-payload construction. Allows different
+ * SOAP dialects (1.2, 1.5, 1.6-SOAP later) to shape payloads differently without
+ * duplicating the core request/response handling.
+ */
+interface ClientWireProfile {
+  toStatusNotificationRequest(
+    connectorId: number,
+    status: OCPPStatus,
+    opts?: {
+      errorCode?: ChargePointErrorCode;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+      timestamp?: Date;
+    },
+  ): SoapPayload;
+
+  toMeterValuesRequest(
+    connectorId: number,
+    transactionId: number | undefined,
+    sampledValues: SampledValue[],
+  ): SoapPayload;
+
+  toStartTransactionRequest(
+    transaction: Transaction,
+    connectorId: number,
+  ): SoapPayload;
+}
+
 type Ocpp15MeterSample = {
   "#text": string;
   "@_context"?: Ocpp15ReadingContext;
@@ -164,6 +242,85 @@ type Ocpp15MeterValuesRequest = {
   }[];
 };
 
+// 1.6 SOAP enums: passthrough, no collapsing
+type Ocpp16ChargePointStatus =
+  | "Available"
+  | "Preparing"
+  | "Charging"
+  | "SuspendedEV"
+  | "SuspendedEVSE"
+  | "Finishing"
+  | "Reserved"
+  | "Unavailable"
+  | "Faulted";
+
+type Ocpp16ChargePointErrorCode =
+  | "ConnectorLockFailure"
+  | "EVCommunicationError"
+  | "GroundFailure"
+  | "HighTemperature"
+  | "InternalError"
+  | "LocalListConflict"
+  | "NoError"
+  | "OtherError"
+  | "OverCurrentFailure"
+  | "OverVoltage"
+  | "PowerMeterFailure"
+  | "PowerSwitchFailure"
+  | "ReaderFailure"
+  | "ResetFailure"
+  | "UnderVoltage"
+  | "WeakSignal";
+
+type Ocpp16StatusNotificationRequest = {
+  connectorId: number;
+  status: Ocpp16ChargePointStatus;
+  errorCode: Ocpp16ChargePointErrorCode;
+  info?: string;
+  timestamp?: string;
+  vendorId?: string;
+  vendorErrorCode?: string;
+};
+
+// 1.6 SOAP SampledValue: child elements, not attributes
+type Ocpp16SampledValue = {
+  value: string;
+  context?: string;
+  format?: "Raw" | "SignedData";
+  measurand?: string;
+  phase?: string;
+  location?: string;
+  unit?: string;
+};
+
+type Ocpp16MeterValue = {
+  timestamp: string;
+  sampledValue: Ocpp16SampledValue[];
+};
+
+type Ocpp16MeterValuesRequest = {
+  connectorId: number;
+  transactionId?: number;
+  meterValue?: Ocpp16MeterValue[];
+};
+
+type Ocpp16StartTransactionRequest = {
+  connectorId: number;
+  idTag: string;
+  timestamp: string;
+  meterStart: number;
+  reservationId?: number;
+};
+
+type Ocpp16StopTransactionRequest = {
+  transactionId: number;
+  idTag?: string;
+  timestamp: string;
+  meterStop: number;
+  reason?: string;
+  transactionData?: Ocpp16MeterValue[];
+};
+
 const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
   Authorize: OCPPAction.Authorize,
   BootNotification: OCPPAction.BootNotification,
@@ -179,6 +336,8 @@ const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
   ChangeAvailability: OCPPAction.ChangeAvailability,
   ChangeConfiguration: OCPPAction.ChangeConfiguration,
   ClearCache: OCPPAction.ClearCache,
+  ClearChargingProfile: OCPPAction.ClearChargingProfile,
+  GetCompositeSchedule: OCPPAction.GetCompositeSchedule,
   GetConfiguration: OCPPAction.GetConfiguration,
   GetDiagnostics: OCPPAction.GetDiagnostics,
   GetLocalListVersion: OCPPAction.GetLocalListVersion,
@@ -187,6 +346,8 @@ const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
   ReserveNow: OCPPAction.ReserveNow,
   Reset: OCPPAction.Reset,
   SendLocalList: OCPPAction.SendLocalList,
+  SetChargingProfile: OCPPAction.SetChargingProfile,
+  TriggerMessage: OCPPAction.TriggerMessage,
   UnlockConnector: OCPPAction.UnlockConnector,
   UpdateFirmware: OCPPAction.UpdateFirmware,
 };
@@ -241,58 +402,6 @@ function idTagInfoFromPayload(value: SoapParsedValue | undefined): IdTagInfo {
 
 function soapPayload(payload: object): SoapPayload {
   return payload as unknown as SoapPayload;
-}
-
-function toOcpp15ChargePointStatus(
-  status: OCPPStatus,
-): Ocpp15ChargePointStatus {
-  // OCPP 1.5 ChargePointStatus only defines Available, Occupied, Faulted,
-  // Unavailable, and Reserved; 1.6 transaction-progress states collapse to
-  // Occupied on the 1.5 SOAP wire.
-  switch (status) {
-    case "Available":
-      return "Available";
-    case "Faulted":
-      return "Faulted";
-    case "Unavailable":
-      return "Unavailable";
-    case "Reserved":
-      return "Reserved";
-    case "Preparing":
-    case "Charging":
-    case "SuspendedEV":
-    case "SuspendedEVSE":
-    case "Finishing":
-      return "Occupied";
-  }
-}
-
-function toOcpp15ChargePointErrorCode(
-  errorCode: ChargePointErrorCode,
-): Ocpp15ChargePointErrorCode {
-  switch (errorCode) {
-    case "ConnectorLockFailure":
-    case "HighTemperature":
-    case "NoError":
-    case "PowerMeterFailure":
-    case "PowerSwitchFailure":
-    case "ReaderFailure":
-    case "ResetFailure":
-    case "GroundFailure":
-    case "OverCurrentFailure":
-    case "UnderVoltage":
-    case "WeakSignal":
-    case "OtherError":
-      return errorCode;
-    case "EVCommunicationError":
-      // OCPP 1.5 has no EVCommunicationError; Mode3Error is the closest
-      // connector/EV communication fault in the 1.5 ChargePointErrorCode set.
-      return "Mode3Error";
-    case "InternalError":
-    case "LocalListConflict":
-    case "OverVoltage":
-      return "OtherError";
-  }
 }
 
 function toOcpp15ReadingContext(
@@ -402,16 +511,204 @@ function toOcpp15MeterSample(sample: SampledValue): Ocpp15MeterSample | null {
   };
 }
 
+function toOcpp16SampledValue(sample: SampledValue): Ocpp16SampledValue {
+  // 1.6 SOAP: SampledValue is a complex type with child elements, all optional except value.
+  // Passthrough all fields without mapping or dropping.
+  return {
+    value: sample.value,
+    ...(sample.context ? { context: sample.context } : {}),
+    ...(sample.format ? { format: sample.format } : {}),
+    ...(sample.measurand ? { measurand: sample.measurand } : {}),
+    ...(sample.phase ? { phase: sample.phase } : {}),
+    ...(sample.location ? { location: sample.location } : {}),
+    ...(sample.unit ? { unit: sample.unit } : {}),
+  };
+}
+
+const OCPP15_WIRE_PROFILE: ClientWireProfile = {
+  toStatusNotificationRequest(connectorId, status, opts) {
+    const payload: Ocpp15StatusNotificationRequest = {
+      connectorId,
+      status: projectStatusForVersion(
+        OCPP_1_5,
+        status,
+      ) as Ocpp15ChargePointStatus,
+      errorCode: projectErrorCodeForVersion(
+        OCPP_1_5,
+        opts?.errorCode ?? "NoError",
+      ) as Ocpp15ChargePointErrorCode,
+      ...(opts?.info ? { info: opts.info } : {}),
+      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
+      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
+      ...(opts?.vendorErrorCode
+        ? { vendorErrorCode: opts.vendorErrorCode }
+        : {}),
+    };
+    return soapPayload(payload);
+  },
+
+  toMeterValuesRequest(connectorId, transactionId, sampledValues) {
+    const payload: Ocpp15MeterValuesRequest = {
+      connectorId,
+      ...(transactionId !== undefined ? { transactionId } : {}),
+      values: [
+        {
+          timestamp: new Date().toISOString(),
+          value: sampledValues
+            .map(toOcpp15MeterSample)
+            .filter((sample): sample is Ocpp15MeterSample => sample !== null),
+        },
+      ],
+    };
+    return soapPayload(payload);
+  },
+
+  toStartTransactionRequest(transaction, connectorId) {
+    const payload: StartTransactionRequestV16 = {
+      connectorId,
+      idTag: transaction.tagId,
+      timestamp: transaction.startTime.toISOString(),
+      meterStart: transaction.meterStart,
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
+    };
+    return soapPayload(payload);
+  },
+};
+
+const OCPP12_WIRE_PROFILE: ClientWireProfile = {
+  toStatusNotificationRequest(connectorId, status, opts) {
+    // OCPP 1.2: exactly 3 fields (connectorId, status, errorCode).
+    // Per XSD verification: info/timestamp/vendorId/vendorErrorCode do NOT exist in 1.2.
+    const payload: Ocpp12StatusNotificationRequest = {
+      connectorId,
+      status: projectStatusForVersion(
+        OCPP_1_2,
+        status,
+      ) as Ocpp12ChargePointStatus,
+      errorCode: projectErrorCodeForVersion(
+        OCPP_1_2,
+        opts?.errorCode ?? "NoError",
+      ) as Ocpp12ChargePointErrorCode,
+    };
+    return soapPayload(payload);
+  },
+
+  toMeterValuesRequest(connectorId, _transactionId, sampledValues) {
+    // OCPP 1.2: flat shape. values[] of {timestamp, value:int} (Wh implied, no transactionId).
+    // Per wire-facts: Energy.Active.Import.Register sample only; pick the Wh value.
+    const wattHourValue = sampledValues.find(
+      (sv) => sv.measurand === "Energy.Active.Import.Register" && sv.value,
+    );
+    const payload: Ocpp12MeterValuesRequest = {
+      connectorId,
+      values: [
+        {
+          timestamp: new Date().toISOString(),
+          value: wattHourValue?.value ?? "0",
+        },
+      ],
+    };
+    return soapPayload(payload);
+  },
+
+  toStartTransactionRequest(transaction, connectorId) {
+    // OCPP 1.2: connectorId, idTag, timestamp, meterStart (NO reservationId).
+    const payload: Ocpp12StartTransactionRequest = {
+      connectorId,
+      idTag: transaction.tagId,
+      timestamp: transaction.startTime.toISOString(),
+      meterStart: transaction.meterStart,
+    };
+    return soapPayload(payload);
+  },
+};
+
+const OCPP16_WIRE_PROFILE: ClientWireProfile = {
+  toStatusNotificationRequest(connectorId, status, opts) {
+    // OCPP 1.6 SOAP: full shape with passthrough enums (no collapsing).
+    // 1.6 enums are identical to 1.6J: Preparing stays Preparing, EVCommunicationError stays.
+    // Field order: connectorId, status, errorCode, info?, timestamp?, vendorId?, vendorErrorCode?
+    const payload: Ocpp16StatusNotificationRequest = {
+      connectorId,
+      status: projectStatusForVersion(
+        OCPP_1_6_SOAP,
+        status,
+      ) as Ocpp16ChargePointStatus,
+      errorCode: projectErrorCodeForVersion(
+        OCPP_1_6_SOAP,
+        opts?.errorCode ?? "NoError",
+      ) as Ocpp16ChargePointErrorCode,
+      ...(opts?.info ? { info: opts.info } : {}),
+      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
+      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
+      ...(opts?.vendorErrorCode
+        ? { vendorErrorCode: opts.vendorErrorCode }
+        : {}),
+    };
+    return soapPayload(payload);
+  },
+
+  toMeterValuesRequest(connectorId, transactionId, sampledValues) {
+    // OCPP 1.6 SOAP: meterValue[] with sampledValue[] as child elements (not attributes).
+    // Field order: connectorId, transactionId?, meterValue[]
+    // Within meterValue: timestamp, sampledValue[]
+    // Within sampledValue: value, context?, format?, measurand?, phase?, location?, unit?
+    const payload: Ocpp16MeterValuesRequest = {
+      connectorId,
+      ...(transactionId !== undefined ? { transactionId } : {}),
+      meterValue: [
+        {
+          timestamp: new Date().toISOString(),
+          sampledValue: sampledValues.map(toOcpp16SampledValue),
+        },
+      ],
+    };
+    return soapPayload(payload);
+  },
+
+  toStartTransactionRequest(transaction, connectorId) {
+    // OCPP 1.6: connectorId, idTag, timestamp, meterStart, reservationId?
+    const payload: Ocpp16StartTransactionRequest = {
+      connectorId,
+      idTag: transaction.tagId,
+      timestamp: transaction.startTime.toISOString(),
+      meterStart: transaction.meterStart,
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
+    };
+    return soapPayload(payload);
+  },
+};
+
 export class OCPPSoapHandler implements IChargePointMessageHandler {
   private readonly _dataTransferHandler = new DataTransferHandler();
-  private _bootStatus: BootStatus = { status: "Idle" };
+  private readonly _bootGate: BootGate = new BootGate();
   private _requestChain: Promise<void> = Promise.resolve();
+  private readonly _dialect: SoapDialect;
+  private readonly _wireProfile: ClientWireProfile;
 
   constructor(
     private readonly _chargePoint: ChargePoint,
     private readonly _logger: Logger,
     private readonly _options: OCPPSoapHandlerOptions,
-  ) {}
+  ) {
+    this._dialect = this._options.dialect ?? OCPP15_DIALECT;
+    this._wireProfile = this.selectWireProfile(this._dialect.version);
+  }
+
+  private selectWireProfile(version: string): ClientWireProfile {
+    if (version === OCPP_1_2) {
+      return OCPP12_WIRE_PROFILE;
+    }
+    if (version === OCPP_1_6_SOAP) {
+      return OCPP16_WIRE_PROFILE;
+    }
+    // Default to 1.5 for any SOAP version we haven't explicitly specialized.
+    return OCPP15_WIRE_PROFILE;
+  }
 
   public sendBootNotification(bootPayload: BootNotification): void {
     this.enqueueRequest("BootNotification", soapPayload(bootPayload), (env) =>
@@ -442,22 +739,16 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     },
   ): void {
     // The SOAP body emits elements in object-key order, so the keys MUST follow
-    // the OCPP 1.5 statusNotificationRequest XSD sequence: connectorId, status,
-    // errorCode, info, timestamp, vendorId, vendorErrorCode. SteVe's JAXB binding
-    // is sequence-sensitive — status before errorCode (the wrong order made SteVe
-    // read `status` as null and throw a Fault during a transaction).
-    const payload: Ocpp15StatusNotificationRequest = {
+    // the version's statusNotificationRequest XSD sequence. For OCPP 1.5:
+    // connectorId, status, errorCode, info, timestamp, vendorId, vendorErrorCode.
+    // For OCPP 1.2: connectorId, status, errorCode (no info/timestamp/vendor fields).
+    // SteVe's JAXB binding is sequence-sensitive.
+    const payload = this._wireProfile.toStatusNotificationRequest(
       connectorId,
-      status: toOcpp15ChargePointStatus(status),
-      errorCode: toOcpp15ChargePointErrorCode(opts?.errorCode ?? "NoError"),
-      ...(opts?.info ? { info: opts.info } : {}),
-      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
-      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
-      ...(opts?.vendorErrorCode
-        ? { vendorErrorCode: opts.vendorErrorCode }
-        : {}),
-    };
-    this.enqueueRequest("StatusNotification", soapPayload(payload), (env) => {
+      status,
+      opts,
+    );
+    this.enqueueRequest("StatusNotification", payload, (env) => {
       new StatusNotificationResultHandler().handle(
         env.payload as StatusNotificationResponseV16,
         this.handlerContext(),
@@ -499,19 +790,12 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
 
     const measurands = this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
-    const payload: Ocpp15MeterValuesRequest = {
+    const payload = this._wireProfile.toMeterValuesRequest(
       connectorId,
-      ...(transactionId !== undefined ? { transactionId } : {}),
-      values: [
-        {
-          timestamp: new Date().toISOString(),
-          value: sampledValue
-            .map(toOcpp15MeterSample)
-            .filter((sample): sample is Ocpp15MeterSample => sample !== null),
-        },
-      ],
-    };
-    this.enqueueRequest("MeterValues", soapPayload(payload), (env) => {
+      transactionId,
+      sampledValue,
+    );
+    this.enqueueRequest("MeterValues", payload, (env) => {
       new MeterValuesResultHandler(payload).handle(
         env.payload as MeterValuesResponseV16,
         this.handlerContext(),
@@ -529,42 +813,86 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       ...(messageId ? { messageId } : {}),
       ...(data !== undefined ? { data } : {}),
     };
-    this._logger.warn(
-      `OCPP 1.5 SOAP DataTransfer is not implemented in this client slice: ${JSON.stringify(payload)}`,
-      LogType.OCPP,
-    );
+    if (this._dialect.version === OCPP_1_2) {
+      this._logger.warn(
+        `OCPP 1.2 has no DataTransfer operation; ignoring: ${JSON.stringify(payload)}`,
+        LogType.OCPP,
+      );
+    } else if (this._dialect.version === OCPP_1_6_SOAP) {
+      // For 1.6S, actually send the DataTransfer request (CP→CS direction, service:"cs")
+      this.enqueueRequest("DataTransfer", soapPayload(payload), (env) => {
+        // Log the response; reuse existing DataTransfer result handler if available
+        this._logger.info(
+          `DataTransfer response: ${JSON.stringify(env.payload)}`,
+          LogType.OCPP,
+        );
+      });
+    } else {
+      this._logger.warn(
+        `${this._dialect.version} SOAP does not support DataTransfer: ${JSON.stringify(payload)}`,
+        LogType.OCPP,
+      );
+    }
   }
 
   public sendDiagnosticsStatusNotification(status: string): void {
     const payload: DiagnosticsStatusNotificationRequestV16 = {
       status: status as DiagnosticsStatusNotificationRequestV16["status"],
     };
-    this._logger.warn(
-      `OCPP 1.5 SOAP DiagnosticsStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
-      LogType.OCPP,
-    );
+    if (this._dialect.version === OCPP_1_6_SOAP) {
+      // For 1.6S, actually send the DiagnosticsStatusNotification request
+      this.enqueueRequest(
+        "DiagnosticsStatusNotification",
+        soapPayload(payload),
+        (env) => {
+          this._logger.info(
+            `DiagnosticsStatusNotification response: ${JSON.stringify(env.payload)}`,
+            LogType.OCPP,
+          );
+        },
+      );
+    } else {
+      this._logger.warn(
+        `${this._dialect.version} SOAP DiagnosticsStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
+        LogType.OCPP,
+      );
+    }
   }
 
   public sendFirmwareStatusNotification(status: string): void {
     const payload: FirmwareStatusNotificationRequestV16 = {
       status: status as FirmwareStatusNotificationRequestV16["status"],
     };
-    this._logger.warn(
-      `OCPP 1.5 SOAP FirmwareStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
-      LogType.OCPP,
-    );
+    if (this._dialect.version === OCPP_1_6_SOAP) {
+      // For 1.6S, actually send the FirmwareStatusNotification request
+      this.enqueueRequest(
+        "FirmwareStatusNotification",
+        soapPayload(payload),
+        (env) => {
+          this._logger.info(
+            `FirmwareStatusNotification response: ${JSON.stringify(env.payload)}`,
+            LogType.OCPP,
+          );
+        },
+      );
+    } else {
+      this._logger.warn(
+        `${this._dialect.version} SOAP FirmwareStatusNotification is not implemented in this client slice: ${JSON.stringify(payload)}`,
+        LogType.OCPP,
+      );
+    }
   }
 
   public sendSecurityEventNotification(type: string, techInfo?: string): void {
     this._logger.warn(
-      `OCPP 1.5 SOAP has no security extension; ignoring SecurityEventNotification ${JSON.stringify({ type, techInfo })}`,
+      `${this._dialect.version} SOAP has no security extension; ignoring SecurityEventNotification ${JSON.stringify({ type, techInfo })}`,
       LogType.OCPP,
     );
   }
 
   public sendLogStatusNotification(status: string, requestId?: number): void {
     this._logger.warn(
-      `OCPP 1.5 SOAP has no security extension; ignoring LogStatusNotification ${JSON.stringify({ status, requestId })}`,
+      `${this._dialect.version} SOAP has no security extension; ignoring LogStatusNotification ${JSON.stringify({ status, requestId })}`,
       LogType.OCPP,
     );
   }
@@ -574,21 +902,21 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     requestId?: number,
   ): void {
     this._logger.warn(
-      `OCPP 1.5 SOAP has no security extension; ignoring SignedFirmwareStatusNotification ${JSON.stringify({ status, requestId })}`,
+      `${this._dialect.version} SOAP has no security extension; ignoring SignedFirmwareStatusNotification ${JSON.stringify({ status, requestId })}`,
       LogType.OCPP,
     );
   }
 
   public sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
-      "OCPP 1.5 SOAP has no security extension; ignoring SignCertificate",
+      `${this._dialect.version} SOAP has no security extension; ignoring SignCertificate`,
       LogType.OCPP,
     );
     return Promise.resolve();
   }
 
-  public setBootStatus(status: BootStatus): void {
-    this._bootStatus = status;
+  public setBootStatus(status: BootGateStatus): void {
+    this._bootGate.set(status);
   }
 
   public getDataTransferHandler(): DataTransferHandler {
@@ -608,16 +936,11 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     transaction: Transaction,
     connectorId: number,
   ): void {
-    const payload: StartTransactionRequestV16 = {
+    const payload = this._wireProfile.toStartTransactionRequest(
+      transaction,
       connectorId,
-      idTag: transaction.tagId,
-      timestamp: transaction.startTime.toISOString(),
-      meterStart: transaction.meterStart,
-      ...(transaction.reservationId !== undefined
-        ? { reservationId: transaction.reservationId }
-        : {}),
-    };
-    this.enqueueRequest("StartTransaction", soapPayload(payload), (env) => {
+    );
+    this.enqueueRequest("StartTransaction", payload, (env) => {
       new StartTransactionResultHandler(connectorId).handle(
         this.startTransactionResponseFromPayload(env.payload),
         this.handlerContext(),
@@ -651,12 +974,23 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       return;
     }
 
-    const payload: Ocpp15StopTransactionRequest = {
-      transactionId: transaction.id,
-      idTag: transaction.tagId,
-      timestamp: transaction.stopTime.toISOString(),
-      meterStop: transaction.meterStop,
-    };
+    const payload: Ocpp15StopTransactionRequest | Ocpp16StopTransactionRequest =
+      this._dialect.version === OCPP_1_6_SOAP
+        ? {
+            transactionId: transaction.id,
+            idTag: transaction.tagId,
+            timestamp: transaction.stopTime.toISOString(),
+            meterStop: transaction.meterStop,
+            ...(transaction.stopReason
+              ? { reason: transaction.stopReason }
+              : {}),
+          }
+        : {
+            transactionId: transaction.id,
+            idTag: transaction.tagId,
+            timestamp: transaction.stopTime.toISOString(),
+            meterStop: transaction.meterStop,
+          };
     this.enqueueRequest("StopTransaction", soapPayload(payload), (env) => {
       new StopTransactionResultHandler(connectorId).handle(
         this.stopTransactionResponseFromPayload(env.payload),
@@ -673,7 +1007,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const action = OPERATION_ACTION[operation];
     if (action && !this.isCallAllowed(action)) {
       this._logger.warn(
-        `Suppressing ${operation}: blocked by boot gate (status=${this._bootStatus.status})`,
+        `Suppressing ${operation}: blocked by the boot gate — BootNotification not yet Accepted (status=${this._bootGate.status.status})`,
         LogType.OCPP,
       );
       return;
@@ -703,11 +1037,16 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       operation,
       chargeBoxIdentity: this._chargePoint.id,
       messageId,
-      from: this._options.soapCallbackUrl,
+      from: this._options.soapCallbackUrl ?? WSA_ANONYMOUS_ADDRESS,
       to: this._options.centralSystemUrl,
       payload,
+      dialect: this._dialect,
     });
-    const contentType = soapContentTypeForOperation(operation);
+    const contentType = soapContentTypeForOperation(
+      operation,
+      "request",
+      this._dialect,
+    );
 
     this._logger.info(`SOAP POST ${operation}: ${xml}`, LogType.OCPP);
     this._chargePoint.notifyOutgoingCall(operation === "Heartbeat");
@@ -752,7 +1091,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       LogType.OCPP,
     );
 
-    const envelope = parseSoapEnvelope(responseText);
+    const envelope = parseSoapEnvelope(responseText, this._dialect);
     if (envelope.kind !== "response") {
       throw new Error(`SOAP ${operation} expected a response envelope`);
     }
@@ -796,7 +1135,12 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
           ? status
           : "Rejected",
       currentTime: textValue(payload.currentTime) ?? new Date().toISOString(),
-      interval: numericValue(payload.heartbeatInterval) ?? 0,
+      // OCPP 1.2/1.5 name this field "heartbeatInterval"; 1.6 renamed it to
+      // "interval" (verified live against SteVe 1.6S). Read whichever is present.
+      interval:
+        numericValue(payload.interval) ??
+        numericValue(payload.heartbeatInterval) ??
+        0,
     };
     new BootNotificationResultHandler().handle(response, this.handlerContext());
   }
@@ -839,17 +1183,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   }
 
   private isCallAllowed(action: OCPPAction): boolean {
-    if (action === OCPPAction.BootNotification) return true;
-    switch (this._bootStatus.status) {
-      case "Accepted":
-        return true;
-      case "Pending":
-        return false;
-      case "Rejected":
-        return Date.now() >= this._bootStatus.retryAfter.getTime();
-      case "Idle":
-        return false;
-    }
+    return this._bootGate.isCallAllowed(action);
   }
 
   private generateMessageId(): string {

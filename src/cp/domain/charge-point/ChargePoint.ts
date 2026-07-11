@@ -21,7 +21,12 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { OCPP_1_5 } from "../types/OcppVersion";
+import { isSoapVersion, OCPP_1_5 } from "../types/OcppVersion";
+import {
+  SOAP_OPERATION_NAMES,
+  soapDialectForVersion,
+  type SoapOperation,
+} from "../../infrastructure/transport/soap/dialect";
 import {
   BootNotification,
   ChargePointStatus,
@@ -112,6 +117,9 @@ export class ChargePoint {
   // timer fires we auto-transition the connector to Finishing.
   private readonly _connectionTimeoutTimers: Map<number, NodeJS.Timeout> =
     new Map();
+  // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
+  // send-only (browser local mode). For non-SOAP versions, always false.
+  private readonly _hasSoapCallbackUrl: boolean;
 
   constructor(
     private readonly _id: string,
@@ -140,6 +148,9 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
+    // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
+    // (server-hosted with callback) vs send-only (no callback URL).
+    this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
 
     // Setup logger callback to emit log events
     this._logger.loggingCallback = (entry) => {
@@ -208,17 +219,14 @@ export class ChargePoint {
       this._connectors.set(connectorId, connector);
     }
 
-    if (this._ocppVersion === OCPP_1_5) {
-      if (!transportOptions.soapCallbackUrl) {
-        throw new Error(
-          "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
-        );
-      }
+    if (isSoapVersion(this._ocppVersion)) {
       this._webSocket = null;
+      const dialect = soapDialectForVersion(this._ocppVersion);
       this._messageHandler = new OCPPSoapHandler(this, this._logger, {
         centralSystemUrl: this._transportUrl,
         soapCallbackUrl: transportOptions.soapCallbackUrl,
         requestTimeoutMs: transportOptions.soapRequestTimeoutMs,
+        dialect,
       });
     } else {
       this._webSocket = new OCPPWebSocket(
@@ -441,8 +449,48 @@ export class ChargePoint {
     return this._webSocket?.isOpenOrConnecting() ?? false;
   }
 
-  isOcpp15SoapChargePoint(): boolean {
-    return this._ocppVersion === OCPP_1_5 && this._webSocket === null;
+  isSoapChargePoint(): boolean {
+    return isSoapVersion(this._ocppVersion) && this._webSocket === null;
+  }
+
+  get ocppVersion(): string {
+    return this._ocppVersion;
+  }
+
+  /**
+   * §4.9 S3: check whether this charge point can receive a CSMS-initiated call.
+   *
+   * WebSocket versions can receive all CSMS calls. SOAP versions depend on:
+   * - Send-only (no soapCallbackUrl): cannot receive any calls (no server).
+   * - Server-hosted (with callback): depends on the version's dialect:
+   *   - OCPP-1.5: only Reset can be received (its server registry is Reset-only).
+   *   - OCPP-1.2 / 1.6S: check if the action exists in the dialect with target "cp".
+   */
+  canReceiveCsmsCall(action: string): boolean {
+    // WebSocket versions can receive all CSMS calls
+    if (!isSoapVersion(this._ocppVersion)) {
+      return true;
+    }
+
+    // SOAP versions without a callback URL (send-only, e.g. browser local mode)
+    // cannot receive any CSMS-initiated calls — there's no server to host the callback.
+    if (!this._hasSoapCallbackUrl) {
+      return false;
+    }
+
+    // SOAP with callback: consult the dialect's operationMetadata.
+    // Special case: OCPP-1.5 server registry is Reset-only.
+    if (this._ocppVersion === OCPP_1_5) {
+      return action === "Reset";
+    }
+
+    // For OCPP-1.2 / 1.6S: check if the action exists in the dialect with target "cp".
+    if (!(SOAP_OPERATION_NAMES as readonly string[]).includes(action)) {
+      return false;
+    }
+    const dialect = soapDialectForVersion(this._ocppVersion);
+    const metadata = dialect.operationMetadata[action as SoapOperation];
+    return metadata?.target === "cp";
   }
 
   get connectorNumber(): number {
@@ -462,6 +510,10 @@ export class ChargePoint {
   }
 
   set error(value: string) {
+    // Only emit on a real transition. boot() clears the error to "" on every
+    // connect, which otherwise emitted a spurious {"event":"error",
+    // "data":{"error":""}} on the JSON/event stream before "connected".
+    if (this._error === value) return;
     this._error = value;
     this._events.emit("error", { error: value });
   }
@@ -561,7 +613,10 @@ export class ChargePoint {
 
   connect(): void {
     if (!this._webSocket) {
-      this._logger.info("Connecting via OCPP 1.5 SOAP client", LogType.OCPP);
+      this._logger.info(
+        `Connecting via ${this._ocppVersion} SOAP client`,
+        LogType.OCPP,
+      );
       this.boot();
       this._events.emit("connected", undefined);
       return;
@@ -935,7 +990,7 @@ export class ChargePoint {
     this._logger.info(
       this._webSocket
         ? "Disconnecting from WebSocket"
-        : "Disconnecting OCPP 1.5 SOAP client",
+        : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
     this.teardownAfterClose();
@@ -989,9 +1044,9 @@ export class ChargePoint {
     type: ChargePointResetType,
     source: ChargePointResetSource = "ocpp-call",
   ): void {
-    if (source === "ocpp15-soap" && !this.isOcpp15SoapChargePoint()) {
+    if (source === "ocpp15-soap" && !this.isSoapChargePoint()) {
       this._logger.warn(
-        "Ignoring SOAP Reset for a charge point that is not registered as OCPP 1.5 SOAP",
+        "Ignoring SOAP Reset for a charge point that is not registered as a SOAP charge point",
         LogType.OCPP,
       );
       return;

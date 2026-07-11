@@ -6,7 +6,10 @@ import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
 import type { Database } from "../../cp/domain/persistence/Database";
-import { isOcppVersion, OCPP_1_5 } from "../../cp/domain/types/OcppVersion";
+import {
+  isOcppVersion,
+  isSoapVersion,
+} from "../../cp/domain/types/OcppVersion";
 import { soapFaultResponse } from "../../cp/infrastructure/transport/soap/OCPPSoapServer";
 
 /**
@@ -275,11 +278,9 @@ function normalizeSoapPath(value: string): string {
   return trimmed.length > 0 ? trimmed : "/";
 }
 
-function isRegisteredOcpp15SoapService(
-  service: CLIChargePointService,
-): boolean {
+function isRegisteredSoapService(service: CLIChargePointService): boolean {
   const init = service.getInit();
-  return init.ocppVersion === OCPP_1_5 && Boolean(init.soapCallbackUrl);
+  return isSoapVersion(init.ocppVersion) && Boolean(init.soapCallbackUrl);
 }
 
 function declaredContentLength(req: Request): number | null {
@@ -520,9 +521,9 @@ export function createHttpHandlers(deps: {
           404,
         );
       }
-      if (!isRegisteredOcpp15SoapService(service)) {
+      if (!isRegisteredSoapService(service)) {
         return soapFaultResponse(
-          `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
+          `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
           400,
         );
       }
@@ -538,19 +539,22 @@ export function createHttpHandlers(deps: {
         return soapFaultResponse("SOAP request body is too large", 413);
       }
 
-      // OCPP 1.5 SOAP has no per-message authentication field. This callback
+      // OCPP SOAP has no per-message authentication field. This callback
       // endpoint relies on the daemon's existing HTTP Basic-auth gate when
       // enabled, or an operator-controlled trusted network boundary otherwise;
       // do not add a non-standard shared secret to the SOAP payload.
       return readTextWithLimit(req, MAX_SOAP_REQUEST_BODY_BYTES).then(
-        (body) => {
+        async (body) => {
           if (body === null) {
             return soapFaultResponse("SOAP request body is too large", 413);
           }
           return (
-            service.handleSoapChargePointServiceRequest(soapRoute.cpId, body) ??
+            (await service.handleSoapChargePointServiceRequest(
+              soapRoute.cpId,
+              body,
+            )) ??
             soapFaultResponse(
-              `Charge point is not configured for OCPP 1.5 SOAP: ${soapRoute.cpId}`,
+              `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
               400,
             )
           );
@@ -622,8 +626,8 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       throw new Error("ocppVersion must be a supported OCPP version");
     }
   }
-  if (ocppVersion === "OCPP-1.5" && !soapCallbackUrl) {
-    throw new Error("soapCallbackUrl is required for OCPP-1.5 SOAP");
+  if (isSoapVersion(ocppVersion) && !soapCallbackUrl) {
+    throw new Error("soapCallbackUrl is required for OCPP SOAP versions");
   }
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {

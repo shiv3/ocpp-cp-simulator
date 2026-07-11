@@ -22,7 +22,6 @@ import type {
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
-  BROWSER_SOAP_UNSUPPORTED_MESSAGE,
   BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
@@ -871,12 +870,6 @@ export class LocalChargePointService implements ChargePointService {
   private buildChargePoint(
     definition: LocalChargePointDefinition,
   ): ChargePoint {
-    if (definition.ocppVersion === "OCPP-1.5") {
-      throw new UnsupportedFeatureError(
-        "browser_soap_unsupported",
-        BROWSER_SOAP_UNSUPPORTED_MESSAGE,
-      );
-    }
     assertBrowserLocalTlsSupported(definition);
     const chargePoint = new ChargePoint(
       definition.id,

@@ -9,7 +9,8 @@ import {
   hasStatusNotificationOptions,
   OCPPStatus,
 } from "../cp/domain/types/OcppTypes";
-import { OCPP_1_5 } from "../cp/domain/types/OcppVersion";
+import { isSoapVersion } from "../cp/domain/types/OcppVersion";
+import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type {
   CLIOptions,
@@ -271,18 +272,17 @@ export class CLIChargePointService {
 
     const ocppVersion = init.ocppVersion ?? "OCPP-1.6J";
     const centralSystemUrl = init.centralSystemUrl ?? init.wsUrl;
-    if (ocppVersion === OCPP_1_5 && !init.soapCallbackUrl) {
+    if (isSoapVersion(ocppVersion) && !init.soapCallbackUrl) {
       throw new Error(
-        "OCPP 1.5 SOAP requires soapCallbackUrl (--soap-callback-url)",
+        "OCPP SOAP versions require soapCallbackUrl (--soap-callback-url)",
       );
     }
 
     // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present.
-    // OCPP 1.5 SOAP posts to the CentralSystemService URL exactly as configured.
-    const baseUrl =
-      ocppVersion === OCPP_1_5
-        ? centralSystemUrl
-        : buildBaseUrl(init.wsUrl, init.cpId);
+    // OCPP SOAP versions post to the CentralSystemService URL exactly as configured.
+    const baseUrl = isSoapVersion(ocppVersion)
+      ? centralSystemUrl
+      : buildBaseUrl(init.wsUrl, init.cpId);
 
     this._chargePoint = new ChargePoint(
       init.cpId,
@@ -305,18 +305,23 @@ export class CLIChargePointService {
       init.cpoName,
       init.tls,
     );
-    this._soapServer =
-      ocppVersion === OCPP_1_5
-        ? new OCPPSoapServer({
+    this._soapServer = isSoapVersion(ocppVersion)
+      ? new OCPPSoapServer(
+          {
             cpId: init.cpId,
             applyRemoteReset: (type) =>
               this._chargePoint.applyRemoteReset(type, "ocpp15-soap"),
-            isRegisteredOcpp15Soap: () =>
-              this._chargePoint.isOcpp15SoapChargePoint() &&
-              this._init.ocppVersion === OCPP_1_5 &&
+            isRegisteredSoapChargePoint: () =>
+              this._chargePoint.isSoapChargePoint() &&
+              isSoapVersion(this._init.ocppVersion) &&
               Boolean(this._init.soapCallbackUrl),
-          })
-        : null;
+            chargePoint: this._chargePoint,
+            logger: this._chargePoint.logger,
+          },
+          undefined,
+          soapDialectForVersion(ocppVersion),
+        )
+      : null;
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
@@ -393,11 +398,11 @@ export class CLIChargePointService {
     this._chargePoint.disconnect();
   }
 
-  handleSoapChargePointServiceRequest(
+  async handleSoapChargePointServiceRequest(
     pathCpId: string,
     xml: string,
-  ): Response | null {
-    return this._soapServer?.handleRequest(pathCpId, xml) ?? null;
+  ): Promise<Response | null> {
+    return (await this._soapServer?.handleRequest(pathCpId, xml)) ?? null;
   }
 
   getStatus(): ChargePointStatus {

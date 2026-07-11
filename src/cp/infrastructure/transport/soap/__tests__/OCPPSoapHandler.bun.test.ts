@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { Transaction } from "../../../../domain/connector/Transaction";
 import {
   BootNotification,
   OCPPStatus,
@@ -18,6 +19,13 @@ import {
   type SoapPayload,
   type SoapPayloadValue,
 } from "../soapEnvelope";
+import {
+  OCPP12_DIALECT,
+  OCPP12_SOAP_NAMESPACES,
+  OCPP15_DIALECT,
+  OCPP16_DIALECT,
+  OCPP16_SOAP_NAMESPACES,
+} from "../dialect";
 import { OCPPSoapHandler } from "../OCPPSoapHandler";
 import { Logger } from "../../../../shared/Logger";
 
@@ -69,6 +77,9 @@ function responsePayloadFor(operation: SoapOperation): SoapPayload {
       return {};
     case "MeterValues":
     case "StatusNotification":
+    case "DataTransfer":
+    case "DiagnosticsStatusNotification":
+    case "FirmwareStatusNotification":
       return {};
     default:
       throw new Error(`Unexpected SOAP operation in fake CSMS: ${operation}`);
@@ -120,9 +131,11 @@ function buildSteVeStyleResponseEnvelope(
   messageId: string,
   relatesTo: string,
   payload: SoapPayload,
+  responseNamespace?: string,
 ): string {
   const metadata = SOAP_OPERATION_METADATA[operation];
   const action = `${metadata.action}Response`;
+  const actualNamespace = responseNamespace ?? metadata.namespace;
   return [
     `<soap:Envelope xmlns:soap="${OCPP15_SOAP_NAMESPACES.SOAP12}">`,
     "<soap:Header>",
@@ -132,7 +145,7 @@ function buildSteVeStyleResponseEnvelope(
     `<RelatesTo xmlns="${OCPP15_SOAP_NAMESPACES.WSA}">${xmlText(relatesTo)}</RelatesTo>`,
     "</soap:Header>",
     "<soap:Body>",
-    `<${metadata.responseWrapper} xmlns="${metadata.namespace}">${payloadXml(payload)}</${metadata.responseWrapper}>`,
+    `<${metadata.responseWrapper} xmlns="${actualNamespace}">${payloadXml(payload)}</${metadata.responseWrapper}>`,
     "</soap:Body>",
     "</soap:Envelope>",
   ].join("");
@@ -146,16 +159,33 @@ function startFirstResponseDelayedCentralSystemService(delayMs: number) {
   return startFetchBackedCentralSystemService(delayMs);
 }
 
+function detectDialectFromRequest(
+  body: string,
+): typeof OCPP12_DIALECT | typeof OCPP15_DIALECT | typeof OCPP16_DIALECT {
+  // Check the namespace in the request to determine which dialect to use for parsing the response
+  if (body.includes(OCPP12_SOAP_NAMESPACES.CS)) {
+    return OCPP12_DIALECT;
+  }
+  if (body.includes(OCPP16_SOAP_NAMESPACES.CS)) {
+    return OCPP16_DIALECT;
+  }
+  return OCPP15_DIALECT;
+}
+
 function startFetchBackedCentralSystemService(firstDelayMs = 0) {
   const received: ReceivedSoapRequest[] = [];
   const originalFetch = globalThis.fetch;
   const url = "http://csms.example/CentralSystemService";
   globalThis.fetch = (async (_input, init) => {
     const body = String(init?.body ?? "");
-    const parsed = parseSoapEnvelope(body);
+    const dialect = detectDialectFromRequest(body);
+    const parsed = parseSoapEnvelope(body, dialect);
     received.push({
       body,
-      contentType: headerValue(init?.headers, "content-type"),
+      contentType: headerValue(
+        init?.headers as FetchHeaders | undefined,
+        "content-type",
+      ),
       parsed,
     });
     if (received.length === 1 && firstDelayMs > 0) {
@@ -167,12 +197,14 @@ function startFetchBackedCentralSystemService(firstDelayMs = 0) {
       `uuid:conf-${received.length}`,
       parsed.messageId,
       responsePayloadFor(parsed.operation),
+      parsed.namespace,
     );
     return new Response(responseXml, {
       headers: {
         "Content-Type": soapContentTypeForOperation(
           parsed.operation,
           "response",
+          dialect,
         ),
       },
     });
@@ -187,7 +219,9 @@ function startFetchBackedCentralSystemService(firstDelayMs = 0) {
   };
 }
 
-function headerValue(headers: HeadersInit | undefined, name: string): string {
+type FetchHeaders = Headers | [string, string][] | Record<string, string>;
+
+function headerValue(headers: FetchHeaders | undefined, name: string): string {
   if (!headers) return "";
   if (headers instanceof Headers) return headers.get(name) ?? "";
   const lowerName = name.toLowerCase();
@@ -357,7 +391,7 @@ function withFakeFaultFetch(status: number, reason: string): () => void {
     new Response(buildSoapFaultEnvelope({ reason, code: "Receiver" }), {
       status,
       headers: { "content-type": "application/soap+xml" },
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
   return () => {
     globalThis.fetch = originalFetch;
   };
@@ -756,6 +790,389 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
         });
       } finally {
         restoreFetch();
+      }
+    });
+  });
+
+  it("sends OCPP 1.2 StatusNotification with exactly 3 fields and collapsed status", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.2";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.2/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP12_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      const cases: [OCPPStatus, string][] = [
+        // 1.2 ChargePointStatus: only Available, Occupied, Faulted, Unavailable
+        [OCPPStatus.Charging, "Occupied"],
+        [OCPPStatus.Reserved, "Unavailable"],
+      ];
+
+      try {
+        cases.forEach(([status]) =>
+          handler.sendStatusNotification(1, status, {
+            errorCode: "OtherError",
+          }),
+        );
+
+        for (const [index, [, expected]] of cases.entries()) {
+          const request = await waitForOperationCount(
+            csms.received,
+            "StatusNotification",
+            index + 1,
+          );
+          // 1.2: exactly 3 fields (connectorId, status, errorCode)
+          const payloadKeys = Object.keys(request.parsed.payload);
+          expect(payloadKeys).toEqual(["connectorId", "status", "errorCode"]);
+          expect(request.parsed.payload).toMatchObject({
+            connectorId: "1",
+            status: expected,
+            errorCode: "Mode3Error", // 1.2 OtherError → Mode3Error
+          });
+          // Verify no info/timestamp/vendorId/vendorErrorCode in XML
+          expect(request.body).not.toContain("<cs:info>");
+          expect(request.body).not.toContain("<cs:timestamp>");
+          expect(request.body).not.toContain("<cs:vendorId>");
+          expect(request.body).not.toContain("<cs:vendorErrorCode>");
+          // Verify 1.2 namespace
+          expect(request.parsed.namespace).toBe(OCPP12_SOAP_NAMESPACES.CS);
+        }
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("sends OCPP 1.2 MeterValues with flat shape (no transactionId)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.2-MV";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.2-MV/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP12_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        cp.setMeterValue(1, 5678);
+        handler.sendMeterValue(undefined, 1); // No transactionId in 1.2
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "MeterValues",
+          1,
+        );
+        expect(request.parsed.namespace).toBe(OCPP12_SOAP_NAMESPACES.CS);
+        // 1.2: flat shape, no transactionId
+        const payloadKeys = Object.keys(request.parsed.payload);
+        expect(payloadKeys).toContain("connectorId");
+        expect(payloadKeys).toContain("values");
+        expect(payloadKeys).not.toContain("transactionId");
+        expect(request.parsed.payload).toMatchObject({
+          connectorId: "1",
+        });
+        // values[] has exactly timestamp and value (flat, no attributes)
+        expect(request.body).toContain("<cs:values>");
+        expect(request.body).toContain("<cs:timestamp>");
+        expect(request.body).toContain("<cs:value>5678</cs:value>");
+        // No attributes in 1.2
+        expect(request.body).not.toContain("context=");
+        expect(request.body).not.toContain("measurand=");
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("sends OCPP 1.2 StartTransaction without reservationId", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.2-STX";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.2-STX/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      // Create a handler with 1.2 dialect and set boot status
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP12_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        // Create a transaction WITH a reservationId to prove the 1.2 wire
+        // profile drops it (1.2 startTransactionRequest has no reservationId).
+        const transaction = {
+          id: 101,
+          tagId: "TAG-DEMO",
+          startTime: new Date(),
+          meterStart: 0,
+          reservationId: 7,
+        } as unknown as Transaction;
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction,
+          connectorId: 1,
+        });
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "StartTransaction",
+          1,
+        );
+        expect(request.parsed.namespace).toBe(OCPP12_SOAP_NAMESPACES.CS);
+        // 1.2: connectorId, idTag, timestamp, meterStart (NO reservationId)
+        const payloadKeys = Object.keys(request.parsed.payload);
+        expect(payloadKeys).toContain("connectorId");
+        expect(payloadKeys).toContain("idTag");
+        expect(payloadKeys).toContain("timestamp");
+        expect(payloadKeys).toContain("meterStart");
+        expect(payloadKeys).not.toContain("reservationId");
+        expect(request.parsed.payload).toMatchObject({
+          connectorId: "1",
+          idTag: "TAG-DEMO",
+          meterStart: "0",
+        });
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("sends OCPP 1.6 StatusNotification with enum passthrough (Preparing stays Preparing)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.6-SN";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.6-SN/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP16_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        // 1.6 enums: Preparing should stay Preparing (not collapse to Occupied)
+        // and EVCommunicationError should stay EVCommunicationError (not collapse to Mode3Error)
+        handler.sendStatusNotification(1, OCPPStatus.Preparing, {
+          errorCode: "EVCommunicationError",
+        });
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "StatusNotification",
+          1,
+        );
+        expect(request.parsed.namespace).toBe(OCPP16_SOAP_NAMESPACES.CS);
+        // 1.6 enums pass through unchanged
+        expect(request.body).toContain("<cs:status>Preparing</cs:status>");
+        expect(request.body).toContain(
+          "<cs:errorCode>EVCommunicationError</cs:errorCode>",
+        );
+        // Field order verification
+        expectElementOrder(request.body, [
+          "connectorId",
+          "status",
+          "errorCode",
+        ]);
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("sends OCPP 1.6 MeterValues with child elements (not attributes)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.6-MV";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.6-MV/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP16_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        cp.setMeterValue(1, 9999);
+        handler.sendMeterValue(42, 1); // With transactionId in 1.6
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "MeterValues",
+          1,
+        );
+        expect(request.parsed.namespace).toBe(OCPP16_SOAP_NAMESPACES.CS);
+        // 1.6: meterValue[] with sampledValue[] as child elements
+        expect(request.body).toContain("<cs:meterValue>");
+        expect(request.body).toContain("<cs:sampledValue>");
+        expect(request.body).toContain("<cs:value>9999</cs:value>");
+        // Should contain child elements for context/measurand, not attributes
+        // Verify no @_ attributes for SampledValue fields
+        expect(request.body).not.toContain("@_context");
+        expect(request.body).not.toContain("@_measurand");
+        expect(request.body).not.toContain("@_unit");
+        // When context/measurand are present, they should be elements
+        if (request.body.includes("context")) {
+          expect(request.body).toContain("<cs:context>");
+        }
+        if (request.body.includes("measurand")) {
+          expect(request.body).toContain("<cs:measurand>");
+        }
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("sends OCPP 1.6 StartTransaction with reservationId when present", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.6-STX";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.6-STX/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP16_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        const transaction = {
+          id: 101,
+          tagId: "TAG-DEMO",
+          startTime: new Date(),
+          meterStart: 0,
+          reservationId: 7,
+        } as unknown as Transaction;
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction,
+          connectorId: 1,
+        });
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "StartTransaction",
+          1,
+        );
+        expect(request.parsed.namespace).toBe(OCPP16_SOAP_NAMESPACES.CS);
+        // 1.6: includes reservationId when present
+        const payloadKeys = Object.keys(request.parsed.payload);
+        expect(payloadKeys).toContain("connectorId");
+        expect(payloadKeys).toContain("idTag");
+        expect(payloadKeys).toContain("timestamp");
+        expect(payloadKeys).toContain("meterStart");
+        expect(payloadKeys).toContain("reservationId");
+        expect(request.parsed.payload).toMatchObject({
+          connectorId: "1",
+          idTag: "TAG-DEMO",
+          meterStart: "0",
+          reservationId: "7",
+        });
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("sends OCPP 1.6 DataTransfer request (CP→CS direction)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.6-DT";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.6-DT/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP16_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        // 1.6S: DataTransfer should actually send (not stub)
+        handler.sendDataTransfer("VendorX", "msg-001", "data-payload");
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "DataTransfer",
+          1,
+        );
+        expect(request.parsed.namespace).toBe(OCPP16_SOAP_NAMESPACES.CS);
+        expect(request.parsed.payload).toMatchObject({
+          vendorId: "VendorX",
+          messageId: "msg-001",
+          data: "data-payload",
+        });
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  it("uses WSA anonymous address for From when soapCallbackUrl is undefined (browser send-only mode)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-SEND-ONLY";
+      // No callback URL — browser local mode scenario
+      const cp = new ChargePoint(
+        cpId,
+        bootNotification(),
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.5",
+        {
+          centralSystemUrl: csms.url,
+          // soapCallbackUrl is undefined — browser send-only mode
+          soapPath: "/ocpp/soap",
+        },
+      );
+      cp.events.on("error", () => undefined);
+
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: undefined, // explicitly undefined for send-only mode
+        dialect: OCPP15_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        handler.sendHeartbeat();
+
+        const request = await waitForOperationCount(
+          csms.received,
+          "Heartbeat",
+          1,
+        );
+        // Verify the From address is the anonymous WSA address, not undefined
+        expect(request.parsed.from).toBe(WSA_ANONYMOUS_ADDRESS);
+        expect(request.body).toContain(
+          `<a:Address>${WSA_ANONYMOUS_ADDRESS}</a:Address>`,
+        );
+      } finally {
+        csms.stop();
       }
     });
   });

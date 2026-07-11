@@ -78,45 +78,17 @@ import {
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
+import { BootGate } from "../../application/state/machines/BootGate";
 
 // Import handler registry and handlers
 import {
   MessageHandlerRegistry,
   HandlerContext,
-  RemoteStartTransactionHandler,
-  RemoteStopTransactionHandler,
-  ResetHandler,
-  GetDiagnosticsHandler,
-  GetConfigurationHandler,
-  ChangeConfigurationHandler,
-  TriggerMessageHandler,
-  ClearCacheHandler,
-  UnlockConnectorHandler,
-  ReserveNowHandler,
-  CancelReservationHandler,
-  SetChargingProfileHandler,
-  ClearChargingProfileHandler,
-  GetCompositeScheduleHandler,
-  BootNotificationResultHandler,
+  buildV16CallHandlerRegistry,
   StartTransactionResultHandler,
   StopTransactionResultHandler,
-  AuthorizeResultHandler,
-  HeartbeatResultHandler,
   MeterValuesResultHandler,
-  StatusNotificationResultHandler,
-  DataTransferResultHandler,
   DataTransferHandler,
-  ChangeAvailabilityHandler,
-  GetLocalListVersionHandler,
-  SendLocalListHandler,
-  UpdateFirmwareHandler,
-  CertificateSignedHandler,
-  ExtendedTriggerMessageHandler,
-  InstallCertificateHandler,
-  GetInstalledCertificateIdsHandler,
-  DeleteCertificateHandler,
-  GetLogHandler,
-  SignedUpdateFirmwareHandler,
 } from "./handlers";
 
 type CoreOcppMessagePayloadCall =
@@ -247,11 +219,7 @@ export class OCPPMessageHandler {
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
   // arrives we restrict outgoing CALLs. The BootNotification.req itself
   // is exempt so the handshake can complete.
-  private _bootStatus:
-    | { status: "Idle" }
-    | { status: "Accepted" }
-    | { status: "Pending" }
-    | { status: "Rejected"; retryAfter: Date } = { status: "Idle" };
+  private _bootGate: BootGate = new BootGate();
 
   // §4.7/§4.8/§4.10 + errata 3.18: transaction-related messages that fail
   // to deliver are queued and retried. Persists across reboots so power
@@ -304,142 +272,19 @@ export class OCPPMessageHandler {
    * Initialize all message handlers using the registry pattern
    */
   private initializeHandlers(): void {
-    // Register CALL handlers (incoming requests from central system)
-    this._registry.registerCallHandler(
-      OCPPAction.RemoteStartTransaction,
-      new RemoteStartTransactionHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.RemoteStopTransaction,
-      new RemoteStopTransactionHandler(),
-    );
-    this._registry.registerCallHandler(OCPPAction.Reset, new ResetHandler());
-    this._registry.registerCallHandler(
-      OCPPAction.GetDiagnostics,
-      new GetDiagnosticsHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.TriggerMessage,
-      new TriggerMessageHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.GetConfiguration,
-      new GetConfigurationHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ChangeConfiguration,
-      new ChangeConfigurationHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ClearCache,
-      new ClearCacheHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.UnlockConnector,
-      new UnlockConnectorHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ReserveNow,
-      new ReserveNowHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.CancelReservation,
-      new CancelReservationHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.SetChargingProfile,
-      new SetChargingProfileHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.ClearChargingProfile,
-      new ClearChargingProfileHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.GetCompositeSchedule,
-      new GetCompositeScheduleHandler(),
-    );
+    // Use the shared factory to populate the registry with all OCPP 1.6
+    // CALL and CALLRESULT handlers. This factory creates stateless handler
+    // instances that can be reused by multiple transports (WebSocket, SOAP).
+    this._registry = buildV16CallHandlerRegistry();
+
+    // Register the instance-specific DataTransferHandler so scenarios can
+    // register vendor responders via getDataTransferHandler().
     // §4.3/§5.6: DataTransfer is a Core message. Without this handler the
     // registry returns NotImplemented, which is wrong — CSMS-side
     // DataTransfer should be answered with UnknownVendorId at minimum.
     this._registry.registerCallHandler(
       OCPPAction.DataTransfer,
       this._dataTransferHandler,
-    );
-    // §5.2: ChangeAvailability is Core. Without this, CSMS can't put the
-    // CP or any connector into maintenance.
-    this._registry.registerCallHandler(
-      OCPPAction.ChangeAvailability,
-      new ChangeAvailabilityHandler(),
-    );
-    // §9 LocalAuthListManagement
-    this._registry.registerCallHandler(
-      OCPPAction.GetLocalListVersion,
-      new GetLocalListVersionHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.SendLocalList,
-      new SendLocalListHandler(),
-    );
-    // §6.19 FirmwareManagement: UpdateFirmware. (GetDiagnostics is
-    // registered above; the matching outbound status notifications fire
-    // from inside ChargePoint.simulateFirmwareUpdate / the GetDiagnostics
-    // handler — there is no CALLRESULT counterpart to register.)
-    this._registry.registerCallHandler(
-      OCPPAction.UpdateFirmware,
-      new UpdateFirmwareHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.CertificateSigned,
-      new CertificateSignedHandler(),
-    );
-    // OCPP 1.6 Security Whitepaper (ed. 4): remaining message set —
-    // ExtendedTriggerMessage/InstallCertificate/GetInstalledCertificateIds/
-    // DeleteCertificate/GetLog/SignedUpdateFirmware. Matching outbound
-    // status notifications fire from inside the handlers themselves (or,
-    // for SignedUpdateFirmware, ChargePoint.simulateSignedFirmwareUpdate) —
-    // there is no CALLRESULT counterpart to register for any of these.
-    this._registry.registerCallHandler(
-      OCPPAction.ExtendedTriggerMessage,
-      new ExtendedTriggerMessageHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.InstallCertificate,
-      new InstallCertificateHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.GetInstalledCertificateIds,
-      new GetInstalledCertificateIdsHandler(),
-    );
-    this._registry.registerCallHandler(
-      OCPPAction.DeleteCertificate,
-      new DeleteCertificateHandler(),
-    );
-    this._registry.registerCallHandler(OCPPAction.GetLog, new GetLogHandler());
-    this._registry.registerCallHandler(
-      OCPPAction.SignedUpdateFirmware,
-      new SignedUpdateFirmwareHandler(),
-    );
-
-    // Register CALLRESULT handlers (incoming responses from central system)
-    this._registry.registerCallResultHandler(
-      OCPPAction.BootNotification,
-      new BootNotificationResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.Authorize,
-      new AuthorizeResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.Heartbeat,
-      new HeartbeatResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.StatusNotification,
-      new StatusNotificationResultHandler(),
-    );
-    this._registry.registerCallResultHandler(
-      OCPPAction.DataTransfer,
-      new DataTransferResultHandler(),
     );
   }
 
@@ -456,7 +301,7 @@ export class OCPPMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void {
-    this._bootStatus = status;
+    this._bootGate.set(status);
     if (status.status === "Accepted") {
       // Drain anything that was queued behind the boot gate while we
       // waited for BootNotification.conf. Microtask so the BootNotification
@@ -476,17 +321,7 @@ export class OCPPMessageHandler {
    * - Idle (pre-handshake): allow BootNotification only.
    */
   private isCallAllowed(action: OCPPAction): boolean {
-    if (action === OCPPAction.BootNotification) return true;
-    switch (this._bootStatus.status) {
-      case "Accepted":
-        return true;
-      case "Pending":
-        return false;
-      case "Rejected":
-        return Date.now() >= this._bootStatus.retryAfter.getTime();
-      case "Idle":
-        return false;
-    }
+    return this._bootGate.isCallAllowed(action);
   }
 
   public authorize(tagId: string): void {
@@ -788,7 +623,7 @@ export class OCPPMessageHandler {
   ): void {
     if (!this.isCallAllowed(action)) {
       this._logger.warn(
-        `Suppressing ${action}: blocked by boot gate (status=${this._bootStatus.status})`,
+        `Suppressing ${action}: blocked by the boot gate — BootNotification not yet Accepted (status=${this._bootGate.status.status})`,
         LogType.OCPP,
       );
       return;

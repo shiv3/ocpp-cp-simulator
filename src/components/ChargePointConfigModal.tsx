@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Save, X } from "lucide-react";
 import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
+import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -161,10 +162,12 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     }
     if (
       mode === "remote" &&
-      config.ocppVersion === "OCPP-1.5" &&
+      isSoapVersion(config.ocppVersion) &&
       !config.soapCallbackUrl?.trim()
     ) {
-      setSaveError("SOAP Callback URL is required for OCPP 1.5.");
+      setSaveError(
+        "SOAP Callback URL is required in remote mode for SOAP versions.",
+      );
       return;
     }
     if (
@@ -310,7 +313,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   className="logger-input"
                 />
               </div>
-              {config.ocppVersion !== "OCPP-1.5" && (
+              {!isSoapVersion(config.ocppVersion) && (
                 <div className="col-span-2">
                   <Label htmlFor="fullWsURL" className="mb-2 logger-label">
                     Full WebSocket URL
@@ -357,7 +360,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
               )}
               <div className="col-span-2">
                 <Label htmlFor="wsURL" className="mb-2 logger-label">
-                  {config.ocppVersion === "OCPP-1.5"
+                  {isSoapVersion(config.ocppVersion)
                     ? "Central System URL (SOAP endpoint)"
                     : "WebSocket URL"}
                 </Label>
@@ -382,54 +385,77 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {mode === "remote" && (
-                      <SelectItem value="OCPP-1.5">OCPP 1.5 (SOAP)</SelectItem>
-                    )}
+                    <SelectItem value="OCPP-1.2">OCPP 1.2 (SOAP)</SelectItem>
+                    <SelectItem value="OCPP-1.5">OCPP 1.5 (SOAP)</SelectItem>
                     <SelectItem value="OCPP-1.6J">OCPP 1.6J</SelectItem>
+                    <SelectItem value="OCPP-1.6S">OCPP 1.6 (SOAP)</SelectItem>
                     <SelectItem value="OCPP-2.0.1">OCPP 2.0.1</SelectItem>
                     <SelectItem value="OCPP-2.1">OCPP 2.1</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {mode === "remote" && config.ocppVersion === "OCPP-1.5" && (
-                <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label
-                      htmlFor="soapCallbackUrl"
-                      className="mb-2 logger-label"
-                    >
-                      SOAP Callback URL
-                    </Label>
-                    <Input
-                      id="soapCallbackUrl"
-                      type="url"
-                      value={config.soapCallbackUrl ?? ""}
-                      onChange={(e) =>
-                        updateConfig("soapCallbackUrl", e.target.value)
-                      }
-                      placeholder="http://cp-host:8080/ocpp/soap/CP001"
-                      required
-                      className="logger-input"
-                    />
-                    <p className="text-xs text-muted mt-1">
-                      OCPP 1.5 ChargePointService callback URL the Central
-                      System uses to reach this CP. Required.
-                    </p>
+              {isSoapVersion(config.ocppVersion) && (
+                <>
+                  {mode === "local" && (
+                    <div className="col-span-2">
+                      <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded p-3 text-xs">
+                        <p className="text-blue-900 dark:text-blue-100">
+                          <strong>Browser local mode (send-only):</strong>{" "}
+                          CP→CSMS calls (BootNotification, Authorize, etc.)
+                          work, but CSMS-initiated commands (RemoteStart, Reset,
+                          …) need the CLI/daemon which hosts the callback
+                          endpoint. The CSMS must allow CORS from this origin.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label
+                        htmlFor="soapCallbackUrl"
+                        className="mb-2 logger-label"
+                      >
+                        SOAP Callback URL
+                        {mode === "local" && (
+                          <span className="text-xs text-muted ml-1">
+                            (optional)
+                          </span>
+                        )}
+                      </Label>
+                      <Input
+                        id="soapCallbackUrl"
+                        type="url"
+                        value={config.soapCallbackUrl ?? ""}
+                        onChange={(e) =>
+                          updateConfig("soapCallbackUrl", e.target.value)
+                        }
+                        placeholder="http://cp-host:8080/ocpp/soap/CP001"
+                        required={mode === "remote"}
+                        className="logger-input"
+                      />
+                      <p className="text-xs text-muted mt-1">
+                        {mode === "local"
+                          ? "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required only when using the daemon."
+                          : "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required."}
+                      </p>
+                    </div>
+                    <div>
+                      <Label htmlFor="soapPath" className="mb-2 logger-label">
+                        SOAP Path (optional)
+                      </Label>
+                      <Input
+                        id="soapPath"
+                        type="text"
+                        value={config.soapPath ?? ""}
+                        onChange={(e) =>
+                          updateConfig("soapPath", e.target.value)
+                        }
+                        placeholder="/ocpp/soap"
+                        className="logger-input"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="soapPath" className="mb-2 logger-label">
-                      SOAP Path (optional)
-                    </Label>
-                    <Input
-                      id="soapPath"
-                      type="text"
-                      value={config.soapPath ?? ""}
-                      onChange={(e) => updateConfig("soapPath", e.target.value)}
-                      placeholder="/ocpp/soap"
-                      className="logger-input"
-                    />
-                  </div>
-                </div>
+                </>
               )}
             </div>
           </div>
@@ -486,7 +512,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
             </div>
           </div>
 
-          {mode === "remote" && (
+          {mode === "remote" && !isSoapVersion(config.ocppVersion) && (
             <div className="card p-4">
               <h3 className="card-header mb-4">Security</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

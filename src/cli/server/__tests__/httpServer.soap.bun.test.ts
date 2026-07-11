@@ -2,10 +2,15 @@ import { describe, expect, it } from "bun:test";
 
 import {
   buildSoapEnvelope,
+  OCPP12_DIALECT,
+  OCPP12_SOAP_NAMESPACES,
+  OCPP16_DIALECT,
+  OCPP16_SOAP_NAMESPACES,
   parseSoapEnvelope,
 } from "../../../cp/infrastructure/transport/soap";
 import type {
   ParsedSoapEnvelope,
+  SoapDialect,
   SoapOperation,
   SoapPayload,
 } from "../../../cp/infrastructure/transport/soap";
@@ -241,7 +246,87 @@ describe("httpServer OCPP 1.5 SOAP ChargePointService", () => {
 
       expect(res.status).toBe(400);
       expect(body).toContain("<s:Fault>");
-      expect(body).toContain("not configured for OCPP 1.5 SOAP");
+      expect(body).toContain("not configured for OCPP SOAP");
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+describe("httpServer OCPP 1.2 SOAP ChargePointService", () => {
+  const cp12Id = "CP12";
+
+  it("accepts a 1.2-dialect Reset for a 1.2 CP and answers in the 1.2 namespace", async () => {
+    await withGlobalFetch(async () => {
+      const registry = createRegistry();
+      const handlers = createHandlers(registry);
+      const service = registry.create(
+        { ...soapCpInit(cp12Id), ocppVersion: "OCPP-1.2" },
+        { seedDefault: false },
+      );
+      const soapPosts: ParsedSoapEnvelope[] = [];
+      const restoreFetch = installFakeCentralSystemFetch(
+        soapPosts,
+        OCPP12_DIALECT,
+      );
+
+      try {
+        const resetApplied = waitForServiceEvent(service, "connected");
+        const res = await postSoap(
+          handlers,
+          `/ocpp/soap/${cp12Id}/ChargePointService`,
+          resetEnvelope(cp12Id, "uuid:reset-12", undefined, OCPP12_DIALECT),
+        );
+        const body = await res.text();
+
+        expect(res.status).toBe(200);
+        expect(body).toContain(OCPP12_SOAP_NAMESPACES.CP);
+        const parsed = parseSoapEnvelope(body, OCPP12_DIALECT);
+        expect(parsed).toMatchObject({
+          operation: "Reset",
+          kind: "response",
+          action: "/ResetResponse",
+          relatesTo: "uuid:reset-12",
+          chargeBoxIdentity: cp12Id,
+          namespace: OCPP12_SOAP_NAMESPACES.CP,
+          payload: { status: "Accepted" },
+        });
+
+        // The reboot drives the 1.2 CP→CS client end-to-end (2010/08 wire).
+        await resetApplied;
+        await waitUntil(() =>
+          soapPosts.some(
+            (post) =>
+              post.operation === "BootNotification" &&
+              post.namespace === OCPP12_SOAP_NAMESPACES.CS,
+          ),
+        );
+      } finally {
+        registry.shutdownAll();
+        restoreFetch();
+      }
+    });
+  });
+
+  it("faults a 1.5-namespace Reset sent to a 1.2 CP", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    registry.create(
+      { ...soapCpInit(cp12Id), ocppVersion: "OCPP-1.2" },
+      { seedDefault: false },
+    );
+
+    try {
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${cp12Id}/ChargePointService`,
+        resetEnvelope(cp12Id, "uuid:reset-ns-mismatch"),
+      );
+      const body = await res.text();
+
+      expect(res.status).toBe(400);
+      expect(body).toContain("<s:Fault>");
+      expect(body).toContain(OCPP12_SOAP_NAMESPACES.CP);
     } finally {
       registry.shutdownAll();
     }
@@ -316,6 +401,7 @@ function resetEnvelope(
   chargeBoxIdentity: string,
   messageId: string,
   to = callbackUrl.replace("/CP/", `/${chargeBoxIdentity}/`),
+  dialect?: SoapDialect,
 ): string {
   return buildSoapEnvelope({
     operation: "Reset",
@@ -324,16 +410,18 @@ function resetEnvelope(
     from: centralSystemUrl,
     to,
     payload: { type: "Hard" },
+    ...(dialect ? { dialect } : {}),
   });
 }
 
 function installFakeCentralSystemFetch(
   received: ParsedSoapEnvelope[],
+  dialect?: SoapDialect,
 ): () => void {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (_input, init) => {
     const requestBody = String(init?.body ?? "");
-    const parsed = parseSoapEnvelope(requestBody);
+    const parsed = parseSoapEnvelope(requestBody, dialect);
     received.push(parsed);
     const responsePayload = centralSystemResponsePayload(parsed.operation);
     return new Response(
@@ -346,6 +434,7 @@ function installFakeCentralSystemFetch(
         to: parsed.from,
         relatesTo: parsed.messageId,
         payload: responsePayload,
+        ...(dialect ? { dialect } : {}),
       }),
       { headers: { "content-type": "application/soap+xml" } },
     );
@@ -393,3 +482,272 @@ async function waitUntil(assertion: () => boolean): Promise<void> {
   }
   throw new Error("Timed out waiting for assertion");
 }
+
+describe("httpServer OCPP 1.6-SOAP + 1.2 CS→CP dispatch (v16 registry)", () => {
+  it("1.2 CP accepts ChangeAvailability via v16 registry dispatch", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    const cp12Id = "CP-12";
+    registry.create(
+      { ...soapCpInit(cp12Id), ocppVersion: "OCPP-1.2" },
+      { seedDefault: false },
+    );
+
+    try {
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${cp12Id}/ChargePointService`,
+        buildSoapEnvelope({
+          operation: "ChangeAvailability",
+          chargeBoxIdentity: cp12Id,
+          messageId: "uuid:ca-12-1",
+          from: centralSystemUrl,
+          to: `http://127.0.0.1:9700/ocpp/soap/${cp12Id}/ChargePointService`,
+          payload: { connectorId: "1", type: "Operative" },
+          dialect: OCPP12_DIALECT,
+        }),
+      );
+      const body = await res.text();
+      const parsed = parseSoapEnvelope(body, OCPP12_DIALECT);
+
+      expect(res.status).toBe(200);
+      expect(parsed).toMatchObject({
+        operation: "ChangeAvailability",
+        kind: "response",
+        relatesTo: "uuid:ca-12-1",
+        chargeBoxIdentity: cp12Id,
+        payload: { status: "Accepted" },
+      });
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+describe("httpServer OCPP 1.6 SOAP ChargePointService", () => {
+  const cp16Id = "CP16";
+
+  it("accepts TriggerMessage and posts StatusNotification to fake CSMS", async () => {
+    await withGlobalFetch(async () => {
+      const registry = createRegistry();
+      const handlers = createHandlers(registry);
+      const service = registry.create(
+        { ...soapCpInit(cp16Id), ocppVersion: "OCPP-1.6S" },
+        { seedDefault: false },
+      );
+      const soapPosts: ParsedSoapEnvelope[] = [];
+      const restoreFetch = installFakeCentralSystemFetch(
+        soapPosts,
+        OCPP16_DIALECT,
+      );
+
+      try {
+        // First, send a Reset to connect the CP
+        const resetConnectedPromise = waitForServiceEvent(service, "connected");
+        await postSoap(
+          handlers,
+          `/ocpp/soap/${cp16Id}/ChargePointService`,
+          buildSoapEnvelope({
+            operation: "Reset",
+            chargeBoxIdentity: cp16Id,
+            messageId: "uuid:reset-connect",
+            from: centralSystemUrl,
+            to: `http://127.0.0.1:9700/ocpp/soap/${cp16Id}/ChargePointService`,
+            payload: { type: "Hard" },
+            dialect: OCPP16_DIALECT,
+          }),
+        );
+        await resetConnectedPromise;
+
+        // Now send TriggerMessage
+        const res = await postSoap(
+          handlers,
+          `/ocpp/soap/${cp16Id}/ChargePointService`,
+          buildSoapEnvelope({
+            operation: "TriggerMessage",
+            chargeBoxIdentity: cp16Id,
+            messageId: "uuid:trigger-1",
+            from: centralSystemUrl,
+            to: `http://127.0.0.1:9700/ocpp/soap/${cp16Id}/ChargePointService`,
+            payload: { requestedMessage: "StatusNotification" },
+            dialect: OCPP16_DIALECT,
+          }),
+        );
+        const body = await res.text();
+        const parsed = parseSoapEnvelope(body, OCPP16_DIALECT);
+
+        expect(res.status).toBe(200);
+        expect(parsed).toMatchObject({
+          operation: "TriggerMessage",
+          kind: "response",
+          relatesTo: "uuid:trigger-1",
+          chargeBoxIdentity: cp16Id,
+          payload: { status: "Accepted" },
+        });
+
+        await waitUntil(() =>
+          soapPosts.some(
+            (post) =>
+              post.operation === "StatusNotification" &&
+              post.namespace === OCPP16_SOAP_NAMESPACES.CS,
+          ),
+        );
+      } finally {
+        registry.shutdownAll();
+        restoreFetch();
+      }
+    });
+  });
+
+  it("accepts RemoteStartTransaction and posts StartTransaction to fake CSMS", async () => {
+    await withGlobalFetch(async () => {
+      const registry = createRegistry();
+      const handlers = createHandlers(registry);
+      const service = registry.create(
+        { ...soapCpInit(cp16Id), ocppVersion: "OCPP-1.6S" },
+        { seedDefault: false },
+      );
+      const soapPosts: ParsedSoapEnvelope[] = [];
+      const restoreFetch = installFakeCentralSystemFetch(
+        soapPosts,
+        OCPP16_DIALECT,
+      );
+
+      try {
+        // First, send a Reset to connect the CP
+        const resetConnectedPromise = waitForServiceEvent(service, "connected");
+        await postSoap(
+          handlers,
+          `/ocpp/soap/${cp16Id}/ChargePointService`,
+          buildSoapEnvelope({
+            operation: "Reset",
+            chargeBoxIdentity: cp16Id,
+            messageId: "uuid:reset-connect",
+            from: centralSystemUrl,
+            to: `http://127.0.0.1:9700/ocpp/soap/${cp16Id}/ChargePointService`,
+            payload: { type: "Hard" },
+            dialect: OCPP16_DIALECT,
+          }),
+        );
+        await resetConnectedPromise;
+
+        // Now send RemoteStartTransaction
+        const res = await postSoap(
+          handlers,
+          `/ocpp/soap/${cp16Id}/ChargePointService`,
+          buildSoapEnvelope({
+            operation: "RemoteStartTransaction",
+            chargeBoxIdentity: cp16Id,
+            messageId: "uuid:rst-1",
+            from: centralSystemUrl,
+            to: `http://127.0.0.1:9700/ocpp/soap/${cp16Id}/ChargePointService`,
+            payload: { idTag: "TAG-16", connectorId: 1 },
+            dialect: OCPP16_DIALECT,
+          }),
+        );
+        const body = await res.text();
+        const parsed = parseSoapEnvelope(body, OCPP16_DIALECT);
+
+        expect(res.status).toBe(200);
+        expect(parsed).toMatchObject({
+          operation: "RemoteStartTransaction",
+          kind: "response",
+          relatesTo: "uuid:rst-1",
+          chargeBoxIdentity: cp16Id,
+          payload: { status: "Accepted" },
+        });
+
+        await waitUntil(() =>
+          soapPosts.some(
+            (post) =>
+              post.operation === "StartTransaction" &&
+              post.namespace === OCPP16_SOAP_NAMESPACES.CS,
+          ),
+        );
+      } finally {
+        registry.shutdownAll();
+        restoreFetch();
+      }
+    });
+  });
+
+  it("rejects out-of-dialect TriggerMessage sent to 1.2 CP with SOAP Fault", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    const cp12Id = "CP12";
+    registry.create(
+      { ...soapCpInit(cp12Id), ocppVersion: "OCPP-1.2" },
+      { seedDefault: false },
+    );
+
+    try {
+      // Build a TriggerMessage envelope with 1.6 dialect
+      const triggerEnvelope = buildSoapEnvelope({
+        operation: "TriggerMessage",
+        chargeBoxIdentity: cp12Id,
+        messageId: "uuid:trigger-invalid",
+        from: centralSystemUrl,
+        to: `http://127.0.0.1:9700/ocpp/soap/${cp12Id}/ChargePointService`,
+        payload: { requestedMessage: "StatusNotification" },
+        dialect: OCPP16_DIALECT,
+      });
+
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${cp12Id}/ChargePointService`,
+        triggerEnvelope,
+      );
+      const body = await res.text();
+
+      // Expect a fault (status 400) because TriggerMessage is not in 1.2 dialect
+      expect(res.status).toBe(400);
+      expect(body).toContain("<s:Fault>");
+      // The fault should indicate the wrapper is not recognized in the 1.2 dialect
+      expect(body).toContain("triggerMessageRequest");
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
+  it("transforms 1.2 UnlockConnector response to only Accepted/Rejected", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    const cp12Id = "CP12";
+    registry.create(
+      { ...soapCpInit(cp12Id), ocppVersion: "OCPP-1.2" },
+      { seedDefault: false },
+    );
+
+    try {
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${cp12Id}/ChargePointService`,
+        buildSoapEnvelope({
+          operation: "UnlockConnector",
+          chargeBoxIdentity: cp12Id,
+          messageId: "uuid:unlock-12",
+          from: centralSystemUrl,
+          to: `http://127.0.0.1:9700/ocpp/soap/${cp12Id}/ChargePointService`,
+          payload: { connectorId: 1 },
+          dialect: OCPP12_DIALECT,
+        }),
+      );
+      const body = await res.text();
+      const parsed = parseSoapEnvelope(body, OCPP12_DIALECT);
+
+      expect(res.status).toBe(200);
+      expect(parsed).toMatchObject({
+        operation: "UnlockConnector",
+        kind: "response",
+        chargeBoxIdentity: cp12Id,
+      });
+      const status = parsed.payload.status as string;
+      expect(["Accepted", "Rejected"]).toContain(status);
+      expect(["Unlocked", "UnlockFailed", "NotSupported"]).not.toContain(
+        status,
+      );
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});

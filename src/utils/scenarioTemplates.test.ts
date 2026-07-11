@@ -56,6 +56,8 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc066-get-composite-schedule",
   "cert16-tc067-clear-charging-profile",
   "cert16-tc044-1-firmware-update",
+  "cert16-tc044-2-firmware-download-failed",
+  "cert16-tc044-3-firmware-install-failed",
   "cert16-tc045-1-get-diagnostics",
 ];
 

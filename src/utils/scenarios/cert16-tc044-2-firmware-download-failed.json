@@ -1,0 +1,82 @@
+{
+  "id": "cert16-tc044-2-firmware-download-failed",
+  "name": "Cert 1.6 Firmware: TC_044_2 Firmware Update — Download Failed",
+  "description": "Pre-arms the CP via the custom `SimulatedFirmwareUpdateFailure` config key (set to 'DownloadFailed' through a local configSet step) so the simulated firmware train diverts after Downloading: CSMS sends UpdateFirmware.req with a retrieveDate in the near past; the CP sends FirmwareStatusNotification(Downloading) then FirmwareStatusNotification(DownloadFailed) and stops — Installing/Installed are never reached.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "config-arm-download-failed",
+      "type": "configSet",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Arm SimulatedFirmwareUpdateFailure=DownloadFailed",
+        "key": "SimulatedFirmwareUpdateFailure",
+        "value": "DownloadFailed"
+      }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 400, "y": 250 },
+      "data": { "label": "Set Available", "status": "Available" }
+    },
+    {
+      "id": "trigger-firmware-update",
+      "type": "csmsCallTrigger",
+      "position": { "x": 400, "y": 350 },
+      "data": {
+        "label": "Wait for UpdateFirmware",
+        "action": "UpdateFirmware",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-firmware-sequence",
+      "type": "delay",
+      "position": { "x": 400, "y": 450 },
+      "data": {
+        "label": "CP simulates Downloading → DownloadFailed",
+        "delaySeconds": 6
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "config-arm-download-failed"
+    },
+    {
+      "id": "e2",
+      "source": "config-arm-download-failed",
+      "target": "status-available"
+    },
+    {
+      "id": "e3",
+      "source": "status-available",
+      "target": "trigger-firmware-update"
+    },
+    {
+      "id": "e4",
+      "source": "trigger-firmware-update",
+      "target": "delay-firmware-sequence"
+    },
+    { "id": "e5", "source": "delay-firmware-sequence", "target": "end-1" }
+  ]
+}

@@ -60,6 +60,8 @@ import cert16Tc067ClearChargingProfileJson from "./scenarios/cert16-tc067-clear-
 
 // OCPP 1.6 Firmware certification scenarios (issue #110, PR 5).
 import cert16Tc044_1FirmwareUpdateJson from "./scenarios/cert16-tc044-1-firmware-update.json";
+import cert16Tc044_2FirmwareDownloadFailedJson from "./scenarios/cert16-tc044-2-firmware-download-failed.json";
+import cert16Tc044_3FirmwareInstallFailedJson from "./scenarios/cert16-tc044-3-firmware-install-failed.json";
 import cert16Tc045_1GetDiagnosticsJson from "./scenarios/cert16-tc045-1-get-diagnostics.json";
 
 export interface ScenarioTemplate {
@@ -203,6 +205,12 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   // OCPP 1.6 Firmware certification scenarios (issue #110, PR 5) —
   // grouped together so they surface as a block in the template picker.
   templateFromJson(cert16Tc044_1FirmwareUpdateJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc044_2FirmwareDownloadFailedJson as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc044_3FirmwareInstallFailedJson as ScenarioDefinition,
+  ),
   templateFromJson(cert16Tc045_1GetDiagnosticsJson as ScenarioDefinition),
 ];
 

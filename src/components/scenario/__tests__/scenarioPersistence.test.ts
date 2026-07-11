@@ -259,6 +259,53 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
       }),
     ).toBe(false);
   });
+
+  it("does not arm autosave suppression when a delayed apply persist rejects (#101 / #165)", async () => {
+    // ScenarioEditor arms the applied-scenario autosave suppression only in
+    // persistEditorScenario(...).then(...). If the replace rejects, arm() must
+    // never run — otherwise the 400ms fallback autosave matches the
+    // fingerprint, clears the marker, skips its write, and silently drops the
+    // imported/template scenario.
+    const imported = {
+      ...scenario("imported"),
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const remote = makeRemoteStyleService([scenario("old")]);
+    const gate = deferred();
+    remote.service.replaceConnectorScenarioDefinitions.mockImplementationOnce(
+      () => gate.promise as unknown as Promise<readonly ScenarioDefinition[]>,
+    );
+
+    let armed: Parameters<typeof shouldSuppressAppliedScenarioAutosave>[0] =
+      null;
+    const apply = persistEditorScenario(
+      {
+        mode: "remote",
+        chargePointService: remote.service,
+        cpId: "CP1",
+        connectorId: 1,
+      },
+      imported,
+    )
+      .then(() => {
+        armed = {
+          scenarioId: imported.id,
+          updatedAt: imported.updatedAt,
+          fingerprint: scenarioAutosaveSuppressionFingerprint(imported),
+        };
+      })
+      .catch(() => {
+        /* apply failed → suppression intentionally left unarmed */
+      });
+
+    gate.reject(new Error("replace failed"));
+    await apply;
+    await flushPromises();
+
+    expect(armed).toBeNull();
+    // Unarmed suppression → the fallback autosave is free to persist the import.
+    expect(shouldSuppressAppliedScenarioAutosave(armed, imported)).toBe(false);
+  });
 });
 
 describe("saveEditorScenario (single definition upsert)", () => {

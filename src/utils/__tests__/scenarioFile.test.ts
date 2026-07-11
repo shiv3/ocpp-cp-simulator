@@ -79,19 +79,46 @@ describe("parseScenarioJSON", () => {
     expect(() => parseScenarioJSON(invalidJson)).toThrow();
   });
 
-  it("throws on empty nodes array", () => {
+  it("accepts an empty nodes array", () => {
     const scenario = createValidScenario({ nodes: [] });
-    // Note: empty array is truthy, so this should NOT throw
-    const json = JSON.stringify(scenario);
-    const result = parseScenarioJSON(json);
+    const result = parseScenarioJSON(JSON.stringify(scenario));
     expect(result.nodes).toHaveLength(0);
   });
 
-  it("throws on empty edges array", () => {
+  it("accepts an empty edges array", () => {
     const scenario = createValidScenario({ edges: [] });
-    // Note: empty array is truthy, so this should NOT throw
-    const json = JSON.stringify(scenario);
-    const result = parseScenarioJSON(json);
+    const result = parseScenarioJSON(JSON.stringify(scenario));
     expect(result.edges).toHaveLength(0);
+  });
+
+  it("rejects non-array nodes/edges (truthiness alone would accept these)", () => {
+    expect(() =>
+      parseScenarioJSON(
+        JSON.stringify(createValidScenario({ nodes: {} as never })),
+      ),
+    ).toThrow("Invalid scenario file format");
+    expect(() =>
+      parseScenarioJSON(
+        JSON.stringify(createValidScenario({ edges: "invalid" as never })),
+      ),
+    ).toThrow("Invalid scenario file format");
+  });
+
+  it("rejects an empty-string id", () => {
+    expect(() =>
+      parseScenarioJSON(JSON.stringify(createValidScenario({ id: "" }))),
+    ).toThrow("Invalid scenario file format");
+  });
+
+  it("rejects non-object top-level JSON (null / array / scalar)", () => {
+    expect(() => parseScenarioJSON("null")).toThrow(
+      "Invalid scenario file format",
+    );
+    expect(() => parseScenarioJSON("[]")).toThrow(
+      "Invalid scenario file format",
+    );
+    expect(() => parseScenarioJSON("42")).toThrow(
+      "Invalid scenario file format",
+    );
   });
 });

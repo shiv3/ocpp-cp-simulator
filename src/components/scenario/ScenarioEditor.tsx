@@ -391,17 +391,31 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     ],
   );
 
+  // Stamp a fresh updatedAt on a scenario the user is applying (upload /
+  // template) so it wins the `updated_at DESC` ordering. Does NOT arm the
+  // autosave suppression — see armAppliedScenarioAutosaveSuppression, which
+  // must run only after the apply's persistence succeeds.
   const prepareAppliedRemoteScenario = useCallback(
     (next: ScenarioDefinition): ScenarioDefinition => {
       if (mode !== "remote") return next;
       const updatedAt = next.updatedAt ?? new Date().toISOString();
-      const applied = { ...next, updatedAt };
+      return { ...next, updatedAt };
+    },
+    [mode],
+  );
+
+  // Arm the applied-scenario autosave suppression. MUST be called only after
+  // the apply's persistence (replace) has succeeded: if the import/template
+  // persist fails, the marker must stay unset so the fallback autosave still
+  // writes the scenario instead of being suppressed into a silent drop (#101).
+  const armAppliedScenarioAutosaveSuppression = useCallback(
+    (applied: ScenarioDefinition): void => {
+      if (mode !== "remote") return;
       appliedRemoteScenarioAutosaveRef.current = {
         scenarioId: applied.id,
         updatedAt: applied.updatedAt ?? null,
         fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
       };
-      return applied;
     },
     [mode],
   );
@@ -1277,6 +1291,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           { mode, chargePointService, cpId, connectorId },
           scenarioToPersist,
         );
+        // Only now that the write succeeded may we suppress the redundant
+        // autosave the programmatic setState above triggered.
+        armAppliedScenarioAutosaveSuppression(scenarioToPersist);
       } catch (error) {
         alert(`Failed to import scenario: ${error}`);
       }
@@ -1289,6 +1306,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodes,
       setEdges,
       prepareAppliedRemoteScenario,
+      armAppliedScenarioAutosaveSuppression,
     ],
   );
 
@@ -1336,9 +1354,13 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       void persistEditorScenario(
         { mode, chargePointService, cpId, connectorId },
         scenarioWithSerialized,
-      ).catch((err) =>
-        console.error("Failed to persist template scenario", err),
-      );
+      )
+        .then(() =>
+          armAppliedScenarioAutosaveSuppression(scenarioWithSerialized),
+        )
+        .catch((err) =>
+          console.error("Failed to persist template scenario", err),
+        );
     },
     [
       cpId,
@@ -1349,6 +1371,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setNodes,
       setEdges,
       prepareAppliedRemoteScenario,
+      armAppliedScenarioAutosaveSuppression,
     ],
   );
 

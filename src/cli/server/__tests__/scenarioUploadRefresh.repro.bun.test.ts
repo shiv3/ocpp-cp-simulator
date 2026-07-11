@@ -87,7 +87,14 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
   it("survives a daemon restart (durable to disk)", async () => {
     const { path, db } = await tempDb();
     const server1 = await startTestServer({ database: db });
+    let server1Closed = false;
+    // Register cleanups immediately so a failed assertion below can't leak the
+    // socket/server handles and stall later tests.
+    cleanups.push(async () => {
+      if (!server1Closed) await server1.close();
+    });
     const client1 = await connectTestClient(server1);
+    cleanups.push(() => client1.close());
     const replaceAck = await emitRpc(client1, {
       method: "scenario.definitions.replace",
       params: {
@@ -98,6 +105,7 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
     });
     expect(replaceAck.ok).toBe(true);
     client1.close();
+    server1Closed = true;
     await server1.close();
 
     // Daemon restart: fresh server + DB adapter over the SAME file.

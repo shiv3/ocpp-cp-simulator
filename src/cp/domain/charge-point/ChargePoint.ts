@@ -626,6 +626,11 @@ export class ChargePoint {
     return status;
   }
 
+  /** Clear an armed response override. No-op if not armed. */
+  clearResponseOverride(action: string): void {
+    this._responseOverrides.delete(action);
+  }
+
   set loggingCallback(callback: (entry: LogEntry) => void) {
     this._logger._loggingCallback = callback;
   }

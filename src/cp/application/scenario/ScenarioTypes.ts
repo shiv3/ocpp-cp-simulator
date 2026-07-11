@@ -549,6 +549,10 @@ export interface ScenarioExecutorCallbacks {
   /** Issue #110: arm a one-shot `{ status }` response override for the
    *  next incoming CALL of the given action. */
   onArmResponseOverride?: (action: string, status: string) => void;
+  /** Issue #110: clear an armed response override. Called when a scenario
+   *  run ends (both normal completion and stop()) to clean up any overrides
+   *  armed during the run. */
+  onClearResponseOverride?: (action: string) => void;
   /** §5.3: apply a Configuration key change locally. */
   onConfigSet?: (key: string, value: string) => void;
   /** §4.3: send CP-initiated DataTransfer.req. */

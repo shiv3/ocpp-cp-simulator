@@ -101,6 +101,9 @@ export class ScenarioExecutor {
   private remoteStopOptions: StopTransactionOptions | null = null;
   private currentNodeId: string | null = null;
   private executedNodes: string[] = [];
+  // Issue #110: track which response overrides were armed during this run,
+  // so they can be cleared when the run ends (both normal completion and stop()).
+  private armedOverrideActions: string[] = [];
 
   constructor(
     scenario: ScenarioDefinition,
@@ -164,6 +167,7 @@ export class ScenarioExecutor {
     this.executedNodes = [];
     this.stepResolve = null;
     this.pendingSteps = 0;
+    this.armedOverrideActions = [];
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
@@ -243,9 +247,18 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Scenario execution failed: ${errorMessage}`,
         "error",
       );
-    }
+    } finally {
+      // Issue #110: clear any response overrides armed during this run,
+      // both on normal completion and on stop(). Iterate through the
+      // tracking list (which was populated by executeResponseOverride)
+      // and call the clear callback for each one.
+      for (const action of this.armedOverrideActions) {
+        this.callbacks.onClearResponseOverride?.(action);
+      }
+      this.armedOverrideActions = [];
 
-    this.notifyStateChange();
+      this.notifyStateChange();
+    }
   }
 
   /**
@@ -658,6 +671,10 @@ export class ScenarioExecutor {
       return;
     }
     this.callbacks.onArmResponseOverride(data.action, data.status);
+    // Issue #110: track this action so we can clear it when the run ends.
+    if (!this.armedOverrideActions.includes(data.action)) {
+      this.armedOverrideActions.push(data.action);
+    }
     this.callbacks.log?.(
       `Armed response override: ${data.action} → ${data.status}`,
       "info",

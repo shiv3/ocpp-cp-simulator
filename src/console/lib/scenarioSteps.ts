@@ -116,6 +116,37 @@ export function deriveLinearSteps(
   return { isLinear, steps, startNode, endNode };
 }
 
+export interface DisplayedSteps {
+  /** The node set actually rendered by the run console's timeline, in
+   *  display order. */
+  steps: ScenarioNode[];
+  isLinear: boolean;
+}
+
+/**
+ * The node set the Scenario Run console's timeline (`RunTimeline`) renders:
+ * `deriveLinearSteps`'s ordered walk for linear scenarios, or every
+ * non-START/END node in definition order for branching ones (flagged there
+ * with an "order approximate" banner). Exported from here — rather than
+ * defined separately in `RunTimeline.tsx` and `ScenarioRunPage.tsx` — so the
+ * header's "step k/n" count and the timeline's rendered list are always the
+ * same set and can't drift: they used to disagree for branching scenarios,
+ * where the header called `deriveLinearSteps` directly (a partial walk that
+ * stops at the first branch) while the timeline showed the full node list.
+ */
+export function deriveDisplayedSteps(
+  def: Pick<ScenarioDefinition, "nodes" | "edges">,
+): DisplayedSteps {
+  const linear = deriveLinearSteps(def);
+  const steps = linear.isLinear
+    ? linear.steps
+    : def.nodes.filter(
+        (n) =>
+          n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+      );
+  return { steps, isLinear: linear.isLinear };
+}
+
 /**
  * Rebuilds a scenario's `nodes`/`edges` from an ordered step list, keeping
  * (or creating, if absent) the START/END nodes, rewriting edges into a

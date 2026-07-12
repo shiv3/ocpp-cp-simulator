@@ -346,4 +346,62 @@ describe("useScenarioRun", () => {
     expect(loadScenario).not.toHaveBeenCalled();
     expect(mounted.current().state).toBe("idle");
   });
+
+  it("stop() surfaces a rejected stopScenario as an error instead of silently reporting stopped (Fix 1)", async () => {
+    const scenario = fixtureScenario();
+    const [step1] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const loadScenario = vi.fn(async () => ({ scenarioId: "runtime-s1" }));
+    const runScenario = vi.fn(async () => undefined);
+    const stopScenario = vi.fn().mockRejectedValue(new Error("boom"));
+    const service = createFakeChargePointService({
+      loadScenario,
+      runScenario,
+      stopScenario,
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await mounted.click("start");
+
+    await pushEvent(service, "CP-1", {
+      type: "scenario-started",
+      connectorId: 1,
+      scenarioId: "runtime-s1",
+    });
+    await pushEvent(service, "CP-1", {
+      type: "scenario-node-execute",
+      connectorId: 1,
+      scenarioId: "runtime-s1",
+      nodeId: step1.id,
+    });
+
+    await mounted.click("stop");
+
+    expect(stopScenario).toHaveBeenCalledTimes(1);
+    expect(mounted.current().state).toBe("error");
+    expect(mounted.current().error).toContain("boom");
+    expect(mounted.current().runs).toHaveLength(1);
+    expect(mounted.current().runs[0].result).toBe("error");
+    expect(mounted.current().runs[0].endedAt).not.toBeNull();
+  });
+
+  it("start() records a run-history entry with result=error when loadScenario rejects (Fix 2)", async () => {
+    const scenario = fixtureScenario();
+    const loadScenario = vi.fn().mockRejectedValue(new Error("load failed"));
+    const service = createFakeChargePointService({ loadScenario });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await mounted.click("start");
+
+    expect(mounted.current().state).toBe("error");
+    expect(mounted.current().error).toContain("load failed");
+    expect(mounted.current().runs).toHaveLength(1);
+    expect(mounted.current().runs[0].result).toBe("error");
+    expect(mounted.current().runs[0].startedAt).toBeInstanceOf(Date);
+    expect(mounted.current().runs[0].endedAt).not.toBeNull();
+  });
 });

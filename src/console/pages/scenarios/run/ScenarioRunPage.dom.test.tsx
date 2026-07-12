@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import type { Root } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
@@ -52,6 +60,10 @@ function linearFixture(): ScenarioDefinition {
 
 describe("ScenarioRunPage", () => {
   let cleanup: (() => Promise<void>) | null = null;
+  // Tracks whether THIS file installed the polyfill below, so afterAll only
+  // removes it if it's the one that added it (and not, say, a real
+  // `scrollTo` implementation some other environment already provided).
+  let installedScrollToPolyfill = false;
 
   beforeAll(() => {
     (
@@ -68,6 +80,16 @@ describe("ScenarioRunPage", () => {
     // (`src/components/*` is off-limits for Task 8).
     if (typeof Element.prototype.scrollTo !== "function") {
       Element.prototype.scrollTo = () => {};
+      installedScrollToPolyfill = true;
+    }
+  });
+
+  afterAll(() => {
+    // Undo the polyfill so it doesn't leak into other test files sharing
+    // this vitest worker/jsdom global — otherwise "scoped to this file"
+    // above would be a false claim.
+    if (installedScrollToPolyfill) {
+      delete (Element.prototype as { scrollTo?: () => void }).scrollTo;
     }
   });
 

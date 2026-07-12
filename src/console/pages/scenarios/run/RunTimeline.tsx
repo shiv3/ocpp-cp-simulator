@@ -6,11 +6,10 @@ import {
   NODE_FORM_REGISTRY,
   isScenarioNodeType,
 } from "../../../../components/scenario/forms/nodeFormRegistry";
-import { deriveLinearSteps, stepSummary } from "../../../lib/scenarioSteps";
-import {
-  ScenarioNodeType,
-  type ScenarioDefinition,
-  type ScenarioNode,
+import { deriveDisplayedSteps, stepSummary } from "../../../lib/scenarioSteps";
+import type {
+  ScenarioDefinition,
+  ScenarioNode,
 } from "../../../../cp/application/scenario/ScenarioTypes";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 
@@ -62,13 +61,10 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
   executedNodeIds,
   state,
 }) => {
-  const linear = useMemo(() => deriveLinearSteps(scenario), [scenario]);
-  const steps = linear.isLinear
-    ? linear.steps
-    : scenario.nodes.filter(
-        (n) =>
-          n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
-      );
+  const { steps, isLinear } = useMemo(
+    () => deriveDisplayedSteps(scenario),
+    [scenario],
+  );
 
   if (steps.length === 0) {
     return (
@@ -80,7 +76,7 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
 
   return (
     <div className="space-y-2">
-      {!linear.isLinear && (
+      {!isLinear && (
         <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           branching scenario — order approximate
         </div>

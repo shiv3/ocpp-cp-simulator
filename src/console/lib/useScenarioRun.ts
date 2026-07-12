@@ -151,6 +151,17 @@ export function useScenarioRun(
         ? { ...scenario, defaultExecutionMode: mode }
         : scenario;
 
+      // Push the run-history entry BEFORE the RPCs (not after `loadScenario`
+      // resolves) so a rejection from either `loadScenario` or `runScenario`
+      // still has a "running" entry to close as "error" below. Pushing it
+      // only on the success path meant a failed attempt left `runs` empty —
+      // `closeActiveRun` no-ops on an empty array — so RunHistory silently
+      // showed "No runs yet this session" despite a real failed attempt.
+      setRuns((prev) => [
+        { startedAt: new Date(), endedAt: null, result: "running" },
+        ...prev,
+      ]);
+
       try {
         const { scenarioId } = await chargePointService.loadScenario(
           cpId,
@@ -161,10 +172,6 @@ export function useScenarioRun(
         currentNodeIdRef.current = null;
         setCurrentNodeId(null);
         setExecutedNodeIds([]);
-        setRuns((prev) => [
-          { startedAt: new Date(), endedAt: null, result: "running" },
-          ...prev,
-        ]);
         setState("running");
 
         await chargePointService.runScenario(cpId, connectorId, scenarioId);
@@ -184,10 +191,33 @@ export function useScenarioRun(
 
     try {
       await chargePointService.stopScenario(cpId, connectorId, scenarioId);
-    } finally {
-      setState("idle");
-      closeActiveRun("stopped");
+    } catch (err) {
+      // `stopScenario` rejected: the runtime never confirmed the stop, so
+      // the scenario may well still be running there. Reporting "idle" here
+      // (the old `finally`-only behavior) would silently swallow the RPC
+      // failure and, worse, leave later `scenario-node-execute` events for
+      // this scenarioId still updating `currentNodeId`/`executedNodeIds`
+      // behind an "Idle" badge the user has no reason to distrust. Instead
+      // surface "error" and close the run as "error" (not "stopped") so
+      // both the badge and run history tell the truth. Deliberately leave
+      // `activeScenarioIdRef` set (unlike the success path below) so the
+      // event filter keeps accepting events for this scenarioId — the run
+      // is still live from the runtime's point of view, and later events
+      // (e.g. a `scenario-completed` that arrives despite the failed stop)
+      // should keep updating this hook's state rather than being dropped.
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setState("error");
+      closeActiveRun("error", currentNodeIdRef.current ?? undefined);
+      return;
     }
+
+    // Stop confirmed by the runtime: this scenarioId is done, so clear the
+    // ref too — no legitimate further events for it should arrive, and
+    // doing so keeps `step()`/a second `stop()` from acting on a stale id.
+    activeScenarioIdRef.current = null;
+    setState("idle");
+    closeActiveRun("stopped");
   }, [cpId, connectorId, chargePointService, closeActiveRun]);
 
   const step = useCallback(async () => {

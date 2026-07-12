@@ -10,7 +10,7 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import TargetChip from "../components/TargetChip";
-import { deriveLinearSteps } from "../lib/scenarioSteps";
+import { deriveDisplayedSteps } from "../lib/scenarioSteps";
 import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
 import RunHistory from "./scenarios/run/RunHistory";
 import RunTimeline from "./scenarios/run/RunTimeline";
@@ -94,13 +94,18 @@ const ScenarioRunPage: React.FC = () => {
   const view = useChargePointView(cpId || null);
   const tailLogs = useMemo(() => view.logs.slice(-LOG_TAIL_LIMIT), [view.logs]);
 
-  const linear = useMemo(
-    () => (scenario ? deriveLinearSteps(scenario) : null),
+  // Same node set RunTimeline renders below — computing this independently
+  // used to drift from the timeline's own derivation for branching
+  // scenarios (the header did a partial `deriveLinearSteps` walk while the
+  // timeline showed the full node list), so "step k/n" could disagree with
+  // the list it sits above. See `deriveDisplayedSteps`.
+  const displayedSteps = useMemo(
+    () => (scenario ? deriveDisplayedSteps(scenario) : null),
     [scenario],
   );
-  const totalSteps = linear?.steps.length ?? 0;
-  const executedStepsCount = linear
-    ? linear.steps.filter((s) => executedNodeIds.includes(s.id)).length
+  const totalSteps = displayedSteps?.steps.length ?? 0;
+  const executedStepsCount = displayedSteps
+    ? displayedSteps.steps.filter((s) => executedNodeIds.includes(s.id)).length
     : 0;
   const stepLabel =
     state === "running" && totalSteps > 0

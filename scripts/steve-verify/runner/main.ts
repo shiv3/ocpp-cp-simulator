@@ -401,6 +401,16 @@ function requireValue(argv: string[], index: number, flag: string): string {
   return value;
 }
 
+function requireNumber(argv: string[], index: number, flag: string): number {
+  const raw = requireValue(argv, index, flag);
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    process.stderr.write(`Error: ${flag} expects a number, got "${raw}"\n`);
+    process.exit(1);
+  }
+  return n;
+}
+
 function printUsage(): void {
   process.stderr.write(
     "Usage (paths shown from the repo root; from scripts/steve-verify " +
@@ -467,10 +477,10 @@ function parseArgs(argv: string[]): CliArgs {
         cpId = requireValue(argv, ++i, "--cp");
         break;
       case "--connector":
-        connector = Number(requireValue(argv, ++i, "--connector"));
+        connector = requireNumber(argv, ++i, "--connector");
         break;
       case "--timeout":
-        timeoutSecs = Number(requireValue(argv, ++i, "--timeout"));
+        timeoutSecs = requireNumber(argv, ++i, "--timeout");
         break;
       case "--parallel":
         parallel = true;

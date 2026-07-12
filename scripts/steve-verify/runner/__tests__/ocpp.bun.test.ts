@@ -196,4 +196,43 @@ describe("findCall / findResponseFor (uniqueId correlation)", () => {
     const call = findCall(frames, "received", "RemoteStartTransaction");
     expect(findResponseFor(frames, call as CallFrame)).toBeUndefined();
   });
+
+  test("pairs a sent CALL with its received CALLERROR response by uniqueId", () => {
+    const sentGetDiagnostics =
+      '[2026-07-12T01:18:59.000Z] [INFO] [WebSocket] Sent: [2,"deadbeef-0000","GetDiagnostics",{}]';
+    const frames = parseLog([sentGetDiagnostics, CALLERROR_LINE].join("\n"));
+
+    const call = findCall(frames, "sent", "GetDiagnostics");
+    expect(call).toBeDefined();
+    const response = findResponseFor(frames, call as CallFrame);
+
+    expect(response).toBeDefined();
+    expect(response?.kind).toBe("callerror");
+    expect(response?.uniqueId).toBe("deadbeef-0000");
+  });
+
+  test("findResponseFor ignores a stale EARLIER response sharing the request's uniqueId, and matches the response strictly after it", () => {
+    // uniqueId-uniqueness guard: a response can only ever belong to the
+    // request that precedes it on the wire. A naive "first frame in the
+    // whole list with a matching uniqueId+direction" scan would wrongly
+    // pick up a leftover response from an earlier, unrelated exchange that
+    // happens to reuse the same id string ahead of the real request.
+    const reusedId = "reused-uuid-0001";
+    const staleEarlierResponse = `[2026-07-12T01:17:00.000Z] [INFO] [WebSocket] Sent: [3,"${reusedId}",{"status":"STALE-DO-NOT-MATCH"}]`;
+    const laterCall = `[2026-07-12T01:18:00.000Z] [INFO] [WebSocket] Received: [2,"${reusedId}","GetConfiguration",{}]`;
+    const realResponse = `[2026-07-12T01:18:00.100Z] [INFO] [WebSocket] Sent: [3,"${reusedId}",{"status":"REAL"}]`;
+
+    const frames = parseLog(
+      [staleEarlierResponse, laterCall, realResponse].join("\n"),
+    );
+
+    const call = findCall(frames, "received", "GetConfiguration");
+    expect(call).toBeDefined();
+    const response = findResponseFor(frames, call as CallFrame);
+
+    expect(response).toBeDefined();
+    expect((response as { payload: { status: string } }).payload.status).toBe(
+      "REAL",
+    );
+  });
 });

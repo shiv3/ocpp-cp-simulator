@@ -10,6 +10,41 @@
 
 const STOP_GRACE_MS = 10_000;
 
+// ---------------------------------------------------------------------------
+// Signal-safe cleanup -- a bare try/finally around a run does NOT survive
+// Ctrl-C (SIGINT) or a `docker stop`/CI-cancel-driven SIGTERM arriving while
+// the runner is `await sleep(...)`-ing (e.g. holdSecs): Node/Bun's default
+// disposition for those signals is immediate process termination, which
+// unwinds nothing -- no `finally` block runs, so `sim.stop()`'s unconditional
+// `docker stop`/`docker rm -f` (below) never fires and the container is
+// orphaned. Registering a handler here overrides that default and gives
+// every SimProcess started via startSim() a chance to actually run that
+// cleanup path before the process exits. Installed lazily (on first
+// startSim() call) so importing this module for its types/tests never has
+// the side effect of installing process-wide signal handlers.
+// ---------------------------------------------------------------------------
+
+const activeSims = new Set<SimProcess>();
+let signalHandlersInstalled = false;
+
+function installSignalHandlersOnce(): void {
+  if (signalHandlersInstalled) return;
+  signalHandlersInstalled = true;
+
+  const onSignal = (signal: NodeJS.Signals): void => {
+    process.stderr.write(
+      `[runner] received ${signal} -- stopping ${activeSims.size} active sim container(s) before exit\n`,
+    );
+    void (async () => {
+      await Promise.allSettled([...activeSims].map((sim) => sim.stop()));
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    })();
+  };
+
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+}
+
 export interface SimConfig {
   /** docker network the sim container joins (must be SteVe's network so it
    *  can resolve the `app` hostname in wsUrl). */
@@ -104,6 +139,8 @@ export async function startSim(
   templateId: string,
   cfg: SimConfig,
 ): Promise<SimProcess> {
+  installSignalHandlersOnce();
+
   const container = containerName(cpId, templateId);
 
   // Best-effort cleanup of a stale container from an interrupted previous
@@ -192,6 +229,7 @@ export async function startSim(
   async function stop(): Promise<void> {
     if (stopped) return;
     stopped = true;
+    activeSims.delete(simProcess);
 
     try {
       await proc.stdin.end();
@@ -217,7 +255,7 @@ export async function startSim(
     await Promise.allSettled([stdoutTask, stderrTask]);
   }
 
-  return {
+  const simProcess: SimProcess = {
     cpId,
     container,
     get lines(): readonly string[] {
@@ -227,4 +265,6 @@ export async function startSim(
     waitForLine,
     stop,
   };
+  activeSims.add(simProcess);
+  return simProcess;
 }

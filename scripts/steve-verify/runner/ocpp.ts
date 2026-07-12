@@ -184,6 +184,18 @@ export function findAllCalls(
  * be received, and vice versa) -- never by adjacency in the log. Returns
  * the FIRST such response in log order (an OCPP peer should never send two
  * responses to the same uniqueId, but this is deterministic either way).
+ *
+ * uniqueId-uniqueness assumption: this correlation is only sound if
+ * `uniqueId`s are effectively unique for the span of the log being
+ * searched. In practice they are -- both the CP (OCPPWebSocket) and SteVe
+ * generate UUIDs per outstanding request -- but a long-running or reused
+ * log CAN contain the same uniqueId string twice by coincidence (or, in a
+ * test fixture, deliberately). Guard against that: a response can only
+ * ever be for the CALL that precedes it on the wire, so this only searches
+ * frames STRICTLY AFTER `call`'s own position in `frames` -- an earlier
+ * frame sharing the same uniqueId (e.g. a stale response left over from a
+ * prior exchange that happened to reuse the id) is never matched, even
+ * though it satisfies direction+uniqueId.
  */
 export function findResponseFor(
   frames: readonly Frame[],
@@ -191,7 +203,10 @@ export function findResponseFor(
 ): ResponseFrame | undefined {
   const responseDirection: Direction =
     call.direction === "sent" ? "received" : "sent";
-  for (const frame of frames) {
+  const callIndex = frames.indexOf(call);
+  const start = callIndex === -1 ? 0 : callIndex + 1;
+  for (let i = start; i < frames.length; i++) {
+    const frame = frames[i];
     if (
       (frame.kind === "callresult" || frame.kind === "callerror") &&
       frame.direction === responseDirection &&

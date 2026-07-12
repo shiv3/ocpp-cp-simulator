@@ -759,7 +759,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   public authorize(tagId: string): void {
     const payload: AuthorizeRequestV16 = { idTag: tagId };
     this.enqueueRequest("Authorize", soapPayload(payload), (env) => {
-      new AuthorizeResultHandler().handle(
+      new AuthorizeResultHandler(payload).handle(
         this.authorizeResponseFromPayload(env.payload),
         this.handlerContext(),
       );

@@ -47,7 +47,19 @@ export class RemoteStartTransactionHandler implements CallHandler<
       // Scenario is waiting for RemoteStart - let it handle the transaction flow
       context.chargePoint.notifyRemoteStartReceived(resolvedConnectorId, idTag);
     } else {
-      context.chargePoint.startTransaction(idTag, resolvedConnectorId);
+      // triggerReason: "RemoteStart" marks this as CSMS-initiated so
+      // ChargePoint.startTransaction's #181 local-authorize gate doesn't
+      // double-authorize on top of the AuthorizeRemoteTxRequests handling
+      // above (parity with the OCPP 2.0.1 RequestStartTransaction path).
+      context.chargePoint.startTransaction(
+        idTag,
+        resolvedConnectorId,
+        undefined,
+        undefined,
+        {
+          triggerReason: "RemoteStart",
+        },
+      );
     }
     return { status: "Accepted" };
   }

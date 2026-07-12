@@ -6,6 +6,7 @@ import type {
   TransactionStartTriggerReason,
   TransactionStopTriggerReason,
 } from "../../domain/connector/Transaction";
+import type { StartTransactionOutcome } from "../../domain/charge-point/ChargePoint";
 
 /**
  * Scenario execution mode
@@ -446,12 +447,18 @@ export interface ConnectorScenariosCollection {
  */
 export interface ScenarioExecutorCallbacks {
   onStatusChange?: (status: OCPPStatus) => Promise<void>;
+  /**
+   * Returns the domain's `StartTransactionOutcome` (issue #181) so the
+   * executor can distinguish a denied local-authorize gate from a real
+   * start without a thrown error — `void` return remains valid for any
+   * implementation that doesn't need to report an outcome.
+   */
   onStartTransaction?: (
     tagId: string,
     batteryCapacityKwh?: number,
     initialSoc?: number,
     options?: StartTransactionOptions,
-  ) => Promise<void>;
+  ) => Promise<StartTransactionOutcome | void>;
   onStopTransaction?: (
     /** Optional OCPP §6.21 reason string. When a preceding
      *  RemoteStopTrigger node captured a CSMS-initiated stop, the

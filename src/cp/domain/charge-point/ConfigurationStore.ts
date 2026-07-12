@@ -178,6 +178,21 @@ export class ConfigurationStore {
     return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;
   }
 
+  /** Canonical key `StopTransactionOnInvalidId`; default `true`. §7.22:
+   *  whether the CP stops an ongoing transaction when StartTransaction.conf
+   *  carries a non-Accepted idTagInfo.status (issue #181). */
+  stopTransactionOnInvalidId(): boolean {
+    return this.getBoolean("StopTransactionOnInvalidId") ?? true;
+  }
+
+  /** Custom key `AuthorizeBeforeLocalStart`; default `true`. Gates whether
+   *  `ChargePoint.startTransaction` sends Authorize.req and awaits the
+   *  result before a LOCAL (non-remote-start) transaction start
+   *  (issue #181). */
+  authorizeBeforeLocalStart(): boolean {
+    return this.getBoolean("AuthorizeBeforeLocalStart") ?? true;
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;

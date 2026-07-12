@@ -17,6 +17,12 @@ import { runStartupScenario } from "../startServer";
  * the mock CSMS from stalling the pipeline while we control the timing
  * of the two calls we actually care about (BootNotification,
  * StartTransaction).
+ *
+ * Issue #181: the scenario's Start Transaction node is a plain local
+ * start (AuthorizeBeforeLocalStart defaults true), so it now also sends
+ * Authorize.req and awaits Authorize.conf before StartTransaction.req —
+ * auto-ack that too (Accepted) so the boot-gate timing this test actually
+ * cares about isn't obscured by an unrelated pending Authorize.
  */
 function autoAckStatusNotifications(csms: MockCsms): () => void {
   const acked = new Set<string>();
@@ -27,6 +33,9 @@ function autoAckStatusNotifications(csms: MockCsms): () => void {
       if (frame[2] === "StatusNotification" && !acked.has(messageId)) {
         acked.add(messageId);
         csms.replyCallResult(messageId, {});
+      } else if (frame[2] === "Authorize" && !acked.has(messageId)) {
+        acked.add(messageId);
+        csms.replyCallResult(messageId, { idTagInfo: { status: "Accepted" } });
       }
     }
   }, 5);

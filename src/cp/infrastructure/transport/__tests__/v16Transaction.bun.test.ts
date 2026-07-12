@@ -56,6 +56,12 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
       {},
     );
     cp.events.on("error", () => undefined);
+    // This test pins the #176 Preparing-before-StartTransaction wire
+    // order, not the #181 local-authorize gate — disable it so
+    // startTransaction() below doesn't wait on an Authorize.conf this
+    // mock CSMS never answers. The #181 Authorize-first wire is covered
+    // by the TC_023 scenario specs (issue #181 Task 4).
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
 
     try {
       cp.connect();

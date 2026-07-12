@@ -88,6 +88,7 @@ import {
   StartTransactionResultHandler,
   StopTransactionResultHandler,
   MeterValuesResultHandler,
+  AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
 
@@ -904,6 +905,10 @@ export class OCPPMessageHandler {
       } else if (action === OCPPAction.MeterValues) {
         handler = new MeterValuesResultHandler(
           request.payload as MeterValuesRequestV16,
+        );
+      } else if (action === OCPPAction.Authorize) {
+        handler = new AuthorizeResultHandler(
+          request.payload as AuthorizeRequestV16,
         );
       }
     }

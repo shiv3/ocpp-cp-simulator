@@ -146,6 +146,10 @@ describe("OCPP 2.0.1 transaction events", () => {
       {},
     );
     cp.events.on("error", () => undefined);
+    // This suite exercises TransactionEvent wire-building, not the #181
+    // local-authorize gate — disable it so startTransaction() below
+    // doesn't wait on an Authorize.conf the mock CSMS never answers.
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
 
     try {
       cp.connect();
@@ -258,6 +262,10 @@ describe("OCPP 2.0.1 transaction events", () => {
       {},
     );
     cp.events.on("error", () => undefined);
+    // This suite exercises TransactionEvent wire-building, not the #181
+    // local-authorize gate — disable it so startTransaction() below
+    // doesn't wait on an Authorize.conf the mock CSMS never answers.
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
 
     try {
       cp.connect();
@@ -430,6 +438,10 @@ describe("OCPP 2.0.1 transaction events", () => {
       {},
     );
     cp.events.on("error", () => undefined);
+    // This suite exercises TransactionEvent wire-building, not the #181
+    // local-authorize gate — disable it so startTransaction() below
+    // doesn't wait on an Authorize.conf the mock CSMS never answers.
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
 
     try {
       cp.connect();
@@ -503,6 +515,10 @@ describe("OCPP 2.0.1 transaction events", () => {
       {},
     );
     cp.events.on("error", () => undefined);
+    // This suite exercises TransactionEvent wire-building, not the #181
+    // local-authorize gate — disable it so startTransaction() below
+    // doesn't wait on an Authorize.conf the mock CSMS never answers.
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
 
     const knownCpTransactionId = "cp-tx-known";
     const restoredTransaction: Transaction = {
@@ -589,6 +605,10 @@ describe("OCPP 2.0.1 transaction events", () => {
         {},
       );
       cp.events.on("error", () => undefined);
+      // This suite exercises TransactionEvent wire-building, not the #181
+      // local-authorize gate — disable it so startTransaction() below
+      // doesn't wait on an Authorize.conf the mock CSMS never answers.
+      cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
       return cp;
     };
 

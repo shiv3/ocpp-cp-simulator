@@ -62,6 +62,19 @@ interface StartTransactionOptions {
   remoteStartId?: number;
 }
 
+/**
+ * Result of `ChargePoint.startTransaction` (issue #181). Non-throwing: a
+ * denied local-authorize gate is reported here rather than as a thrown
+ * error, so scenario-layer callers can log-and-continue instead of
+ * aborting. `denialStatus` is only set when `started` is `false` because
+ * Authorize.conf came back non-Accepted; the other early-return guards
+ * (connector missing/busy/inoperative) leave it `undefined`.
+ */
+export interface StartTransactionOutcome {
+  started: boolean;
+  denialStatus?: string;
+}
+
 interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
 }
@@ -612,6 +625,81 @@ export class ChargePoint {
 
   notifyIncomingCall(action: string, payload: unknown): void {
     this._events.emit("incomingCallReceived", { action, payload });
+  }
+
+  /** Called by StartTransactionResultHandler when StartTransaction.conf
+   *  carries a non-Accepted idTagInfo.status (issue #181). */
+  notifyStartTransactionNotAccepted(
+    connectorId: number,
+    status: string,
+    stopped: boolean,
+  ): void {
+    this._events.emit("startTransactionNotAccepted", {
+      connectorId,
+      status,
+      stopped,
+    });
+  }
+
+  /** Called by AuthorizeResultHandler when Authorize.conf arrives
+   *  (issue #181). Fans out to any in-flight `authorizeAndWait` callers
+   *  tagId-matched via the `authorizeResult` event. */
+  notifyAuthorizeResult(tagId: string, status: string): void {
+    this._events.emit("authorizeResult", { tagId, status });
+  }
+
+  /**
+   * Send Authorize.req for `tagId` and await the matching Authorize.conf
+   * (issue #181). Resolves with `idTagInfo.status` ("Accepted", "Invalid",
+   * "Expired", "Blocked", ...). Tag-matched against the `authorizeResult`
+   * event so concurrent Authorize calls for different tags don't cross
+   * streams. Bounded by `timeoutMs`; on timeout OR disconnect while
+   * waiting, warns and resolves as "Accepted" (warn-and-proceed — mirrors
+   * the boot-wait philosophy; a real LocalAuthorizeOffline cache is future
+   * work). Never rejects.
+   */
+  authorizeAndWait(tagId: string, timeoutMs = 10000): Promise<string> {
+    this.authorize(tagId);
+
+    return new Promise<string>((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        this._events.off("authorizeResult", handler);
+        this._events.off("disconnected", disconnectHandler);
+      };
+
+      const handler = (data: { tagId: string; status: string }) => {
+        if (data.tagId !== tagId) return;
+        cleanup();
+        resolve(data.status);
+      };
+
+      const disconnectHandler = () => {
+        cleanup();
+        this._logger.warn(
+          `Disconnected while awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
+          LogType.TRANSACTION,
+        );
+        resolve("Accepted");
+      };
+
+      this._events.on("authorizeResult", handler);
+      this._events.on("disconnected", disconnectHandler);
+
+      timeoutId = setTimeout(() => {
+        cleanup();
+        this._logger.warn(
+          `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
+          LogType.TRANSACTION,
+        );
+        resolve("Accepted");
+      }, timeoutMs);
+    });
   }
 
   armResponseOverride(action: string, status: string): void {
@@ -1166,20 +1254,20 @@ export class ChargePoint {
     });
   }
 
-  startTransaction(
+  async startTransaction(
     tagId: string,
     connectorId: number,
     batteryCapacityKwh?: number,
     initialSoc?: number,
     options: StartTransactionOptions = {},
-  ): void {
+  ): Promise<StartTransactionOutcome> {
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(
         `Connector ${connectorId} not found`,
         LogType.TRANSACTION,
       );
-      return;
+      return { started: false };
     }
 
     if (connector.transaction && connector.transaction.stopTime === null) {
@@ -1190,7 +1278,7 @@ export class ChargePoint {
         `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
         LogType.TRANSACTION,
       );
-      return;
+      return { started: false };
     }
 
     if (connector.availability !== "Operative") {
@@ -1198,7 +1286,33 @@ export class ChargePoint {
         `Connector ${connectorId} is ${connector.availability}; refusing to start transaction`,
         LogType.TRANSACTION,
       );
-      return;
+      return { started: false };
+    }
+
+    // Issue #181: gate LOCAL (non-remote-start) starts on Authorize.conf.
+    // "RemoteStart" means either RemoteStartTransactionHandler's direct
+    // path (which already applies AuthorizeRemoteTxRequests semantics) or
+    // a scenario that captured a RemoteStartTrigger node — both already
+    // went through CSMS-driven authorization, so they're excluded here.
+    const isLocalStart = options.triggerReason !== "RemoteStart";
+    if (isLocalStart && this._configuration.authorizeBeforeLocalStart()) {
+      const status = await this.authorizeAndWait(tagId);
+      if (
+        status === "Invalid" ||
+        status === "Expired" ||
+        status === "Blocked"
+      ) {
+        this._logger.warn(
+          `Authorize.conf ${status} for ${tagId}; refusing local transaction start on connector ${connectorId}`,
+          LogType.TRANSACTION,
+        );
+        this._events.emit("authorizeDenied", {
+          connectorId,
+          tagId,
+          status,
+        });
+        return { started: false, denialStatus: status };
+      }
     }
 
     // §5.13: if the connector was Reserved (or the reservation is for
@@ -1255,6 +1369,8 @@ export class ChargePoint {
       transactionId: 0,
       tagId,
     });
+
+    return { started: true };
   }
 
   stopTransaction(

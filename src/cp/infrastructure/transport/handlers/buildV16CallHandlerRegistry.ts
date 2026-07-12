@@ -27,7 +27,6 @@ import {
   GetLogHandler,
   SignedUpdateFirmwareHandler,
   BootNotificationResultHandler,
-  AuthorizeResultHandler,
   HeartbeatResultHandler,
   StatusNotificationResultHandler,
   DataTransferResultHandler,
@@ -179,10 +178,11 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
     OCPPAction.BootNotification,
     new BootNotificationResultHandler(),
   );
-  registry.registerCallResultHandler(
-    OCPPAction.Authorize,
-    new AuthorizeResultHandler(),
-  );
+  // NOTE: Authorize CALLRESULT handler is intentionally NOT registered
+  // here (issue #181). It needs the original Authorize.req's idTag to
+  // correlate the `authorizeResult` event, so OCPPMessageHandler.
+  // handleCallResult constructs it per-request from `request.payload`,
+  // mirroring StartTransaction/StopTransaction/MeterValues below.
   registry.registerCallResultHandler(
     OCPPAction.Heartbeat,
     new HeartbeatResultHandler(),

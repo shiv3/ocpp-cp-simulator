@@ -21,12 +21,6 @@
       "data": { "label": "Plug In", "action": "plugin" }
     },
     {
-      "id": "status-preparing",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 250 },
-      "data": { "label": "Set Preparing", "status": "Preparing" }
-    },
-    {
       "id": "trigger-remote-start",
       "type": "remoteStartTrigger",
       "position": { "x": 400, "y": 350 },
@@ -41,12 +35,6 @@
         "action": "start",
         "tagId": "CERT010"
       }
-    },
-    {
-      "id": "status-charging",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 550 },
-      "data": { "label": "Set Charging", "status": "Charging" }
     },
     {
       "id": "meter-auto",
@@ -71,16 +59,18 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "connector-plug-1" },
-    { "id": "e2", "source": "connector-plug-1", "target": "status-preparing" },
     {
-      "id": "e3",
-      "source": "status-preparing",
+      "id": "e1",
+      "source": "start-1",
+      "target": "connector-plug-1"
+    },
+    {
+      "id": "e2",
+      "source": "connector-plug-1",
       "target": "trigger-remote-start"
     },
-    { "id": "e4", "source": "trigger-remote-start", "target": "tx-start" },
-    { "id": "e5", "source": "tx-start", "target": "status-charging" },
-    { "id": "e6", "source": "status-charging", "target": "meter-auto" },
-    { "id": "e7", "source": "meter-auto", "target": "end-1" }
+    { "id": "e3", "source": "trigger-remote-start", "target": "tx-start" },
+    { "id": "e4", "source": "tx-start", "target": "meter-auto" },
+    { "id": "e5", "source": "meter-auto", "target": "end-1" }
   ]
 }

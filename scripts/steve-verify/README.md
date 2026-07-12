@@ -293,6 +293,12 @@ or provision equivalently by hand. Skip `01-setup-steve.sh` entirely (it only
 manages the bundled compose stack) and `99-teardown.sh` (don't tear down an
 instance you don't own).
 
+> **Note:** `02-provision.sh` provisions OCPP tags via the REST `/ocppTags`
+> API and therefore requires REST auth (`web_user.api_password`) **regardless
+> of `STEVE_DRIVER`** -- the `ui` driver only affects how _scenarios_ drive
+> operations, not how provisioning creates tags. Seed `api_password` per the
+> section above before provisioning against a pre-existing SteVe.
+
 ## Parallel lane isolation
 
 `--parallel` runs up to 3 scenarios concurrently, one per `CERTCP1`..`3`, all

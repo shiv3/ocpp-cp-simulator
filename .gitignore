@@ -45,3 +45,8 @@ coverage/
 e2e/csms/e2e-csms
 
 .eslintcache
+
+# steve-verify: scenario logs, per-run results, and generated feeder scripts
+# -- reproducible from a live SteVe run, never committed.
+scripts/steve-verify/results/
+scripts/steve-verify/.runtime/

@@ -28,7 +28,7 @@ describe("ConsoleApp routing", () => {
     }
   });
 
-  it("renders the sidebar shell and the Dashboard stub at /", async () => {
+  it("renders the sidebar shell and the Dashboard page at /", async () => {
     const { container, root } = await renderConsole("/");
     cleanup = () => unmount(root);
 
@@ -45,11 +45,13 @@ describe("ConsoleApp routing", () => {
       expect(link, `expected a sidebar link labeled "${label}"`).toBeTruthy();
     }
 
-    const heading = Array.from(container.querySelectorAll("h2")).find(
-      (h) => h.textContent === "Dashboard",
+    // No registry snapshot was pushed, so the Dashboard's charge point list
+    // stays empty and renders its EmptyState.
+    const heading = Array.from(container.querySelectorAll("h1")).find(
+      (h) => h.textContent === "Charge Points",
     );
     expect(heading).toBeTruthy();
-    expect(container.textContent).toContain("Coming soon");
+    expect(container.textContent).toContain("No charge points");
   });
 
   it("renders the real Settings page with a link back to the classic UI at /settings", async () => {
@@ -77,10 +79,10 @@ describe("ConsoleApp routing", () => {
       backButton!.click();
     });
 
-    const heading = Array.from(container.querySelectorAll("h2")).find(
-      (h) => h.textContent === "Dashboard",
+    const heading = Array.from(container.querySelectorAll("h1")).find(
+      (h) => h.textContent === "Charge Points",
     );
     expect(heading).toBeTruthy();
-    expect(container.textContent).toContain("Coming soon");
+    expect(container.textContent).toContain("No charge points");
   });
 });

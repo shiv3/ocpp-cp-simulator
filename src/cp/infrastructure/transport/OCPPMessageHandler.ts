@@ -963,6 +963,18 @@ export class OCPPMessageHandler {
       );
     }
 
+    // Issue #181: a CALLERROR answering Authorize.req is a definite
+    // protocol failure (unlike the authorizeAndWait timeout/disconnect
+    // paths, which proceed fail-OPEN as "Accepted" because the CSMS said
+    // nothing at all). Here the CSMS *did* respond, and what it said was
+    // "I couldn't process this" — so treat it as fail-CLOSED: synthesize
+    // a denial ("Invalid") rather than let authorizeAndWait burn its full
+    // timeout waiting for a CALLRESULT that will never arrive.
+    if (request?.action === OCPPAction.Authorize) {
+      const idTag = (request.payload as AuthorizeRequestV16).idTag;
+      this._chargePoint.notifyAuthorizeResult(idTag, "Invalid");
+    }
+
     this._requests.remove(messageId);
     // §4.1.1: CALLERROR also settles the in-flight CALL.
     this.settleSerialInFlight(messageId);

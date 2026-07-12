@@ -228,8 +228,25 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     } else if (messageType === OCPPMessageType.CALLRESULT) {
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {
+      const pending = this._pendingRequests.get(messageId);
       this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
+
+      // Issue #181: a CALLERROR answering Authorize.req is a definite
+      // protocol failure (unlike the authorizeAndWait timeout/disconnect
+      // paths, which proceed fail-OPEN as "Accepted" because the CSMS
+      // said nothing at all). Here the CSMS *did* respond, and what it
+      // said was "I couldn't process this" — so treat it as fail-CLOSED:
+      // synthesize a denial ("Invalid") rather than let authorizeAndWait
+      // burn its full timeout waiting for a CALLRESULT that will never
+      // arrive.
+      if (pending?.action === "Authorize") {
+        const authorizeRequest = pending.payload as AuthorizeRequestV201;
+        this._chargePoint.notifyAuthorizeResult(
+          authorizeRequest.idToken.idToken,
+          "Invalid",
+        );
+      }
     }
   }
 

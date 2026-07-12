@@ -183,4 +183,46 @@ describe("OCPP 2.0.1 local-authorize gate (#181)", () => {
       await csms.stop();
     }
   });
+
+  it("gate ON + CSMS answers Authorize with a CALLERROR: resolves PROMPTLY (no ~10s stall) and denies fail-CLOSED", async () => {
+    const csms = startMockCsms();
+    const cp = newV201ChargePoint("CP201-AUTHGATE-CALLERROR", csms.url);
+    const tagId = "TAG-201-AUTHGATE-CALLERROR";
+
+    try {
+      await connectAndBoot(csms, cp);
+
+      const startedAt = Date.now();
+      const startPromise = cp.startTransaction(tagId, 1);
+
+      const authCall = await csms.waitForCall("Authorize");
+      // OCPP-J CALLERROR: [4, messageId, errorCode, errorDescription, errorDetails]
+      csms.send([
+        4,
+        authCall.messageId,
+        "FormationViolation",
+        "bad payload",
+        {},
+      ]);
+
+      const outcome = await startPromise;
+      const elapsedMs = Date.now() - startedAt;
+
+      // Before this fix, a CALLERROR was never correlated back to the
+      // pending Authorize.req: `handleIncomingMessage`'s CALLERROR branch
+      // only deleted the pending entry and logged, so `authorizeAndWait`
+      // burned its full 10_000ms timeout. A generous 3s ceiling proves
+      // resolution rode the CALLERROR, not the timeout.
+      expect(elapsedMs).toBeLessThan(3000);
+      // Fail-CLOSED: a CALLERROR is a definite protocol failure (unlike
+      // silence, which fails open), so the synthesized denial status is
+      // "Invalid" and the local start does not proceed.
+      expect(outcome).toEqual({ started: false, denialStatus: "Invalid" });
+      expect(cp.getConnector(1)?.transaction).toBeNull();
+      await expectNoFrame(csms, transactionEventFrame("Started"));
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  }, 5000);
 });

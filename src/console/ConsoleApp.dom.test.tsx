@@ -63,4 +63,24 @@ describe("ConsoleApp routing", () => {
     expect(classicLink).toBeTruthy();
     expect(classicLink?.textContent).toContain("Open classic UI");
   });
+
+  it('"Back to Home" on the embedded Settings page returns to the console Dashboard (relative navigate("..") from /settings)', async () => {
+    const { container, root } = await renderConsole("/settings");
+    cleanup = () => unmount(root);
+
+    const backButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Back to Home",
+    );
+    expect(backButton, 'expected a "Back to Home" button').toBeTruthy();
+
+    await act(async () => {
+      backButton!.click();
+    });
+
+    const heading = Array.from(container.querySelectorAll("h2")).find(
+      (h) => h.textContent === "Dashboard",
+    );
+    expect(heading).toBeTruthy();
+    expect(container.textContent).toContain("Coming soon");
+  });
 });

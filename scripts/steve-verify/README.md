@@ -142,16 +142,27 @@ machines; override if `18180`/`18443`/`13306` are also taken.
   wire/DB facts each `cert16-*` scenario's README description calls out --
   they do not validate every field of every OCPP message, nor exercise
   negative/malformed-input paths beyond what the scenario itself encodes.
-- **Timing-based, not event-driven.** `drive()` functions use fixed
-  `sleep`s tuned against this environment's (fast, local) round-trip times,
-  mirroring the manual verification sessions' approach. A much slower/loaded
-  environment could need larger `SPEC_BOOT_WAIT`/`SPEC_HOLD_SECS` values in
-  the affected spec files, or `--timeout` on the command line.
+- **Mostly timing-based, not event-driven.** Most `drive()` functions still
+  use fixed `sleep`s tuned against this environment's (fast, local)
+  round-trip times, mirroring the manual verification sessions' approach.
+  A much slower/loaded environment could need larger
+  `SPEC_BOOT_WAIT`/`SPEC_HOLD_SECS` values in the affected spec files, or
+  `--timeout` on the command line. A few completion barriers where a fixed
+  sleep previously raced a real dependency (SetChargingProfile actually
+  applying before TC_066/TC_067's second op; a transaction/reservation row
+  actually existing before TC_028/TC_051/TC_057's DB-driven follow-up) now
+  poll (`sim_wait_log`/`wait_for_condition`/`db_wait_active_tx_pk`) instead.
+- **Per-process session state (fixed).** `STEVE_JAR` (the login cookie
+  jar) and `steve_op()`'s scratch response file are generated per-process
+  (PID-suffixed / `mktemp`) rather than shared fixed `/tmp` paths, so
+  concurrent `run-scenario.sh` processes under `--parallel` no longer race
+  on the same session/CSRF state.
 - **Shared idTag pool under heavy `--parallel` use.** Several specs use a
   fixed tag (e.g. `CERT-TAG-1`) for CSMS-initiated ops rather than deriving
   a per-CP tag; `max_active_transaction_count=5` gives headroom for the
   default 3-way `--parallel` fan-out, but running many groups in parallel
-  simultaneously could contend.
+  simultaneously could contend. (This is the remaining `--parallel`
+  caveat now that session state above is per-process.)
 - **SteVe-specific.** Response statuses that are SteVe's own policy rather
   than CP behavior (e.g. TC_064's DataTransfer response status) are asserted
   loosely (a response was received) rather than pinned to a specific status.

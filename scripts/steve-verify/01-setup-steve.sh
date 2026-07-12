@@ -51,10 +51,16 @@ COMPOSE_OVERRIDE="$STEVE_REPO_DIR/docker-compose.override.yml"
 [ -f "$COMPOSE_FILE" ] || die "no docker-compose.yml found at $COMPOSE_FILE -- unexpected SteVe checkout layout"
 
 log_info "applying port remap to docker-compose.yml (db -> ${STEVE_DB_HOST_PORT}, app -> ${STEVE_APP_HOST_PORT}/${STEVE_APP_HOST_TLS_PORT})"
+# Tolerate both quoted and unquoted port lines on every pattern (matches
+# the current stock docker-compose.yml's own mix: unquoted "- 3306:3306"
+# for db, quoted "- \"8180:8180\"" for app) -- a future upstream change to
+# either quoting style would otherwise silently fail to match instead of
+# applying the remap, and the "stray duplicate ports:" sanity check below
+# would misdiagnose the real cause.
 sed -i.bak \
   -e "s/^\( *- \)\"\?[0-9]\+:3306\"\?/\1${STEVE_DB_HOST_PORT}:3306/" \
-  -e "s/^\( *- \)\"[0-9]\+:8180\"/\1\"${STEVE_APP_HOST_PORT}:8180\"/" \
-  -e "s/^\( *- \)\"[0-9]\+:8443\"/\1\"${STEVE_APP_HOST_TLS_PORT}:8443\"/" \
+  -e "s/^\( *- \)\"\?[0-9]\+:8180\"\?/\1\"${STEVE_APP_HOST_PORT}:8180\"/" \
+  -e "s/^\( *- \)\"\?[0-9]\+:8443\"\?/\1\"${STEVE_APP_HOST_TLS_PORT}:8443\"/" \
   "$COMPOSE_FILE"
 rm -f "$COMPOSE_FILE.bak"
 

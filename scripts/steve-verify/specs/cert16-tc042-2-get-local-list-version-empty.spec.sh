@@ -5,10 +5,13 @@
 # TC_042.2 Get Local List Version -- Empty. Local list enabled via configSet
 # on a fresh CP; CSMS sends GetLocalListVersion; CP must answer listVersion 0.
 #
-# NOTE: assumes no prior SendLocalList ran against this $CP_ID earlier in the
-# same session (that would legitimately bump the version past 0) -- a known
-# cross-scenario-state limitation of running scenarios back-to-back on a
-# shared charge point, not a bug in this spec.
+# NOTE: version 0 holds regardless of run order -- lib.sh's sim_start()
+# launches a FRESH simulator container per scenario, and
+# LocalAuthListManager's list/version live only in that process's memory
+# (see src/cp/domain/auth/LocalAuthList.ts), so a prior SendLocalList run
+# against the same $CP_ID (even earlier in the same run-all.sh sweep)
+# leaves nothing behind here. Do not "fix" this by resetting/isolating
+# state -- there's no cross-run state to reset.
 
 SPEC_CONNECTOR=1
 SPEC_BOOT_WAIT=4

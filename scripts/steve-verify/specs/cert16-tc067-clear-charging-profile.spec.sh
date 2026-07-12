@@ -15,7 +15,16 @@ drive() {
     "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
     chargingProfilePk=1 connectorId=1 transactionId= || true
 
-  sleep 2
+  # steve_op only confirms SetChargingProfile was QUEUED -- a fixed sleep
+  # here isn't a completion barrier. Wait for the CP's own confirmation
+  # that it actually applied the profile (the log literal is
+  # SmartChargingHandlers.ts's "Applied charging profile #<id> to
+  # connector <n>") before clearing it, so ClearChargingProfile can't race
+  # ahead of the profile actually being stored.
+  if ! sim_wait_log "$CONTAINER" 'Applied charging profile #1' 10 "SetChargingProfile applied"; then
+    log_warn "did not see 'Applied charging profile #1' within 10s -- proceeding anyway, assert() will likely fail"
+  fi
+
   steve_op v1.6/ClearChargingProfile \
     "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
     chargingProfilePk=1 || true

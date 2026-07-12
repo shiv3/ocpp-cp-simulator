@@ -27,13 +27,23 @@ assert() {
     "RemoteStartTransaction (with attached TxProfile) accepted"
   check_log_contains "$log" 'Sent: \[2,.*"StartTransaction"' \
     "StartTransaction sent"
-  check_log_not_contains "$log" 'Applied charging profile' \
-    "attached profile is accepted but NOT stored/applied (Core CP may ignore SmartCharging profiles per OCPP 5.11)"
+  # Narrowed to profile #2 specifically (the log's actual format is
+  # "Applied charging profile #<id> to connector <n>", confirmed against
+  # SmartChargingHandlers.ts) -- a bare 'Applied charging profile' would
+  # also fail this scenario on an unrelated profile (e.g. #1 from another
+  # spec's leftover state) being applied, which isn't what this assertion
+  # is about.
+  check_log_not_contains "$log" 'Applied charging profile #2 to connector' \
+    "attached profile #2 is accepted but NOT stored/applied (Core CP may ignore SmartCharging profiles per OCPP 5.11)"
   check_log_contains "$log" 'Sent: \[2,.*"StopTransaction"' \
     "StopTransaction eventually sent"
 
   local tx_pk
   tx_pk="$(db_latest_tx_pk "$CP_ID")"
+  if [ -z "$tx_pk" ]; then
+    _check_fail "DB: transaction is closed (stop_timestamp set)" "no transaction found"
+    return
+  fi
   check_db_nonempty "SELECT stop_timestamp FROM transaction WHERE transaction_pk=$tx_pk;" \
     "DB: transaction is closed (stop_timestamp set)"
 }

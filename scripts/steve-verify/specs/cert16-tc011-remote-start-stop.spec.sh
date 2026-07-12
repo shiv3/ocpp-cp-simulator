@@ -42,6 +42,10 @@ assert() {
 
   local tx_pk
   tx_pk="$(db_latest_tx_pk "$CP_ID")"
+  if [ -z "$tx_pk" ]; then
+    _check_fail "DB: transaction is closed (stop_timestamp set)" "no transaction found"
+    return
+  fi
   check_db_nonempty "SELECT stop_timestamp FROM transaction WHERE transaction_pk=$tx_pk;" \
     "DB: transaction is closed (stop_timestamp set)"
 }

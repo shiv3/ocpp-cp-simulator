@@ -10,14 +10,19 @@ SPEC_CONNECTOR=1
 SPEC_BOOT_WAIT=4
 SPEC_HOLD_SECS=20
 
+# Populated by drive(), read back in assert() -- both run in the same shell.
+TX_PK=""
+
 drive() {
-  sleep 3
-  local tx_pk
-  tx_pk="$(db_latest_tx_pk "$CP_ID")"
-  if [ -n "$tx_pk" ]; then
+  # Bind to the ACTIVE transaction CERT028's own StartTransaction created,
+  # not db_latest_tx_pk's "newest row regardless of tag/state" -- on a
+  # reused charge point that could silently pick up a stale closed
+  # transaction from an earlier run instead.
+  TX_PK="$(db_wait_active_tx_pk "$CP_ID" CERT028 15)" || true
+  if [ -n "$TX_PK" ]; then
     steve_op v1.6/RemoteStopTransaction \
       "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
-      transactionId="$tx_pk" || true
+      transactionId="$TX_PK" || true
   fi
 }
 
@@ -31,8 +36,10 @@ assert() {
   check_log_contains "$log" 'Sent: \[2,.*"StopTransaction"' \
     "StopTransaction eventually sent (local stop after rejection, charging continued in between)"
 
-  local tx_pk
-  tx_pk="$(db_latest_tx_pk "$CP_ID")"
-  check_db_nonempty "SELECT stop_timestamp FROM transaction WHERE transaction_pk=$tx_pk;" \
+  if [ -z "$TX_PK" ]; then
+    _check_fail "DB: transaction is closed (stop_timestamp set)" "no active transaction found for CERT028"
+    return
+  fi
+  check_db_nonempty "SELECT stop_timestamp FROM transaction WHERE transaction_pk=$TX_PK;" \
     "DB: transaction is closed (stop_timestamp set)"
 }

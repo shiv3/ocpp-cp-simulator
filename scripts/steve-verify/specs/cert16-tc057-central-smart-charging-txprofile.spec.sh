@@ -13,8 +13,12 @@ SPEC_HOLD_SECS=25
 TX_PK=""
 
 drive() {
-  sleep 3
-  TX_PK="$(db_latest_tx_pk "$CP_ID")"
+  # Bind to the ACTIVE transaction CERT057's own StartTransaction created,
+  # not db_latest_tx_pk's "newest row regardless of tag/state" -- on a
+  # reused charge point that could silently pick up a stale closed
+  # transaction from an earlier run instead (and the TxProfile is only
+  # meaningful attached to the actual running transaction).
+  TX_PK="$(db_wait_active_tx_pk "$CP_ID" CERT057 15)" || true
   steve_op v1.6/SetChargingProfile \
     "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
     chargingProfilePk=2 connectorId=1 transactionId="$TX_PK" || true
@@ -32,7 +36,10 @@ assert() {
   check_log_contains "$log" 'Sent: \[2,.*"StopTransaction"' \
     "StopTransaction eventually sent"
 
-  local tx_pk="${TX_PK:-$(db_latest_tx_pk "$CP_ID")}"
-  check_db_nonempty "SELECT stop_timestamp FROM transaction WHERE transaction_pk=$tx_pk;" \
+  if [ -z "$TX_PK" ]; then
+    _check_fail "DB: transaction is closed (stop_timestamp set)" "no active transaction found for CERT057"
+    return
+  fi
+  check_db_nonempty "SELECT stop_timestamp FROM transaction WHERE transaction_pk=$TX_PK;" \
     "DB: transaction is closed (stop_timestamp set)"
 }

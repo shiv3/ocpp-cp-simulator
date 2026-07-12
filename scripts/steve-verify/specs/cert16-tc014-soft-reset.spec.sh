@@ -24,6 +24,16 @@ assert() {
     "Reset accepted"
   check_log_contains "$log" 'Sent: \[2,.*"StopTransaction"' \
     "StopTransaction sent"
+  # ChargePoint.applyRemoteReset() takes the Soft path via boot() (no
+  # disconnect/reconnect -- see src/cp/domain/charge-point/ChargePoint.ts),
+  # which re-sends BootNotification.req on the SAME socket. That's a CP
+  # CALL, so it shows up as "Sent:" in this log, not "Received:". Anchored
+  # after the Reset.req line (not check_log_order) so an unrelated earlier
+  # BootNotification (the initial one) can't trivially satisfy this.
+  check_log_after "$log" \
+    'Received: \[2,.*"Reset"' \
+    'Sent: \[2,.*"BootNotification"' \
+    "CP sends a fresh BootNotification after Soft Reset (reboot on the same socket)"
 
   local tx_pk
   tx_pk="$(db_latest_tx_pk "$CP_ID")"

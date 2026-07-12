@@ -23,7 +23,13 @@ assert() {
     "TriggerMessage.req received"
   check_response_status "$log" "TriggerMessage" "Accepted" \
     "TriggerMessage accepted"
-  check_log_order "$log" \
+  # check_log_after (not check_log_order): a periodic Heartbeat unrelated to
+  # this TriggerMessage could land anywhere in the log and either mask a
+  # real failure (an earlier Heartbeat trivially satisfies first-match
+  # order) or, on a slow run, not exist yet at check_log_order's checked
+  # position. Confirm a Heartbeat appears strictly after the (last)
+  # TriggerMessage.req line instead.
+  check_log_after "$log" \
     'Received: \[2,.*"TriggerMessage"' \
     'Sent: \[2,.*"Heartbeat"' \
     "requested Heartbeat sent after TriggerMessage"

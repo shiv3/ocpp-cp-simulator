@@ -4,11 +4,14 @@
 # location; CP responds with a fileName and sends DiagnosticsStatusNotification
 # (Uploading, then Uploaded/UploadFailed depending on the HTTP response).
 #
-# This spec's location (http://example.com/upload) is not a real upload
-# endpoint, so UploadFailed is the EXPECTED outcome here (confirmed live:
-# the location 404/405s) -- not a defect. Both outcomes are
-# certification-relevant per the scenario's own description; this spec
-# pins UploadFailed since that's what this harness's location produces.
+# GetDiagnosticsHandler really does `fetch()` the location (see
+# src/cp/infrastructure/transport/handlers/call/GetDiagnosticsHandler.ts --
+# unlike UpdateFirmware, which never dereferences its `location`), so this
+# spec's target must stay reachable-but-failing without any real DNS/egress
+# dependency. `http://app:9/upload` -- SteVe's own app container, port 9 is
+# nothing listens there -- gets an instant, deterministic connection-refused
+# on the steve_default docker network (no external network needed at all),
+# so UploadFailed is the EXPECTED and hermetic outcome here, not a defect.
 
 SPEC_CONNECTOR=1
 SPEC_BOOT_WAIT=4
@@ -17,7 +20,7 @@ SPEC_HOLD_SECS=25
 drive() {
   sleep 2
   steve_op v1.6/GetDiagnostics "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
-    location=http://example.com/upload || true
+    location=http://app:9/upload || true
 }
 
 assert() {

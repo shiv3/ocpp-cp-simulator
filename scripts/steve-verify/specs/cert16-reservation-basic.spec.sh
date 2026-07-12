@@ -16,7 +16,7 @@ SPEC_HOLD_SECS=45
 drive() {
   sleep 2
   steve_op v1.6/ReserveNow "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
-    connectorId=1 expiry="2026-07-12 12:00" idTag=CERT-TAG-1 || true
+    connectorId=1 expiry="$(reservation_expiry_soon)" idTag=CERT-TAG-1 || true
 }
 
 assert() {

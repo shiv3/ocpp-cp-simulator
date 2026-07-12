@@ -50,6 +50,10 @@ assert() {
 
   local tx_pk
   tx_pk="$(db_latest_tx_pk "$CP_ID")"
+  if [ -z "$tx_pk" ]; then
+    _check_fail "DB: transaction row exists for $CP_ID with id_tag CERT-TAG-1" "no transaction found"
+    return
+  fi
   check_db_nonempty "SELECT id_tag FROM transaction WHERE transaction_pk=$tx_pk AND id_tag='CERT-TAG-1';" \
     "DB: transaction row exists for $CP_ID with id_tag CERT-TAG-1"
 }

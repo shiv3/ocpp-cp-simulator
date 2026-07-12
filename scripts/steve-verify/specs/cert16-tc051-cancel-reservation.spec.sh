@@ -14,12 +14,19 @@ SPEC_HOLD_SECS=20
 # Populated by drive(), read back in assert() -- both run in the same shell.
 RESV_PK=""
 
+# steve_op only confirms ReserveNow was QUEUED, not that SteVe has finished
+# writing the reservation row -- a one-shot db_latest_reservation_pk right
+# after queuing it can race the DB write and capture an empty/stale PK.
+_tc051_reservation_exists() {
+  RESV_PK="$(db_latest_reservation_pk "$CP_ID")"
+  [ -n "$RESV_PK" ]
+}
+
 drive() {
   sleep 2
   steve_op v1.6/ReserveNow "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
-    connectorId=1 expiry="2026-07-12 12:00" idTag=CERT-TAG-1 || true
-  RESV_PK="$(db_latest_reservation_pk "$CP_ID")"
-  sleep 2
+    connectorId=1 expiry="$(reservation_expiry_soon)" idTag=CERT-TAG-1 || true
+  wait_for_condition 15 1 "reservation row for $CP_ID exists" -- _tc051_reservation_exists
   steve_op v1.6/CancelReservation "chargePointSelectList=$(steve_cp_select "$CP_ID")" \
     reservationId="$RESV_PK" || true
 }

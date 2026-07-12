@@ -48,7 +48,12 @@ STEVE_DB_HOST_PORT="${STEVE_DB_HOST_PORT:-13306}"
 STEVE_URL="${STEVE_URL:-http://localhost:${STEVE_APP_HOST_PORT}/steve/manager}"
 STEVE_USER="${STEVE_USER:-admin}"
 STEVE_PASS="${STEVE_PASS:-1234}"
-STEVE_JAR="${STEVE_JAR:-/tmp/steve-verify-cookies.jar}"
+# Per-process by default ($$) so concurrent run-scenario.sh invocations
+# (run-all.sh --parallel launches up to 3) never race on the same cookie
+# jar/CSRF state -- each process gets its own file. Override explicitly if a
+# caller genuinely wants a shared jar (e.g. re-using a login across manual
+# invocations in the same shell).
+STEVE_JAR="${STEVE_JAR:-/tmp/steve-verify-cookies.$$.jar}"
 
 # docker compose project container names + network (defaults match a plain
 # `docker compose up -d` from STEVE_REPO_DIR with the service names in
@@ -88,6 +93,22 @@ die() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1 (install it and re-run)"
+}
+
+# ---------------------------------------------------------------------------
+# Time helpers
+# ---------------------------------------------------------------------------
+
+# reservation_expiry_soon [MINUTES] -- prints a ReserveNow "expiry" value
+# MINUTES (default 10) from now, in the "YYYY-MM-DD HH:MM" format SteVe's
+# ReserveNow form expects (no seconds field). Runtime-relative so specs
+# never go stale the way a hardcoded absolute date would. macOS (BSD date)
+# and Linux (GNU date) compatible -- same +N-offset technique as
+# cert16-tc044-*'s retrieve_datetime_soon() for UpdateFirmware.
+reservation_expiry_soon() {
+  local minutes="${1:-10}"
+  date -u -v+"${minutes}"M +'%Y-%m-%d %H:%M' 2>/dev/null ||
+    date -u -d "+${minutes} minutes" +'%Y-%m-%d %H:%M'
 }
 
 # ---------------------------------------------------------------------------
@@ -174,6 +195,32 @@ db_latest_open_tx_pk() {
   db_scalar "SELECT t.transaction_pk FROM transaction t JOIN evse e ON e.evse_pk = t.evse_pk WHERE e.charge_box_id = '$1' AND t.stop_timestamp IS NULL ORDER BY t.transaction_pk DESC LIMIT 1;"
 }
 
+# db_wait_active_tx_pk CP_ID ID_TAG [TIMEOUT_SECS] -- polls (bounded, default
+# 15s) for an OPEN transaction (stop_timestamp IS NULL) on CP_ID started with
+# ID_TAG, and prints its transaction_pk on stdout. Use this instead of
+# db_latest_tx_pk when a spec needs to bind its later assertions to the
+# transaction ITS OWN scenario/drive() created -- db_latest_tx_pk just grabs
+# the newest row for the charge box regardless of tag or open/closed state,
+# which on a reused charge point can silently pick up a stale closed
+# transaction from an earlier run instead of racing-in-progress one. Prints
+# nothing and returns 1 on timeout (never dies -- callers decide how to
+# treat "not found").
+db_wait_active_tx_pk() {
+  local cp_id="$1" id_tag="$2" timeout="${3:-15}"
+  local waited=0 pk
+  while [ "$waited" -lt "$timeout" ]; do
+    pk="$(db_scalar "SELECT t.transaction_pk FROM transaction t JOIN evse e ON e.evse_pk = t.evse_pk WHERE e.charge_box_id = '$cp_id' AND t.id_tag = '$id_tag' AND t.stop_timestamp IS NULL ORDER BY t.transaction_pk DESC LIMIT 1;")"
+    if [ -n "$pk" ]; then
+      printf '%s\n' "$pk"
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  log_warn "timed out after ${timeout}s waiting for an active transaction on $cp_id (id_tag=$id_tag)"
+  return 1
+}
+
 # db_tx_stop_reason TX_PK -- stop_reason column for a transaction (may be
 # empty/NULL for the OCPP spec-default "Local").
 db_tx_stop_reason() {
@@ -248,12 +295,16 @@ steve_op() {
   shift
   steve_ensure_login
 
-  local op_html csrf headers location
+  local op_html op_result_html csrf headers location
   op_html="$(mktemp)"
-  # Intentionally expand op_html now (not at trap-fire time) -- it's a
-  # fixed mktemp path for this call, not something that changes later.
+  op_result_html="$(mktemp)"
+  # Intentionally expand both paths now (not at trap-fire time) -- they're
+  # fixed mktemp paths for this call, not something that changes later.
+  # A hardcoded shared path here (the old behavior) would race across
+  # concurrent run-scenario.sh processes (run-all.sh --parallel), each
+  # overwriting the other's debug output.
   # shellcheck disable=SC2064
-  trap "rm -f '$op_html'" RETURN
+  trap "rm -f '$op_html' '$op_result_html'" RETURN
 
   curl -sS -b "$STEVE_JAR" -c "$STEVE_JAR" -m 10 "$STEVE_URL/operations/$op_path" -o "$op_html"
   csrf="$(_steve_extract_csrf "$op_html")"
@@ -262,7 +313,7 @@ steve_op() {
     return 1
   fi
 
-  local curl_args=(-sS -b "$STEVE_JAR" -c "$STEVE_JAR" -m 10 -D - -o /tmp/steve-verify-op-result.html)
+  local curl_args=(-sS -b "$STEVE_JAR" -c "$STEVE_JAR" -m 10 -D - -o "$op_result_html")
   for f in "$@"; do
     curl_args+=(--data-urlencode "$f")
   done
@@ -277,7 +328,7 @@ steve_op() {
     printf '%s\n' "$location"
     return 0
   fi
-  log_warn "steve_op: no redirect Location header for $op_path; see /tmp/steve-verify-op-result.html"
+  log_warn "steve_op: no redirect Location header for $op_path; see $op_result_html"
   return 1
 }
 
@@ -438,6 +489,32 @@ check_response_status() {
   window="$(grep -A20 "Received: .*\"$action\"" "$log" 2>/dev/null | grep -m1 'Sent: \[3,' || true)"
   if [ -z "$window" ]; then
     _check_fail "$desc" "no CALLRESULT found after Received .../$action"
+  elif printf '%s' "$window" | grep -q "\"status\":\"$status\""; then
+    _check_pass "$desc"
+  else
+    _check_fail "$desc" "expected status=$status, got: $window"
+  fi
+}
+
+# check_response_status_after LOG_FILE AFTER_PATTERN REQUEST_ACTION
+#   EXPECTED_STATUS DESCRIPTION
+# Occurrence-aware variant of check_response_status: only considers the log
+# strictly after the LAST line matching AFTER_PATTERN before applying the
+# same windowed "Received .../action -> next CALLRESULT" match. Use this
+# when REQUEST_ACTION appears more than once in the log (e.g. a Full then a
+# Differential SendLocalList) -- check_response_status's first-occurrence
+# window would otherwise always validate the FIRST exchange even when the
+# assertion is meant for a later one.
+check_response_status_after() {
+  local log="$1" after="$2" action="$3" status="$4" desc="$5" after_line window
+  after_line="$(grep -nE "$after" "$log" 2>/dev/null | tail -n1 | cut -d: -f1)"
+  if [ -z "$after_line" ]; then
+    _check_fail "$desc" "reference pattern not found: $after"
+    return
+  fi
+  window="$(tail -n "+$((after_line + 1))" "$log" | grep -A20 "Received: .*\"$action\"" | grep -m1 'Sent: \[3,' || true)"
+  if [ -z "$window" ]; then
+    _check_fail "$desc" "no CALLRESULT found after Received .../$action (searched after line $after_line: $after)"
   elif printf '%s' "$window" | grep -q "\"status\":\"$status\""; then
     _check_pass "$desc"
   else

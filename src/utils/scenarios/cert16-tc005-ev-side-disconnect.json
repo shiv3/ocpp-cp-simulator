@@ -21,12 +21,6 @@
       "data": { "label": "Plug In", "action": "plugin" }
     },
     {
-      "id": "status-preparing",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 250 },
-      "data": { "label": "Set Preparing", "status": "Preparing" }
-    },
-    {
       "id": "tx-start",
       "type": "transaction",
       "position": { "x": 400, "y": 350 },
@@ -35,12 +29,6 @@
         "action": "start",
         "tagId": "CERT005"
       }
-    },
-    {
-      "id": "status-charging",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 450 },
-      "data": { "label": "Set Charging", "status": "Charging" }
     },
     {
       "id": "meter-auto",
@@ -74,12 +62,6 @@
       }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 850 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "end-1",
       "type": "end",
       "position": { "x": 400, "y": 950 },
@@ -88,13 +70,10 @@
   ],
   "edges": [
     { "id": "e1", "source": "start-1", "target": "plug-in" },
-    { "id": "e2", "source": "plug-in", "target": "status-preparing" },
-    { "id": "e3", "source": "status-preparing", "target": "tx-start" },
-    { "id": "e4", "source": "tx-start", "target": "status-charging" },
-    { "id": "e5", "source": "status-charging", "target": "meter-auto" },
-    { "id": "e6", "source": "meter-auto", "target": "plug-out" },
-    { "id": "e7", "source": "plug-out", "target": "tx-stop" },
-    { "id": "e8", "source": "tx-stop", "target": "status-available" },
-    { "id": "e9", "source": "status-available", "target": "end-1" }
+    { "id": "e2", "source": "plug-in", "target": "tx-start" },
+    { "id": "e3", "source": "tx-start", "target": "meter-auto" },
+    { "id": "e4", "source": "meter-auto", "target": "plug-out" },
+    { "id": "e5", "source": "plug-out", "target": "tx-stop" },
+    { "id": "e6", "source": "tx-stop", "target": "end-1" }
   ]
 }

@@ -8,6 +8,9 @@ import {
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import { getTemplateById } from "../../../../utils/scenarioTemplates";
+import { StartTransactionResultHandler } from "../../../infrastructure/transport/handlers/callresult/TransactionResultHandlers";
+import { Logger } from "../../../shared/Logger";
+import type { HandlerContext } from "../../../infrastructure/transport/handlers/MessageHandlerRegistry";
 
 function timeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -76,6 +79,20 @@ describe("cert16-tc010-remote-start (built-in certification template)", () => {
       // Simulate the CSMS issuing RemoteStartTransaction.req — the same
       // entry point the real RemoteStartTransaction handler uses.
       cp.notifyRemoteStartReceived(1, "CERT010-LIVE-TAG");
+
+      // The scenario's own "Set Preparing"/"Set Charging" nodes were
+      // removed (#176) — Preparing is now driven intrinsically by
+      // ChargePoint.startTransaction() (request-time), and Charging is
+      // only driven by StartTransactionResultHandler on the
+      // StartTransaction.conf CALLRESULT. This test has no live transport
+      // (see newChargePoint's comment), so simulate that CALLRESULT
+      // arriving directly, exactly as a real CSMS accepting the start
+      // would trigger it.
+      await waitUntil(() => connector!.transaction !== null);
+      new StartTransactionResultHandler(1).handle(
+        { transactionId: 1010, idTagInfo: { status: "Accepted" } },
+        { chargePoint: cp, logger: new Logger() } satisfies HandlerContext,
+      );
 
       await waitUntil(() => connector!.status === OCPPStatus.Charging);
 

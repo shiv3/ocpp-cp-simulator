@@ -40,7 +40,7 @@ async function replyStatusNotification(
 }
 
 describe("OCPP 1.6 transaction lifecycle (golden)", () => {
-  it("sends StartTransaction, MeterValues, and StopTransaction with CSMS transaction id", async () => {
+  it("sends StartTransaction, MeterValues, and StopTransaction with CSMS transaction id, with Preparing preceding StartTransaction on the wire (#176)", async () => {
     const csms = startMockCsms();
     const cp = new ChargePoint(
       "CP016-TX",
@@ -71,6 +71,14 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
       await replyStatusNotification(csms, 1, "Available");
 
       cp.startTransaction("TAG-16", 1);
+
+      // The outbound CALL queue is strictly serial/FIFO (§4.1.1), and
+      // startTransaction() now drives Preparing before enqueueing
+      // StartTransaction.req (#176) — so the wire sees Preparing's
+      // StatusNotification.req first, and StartTransaction.req is only
+      // sent once that's acked.
+      await replyStatusNotification(csms, 1, "Preparing");
+
       const startCall = await csms.waitForCall("StartTransaction");
       const startPayload = startCall.payload as StartTransactionRequestV16;
       expect(startPayload).toMatchObject({
@@ -84,7 +92,6 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
         idTagInfo: { status: "Accepted" },
       });
 
-      await replyStatusNotification(csms, 1, "Preparing");
       await replyStatusNotification(csms, 1, "Charging");
 
       cp.sendMeterValue(1);
@@ -114,6 +121,28 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
       expect(
         payload<StopTransactionRequestV16>(relevantFrames[2]).transactionId,
       ).toBe(1001);
+
+      // #176: explicit wire-order pin. Preparing's StatusNotification.req
+      // must be enqueued (and therefore sent, given the serial CALL queue)
+      // strictly before StartTransaction.req — not just "eventually acked
+      // before" as an artifact of a scenario node, but intrinsic to
+      // ChargePoint.startTransaction() itself for a plain, non-scenario
+      // start.
+      const preparingIndex = csms.received.findIndex(
+        (frame) =>
+          frame[0] === 2 &&
+          frame[2] === "StatusNotification" &&
+          (frame[3] as { connectorId?: number; status?: string })
+            .connectorId === 1 &&
+          (frame[3] as { connectorId?: number; status?: string }).status ===
+            "Preparing",
+      );
+      const startTransactionIndex = csms.received.findIndex(
+        (frame) => frame[0] === 2 && frame[2] === "StartTransaction",
+      );
+      expect(preparingIndex).toBeGreaterThanOrEqual(0);
+      expect(startTransactionIndex).toBeGreaterThanOrEqual(0);
+      expect(preparingIndex).toBeLessThan(startTransactionIndex);
 
       expect(normalizeTranscript(relevantFrames)).toMatchSnapshot();
     } finally {

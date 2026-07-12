@@ -1,6 +1,6 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
-exports[`OCPP 1.6 transaction lifecycle (golden) sends StartTransaction, MeterValues, and StopTransaction with CSMS transaction id 1`] = `
+exports[`OCPP 1.6 transaction lifecycle (golden) sends StartTransaction, MeterValues, and StopTransaction with CSMS transaction id, with Preparing preceding StartTransaction on the wire (#176) 1`] = `
 [
   [
     2,

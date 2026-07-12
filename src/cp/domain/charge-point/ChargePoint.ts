@@ -1237,12 +1237,18 @@ export class ChargePoint {
     }
 
     connector.beginTransaction(transaction);
+    // Drive Preparing before enqueueing StartTransaction.req: the outbound
+    // CALL queue is strictly serial/FIFO, so whichever we queue first is
+    // what the wire sees first. Sending Preparing's StatusNotification.req
+    // ahead of StartTransaction.req makes the OCPP-conformant wire order
+    // (Preparing precedes StartTransaction) intrinsic to the domain rather
+    // than an accident of scenario node ordering (#176).
+    this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     this._outbox.sendTransactionEvent({
       phase: "started",
       transaction,
       connectorId,
     });
-    this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
 
     this._events.emit("transactionStarted", {
       connectorId,

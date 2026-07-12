@@ -40,6 +40,58 @@ export function defaultSteveConfig(
   };
 }
 
+/**
+ * reservation_expiry_soon equivalent: a ReserveNow "expiry" value `minutes`
+ * (default 10) from now, in the "YYYY-MM-DD HH:MM" format SteVe's ReserveNow
+ * form expects (no seconds field). Runtime-relative so specs never go stale
+ * the way a hardcoded absolute date would -- always UTC (matches the bash
+ * version's `date -u`).
+ */
+export function reservationExpirySoon(minutes = 10): string {
+  const d = new Date(Date.now() + minutes * 60_000);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+export interface WaitForConditionOptions {
+  /** Total time budget, ms (default 15000). */
+  timeoutMs?: number;
+  /** Delay between polls, ms (default 1000). */
+  intervalMs?: number;
+  /** Included in the timeout error message. */
+  description?: string;
+}
+
+/**
+ * wait_for_condition equivalent: polls `check()` (any async predicate -- DB
+ * polling here, but deliberately generic, not DB-specific) until it
+ * resolves to a truthy value, returning that value. Rejects once
+ * `timeoutMs` has elapsed without a truthy result -- mirrors lib.sh's
+ * wait_for_condition, which `die`s (kills the whole run) on timeout rather
+ * than returning an empty/failure value for the caller to handle
+ * gracefully; letting this reject and propagate out of a spec's drive()
+ * reproduces that same fail-hard behavior here.
+ */
+export async function waitForCondition<T>(
+  check: () => Promise<T | undefined | null | false | "">,
+  options: WaitForConditionOptions = {},
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const intervalMs = options.intervalMs ?? 1_000;
+  const description = options.description ?? "condition";
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await check();
+    if (result) return result;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `timed out after ${timeoutMs}ms waiting for: ${description}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 const CSRF_RE = /name="_csrf"\s+value="([^"]*)"/;
 
 function extractCsrf(html: string): string {
@@ -216,6 +268,14 @@ export class SteveDb {
   async latestOpenTxPk(cpId: string): Promise<string> {
     return this.scalar(
       `SELECT t.transaction_pk FROM transaction t JOIN evse e ON e.evse_pk = t.evse_pk WHERE e.charge_box_id = '${cpId}' AND t.stop_timestamp IS NULL ORDER BY t.transaction_pk DESC LIMIT 1;`,
+    );
+  }
+
+  /** db_latest_reservation_pk equivalent: most recent reservation_pk for a
+   *  charge box (any status). */
+  async latestReservationPk(cpId: string): Promise<string> {
+    return this.scalar(
+      `SELECT r.reservation_pk FROM reservation r JOIN evse e ON e.evse_pk = r.evse_pk WHERE e.charge_box_id = '${cpId}' ORDER BY r.reservation_pk DESC LIMIT 1;`,
     );
   }
 

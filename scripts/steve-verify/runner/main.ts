@@ -1,104 +1,47 @@
 #!/usr/bin/env bun
 /**
- * main.ts -- TypeScript steve-verify runner CLI (Task 1 slice).
+ * main.ts -- TypeScript steve-verify runner CLI.
  *
  * Usage: bun scripts/steve-verify/runner/main.ts run <template-id> \
  *          [--cp CERTCP1] [--timeout N] [--connector N]
+ *        bun scripts/steve-verify/runner/main.ts run --group core|authlist-reservation
  *
  * Brings its own simulator container up (sim.ts, mirrors lib.sh's
  * sim_start), drives it over the JSON-Lines stdin protocol, captures its
  * full stdout, parses OCPP-J frames (ocpp.ts) and runs the named spec's
- * drive()/assert() against a live SteVe instance (steve.ts). Task 1 wires
- * exactly the two scenarios needed for the end-to-end proof; Task 2 grows
- * a specs/ directory + `run --group` on top of this same runScenario()
- * core.
+ * drive()/assert() against a live SteVe instance (steve.ts). Task 1 wired
+ * the runner core + two scenarios directly here; Task 2 grows a specs/
+ * directory (typed spec objects per group) + this `run --group` sweep on
+ * top of the same runScenario() core -- sequential only, one CP per
+ * scenario round-robined across CERTCP1..3 (mirrors run-all.sh's CP_FOR
+ * assignment); Task 3 adds --parallel and the remaining groups.
  */
 
 import { fileURLToPath } from "node:url";
 import {
   AssertRecorder,
   assertEq,
-  assertLineMatches,
-  assertNoLineMatches,
   assertNotSent,
   assertReceived,
   assertResponseStatus,
-  assertSent,
 } from "./assert";
 import { parseLog } from "./ocpp";
 import { defaultSimConfig, startSim } from "./sim";
 import { defaultSteveConfig, SteveClient, SteveDb } from "./steve";
+import { AUTHLIST_RESERVATION_SPECS, CORE_SPECS } from "./specs/index";
 import type { AssertContext, DriveContext, ScenarioSpec } from "./spec-types";
+import { sleep } from "./util";
 
 // scripts/steve-verify/runner/main.ts is 3 directories below the repo root.
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // ---------------------------------------------------------------------------
-// Scenario specs (Task 1: exactly the two needed for the live end-to-end
-// proof; Task 2 replaces this with a specs/ directory + registry).
+// Scenario specs -- the Core and LocalAuthList/Reservation groups now live
+// in specs/ (Task 2); cert16-tc026-remote-start-rejected is a
+// RemoteTrigger/SmartCharging-group scenario (Task 3's group, not yet
+// ported into specs/), kept here as the Task 1 proof scenario and merged
+// into the combined registry below so `run <template-id>` still finds it.
 // ---------------------------------------------------------------------------
-
-/** cert16-tc001-cold-boot -- CP-only scenario, no CSMS-side operator action. */
-const tc001ColdBootSpec: ScenarioSpec<void> = {
-  templateId: "cert16-tc001-cold-boot",
-  description:
-    "TC_001 Cold Boot: CP re-affirms StatusNotification(Available) after boot, then idles.",
-  connector: 1,
-  bootWaitSecs: 4,
-  holdSecs: 15,
-  assert({ frames, lines, rec }: AssertContext<void>) {
-    assertSent(rec, frames, "BootNotification", "BootNotification.req sent");
-    assertResponseStatus(
-      rec,
-      frames,
-      "BootNotification",
-      "Accepted",
-      "BootNotification accepted",
-      { direction: "sent" },
-    );
-
-    const sentAvailableOnConnector1 = frames.some(
-      (f) =>
-        f.kind === "call" &&
-        f.direction === "sent" &&
-        f.action === "StatusNotification" &&
-        (f.payload as { connectorId?: number; status?: string } | null)
-          ?.connectorId === 1 &&
-        (f.payload as { connectorId?: number; status?: string } | null)
-          ?.status === "Available",
-    );
-    if (sentAvailableOnConnector1) {
-      rec.pass("StatusNotification(Available) sent for connector 1");
-    } else {
-      rec.fail(
-        "StatusNotification(Available) sent for connector 1",
-        "no Sent StatusNotification frame with connectorId=1, status=Available",
-      );
-    }
-
-    // Scenario lifecycle: prefer the structured JSON event
-    // ({"event":"scenario_completed",...}) over grepping the free-text
-    // "Scenario execution completed" log line -- see the Task 1
-    // investigation notes (.superpowers/sdd/tsr-task-1-report.md) for why
-    // it's the more robust of the two for lifecycle checks specifically.
-    assertLineMatches(
-      rec,
-      lines,
-      /"event":"scenario_completed"/,
-      "scenario ran to completion",
-    );
-    assertNoLineMatches(
-      rec,
-      lines,
-      /blocked by the boot gate/,
-      "no messages were dropped by the boot gate",
-    );
-  },
-};
 
 interface RemoteStartRejectedDriveState {
   baselineTxPk: string;
@@ -292,11 +235,83 @@ async function runScenario<D>(
 }
 
 // ---------------------------------------------------------------------------
+// Spec registry -- groups mirror run-all.sh's group names exactly (Task 3
+// adds remotetrigger-smartcharging/firmware/all on top of this same map).
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const GROUPS: Record<string, ScenarioSpec<any>[]> = {
+  core: CORE_SPECS,
+  "authlist-reservation": AUTHLIST_RESERVATION_SPECS,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ALL_SPECS: ScenarioSpec<any>[] = [
+  ...CORE_SPECS,
+  ...AUTHLIST_RESERVATION_SPECS,
+  tc026RemoteStartRejectedSpec,
+];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const SPECS_BY_TEMPLATE_ID = new Map<string, ScenarioSpec<any>>(
+  ALL_SPECS.map((spec) => [spec.templateId, spec]),
+);
+
+// Round-robins scenarios across CERTCP1..3 so adjacent scenarios in a group
+// sweep don't collide on the same charge point's transaction state --
+// mirrors run-all.sh's CP_FOR assignment.
+const GROUP_CPS = ["CERTCP1", "CERTCP2", "CERTCP3"];
+
+/** Sequential group sweep (Task 3 adds --parallel). Exits the process. */
+async function runGroup(groupName: string): Promise<never> {
+  const specs = GROUPS[groupName];
+  if (!specs) {
+    process.stderr.write(
+      `Unknown group: ${groupName} (known: ${Object.keys(GROUPS).join(", ")})\n`,
+    );
+    process.exit(1);
+  }
+
+  process.stderr.write(
+    `[runner] group '${groupName}': ${specs.length} scenario(s), sequential\n`,
+  );
+
+  const results: { templateId: string; cpId: string; rec: AssertRecorder }[] =
+    [];
+  for (let i = 0; i < specs.length; i++) {
+    const spec = specs[i];
+    const cpId = GROUP_CPS[i % GROUP_CPS.length];
+    const rec = await runScenario(spec, { cpId });
+    results.push({ templateId: spec.templateId, cpId, rec });
+  }
+
+  process.stderr.write(`\n[runner] group '${groupName}' results:\n`);
+  for (const { templateId, cpId, rec } of results) {
+    process.stderr.write(
+      `  ${rec.verdict}: ${templateId} (${cpId}, ${rec.total} checks, ${rec.failed} failed)\n`,
+    );
+  }
+
+  const failedCount = results.filter((r) => r.rec.verdict === "FAIL").length;
+  if (failedCount > 0) {
+    process.stderr.write(
+      `[runner] ${failedCount}/${results.length} scenario(s) in group '${groupName}' FAILed\n`,
+    );
+    process.exit(1);
+  }
+  process.stderr.write(
+    `[runner] all ${results.length} scenario(s) in group '${groupName}' PASSed.\n`,
+  );
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
 interface CliArgs {
-  templateId: string;
+  templateId?: string;
+  group?: string;
   cpId: string;
   connector?: number;
   timeoutSecs?: number;
@@ -314,7 +329,9 @@ function requireValue(argv: string[], index: number, flag: string): string {
 function printUsage(): void {
   process.stderr.write(
     "Usage: bun scripts/steve-verify/runner/main.ts run <template-id> " +
-      "[--cp CERTCP1] [--timeout N] [--connector N]\n",
+      "[--cp CERTCP1] [--timeout N] [--connector N]\n" +
+      "       bun scripts/steve-verify/runner/main.ts run --group " +
+      `${Object.keys(GROUPS).join("|")}\n`,
   );
 }
 
@@ -323,12 +340,21 @@ function parseArgs(argv: string[]): CliArgs {
     printUsage();
     process.exit(1);
   }
-  const templateId = argv[1];
+
+  let templateId: string | undefined;
+  let group: string | undefined;
   let cpId = process.env.DEFAULT_CP_ID ?? "CERTCP1";
   let connector: number | undefined;
   let timeoutSecs: number | undefined;
 
-  for (let i = 2; i < argv.length; i++) {
+  if (argv[1] === "--group") {
+    group = requireValue(argv, 2, "--group");
+  } else {
+    templateId = argv[1];
+  }
+
+  const startIndex = group !== undefined ? 3 : 2;
+  for (let i = startIndex; i < argv.length; i++) {
     switch (argv[i]) {
       case "--cp":
         cpId = requireValue(argv, ++i, "--cp");
@@ -345,34 +371,37 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
     }
   }
-  return { templateId, cpId, connector, timeoutSecs };
+  return { templateId, group, cpId, connector, timeoutSecs };
 }
-
-const KNOWN_SPECS = [tc001ColdBootSpec, tc026RemoteStartRejectedSpec];
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  if (args.group !== undefined) {
+    await runGroup(args.group);
+    return;
+  }
+
   const options: RunOptions = {
     cpId: args.cpId,
     connector: args.connector,
     timeoutSecs: args.timeoutSecs,
   };
 
-  let rec: AssertRecorder;
-  switch (args.templateId) {
-    case tc001ColdBootSpec.templateId:
-      rec = await runScenario(tc001ColdBootSpec, options);
-      break;
-    case tc026RemoteStartRejectedSpec.templateId:
-      rec = await runScenario(tc026RemoteStartRejectedSpec, options);
-      break;
-    default:
-      process.stderr.write(
-        `Unknown template id: ${args.templateId} (known: ${KNOWN_SPECS.map((s) => s.templateId).join(", ")})\n`,
-      );
-      process.exit(1);
+  if (!args.templateId) {
+    printUsage();
+    process.exit(1);
   }
 
+  const spec = SPECS_BY_TEMPLATE_ID.get(args.templateId);
+  if (!spec) {
+    process.stderr.write(
+      `Unknown template id: ${args.templateId} (known: ${[...SPECS_BY_TEMPLATE_ID.keys()].join(", ")})\n`,
+    );
+    process.exit(1);
+  }
+
+  const rec = await runScenario(spec, options);
   process.exit(rec.verdict === "PASS" ? 0 : 1);
 }
 

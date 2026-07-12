@@ -471,7 +471,7 @@ export const tc017UnlockOccupiedSpec: ScenarioSpec<void> = {
       );
     }
   },
-  assert({ frames, rec }) {
+  async assert({ cpId, db, frames, rec }) {
     assertReceived(
       rec,
       frames,
@@ -490,6 +490,22 @@ export const tc017UnlockOccupiedSpec: ScenarioSpec<void> = {
       frames,
       "StopTransaction",
       "StopTransaction sent (session completes normally)",
+    );
+
+    const txPk = await db.latestTxPk(cpId);
+    if (!txPk) {
+      rec.fail(
+        `DB: transaction row exists for ${cpId}`,
+        "no transaction found",
+      );
+      return;
+    }
+    assertNonEmpty(
+      rec,
+      await db.scalar(
+        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
+      ),
+      "DB: transaction is closed (stop_timestamp set)",
     );
   },
 };
@@ -519,7 +535,7 @@ export const tc018UnlockFailureSpec: ScenarioSpec<void> = {
       );
     }
   },
-  assert({ frames, rec }) {
+  async assert({ cpId, db, frames, rec }) {
     assertReceived(
       rec,
       frames,
@@ -538,6 +554,22 @@ export const tc018UnlockFailureSpec: ScenarioSpec<void> = {
       frames,
       "StopTransaction",
       "StopTransaction sent (session completes normally despite unlock failure)",
+    );
+
+    const txPk = await db.latestTxPk(cpId);
+    if (!txPk) {
+      rec.fail(
+        `DB: transaction row exists for ${cpId}`,
+        "no transaction found",
+      );
+      return;
+    }
+    assertNonEmpty(
+      rec,
+      await db.scalar(
+        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
+      ),
+      "DB: transaction is closed (stop_timestamp set)",
     );
   },
 };

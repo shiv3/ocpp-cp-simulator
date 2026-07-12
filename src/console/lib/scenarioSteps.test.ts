@@ -191,6 +191,44 @@ describe("deriveLinearSteps", () => {
     expect(result.isLinear).toBe(true);
     expect(result.steps.map((n) => n.id)).toEqual(["a"]);
   });
+
+  it("treats a clean chain with no END node as linear, with endNode null", () => {
+    const a = node("a", ScenarioNodeType.STATUS_CHANGE, {
+      label: "A",
+      status: OCPPStatus.Available,
+    });
+    const b = node("b", ScenarioNodeType.DELAY, {
+      label: "B",
+      delaySeconds: 5,
+    });
+    const def = makeDef(
+      [startNode(), a, b],
+      [edge("start", "a"), edge("a", "b")],
+    );
+
+    const result = deriveLinearSteps(def);
+
+    expect(result.isLinear).toBe(true);
+    expect(result.endNode).toBeNull();
+    expect(result.steps.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("returns the END node and excludes it from steps when present (regression)", () => {
+    const a = node("a", ScenarioNodeType.STATUS_CHANGE, {
+      label: "A",
+      status: OCPPStatus.Available,
+    });
+    const def = makeDef(
+      [startNode(), a, endNode()],
+      [edge("start", "a"), edge("a", "end")],
+    );
+
+    const result = deriveLinearSteps(def);
+
+    expect(result.isLinear).toBe(true);
+    expect(result.endNode?.id).toBe("end");
+    expect(result.steps.map((n) => n.id)).toEqual(["a"]);
+  });
 });
 
 // --- rebuildLinearScenario ------------------------------------------------

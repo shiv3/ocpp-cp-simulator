@@ -29,20 +29,33 @@ import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 /**
  * Maps a scenario graph (`nodes`/`edges`) to an ordered, list-editable
  * shape when it forms a single linear chain START → step[1] → … →
- * step[n] → END. Most real scenarios in this repo are linear chains, so a
+ * step[n] → (END). Most real scenarios in this repo are linear chains, so a
  * list-based editor can operate on `steps` directly instead of mounting
- * ReactFlow, and hand the result back to `rebuildLinearScenario`.
+ * ReactFlow, and hand the result back to `rebuildLinearScenario`. The chain
+ * is linear whether or not an END node terminates it — see `endNode` below.
  */
 export interface LinearSteps {
   /**
    * false if any node has >1 outgoing edge (branch), a node exists that
-   * the START→…→END walk never reaches (disconnected middle node), the
-   * walk revisits a node (cycle), or there is no START node at all.
+   * the START→…→(END) walk never reaches (disconnected middle node), the
+   * walk revisits a node (cycle), or there is no START node at all. A
+   * missing END node does NOT make a clean chain non-linear (see `endNode`).
    */
   isLinear: boolean;
-  /** Ordered walk from START to END, excluding the START/END nodes themselves. */
+  /**
+   * Ordered walk from START to the last reachable node, excluding the
+   * START/END nodes themselves. Includes the terminal real (non-END) node
+   * even when the scenario has no END node.
+   */
   steps: ScenarioNode[];
   startNode: ScenarioNode | null;
+  /**
+   * The scenario's END node, or `null` if none exists. `null` can occur
+   * even when `isLinear` is `true`: the v2 graph editor lets a user delete
+   * the END node and persist the result, and a clean START→…→chain with no
+   * END is still considered linear so the list editor can open it —
+   * `rebuildLinearScenario` self-heals by creating a new END node on save.
+   */
   endNode: ScenarioNode | null;
 }
 

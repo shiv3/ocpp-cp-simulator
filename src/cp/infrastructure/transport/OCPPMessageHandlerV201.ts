@@ -129,6 +129,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _dataTransferHandler: DataTransferHandler =
     new DataTransferHandler();
   private readonly _inbound: V201InboundRegistry;
+  /** Tracks in-flight CP→CSMS CALLs by messageId so `handleCallResult` can
+   *  correlate a CALLRESULT back to the request that provoked it (issue
+   *  #181) — e.g. Authorize.conf carries no idToken of its own, so the
+   *  idToken has to come from the original Authorize.req. Entries are
+   *  removed once the matching CALLRESULT/CALLERROR arrives. */
+  private readonly _pendingRequests = new Map<
+    string,
+    { action: V201Action; payload: V201RequestPayload }
+  >();
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -173,6 +182,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
     const sent = this._webSocket.sendAction(messageId, action, payload);
     if (sent) {
+      this._pendingRequests.set(messageId, { action, payload });
       this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
     }
   }
@@ -218,14 +228,41 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     } else if (messageType === OCPPMessageType.CALLRESULT) {
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {
+      this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
     }
   }
 
   private handleCallResult(
-    _messageId: string,
+    messageId: string,
     payload: V201ResponsePayload,
   ): void {
+    const pending = this._pendingRequests.get(messageId);
+    this._pendingRequests.delete(messageId);
+
+    // Issue #181: correlate Authorize.conf back to the idToken from the
+    // original Authorize.req (AuthorizeResponseV201 itself carries none)
+    // and fan it out via the same `authorizeResult` event/notify path the
+    // v16 AuthorizeResultHandler uses, so `ChargePoint.authorizeAndWait`
+    // (the #181 local-authorize gate) resolves promptly for v2.0.1/2.1
+    // local starts instead of always timing out.
+    if (pending?.action === "Authorize") {
+      const authorizeResult = payload as AuthorizeResponseV201;
+      const authorizeRequest = pending.payload as AuthorizeRequestV201;
+      const status = authorizeResult.idTokenInfo?.status;
+      if (status !== undefined) {
+        this._logger.info(
+          `[v2.0.1] Authorize response: ${status}`,
+          LogType.OCPP,
+        );
+        this._chargePoint.notifyAuthorizeResult(
+          authorizeRequest.idToken.idToken,
+          status,
+        );
+      }
+      return;
+    }
+
     const bootResult = payload as BootNotificationResponseV201;
     if (
       bootResult.status !== undefined &&

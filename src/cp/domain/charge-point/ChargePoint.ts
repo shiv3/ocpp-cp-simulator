@@ -1297,11 +1297,13 @@ export class ChargePoint {
     const isLocalStart = options.triggerReason !== "RemoteStart";
     if (isLocalStart && this._configuration.authorizeBeforeLocalStart()) {
       const status = await this.authorizeAndWait(tagId);
-      if (
-        status === "Invalid" ||
-        status === "Expired" ||
-        status === "Blocked"
-      ) {
+      // Any non-"Accepted" idTagInfo/idTokenInfo status denies the local
+      // start. Deliberately NOT an allowlist of specific denial strings —
+      // OCPP 2.0.1/2.1's AuthorizationStatusEnumType has more denial values
+      // than 1.6's AuthorizationStatus (ConcurrentTx, NoCredit,
+      // NotAllowedTypeEVSE, NotAtThisLocation, NotAtThisTime, Unknown), and
+      // a hardcoded 1.6-shaped list would silently let those through.
+      if (status !== "Accepted") {
         this._logger.warn(
           `Authorize.conf ${status} for ${tagId}; refusing local transaction start on connector ${connectorId}`,
           LogType.TRANSACTION,

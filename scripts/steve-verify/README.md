@@ -68,6 +68,7 @@ retired `run-all.sh`'s own CLI):
 ```bash
 bun runner/main.ts run-all
 bun runner/main.ts run-all --parallel   # up to 3 concurrent (one per CERTCP1..3)
+bun runner/main.ts run-all --parallel --retry-failed-isolated  # + isolated-retry safety net, see below
 ```
 
 **Teardown:**
@@ -86,7 +87,10 @@ bun runner/main.ts run-all --parallel   # up to 3 concurrent (one per CERTCP1..3
   a markdown table (`scenario | cp | verdict | checks | failed`) covering
   every scenario in that run, same columns the retired bash `run-all.sh`
   produced so existing docs/screenshots referencing this format stay
-  truthful. Process exit code is non-zero if any scenario FAILed or errored.
+  truthful. Process exit code is non-zero if any scenario FAILed or errored
+  (see "Parallel lane isolation" below for how `--retry-failed-isolated`
+  changes that for a `--parallel` sweep). With `--retry-failed-isolated`,
+  the table gains an "isolated retry" column and a flake-count note.
 - A single `bun runner/main.ts run <id>` exits 0 on PASS, 1 on FAIL (no
   `summary.md` for a single-scenario run -- that's a group-sweep artifact).
 - `results/` is gitignored (reproducible from a live run, not meant to be
@@ -140,6 +144,58 @@ window-scan), which could pick up the wrong CALLRESULT when other traffic
 wire between a request and its own response. `assert()` then runs against
 those correlated frames plus SteVe's DB.
 
+## Parallel lane isolation
+
+`--parallel` runs up to 3 scenarios concurrently, one per `CERTCP1`..`3`, all
+inside a single `bun` process (`Promise.all` over one batch, not separate
+child processes). Investigation for issue #184 Finding 4 (juherr's
+independent SteVe pre-prod run saw 5 parallel-only false-negative FAILs --
+`tc021`/`tc043-3`/`tc043-5`/`reservation-basic`/`tc054` -- that all PASSed
+run in isolation) found:
+
+- **Not session/CSRF contamination.** `SteveClient` (`runner/steve.ts`) holds
+  its cookie jar as an instance field (a plain `Map`), and `runScenario()`
+  constructs a fresh `SteveClient`/`SteveDb` per call -- each parallel lane
+  already gets its own jar, never shared. Confirmed live: three concurrent
+  `admin` logins against a running SteVe 3.13.0 all stayed valid
+  simultaneously (no single-session-per-user eviction).
+- **Not cross-CP DB query contamination.** Every `SteveDb` lookup used by a
+  spec's `assert()` (`latestTxPk`, `latestOpenTxPk`, `latestReservationPk`,
+  `waitActiveTxPk`) filters by `charge_box_id`, so two lanes on different
+  CPs can't read each other's transaction/reservation row.
+- **Working hypothesis: fixed-timing races under host contention.** All 5
+  flaky scenarios share one shape: a SteVe-initiated async CSMS push
+  (`steve.op()` -- ChangeConfiguration/SendLocalList/ReserveNow/
+  TriggerMessage) whose `assert()` reads a wire-log snapshot frozen after a
+  **fixed** `holdSecs` sleep (`runScenario()` in `runner/main.ts`). Under
+  3-way parallel docker+JVM+DB host contention, SteVe's actual push to the
+  CP can arrive later than under no contention; if it lands after that fixed
+  window, the assert finds nothing and reports a false FAIL. This is the
+  same class of race already called out in `runScenario()`'s own comment for
+  `bootWaitSecs`/`BootNotification.conf` timing under `--parallel`, just
+  hitting a different fixed wait. Not yet proven with a captured
+  reproduction under load; the REST-driver migration (issue #184 Task 2,
+  stateless Basic auth, no cookie/session at all) may also change this
+  timing profile enough to matter, one way or the other -- worth
+  re-evaluating once that lands.
+- **Sequential is the reliable reporting mode** until lane isolation is
+  guaranteed. `bun runner/main.ts run-all` (no `--parallel`) is the verdict
+  to trust for a final sign-off.
+
+For a faster loop that still gets a trustworthy verdict, pass
+`--retry-failed-isolated` alongside `--parallel`: after the parallel sweep,
+every scenario whose PARALLEL verdict was not PASS is re-run once more,
+sequentially (no concurrent lane), on the same SteVe/DB. `results/summary.md`
+gets an extra "isolated retry" column and a flake-count note; the runner logs
+`FLAKE` (parallel FAIL/ERROR, isolated PASS) or `CONFIRMED` (fails isolated
+too) for each retried scenario. The sweep's exit code only fails on a
+CONFIRMED non-PASS -- a resolved flake does not fail the run. This is a
+safety net, not a fix: it does not address the underlying timing race, and a
+scenario that is flaky in a way the isolated retry also hits (e.g. host is
+generally overloaded, not just parallel-contended) will still show
+CONFIRMED. The flag has no effect without `--parallel` (a sequential sweep
+is already isolated).
+
 ## Environment / configuration
 
 Everything is env-overridable. The bash environment layer (`01`/`02`/`99`,
@@ -187,6 +243,9 @@ machines; override if `18180`/`18443`/`13306` are also taken.
   a per-CP tag; `max_active_transaction_count=5` gives headroom for the
   default 3-way `--parallel` fan-out, but running many groups in parallel
   simultaneously could contend.
+- **`--parallel` lanes are not fully isolated (issue #184 Finding 4).**
+  See "Parallel lane isolation" above -- sequential is the reliable
+  reporting mode; `--retry-failed-isolated` is a safety net, not a fix.
 - **SteVe-specific.** Response statuses that are SteVe's own policy rather
   than CP behavior (e.g. TC_064's DataTransfer response status) are asserted
   loosely (a response was received) rather than pinned to a specific status.
@@ -224,7 +283,7 @@ scripts/steve-verify/
   02-provision.sh            # charge boxes, tags, charging profiles, stale-tx cleanup
   99-teardown.sh              # compose down (+ optional volume wipe)
   runner/                    # TypeScript runner (bun)
-    main.ts                   # CLI: run/run-all, groups, --parallel, summary writer
+    main.ts                   # CLI: run/run-all, groups, --parallel, --retry-failed-isolated, summary writer
     sim.ts                     # docker-spawned simulator process (JSON-Lines stdin)
     ocpp.ts                     # OCPP-J frame parser + uniqueId correlation
     steve.ts                     # SteVe manager-UI login/ops + DB access

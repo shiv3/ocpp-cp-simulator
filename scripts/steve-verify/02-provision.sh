@@ -133,6 +133,12 @@ ensure_charging_profile() {
   rm -f "$add_html"
   [ -n "$csrf" ] || die "could not find CSRF token on $STEVE_URL/chargingProfiles/add"
 
+  # add=Add mirrors the form's <input type="submit" name="add" value="Add">
+  # (confirmed on the live SteVe 3.13.0 /chargingProfiles/add page): Spring
+  # MVC dispatches this form to the controller's add handler by the presence
+  # of that "add" param, not by URL/method alone -- without it the POST is a
+  # silent no-op (200, no row inserted, no visible error). See issue #184
+  # Finding 3.
   curl -sS -b "$STEVE_JAR" -c "$STEVE_JAR" -m 10 -o /dev/null \
     --data-urlencode "description=$description" \
     --data-urlencode "stackLevel=$stack_level" \
@@ -145,6 +151,7 @@ ensure_charging_profile() {
     --data-urlencode "schedulePeriods[0].startPeriodInSeconds=0" \
     --data-urlencode "schedulePeriods[0].powerLimit=11000" \
     --data-urlencode "_csrf=$csrf" \
+    --data-urlencode "add=Add" \
     "$STEVE_URL/chargingProfiles/add"
 
   existing="$(db_scalar "SELECT charging_profile_pk FROM charging_profile WHERE description = '$description' LIMIT 1;")"

@@ -7,6 +7,7 @@ import Settings from "./components/Settings.tsx";
 import TopPage from "./components/TopPage.tsx";
 import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
 import V1App from "./v1/V1App.tsx";
+import ConsoleApp from "./console/ConsoleApp.tsx";
 
 const V2App: React.FC = () => {
   return (
@@ -29,11 +30,21 @@ const App: React.FC = () => {
   return (
     <Router basename={import.meta.env.VITE_BASE_URL}>
       <Routes>
-        {/* V1 Routes - Outside DarkModeProvider */}
+        {/* V1 legacy routes - outside DarkModeProvider */}
         <Route path="/v1/*" element={<V1App />} />
 
-        {/* V2 Routes - With DarkModeProvider */}
-        <Route path="/*" element={<V2App />} />
+        {/* V2 classic routes - unchanged, now mounted under /v2 */}
+        <Route path="/v2/*" element={<V2App />} />
+
+        {/* New console - default UI */}
+        <Route
+          path="/*"
+          element={
+            <DarkModeProvider>
+              <ConsoleApp />
+            </DarkModeProvider>
+          }
+        />
       </Routes>
     </Router>
   );

@@ -92,12 +92,12 @@ const Navbar: React.FC = () => {
           <div className="flex items-center gap-2">
             <Link
               className="text-xl font-bold hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
-              to="/"
+              to="/v2"
             >
               OCPP ChargePoint Simulator
             </Link>
             <Link
-              to="/settings"
+              to="/v2/settings"
               title={badgeTitle}
               className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded transition-colors ${badgeBg}`}
             >
@@ -116,7 +116,7 @@ const Navbar: React.FC = () => {
               <li>
                 <Link
                   className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
-                  to="/"
+                  to="/v2"
                 >
                   ChargePoint
                 </Link>
@@ -124,7 +124,7 @@ const Navbar: React.FC = () => {
               <li>
                 <Link
                   className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
-                  to="/settings"
+                  to="/v2/settings"
                 >
                   Settings
                 </Link>

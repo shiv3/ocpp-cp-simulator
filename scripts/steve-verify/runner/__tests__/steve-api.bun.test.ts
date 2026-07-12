@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { buildOperationBody } from "../steve-api";
+import {
+  buildOperationBody,
+  buildTransactionsQuery,
+  nullableToEmpty,
+  pickLatestTxPk,
+} from "../steve-api";
 
 // Every case below mirrors an actual specs/*.ts call site's `fields`
 // (UI-form-shaped, string-valued) and asserts the exact JSON body that was
@@ -306,5 +311,74 @@ describe("buildOperationBody", () => {
         connectorId: "not-a-number",
       }),
     ).toThrow(/integer/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SteveApiDb (issue #184 Task 3) -- pure helpers. The actual fetch()-driven
+// class methods (latestTxPk/waitActiveTxPk/closeStaleTx/txIdTag/
+// txStopTimestamp/txStopReason/txCountForTag) are exercised live against a
+// running SteVe 3.13.0 instead of mocked here -- same split as
+// buildOperationBody() above vs. SteveApiOps#op() (see the #184 Task 3
+// report for the live proof).
+// ---------------------------------------------------------------------------
+
+describe("pickLatestTxPk", () => {
+  test('empty list -> ""', () => {
+    expect(pickLatestTxPk([])).toBe("");
+  });
+
+  test("takes the FIRST element's id (SteVe orders /transactions by transaction_pk DESC -- source-verified, see steve-api.ts's header)", () => {
+    expect(pickLatestTxPk([{ id: 183 }, { id: 180 }, { id: 42 }])).toBe("183");
+  });
+
+  test("stringifies a numeric id", () => {
+    expect(pickLatestTxPk([{ id: 7 }])).toBe("7");
+  });
+});
+
+describe("nullableToEmpty", () => {
+  test('null -> "" (REST\'s not-set representation)', () => {
+    expect(nullableToEmpty(null)).toBe("");
+  });
+
+  test('undefined -> "" (transaction not found upstream)', () => {
+    expect(nullableToEmpty(undefined)).toBe("");
+  });
+
+  test("a real value passes through unchanged", () => {
+    expect(nullableToEmpty("2026-07-12T19:16:11.836Z")).toBe(
+      "2026-07-12T19:16:11.836Z",
+    );
+  });
+
+  test("empty string passes through unchanged (distinct from null)", () => {
+    expect(nullableToEmpty("")).toBe("");
+  });
+});
+
+describe("buildTransactionsQuery", () => {
+  test("no params -> empty query string (SteVe's TransactionQueryFormForApi already defaults type/periodType to ALL)", () => {
+    expect(buildTransactionsQuery({})).toBe("");
+  });
+
+  test("chargeBoxId only", () => {
+    expect(buildTransactionsQuery({ chargeBoxId: "CERTCP1" })).toBe(
+      "chargeBoxId=CERTCP1",
+    );
+  });
+
+  test("chargeBoxId + ocppIdTag + type, in insertion order", () => {
+    expect(
+      buildTransactionsQuery({
+        chargeBoxId: "CERTCP1",
+        ocppIdTag: "CERT028",
+        type: "ACTIVE",
+      }),
+    ).toBe("chargeBoxId=CERTCP1&ocppIdTag=CERT028&type=ACTIVE");
+  });
+
+  test("type is passed through UPPERCASE verbatim -- SteVe's QueryType enum is case-sensitive (live-verified: ?type=Active 400s, ?type=ACTIVE 200s)", () => {
+    expect(buildTransactionsQuery({ type: "STOPPED" })).toBe("type=STOPPED");
   });
 });

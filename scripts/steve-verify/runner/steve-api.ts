@@ -6,9 +6,15 @@
  * or unset, selected in main.ts) -- see steve.ts's `SteveUiOps` for the
  * `STEVE_DRIVER=ui` fallback (manager-UI form POSTs).
  *
+ * Issue #184 Task 3 grew this file a second driver, `SteveApiDb`
+ * (implements steve.ts's `SteveTx`) -- REST for transactions/OCPP tags,
+ * replacing direct MariaDB access everywhere the REST API covers it. See
+ * the "Transactions + OCPP tags" section further down for its own header
+ * (auth is identical to `SteveApiOps`'s below; the shapes differ).
+ *
  * Every shape below was verified live against a running SteVe 3.13.0 (see
- * the #184 Task 2 report for the full per-operation request/response
- * captures) -- nothing here is inferred from source alone.
+ * the #184 Task 2/3 reports for the full per-operation/endpoint
+ * request/response captures) -- nothing here is inferred from source alone.
  *
  * ## Auth
  * `/api/**` is a SEPARATE Spring Security filter chain from the manager
@@ -86,7 +92,8 @@
  * spec's holdSecs already budgets comfortably past that.
  */
 
-import type { SteveOps } from "./steve";
+import { SteveDb, waitForCondition } from "./steve";
+import type { SteveConfig, SteveOps, SteveTx } from "./steve";
 
 /** SteVe's own station-response budget is 30s
  *  (OcppOperationsService.STATION_RESPONSE_TIMEOUT) -- this must exceed
@@ -393,5 +400,351 @@ export class SteveApiOps implements SteveOps {
     return parsed
       ? `taskId=${parsed.taskId} taskFinished=${parsed.taskFinished}`
       : responseText;
+  }
+}
+
+// =============================================================================
+// Transactions + OCPP tags (issue #184 Task 3): SteVe 3.13.0's
+// `/api/v1/transactions` and `/api/v1/ocppTags` REST controllers, replacing
+// direct MariaDB access for everything they cover. Every shape below was
+// captured live against a running SteVe 3.13.0 -- see the #184 Task 3
+// report for the full raw captures (curl output + the Spring source read
+// straight out of the running container, same method Task 2 used for the
+// operations API).
+//
+// ## Transactions -- `GET /api/v1/transactions`
+// `TransactionsRestController#get` takes `TransactionQueryForm
+// .TransactionQueryFormForApi` query params -- notably `chargeBoxId` /
+// `ocppIdTag` (repeatable list params, `QueryForm`), and `type`
+// (`TransactionQueryForm.QueryType`: `ALL`/`ACTIVE`/`STOPPED`,
+// **UPPERCASE, case-sensitive** -- `?type=Active` 400s, `?type=ACTIVE`
+// 200s, live-verified). Unlike the manager UI's `TransactionQueryForm`
+// (whose bare constructor defaults `type` to `ACTIVE`),
+// `TransactionQueryFormForApi`'s constructor overrides both `type` and
+// `periodType` to `ALL` -- so the REST list defaults to every transaction,
+// open or closed, no `type` param needed for a `latestTxPk`-style lookup.
+// Results are `.orderBy(TRANSACTION.TRANSACTION_PK.desc())`
+// (`TransactionRepositoryImpl#getTransactions`, source-verified, not an
+// artifact of this dataset) -- the first element of a `chargeBoxId`-
+// filtered list IS `db_latest_tx_pk`'s answer.
+//
+// ## Transaction detail -- `GET /api/v1/transactions/{transactionPk}`
+// Returns `TransactionDetails { transaction, values }` -- `values` is the
+// full `MeterValues[]` list for that transaction (live-verified:
+// `energyValuesOnly=true`, the default, returns only
+// `Energy.Active.Import.Register` samples; `energyValuesOnly=false`
+// additionally includes `Power.Active.Import`). **MeterValues ARE exposed
+// via REST** -- no DB fallback needed for them (none of the 47 specs
+// currently assert on MeterValues content, but the capability is here).
+// A nonexistent `transactionPk` 404s with a clean JSON error body
+// (live-verified) -- `getTransactionDetailsOrUndefined` below treats that
+// as "no such transaction", matching `scalar()`'s "" for a zero-row SQL
+// SELECT.
+//
+// ## Stale-transaction close -- `PATCH /api/v1/transactions/{pk}/stop`
+// No request body. Live-verified: closes an open transaction with
+// `stopEventActor:"manual"`, `stopValue:"0"` -- the exact same shape
+// `SteveDb#closeStaleTx`'s raw `INSERT INTO transaction_stop (...,
+// event_actor, ..., stop_value, ...) VALUES (..., 'manual', ..., '0',
+// ...)` produces. Also live-verified **idempotent**: PATCHing an
+// already-closed transaction still 200s (no-op), so `closeStaleTx` below
+// doesn't need to special-case "already closed" itself.
+//
+// ## OCPP tags -- `GET/POST/PUT/DELETE /api/v1/ocppTags`
+// `OcppTagForm` (`POST`/`PUT` body): `idTag` (required), `parentIdTag`,
+// `expiryDate` (ISO-8601, **`@Future`-validated on BOTH create AND
+// update** -- live-verified: a past date -> `400 Bad Request` on POST,
+// confirmed the same DTO/validation applies to PUT by inspecting the
+// controller: both `create()` and `update()` take `@Valid OcppTagForm`),
+// `maxActiveTransactionCount`, `note`. Response (`OcppTagOverview`)
+// additionally carries `blocked`/`inTransaction`/`activeTransactionCount`
+// -- all **derived**, not stored columns (confirmed via `DESCRIBE
+// ocpp_tag`: no `blocked` column exists; `blocked` is
+// `max_active_transaction_count == 0`, live-verified by POSTing
+// `maxActiveTransactionCount:0` and reading back `"blocked":true`).
+// `idTag` lookup-by-value: `GET /ocppTags?idTag=<exact>` (live-verified
+// exact match, used to resolve a `POST`-returned `ocppTagPk` for a later
+// `PUT`/`DELETE`).
+//
+// **The CERT023-EXP gap (TC_023.2, issue #181): cannot be provisioned via
+// REST.** An EXPIRED tag needs `expiry_date` in the past, but
+// `OcppTagForm.expiryDate`'s `@Future` validation rejects that
+// unconditionally on both create and update (400, live-verified) -- there
+// is no request shape that gets a past `expiryDate` into SteVe through
+// this endpoint. `02-provision.sh` keeps the direct `UPDATE ocpp_tag SET
+// expiry_date = ...` SQL for this ONE field as a documented, permanent DB
+// fallback (not a gap expected to close -- `@Future` is presumably
+// intentional server-side validation, not a missing feature). Every other
+// tag-provisioning step (CERT023-BLK's `maxActiveTransactionCount=0`,
+// CERT023-INV's non-existence, and the whole CERT-TAG-1..8 +
+// scenario-discovered pool) is fully REST-driven -- see 02-provision.sh
+// and lib.sh's `steve_api_*` helpers.
+// =============================================================================
+
+/** `de.rwth.idsg.steve.repository.dto.Transaction` (REST JSON). "For
+ *  active transactions, all 'stop'-prefixed fields would be null." (the
+ *  DTO's own Swagger description, live-verified). */
+export interface ApiTransaction {
+  id: number;
+  connectorId: number;
+  chargeBoxPk: number;
+  ocppTagPk: number;
+  chargeBoxId: string;
+  ocppIdTag: string;
+  userId: number | null;
+  startValue: string;
+  startTimestamp: string;
+  stopValue: string | null;
+  stopReason: string | null;
+  stopTimestamp: string | null;
+  stopEventActor: string | null;
+}
+
+/** `TransactionDetails.MeterValues` (REST JSON, nested under `values[]`). */
+export interface ApiMeterValue {
+  valueTimestamp: string;
+  value: string;
+  readingContext: string | null;
+  format: string | null;
+  measurand: string | null;
+  location: string | null;
+  unit: string | null;
+  phase: string | null;
+}
+
+/** `GET /api/v1/transactions/{transactionPk}` response shape. */
+export interface ApiTransactionDetails {
+  transaction: ApiTransaction;
+  values: ApiMeterValue[];
+}
+
+/** `OcppTagOverview` (REST JSON) -- `GET /api/v1/ocppTags` list/detail
+ *  response shape, and what a successful `POST`/`PUT`/`DELETE` echoes
+ *  back. */
+export interface ApiOcppTag {
+  ocppTagPk: number;
+  idTag: string;
+  parentIdTag: string | null;
+  parentOcppTagPk: number | null;
+  expiryDate: string | null;
+  maxActiveTransactionCount: number;
+  note: string | null;
+  userPk: number | null;
+  /** Derived (`maxActiveTransactionCount === 0`), not a stored column --
+   *  see this section's header comment. */
+  blocked: boolean;
+  inTransaction: boolean;
+  activeTransactionCount: number;
+}
+
+/** REST equivalent of steve.ts's `SteveConfig` for the transactions/tags
+ *  client -- deliberately the same shape as `SteveApiConfig` (this file
+ *  already has one), but a distinct type so a caller can't accidentally
+ *  pass an operations config where a transactions/tags config is
+ *  expected (both happen to be structurally identical today; kept
+ *  separate for that reason, not because the fields differ). */
+export type SteveApiDbConfig = SteveApiConfig;
+
+/** `env` -> `SteveApiDbConfig` -- same defaults/env vars as
+ *  {@link defaultSteveApiConfig} (one SteVe REST API, one set of
+ *  credentials). */
+export const defaultSteveApiDbConfig = defaultSteveApiConfig;
+
+/** `db.latestTxPk()`'s answer from an already newest-first `/transactions`
+ *  response (see this section's header: SteVe itself orders by
+ *  `transaction_pk DESC`) -- the first element's id, or "" if the list is
+ *  empty. Pure, exported for unit testing. */
+export function pickLatestTxPk(
+  transactions: readonly { id: number }[],
+): string {
+  return transactions.length > 0 ? String(transactions[0].id) : "";
+}
+
+/** REST's JSON `null` -> steve.ts's "" not-set sentinel (assert.ts's
+ *  `assertNonEmpty` checks `value !== ""`). Pure, exported for unit
+ *  testing. */
+export function nullableToEmpty(value: string | null | undefined): string {
+  return value === null || value === undefined ? "" : value;
+}
+
+/** Builds the `/transactions` query string. `chargeBoxId`/`ocppIdTag` are
+ *  SteVe's repeatable list params (only ever a single value from this
+ *  driver's callers); `type` must be UPPERCASE (see this section's header
+ *  -- `?type=Active` 400s). Pure, exported for unit testing. */
+export function buildTransactionsQuery(params: {
+  chargeBoxId?: string;
+  ocppIdTag?: string;
+  type?: "ALL" | "ACTIVE" | "STOPPED";
+}): string {
+  const qs = new URLSearchParams();
+  if (params.chargeBoxId) qs.set("chargeBoxId", params.chargeBoxId);
+  if (params.ocppIdTag) qs.set("ocppIdTag", params.ocppIdTag);
+  if (params.type) qs.set("type", params.type);
+  return qs.toString();
+}
+
+/** GET/PATCH timeout for the transactions/tags client -- ordinary
+ *  request/response calls (not `SteveApiOps#op()`'s synchronous-CSMS-op
+ *  30s+ budget), so the same 10s every other non-op HTTP call in this
+ *  suite uses (steve.ts's `DEFAULT_TIMEOUT_MS`). */
+const DB_DEFAULT_TIMEOUT_MS = 10_000;
+
+/**
+ * REST driver for `SteveTx` (steve.ts): SteVe 3.13.0's
+ * `/api/v1/transactions` for everything transaction-shaped, with a
+ * DB-backed fallback ONLY for `latestReservationPk`/`reservationStatus`
+ * (no REST reservations endpoint exists -- see steve.ts's `SteveTx` doc
+ * comment). Default (`STEVE_DRIVER=api` or unset) -- see steve.ts's
+ * `SteveDb` for the `STEVE_DRIVER=ui`/`db` fallback, and this file's
+ * section header above for the request/response shapes this was verified
+ * against.
+ */
+export class SteveApiDb implements SteveTx {
+  private readonly dbFallback: SteveDb;
+
+  constructor(
+    private readonly cfg: SteveApiDbConfig,
+    dbFallbackCfg: SteveConfig,
+  ) {
+    this.dbFallback = new SteveDb(dbFallbackCfg);
+  }
+
+  private authHeader(): string {
+    return `Basic ${Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64")}`;
+  }
+
+  private async getJson<T>(path: string): Promise<T> {
+    const res = await fetch(`${this.cfg.baseUrl}${path}`, {
+      headers: {
+        accept: "application/json",
+        authorization: this.authHeader(),
+      },
+      signal: AbortSignal.timeout(DB_DEFAULT_TIMEOUT_MS),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        `steve-api-db: GET ${path} failed (HTTP ${res.status}): ${text.slice(0, 300)}`,
+      );
+    }
+    return JSON.parse(text) as T;
+  }
+
+  private async listTransactions(params: {
+    chargeBoxId?: string;
+    ocppIdTag?: string;
+    type?: "ALL" | "ACTIVE" | "STOPPED";
+  }): Promise<ApiTransaction[]> {
+    return this.getJson<ApiTransaction[]>(
+      `/transactions?${buildTransactionsQuery(params)}`,
+    );
+  }
+
+  /** Returns `undefined` for a nonexistent `transactionPk` (REST 404s --
+   *  live-verified, see this section's header) instead of throwing --
+   *  every caller below treats "no such transaction" the same as
+   *  scalar()'s "" for a zero-row SELECT. Also short-circuits on an empty
+   *  `txPk` (every real spec call site already guards `if (!txPk)` before
+   *  calling in, but SteVe would 400 on `/transactions/` with no id). */
+  private async getTransactionDetails(
+    txPk: string,
+  ): Promise<ApiTransactionDetails | undefined> {
+    if (!txPk) return undefined;
+    const res = await fetch(`${this.cfg.baseUrl}/transactions/${txPk}`, {
+      headers: {
+        accept: "application/json",
+        authorization: this.authHeader(),
+      },
+      signal: AbortSignal.timeout(DB_DEFAULT_TIMEOUT_MS),
+    });
+    if (res.status === 404) return undefined;
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        `steve-api-db: GET /transactions/${txPk} failed (HTTP ${res.status}): ${text.slice(0, 300)}`,
+      );
+    }
+    return JSON.parse(text) as ApiTransactionDetails;
+  }
+
+  async latestTxPk(cpId: string): Promise<string> {
+    const txs = await this.listTransactions({ chargeBoxId: cpId });
+    return pickLatestTxPk(txs);
+  }
+
+  async waitActiveTxPk(
+    cpId: string,
+    idTag: string,
+    timeoutSecs = 15,
+  ): Promise<string> {
+    return waitForCondition(
+      async () => {
+        const txs = await this.listTransactions({
+          chargeBoxId: cpId,
+          ocppIdTag: idTag,
+          type: "ACTIVE",
+        });
+        return pickLatestTxPk(txs) || undefined;
+      },
+      {
+        timeoutMs: timeoutSecs * 1000,
+        intervalMs: 1_000,
+        description: `active transaction on ${cpId} (id_tag=${idTag})`,
+      },
+    );
+  }
+
+  async closeStaleTx(cpId: string): Promise<void> {
+    const txs = await this.listTransactions({
+      chargeBoxId: cpId,
+      type: "ACTIVE",
+    });
+    const pk = pickLatestTxPk(txs);
+    if (!pk) return;
+    const res = await fetch(`${this.cfg.baseUrl}/transactions/${pk}/stop`, {
+      method: "PATCH",
+      headers: { authorization: this.authHeader() },
+      signal: AbortSignal.timeout(DB_DEFAULT_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "<unreadable body>");
+      throw new Error(
+        `steve-api-db: PATCH /transactions/${pk}/stop failed (HTTP ${res.status}): ${text.slice(0, 300)}`,
+      );
+    }
+  }
+
+  /** DB-only fallback -- see this class's doc comment and steve.ts's
+   *  `SteveTx`. */
+  async latestReservationPk(cpId: string): Promise<string> {
+    return this.dbFallback.latestReservationPk(cpId);
+  }
+
+  /** DB-only fallback -- see {@link latestReservationPk}. */
+  async reservationStatus(reservationPk: string): Promise<string> {
+    return this.dbFallback.reservationStatus(reservationPk);
+  }
+
+  async txIdTag(txPk: string): Promise<string> {
+    const details = await this.getTransactionDetails(txPk);
+    return details?.transaction.ocppIdTag ?? "";
+  }
+
+  async txStopTimestamp(txPk: string): Promise<string> {
+    const details = await this.getTransactionDetails(txPk);
+    return nullableToEmpty(details?.transaction.stopTimestamp);
+  }
+
+  async txStopReason(txPk: string): Promise<string> {
+    const details = await this.getTransactionDetails(txPk);
+    return nullableToEmpty(details?.transaction.stopReason);
+  }
+
+  async txCountForTag(cpId: string, idTag: string): Promise<string> {
+    const txs = await this.listTransactions({
+      chargeBoxId: cpId,
+      ocppIdTag: idTag,
+    });
+    return String(txs.length);
   }
 }

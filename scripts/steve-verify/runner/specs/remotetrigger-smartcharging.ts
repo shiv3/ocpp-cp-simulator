@@ -113,11 +113,14 @@ export const tc010RemoteStartSpec: ScenarioSpec<void> = {
       );
       return;
     }
-    assertNonEmpty(
+    // Was a raw `... WHERE transaction_pk=X AND id_tag='CERT-TAG-1'`
+    // existence check (non-empty iff both match) -- txPk already narrows to
+    // one row, so comparing ITS id_tag for equality checks the exact same
+    // thing (and reports a more useful mismatch on failure).
+    assertEq(
       rec,
-      await db.scalar(
-        `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk} AND id_tag='CERT-TAG-1';`,
-      ),
+      await db.txIdTag(txPk),
+      "CERT-TAG-1",
       `DB: transaction row exists for ${cpId} with id_tag CERT-TAG-1`,
     );
   },
@@ -202,9 +205,7 @@ export const tc011RemoteStartStopSpec: ScenarioSpec<void> = {
     }
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },
@@ -266,19 +267,10 @@ export const tc012RemoteStopSpec: ScenarioSpec<void> = {
       );
       return;
     }
-    assertEq(
-      rec,
-      await db.scalar(
-        `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
-      "CERT012",
-      "DB: id_tag is CERT012",
-    );
+    assertEq(rec, await db.txIdTag(txPk), "CERT012", "DB: id_tag is CERT012");
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },
@@ -437,9 +429,7 @@ export const tc028RemoteStopRejectedSpec: ScenarioSpec<RemoteStopRejectedDriveSt
       }
       assertNonEmpty(
         rec,
-        await db.scalar(
-          `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${driveState.txPk};`,
-        ),
+        await db.txStopTimestamp(driveState.txPk),
         "DB: transaction is closed (stop_timestamp set)",
       );
     },
@@ -621,9 +611,7 @@ export const tc056SmartChargingTxDefaultSpec: ScenarioSpec<TxDefaultProfileDrive
       }
       assertNonEmpty(
         rec,
-        await db.scalar(
-          `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-        ),
+        await db.txStopTimestamp(txPk),
         "DB: transaction is closed (stop_timestamp set)",
       );
     },
@@ -707,9 +695,7 @@ export const tc057SmartChargingTxProfileSpec: ScenarioSpec<TxProfileDriveState> 
       }
       assertNonEmpty(
         rec,
-        await db.scalar(
-          `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${driveState.txPk};`,
-        ),
+        await db.txStopTimestamp(driveState.txPk),
         "DB: transaction is closed (stop_timestamp set)",
       );
     },
@@ -787,9 +773,7 @@ export const tc059RemoteStartWithProfileSpec: ScenarioSpec<void> = {
     }
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },

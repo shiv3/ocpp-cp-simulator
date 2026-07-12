@@ -48,6 +48,59 @@ export interface SteveOps {
   op(opPath: string, fields: Record<string, string>): Promise<string>;
 }
 
+/**
+ * SteveTx -- the transaction/reservation-assertion surface every spec's
+ * drive()/assert() calls via `db.*` (predates issue #184's REST migration;
+ * kept as the field name for spec-source stability). Two implementations:
+ * `SteveDb` below (direct MariaDB queries, unchanged since Task 1) and
+ * steve-api.ts's `SteveApiDb` (SteVe 3.13.0's `/api/v1/transactions` REST
+ * API, issue #184 Task 3) -- selected the same way as `SteveOps`
+ * (`STEVE_DRIVER=api|ui`, see main.ts's `createDb()`).
+ *
+ * `latestReservationPk`/`reservationStatus` have NO REST equivalent: SteVe
+ * 3.13.0 ships no `/api/v1/reservations` controller at all (confirmed by
+ * listing the running container's compiled `web/api/*RestController`
+ * classes -- only Transactions/OcppTags/OcppOperations exist). Both
+ * implementations resolve those two methods via direct DB access;
+ * `SteveApiDb` documents this as its one fallback (see its header).
+ */
+export interface SteveTx {
+  /** db_latest_tx_pk equivalent: most recent transaction_pk (open or
+   *  closed) for a charge box. Empty string if none. */
+  latestTxPk(cpId: string): Promise<string>;
+  /** db_wait_active_tx_pk equivalent -- see the full open-and-tagged
+   *  narrowing rationale on SteveDb's method below. */
+  waitActiveTxPk(
+    cpId: string,
+    idTag: string,
+    timeoutSecs?: number,
+  ): Promise<string>;
+  /** db_close_stale_tx equivalent. Idempotent. */
+  closeStaleTx(cpId: string): Promise<void>;
+  /** db_latest_reservation_pk equivalent. DB-only surface -- see this
+   *  interface's doc comment. */
+  latestReservationPk(cpId: string): Promise<string>;
+  /** `reservation.status` for a reservation_pk (e.g. "CANCELLED"). DB-only
+   *  -- see this interface's doc comment. */
+  reservationStatus(reservationPk: string): Promise<string>;
+  /** `transaction.id_tag` for a transaction_pk (REST:
+   *  `Transaction.ocppIdTag`). Empty string if the transaction doesn't
+   *  exist. */
+  txIdTag(txPk: string): Promise<string>;
+  /** `transaction.stop_timestamp` for a transaction_pk (REST:
+   *  `Transaction.stopTimestamp`) -- "" while still open (or nonexistent),
+   *  a non-empty timestamp string once closed. Matches assert.ts's
+   *  `assertNonEmpty` "" == not-set sentinel. */
+  txStopTimestamp(txPk: string): Promise<string>;
+  /** `transaction.stop_reason` for a transaction_pk (REST:
+   *  `Transaction.stopReason`). "" if unset/nonexistent. */
+  txStopReason(txPk: string): Promise<string>;
+  /** COUNT(*) of transactions for a charge box + idTag, as a decimal
+   *  string (REST: length of the `chargeBoxId`+`ocppIdTag`-filtered
+   *  `/transactions` list). */
+  txCountForTag(cpId: string, idTag: string): Promise<string>;
+}
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export interface SteveConfig {
@@ -277,8 +330,11 @@ export class SteveUiOps implements SteveOps {
   }
 }
 
-/** db()/db_scalar() equivalent: SQL against SteVe's MariaDB via docker exec. */
-export class SteveDb {
+/** db()/db_scalar() equivalent: SQL against SteVe's MariaDB via docker exec.
+ *  Implements SteveTx -- the `STEVE_DRIVER=ui`/`db` fallback (and, until
+ *  issue #184 Task 3, the only implementation); see steve-api.ts's
+ *  SteveApiDb for the `STEVE_DRIVER=api` default. */
+export class SteveDb implements SteveTx {
   constructor(private readonly cfg: SteveConfig) {}
 
   /** Runs SQL, returns the first column of the first row (empty string if none). */
@@ -380,5 +436,66 @@ export class SteveDb {
     await this.scalar(
       `INSERT INTO transaction_stop (transaction_pk, event_timestamp, event_actor, stop_timestamp, stop_value, stop_reason) VALUES (${pk}, NOW(), 'manual', NOW(), '0', 'Local');`,
     );
+  }
+
+  /** `reservation.status` for a reservation_pk (e.g. "CANCELLED").
+   *  DB-only -- see {@link latestReservationPk}. */
+  async reservationStatus(reservationPk: string): Promise<string> {
+    return this.nullSafeScalar(
+      `SELECT status FROM reservation WHERE reservation_pk=${reservationPk};`,
+    );
+  }
+
+  /** `transaction.id_tag` for a transaction_pk. Empty string if the
+   *  transaction doesn't exist. */
+  async txIdTag(txPk: string): Promise<string> {
+    return this.nullSafeScalar(
+      `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk};`,
+    );
+  }
+
+  /** `transaction.stop_timestamp` for a transaction_pk -- "" while still
+   *  open (or nonexistent), a non-empty timestamp string once closed. */
+  async txStopTimestamp(txPk: string): Promise<string> {
+    return this.nullSafeScalar(
+      `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
+    );
+  }
+
+  /** `transaction.stop_reason` for a transaction_pk. "" if unset. */
+  async txStopReason(txPk: string): Promise<string> {
+    return this.nullSafeScalar(
+      `SELECT stop_reason FROM transaction WHERE transaction_pk=${txPk};`,
+    );
+  }
+
+  /** COUNT(*) of transactions for a charge box + idTag, as a decimal
+   *  string. */
+  async txCountForTag(cpId: string, idTag: string): Promise<string> {
+    return this.scalar(
+      `SELECT COUNT(*) FROM transaction t JOIN evse e ON e.evse_pk = t.evse_pk WHERE e.charge_box_id = '${cpId}' AND t.id_tag = '${idTag}';`,
+    );
+  }
+
+  /**
+   * scalar(), normalizing a genuine SQL NULL to "" -- issue #184 Task 3
+   * finding: the MariaDB CLI (`mariadb -N -B`, what scalar() shells out
+   * to) renders a SQL NULL as the literal 4-character string "NULL", not
+   * an empty string (live-verified: `SELECT NULL;` -> the bytes `NULL\n`).
+   * scalar() passes that through verbatim (a faithful raw-SQL
+   * passthrough, kept as-is for any future direct caller), but every
+   * typed getter above wants "" as its is-this-set sentinel
+   * (assert.ts's assertNonEmpty checks `value !== ""` -- see
+   * txStopTimestamp's doc comment) -- without this normalization,
+   * `assertNonEmpty(await db.txStopTimestamp(openTxPk), ...)` would
+   * wrongly PASS on a still-open transaction, since the string "NULL" is
+   * non-empty. (A zero-row result, e.g. a nonexistent transaction_pk,
+   * already comes back as "" from scalar() itself -- MariaDB prints
+   * nothing at all for zero rows, only "NULL" for an existing row's NULL
+   * column -- so this only needs to handle the one literal.)
+   */
+  private async nullSafeScalar(sql: string): Promise<string> {
+    const raw = await this.scalar(sql);
+    return raw === "NULL" ? "" : raw;
   }
 }

@@ -7,8 +7,17 @@
 # charging-profile entities SmartCharging ops need, and closes any stale
 # open transactions left over from an interrupted previous run.
 #
-# Safe to re-run: every step is INSERT ... ON DUPLICATE KEY UPDATE or an
-# existence check first.
+# Issue #184 Task 3: tag provisioning goes through SteVe's REST API
+# (POST/PUT/DELETE /api/v1/ocppTags, see lib.sh's steve_api_* helpers)
+# instead of direct SQL. Charge-box registration and stale-transaction
+# cleanup stay on direct DB access (no REST endpoint for either); the
+# charging-profile entities stay on the manager-UI form POST (no REST
+# charging-profile endpoint in SteVe 3.13.0); CERT023-EXP's past
+# expiry_date stays a direct SQL UPDATE (the REST API validates expiryDate
+# as @Future on both create and update -- see section 2b below).
+#
+# Safe to re-run: every step is INSERT ... ON DUPLICATE KEY UPDATE, an
+# idempotent POST-or-PUT/DELETE-if-exists, or an existence check first.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +50,9 @@ ON DUPLICATE KEY UPDATE registration_status = 'Accepted';
 # ---------------------------------------------------------------------------
 # 2. Tags: the CERT-TAG-1..8 pool + CERT-RES01 + every scenario-hardcoded
 #    tagId/idTag, discovered by grepping the scenario JSONs so new
-#    scenarios are picked up without editing this script.
+#    scenarios are picked up without editing this script. Provisioned via
+#    POST/PUT /api/v1/ocppTags (issue #184 Task 3) instead of a direct SQL
+#    INSERT -- see lib.sh's steve_api_ensure_tag().
 # ---------------------------------------------------------------------------
 
 log_info "collecting tagId/idTag values referenced by src/utils/scenarios/cert16-*.json"
@@ -56,19 +67,17 @@ all_tags=(CERT-TAG-1 CERT-TAG-2 CERT-TAG-3 CERT-TAG-4 CERT-TAG-5 CERT-TAG-6 CERT
 
 # Deduplicate while preserving order.
 declare -A seen_tag=()
-tag_values=""
+unique_tags=()
 for t in "${all_tags[@]}"; do
   [ -n "${seen_tag[$t]:-}" ] && continue
   seen_tag["$t"]=1
-  tag_values="${tag_values}${tag_values:+, }('$t', 5)"
+  unique_tags+=("$t")
 done
 
-log_info "provisioning $(printf '%s' "$tag_values" | grep -o "('" | wc -l | tr -d ' ') ocpp_tag row(s), max_active_transaction_count=5"
-db "
-INSERT INTO ocpp_tag (id_tag, max_active_transaction_count) VALUES
-  $tag_values
-ON DUPLICATE KEY UPDATE max_active_transaction_count = 5;
-" >/dev/null
+log_info "provisioning ${#unique_tags[@]} ocpp tag(s) via POST/PUT /api/v1/ocppTags, max_active_transaction_count=5"
+for t in "${unique_tags[@]}"; do
+  steve_api_ensure_tag "$t" 5
+done
 
 # ---------------------------------------------------------------------------
 # 2b. TC_023 Authorize-outcome tags (issue #181): CERT023-{INV,EXP,BLK} come
@@ -87,24 +96,37 @@ ON DUPLICATE KEY UPDATE max_active_transaction_count = 5;
 #       - otherwise                                            -> ACCEPTED
 #     Blocked is checked before Expired, so the two conditions can't be
 #     accidentally conflated by setting both on one row.
+#
+#     CERT023-INV and CERT023-BLK are fully API-driven (issue #184 Task 3).
+#     CERT023-EXP is NOT: SteVe's OcppTagForm.expiryDate is @Future-validated
+#     on BOTH create AND update (confirmed live -- a past ISO date POSTed or
+#     PUT to /api/v1/ocppTags -> 400 Bad Request, "Error understanding the
+#     request"; see runner/steve-api.ts's "Transactions + OCPP tags" section
+#     header for the full capture). There is no request shape that gets an
+#     already-past expiry_date into SteVe through the REST API -- this ONE
+#     field stays a direct SQL UPDATE, a permanent documented fallback (not
+#     an API gap expected to close).
 # ---------------------------------------------------------------------------
 
 log_info "fixing up TC_023 Authorize-outcome tag states (CERT023-INV/EXP/BLK)"
 
 # CERT023-INV must stay UNKNOWN (no ocpp_tag row) so SteVe's
 # AuthTagServiceLocal.decideStatus() returns INVALID -- undo the general
-# loop's insert. Safe to re-run: ocpp_tag.id_tag is referenced by
+# loop's create. Safe to re-run: ocpp_tag.id_tag is referenced by
 # transaction_start.id_tag with ON DELETE CASCADE (confirmed via
 # information_schema.REFERENTIAL_CONSTRAINTS), so this never fails on a
 # leftover FK even if a prior run's transaction referenced this tag; correct
 # behavior never creates such a row for CERT023-INV in the first place.
-db "DELETE FROM ocpp_tag WHERE id_tag = 'CERT023-INV';" >/dev/null
+steve_api_delete_tag_if_exists "CERT023-INV"
 
-# CERT023-EXP: expiry_date in the past -> isExpired() -> EXPIRED.
+# CERT023-EXP: expiry_date in the past -> isExpired() -> EXPIRED. REST
+# fallback -- see this section's header comment above.
 db "UPDATE ocpp_tag SET expiry_date = NOW() - INTERVAL 1 DAY WHERE id_tag = 'CERT023-EXP';" >/dev/null
 
-# CERT023-BLK: max_active_transaction_count = 0 -> isBlocked() -> BLOCKED.
-db "UPDATE ocpp_tag SET max_active_transaction_count = 0 WHERE id_tag = 'CERT023-BLK';" >/dev/null
+# CERT023-BLK: maxActiveTransactionCount=0 -> isBlocked() -> BLOCKED --
+# fully API-driven (PUT, since the general loop above already created the
+# row; reads back as "blocked":true, live-verified).
+steve_api_ensure_tag "CERT023-BLK" 0
 
 # ---------------------------------------------------------------------------
 # 3. Charging-profile entities for SmartCharging ops (TC_056/057/059/066/067)

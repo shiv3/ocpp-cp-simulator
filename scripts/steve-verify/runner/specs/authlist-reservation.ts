@@ -19,7 +19,12 @@ import {
   assertSent,
 } from "../assert";
 import type { ScenarioSpec } from "../spec-types";
-import { reservationExpirySoon, waitForCondition } from "../steve";
+import {
+  defaultSteveConfig,
+  reservationExpirySoon,
+  SteveUiOps,
+  waitForCondition,
+} from "../steve";
 import { sleep } from "../util";
 
 function warnOpFailed(op: string, err: unknown): void {
@@ -357,17 +362,13 @@ export const reservationBasicSpec: ScenarioSpec<void> = {
     rec.pass(`DB: transaction row exists for ${cpId} (pk=${txPk})`);
     assertEq(
       rec,
-      await db.scalar(
-        `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txIdTag(txPk),
       "CERT-RES01",
       "DB: id_tag is CERT-RES01",
     );
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },
@@ -643,9 +644,7 @@ export const tc051CancelReservationSpec: ScenarioSpec<CancelReservationDriveStat
       }
       assertEq(
         rec,
-        await db.scalar(
-          `SELECT status FROM reservation WHERE reservation_pk=${driveState.reservationPk};`,
-        ),
+        await db.reservationStatus(driveState.reservationPk),
         "CANCELLED",
         `DB: reservation ${driveState.reservationPk} is CANCELLED`,
       );
@@ -663,11 +662,29 @@ export const tc052CancelReservationRejectedSpec: ScenarioSpec<void> = {
   connector: 1,
   bootWaitSecs: 4,
   holdSecs: 12,
-  async drive({ cpId, steve }) {
+  async drive({ cpId }) {
     await sleep(2000);
+    // Deliberately bypasses `steve` (the ambient STEVE_DRIVER=api|ui
+    // driver) and always uses the manager-UI client for THIS ONE call --
+    // discovered live while verifying issue #184 Task 3's --parallel
+    // groups: SteVe 3.13.0's REST CancelReservation
+    // (OcppOperationsService#cancelReservation ->
+    // #validateReservationId, source-verified) checks the reservationId
+    // against ReservationRepository#getActiveReservationIds(chargeBoxId)
+    // BEFORE ever dispatching to the CP, and 400s
+    // ("This reservation is not active at this station.") without
+    // sending anything on the wire for a reservationId the station
+    // doesn't have active -- which is exactly this scenario's whole
+    // point (an intentionally-nonexistent 99999, so the CP ITSELF must
+    // answer Rejected). The manager-UI path
+    // (Ocpp15Controller#postCancelReserv -> ChargePointServiceClient
+    // directly) has no such pre-check and always reaches the CP -- a
+    // genuine, permanent REST capability gap (not a flake), so this one
+    // call site stays UI-only regardless of STEVE_DRIVER.
+    const uiSteve = new SteveUiOps(defaultSteveConfig());
     try {
-      await steve.op("v1.6/CancelReservation", {
-        chargePointSelectList: steve.cpSelect(cpId),
+      await uiSteve.op("v1.6/CancelReservation", {
+        chargePointSelectList: uiSteve.cpSelect(cpId),
         reservationId: "99999",
       });
     } catch (err) {

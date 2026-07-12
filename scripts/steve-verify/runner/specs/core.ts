@@ -142,19 +142,10 @@ export const tc003ChargingPluginFirstSpec: ScenarioSpec<void> = {
       return;
     }
     rec.pass(`DB: transaction row exists for ${cpId} (pk=${txPk})`);
-    assertEq(
-      rec,
-      await db.scalar(
-        `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
-      "CERT003",
-      "DB: id_tag is CERT003",
-    );
+    assertEq(rec, await db.txIdTag(txPk), "CERT003", "DB: id_tag is CERT003");
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },
@@ -210,19 +201,10 @@ export const tc004ChargingIdFirstSpec: ScenarioSpec<void> = {
       return;
     }
     rec.pass(`DB: transaction row exists for ${cpId} (pk=${txPk})`);
-    assertEq(
-      rec,
-      await db.scalar(
-        `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
-      "CERT004",
-      "DB: id_tag is CERT004",
-    );
+    assertEq(rec, await db.txIdTag(txPk), "CERT004", "DB: id_tag is CERT004");
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },
@@ -264,19 +246,10 @@ export const tc005EvSideDisconnectSpec: ScenarioSpec<void> = {
       return;
     }
     rec.pass(`DB: transaction row exists for ${cpId} (pk=${txPk})`);
+    assertEq(rec, await db.txIdTag(txPk), "CERT005", "DB: id_tag is CERT005");
     assertEq(
       rec,
-      await db.scalar(
-        `SELECT id_tag FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
-      "CERT005",
-      "DB: id_tag is CERT005",
-    );
-    assertEq(
-      rec,
-      await db.scalar(
-        `SELECT stop_reason FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopReason(txPk),
       "EVDisconnected",
       "DB: stop_reason is EVDisconnected",
     );
@@ -357,9 +330,7 @@ export const tc013HardResetSpec: ScenarioSpec<void> = {
     }
     assertEq(
       rec,
-      await db.scalar(
-        `SELECT stop_reason FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopReason(txPk),
       "HardReset",
       "DB: stop_reason is HardReset",
     );
@@ -432,9 +403,7 @@ export const tc014SoftResetSpec: ScenarioSpec<void> = {
     }
     assertEq(
       rec,
-      await db.scalar(
-        `SELECT stop_reason FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopReason(txPk),
       "SoftReset",
       "DB: stop_reason is SoftReset",
     );
@@ -502,9 +471,7 @@ export const tc017UnlockOccupiedSpec: ScenarioSpec<void> = {
     }
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },
@@ -566,9 +533,7 @@ export const tc018UnlockFailureSpec: ScenarioSpec<void> = {
     }
     assertNonEmpty(
       rec,
-      await db.scalar(
-        `SELECT stop_timestamp FROM transaction WHERE transaction_pk=${txPk};`,
-      ),
+      await db.txStopTimestamp(txPk),
       "DB: transaction is closed (stop_timestamp set)",
     );
   },

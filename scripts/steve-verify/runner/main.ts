@@ -25,9 +25,14 @@ import { fileURLToPath } from "node:url";
 import { AssertRecorder } from "./assert";
 import { parseLog } from "./ocpp";
 import { defaultSimConfig, startSim } from "./sim";
-import { defaultSteveApiConfig, SteveApiOps } from "./steve-api";
+import {
+  defaultSteveApiConfig,
+  defaultSteveApiDbConfig,
+  SteveApiDb,
+  SteveApiOps,
+} from "./steve-api";
 import { defaultSteveConfig, SteveDb, SteveUiOps } from "./steve";
-import type { SteveOps } from "./steve";
+import type { SteveOps, SteveTx } from "./steve";
 import {
   AUTHLIST_RESERVATION_SPECS,
   AUTHORIZE_SPECS,
@@ -77,6 +82,26 @@ function createSteveOps(env: NodeJS.ProcessEnv = process.env): SteveOps {
   return new SteveApiOps(defaultSteveApiConfig(env));
 }
 
+/**
+ * Issue #184 Task 3: picks the SteveTx (transaction/reservation-assertion)
+ * driver for this run, using the SAME `STEVE_DRIVER` flag as
+ * {@link createSteveOps} -- `api` (or unset) uses `SteveApiDb`
+ * (steve-api.ts, SteVe 3.13.0's `/api/v1/transactions`); `ui`/anything
+ * else falls back to `SteveDb` (steve.ts, direct MariaDB). `SteveApiDb`
+ * still needs a DB config even under `api` -- it delegates
+ * `latestReservationPk`/`reservationStatus` to a DB fallback internally
+ * (no REST reservations endpoint exists; see steve.ts's `SteveTx` doc
+ * comment).
+ */
+function createDb(env: NodeJS.ProcessEnv = process.env): SteveTx {
+  const driver = (env.STEVE_DRIVER ?? "api").toLowerCase();
+  const dbCfg = defaultSteveConfig(env);
+  if (driver === "ui") {
+    return new SteveDb(dbCfg);
+  }
+  return new SteveApiDb(defaultSteveApiDbConfig(env), dbCfg);
+}
+
 async function runScenario<D>(
   spec: ScenarioSpec<D>,
   options: RunOptions,
@@ -86,13 +111,13 @@ async function runScenario<D>(
   const holdSecs = options.timeoutSecs ?? spec.holdSecs ?? 20;
 
   const simCfg = defaultSimConfig(REPO_ROOT);
-  const steveCfg = defaultSteveConfig();
-  const db = new SteveDb(steveCfg);
   // A fresh driver instance per runScenario() call (one per parallel lane)
   // -- preserves the per-lane isolation Task 1's Finding 4 investigation
-  // relied on (see main.ts's isolation note further down); SteveApiOps is
-  // additionally stateless (no cookie jar at all, unlike SteveUiOps), so
-  // this instantiation is cheap either way.
+  // relied on (see main.ts's isolation note further down); SteveApiOps/
+  // SteveApiDb are additionally stateless (no cookie jar at all, unlike
+  // SteveUiOps/SteveDb's docker-exec-per-call), so this instantiation is
+  // cheap either way.
+  const db = createDb();
   const steve = createSteveOps();
 
   await db.closeStaleTx(options.cpId);

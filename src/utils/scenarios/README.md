@@ -56,6 +56,9 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 | cert16-tc044-2-firmware-download-failed             | TC_044.2 | Firmware Update — Download Failed         | Firmware      | Pre-arms SimulatedFirmwareUpdateFailure=DownloadFailed (one-shot config auto-cleared after next UpdateFirmware). CSMS sends UpdateFirmware.req. Verify CP sends Downloading then DownloadFailed.                                               |
 | cert16-tc044-3-firmware-install-failed              | TC_044.3 | Firmware Update — Installation Failed     | Firmware      | Pre-arms SimulatedFirmwareUpdateFailure=InstallationFailed (one-shot config auto-cleared after next UpdateFirmware). CSMS sends UpdateFirmware.req. Verify CP progresses Downloading → Downloaded → Installing → InstallationFailed.           |
 | cert16-tc045-1-get-diagnostics                      | TC_045.1 | Get Diagnostics                           | Firmware      | CSMS sends GetDiagnostics.req with an upload location. CP responds with fileName and sends DiagnosticsStatusNotification (Uploading, then Uploaded or UploadFailed depending on HTTP response).                                                |
+| cert16-tc023-1-authorize-invalid                    | TC_023.1 | Authorize Outcome (Invalid)               | Core          | Ensure idTag CERT023-INV is unknown to the CSMS. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Invalid, and does NOT send StartTransaction.req. Plug out.                                                              |
+| cert16-tc023-2-authorize-expired                    | TC_023.2 | Authorize Outcome (Expired)               | Core          | Ensure idTag CERT023-EXP is registered with an expiry_date in the past. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Expired, and does NOT send StartTransaction.req. Plug out.                                       |
+| cert16-tc023-3-authorize-blocked                    | TC_023.3 | Authorize Outcome (Blocked)               | Core          | Ensure idTag CERT023-BLK is registered as blocked. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Blocked, and does NOT send StartTransaction.req. Plug out.                                                            |
 
 ## Numbering Note
 
@@ -91,8 +94,7 @@ When using the `responseOverride` node to arm a one-shot response override for a
 
 The following test cases are not covered by scenarios:
 
-- **TC_007** (Cached Authorization) — No scenario-drivable Authorize flow with cache orchestration.
-- **TC_023** (Authorize Outcome Variants) — No scenario-drivable Authorize request/response orchestration.
+- **TC_007** (Cached Authorization) — the local auth list is write-only in this simulator today (SendLocalList populates it, but nothing consults it on a local start — see issue #181's core report); there's no auth-cache seam to drive a "cached idTag" scenario against without adding cache-consultation logic, which is out of scope here. Follow-up: LocalPreAuthorize (see #181's PR body).
 - **TC_032, TC_037, TC_039** (Offline Power Failure, Offline Transactions) — No offline transaction queue or transaction replication in the scenario engine.
 - **TC_047** (Reservation Expiry) — CP expires reservations passively on TTL; transition is internal, not observable as a status change.
 - **TC_049** (Charge-Point-Wide Reservation) — CP has no connector 0; ReserveNow(connectorId=0) is rejected by core; no distinct behavior to verify.

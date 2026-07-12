@@ -71,6 +71,42 @@ ON DUPLICATE KEY UPDATE max_active_transaction_count = 5;
 " >/dev/null
 
 # ---------------------------------------------------------------------------
+# 2b. TC_023 Authorize-outcome tags (issue #181): CERT023-{INV,EXP,BLK} come
+#     out of the general auto-discovery loop above as ordinary accepted tags
+#     (max_active_transaction_count=5, no expiry) -- that's wrong for two of
+#     the three, and CERT023-INV must not be a row in ocpp_tag at all. Fix
+#     up all three explicitly here so SteVe's Authorize.conf actually
+#     returns the outcome each scenario's name promises.
+#
+#     Confirmed directly against SteVe's decision logic (running
+#     steve-app-1 container, src/main/java/de/rwth/idsg/steve/service/
+#     AuthTagServiceLocal.java + OcppTagActivityRecordUtils.java):
+#       - record == null (no ocpp_tag row for the idTag)      -> INVALID
+#       - isBlocked(record): max_active_transaction_count = 0 -> BLOCKED
+#       - isExpired(record, now): expiry_date < NOW()         -> EXPIRED
+#       - otherwise                                            -> ACCEPTED
+#     Blocked is checked before Expired, so the two conditions can't be
+#     accidentally conflated by setting both on one row.
+# ---------------------------------------------------------------------------
+
+log_info "fixing up TC_023 Authorize-outcome tag states (CERT023-INV/EXP/BLK)"
+
+# CERT023-INV must stay UNKNOWN (no ocpp_tag row) so SteVe's
+# AuthTagServiceLocal.decideStatus() returns INVALID -- undo the general
+# loop's insert. Safe to re-run: ocpp_tag.id_tag is referenced by
+# transaction_start.id_tag with ON DELETE CASCADE (confirmed via
+# information_schema.REFERENTIAL_CONSTRAINTS), so this never fails on a
+# leftover FK even if a prior run's transaction referenced this tag; correct
+# behavior never creates such a row for CERT023-INV in the first place.
+db "DELETE FROM ocpp_tag WHERE id_tag = 'CERT023-INV';" >/dev/null
+
+# CERT023-EXP: expiry_date in the past -> isExpired() -> EXPIRED.
+db "UPDATE ocpp_tag SET expiry_date = NOW() - INTERVAL 1 DAY WHERE id_tag = 'CERT023-EXP';" >/dev/null
+
+# CERT023-BLK: max_active_transaction_count = 0 -> isBlocked() -> BLOCKED.
+db "UPDATE ocpp_tag SET max_active_transaction_count = 0 WHERE id_tag = 'CERT023-BLK';" >/dev/null
+
+# ---------------------------------------------------------------------------
 # 3. Charging-profile entities for SmartCharging ops (TC_056/057/059/066/067)
 #    -- SetChargingProfile/ClearChargingProfile/RemoteStartTransaction all
 #    key off a pre-existing "Charging Profile" entity in SteVe (no ad hoc

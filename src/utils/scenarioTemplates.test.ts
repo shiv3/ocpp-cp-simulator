@@ -59,6 +59,9 @@ const EXPECTED_CERT16_IDS = [
   "cert16-tc044-2-firmware-download-failed",
   "cert16-tc044-3-firmware-install-failed",
   "cert16-tc045-1-get-diagnostics",
+  "cert16-tc023-1-authorize-invalid",
+  "cert16-tc023-2-authorize-expired",
+  "cert16-tc023-3-authorize-blocked",
 ];
 
 /** BFS from the single start node; true if any END node is reachable. */

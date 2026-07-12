@@ -129,4 +129,4 @@ for cp in CERTCP1 CERTCP2 CERTCP3; do
 done
 
 log_info "provisioning complete."
-log_info "next: ./run-scenario.sh <template-id>  (or ./run-all.sh --group core)"
+log_info "next: bun runner/main.ts run <template-id>  (or bun runner/main.ts run-all --group core)"

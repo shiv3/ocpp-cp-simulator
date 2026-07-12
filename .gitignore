@@ -50,3 +50,6 @@ e2e/csms/e2e-csms
 # -- reproducible from a live SteVe run, never committed.
 scripts/steve-verify/results/
 scripts/steve-verify/.runtime/
+# steve-verify: generated feeder/op helper scripts dropped at the repo root
+.steve-*.sh
+.steve-op.sh

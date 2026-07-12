@@ -403,7 +403,9 @@ function requireValue(argv: string[], index: number, flag: string): string {
 
 function printUsage(): void {
   process.stderr.write(
-    "Usage: bun scripts/steve-verify/runner/main.ts run <template-id> " +
+    "Usage (paths shown from the repo root; from scripts/steve-verify " +
+      "use the shorter `bun runner/main.ts …`):\n" +
+      "       bun scripts/steve-verify/runner/main.ts run <template-id> " +
       "[--cp CERTCP1] [--timeout N] [--connector N]\n" +
       "       bun scripts/steve-verify/runner/main.ts run --group " +
       `${Object.keys(GROUPS).join("|")} [--parallel]\n` +

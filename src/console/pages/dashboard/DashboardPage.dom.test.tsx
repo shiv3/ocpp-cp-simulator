@@ -6,15 +6,34 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   createFakeChargePointService,
   renderConsole,
+  type FakeChargePointService,
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
-import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
+import { LogLevel, LogType } from "../../../cp/shared/Logger";
+import type {
+  ChargePointEvent,
+  ChargePointSnapshot,
+} from "../../../data/interfaces/ChargePointService";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {
     root.unmount();
   });
   document.body.innerHTML = "";
+}
+
+async function pushEvent(
+  service: FakeChargePointService,
+  cpId: string,
+  event: ChargePointEvent,
+): Promise<void> {
+  const handlers = service.__handlers.subscribe.get(cpId);
+  if (!handlers || handlers.size === 0) {
+    throw new Error(`no subscribe handler recorded for ${cpId}`);
+  }
+  await act(async () => {
+    handlers.forEach((handler) => handler(event));
+  });
 }
 
 function connector(
@@ -144,5 +163,46 @@ describe("DashboardPage", () => {
       (b) => b.textContent?.includes("Add Charge Point"),
     );
     expect(addButtons.length).toBeGreaterThan(0);
+  });
+
+  it("shows a Recent activity strip that fills in as global log events arrive (Task 9)", async () => {
+    const cpA = snapshot({ id: "CP-A" });
+    const service = createFakeChargePointService({ snapshots: [cpA] });
+    const { container, root } = await renderConsole("/", { service });
+    cleanup = () => unmount(root);
+
+    await act(async () => {
+      for (const handler of service.__handlers.subscribeRegistry) {
+        handler({ type: "snapshot", cps: [cpA] });
+      }
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Before any log event, the strip is present but empty.
+    expect(container.textContent).toContain("Recent activity");
+    expect(container.textContent).toContain("No activity yet.");
+
+    const openLogLink = Array.from(container.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Open Message Log"),
+    );
+    expect(openLogLink, "expected an Open Message Log link").toBeTruthy();
+    expect(openLogLink!.getAttribute("href")).toBe("/logs");
+
+    await pushEvent(service, "CP-A", {
+      type: "log",
+      entry: {
+        timestamp: new Date(),
+        level: LogLevel.INFO,
+        type: LogType.OCPP,
+        message: "BootNotification accepted",
+      },
+    });
+
+    expect(container.textContent).not.toContain("No activity yet.");
+    expect(container.textContent).toContain("CP-A");
+    expect(container.textContent).toContain("BootNotification accepted");
   });
 });

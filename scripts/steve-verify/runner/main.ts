@@ -25,7 +25,9 @@ import { fileURLToPath } from "node:url";
 import { AssertRecorder } from "./assert";
 import { parseLog } from "./ocpp";
 import { defaultSimConfig, startSim } from "./sim";
-import { defaultSteveConfig, SteveClient, SteveDb } from "./steve";
+import { defaultSteveApiConfig, SteveApiOps } from "./steve-api";
+import { defaultSteveConfig, SteveDb, SteveUiOps } from "./steve";
+import type { SteveOps } from "./steve";
 import {
   AUTHLIST_RESERVATION_SPECS,
   AUTHORIZE_SPECS,
@@ -52,6 +54,29 @@ interface RunOptions {
   timeoutSecs?: number;
 }
 
+/**
+ * Issue #184 Task 2: picks the SteveOps driver for this run.
+ * `STEVE_DRIVER=api` (or unset -- REST is now the default) uses
+ * SteveApiOps (steve-api.ts, SteVe 3.13.0's typed `/api/v1/operations/*`);
+ * `STEVE_DRIVER=ui` falls back to SteveUiOps (steve.ts, the manager-UI
+ * form-POST client this runner used exclusively through Task 1). Every
+ * spec drives CSMS operations only through the SteveOps surface
+ * (steve.op()/steve.cpSelect()), so which driver is active is invisible
+ * to specs/*.ts.
+ */
+function createSteveOps(env: NodeJS.ProcessEnv = process.env): SteveOps {
+  const driver = (env.STEVE_DRIVER ?? "api").toLowerCase();
+  if (driver === "ui") {
+    return new SteveUiOps(defaultSteveConfig(env));
+  }
+  if (driver !== "api") {
+    process.stderr.write(
+      `[runner] WARN: unrecognized STEVE_DRIVER="${env.STEVE_DRIVER}" -- falling back to "api"\n`,
+    );
+  }
+  return new SteveApiOps(defaultSteveApiConfig(env));
+}
+
 async function runScenario<D>(
   spec: ScenarioSpec<D>,
   options: RunOptions,
@@ -63,12 +88,18 @@ async function runScenario<D>(
   const simCfg = defaultSimConfig(REPO_ROOT);
   const steveCfg = defaultSteveConfig();
   const db = new SteveDb(steveCfg);
-  const steve = new SteveClient(steveCfg);
+  // A fresh driver instance per runScenario() call (one per parallel lane)
+  // -- preserves the per-lane isolation Task 1's Finding 4 investigation
+  // relied on (see main.ts's isolation note further down); SteveApiOps is
+  // additionally stateless (no cookie jar at all, unlike SteveUiOps), so
+  // this instantiation is cheap either way.
+  const steve = createSteveOps();
 
   await db.closeStaleTx(options.cpId);
 
   process.stderr.write(
-    `[runner] === ${spec.templateId} on ${options.cpId} (connector ${connector}, boot-wait ${bootWaitSecs}s, hold ${holdSecs}s) ===\n`,
+    `[runner] === ${spec.templateId} on ${options.cpId} (connector ${connector}, boot-wait ${bootWaitSecs}s, hold ${holdSecs}s, ` +
+      `steve driver ${(process.env.STEVE_DRIVER ?? "api").toLowerCase()}) ===\n`,
   );
 
   const sim = await startSim(options.cpId, spec.templateId, simCfg);
@@ -318,8 +349,8 @@ async function runOneForSweep<D>(
  * independent SteVe pre-prod run hit 5 parallel-only false-negative FAILs
  * (tc021/tc043-3/tc043-5/reservation-basic/tc054) that all PASSED run in
  * isolation. Investigation here (see README's "Parallel lane isolation"
- * section) found the TS runner's cookie jar is already per-SteveClient
- * instance (a fresh `new SteveClient()` per runScenario() call, one per
+ * section) found the TS runner's cookie jar is already per-SteveUiOps
+ * instance (a fresh `new SteveUiOps()` per runScenario() call, one per
  * lane -- see steve.ts), and concurrent admin sessions were confirmed live
  * not to invalidate each other, so cross-lane session/CSRF contamination is
  * NOT the cause. All 5 flaky scenarios instead share one shape: a
@@ -331,6 +362,15 @@ async function runOneForSweep<D>(
  * that disappears with no contention. This function does not fix that
  * timing race -- it gives the sweep a way to distinguish a flake from a
  * real failure without giving up --parallel's wall-clock win.
+ *
+ * Task 2 note: the default driver is now SteveApiOps (steve-api.ts),
+ * which holds no cookie/CSRF state at all (stateless Basic auth per
+ * request) -- strictly less shared state than SteveUiOps's already-cleared
+ * cookie-jar theory above, so it cannot be a NEW source of cross-lane
+ * contamination. Whether it changes the actual flake rate is a
+ * `--parallel` question this task didn't re-run (Task 2's live proof was
+ * 3 single scenarios + 1 UI-fallback single scenario, not a full sweep) --
+ * left for Task 4's full-verification pass to confirm or refute.
  */
 async function retryFailedOutcomesIsolated(
   outcomes: ScenarioOutcome[],

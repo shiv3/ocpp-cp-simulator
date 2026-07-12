@@ -9,7 +9,44 @@
  *
  * DB access shells out to `docker exec` against the DB container, mirroring
  * lib.sh's db()/db_scalar() exactly (same SQL, same container).
+ *
+ * Since issue #184 Task 2, this manager-UI client (`SteveUiOps`) is one of
+ * two `SteveOps` implementations -- `steve-api.ts`'s `SteveApiOps` (SteVe
+ * 3.13.0's typed REST `/api/v1/operations/*`) is the DEFAULT driver
+ * (`STEVE_DRIVER=api` or unset); this UI client is the explicit fallback
+ * (`STEVE_DRIVER=ui`), selected in main.ts. Both implement the same
+ * `SteveOps` surface below so specs/*.ts (which only ever call
+ * `steve.op(opPath, fields)` and `steve.cpSelect(cpId)`) need no changes
+ * regardless of which driver is active.
  */
+
+/**
+ * The entire method surface specs/*.ts calls on `steve` (grep confirms:
+ * every call site is either `steve.op(...)` or `steve.cpSelect(...)`,
+ * always feeding cpSelect's return value straight into the following
+ * op()'s `chargePointSelectList` field). Deliberately narrow -- each
+ * driver is free to encode `cpSelect`'s return value however its own
+ * `op()` implementation expects to decode it (SteveUiOps uses SteVe's
+ * manager-UI `"V_16_JSON;<cpId>;-"` select-list token; SteveApiOps just
+ * uses the bare cpId, since the REST DTOs take `chargeBoxIdList: string[]`
+ * directly) -- callers never need to know or care which.
+ */
+export interface SteveOps {
+  /** Builds the token `op()`'s `chargePointSelectList` field expects for
+   *  one charge point, in whatever encoding this driver's `op()` decodes. */
+  cpSelect(cpId: string): string;
+  /** steve_op OP_PATH FIELDS equivalent (see lib.sh). Drives one CSMS
+   *  operation (`opPath` e.g. "v1.6/Reset") with UI-form-shaped `fields`
+   *  (string-valued, named after the manager UI's <form> inputs -- see
+   *  specs/*.ts call sites for the exact per-operation shapes). Resolves
+   *  once the CSMS has accepted/dispatched the operation; does NOT imply
+   *  the charge point has responded (or ever will) -- every spec's
+   *  assert() checks the sim's own captured wire log, not this call's
+   *  result, so a driver should throw only on a genuine transport/request
+   *  failure (bad auth, malformed request, HTTP error), never on an OCPP
+   *  Rejected/CallError/no-response outcome. */
+  op(opPath: string, fields: Record<string, string>): Promise<string>;
+}
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -121,8 +158,10 @@ function extractCsrf(html: string): string {
   return match[1];
 }
 
-/** CSMS manager UI client: login + operation POST, one cookie jar per instance. */
-export class SteveClient {
+/** CSMS manager UI client: login + operation POST, one cookie jar per
+ *  instance. The `STEVE_DRIVER=ui` fallback SteveOps implementation --
+ *  see steve-api.ts's SteveApiOps for the default REST driver. */
+export class SteveUiOps implements SteveOps {
   private cookies = new Map<string, string>();
 
   constructor(private readonly cfg: SteveConfig) {}

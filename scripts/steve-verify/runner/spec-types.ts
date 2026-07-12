@@ -7,13 +7,16 @@
 import type { AssertRecorder } from "./assert";
 import type { Frame } from "./ocpp";
 import type { SimProcess } from "./sim";
-import type { SteveClient, SteveDb } from "./steve";
+import type { SteveDb, SteveOps } from "./steve";
 
 export interface DriveContext {
   cpId: string;
   connector: number;
   sim: SimProcess;
-  steve: SteveClient;
+  /** Whichever SteveOps driver main.ts selected for this run
+   *  (STEVE_DRIVER=api|ui, default api) -- see steve.ts's SteveOps for
+   *  the (deliberately narrow) method surface specs may rely on. */
+  steve: SteveOps;
   db: SteveDb;
 }
 

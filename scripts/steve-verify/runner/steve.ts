@@ -99,6 +99,19 @@ export interface SteveTx {
    *  string (REST: length of the `chargeBoxId`+`ocppIdTag`-filtered
    *  `/transactions` list). */
   txCountForTag(cpId: string, idTag: string): Promise<string>;
+  /** `charging_profile.charging_profile_pk` for a Charging Profile entity
+   *  identified by its `description` -- the same lookup
+   *  `02-provision.sh`'s `ensure_charging_profile()` already runs before
+   *  creating one. DB-only surface, like `latestReservationPk`/
+   *  `reservationStatus` above: SteVe 3.13.0 has no Charging Profile CRUD
+   *  REST endpoint at all (steve-community/steve#2069). "" if no such
+   *  profile exists. Issue #184 Task 4: added after the
+   *  `remotetrigger-smartcharging` specs' hardcoded pks (`"1"`/`"2"`) were
+   *  found to have drifted from the actually-provisioned value on a
+   *  long-lived SteVe DB (auto_increment gaps from unrelated provisioning
+   *  history) -- looking the pk up by description instead of hardcoding it
+   *  makes those specs correct regardless of DB history. */
+  chargingProfilePkByDescription(description: string): Promise<string>;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -443,6 +456,14 @@ export class SteveDb implements SteveTx {
   async reservationStatus(reservationPk: string): Promise<string> {
     return this.nullSafeScalar(
       `SELECT status FROM reservation WHERE reservation_pk=${reservationPk};`,
+    );
+  }
+
+  /** charging_profile_pk for a Charging Profile entity by its
+   *  `description` -- see the `SteveTx` interface's doc comment. */
+  async chargingProfilePkByDescription(description: string): Promise<string> {
+    return this.scalar(
+      `SELECT charging_profile_pk FROM charging_profile WHERE description = '${description}' LIMIT 1;`,
     );
   }
 

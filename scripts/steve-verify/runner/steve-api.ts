@@ -111,6 +111,14 @@ export interface SteveApiConfig {
   password: string;
 }
 
+/** Builds the `Authorization: Basic ...` header value for SteVe's
+ *  stateless `/api/**` auth (see this file's header). Shared by
+ *  `SteveApiOps`/`SteveApiDb` below and by capability-probe.ts (issue #184
+ *  Task 4) so all three derive the same base64 encoding from one place. */
+export function basicAuthHeader(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
 export function defaultSteveApiConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): SteveApiConfig {
@@ -351,14 +359,12 @@ export class SteveApiOps implements SteveOps {
       );
     };
 
-    const authHeader = `Basic ${Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64")}`;
-
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         accept: "application/json",
-        authorization: authHeader,
+        authorization: basicAuthHeader(this.cfg.username, this.cfg.password),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
@@ -610,7 +616,7 @@ export class SteveApiDb implements SteveTx {
   }
 
   private authHeader(): string {
-    return `Basic ${Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64")}`;
+    return basicAuthHeader(this.cfg.username, this.cfg.password);
   }
 
   private async getJson<T>(path: string): Promise<T> {
@@ -723,6 +729,13 @@ export class SteveApiDb implements SteveTx {
   /** DB-only fallback -- see {@link latestReservationPk}. */
   async reservationStatus(reservationPk: string): Promise<string> {
     return this.dbFallback.reservationStatus(reservationPk);
+  }
+
+  /** DB-only fallback -- no REST Charging Profile CRUD endpoint exists in
+   *  SteVe 3.13.0 at all (steve-community/steve#2069). See steve.ts's
+   *  `SteveTx` doc comment. */
+  async chargingProfilePkByDescription(description: string): Promise<string> {
+    return this.dbFallback.chargingProfilePkByDescription(description);
   }
 
   async txIdTag(txPk: string): Promise<string> {

@@ -544,6 +544,11 @@ export const tc055TriggerMessageRejectedSpec: ScenarioSpec<void> = {
 
 interface TxDefaultProfileDriveState {
   txPk: string;
+  /** Looked up by description (see steve.ts's `SteveTx.chargingProfilePkByDescription`
+   *  doc comment) rather than hardcoded -- a hardcoded pk drifts on a
+   *  long-lived SteVe DB (auto_increment gaps from unrelated provisioning
+   *  history), which is exactly what broke this spec (issue #184 Task 4). */
+  profilePk: string;
 }
 
 export const tc056SmartChargingTxDefaultSpec: ScenarioSpec<TxDefaultProfileDriveState> =
@@ -558,17 +563,20 @@ export const tc056SmartChargingTxDefaultSpec: ScenarioSpec<TxDefaultProfileDrive
     async drive({ cpId, db, steve }): Promise<TxDefaultProfileDriveState> {
       await sleep(3000);
       const txPk = await db.latestTxPk(cpId);
+      const profilePk = await db.chargingProfilePkByDescription(
+        "TC056 TxDefaultProfile",
+      );
       try {
         await steve.op("v1.6/SetChargingProfile", {
           chargePointSelectList: steve.cpSelect(cpId),
-          chargingProfilePk: "1",
+          chargingProfilePk: profilePk,
           connectorId: "1",
           transactionId: "",
         });
       } catch (err) {
         warnOpFailed("SetChargingProfile", err);
       }
-      return { txPk };
+      return { txPk, profilePk };
     },
     async assert({ cpId, frames, lines, rec, db, driveState }) {
       assertLineMatches(
@@ -587,7 +595,7 @@ export const tc056SmartChargingTxDefaultSpec: ScenarioSpec<TxDefaultProfileDrive
       assertLineMatches(
         rec,
         lines,
-        /Applied charging profile #1/,
+        new RegExp(`Applied charging profile #${driveState.profilePk}(?!\\d)`),
         "CP applied the TxDefaultProfile",
       );
       assertLineMatches(
@@ -625,6 +633,9 @@ export const tc056SmartChargingTxDefaultSpec: ScenarioSpec<TxDefaultProfileDrive
 
 interface TxProfileDriveState {
   txPk: string;
+  /** See TxDefaultProfileDriveState.profilePk's comment above -- same
+   *  hardcoded-pk drift issue, fixed the same way. */
+  profilePk: string;
 }
 
 export const tc057SmartChargingTxProfileSpec: ScenarioSpec<TxProfileDriveState> =
@@ -647,17 +658,19 @@ export const tc057SmartChargingTxProfileSpec: ScenarioSpec<TxProfileDriveState> 
       } catch (err) {
         warnOpFailed("db_wait_active_tx_pk(CERT057)", err);
       }
+      const profilePk =
+        await db.chargingProfilePkByDescription("TC057 TxProfile");
       try {
         await steve.op("v1.6/SetChargingProfile", {
           chargePointSelectList: steve.cpSelect(cpId),
-          chargingProfilePk: "2",
+          chargingProfilePk: profilePk,
           connectorId: "1",
           transactionId: txPk,
         });
       } catch (err) {
         warnOpFailed("SetChargingProfile", err);
       }
-      return { txPk };
+      return { txPk, profilePk };
     },
     async assert({ frames, lines, rec, db, driveState }) {
       assertLineMatches(
@@ -676,7 +689,7 @@ export const tc057SmartChargingTxProfileSpec: ScenarioSpec<TxProfileDriveState> 
       assertLineMatches(
         rec,
         lines,
-        /Applied charging profile #2/,
+        new RegExp(`Applied charging profile #${driveState.profilePk}(?!\\d)`),
         "CP applied the TxProfile",
       );
       assertLineMatches(
@@ -703,81 +716,97 @@ export const tc057SmartChargingTxProfileSpec: ScenarioSpec<TxProfileDriveState> 
 
 // ---------------------------------------------------------------------------
 // TC_059 Remote Start with Charging Profile -- CSMS sends
-// RemoteStartTransaction with an attached TxProfile (chargingProfilePk=2,
-// the only purpose SteVe will attach to this op). Per OCPP 5.11 a Core-only
-// CP may accept the start but not store/apply the profile -- that's the
-// load-bearing assertion here.
+// RemoteStartTransaction with an attached TxProfile entity ("TC057
+// TxProfile", the only purpose SteVe will attach to this op). Per OCPP 5.11
+// a Core-only CP may accept the start but not store/apply the profile --
+// that's the load-bearing assertion here.
 // ---------------------------------------------------------------------------
 
-export const tc059RemoteStartWithProfileSpec: ScenarioSpec<void> = {
-  templateId: "cert16-tc059-remote-start-with-profile",
-  description:
-    "TC_059 Remote Start with Charging Profile: accepted, but the attached TxProfile is NOT applied (Core CP).",
-  connector: 1,
-  bootWaitSecs: 4,
-  // meter-auto blocks 30s before tx-stop + tail.
-  holdSecs: 40,
-  async drive({ cpId, steve }) {
-    await sleep(2000);
-    try {
-      await steve.op("v1.6/RemoteStartTransaction", {
-        chargePointSelectList: steve.cpSelect(cpId),
-        connectorId: "1",
-        idTag: "CERT-TAG-1",
-        chargingProfilePk: "2",
-      });
-    } catch (err) {
-      warnOpFailed("RemoteStartTransaction", err);
-    }
-  },
-  async assert({ cpId, frames, lines, rec, db }) {
-    assertResponseStatus(
-      rec,
-      frames,
-      "RemoteStartTransaction",
-      "Accepted",
-      "RemoteStartTransaction (with attached TxProfile) accepted",
-    );
-    assertLineMatches(
-      rec,
-      lines,
-      /Sent: \[2,.*"StartTransaction"/,
-      "StartTransaction sent",
-    );
-    // Narrowed to profile #2 specifically (the log's actual format is
-    // "Applied charging profile #<id> to connector <n>", confirmed against
-    // SmartChargingHandlers.ts) -- a bare 'Applied charging profile' would
-    // also fail this scenario on an unrelated profile (e.g. #1 from
-    // another spec's leftover state) being applied, which isn't what this
-    // assertion is about. Literal copied verbatim from the bash spec.
-    assertNoLineMatches(
-      rec,
-      lines,
-      /Applied charging profile #2 to connector/,
-      "attached profile #2 is accepted but NOT stored/applied (Core CP may ignore SmartCharging profiles per OCPP 5.11)",
-    );
-    assertLineMatches(
-      rec,
-      lines,
-      /Sent: \[2,.*"StopTransaction"/,
-      "StopTransaction eventually sent",
-    );
+interface RemoteStartWithProfileDriveState {
+  /** See TxDefaultProfileDriveState.profilePk's comment above -- same
+   *  hardcoded-pk drift issue, fixed the same way. */
+  profilePk: string;
+}
 
-    const txPk = await db.latestTxPk(cpId);
-    if (!txPk) {
-      rec.fail(
-        "DB: transaction is closed (stop_timestamp set)",
-        "no transaction found",
+export const tc059RemoteStartWithProfileSpec: ScenarioSpec<RemoteStartWithProfileDriveState> =
+  {
+    templateId: "cert16-tc059-remote-start-with-profile",
+    description:
+      "TC_059 Remote Start with Charging Profile: accepted, but the attached TxProfile is NOT applied (Core CP).",
+    connector: 1,
+    bootWaitSecs: 4,
+    // meter-auto blocks 30s before tx-stop + tail.
+    holdSecs: 40,
+    async drive({
+      cpId,
+      db,
+      steve,
+    }): Promise<RemoteStartWithProfileDriveState> {
+      await sleep(2000);
+      const profilePk =
+        await db.chargingProfilePkByDescription("TC057 TxProfile");
+      try {
+        await steve.op("v1.6/RemoteStartTransaction", {
+          chargePointSelectList: steve.cpSelect(cpId),
+          connectorId: "1",
+          idTag: "CERT-TAG-1",
+          chargingProfilePk: profilePk,
+        });
+      } catch (err) {
+        warnOpFailed("RemoteStartTransaction", err);
+      }
+      return { profilePk };
+    },
+    async assert({ cpId, frames, lines, rec, db, driveState }) {
+      assertResponseStatus(
+        rec,
+        frames,
+        "RemoteStartTransaction",
+        "Accepted",
+        "RemoteStartTransaction (with attached TxProfile) accepted",
       );
-      return;
-    }
-    assertNonEmpty(
-      rec,
-      await db.txStopTimestamp(txPk),
-      "DB: transaction is closed (stop_timestamp set)",
-    );
-  },
-};
+      assertLineMatches(
+        rec,
+        lines,
+        /Sent: \[2,.*"StartTransaction"/,
+        "StartTransaction sent",
+      );
+      // Narrowed to the attached profile's own pk specifically (the log's
+      // actual format is "Applied charging profile #<id> to connector <n>",
+      // confirmed against SmartChargingHandlers.ts) -- a bare 'Applied
+      // charging profile' would also fail this scenario on an unrelated
+      // profile (e.g. TC056's, from another spec's leftover state) being
+      // applied, which isn't what this assertion is about.
+      assertNoLineMatches(
+        rec,
+        lines,
+        new RegExp(
+          `Applied charging profile #${driveState.profilePk}(?!\\d) to connector`,
+        ),
+        "attached profile is accepted but NOT stored/applied (Core CP may ignore SmartCharging profiles per OCPP 5.11)",
+      );
+      assertLineMatches(
+        rec,
+        lines,
+        /Sent: \[2,.*"StopTransaction"/,
+        "StopTransaction eventually sent",
+      );
+
+      const txPk = await db.latestTxPk(cpId);
+      if (!txPk) {
+        rec.fail(
+          "DB: transaction is closed (stop_timestamp set)",
+          "no transaction found",
+        );
+        return;
+      }
+      assertNonEmpty(
+        rec,
+        await db.txStopTimestamp(txPk),
+        "DB: transaction is closed (stop_timestamp set)",
+      );
+    },
+  };
 
 // ---------------------------------------------------------------------------
 // TC_066 Get Composite Schedule -- SetChargingProfile then
@@ -793,12 +822,18 @@ export const tc066GetCompositeScheduleSpec: ScenarioSpec<void> = {
   connector: 1,
   bootWaitSecs: 4,
   holdSecs: 15,
-  async drive({ cpId, sim, steve }) {
+  async drive({ cpId, db, sim, steve }) {
     await sleep(2000);
+    // Looked up by description (see TxDefaultProfileDriveState's comment
+    // above -- same hardcoded-pk drift issue, fixed the same way) rather
+    // than assuming this profile always has pk 1.
+    const profilePk = await db.chargingProfilePkByDescription(
+      "TC056 TxDefaultProfile",
+    );
     try {
       await steve.op("v1.6/SetChargingProfile", {
         chargePointSelectList: steve.cpSelect(cpId),
-        chargingProfilePk: "1",
+        chargingProfilePk: profilePk,
         connectorId: "1",
         transactionId: "",
       });
@@ -813,11 +848,14 @@ export const tc066GetCompositeScheduleSpec: ScenarioSpec<void> = {
     // connector <n>") before requesting the composite schedule, so a
     // slower host can't race GetCompositeSchedule ahead of the profile
     // actually landing -- ported from the bash spec's sim_wait_log barrier.
+    const appliedRe = new RegExp(
+      `Applied charging profile #${profilePk}(?!\\d)`,
+    );
     try {
-      await sim.waitForLine(/Applied charging profile #1/, 10_000);
+      await sim.waitForLine(appliedRe, 10_000);
     } catch (err) {
       process.stderr.write(
-        `[runner] WARN: did not see 'Applied charging profile #1' within 10s -- proceeding anyway, assert() will likely fail (${
+        `[runner] WARN: did not see 'Applied charging profile #${profilePk}' within 10s -- proceeding anyway, assert() will likely fail (${
           err instanceof Error ? err.message : String(err)
         })\n`,
       );
@@ -870,12 +908,18 @@ export const tc067ClearChargingProfileSpec: ScenarioSpec<void> = {
   connector: 1,
   bootWaitSecs: 4,
   holdSecs: 15,
-  async drive({ cpId, sim, steve }) {
+  async drive({ cpId, db, sim, steve }) {
     await sleep(2000);
+    // Looked up by description (see TxDefaultProfileDriveState's comment
+    // in the TC_056 spec above -- same hardcoded-pk drift issue, fixed the
+    // same way) rather than assuming this profile always has pk 1.
+    const profilePk = await db.chargingProfilePkByDescription(
+      "TC056 TxDefaultProfile",
+    );
     try {
       await steve.op("v1.6/SetChargingProfile", {
         chargePointSelectList: steve.cpSelect(cpId),
-        chargingProfilePk: "1",
+        chargingProfilePk: profilePk,
         connectorId: "1",
         transactionId: "",
       });
@@ -886,11 +930,14 @@ export const tc067ClearChargingProfileSpec: ScenarioSpec<void> = {
     // Same completion-barrier rationale as TC_066 -- wait for the CP's own
     // "applied" confirmation before clearing it, so ClearChargingProfile
     // can't race ahead of the profile actually being stored.
+    const appliedRe = new RegExp(
+      `Applied charging profile #${profilePk}(?!\\d)`,
+    );
     try {
-      await sim.waitForLine(/Applied charging profile #1/, 10_000);
+      await sim.waitForLine(appliedRe, 10_000);
     } catch (err) {
       process.stderr.write(
-        `[runner] WARN: did not see 'Applied charging profile #1' within 10s -- proceeding anyway, assert() will likely fail (${
+        `[runner] WARN: did not see 'Applied charging profile #${profilePk}' within 10s -- proceeding anyway, assert() will likely fail (${
           err instanceof Error ? err.message : String(err)
         })\n`,
       );
@@ -899,7 +946,7 @@ export const tc067ClearChargingProfileSpec: ScenarioSpec<void> = {
     try {
       await steve.op("v1.6/ClearChargingProfile", {
         chargePointSelectList: steve.cpSelect(cpId),
-        chargingProfilePk: "1",
+        chargingProfilePk: profilePk,
       });
     } catch (err) {
       warnOpFailed("ClearChargingProfile", err);

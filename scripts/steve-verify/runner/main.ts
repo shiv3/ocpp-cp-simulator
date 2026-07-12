@@ -23,6 +23,7 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { AssertRecorder } from "./assert";
+import { printCapabilityProbe } from "./capability-probe";
 import { parseLog } from "./ocpp";
 import { defaultSimConfig, startSim } from "./sim";
 import {
@@ -768,6 +769,11 @@ function parseArgs(argv: string[]): CliArgs {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  // Issue #184 Task 4: print once per invocation, ahead of both a single
+  // `run <id>` and a `run-all`/`run --group` sweep -- see
+  // capability-probe.ts for what each line means and how it's derived.
+  await printCapabilityProbe();
 
   if (args.runAll || args.group !== undefined) {
     await runGroupSweep(

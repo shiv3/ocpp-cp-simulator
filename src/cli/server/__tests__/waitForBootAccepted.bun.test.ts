@@ -77,4 +77,17 @@ describe("waitForBootAccepted", () => {
     expect(result).toBe(false);
     expect(timedOut).toBe(true);
   });
+
+  it("still resolves false on timeout when onTimeout throws", async () => {
+    const cp = makeChargePoint("CP004");
+
+    const result = await waitForBootAccepted(cp, 1, {
+      timeoutMs: 30,
+      onTimeout: () => {
+        throw new Error("boom");
+      },
+    });
+
+    expect(result).toBe(false);
+  });
 });

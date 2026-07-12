@@ -73,7 +73,15 @@ export function waitForBootAccepted(
       unsubStatus();
       unsubConnector();
       if (!result) {
-        options.onTimeout?.();
+        // `onTimeout` is caller-supplied (see startServer.ts's usage) and
+        // must never prevent this promise from settling — a throwing
+        // callback would otherwise leave the awaiting scenario hung
+        // forever instead of proceeding per the timeout policy above.
+        try {
+          options.onTimeout?.();
+        } catch (err) {
+          console.error("[waitForBootAccepted] onTimeout callback threw:", err);
+        }
       }
       resolve(result);
     };

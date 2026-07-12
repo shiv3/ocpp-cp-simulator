@@ -13,14 +13,27 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
     if (idTagInfo.status === "Accepted") {
       if (connector) {
         connector.transactionId = transactionId;
-        context.logger.info(
-          `StartTransaction accepted for connector ${this.connectorId}, transitioning to Charging`,
-          LogType.TRANSACTION,
-        );
-        context.chargePoint.updateConnectorStatus(
-          this.connectorId,
-          OCPPStatus.Charging,
-        );
+        // #175: a scenario's own explicit `statusChange` node typically
+        // drives Preparing -> Charging itself right after StartTransaction
+        // is sent (scenario continuation is synchronous; this CALLRESULT
+        // is a genuine round trip and consistently arrives after). Only
+        // re-drive here — and emit a second StatusNotification.req — if
+        // that hasn't already happened.
+        if (connector.status !== OCPPStatus.Charging) {
+          context.logger.info(
+            `StartTransaction accepted for connector ${this.connectorId}, transitioning to Charging`,
+            LogType.TRANSACTION,
+          );
+          context.chargePoint.updateConnectorStatus(
+            this.connectorId,
+            OCPPStatus.Charging,
+          );
+        } else {
+          context.logger.info(
+            `StartTransaction accepted for connector ${this.connectorId}; already Charging, skipping redundant StatusNotification`,
+            LogType.TRANSACTION,
+          );
+        }
       }
     } else {
       context.logger.error("Failed to start transaction", LogType.TRANSACTION);
@@ -34,10 +47,12 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
       } else {
         context.chargePoint.cleanTransaction(this.connectorId);
       }
-      context.chargePoint.updateConnectorStatus(
-        this.connectorId,
-        OCPPStatus.Available,
-      );
+      if (!connector || connector.status !== OCPPStatus.Available) {
+        context.chargePoint.updateConnectorStatus(
+          this.connectorId,
+          OCPPStatus.Available,
+        );
+      }
     }
   }
 }
@@ -54,7 +69,16 @@ export class StopTransactionResultHandler implements CallResultHandler<StopTrans
     if (connector) {
       connector.transactionId = null;
       connector.stopTransaction();
-      if (connector.autoResetToAvailable) {
+      // #175: ChargePoint.stopTransaction() already drove Finishing ->
+      // Available (when autoResetToAvailable) synchronously at
+      // StopTransaction.req send time, and/or a scenario's own explicit
+      // `statusChange` node may have done so since — both happen before
+      // this CALLRESULT can possibly arrive. Only re-drive (and re-notify)
+      // if the connector genuinely hasn't reached Available yet.
+      if (
+        connector.autoResetToAvailable &&
+        connector.status !== OCPPStatus.Available
+      ) {
         context.chargePoint.updateConnectorStatus(
           this.connectorId,
           OCPPStatus.Available,

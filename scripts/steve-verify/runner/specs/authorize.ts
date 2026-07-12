@@ -33,17 +33,15 @@ import {
   type AssertRecorder,
 } from "../assert";
 import type { ScenarioSpec } from "../spec-types";
-import type { SteveDb } from "../steve";
+import type { SteveTx } from "../steve";
 
 async function assertNoTransactionForTag(
   cpId: string,
   idTag: string,
-  db: SteveDb,
+  db: SteveTx,
   rec: AssertRecorder,
 ): Promise<void> {
-  const count = await db.scalar(
-    `SELECT COUNT(*) FROM transaction t JOIN evse e ON e.evse_pk = t.evse_pk WHERE e.charge_box_id = '${cpId}' AND t.id_tag = '${idTag}';`,
-  );
+  const count = await db.txCountForTag(cpId, idTag);
   assertEq(
     rec,
     count,

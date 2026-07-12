@@ -189,3 +189,84 @@ steve_login() {
 steve_ensure_login() {
   steve_is_logged_in || steve_login
 }
+
+# ---------------------------------------------------------------------------
+# SteVe REST API (issue #184 Task 3): Basic-auth JSON client for
+# /api/v1/ocppTags, used by 02-provision.sh's tag provisioning. Separate
+# from steve_login()/steve_ensure_login() above -- those drive the
+# manager-UI cookie/CSRF session 02-provision.sh's ensure_charging_profile()
+# still needs (SteVe 3.13.0 ships no REST charging-profile endpoint). The
+# REST API is a stateless, separate Spring Security filter chain
+# authenticated by web_user.api_password (a SEPARATE bcrypt column from the
+# manager-UI password) -- see runner/steve-api.ts's file header for the full
+# auth story and 01-setup-steve.sh for how a fresh checkout seeds it.
+# ---------------------------------------------------------------------------
+
+STEVE_API_URL="${STEVE_API_URL:-http://localhost:${STEVE_APP_HOST_PORT}/steve/api/v1}"
+STEVE_API_USER="${STEVE_API_USER:-$STEVE_USER}"
+STEVE_API_PASS="${STEVE_API_PASS:-$STEVE_PASS}"
+
+# steve_api_json_field FIELD JSON -- extracts a top-level NUMERIC field's
+# value from a JSON object, or the first element of a JSON array (e.g.
+# ocppTagPk from an /ocppTags response) via grep/sed -- no jq dependency,
+# matching this file's existing CSRF-extraction style (_steve_extract_csrf
+# above). Empty output if the field isn't present.
+#
+# `|| true` is load-bearing under this file's callers' `set -o pipefail`:
+# `grep -o` with NO match (the common, expected case for a not-yet-
+# provisioned tag -- e.g. `[]` from `GET /ocppTags?idTag=<new>`) exits 1,
+# and pipefail propagates that through `head`/`cut` even though they both
+# succeed -- without the `|| true`, this silently aborted 02-provision.sh
+# (via `set -e`) on the FIRST tag that didn't already exist, discovered
+# live: a fresh-looking tag (CERT023-INV, already deleted by section 2b's
+# fixup on a prior run) killed the whole provisioning loop with NO error
+# output at all (`die()` was never reached -- the abort happened one level
+# down, inside this command substitution).
+steve_api_json_field() {
+  printf '%s' "$2" | grep -o "\"$1\":[0-9]*" | head -n1 | cut -d: -f2 || true
+}
+
+# steve_api_tag_pk ID_TAG -- ocppTagPk of an existing ocppTag, empty if none.
+steve_api_tag_pk() {
+  local body
+  body="$(curl -sS -u "$STEVE_API_USER:$STEVE_API_PASS" -m 10 \
+    --get --data-urlencode "idTag=$1" "$STEVE_API_URL/ocppTags")"
+  steve_api_json_field "ocppTagPk" "$body"
+}
+
+# steve_api_ensure_tag ID_TAG MAX_ACTIVE_TX_COUNT -- creates (POST) or
+# updates (PUT, if a row already exists) an ocppTag via
+# /api/v1/ocppTags -- idempotent. maxActiveTransactionCount=0 makes the tag
+# read back as "blocked":true (derived server-side, live-verified -- see
+# runner/steve-api.ts's "Transactions + OCPP tags" section header); this is
+# how CERT023-BLK is provisioned (see 02-provision.sh). Dies on an
+# unexpected HTTP status.
+steve_api_ensure_tag() {
+  local id_tag="$1" max_count="$2" pk payload response status
+  payload="{\"idTag\":\"$id_tag\",\"maxActiveTransactionCount\":$max_count}"
+  pk="$(steve_api_tag_pk "$id_tag")"
+  if [ -n "$pk" ]; then
+    response="$(curl -sS -u "$STEVE_API_USER:$STEVE_API_PASS" -m 10 -w '\n%{http_code}' \
+      -X PUT -H 'Content-Type: application/json' -d "$payload" \
+      "$STEVE_API_URL/ocppTags/$pk")"
+  else
+    response="$(curl -sS -u "$STEVE_API_USER:$STEVE_API_PASS" -m 10 -w '\n%{http_code}' \
+      -X POST -H 'Content-Type: application/json' -d "$payload" \
+      "$STEVE_API_URL/ocppTags")"
+  fi
+  status="${response##*$'\n'}"
+  case "$status" in
+    200 | 201) ;;
+    *) die "steve_api_ensure_tag($id_tag): unexpected HTTP $status: ${response%$'\n'*}" ;;
+  esac
+}
+
+# steve_api_delete_tag_if_exists ID_TAG -- DELETEs an ocppTag if a row
+# exists for it; no-op if it doesn't. Idempotent.
+steve_api_delete_tag_if_exists() {
+  local pk
+  pk="$(steve_api_tag_pk "$1")"
+  [ -n "$pk" ] || return 0
+  curl -sS -u "$STEVE_API_USER:$STEVE_API_PASS" -m 10 -o /dev/null \
+    -X DELETE "$STEVE_API_URL/ocppTags/$pk"
+}

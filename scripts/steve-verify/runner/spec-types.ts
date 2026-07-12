@@ -7,14 +7,21 @@
 import type { AssertRecorder } from "./assert";
 import type { Frame } from "./ocpp";
 import type { SimProcess } from "./sim";
-import type { SteveClient, SteveDb } from "./steve";
+import type { SteveOps, SteveTx } from "./steve";
 
 export interface DriveContext {
   cpId: string;
   connector: number;
   sim: SimProcess;
-  steve: SteveClient;
-  db: SteveDb;
+  /** Whichever SteveOps driver main.ts selected for this run
+   *  (STEVE_DRIVER=api|ui, default api) -- see steve.ts's SteveOps for
+   *  the (deliberately narrow) method surface specs may rely on. */
+  steve: SteveOps;
+  /** Whichever SteveTx driver main.ts selected for this run
+   *  (STEVE_DRIVER=api|ui, default api, same flag as `steve` above) --
+   *  see steve.ts's SteveTx for the transaction/reservation-assertion
+   *  method surface specs may rely on (issue #184 Task 3). */
+  db: SteveTx;
 }
 
 export interface AssertContext<D> {
@@ -28,7 +35,7 @@ export interface AssertContext<D> {
    *  (scenario lifecycle events, boot-gate-suppression absence, ...). */
   lines: readonly string[];
   rec: AssertRecorder;
-  db: SteveDb;
+  db: SteveTx;
   /** Whatever `drive()` returned (e.g. a DB baseline captured before
    *  triggering a CSMS op), threaded through for a later negative check. */
   driveState: D;

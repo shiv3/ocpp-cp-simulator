@@ -89,6 +89,34 @@ if ! printf '%s' "$merged_config" | grep -q "published: \"${STEVE_APP_HOST_PORT}
 fi
 
 # ---------------------------------------------------------------------------
+# 2b. Enable the REST API for the seeded admin user (issue #184 Task 2)
+# ---------------------------------------------------------------------------
+#
+# The TS runner's default SteveOps driver (STEVE_DRIVER=api, see
+# runner/steve-api.ts) authenticates against SteVe's /api/v1/** with HTTP
+# Basic auth checked against web_user.api_password -- a SEPARATE bcrypt
+# column from the manager-UI login password, NULL by default. SteVe only
+# seeds it (from this `webapi.value` property) the FIRST time it ever
+# creates an ADMIN user (WebUserService#afterStart is a no-op once any
+# ADMIN exists) -- i.e. only on a truly fresh DB volume, which is exactly
+# what a first-time clone here produces. Set it to STEVE_PASS so the
+# seeded admin's API credentials end up identical to its manager-UI
+# credentials (STEVE_USER/STEVE_PASS) -- one set of creds, both drivers.
+# Idempotent (plain substitution); a no-op for an already-provisioned
+# instance -- see runner/steve-api.ts's file header for the one-time
+# `UPDATE web_user SET api_password = password ...` DB fixup + app
+# restart that situation needs instead (this script can't reach into an
+# already-seeded database).
+PROPS_FILE="$STEVE_REPO_DIR/src/main/resources/application-docker.properties"
+[ -f "$PROPS_FILE" ] || die "no application-docker.properties found at $PROPS_FILE -- unexpected SteVe checkout layout"
+
+log_info "enabling the REST API for the seeded admin user (webapi.value in application-docker.properties, fresh DB only)"
+sed -i.bak \
+  -e "s/^webapi\.value[[:space:]]*=.*/webapi.value = ${STEVE_PASS}/" \
+  "$PROPS_FILE"
+rm -f "$PROPS_FILE.bak"
+
+# ---------------------------------------------------------------------------
 # 3. Bring the stack up
 # ---------------------------------------------------------------------------
 

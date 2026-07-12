@@ -53,6 +53,23 @@ export function reservationExpirySoon(minutes = 10): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+/**
+ * retrieve_datetime_soon equivalent (duplicated identically across the
+ * cert16-tc044-* bash specs -- collapsed to one shared helper here): a
+ * `UpdateFirmware.retrieveDateTime` value `seconds` (default 90) from now,
+ * in the same "YYYY-MM-DD HH:MM" no-seconds-field format as
+ * {@link reservationExpirySoon}. Deliberately a longer default offset than a
+ * ReserveNow expiry needs (90s, not minutes) -- retrieveDateTime has no
+ * seconds field, so a short "+N seconds" offset can round into the current
+ * (already-past) minute; +90s guarantees landing in a strictly future
+ * minute regardless of where in the current minute the caller runs.
+ */
+export function retrieveDatetimeSoon(seconds = 90): string {
+  const d = new Date(Date.now() + seconds * 1_000);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
 export interface WaitForConditionOptions {
   /** Total time budget, ms (default 15000). */
   timeoutMs?: number;
@@ -276,6 +293,42 @@ export class SteveDb {
   async latestReservationPk(cpId: string): Promise<string> {
     return this.scalar(
       `SELECT r.reservation_pk FROM reservation r JOIN evse e ON e.evse_pk = r.evse_pk WHERE e.charge_box_id = '${cpId}' ORDER BY r.reservation_pk DESC LIMIT 1;`,
+    );
+  }
+
+  /**
+   * db_wait_active_tx_pk equivalent: polls (bounded, default 15s) for an
+   * OPEN transaction (stop_timestamp IS NULL) on `cpId` started with
+   * `idTag`, returning its transaction_pk. Use this instead of
+   * {@link latestTxPk} when a spec needs to bind its later assertions to the
+   * transaction ITS OWN scenario/drive() created -- latestTxPk just grabs
+   * the newest row for the charge box regardless of tag or open/closed
+   * state, which on a reused charge point can silently pick up a stale
+   * closed transaction from an earlier run instead of the racing
+   * in-progress one. Task-3-group-only (tc028, tc057): every Task 1/2 spec
+   * either has no concurrent tag collision risk or doesn't need the
+   * open-and-tagged narrowing. Rejects (fail-hard, mirrors
+   * {@link waitForCondition}/wait_for_condition's `die`) on timeout --
+   * unlike the bash version's `log_warn` + `return 1`, which lets its
+   * caller's `|| true` swallow the failure and continue with an empty
+   * TX_PK. Callers that want that same "continue with nothing" behavior
+   * should catch and treat the rejection as an empty result themselves.
+   */
+  async waitActiveTxPk(
+    cpId: string,
+    idTag: string,
+    timeoutSecs = 15,
+  ): Promise<string> {
+    return waitForCondition(
+      () =>
+        this.scalar(
+          `SELECT t.transaction_pk FROM transaction t JOIN evse e ON e.evse_pk = t.evse_pk WHERE e.charge_box_id = '${cpId}' AND t.id_tag = '${idTag}' AND t.stop_timestamp IS NULL ORDER BY t.transaction_pk DESC LIMIT 1;`,
+        ),
+      {
+        timeoutMs: timeoutSecs * 1000,
+        intervalMs: 1_000,
+        description: `active transaction on ${cpId} (id_tag=${idTag})`,
+      },
     );
   }
 

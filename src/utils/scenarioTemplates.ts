@@ -64,6 +64,14 @@ import cert16Tc044_2FirmwareDownloadFailedJson from "./scenarios/cert16-tc044-2-
 import cert16Tc044_3FirmwareInstallFailedJson from "./scenarios/cert16-tc044-3-firmware-install-failed.json";
 import cert16Tc045_1GetDiagnosticsJson from "./scenarios/cert16-tc045-1-get-diagnostics.json";
 
+// OCPP 1.6 Authorize outcome certification scenarios (issue #181): the
+// local-start Authorize gate landed in #181 makes these newly expressible
+// (a denied Authorize.conf is now a non-throwing scenario skip instead of
+// an unmodeled no-op) — see the README's Out-of-Scope section history.
+import cert16Tc023_1AuthorizeInvalidJson from "./scenarios/cert16-tc023-1-authorize-invalid.json";
+import cert16Tc023_2AuthorizeExpiredJson from "./scenarios/cert16-tc023-2-authorize-expired.json";
+import cert16Tc023_3AuthorizeBlockedJson from "./scenarios/cert16-tc023-3-authorize-blocked.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -212,6 +220,12 @@ export const scenarioTemplates: ScenarioTemplate[] = [
     cert16Tc044_3FirmwareInstallFailedJson as ScenarioDefinition,
   ),
   templateFromJson(cert16Tc045_1GetDiagnosticsJson as ScenarioDefinition),
+
+  // OCPP 1.6 Authorize outcome certification scenarios (issue #181) —
+  // grouped together so they surface as a block in the template picker.
+  templateFromJson(cert16Tc023_1AuthorizeInvalidJson as ScenarioDefinition),
+  templateFromJson(cert16Tc023_2AuthorizeExpiredJson as ScenarioDefinition),
+  templateFromJson(cert16Tc023_3AuthorizeBlockedJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

@@ -106,13 +106,12 @@ describe("buildV16CallHandlerRegistry", () => {
   });
 
   describe("CALLRESULT handlers", () => {
-    it("registers all OCPP 1.6 CALLRESULT handlers", () => {
+    it("registers the stateless OCPP 1.6 CALLRESULT handlers", () => {
       const registry = buildV16CallHandlerRegistry();
 
       expect(
         registry.getCallResultHandler(OCPPAction.BootNotification),
       ).toBeDefined();
-      expect(registry.getCallResultHandler(OCPPAction.Authorize)).toBeDefined();
       expect(registry.getCallResultHandler(OCPPAction.Heartbeat)).toBeDefined();
       expect(
         registry.getCallResultHandler(OCPPAction.StatusNotification),
@@ -120,6 +119,17 @@ describe("buildV16CallHandlerRegistry", () => {
       expect(
         registry.getCallResultHandler(OCPPAction.DataTransfer),
       ).toBeDefined();
+    });
+
+    it("does NOT register Authorize CALLRESULT handler (per-request, needs the request's idTag — #181)", () => {
+      const registry = buildV16CallHandlerRegistry();
+      // Mirrors StartTransaction/StopTransaction/MeterValues below:
+      // OCPPMessageHandler.handleCallResult constructs it dynamically from
+      // request.payload so it can correlate the `authorizeResult` event
+      // with the tagId Authorize.conf itself doesn't carry.
+      expect(
+        registry.getCallResultHandler(OCPPAction.Authorize),
+      ).toBeUndefined();
     });
 
     it("returns undefined for unregistered CALLRESULT actions", () => {

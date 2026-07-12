@@ -41,6 +41,10 @@ function newChargePoint(id: string): ChargePoint {
     {},
   );
   cp.events.on("error", () => undefined);
+  // This suite is about stop-reason propagation (issue #110), not the
+  // #181 local-authorize gate — disable it so the scenario's "Start Tx"
+  // node doesn't park awaiting an Authorize.conf this test never sends.
+  cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
   return cp;
 }
 

@@ -470,7 +470,11 @@ export const createScenarioExecutorCallbacks = (
       initialSoc,
       options,
     ) => {
-      chargePoint.startTransaction(
+      // Issue #181: surface the domain outcome (denied vs started) instead
+      // of discarding it — ScenarioExecutor.executeTransaction uses this to
+      // log-and-continue on a denied local-authorize gate rather than
+      // erroring the scenario.
+      return chargePoint.startTransaction(
         tagId,
         connector.id,
         batteryCapacityKwh,

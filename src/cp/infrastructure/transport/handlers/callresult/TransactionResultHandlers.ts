@@ -1,5 +1,6 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {} from "../../../../../ocpp";
+import type { AuthorizeRequestV16 } from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
@@ -36,23 +37,38 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
         }
       }
     } else {
-      context.logger.error("Failed to start transaction", LogType.TRANSACTION);
+      // Issue #181: §4.8 StopTransactionOnInvalidId — a non-Accepted
+      // idTagInfo on StartTransaction.conf either administratively stops
+      // the transaction (DeAuthorized, default) or is logged and the
+      // transaction keeps running, per the key's value.
+      const status = idTagInfo.status;
+      const stopOnInvalid =
+        context.chargePoint.configuration.stopTransactionOnInvalidId();
+      context.logger.warn(
+        `StartTransaction not accepted (${status}) for connector ${this.connectorId}; StopTransactionOnInvalidId=${stopOnInvalid}`,
+        LogType.TRANSACTION,
+      );
       if (connector) {
-        connector.status = OCPPStatus.Faulted;
-        if (connector.transaction && connector.transaction.meterSent) {
-          context.chargePoint.stopTransaction(connector);
-        } else {
-          context.chargePoint.cleanTransaction(connector);
+        // Record the CSMS-assigned transactionId regardless of outcome —
+        // §4.8 guarantees it's present even on rejection, and the
+        // DeAuthorized StopTransaction.req below needs it to correlate.
+        connector.transactionId = transactionId;
+        if (stopOnInvalid) {
+          context.chargePoint.stopTransaction(connector, "DeAuthorized");
+        } else if (connector.status !== OCPPStatus.Charging) {
+          // StopTransactionOnInvalidId=false: the CP doesn't stop on its
+          // own initiative — the transaction proceeds as if accepted.
+          context.chargePoint.updateConnectorStatus(
+            this.connectorId,
+            OCPPStatus.Charging,
+          );
         }
-      } else {
-        context.chargePoint.cleanTransaction(this.connectorId);
       }
-      if (!connector || connector.status !== OCPPStatus.Available) {
-        context.chargePoint.updateConnectorStatus(
-          this.connectorId,
-          OCPPStatus.Available,
-        );
-      }
+      context.chargePoint.notifyStartTransactionNotAccepted(
+        this.connectorId,
+        status,
+        stopOnInvalid,
+      );
     }
   }
 }
@@ -89,12 +105,25 @@ export class StopTransactionResultHandler implements CallResultHandler<StopTrans
 }
 
 export class AuthorizeResultHandler implements CallResultHandler<AuthorizeResponseV16> {
+  /** `requestPayload` is the original Authorize.req this CALLRESULT answers
+   *  — AuthorizeResponseV16 itself carries no idTag, so the handler needs
+   *  it from the request to correlate the `authorizeResult` event
+   *  (issue #181). Constructed dynamically per-request by
+   *  OCPPMessageHandler.handleCallResult, mirroring MeterValuesResultHandler. */
+  constructor(private requestPayload?: AuthorizeRequestV16) {}
+
   handle(payload: AuthorizeResponseV16, context: HandlerContext): void {
     const { idTagInfo } = payload;
     if (idTagInfo.status === "Accepted") {
       context.logger.info("Authorization successful", LogType.TRANSACTION);
     } else {
       context.logger.warn("Authorization failed", LogType.TRANSACTION);
+    }
+    if (this.requestPayload) {
+      context.chargePoint.notifyAuthorizeResult(
+        this.requestPayload.idTag,
+        idTagInfo.status,
+      );
     }
   }
 }

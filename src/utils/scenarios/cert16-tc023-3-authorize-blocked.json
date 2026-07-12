@@ -1,0 +1,59 @@
+{
+  "id": "cert16-tc023-3-authorize-blocked",
+  "name": "Cert 1.6 Core: TC_023.3 Authorize Outcome (Blocked)",
+  "description": "Operator ensures idTag CERT023-BLK is registered on the CSMS as blocked. Plug in; CP sends Authorize.req before starting a transaction (issue #181); CSMS responds Blocked; CP does not send StartTransaction.req and the scenario continues to plug-out.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 150 },
+      "data": { "label": "Plug In", "action": "plugin" }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Start Transaction (Blocked idTag)",
+        "action": "start",
+        "tagId": "CERT023-BLK"
+      }
+    },
+    {
+      "id": "delay-1",
+      "type": "delay",
+      "position": { "x": 400, "y": 350 },
+      "data": { "label": "Wait 2s", "delaySeconds": 2 }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 450 },
+      "data": { "label": "Plug Out", "action": "plugout" }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": { "x": 400, "y": 550 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "plug-in" },
+    { "id": "e2", "source": "plug-in", "target": "tx-start" },
+    { "id": "e3", "source": "tx-start", "target": "delay-1" },
+    { "id": "e4", "source": "delay-1", "target": "plug-out" },
+    { "id": "e5", "source": "plug-out", "target": "end-1" }
+  ]
+}

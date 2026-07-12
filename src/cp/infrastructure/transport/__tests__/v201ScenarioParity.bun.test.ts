@@ -80,6 +80,11 @@ function newChargePoint(id: string): {
     {},
   );
   chargePoint.events.on("error", () => undefined);
+  // This suite exercises RequestStopTransaction/scenario-parity semantics,
+  // not the #181 local-authorize gate — disable it so the helper
+  // `startTransaction()` calls below don't wait on an Authorize.conf the
+  // mock CSMS never answers.
+  chargePoint.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
   return { csms, chargePoint };
 }
 

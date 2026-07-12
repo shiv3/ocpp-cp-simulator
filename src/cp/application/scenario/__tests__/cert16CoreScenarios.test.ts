@@ -41,6 +41,13 @@ function newChargePoint(id: string): ChargePoint {
     {},
   );
   cp.events.on("error", () => undefined);
+  // TC_013's "Start Transaction" node is a plain local start, not a
+  // RemoteStartTrigger — the #181 local-authorize gate would otherwise
+  // park it awaiting an Authorize.conf this test never sends. These specs
+  // predate #181 and aren't about authorize semantics; the TC_023
+  // Authorize-outcome scenarios (issue #181 Task 4) exercise the gate
+  // itself.
+  cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
   return cp;
 }
 

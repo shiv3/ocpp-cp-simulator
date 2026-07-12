@@ -413,6 +413,17 @@ export const ConfigurationKeys = {
       readonly: false,
       type: "string",
     } as StringConfigurationKey,
+    // Issue #181: when true (default), a LOCAL (self-initiated, non-
+    // remote-start) transaction start sends Authorize.req and awaits
+    // Authorize.conf before StartTransaction.req; Invalid/Expired/Blocked
+    // refuses the start. Mirrors the official OCTT TC_003/004 flows. Set
+    // to false to restore the pre-#181 wire (StartTransaction.req only).
+    AuthorizeBeforeLocalStart: {
+      name: "AuthorizeBeforeLocalStart",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
   },
 };
 
@@ -571,5 +582,6 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // ── Custom (non-standard) ──────────────────────────────────────────
     strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),
     strVal(ConfigurationKeys.Custom.SimulatedFirmwareUpdateFailure, ""),
+    boolVal(ConfigurationKeys.Custom.AuthorizeBeforeLocalStart, true),
   ];
 };

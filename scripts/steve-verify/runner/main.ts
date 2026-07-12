@@ -28,6 +28,7 @@ import { defaultSimConfig, startSim } from "./sim";
 import { defaultSteveConfig, SteveClient, SteveDb } from "./steve";
 import {
   AUTHLIST_RESERVATION_SPECS,
+  AUTHORIZE_SPECS,
   CORE_SPECS,
   FIRMWARE_SPECS,
   REMOTETRIGGER_SMARTCHARGING_SPECS,
@@ -193,6 +194,11 @@ async function runScenario<D>(
 // Spec registry -- groups mirror run-all.sh's group names and array
 // membership/order exactly (44 scenarios total: 15 core + 13
 // authlist-reservation + 12 remotetrigger-smartcharging + 4 firmware).
+//
+// "authorize" (issue #181's 3 TC_023 Authorize-outcome scenarios) is a
+// separate group, deliberately NOT folded into "all" -- run-all --parallel
+// stays at its existing 44-scenario baseline; run `run-all --group
+// authorize` (3 scenarios) as its own sweep.
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,6 +207,7 @@ const GROUPS: Record<string, ScenarioSpec<any>[]> = {
   "authlist-reservation": AUTHLIST_RESERVATION_SPECS,
   "remotetrigger-smartcharging": REMOTETRIGGER_SMARTCHARGING_SPECS,
   firmware: FIRMWARE_SPECS,
+  authorize: AUTHORIZE_SPECS,
   // Concatenation order mirrors run-all.sh's `all)` case exactly: CORE +
   // AUTHLIST_RESERVATION + REMOTETRIGGER_SMARTCHARGING + FIRMWARE.
   all: [
@@ -211,9 +218,15 @@ const GROUPS: Record<string, ScenarioSpec<any>[]> = {
   ],
 };
 
+// Built from every group (not just "all") so `run <template-id>` also
+// resolves specs from groups intentionally excluded from "all" (e.g.
+// "authorize" -- see the GROUPS comment above). Map construction dedupes
+// the same spec object appearing under both its own group and "all".
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SPECS_BY_TEMPLATE_ID = new Map<string, ScenarioSpec<any>>(
-  GROUPS.all.map((spec) => [spec.templateId, spec]),
+  Object.values(GROUPS)
+    .flat()
+    .map((spec) => [spec.templateId, spec]),
 );
 
 // Round-robins scenarios across CERTCP1..3 so adjacent scenarios in a group

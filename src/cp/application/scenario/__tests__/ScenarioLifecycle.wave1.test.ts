@@ -234,6 +234,11 @@ function newChargePoint(id: string): ChargePoint {
     {},
   );
   cp.events.on("error", () => undefined);
+  // These WAVE 1 tests exercise pre-#181 transaction-lifecycle guards
+  // (duplicate start, cleaned-retry, Inoperative), not the #181
+  // local-authorize gate — disable it so startTransaction() keeps its
+  // synchronous behavior here.
+  cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
   return cp;
 }
 

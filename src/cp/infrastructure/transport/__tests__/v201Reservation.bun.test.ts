@@ -101,6 +101,10 @@ function newChargePoint(id: string): {
     {},
   );
   cp.events.on("error", () => undefined);
+  // This suite exercises Reservation semantics, not the #181 local-
+  // authorize gate — disable it so the setup `startTransaction()` calls
+  // below don't wait on an Authorize.conf the mock CSMS never answers.
+  cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
   return { csms, cp };
 }
 

@@ -724,18 +724,27 @@ export class ScenarioExecutor {
         const options = this.remoteStartOptions;
         this.remoteStartTagId = null;
         this.remoteStartOptions = null;
-        if (options) {
-          await this.callbacks.onStartTransaction(
-            tagId,
-            data.batteryCapacityKwh,
-            data.initialSoc,
-            options,
-          );
-        } else {
-          await this.callbacks.onStartTransaction(
-            tagId,
-            data.batteryCapacityKwh,
-            data.initialSoc,
+        const outcome = options
+          ? await this.callbacks.onStartTransaction(
+              tagId,
+              data.batteryCapacityKwh,
+              data.initialSoc,
+              options,
+            )
+          : await this.callbacks.onStartTransaction(
+              tagId,
+              data.batteryCapacityKwh,
+              data.initialSoc,
+            );
+        // Issue #181: a denied local-authorize gate is a LOGGED SKIP, not
+        // an error — the scenario continues to its next node (e.g. plugout
+        // / end) exactly like TC_023's Authorize-Invalid/Expired/Blocked
+        // graphs expect. `outcome` is `void` for callback implementations
+        // that don't report one, so only act on it when present.
+        if (outcome && outcome.started === false) {
+          this.callbacks.log?.(
+            `Transaction start denied (${outcome.denialStatus ?? "refused"}); continuing scenario`,
+            "warn",
           );
         }
       }

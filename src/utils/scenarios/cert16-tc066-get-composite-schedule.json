@@ -14,12 +14,6 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "csms-set-charging-profile",
       "type": "csmsCallTrigger",
       "position": { "x": 400, "y": 250 },
@@ -47,12 +41,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-available" },
-    {
-      "id": "e2",
-      "source": "status-available",
-      "target": "csms-set-charging-profile"
-    },
+    { "id": "e1", "source": "start-1", "target": "csms-set-charging-profile" },
     {
       "id": "e3",
       "source": "csms-set-charging-profile",

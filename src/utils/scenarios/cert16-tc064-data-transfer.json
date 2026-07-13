@@ -15,12 +15,6 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "send-data-transfer",
       "type": "dataTransfer",
       "position": { "x": 400, "y": 250 },
@@ -45,12 +39,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-available" },
-    {
-      "id": "e2",
-      "source": "status-available",
-      "target": "send-data-transfer"
-    },
+    { "id": "e1", "source": "start-1", "target": "send-data-transfer" },
     { "id": "e3", "source": "send-data-transfer", "target": "delay-1" },
     { "id": "e4", "source": "delay-1", "target": "end-1" }
   ]

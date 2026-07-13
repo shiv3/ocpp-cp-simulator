@@ -404,4 +404,91 @@ describe("useScenarioRun", () => {
     expect(mounted.current().runs[0].startedAt).toBeInstanceOf(Date);
     expect(mounted.current().runs[0].endedAt).not.toBeNull();
   });
+
+  it("start() is a no-op on a rapid second call while the first loadScenario is still pending (Bug 1)", async () => {
+    const scenario = fixtureScenario();
+    let resolveLoad: ((value: { scenarioId: string }) => void) | undefined;
+    const loadScenario = vi.fn(
+      () =>
+        new Promise<{ scenarioId: string }>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const runScenario = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      loadScenario,
+      runScenario,
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+
+    // Two rapid calls before `loadScenario` settles — the second must be a
+    // no-op, not a re-entry that pushes a second run / issues a second RPC.
+    await act(async () => {
+      const { start } = mounted.current();
+      void start();
+      void start();
+      await Promise.resolve();
+    });
+
+    expect(loadScenario).toHaveBeenCalledTimes(1);
+    expect(mounted.current().runs).toHaveLength(1);
+
+    await act(async () => {
+      resolveLoad?.({ scenarioId: "runtime-s1" });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(runScenario).toHaveBeenCalledTimes(1);
+    expect(mounted.current().runs).toHaveLength(1);
+    expect(mounted.current().state).toBe("running");
+    expect(mounted.current().runs[0].result).toBe("running");
+  });
+
+  it("start() does not attach a stale currentNodeId as failedNodeId when a retry's loadScenario rejects (Bug 2)", async () => {
+    const scenario = fixtureScenario();
+    const [step1] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const loadScenario = vi
+      .fn()
+      .mockResolvedValueOnce({ scenarioId: "runtime-s1" })
+      .mockRejectedValueOnce(new Error("retry load failed"));
+    const runScenario = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      loadScenario,
+      runScenario,
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+
+    // First run completes at step1.
+    await mounted.click("start");
+    await pushEvent(service, "CP-1", {
+      type: "scenario-node-execute",
+      connectorId: 1,
+      scenarioId: "runtime-s1",
+      nodeId: step1.id,
+    });
+    await pushEvent(service, "CP-1", {
+      type: "scenario-completed",
+      connectorId: 1,
+      scenarioId: "runtime-s1",
+    });
+    expect(mounted.current().currentNodeId).toBe(step1.id);
+
+    // Retry: loadScenario rejects before any node of the new run executes.
+    await mounted.click("start");
+
+    expect(mounted.current().state).toBe("error");
+    expect(mounted.current().error).toContain("retry load failed");
+    expect(mounted.current().runs).toHaveLength(2);
+    expect(mounted.current().runs[0].result).toBe("error");
+    expect(mounted.current().runs[0].failedNodeId).toBeUndefined();
+  });
 });

@@ -83,6 +83,16 @@ export function useScenarioRun(
   // reads the latest value instead of a stale closure.
   const activeScenarioIdRef = useRef<string | null>(null);
   const currentNodeIdRef = useRef<string | null>(null);
+  // Guards `start()` against re-entry: `state` doesn't flip to "running"
+  // until `loadScenario` resolves, so a rapid second `start()` call in that
+  // window would otherwise re-enter, pushing a second `runs` entry and
+  // overwriting `activeScenarioIdRef` — orphaning the first run (its
+  // `scenario-completed`/`scenario-error` events get filtered out once
+  // `activeScenarioIdRef` points at the second run's scenarioId, so it never
+  // gets `endedAt` and stays "running" forever). Set true synchronously at
+  // the top of `start()` and cleared in `finally`, so it covers the whole
+  // `loadScenario` + `runScenario` duration, not just cleared elsewhere.
+  const isStartingRef = useRef(false);
 
   // Reset everything when the viewed target changes.
   useEffect(() => {
@@ -152,8 +162,24 @@ export function useScenarioRun(
   const start = useCallback(
     async (mode?: ScenarioExecutionMode) => {
       if (!cpId || connectorId == null || !scenario) return;
+      // Reentry guard: a rapid second click lands here while the first
+      // call's `loadScenario`/`runScenario` are still in flight. No-op
+      // until the first call resolves or fails (cleared in `finally`).
+      if (isStartingRef.current) return;
+      isStartingRef.current = true;
 
       setError(null);
+      // Reset node-tracking state up front, BEFORE `loadScenario` — not
+      // only on the success path below. Otherwise a retry after a prior
+      // run (completed/stopped/error) would still have `currentNodeIdRef`
+      // pointing at that prior run's last node, and if THIS attempt's
+      // `loadScenario` rejects before any node executes, the catch below
+      // would mislabel the load-time failure with that stale node as
+      // `failedNodeId`.
+      currentNodeIdRef.current = null;
+      setCurrentNodeId(null);
+      setExecutedNodeIds([]);
+
       const definitionToLoad = mode
         ? { ...scenario, defaultExecutionMode: mode }
         : scenario;
@@ -176,9 +202,6 @@ export function useScenarioRun(
           definitionToLoad,
         );
         activeScenarioIdRef.current = scenarioId;
-        currentNodeIdRef.current = null;
-        setCurrentNodeId(null);
-        setExecutedNodeIds([]);
         setState("running");
 
         await chargePointService.runScenario(cpId, connectorId, scenarioId);
@@ -187,6 +210,8 @@ export function useScenarioRun(
         setError(message);
         setState("error");
         closeActiveRun("error", currentNodeIdRef.current ?? undefined);
+      } finally {
+        isStartingRef.current = false;
       }
     },
     [cpId, connectorId, scenario, chargePointService, closeActiveRun],

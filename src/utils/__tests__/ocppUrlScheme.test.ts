@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { adaptCentralSystemUrlScheme } from "../ocppUrlScheme";
+import {
+  adaptCentralSystemUrlScheme,
+  adaptOcppUrlSecurity,
+} from "../ocppUrlScheme";
 
 describe("adaptCentralSystemUrlScheme (#164)", () => {
   // A generic, non-SteVe-boilerplate host/path, used to verify the plain
@@ -118,5 +121,63 @@ describe("adaptCentralSystemUrlScheme (#164)", () => {
         adaptCentralSystemUrlScheme("ws://otherhost/some/custom/path", true),
       ).toBe("http://otherhost/some/custom/path");
     });
+  });
+});
+
+describe("adaptOcppUrlSecurity (#178 item G)", () => {
+  const HOST = "example.com:8080/ocpp/CentralSystemService/CP001";
+
+  describe("requiring a secure transport (profiles 2/3)", () => {
+    it("upgrades ws:// -> wss:// and keeps host/port/path", () => {
+      expect(adaptOcppUrlSecurity(`ws://${HOST}`, true)).toBe(`wss://${HOST}`);
+    });
+
+    it("upgrades http:// -> https://", () => {
+      expect(adaptOcppUrlSecurity(`http://${HOST}`, true)).toBe(
+        `https://${HOST}`,
+      );
+    });
+
+    it("leaves an already-secure URL unchanged", () => {
+      expect(adaptOcppUrlSecurity(`wss://${HOST}`, true)).toBe(`wss://${HOST}`);
+      expect(adaptOcppUrlSecurity(`https://${HOST}`, true)).toBe(
+        `https://${HOST}`,
+      );
+    });
+  });
+
+  describe("requiring an unsecured transport (profile 1)", () => {
+    it("downgrades wss:// -> ws:// and keeps host/port/path", () => {
+      expect(adaptOcppUrlSecurity(`wss://${HOST}`, false)).toBe(`ws://${HOST}`);
+    });
+
+    it("downgrades https:// -> http://", () => {
+      expect(adaptOcppUrlSecurity(`https://${HOST}`, false)).toBe(
+        `http://${HOST}`,
+      );
+    });
+
+    it("leaves an already-unsecured URL unchanged", () => {
+      expect(adaptOcppUrlSecurity(`ws://${HOST}`, false)).toBe(`ws://${HOST}`);
+      expect(adaptOcppUrlSecurity(`http://${HOST}`, false)).toBe(
+        `http://${HOST}`,
+      );
+    });
+  });
+
+  it("preserves the transport — never swaps ws<->http, only the secure half", () => {
+    // ws stays ws-family (→ wss), never becomes https; http stays http-family.
+    expect(adaptOcppUrlSecurity(`ws://${HOST}`, true)).toBe(`wss://${HOST}`);
+    expect(adaptOcppUrlSecurity(`http://${HOST}`, true)).toBe(
+      `https://${HOST}`,
+    );
+  });
+
+  it("matches schemes case-insensitively", () => {
+    expect(adaptOcppUrlSecurity(`WS://${HOST}`, true)).toBe(`wss://${HOST}`);
+  });
+
+  it("returns an unrecognized scheme unchanged", () => {
+    expect(adaptOcppUrlSecurity(`soap://${HOST}`, true)).toBe(`soap://${HOST}`);
   });
 });

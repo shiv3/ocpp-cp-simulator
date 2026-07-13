@@ -3,7 +3,10 @@ import { Save, X } from "lucide-react";
 import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
-import { adaptCentralSystemUrlScheme } from "../utils/ocppUrlScheme";
+import {
+  adaptCentralSystemUrlScheme,
+  adaptOcppUrlSecurity,
+} from "../utils/ocppUrlScheme";
 import {
   classifyBasicAuthSource,
   type OcppSecurityProfile,
@@ -204,6 +207,24 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
       ocppVersion: value,
       wsURL: adaptCentralSystemUrlScheme(prev.wsURL, isSoapVersion(value)),
     }));
+  };
+
+  // #178 item G: OCPP 1.6 security profiles force the transport security at
+  // connect time (profile 1 → ws, profiles 2/3 → wss), so mirror that into the
+  // displayed URL scheme when the profile changes rather than letting the form
+  // silently diverge from the wire. Profile 0 enforces nothing, so the
+  // operator's typed scheme is left untouched.
+  const changeSecurityProfile = (value: string) => {
+    const profile = Number(value) as OcppSecurityProfile;
+    setConfig((prev) =>
+      profile === 0
+        ? { ...prev, securityProfile: profile }
+        : {
+            ...prev,
+            securityProfile: profile,
+            wsURL: adaptOcppUrlSecurity(prev.wsURL, profile >= 2),
+          },
+    );
   };
 
   const updateTls = (patch: Partial<OcppTlsOptions>) => {
@@ -542,12 +563,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                   </Label>
                   <Select
                     value={String(securityProfile)}
-                    onValueChange={(value) =>
-                      updateConfig(
-                        "securityProfile",
-                        Number(value) as OcppSecurityProfile,
-                      )
-                    }
+                    onValueChange={changeSecurityProfile}
                   >
                     <SelectTrigger id="securityProfile">
                       <SelectValue />

@@ -202,4 +202,54 @@ describe("LogsPage", () => {
     expect(container.textContent).toContain("Waiting for messages…");
     expect(container.textContent).not.toContain("kept after resume");
   });
+
+  it("log rows are keyboard-operable: tabIndex=0, and Enter selects the row (updates the detail pane)", async () => {
+    const cpA = snapshot("CP-A");
+    const cpB = snapshot("CP-B");
+    const service = createFakeChargePointService({ snapshots: [cpA, cpB] });
+
+    const { container, root } = await renderConsole("/logs", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await pushRegistrySnapshot(service, [cpA, cpB]);
+    await flush();
+
+    const timestampA = new Date("2026-01-01T10:00:00.000Z");
+    await pushEvent(service, "CP-A", {
+      type: "log",
+      entry: {
+        timestamp: timestampA,
+        level: LogLevel.INFO,
+        type: LogType.OCPP,
+        message: "first entry",
+      },
+    });
+    await pushEvent(service, "CP-B", {
+      type: "log",
+      entry: {
+        timestamp: new Date("2026-01-01T10:00:01.000Z"),
+        level: LogLevel.INFO,
+        type: LogType.OCPP,
+        message: "second entry",
+      },
+    });
+
+    // CP-B is newest, so it's selected by default; CP-A's row is not.
+    const rowA = Array.from(container.querySelectorAll("tr[data-seq]")).find(
+      (row) => row.textContent?.includes("first entry"),
+    ) as HTMLElement | undefined;
+    expect(rowA, "expected a row for the CP-A log entry").toBeTruthy();
+    expect(rowA!.tabIndex).toBe(0);
+    expect(rowA!.getAttribute("aria-selected")).toBe("false");
+    expect(container.textContent).not.toContain(timestampA.toISOString());
+
+    await act(async () => {
+      rowA!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+
+    expect(rowA!.getAttribute("aria-selected")).toBe("true");
+    expect(container.textContent).toContain(timestampA.toISOString());
+  });
 });

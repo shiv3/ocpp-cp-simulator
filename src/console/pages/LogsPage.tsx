@@ -204,9 +204,20 @@ const LogsPage: React.FC = () => {
                   <tr
                     key={item.seq}
                     data-seq={item.seq}
+                    tabIndex={0}
+                    aria-selected={selected?.seq === item.seq}
                     onClick={() => setSelectedSeq(item.seq)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        // Space also scrolls the page by default — this is
+                        // a selectable row, not a link/button, so prevent
+                        // that before applying the selection.
+                        e.preventDefault();
+                        setSelectedSeq(item.seq);
+                      }
+                    }}
                     className={cn(
-                      "cursor-pointer",
+                      "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
                       selected?.seq === item.seq
                         ? "bg-blue-50 dark:bg-blue-950"
                         : "hover:bg-gray-50 dark:hover:bg-gray-900",

@@ -4,8 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { useGlobalLogs } from "./useGlobalLogs";
+import { GlobalLogsProvider } from "./GlobalLogsProvider";
 import {
   createFakeChargePointService,
+  renderConsole,
   type FakeChargePointService,
 } from "../test/harness";
 import { DataContext } from "../../data/providers/DataProvider";
@@ -72,8 +74,8 @@ async function pushLog(
 
 let latestHookApi: ReturnType<typeof useGlobalLogs> | null = null;
 
-function Probe(props: { max?: number }) {
-  const api = useGlobalLogs(props.max != null ? { max: props.max } : undefined);
+function Probe() {
+  const api = useGlobalLogs();
   latestHookApi = api;
   return (
     <div>
@@ -90,6 +92,11 @@ function Probe(props: { max?: number }) {
   );
 }
 
+/** Renders `<Probe/>` inside a `<GlobalLogsProvider>` (the same provider
+ *  `AppShell` mounts in the real app) wired to a `DataContext` — exercises
+ *  the ring-buffer/pause/eviction behavior now owned by the provider, one
+ *  level down from the full route tree so these tests stay focused on the
+ *  buffer semantics rather than routing. */
 async function renderProbe(
   service: FakeChargePointService,
   max?: number,
@@ -108,7 +115,9 @@ async function renderProbe(
           chargePointService: service,
         }}
       >
-        <Probe max={max} />
+        <GlobalLogsProvider max={max}>
+          <Probe />
+        </GlobalLogsProvider>
       </DataContext.Provider>,
     );
   });
@@ -136,6 +145,26 @@ describe("useGlobalLogs", () => {
       cleanup = null;
     }
     latestHookApi = null;
+  });
+
+  it("throws when called outside a <GlobalLogsProvider>", () => {
+    // Suppress the expected React error-boundary console.error noise for
+    // this one assertion.
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      expect(() => {
+        act(() => {
+          root.render(<Probe />);
+        });
+      }).toThrow(/GlobalLogsProvider/);
+      root.unmount();
+    } finally {
+      console.error = originalError;
+    }
   });
 
   it("aggregates log events from every CP, newest first, tagged with cpId", async () => {
@@ -241,5 +270,47 @@ describe("useGlobalLogs", () => {
 
     expect(service.__handlers.subscribe.get("CP-1")?.size).toBe(0);
     expect(service.__handlers.subscribe.get("CP-2")?.size).toBe(0);
+  });
+
+  it("keeps entries collected on the Dashboard after navigating to /logs (provider survives route change)", async () => {
+    const cpA = snapshot("CP-A");
+    const service = createFakeChargePointService({ snapshots: [cpA] });
+
+    // Mounts through the real route tree (ConsoleRoutes -> AppShell ->
+    // Outlet), which is what actually exercises the fix: GlobalLogsProvider
+    // is mounted once in AppShell, a layout route that stays mounted across
+    // `/` <-> `/logs`, instead of being recreated per-page.
+    const { container, root } = await renderConsole("/", { service });
+    cleanup = () => unmount(root);
+
+    await pushRegistrySnapshot(service, [cpA]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await pushLog(service, "CP-A", "collected on dashboard");
+
+    // Sanity check: the entry actually landed while on the Dashboard.
+    expect(container.textContent).toContain("collected on dashboard");
+
+    const logsLink = Array.from(container.querySelectorAll("a")).find(
+      (a) => a.textContent?.trim() === "Message Log",
+    );
+    expect(logsLink, 'expected a "Message Log" nav link').toBeTruthy();
+
+    await act(async () => {
+      logsLink!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Before the fix, LogsPage mounted its own fresh useGlobalLogs() and
+    // this entry — collected while on the Dashboard — would be gone.
+    expect(container.textContent).toContain("Message Log");
+    expect(container.textContent).toContain("collected on dashboard");
+    expect(container.textContent).toContain("1 shown · 1 total");
   });
 });

@@ -1,7 +1,7 @@
 {
   "id": "cert16-reservation-basic",
   "name": "Cert 1.6 Core: Reservation (Basic)",
-  "description": "Parks waiting for ReserveNow.req (connector goes Reserved internally on Accepted); once the reserved idTag is presented, StatusNotification(Preparing) → StartTransaction.req (carries the reservationId) → StatusNotification(Charging) with bounded MeterValue.req → StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "Parks waiting for ReserveNow.req (the CP core emits StatusNotification(Reserved) on Accepted); once the reserved idTag is presented, StatusNotification(Preparing) → StartTransaction.req (carries the reservationId) → StatusNotification(Charging) with bounded MeterValue.req → StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },
@@ -19,12 +19,6 @@
       "type": "reservationTrigger",
       "position": { "x": 400, "y": 150 },
       "data": { "label": "Wait for ReserveNow", "timeout": 0 }
-    },
-    {
-      "id": "status-reserved",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 250 },
-      "data": { "label": "Set Reserved", "status": "Reserved" }
     },
     {
       "id": "delay-arrival",
@@ -75,9 +69,8 @@
     {
       "id": "e2",
       "source": "trigger-reservation",
-      "target": "status-reserved"
+      "target": "delay-arrival"
     },
-    { "id": "e3", "source": "status-reserved", "target": "delay-arrival" },
     { "id": "e4", "source": "delay-arrival", "target": "tx-start" },
     { "id": "e5", "source": "tx-start", "target": "meter-auto" },
     { "id": "e6", "source": "meter-auto", "target": "tx-stop" },

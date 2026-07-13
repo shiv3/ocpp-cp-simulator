@@ -192,7 +192,9 @@ export function insertStep(
   index: number,
   type: ScenarioNodeType,
 ): ScenarioDefinition {
-  const steps = deriveLinearSteps(def).steps;
+  const linear = deriveLinearSteps(def);
+  if (!linear.isLinear) return def;
+  const steps = linear.steps;
   const clampedIndex = Math.max(0, Math.min(index, steps.length));
   const newNode = createDefaultNode(type);
   const newSteps = [
@@ -207,7 +209,9 @@ export function removeStep(
   def: ScenarioDefinition,
   nodeId: string,
 ): ScenarioDefinition {
-  const steps = deriveLinearSteps(def).steps.filter((n) => n.id !== nodeId);
+  const linear = deriveLinearSteps(def);
+  if (!linear.isLinear) return def;
+  const steps = linear.steps.filter((n) => n.id !== nodeId);
   return rebuildLinearScenario(def, steps);
 }
 
@@ -216,7 +220,9 @@ export function moveStep(
   fromIndex: number,
   toIndex: number,
 ): ScenarioDefinition {
-  const steps = [...deriveLinearSteps(def).steps];
+  const linear = deriveLinearSteps(def);
+  if (!linear.isLinear) return def;
+  const steps = [...linear.steps];
   const [moved] = steps.splice(fromIndex, 1);
   if (moved) {
     steps.splice(toIndex, 0, moved);

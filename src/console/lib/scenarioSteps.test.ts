@@ -321,6 +321,26 @@ describe("rebuildLinearScenario", () => {
 
 // --- insertStep / removeStep / moveStep / updateStepData ------------------
 
+/** START forks into two branches — non-linear per `deriveLinearSteps`. */
+function branchedDef(): ScenarioDefinition {
+  const a = node("a", ScenarioNodeType.DELAY, {
+    label: "A",
+    delaySeconds: 1,
+  });
+  const b = node("b", ScenarioNodeType.DELAY, {
+    label: "B",
+    delaySeconds: 2,
+  });
+  const c = node("c", ScenarioNodeType.DELAY, {
+    label: "C",
+    delaySeconds: 3,
+  });
+  return makeDef(
+    [startNode(), a, b, c],
+    [edge("start", "a"), edge("a", "b"), edge("a", "c")],
+  );
+}
+
 describe("insertStep", () => {
   function twoStepDef() {
     const a = node("a", ScenarioNodeType.DELAY, {
@@ -336,6 +356,12 @@ describe("insertStep", () => {
       [edge("start", "a"), edge("a", "b"), edge("b", "end")],
     );
   }
+
+  it("returns a non-linear def unchanged instead of rebuilding from a partial walk", () => {
+    const def = branchedDef();
+    const result = insertStep(def, 0, ScenarioNodeType.STATUS_CHANGE);
+    expect(result).toBe(def);
+  });
 
   it("inserts a new step at index 0 (front)", () => {
     const def = twoStepDef();
@@ -367,6 +393,12 @@ describe("insertStep", () => {
 });
 
 describe("removeStep", () => {
+  it("returns a non-linear def unchanged instead of rebuilding from a partial walk", () => {
+    const def = branchedDef();
+    const result = removeStep(def, "b");
+    expect(result).toBe(def);
+  });
+
   it("removes a step and re-links its neighbors", () => {
     const a = node("a", ScenarioNodeType.DELAY, {
       label: "A",
@@ -398,6 +430,12 @@ describe("removeStep", () => {
 });
 
 describe("moveStep", () => {
+  it("returns a non-linear def unchanged instead of rebuilding from a partial walk", () => {
+    const def = branchedDef();
+    const result = moveStep(def, 0, 1);
+    expect(result).toBe(def);
+  });
+
   it("reorders steps: move first to last", () => {
     const a = node("a", ScenarioNodeType.DELAY, {
       label: "A",

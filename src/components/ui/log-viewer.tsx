@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { LogEntry, LogLevel, LogType } from "@/cp/shared/Logger";
+import {
+  annotateOcppLogs,
+  type LogDirection,
+} from "@/components/ui/logEntryParsing";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,6 +33,15 @@ interface LogViewerProps {
  * case so we can keep the filter list as `(number | null)[]`.
  */
 type ConnectorFilterValue = number | null;
+
+/**
+ * "(none)" pseudo-value for the Direction/Action filters, used for log
+ * entries {@link annotateOcppLogs} couldn't parse an OCPP direction/action
+ * out of (#178 2.4) — same `null`-means-"(none)" convention as
+ * {@link ConnectorFilterValue}.
+ */
+type DirectionFilterValue = LogDirection | null;
+type ActionFilterValue = string | null;
 
 /**
  * Best-effort: pull every connector id referenced by a log message.
@@ -67,13 +80,23 @@ export function LogViewer({
   const [logConnectorFilter, setLogConnectorFilter] = useState<
     ConnectorFilterValue[]
   >([]);
+  const [logDirectionFilter, setLogDirectionFilter] = useState<
+    DirectionFilterValue[]
+  >([]);
+  const [logActionFilter, setLogActionFilter] = useState<ActionFilterValue[]>(
+    [],
+  );
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [levelSearch, setLevelSearch] = useState("");
   const [typeSearch, setTypeSearch] = useState("");
   const [connectorSearch, setConnectorSearch] = useState("");
+  const [directionSearch, setDirectionSearch] = useState("");
+  const [actionSearch, setActionSearch] = useState("");
   const [levelExpanded, setLevelExpanded] = useState(true);
   const [typeExpanded, setTypeExpanded] = useState(true);
   const [connectorExpanded, setConnectorExpanded] = useState(true);
+  const [directionExpanded, setDirectionExpanded] = useState(true);
+  const [actionExpanded, setActionExpanded] = useState(true);
 
   // Each log's set of referenced connector ids — memoized so we don't
   // re-parse the message on every render or every filter toggle.
@@ -81,6 +104,13 @@ export function LogViewer({
     () => logs.map((log) => extractConnectorIds(log.message)),
     [logs],
   );
+
+  // Best-effort OCPP action + wire direction per entry (#178 2.2/2.3).
+  // Parsed from `logs` (the full, chronological list) rather than
+  // `filteredLogs` — see logEntryParsing.ts: CALLRESULT/CALLERROR frames
+  // need to correlate back to an earlier CALL frame by message id, which
+  // breaks if an active filter hides that earlier entry.
+  const logOcppInfo = useMemo(() => annotateOcppLogs(logs), [logs]);
 
   // Calculate statistics
   const stats = useMemo(() => {
@@ -92,6 +122,8 @@ export function LogViewer({
     };
     const typeCounts: Record<LogType, number> = {} as Record<LogType, number>;
     const connectorCounts = new Map<ConnectorFilterValue, number>();
+    const directionCounts = new Map<DirectionFilterValue, number>();
+    const actionCounts = new Map<ActionFilterValue, number>();
 
     logs.forEach((log, idx) => {
       levelCounts[log.level] = (levelCounts[log.level] || 0) + 1;
@@ -105,32 +137,60 @@ export function LogViewer({
           connectorCounts.set(id, (connectorCounts.get(id) ?? 0) + 1);
         }
       }
+
+      const info = logOcppInfo[idx];
+      const direction = info.direction ?? null;
+      directionCounts.set(direction, (directionCounts.get(direction) ?? 0) + 1);
+      const action = info.action ?? null;
+      actionCounts.set(action, (actionCounts.get(action) ?? 0) + 1);
     });
 
-    return { levelCounts, typeCounts, connectorCounts };
-  }, [logs, logConnectors]);
+    return {
+      levelCounts,
+      typeCounts,
+      connectorCounts,
+      directionCounts,
+      actionCounts,
+    };
+  }, [logs, logConnectors, logOcppInfo]);
 
+  // Pairs each surviving entry with its index in the original `logs` array
+  // (not its position after filtering) so the row renderer can still look
+  // up per-entry data — like `logOcppInfo` — keyed against the full list.
   const filteredLogs = useMemo(() => {
-    return logs.filter((log, idx) => {
-      if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
-        return false;
-      }
-      if (logLevelFilter.length > 0 && !logLevelFilter.includes(log.level)) {
-        return false;
-      }
-      if (logTypeFilter.length > 0 && !logTypeFilter.includes(log.type)) {
-        return false;
-      }
-      if (logConnectorFilter.length > 0) {
-        const ids = logConnectors[idx];
-        const match =
-          ids.length === 0
-            ? logConnectorFilter.includes(null)
-            : ids.some((id) => logConnectorFilter.includes(id));
-        if (!match) return false;
-      }
-      return true;
-    });
+    return logs
+      .map((log, idx) => ({ log, idx }))
+      .filter(({ log, idx }) => {
+        if (
+          filter &&
+          !log.message.toLowerCase().includes(filter.toLowerCase())
+        ) {
+          return false;
+        }
+        if (logLevelFilter.length > 0 && !logLevelFilter.includes(log.level)) {
+          return false;
+        }
+        if (logTypeFilter.length > 0 && !logTypeFilter.includes(log.type)) {
+          return false;
+        }
+        if (logConnectorFilter.length > 0) {
+          const ids = logConnectors[idx];
+          const match =
+            ids.length === 0
+              ? logConnectorFilter.includes(null)
+              : ids.some((id) => logConnectorFilter.includes(id));
+          if (!match) return false;
+        }
+        if (logDirectionFilter.length > 0) {
+          const direction = logOcppInfo[idx].direction ?? null;
+          if (!logDirectionFilter.includes(direction)) return false;
+        }
+        if (logActionFilter.length > 0) {
+          const action = logOcppInfo[idx].action ?? null;
+          if (!logActionFilter.includes(action)) return false;
+        }
+        return true;
+      });
   }, [
     logs,
     filter,
@@ -138,6 +198,9 @@ export function LogViewer({
     logTypeFilter,
     logConnectorFilter,
     logConnectors,
+    logDirectionFilter,
+    logActionFilter,
+    logOcppInfo,
   ]);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -217,12 +280,33 @@ export function LogViewer({
     }
   };
 
+  const toggleLogDirection = (value: DirectionFilterValue) => {
+    if (logDirectionFilter.includes(value)) {
+      setLogDirectionFilter(logDirectionFilter.filter((v) => v !== value));
+    } else {
+      setLogDirectionFilter([...logDirectionFilter, value]);
+    }
+  };
+
+  const toggleLogAction = (value: ActionFilterValue) => {
+    if (logActionFilter.includes(value)) {
+      setLogActionFilter(logActionFilter.filter((v) => v !== value));
+    } else {
+      setLogActionFilter([...logActionFilter, value]);
+    }
+  };
+
   const connectorLabel = (value: ConnectorFilterValue): string =>
     value === null
       ? "(none)"
       : value === 0
         ? "0 (charge point)"
         : `Connector ${value}`;
+
+  const directionLabel = (value: DirectionFilterValue): string =>
+    value === null ? "(none)" : value === "sent" ? "Sent" : "Received";
+
+  const actionLabel = (value: ActionFilterValue): string => value ?? "(none)";
 
   // Surface every connector id that's appeared in logs so far, sorted with
   // (none) last. Filter by the search box (matches the rendered label).
@@ -238,6 +322,38 @@ export function LogViewer({
     const q = connectorSearch.toLowerCase();
     return all.filter((v) => connectorLabel(v).toLowerCase().includes(q));
   }, [stats.connectorCounts, connectorSearch]);
+
+  // Sent / Received / (none), with (none) last — same shape as the
+  // Connector filter above (#178 2.4).
+  const filteredDirections = useMemo(() => {
+    const all: DirectionFilterValue[] = [...stats.directionCounts.keys()].sort(
+      (a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return a.localeCompare(b);
+      },
+    );
+    if (!directionSearch) return all;
+    const q = directionSearch.toLowerCase();
+    return all.filter((v) => directionLabel(v).toLowerCase().includes(q));
+  }, [stats.directionCounts, directionSearch]);
+
+  // Every OCPP action name that's appeared in logs so far, most-frequent
+  // first (mirrors the Type filter's sort), with (none) last (#178 2.4).
+  const filteredActions = useMemo(() => {
+    const all: ActionFilterValue[] = [...stats.actionCounts.keys()].sort(
+      (a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return (
+          (stats.actionCounts.get(b) || 0) - (stats.actionCounts.get(a) || 0)
+        );
+      },
+    );
+    if (!actionSearch) return all;
+    const q = actionSearch.toLowerCase();
+    return all.filter((v) => actionLabel(v).toLowerCase().includes(q));
+  }, [stats.actionCounts, actionSearch]);
 
   // Filtered level and type lists for search
   const filteredLevels = useMemo(() => {
@@ -431,11 +547,129 @@ export function LogViewer({
               </div>
             )}
           </div>
+
+          {/* Direction Filter (#178 2.4) */}
+          <div className="border-b">
+            <button
+              onClick={() => setDirectionExpanded(!directionExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Direction
+              </span>
+              {directionExpanded ? (
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+            {directionExpanded && (
+              <div className="px-3 pb-3 space-y-2">
+                <Input
+                  placeholder="Filter values"
+                  value={directionSearch}
+                  onChange={(e) => setDirectionSearch(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {filteredDirections.map((value) => {
+                    const key = value ?? "none";
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Checkbox
+                            checked={logDirectionFilter.includes(value)}
+                            onCheckedChange={() => toggleLogDirection(value)}
+                          />
+                          <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
+                            {directionLabel(value)}
+                          </span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="ml-2 text-xs px-1.5 py-0"
+                        >
+                          {stats.directionCounts.get(value) || 0}
+                        </Badge>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Action Filter (#178 2.4) */}
+          <div className="border-b">
+            <button
+              onClick={() => setActionExpanded(!actionExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Action
+              </span>
+              {actionExpanded ? (
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+            {actionExpanded && (
+              <div className="px-3 pb-3 space-y-2">
+                <Input
+                  placeholder="Filter values"
+                  value={actionSearch}
+                  onChange={(e) => setActionSearch(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {filteredActions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic px-1">
+                      No OCPP actions parsed yet
+                    </p>
+                  ) : (
+                    filteredActions.map((value) => {
+                      const key = value ?? "none";
+                      return (
+                        <label
+                          key={key}
+                          className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <Checkbox
+                              checked={logActionFilter.includes(value)}
+                              onCheckedChange={() => toggleLogAction(value)}
+                            />
+                            <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
+                              {actionLabel(value)}
+                            </span>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className="ml-2 text-xs px-1.5 py-0"
+                          >
+                            {stats.actionCounts.get(value) || 0}
+                          </Badge>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Right Side - Logs */}
-      <div className="flex-1 flex flex-col">
+      {/* min-w-0 overrides the flex-item default `min-width: auto`, which
+       *  would otherwise let a wide log table force this column (and the
+       *  whole page) wider instead of scrolling inside its own container
+       *  (#178 2.1). */}
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
         <div className="flex justify-between items-center p-3 border-b bg-muted/50">
           <div className="flex items-center gap-3">
@@ -501,7 +735,7 @@ export function LogViewer({
 
         {/* Log Table */}
         <div
-          className="flex-1 overflow-auto relative"
+          className="flex-1 overflow-x-auto overflow-y-auto relative"
           ref={containerRef}
           style={{ maxHeight }}
         >
@@ -517,6 +751,12 @@ export function LogViewer({
                 <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[140px]">
                   Type
                 </th>
+                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[100px]">
+                  Direction
+                </th>
+                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[180px]">
+                  Action
+                </th>
                 <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">
                   Message
                 </th>
@@ -526,7 +766,7 @@ export function LogViewer({
               {filteredLogs.length === 0 ? (
                 <tr className="border-b">
                   <td
-                    colSpan={4}
+                    colSpan={6}
                     className="p-2 text-center text-muted-foreground py-8"
                   >
                     {logs.length === 0
@@ -535,35 +775,67 @@ export function LogViewer({
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log, index) => (
-                  <tr
-                    key={index}
-                    className="border-b transition-colors hover:bg-muted/50 font-mono text-xs"
-                  >
-                    <td className="p-2 align-middle text-muted-foreground">
-                      {log.timestamp.toISOString().substring(11, 23)}
-                    </td>
-                    <td className="p-2 align-middle">
-                      <Badge variant={getLogLevelBadgeVariant(log.level)}>
-                        {LogLevel[log.level]}
-                      </Badge>
-                    </td>
-                    <td className="p-2 align-middle">
-                      <Badge
-                        variant="secondary"
-                        className={cn(
-                          "font-normal",
-                          getLogTypeBadgeColor(log.type),
+                filteredLogs.map(({ log, idx }) => {
+                  const ocppInfo = logOcppInfo[idx];
+                  return (
+                    <tr
+                      key={idx}
+                      className="border-b transition-colors hover:bg-muted/50 font-mono text-xs"
+                    >
+                      <td className="p-2 align-middle text-muted-foreground">
+                        {log.timestamp.toISOString().substring(11, 23)}
+                      </td>
+                      <td className="p-2 align-middle">
+                        <Badge variant={getLogLevelBadgeVariant(log.level)}>
+                          {LogLevel[log.level]}
+                        </Badge>
+                      </td>
+                      <td className="p-2 align-middle">
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "font-normal",
+                            getLogTypeBadgeColor(log.type),
+                          )}
+                        >
+                          {log.type}
+                        </Badge>
+                      </td>
+                      <td className="p-2 align-middle">
+                        {ocppInfo.direction ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "font-normal whitespace-nowrap",
+                              ocppInfo.direction === "sent"
+                                ? "border-sky-300 text-sky-700 dark:border-sky-700 dark:text-sky-300"
+                                : "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300",
+                            )}
+                          >
+                            {ocppInfo.direction === "sent"
+                              ? "→ Sent"
+                              : "← Received"}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
                         )}
-                      >
-                        {log.type}
-                      </Badge>
-                    </td>
-                    <td className="p-2 align-middle break-all">
-                      {log.message}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="p-2 align-middle whitespace-nowrap">
+                        {ocppInfo.action ?? (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* whitespace-nowrap (was break-all): a long payload
+                       *  now stays on one line and scrolls horizontally in
+                       *  the container above instead of wrapping
+                       *  character-by-character into a mangled block
+                       *  (#178 2.1). */}
+                      <td className="p-2 align-middle whitespace-nowrap">
+                        {log.message}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

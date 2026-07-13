@@ -15,12 +15,6 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "arm-rejected-response",
       "type": "responseOverride",
       "position": { "x": 400, "y": 250 },
@@ -48,12 +42,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-available" },
-    {
-      "id": "e2",
-      "source": "status-available",
-      "target": "arm-rejected-response"
-    },
+    { "id": "e1", "source": "start-1", "target": "arm-rejected-response" },
     {
       "id": "e3",
       "source": "arm-rejected-response",

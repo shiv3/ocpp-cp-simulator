@@ -15,12 +15,6 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "trigger-message",
       "type": "csmsCallTrigger",
       "position": { "x": 400, "y": 250 },
@@ -44,8 +38,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-available" },
-    { "id": "e2", "source": "status-available", "target": "trigger-message" },
+    { "id": "e1", "source": "start-1", "target": "trigger-message" },
     { "id": "e3", "source": "trigger-message", "target": "delay-cp-sends" },
     { "id": "e4", "source": "delay-cp-sends", "target": "end-1" }
   ]

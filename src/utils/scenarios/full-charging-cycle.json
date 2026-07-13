@@ -15,12 +15,6 @@
       "data": { "label": "Start" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "transaction-start",
       "type": "transaction",
       "position": { "x": 400, "y": 350 },
@@ -70,11 +64,6 @@
     {
       "id": "e-start-available",
       "source": "start-1",
-      "target": "status-available"
-    },
-    {
-      "id": "e-available-txstart",
-      "source": "status-available",
       "target": "transaction-start"
     },
     {

@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc001-cold-boot",
   "name": "Cert 1.6 Core: TC_001 Cold Boot",
-  "description": "BootNotification.req/.conf runs automatically on connect; scenario re-affirms StatusNotification(Available) for the target connector, then idles while the CP's own Heartbeat timer keeps running.",
+  "description": "BootNotification.req/.conf runs automatically on connect; the CP core drives every idle connector to Available and sends StatusNotification(Available) on boot, so this scenario just observes that boot behavior and idles while the CP's own Heartbeat timer keeps running.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },
@@ -13,15 +13,6 @@
       "type": "start",
       "position": { "x": 400, "y": 50 },
       "data": { "label": "Start", "triggerOn": "connect" }
-    },
-    {
-      "id": "status-notify-available",
-      "type": "statusNotification",
-      "position": { "x": 400, "y": 150 },
-      "data": {
-        "label": "StatusNotification: Available",
-        "status": "Available"
-      }
     },
     {
       "id": "delay-idle",
@@ -40,8 +31,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-notify-available" },
-    { "id": "e2", "source": "status-notify-available", "target": "delay-idle" },
+    { "id": "e1", "source": "start-1", "target": "delay-idle" },
     { "id": "e3", "source": "delay-idle", "target": "end-1" }
   ]
 }

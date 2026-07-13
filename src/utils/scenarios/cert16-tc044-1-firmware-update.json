@@ -15,12 +15,6 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "trigger-firmware-update",
       "type": "csmsCallTrigger",
       "position": { "x": 400, "y": 250 },
@@ -47,12 +41,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-available" },
-    {
-      "id": "e2",
-      "source": "status-available",
-      "target": "trigger-firmware-update"
-    },
+    { "id": "e1", "source": "start-1", "target": "trigger-firmware-update" },
     {
       "id": "e3",
       "source": "trigger-firmware-update",

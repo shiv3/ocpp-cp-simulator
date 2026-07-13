@@ -31,7 +31,7 @@ import { sleep } from "../util";
 export const tc001ColdBootSpec: ScenarioSpec<void> = {
   templateId: "cert16-tc001-cold-boot",
   description:
-    "TC_001 Cold Boot: CP re-affirms StatusNotification(Available) after boot, then idles.",
+    "TC_001 Cold Boot: CP core drives StatusNotification(Available) on boot (no scripted node), then idles.",
   connector: 1,
   bootWaitSecs: 4,
   holdSecs: 20,

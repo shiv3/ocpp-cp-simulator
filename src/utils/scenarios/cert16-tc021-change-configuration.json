@@ -15,12 +15,6 @@
       "data": { "label": "Start", "triggerOn": "connect" }
     },
     {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Set Available", "status": "Available" }
-    },
-    {
       "id": "trigger-change-config",
       "type": "csmsCallTrigger",
       "position": { "x": 400, "y": 250 },
@@ -38,12 +32,7 @@
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "status-available" },
-    {
-      "id": "e2",
-      "source": "status-available",
-      "target": "trigger-change-config"
-    },
+    { "id": "e1", "source": "start-1", "target": "trigger-change-config" },
     { "id": "e3", "source": "trigger-change-config", "target": "end-1" }
   ]
 }

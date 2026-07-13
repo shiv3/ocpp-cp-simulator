@@ -267,7 +267,10 @@ export class ChargePoint {
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
 
-    this._reservationManager = new ReservationManager(this._logger);
+    this._reservationManager = new ReservationManager(
+      this._logger,
+      (connectorId) => this.onReservationExpired(connectorId),
+    );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
 
     this._stateManager = new StateManager(
@@ -548,6 +551,20 @@ export class ChargePoint {
 
   get reservationManager(): ReservationManager {
     return this._reservationManager;
+  }
+
+  /**
+   * A reservation lapsed (ReservationManager expiry cleanup) without an
+   * explicit CancelReservation. Mirror the cancel path — drive the connector
+   * back to Available through updateConnectorStatus so the CSMS sees the
+   * transition on the wire — but only when it's still Reserved: a connector
+   * that moved to Charging/Preparing/etc. in the meantime must not be clobbered.
+   */
+  private onReservationExpired(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (connector && connector.status === OCPPStatus.Reserved) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+    }
   }
 
   get localAuthListManager(): LocalAuthListManager {

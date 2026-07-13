@@ -62,7 +62,7 @@
   ],
   "edges": [
     {
-      "id": "e-start-available",
+      "id": "e-start-transaction",
       "source": "start-1",
       "target": "transaction-start"
     },

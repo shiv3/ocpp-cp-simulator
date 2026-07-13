@@ -43,7 +43,10 @@ import {
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import { getDefaultEVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";
+import type {
+  ActiveChargingProfile,
+  Connector,
+} from "../cp/domain/connector/Connector";
 import type {
   StateHistoryEntry,
   HistoryOptions,
@@ -53,8 +56,23 @@ import { TranscriptBuffer } from "../cp/application/verification/TranscriptBuffe
 import {
   evaluateAssertions,
   computeVerdict,
+  frameToTranscriptEntry,
+  redactTranscriptEntry,
   type ScenarioRunResult,
+  type ScenarioStateSnapshot,
 } from "../cp/application/verification/ScenarioAssertions";
+import { redactSensitiveText } from "../cp/shared/redaction";
+
+/**
+ * #179 Phase 3: `ScenarioRunResult.simulatorVersion`. The CLI/daemon runs
+ * outside Vite (no `__APP_VERSION__` build-time define -- see
+ * src/vite-env.d.ts, which only covers the browser bundle), and
+ * package.json's own `version` field is unmaintained (pinned "0.0.0"), so
+ * there's no existing source of truth to thread through. A literal here
+ * matches package.json exactly and avoids adding new file-read plumbing
+ * for a field no consumer currently depends on.
+ */
+const SIMULATOR_VERSION = "0.0.0";
 
 export type CLIEvent =
   | { readonly event: "connected"; readonly data: Record<string, never> }
@@ -221,6 +239,19 @@ function makeScenarioRunId(scenarioId: string): string {
   return `${scenarioId}#${Date.now()}-${rand}`;
 }
 
+/**
+ * #179 Phase 3: snapshot a connector's observable state for a run report's
+ * initialState / finalState. Mirrors the fields StateSnapshot already exposes
+ * per connector (status / meter / active transaction id).
+ */
+function connectorStateSnapshot(connector: Connector): ScenarioStateSnapshot {
+  return {
+    connectorStatus: connector.status,
+    meterValue: connector.meterValue,
+    transactionId: connector.transaction?.id ?? null,
+  };
+}
+
 export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _soapServer: OCPPSoapServer | null;
@@ -242,10 +273,14 @@ export class CLIChargePointService {
   // run ends, in finalizeScenarioRun.
   private readonly _transcriptByScenario: Map<string, TranscriptBuffer> =
     new Map();
-  // #179 Phase 2b: wall-clock start time (ISO) for the currently-executing
-  // scenario's run, read back by finalizeScenarioRun to build the
-  // ScenarioRunResult.
-  private readonly _runStartedAtByScenario: Map<string, string> = new Map();
+  // #179 Phase 2b/3: wall-clock start time (ISO) + the connector's state
+  // snapshot at that moment, for the currently-executing scenario's run.
+  // Read back by finalizeScenarioRun to build the ScenarioRunResult's
+  // startedAt/initialState fields.
+  private readonly _runStartByScenario: Map<
+    string,
+    { readonly startedAt: string; readonly initialState: ScenarioStateSnapshot }
+  > = new Map();
   // #179 Phase 2b: bounded history of per-run verdicts + assertion results,
   // keyed by runId. Capped so a long-lived daemon doesn't accumulate
   // results forever; recordRunResult evicts the oldest entry past the cap.
@@ -839,7 +874,7 @@ export class CLIChargePointService {
         transcript.stop();
         this._transcriptByScenario.delete(scenarioId);
       }
-      this._runStartedAtByScenario.delete(scenarioId);
+      this._runStartByScenario.delete(scenarioId);
     }
     this._scenarios.delete(scenarioId);
     this._scenarioRepo.deleteOne(this._chargePoint.id, connectorId, scenarioId);
@@ -898,11 +933,19 @@ export class CLIChargePointService {
     const transcript = new TranscriptBuffer(this._chargePoint.logger);
     transcript.start();
     this._transcriptByScenario.set(scenarioId, transcript);
-    this._runStartedAtByScenario.set(scenarioId, new Date().toISOString());
+    // #179 Phase 3: snapshot the connector's state right as the run starts,
+    // for the report's `initialState` field (see finalizeScenarioRun).
+    this._runStartByScenario.set(scenarioId, {
+      startedAt: new Date().toISOString(),
+      initialState: connectorStateSnapshot(connector),
+    });
 
     // Set by the onError hook below; read in executor.start().finally() to
     // decide this run's verdict executionState ("error" vs "completed").
     let hadError = false;
+    // #179 Phase 3: error message(s) seen during this run, redacted, for
+    // the report's `errors` field.
+    const errorMessages: string[] = [];
 
     const callbacks = createScenarioExecutorCallbacks({
       chargePoint: this._chargePoint,
@@ -924,6 +967,7 @@ export class CLIChargePointService {
         },
         onError: (error) => {
           hadError = true;
+          errorMessages.push(redactSensitiveText(error.message));
           this.emit({
             event: "scenario_error",
             data: { connectorId, scenarioId, error: error.message, runId },
@@ -1035,6 +1079,15 @@ export class CLIChargePointService {
         runId,
         hadError ? "error" : "completed",
         false,
+        errorMessages,
+        // #179 Phase 3: the executor clears its parked expectation in the
+        // same `finally` block that lets a node's thrown error propagate
+        // (see ScenarioExecutor.executeSingleNode), so by the time this
+        // callback runs there's no expectation left to report -- best
+        // effort here is "null", not a guess at what the node was waiting
+        // for. The stop-path methods below capture it BEFORE stop()
+        // clears it, which is the case that can be non-null.
+        null,
       );
     });
   }
@@ -1104,6 +1157,21 @@ export class CLIChargePointService {
   }
 
   /**
+   * #179 Phase 3: the `scenario_report` facade entry point — the full
+   * per-run report (verdict + assertions + transcript + snapshots) for a
+   * finished run, or null if none has finished. `connectorId` is accepted
+   * for facade-signature symmetry; runs are keyed by scenarioId. Omitting
+   * runId returns the latest recorded run.
+   */
+  getScenarioReport(
+    _connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): ScenarioRunResult | null {
+    return this.getScenarioRunResult(scenarioId, runId);
+  }
+
+  /**
    * #179 Phase 2b: stop capturing this run's transcript, evaluate the
    * scenario's declared assertions (if any) against it, and store the
    * resulting {@link ScenarioRunResult}. A scenario with no `assertions`
@@ -1123,30 +1191,63 @@ export class CLIChargePointService {
     runId: string,
     executionState: "completed" | "error",
     blocked: boolean,
+    errors: string[],
+    timeout: { nodeId: string; expectation?: unknown } | null,
   ): void {
     const transcript = this._transcriptByScenario.get(scenarioId);
     if (!transcript) return;
     transcript.stop();
     this._transcriptByScenario.delete(scenarioId);
 
-    const startedAt =
-      this._runStartedAtByScenario.get(scenarioId) ?? new Date().toISOString();
-    this._runStartedAtByScenario.delete(scenarioId);
+    const endedAt = new Date().toISOString();
+    const start = this._runStartByScenario.get(scenarioId);
+    this._runStartByScenario.delete(scenarioId);
+    const startedAt = start?.startedAt ?? endedAt;
+    const initialState: ScenarioStateSnapshot = start?.initialState ?? {
+      connectorStatus: "Unknown",
+      meterValue: 0,
+      transactionId: null,
+    };
 
-    const assertionSpecs =
-      this._scenarios.get(scenarioId)?.definition.assertions ?? [];
+    const definition = this._scenarios.get(scenarioId)?.definition;
+    const assertionSpecs = definition?.assertions ?? [];
     const assertions = evaluateAssertions(assertionSpecs, transcript.frames);
     const verdict = computeVerdict(assertions, { executionState, blocked });
 
+    // #179 Phase 3: flatten + redact the captured transcript before it can
+    // reach a client (payloads carry auth material -- redactTranscriptEntry).
+    const transcriptEntries = transcript.frames.map((frame, i) =>
+      redactTranscriptEntry(frameToTranscriptEntry(frame, i)),
+    );
+
+    const connector = this._chargePoint.connectors.get(connectorId);
+    const finalState: ScenarioStateSnapshot = connector
+      ? connectorStateSnapshot(connector)
+      : initialState;
+
     this.recordRunResult({
+      schemaVersion: 1,
       runId,
       scenarioId,
+      scenarioName: definition?.name,
+      cpId: this._chargePoint.id,
       connectorId,
+      simulatorVersion: SIMULATOR_VERSION,
+      ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
+      startedAt,
+      endedAt,
+      durationMs: Math.max(
+        0,
+        new Date(endedAt).getTime() - new Date(startedAt).getTime(),
+      ),
+      executionState,
       verdict,
       assertions,
-      startedAt,
-      endedAt: new Date().toISOString(),
-      frameCount: transcript.frames.length,
+      transcript: transcriptEntries,
+      errors,
+      timeout,
+      initialState,
+      finalState,
     });
   }
 
@@ -1177,7 +1278,17 @@ export class CLIChargePointService {
     // couldn't reach a verifiable state, so its verdict should be BLOCKED
     // rather than a possibly-misleading FAIL/PASS off a truncated
     // transcript.
-    const wasWaiting = executor.getContext().state === "waiting";
+    const ctxBeforeStop = executor.getContext();
+    const wasWaiting = ctxBeforeStop.state === "waiting";
+    // #179 Phase 3: a stop mid-wait is the closest thing to a timeout the
+    // report can attribute — record which node was parked and what it awaited.
+    const timeout =
+      wasWaiting && ctxBeforeStop.currentNodeId
+        ? {
+            nodeId: ctxBeforeStop.currentNodeId,
+            expectation: ctxBeforeStop.expectation,
+          }
+        : null;
     executor.stop();
     this._executors.delete(scenarioId);
     this._runIdByScenario.delete(scenarioId);
@@ -1198,13 +1309,15 @@ export class CLIChargePointService {
     // #179 Phase 2b: finalize now, synchronously, before executor.start()'s
     // own .finally() (deferred to a microtask by the abort machinery) can
     // race it — finalizeScenarioRun's transcript guard makes that later
-    // call a no-op.
+    // call a no-op. A manual stop collects no error message.
     this.finalizeScenarioRun(
       scenarioId,
       connectorId,
       runId,
       "completed",
       wasWaiting,
+      [],
+      timeout,
     );
   }
 
@@ -1214,8 +1327,16 @@ export class CLIChargePointService {
         const executor = this._executors.get(scenarioId);
         if (executor) {
           const runId = this._runIdByScenario.get(scenarioId) ?? "";
-          // #179 Phase 2b: see stopScenario's comment.
-          const wasWaiting = executor.getContext().state === "waiting";
+          // #179 Phase 2b/3: see stopScenario's comment.
+          const ctxBeforeStop = executor.getContext();
+          const wasWaiting = ctxBeforeStop.state === "waiting";
+          const timeout =
+            wasWaiting && ctxBeforeStop.currentNodeId
+              ? {
+                  nodeId: ctxBeforeStop.currentNodeId,
+                  expectation: ctxBeforeStop.expectation,
+                }
+              : null;
           executor.stop();
           this._executors.delete(scenarioId);
           this._runIdByScenario.delete(scenarioId);
@@ -1236,6 +1357,8 @@ export class CLIChargePointService {
             runId,
             "completed",
             wasWaiting,
+            [],
+            timeout,
           );
         }
       }
@@ -1269,7 +1392,7 @@ export class CLIChargePointService {
       transcript.stop();
     }
     this._transcriptByScenario.clear();
-    this._runStartedAtByScenario.clear();
+    this._runStartByScenario.clear();
     this._chargePoint.disconnect();
     this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {

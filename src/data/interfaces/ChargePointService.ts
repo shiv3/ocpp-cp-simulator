@@ -6,6 +6,7 @@ import type {
   ScenarioExecutionContext,
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -482,6 +483,19 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null>;
+  /**
+   * #179 Phase 3: the machine-readable certification report for a finished
+   * scenario run — verdict, assertion results, correlated transcript, and
+   * initial/final state snapshots. `runId` omitted returns the latest run.
+   * Null when no run has finished (or in local mode, which has no run-report
+   * machinery — only the headless/CLI service records reports).
+   */
+  getScenarioReport(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): Promise<ScenarioRunResult | null>;
   /**
    * Returns the loaded scenario definition (or null) for a given connector
    * + scenarioId. Lets the browser inspect scenarios that the server

@@ -15,6 +15,7 @@ import type {
   ScenarioExecutionContext,
   ScenarioMode,
 } from "../cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "../cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -92,6 +93,11 @@ export interface SingleCpCommandOps {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null>;
+  getScenarioReport(
+    connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): Promise<ScenarioRunResult | null>;
   getScenario(
     connectorId: number,
     scenarioId: string,
@@ -243,6 +249,8 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     },
     getScenarioStatus: async (connectorId, scenarioId) =>
       service.getScenarioStatus(connectorId, scenarioId),
+    getScenarioReport: async (connectorId, scenarioId, runId) =>
+      service.getScenarioReport(connectorId, scenarioId, runId),
     getScenario: async (connectorId, scenarioId) =>
       service.getScenario(connectorId, scenarioId),
     stopScenario: async (connectorId, scenarioId) => {
@@ -344,6 +352,8 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       }),
     getScenarioStatus: (connectorId, scenarioId) =>
       service.getScenarioStatus(cpId, connectorId, scenarioId),
+    getScenarioReport: (connectorId, scenarioId, runId) =>
+      service.getScenarioReport(cpId, connectorId, scenarioId, runId),
     getScenario: (connectorId, scenarioId) =>
       service.getScenario(cpId, connectorId, scenarioId),
     stopScenario: (connectorId, scenarioId) =>

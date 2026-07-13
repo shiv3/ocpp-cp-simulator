@@ -9,6 +9,7 @@ import {
   type ScenarioExecutionContext,
   type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -580,6 +581,19 @@ export class RegistryChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null> {
     return this.requireService(id).getScenarioStatus(connectorId, scenarioId);
+  }
+
+  async getScenarioReport(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): Promise<ScenarioRunResult | null> {
+    return this.requireService(id).getScenarioReport(
+      connectorId,
+      scenarioId,
+      runId,
+    );
   }
 
   async getScenario(

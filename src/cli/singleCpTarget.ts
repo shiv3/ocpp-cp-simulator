@@ -103,6 +103,7 @@ export interface SingleCpCommandOps {
     scenarioId: string,
   ): Promise<ScenarioDefinition | null>;
   stopScenario(connectorId: number, scenarioId: string): Promise<void>;
+  resetScenario(connectorId: number, scenarioId: string): Promise<void>;
   stepScenario(
     connectorId: number,
     scenarioId: string,
@@ -256,6 +257,9 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     stopScenario: async (connectorId, scenarioId) => {
       service.stopScenario(connectorId, scenarioId);
     },
+    resetScenario: async (connectorId, scenarioId) => {
+      service.resetScenario(connectorId, scenarioId);
+    },
     stepScenario: async (connectorId, scenarioId, force) => {
       service.stepScenario(connectorId, scenarioId, force);
     },
@@ -358,6 +362,8 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.getScenario(cpId, connectorId, scenarioId),
     stopScenario: (connectorId, scenarioId) =>
       service.stopScenario(cpId, connectorId, scenarioId),
+    resetScenario: (connectorId, scenarioId) =>
+      service.resetScenario(cpId, connectorId, scenarioId),
     stepScenario: (connectorId, scenarioId, force) =>
       service.stepScenario(cpId, connectorId, scenarioId, force),
     stopAllScenarios: (connectorId) =>

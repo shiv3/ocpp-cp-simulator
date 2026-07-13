@@ -8,6 +8,7 @@ import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
 /**
  * #179 Phase 2b: a scenario with no external waits, completing on its own
@@ -169,5 +170,38 @@ describe("#179 Phase 2b: declarative assertions + verdict + per-run transcript",
     // A runId that doesn't belong to this scenario resolves to null, not a
     // stale/foreign result.
     expect(svc.getScenarioRunResult(id, "not-a-real-run-id")).toBeNull();
+  });
+});
+
+describe("#179 Phase 4: scenario_reset", () => {
+  function connector1(svc: CLIChargePointService) {
+    return svc.getStatus().connectors.find((c) => c.id === 1)!;
+  }
+
+  it("returns the target connector to a clean baseline", () => {
+    const svc = newService();
+    const id = svc.loadScenario(1, completingScenario("reset-me"));
+
+    // Dirty the connector: Charging + a non-zero meter.
+    svc.updateConnectorStatus(1, OCPPStatus.Charging);
+    svc.setMeterValue(1, 500);
+    const before = connector1(svc);
+    expect(before.status).toBe("Charging");
+    expect(before.meterValue).toBe(500);
+
+    svc.resetScenario(1, id);
+
+    const after = connector1(svc);
+    expect(after.status).toBe("Available");
+    expect(after.meterValue).toBe(0);
+    expect(after.transactionId).toBeNull();
+  });
+
+  it("is a no-op-safe call when nothing is running or dirty", () => {
+    const svc = newService();
+    const id = svc.loadScenario(1, completingScenario("reset-idle"));
+    // Should not throw even though no run happened and the connector is clean.
+    expect(() => svc.resetScenario(1, id)).not.toThrow();
+    expect(connector1(svc).status).toBe("Available");
   });
 });

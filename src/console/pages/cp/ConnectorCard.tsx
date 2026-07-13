@@ -62,6 +62,11 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         connectorId,
         effectiveTagId,
       );
+    } catch (err) {
+      console.error(
+        `Failed to start transaction on ${cpId}/${connectorId}`,
+        err,
+      );
     } finally {
       setIsPending(false);
     }
@@ -71,6 +76,30 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
     setIsPending(true);
     try {
       await chargePointService.stopTransaction(cpId, connectorId);
+    } catch (err) {
+      console.error(
+        `Failed to stop transaction on ${cpId}/${connectorId}`,
+        err,
+      );
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  const handleSetStatus = async (status: OCPPStatus) => {
+    if (isPending) return;
+    setIsPending(true);
+    try {
+      await chargePointService.sendStatusNotification(
+        cpId,
+        connectorId,
+        status,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to set status ${status} on ${cpId}/${connectorId}`,
+        err,
+      );
     } finally {
       setIsPending(false);
     }
@@ -165,13 +194,8 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             {STATUS_OPTIONS.map((status) => (
               <DropdownMenuItem
                 key={status}
-                onClick={() =>
-                  void chargePointService.sendStatusNotification(
-                    cpId,
-                    connectorId,
-                    status,
-                  )
-                }
+                disabled={isPending}
+                onClick={() => void handleSetStatus(status)}
               >
                 {status}
               </DropdownMenuItem>

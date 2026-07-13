@@ -194,15 +194,24 @@ const CpDetailPage: React.FC = () => {
       } else {
         await chargePointService.connect(cpId);
       }
+    } catch (err) {
+      console.error(
+        `Failed to ${isConnected ? "disconnect" : "connect"} ${cpId}`,
+        err,
+      );
     } finally {
       setIsConnectPending(false);
     }
   };
 
   const handleSaveConfig = async (cpConfig: ChargePointConfig) => {
-    await updateCp(cpConfig);
-    setIsEditOpen(false);
-    refreshSnapshot();
+    try {
+      await updateCp(cpConfig);
+      setIsEditOpen(false);
+      refreshSnapshot();
+    } catch (err) {
+      console.error(`Failed to save config for ${cpId}`, err);
+    }
   };
 
   // Domain objects (not the snapshot/view-model) — only obtainable in local

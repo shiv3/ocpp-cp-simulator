@@ -51,3 +51,31 @@ export function adaptCentralSystemUrlScheme(
     return swapStevePath(`wss://${url.slice(8)}`, false);
   return url;
 }
+
+/**
+ * Adapt a Central System URL's scheme to match a WebSocket security profile
+ * (#178 item G), preserving the transport.
+ *
+ * OCPP 1.6 security profiles fix the transport security at connect time —
+ * profile 1 uses an unsecured socket (`ws`), profiles 2 and 3 require TLS
+ * (`wss`) — and `buildOcppWebSocketUrl` overwrites `url.protocol` accordingly.
+ * Without this, the scheme the operator typed in the form silently diverges
+ * from what actually goes on the wire once a profile is chosen. Flip only the
+ * secure/insecure half of the scheme (`ws` <-> `wss`, `http` <-> `https`) so
+ * the displayed URL stays honest; host, port and path are untouched, and a URL
+ * whose scheme already matches (or is unrecognized) is returned unchanged.
+ *
+ * `secure` should be true for profiles 2/3 and false for profile 1; profile 0
+ * enforces nothing, so callers should leave the URL alone rather than calling
+ * this.
+ */
+export function adaptOcppUrlSecurity(url: string, secure: boolean): string {
+  if (secure) {
+    if (/^ws:\/\//i.test(url)) return `wss://${url.slice(5)}`;
+    if (/^http:\/\//i.test(url)) return `https://${url.slice(7)}`;
+    return url;
+  }
+  if (/^wss:\/\//i.test(url)) return `ws://${url.slice(6)}`;
+  if (/^https:\/\//i.test(url)) return `http://${url.slice(8)}`;
+  return url;
+}

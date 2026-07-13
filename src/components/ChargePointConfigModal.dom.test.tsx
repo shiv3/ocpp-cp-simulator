@@ -353,6 +353,39 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     expect(document.getElementById("authorizationKey")).toBeNull();
   });
 
+  // #178 item G: security profiles force the transport security on the wire
+  // (profile 1 → ws, 2/3 → wss), so changing the profile keeps the displayed
+  // WebSocket URL scheme honest instead of silently diverging.
+  it("adapts the WebSocket URL scheme when the security profile changes", async () => {
+    const rendered = await renderModal({
+      mode: "remote",
+      initialConfig: baseConfig({
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 0,
+        wsURL: "ws://localhost:8080/steve/websocket/CentralSystemService/",
+      }),
+    });
+    roots.push(rendered.root);
+
+    // Profile 2 (TLS) upgrades ws → wss.
+    await selectOption("securityProfile", "2 — Basic Auth + TLS (server cert)");
+    expect(inputById("wsURL").value).toBe(
+      "wss://localhost:8080/steve/websocket/CentralSystemService/",
+    );
+
+    // Profile 1 (unsecured) downgrades wss → ws.
+    await selectOption("securityProfile", "1 — Basic Auth");
+    expect(inputById("wsURL").value).toBe(
+      "ws://localhost:8080/steve/websocket/CentralSystemService/",
+    );
+
+    // Profile 0 enforces nothing — the operator's scheme is left as-is.
+    await selectOption("securityProfile", "0 — No auth, no TLS");
+    expect(inputById("wsURL").value).toBe(
+      "ws://localhost:8080/steve/websocket/CentralSystemService/",
+    );
+  });
+
   it("blocks save when OCPP-1.5 is selected without a SOAP callback URL", async () => {
     const onSave = vi.fn();
     const rendered = await renderModal({

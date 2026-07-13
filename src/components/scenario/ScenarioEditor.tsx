@@ -1623,7 +1623,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           open={isSettingsModalOpen}
           onOpenChange={(open) => !open && setIsSettingsModalOpen(false)}
         >
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Scenario Settings</DialogTitle>
             </DialogHeader>

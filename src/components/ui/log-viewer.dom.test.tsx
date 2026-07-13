@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { LogViewer } from "./log-viewer";
 import { LogLevel, LogType, type LogEntry } from "@/cp/shared/Logger";
@@ -12,6 +12,53 @@ import { LogLevel, LogType, type LogEntry } from "@/cp/shared/Logger";
 afterEach(() => {
   cleanup();
 });
+
+/** Finds a sidebar filter section's `<label>` row by its option text (e.g.
+ *  section "Direction", option "Sent"). Scoped to the section because
+ *  option labels can collide across sections (e.g. "Heartbeat" is both a
+ *  LogType and an OCPP action name). Sidebar sections are
+ *  `<div class="border-b"><button><span>{heading}</span>...</button>
+ *  {options}</div>`. */
+function findFilterOptionRow(
+  sectionHeading: string,
+  optionLabel: string,
+): HTMLLabelElement {
+  const heading = screen.getByText(sectionHeading, {
+    exact: true,
+    selector: "span",
+  });
+  const section = heading.closest(".border-b");
+  if (!section) {
+    throw new Error(`No filter section found for heading "${sectionHeading}"`);
+  }
+  const labels = Array.from(section.querySelectorAll("label"));
+  // The direct-child text span, not `label querySelector("span")` generally
+  // — a *checked* Checkbox renders its own indicator <span> (wrapping a
+  // Check icon) nested inside the checkbox button, which would otherwise
+  // shadow the real label text once a row is toggled on.
+  const match = labels.find(
+    (l) => l.querySelector(":scope > div > span")?.textContent === optionLabel,
+  );
+  if (!match) {
+    throw new Error(
+      `No filter option "${optionLabel}" found in section "${sectionHeading}"`,
+    );
+  }
+  return match as HTMLLabelElement;
+}
+
+/** Clicks the checkbox inside a specific sidebar filter option. Goes via
+ *  the label's own checkbox button rather than relying on native label
+ *  click-delegation, which jsdom doesn't reliably forward onto a
+ *  `<button role="checkbox">`. */
+function clickFilterOption(sectionHeading: string, optionLabel: string) {
+  const row = findFilterOptionRow(sectionHeading, optionLabel);
+  const checkbox = row.querySelector('button[role="checkbox"]');
+  if (!checkbox) {
+    throw new Error(`No checkbox found for filter option "${optionLabel}"`);
+  }
+  fireEvent.click(checkbox);
+}
 
 function entry(message: string, overrides: Partial<LogEntry> = {}): LogEntry {
   return {
@@ -167,8 +214,11 @@ describe("LogViewer action + direction columns (#178 2.2/2.3)", () => {
       />,
     );
 
-    expect(screen.getByText("Direction")).toBeInTheDocument();
-    expect(screen.getByText("Action")).toBeInTheDocument();
+    // "Direction"/"Action" also label the #178 2.4 sidebar filter
+    // sections, so scope to the table's <thead>.
+    const headerRow = container.querySelector("thead tr");
+    expect(headerRow?.textContent).toContain("Direction");
+    expect(headerRow?.textContent).toContain("Action");
 
     // Even though the CALLRESULT row's message text doesn't contain
     // "BootNotification" itself, correlation still resolves its action
@@ -178,5 +228,95 @@ describe("LogViewer action + direction columns (#178 2.2/2.3)", () => {
       r.textContent?.includes("← Received"),
     );
     expect(receivedRow?.textContent).toContain("BootNotification");
+  });
+});
+
+describe("LogViewer direction/action filters (#178 2.4)", () => {
+  // "Heartbeat" deliberately doubles as both the OCPP action name and an
+  // existing LogType enum value, to prove the filter helpers (and the
+  // component) don't cross-match sections that happen to share a label.
+  function threeMixedLogs() {
+    return [
+      entry(`Sent: ${JSON.stringify([2, "1", "BootNotification", {}])}`),
+      entry(`Received: ${JSON.stringify([2, "9", "Heartbeat", {}])}`),
+      entry("unrelated general log line — no direction/action"),
+    ];
+  }
+
+  it("filters rows down to a single direction when its checkbox is checked", () => {
+    const { container } = render(<LogViewer logs={threeMixedLogs()} />);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
+
+    clickFilterOption("Direction", "Sent");
+
+    const rows = container.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("BootNotification");
+    expect(rows[0].textContent).toContain("→ Sent");
+  });
+
+  it("filters rows down to a single OCPP action when its checkbox is checked", () => {
+    const { container } = render(<LogViewer logs={threeMixedLogs()} />);
+
+    clickFilterOption("Action", "Heartbeat");
+
+    const rows = container.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("Heartbeat");
+    expect(rows[0].textContent).toContain("← Received");
+  });
+
+  it("filters to the '(none)' bucket for entries with no parsed direction/action", () => {
+    const { container } = render(<LogViewer logs={threeMixedLogs()} />);
+
+    clickFilterOption("Direction", "(none)");
+
+    const rows = container.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain(
+      "unrelated general log line — no direction/action",
+    );
+  });
+
+  it("un-checking a direction filter restores the other rows", () => {
+    const { container } = render(<LogViewer logs={threeMixedLogs()} />);
+
+    clickFilterOption("Direction", "Sent");
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
+
+    clickFilterOption("Direction", "Sent");
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
+  });
+
+  it("combines an Action filter with the existing free-text search", () => {
+    const { container } = render(<LogViewer logs={threeMixedLogs()} />);
+
+    clickFilterOption("Action", "BootNotification");
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
+
+    const searchBox = screen.getByPlaceholderText("Search in messages...");
+    fireEvent.change(searchBox, { target: { value: "chargePointVendor" } });
+
+    // Action filter still selects the BootNotification row, but the free
+    // text filter now also requires "chargePointVendor" in the message,
+    // which this fixture's payload doesn't contain — so no data rows
+    // survive. The empty-state message is itself a <tr>, so scope to the
+    // table body's text rather than counting <tr> elements (and don't
+    // check page-wide text — the Action sidebar still lists
+    // "BootNotification" as an available filter option regardless of
+    // what's currently showing in the table).
+    const tbody = container.querySelector("tbody");
+    expect(tbody?.textContent).toContain("No logs match the current filters");
+    expect(tbody?.textContent).not.toContain("BootNotification");
+  });
+
+  it("shows per-value counts as badges next to each Direction/Action filter option", () => {
+    render(<LogViewer logs={threeMixedLogs()} />);
+
+    const sentRow = findFilterOptionRow("Direction", "Sent");
+    expect(sentRow.textContent).toContain("1");
+
+    const heartbeatRow = findFilterOptionRow("Action", "Heartbeat");
+    expect(heartbeatRow.textContent).toContain("1");
   });
 });

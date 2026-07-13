@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { LogEntry, LogLevel, LogType } from "@/cp/shared/Logger";
-import { annotateOcppLogs } from "@/components/ui/logEntryParsing";
+import {
+  annotateOcppLogs,
+  type LogDirection,
+} from "@/components/ui/logEntryParsing";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -30,6 +33,15 @@ interface LogViewerProps {
  * case so we can keep the filter list as `(number | null)[]`.
  */
 type ConnectorFilterValue = number | null;
+
+/**
+ * "(none)" pseudo-value for the Direction/Action filters, used for log
+ * entries {@link annotateOcppLogs} couldn't parse an OCPP direction/action
+ * out of (#178 2.4) — same `null`-means-"(none)" convention as
+ * {@link ConnectorFilterValue}.
+ */
+type DirectionFilterValue = LogDirection | null;
+type ActionFilterValue = string | null;
 
 /**
  * Best-effort: pull every connector id referenced by a log message.
@@ -68,13 +80,23 @@ export function LogViewer({
   const [logConnectorFilter, setLogConnectorFilter] = useState<
     ConnectorFilterValue[]
   >([]);
+  const [logDirectionFilter, setLogDirectionFilter] = useState<
+    DirectionFilterValue[]
+  >([]);
+  const [logActionFilter, setLogActionFilter] = useState<ActionFilterValue[]>(
+    [],
+  );
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [levelSearch, setLevelSearch] = useState("");
   const [typeSearch, setTypeSearch] = useState("");
   const [connectorSearch, setConnectorSearch] = useState("");
+  const [directionSearch, setDirectionSearch] = useState("");
+  const [actionSearch, setActionSearch] = useState("");
   const [levelExpanded, setLevelExpanded] = useState(true);
   const [typeExpanded, setTypeExpanded] = useState(true);
   const [connectorExpanded, setConnectorExpanded] = useState(true);
+  const [directionExpanded, setDirectionExpanded] = useState(true);
+  const [actionExpanded, setActionExpanded] = useState(true);
 
   // Each log's set of referenced connector ids — memoized so we don't
   // re-parse the message on every render or every filter toggle.
@@ -100,6 +122,8 @@ export function LogViewer({
     };
     const typeCounts: Record<LogType, number> = {} as Record<LogType, number>;
     const connectorCounts = new Map<ConnectorFilterValue, number>();
+    const directionCounts = new Map<DirectionFilterValue, number>();
+    const actionCounts = new Map<ActionFilterValue, number>();
 
     logs.forEach((log, idx) => {
       levelCounts[log.level] = (levelCounts[log.level] || 0) + 1;
@@ -113,10 +137,22 @@ export function LogViewer({
           connectorCounts.set(id, (connectorCounts.get(id) ?? 0) + 1);
         }
       }
+
+      const info = logOcppInfo[idx];
+      const direction = info.direction ?? null;
+      directionCounts.set(direction, (directionCounts.get(direction) ?? 0) + 1);
+      const action = info.action ?? null;
+      actionCounts.set(action, (actionCounts.get(action) ?? 0) + 1);
     });
 
-    return { levelCounts, typeCounts, connectorCounts };
-  }, [logs, logConnectors]);
+    return {
+      levelCounts,
+      typeCounts,
+      connectorCounts,
+      directionCounts,
+      actionCounts,
+    };
+  }, [logs, logConnectors, logOcppInfo]);
 
   // Pairs each surviving entry with its index in the original `logs` array
   // (not its position after filtering) so the row renderer can still look
@@ -145,6 +181,14 @@ export function LogViewer({
               : ids.some((id) => logConnectorFilter.includes(id));
           if (!match) return false;
         }
+        if (logDirectionFilter.length > 0) {
+          const direction = logOcppInfo[idx].direction ?? null;
+          if (!logDirectionFilter.includes(direction)) return false;
+        }
+        if (logActionFilter.length > 0) {
+          const action = logOcppInfo[idx].action ?? null;
+          if (!logActionFilter.includes(action)) return false;
+        }
         return true;
       });
   }, [
@@ -154,6 +198,9 @@ export function LogViewer({
     logTypeFilter,
     logConnectorFilter,
     logConnectors,
+    logDirectionFilter,
+    logActionFilter,
+    logOcppInfo,
   ]);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -233,12 +280,33 @@ export function LogViewer({
     }
   };
 
+  const toggleLogDirection = (value: DirectionFilterValue) => {
+    if (logDirectionFilter.includes(value)) {
+      setLogDirectionFilter(logDirectionFilter.filter((v) => v !== value));
+    } else {
+      setLogDirectionFilter([...logDirectionFilter, value]);
+    }
+  };
+
+  const toggleLogAction = (value: ActionFilterValue) => {
+    if (logActionFilter.includes(value)) {
+      setLogActionFilter(logActionFilter.filter((v) => v !== value));
+    } else {
+      setLogActionFilter([...logActionFilter, value]);
+    }
+  };
+
   const connectorLabel = (value: ConnectorFilterValue): string =>
     value === null
       ? "(none)"
       : value === 0
         ? "0 (charge point)"
         : `Connector ${value}`;
+
+  const directionLabel = (value: DirectionFilterValue): string =>
+    value === null ? "(none)" : value === "sent" ? "Sent" : "Received";
+
+  const actionLabel = (value: ActionFilterValue): string => value ?? "(none)";
 
   // Surface every connector id that's appeared in logs so far, sorted with
   // (none) last. Filter by the search box (matches the rendered label).
@@ -254,6 +322,38 @@ export function LogViewer({
     const q = connectorSearch.toLowerCase();
     return all.filter((v) => connectorLabel(v).toLowerCase().includes(q));
   }, [stats.connectorCounts, connectorSearch]);
+
+  // Sent / Received / (none), with (none) last — same shape as the
+  // Connector filter above (#178 2.4).
+  const filteredDirections = useMemo(() => {
+    const all: DirectionFilterValue[] = [...stats.directionCounts.keys()].sort(
+      (a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return a.localeCompare(b);
+      },
+    );
+    if (!directionSearch) return all;
+    const q = directionSearch.toLowerCase();
+    return all.filter((v) => directionLabel(v).toLowerCase().includes(q));
+  }, [stats.directionCounts, directionSearch]);
+
+  // Every OCPP action name that's appeared in logs so far, most-frequent
+  // first (mirrors the Type filter's sort), with (none) last (#178 2.4).
+  const filteredActions = useMemo(() => {
+    const all: ActionFilterValue[] = [...stats.actionCounts.keys()].sort(
+      (a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return (
+          (stats.actionCounts.get(b) || 0) - (stats.actionCounts.get(a) || 0)
+        );
+      },
+    );
+    if (!actionSearch) return all;
+    const q = actionSearch.toLowerCase();
+    return all.filter((v) => actionLabel(v).toLowerCase().includes(q));
+  }, [stats.actionCounts, actionSearch]);
 
   // Filtered level and type lists for search
   const filteredLevels = useMemo(() => {
@@ -438,6 +538,120 @@ export function LogViewer({
                             className="ml-2 text-xs px-1.5 py-0"
                           >
                             {stats.connectorCounts.get(value) || 0}
+                          </Badge>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Direction Filter (#178 2.4) */}
+          <div className="border-b">
+            <button
+              onClick={() => setDirectionExpanded(!directionExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Direction
+              </span>
+              {directionExpanded ? (
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+            {directionExpanded && (
+              <div className="px-3 pb-3 space-y-2">
+                <Input
+                  placeholder="Filter values"
+                  value={directionSearch}
+                  onChange={(e) => setDirectionSearch(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {filteredDirections.map((value) => {
+                    const key = value ?? "none";
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Checkbox
+                            checked={logDirectionFilter.includes(value)}
+                            onCheckedChange={() => toggleLogDirection(value)}
+                          />
+                          <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
+                            {directionLabel(value)}
+                          </span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="ml-2 text-xs px-1.5 py-0"
+                        >
+                          {stats.directionCounts.get(value) || 0}
+                        </Badge>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Action Filter (#178 2.4) */}
+          <div className="border-b">
+            <button
+              onClick={() => setActionExpanded(!actionExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Action
+              </span>
+              {actionExpanded ? (
+                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+            {actionExpanded && (
+              <div className="px-3 pb-3 space-y-2">
+                <Input
+                  placeholder="Filter values"
+                  value={actionSearch}
+                  onChange={(e) => setActionSearch(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {filteredActions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic px-1">
+                      No OCPP actions parsed yet
+                    </p>
+                  ) : (
+                    filteredActions.map((value) => {
+                      const key = value ?? "none";
+                      return (
+                        <label
+                          key={key}
+                          className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <Checkbox
+                              checked={logActionFilter.includes(value)}
+                              onCheckedChange={() => toggleLogAction(value)}
+                            />
+                            <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
+                              {actionLabel(value)}
+                            </span>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className="ml-2 text-xs px-1.5 py-0"
+                          >
+                            {stats.actionCounts.get(value) || 0}
                           </Badge>
                         </label>
                       );

@@ -3,6 +3,10 @@ import { useCallback } from "react";
 import type { ChargePointConfig } from "../../../components/ChargePointConfigModal";
 import type { CreateChargePointParams } from "../../../data/interfaces/ChargePointService";
 import type { SimulatorConfigInput } from "../../../protocol";
+import {
+  defaultAutoMeterValueConfig,
+  type AutoMeterValueConfig,
+} from "../../../cp/domain/connector/MeterValueCurve";
 import { useChargePoints } from "../../../data/hooks/useChargePoints";
 import { useConfig } from "../../../data/hooks/useConfig";
 import { useDataContext } from "../../../data/providers/DataProvider";
@@ -74,7 +78,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
   // body has no field for, so apply them per-connector after the CP exists.
   const applyAutoMeterValueDefaults = useCallback(
     async (cpConfig: ChargePointConfig) => {
-      if (!cpConfig.autoMeterValueEnabled) return;
+      const enable = cpConfig.autoMeterValueEnabled;
       const presets = await chargePointService
         .getChargePoint(cpConfig.cpId)
         .catch(() => null);
@@ -82,16 +86,19 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
       await Promise.all(
         connectors.map(async (c) => {
           const base = c.autoMeterValueConfig;
-          if (!base) return;
-          try {
-            await chargePointService.setAutoMeterValueConfig(
-              cpConfig.cpId,
-              c.id,
-              {
-                ...base,
+          // DISABLE: turn the connector's generator off — preserving whatever
+          // config it already has (or a sensible default) — rather than
+          // early-returning, which would leave existing generators running.
+          // ENABLE: apply the form's interval/value; when the connector has no
+          // config yet (the common case for a brand-new CP's connectors),
+          // build a default instead of skipping it.
+          const next: AutoMeterValueConfig = !enable
+            ? { ...(base ?? defaultAutoMeterValueConfig), enabled: false }
+            : {
+                ...(base ?? defaultAutoMeterValueConfig),
                 enabled: true,
                 intervalSeconds: cpConfig.autoMeterValueInterval,
-                curvePoints: base.curvePoints?.length
+                curvePoints: base?.curvePoints?.length
                   ? base.curvePoints.map((p, i, arr) =>
                       i === arr.length - 1
                         ? { ...p, value: cpConfig.autoMeterValue }
@@ -101,7 +108,12 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
                       { time: 0, value: 0 },
                       { time: 30, value: cpConfig.autoMeterValue },
                     ],
-              },
+              };
+          try {
+            await chargePointService.setAutoMeterValueConfig(
+              cpConfig.cpId,
+              c.id,
+              next,
             );
           } catch (err) {
             console.warn(
@@ -123,10 +135,16 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     async (cpConfig: ChargePointConfig, isEdit: boolean) => {
       try {
         const params = buildRemoteParams(cpConfig);
-        if (isEdit && chargePointService.updateChargePoint) {
+        if (isEdit) {
+          if (!chargePointService.updateChargePoint) {
+            throw new Error("updateChargePoint not supported in this mode");
+          }
           await chargePointService.updateChargePoint(params);
         } else {
-          await chargePointService.createChargePoint?.(params);
+          if (!chargePointService.createChargePoint) {
+            throw new Error("createChargePoint not supported in this mode");
+          }
+          await chargePointService.createChargePoint(params);
         }
         await applyAutoMeterValueDefaults(cpConfig);
         await refresh();
@@ -177,61 +195,82 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
   // values, exactly as TopPage does.
   const saveLocal = useCallback(
     async (cpConfig: ChargePointConfig, isNew: boolean) => {
-      const existingIds = config?.Experimental?.ChargePointIDs ?? [];
-      const nextIds = isNew
-        ? [
-            ...existingIds,
-            {
-              ChargePointID: cpConfig.cpId,
-              ConnectorNumber: cpConfig.connectorNumber,
-            },
-          ]
-        : existingIds.map((entry) =>
-            entry.ChargePointID === cpConfig.cpId
-              ? {
-                  ChargePointID: cpConfig.cpId,
-                  ConnectorNumber: cpConfig.connectorNumber,
-                }
-              : entry,
+      try {
+        const existingIds = config?.Experimental?.ChargePointIDs ?? [];
+        // Reject a duplicate cpId on add — the dashboard modal isn't given the
+        // existing-ID list, so without this guard adding an existing ID would
+        // silently persist a duplicate `Experimental.ChargePointIDs` entry.
+        if (
+          isNew &&
+          existingIds.some((entry) => entry.ChargePointID === cpConfig.cpId)
+        ) {
+          throw new Error(
+            `A charge point with ID "${cpConfig.cpId}" already exists`,
           );
+        }
+        const nextIds = isNew
+          ? [
+              ...existingIds,
+              {
+                ChargePointID: cpConfig.cpId,
+                ConnectorNumber: cpConfig.connectorNumber,
+              },
+            ]
+          : existingIds.map((entry) =>
+              entry.ChargePointID === cpConfig.cpId
+                ? {
+                    ChargePointID: cpConfig.cpId,
+                    ConnectorNumber: cpConfig.connectorNumber,
+                  }
+                : entry,
+            );
 
-      const newConfig: SimulatorConfigInput = {
-        ...(config || {}),
-        wsURL: cpConfig.wsURL,
-        connectorNumber: cpConfig.connectorNumber,
-        ChargePointID: cpConfig.cpId,
-        tagID: tagIDs[0] || "123456",
-        ocppVersion: cpConfig.ocppVersion,
-        basicAuthSettings: {
-          enabled: cpConfig.basicAuthEnabled,
-          username: cpConfig.basicAuthUsername,
-          password: cpConfig.basicAuthPassword,
-        },
-        autoMeterValueSetting: {
-          enabled: cpConfig.autoMeterValueEnabled,
-          interval: cpConfig.autoMeterValueInterval,
-          value: cpConfig.autoMeterValue,
-        },
-        BootNotification: {
-          chargePointVendor: cpConfig.chargePointVendor,
-          chargePointModel: cpConfig.chargePointModel,
-          firmwareVersion: cpConfig.firmwareVersion,
-          chargeBoxSerialNumber: cpConfig.chargeBoxSerialNumber,
-          chargePointSerialNumber: cpConfig.chargePointSerialNumber,
-          meterSerialNumber: cpConfig.meterSerialNumber,
-          meterType: cpConfig.meterType,
-          iccid: cpConfig.iccid,
-          imsi: cpConfig.imsi,
-        },
-        Experimental: {
-          ChargePointIDs: nextIds,
-          TagIDs: tagIDs,
-        },
-      };
-      await persistConfig(newConfig);
+        const newConfig: SimulatorConfigInput = {
+          ...(config || {}),
+          wsURL: cpConfig.wsURL,
+          connectorNumber: cpConfig.connectorNumber,
+          ChargePointID: cpConfig.cpId,
+          tagID: tagIDs[0] || "123456",
+          ocppVersion: cpConfig.ocppVersion,
+          basicAuthSettings: {
+            enabled: cpConfig.basicAuthEnabled,
+            username: cpConfig.basicAuthUsername,
+            password: cpConfig.basicAuthPassword,
+          },
+          autoMeterValueSetting: {
+            enabled: cpConfig.autoMeterValueEnabled,
+            interval: cpConfig.autoMeterValueInterval,
+            value: cpConfig.autoMeterValue,
+          },
+          BootNotification: {
+            chargePointVendor: cpConfig.chargePointVendor,
+            chargePointModel: cpConfig.chargePointModel,
+            firmwareVersion: cpConfig.firmwareVersion,
+            chargeBoxSerialNumber: cpConfig.chargeBoxSerialNumber,
+            chargePointSerialNumber: cpConfig.chargePointSerialNumber,
+            meterSerialNumber: cpConfig.meterSerialNumber,
+            meterType: cpConfig.meterType,
+            iccid: cpConfig.iccid,
+            imsi: cpConfig.imsi,
+          },
+          Experimental: {
+            ChargePointIDs: nextIds,
+            TagIDs: tagIDs,
+          },
+        };
+        await persistConfig(newConfig);
 
-      if (isNew) {
-        seedEssentialTemplate(cpConfig);
+        if (isNew) {
+          seedEssentialTemplate(cpConfig);
+        }
+      } catch (err) {
+        // Match the remote path's operator-facing error contract — callers
+        // like DashboardPage `void addCp(...)`, so a bare rejection here would
+        // be an unhandled rejection with no feedback.
+        console.error("Failed to save local CP", err);
+        alert(
+          `Failed to save CP: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     },
     [config, tagIDs, persistConfig, seedEssentialTemplate],
@@ -264,7 +303,10 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     async (cpId: string) => {
       if (mode === "remote") {
         try {
-          await chargePointService.removeChargePoint?.(cpId);
+          if (!chargePointService.removeChargePoint) {
+            throw new Error("removeChargePoint not supported in this mode");
+          }
+          await chargePointService.removeChargePoint(cpId);
           await refresh();
         } catch (err) {
           console.error("Failed to remove remote CP", err);
@@ -275,26 +317,35 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         return;
       }
 
-      const existingIds = config?.Experimental?.ChargePointIDs ?? [];
-      const nextIds = existingIds.filter(
-        (entry) => entry.ChargePointID !== cpId,
-      );
+      try {
+        const existingIds = config?.Experimental?.ChargePointIDs ?? [];
+        const nextIds = existingIds.filter(
+          (entry) => entry.ChargePointID !== cpId,
+        );
 
-      if (nextIds.length === 0) {
-        await persistConfig(null);
-        return;
+        if (nextIds.length === 0) {
+          await persistConfig(null);
+          return;
+        }
+
+        if (!config) return;
+
+        const newConfig: SimulatorConfigInput = {
+          ...config,
+          Experimental: {
+            ChargePointIDs: nextIds,
+            TagIDs: tagIDs.length > 0 ? tagIDs : ["123456"],
+          },
+        };
+        await persistConfig(newConfig);
+      } catch (err) {
+        // Same operator-facing contract as the remote branch above, so a
+        // local storage failure doesn't become an unhandled rejection.
+        console.error("Failed to remove local CP", err);
+        alert(
+          `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-
-      if (!config) return;
-
-      const newConfig: SimulatorConfigInput = {
-        ...config,
-        Experimental: {
-          ChargePointIDs: nextIds,
-          TagIDs: tagIDs.length > 0 ? tagIDs : ["123456"],
-        },
-      };
-      await persistConfig(newConfig);
     },
     [mode, chargePointService, refresh, config, tagIDs, persistConfig],
   );

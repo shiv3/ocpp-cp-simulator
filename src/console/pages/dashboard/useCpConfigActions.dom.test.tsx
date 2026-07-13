@@ -221,6 +221,7 @@ describe("useCpConfigActions", () => {
       await cleanup();
       cleanup = null;
     }
+    vi.restoreAllMocks();
   });
 
   describe("remote mode", () => {
@@ -306,8 +307,9 @@ describe("useCpConfigActions", () => {
       await click("add");
 
       expect(service.getChargePoint).toHaveBeenCalledWith("CP-1");
-      // Connector 3 has no autoMeterValueConfig — skipped.
-      expect(service.setAutoMeterValueConfig).toHaveBeenCalledTimes(2);
+      // All three connectors are configured — connector 3 (null config) gets
+      // a fresh default rather than being skipped.
+      expect(service.setAutoMeterValueConfig).toHaveBeenCalledTimes(3);
       // Connector 1: existing curve — only the last point's value is
       // replaced with the form's `autoMeterValue`.
       expect(service.setAutoMeterValueConfig).toHaveBeenCalledWith("CP-1", 1, {
@@ -330,6 +332,94 @@ describe("useCpConfigActions", () => {
           { time: 30, value: 99 },
         ],
       });
+      // Connector 3: no config at all (the common case for a brand-new CP) —
+      // a sensible default is created, enabled:true, instead of skipping.
+      expect(service.setAutoMeterValueConfig).toHaveBeenCalledWith("CP-1", 3, {
+        enabled: true,
+        autoCalculateInterval: false,
+        intervalSeconds: 45,
+        curvePoints: [
+          { time: 0, value: 0 },
+          { time: 30, value: 99 },
+        ],
+      });
+    });
+
+    it("addCp with autoMeterValueEnabled:false disables existing per-connector generators", async () => {
+      const cfg: ChargePointConfig = {
+        ...fixtureConfig,
+        autoMeterValueEnabled: false,
+      };
+      const snapshot: ChargePointSnapshot = {
+        id: "CP-1",
+        status: OCPPStatus.Available,
+        error: "",
+        connectors: [
+          connectorSnapshot({
+            id: 1,
+            autoMeterValueConfig: {
+              enabled: true,
+              autoCalculateInterval: false,
+              intervalSeconds: 5,
+              curvePoints: [
+                { time: 0, value: 0 },
+                { time: 60, value: 5 },
+              ],
+            },
+          }),
+          connectorSnapshot({
+            id: 2,
+            autoMeterValueConfig: {
+              enabled: true,
+              autoCalculateInterval: true,
+              intervalSeconds: 10,
+              curvePoints: [{ time: 0, value: 0 }],
+            },
+          }),
+        ],
+      };
+      const service = createFakeChargePointService({ snapshots: [snapshot] });
+      const { root, click } = await mountProbe(service, "remote", cfg);
+      cleanup = () => unmount(root);
+
+      await click("add");
+
+      // Disabling must actually turn every connector's generator off — not
+      // early-return and leave them running.
+      expect(service.setAutoMeterValueConfig).toHaveBeenCalledTimes(2);
+      expect(service.setAutoMeterValueConfig).toHaveBeenCalledWith("CP-1", 1, {
+        enabled: false,
+        autoCalculateInterval: false,
+        intervalSeconds: 5,
+        curvePoints: [
+          { time: 0, value: 0 },
+          { time: 60, value: 5 },
+        ],
+      });
+      expect(service.setAutoMeterValueConfig).toHaveBeenCalledWith("CP-1", 2, {
+        enabled: false,
+        autoCalculateInterval: true,
+        intervalSeconds: 10,
+        curvePoints: [{ time: 0, value: 0 }],
+      });
+    });
+
+    it("updateCp throws an explicit error when updateChargePoint is unavailable", async () => {
+      const service = createFakeChargePointService({
+        updateChargePoint: undefined,
+      });
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const { root, click } = await mountProbe(service, "remote");
+      cleanup = () => unmount(root);
+
+      await click("update");
+
+      // No silent fall-back to create — the specific method is required.
+      expect(service.createChargePoint).not.toHaveBeenCalled();
+      expect(alertSpy).toHaveBeenCalledTimes(1);
+      expect(alertSpy.mock.calls[0][0]).toContain(
+        "updateChargePoint not supported",
+      );
     });
   });
 
@@ -390,6 +480,54 @@ describe("useCpConfigActions", () => {
       expect(saved?.Experimental?.ChargePointIDs).toEqual([
         { ChargePointID: "CP-OLD", ConnectorNumber: 1 },
       ]);
+    });
+
+    it("addCp rejects a duplicate local charge-point ID", async () => {
+      const initial: WireSimulatorConfig = {
+        wsURL: "ws://localhost:9000/CP-1",
+        ChargePointID: "CP-1",
+        connectorNumber: 2,
+        tagID: "123456",
+        ocppVersion: "OCPP-1.6J",
+        basicAuthSettings: { enabled: false, username: "" },
+        autoMeterValueSetting: { enabled: false, interval: 0, value: 0 },
+        Experimental: {
+          ChargePointIDs: [{ ChargePointID: "CP-1", ConnectorNumber: 2 }],
+          TagIDs: ["123456"],
+        },
+        BootNotification: null,
+      };
+      const { service, saveConfig } = createStatefulConfigService(initial);
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const { root, click } = await mountProbe(service, "local");
+      cleanup = () => unmount(root);
+
+      // fixtureConfig.cpId ("CP-1") already exists — adding it again must be
+      // rejected, not persisted as a duplicate.
+      await click("add");
+
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(alertSpy).toHaveBeenCalledTimes(1);
+      expect(alertSpy.mock.calls[0][0]).toContain("already exists");
+    });
+
+    it("addCp surfaces a local persistence failure via alert (no unhandled rejection)", async () => {
+      const saveConfig = vi.fn(async () => {
+        throw new Error("disk full");
+      });
+      const loadConfig = vi.fn(async () => null);
+      const service = createFakeChargePointService({ saveConfig, loadConfig });
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const { root, click } = await mountProbe(service, "local");
+      cleanup = () => unmount(root);
+
+      // `click` awaits the returned promise — if the rejection escaped it
+      // would surface here as an unhandled rejection / thrown error.
+      await click("add");
+
+      expect(saveConfig).toHaveBeenCalledTimes(1);
+      expect(alertSpy).toHaveBeenCalledTimes(1);
+      expect(alertSpy.mock.calls[0][0]).toContain("Failed to save CP");
     });
   });
 });

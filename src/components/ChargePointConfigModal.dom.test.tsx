@@ -271,6 +271,43 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     expect(saved.basicAuthUsername).toBe("legacy-user");
   });
 
+  // #178 item F regression guard: with the legacy toggle hidden in the
+  // Security section, a remote + non-SOAP CP that already had legacy Basic
+  // Auth on must still have SOME way to turn it off — the informational block
+  // exposes a "Disable" button that clears basicAuthEnabled.
+  it("lets a persisted legacy Basic Auth value be disabled from the Security section", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      isNewChargePoint: false,
+      onSave,
+      initialConfig: baseConfig({
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 0,
+        basicAuthEnabled: true,
+        basicAuthUsername: "legacy-user",
+        basicAuthPassword: "",
+      }),
+    });
+    roots.push(rendered.root);
+
+    const disableButton = Array.from(document.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Disable legacy Basic Authentication"),
+    ) as HTMLButtonElement | undefined;
+    expect(disableButton).toBeDefined();
+
+    await act(async () => {
+      disableButton!.click();
+    });
+    await act(async () => {
+      saveButton().click();
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as ChargePointConfig;
+    expect(saved.basicAuthEnabled).toBe(false);
+  });
+
   it("keeps the generic Basic Auth toggle for SOAP versions in remote mode (no Security Profile model)", async () => {
     const rendered = await renderModal({
       mode: "remote",

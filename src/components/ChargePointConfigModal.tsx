@@ -752,16 +752,31 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
               </p>
             ) : securityProfile === 0 ? (
               basicAuthSource === "legacy" ? (
-                <p className="text-xs text-muted mb-4">
-                  Basic Authentication is currently active via the legacy
-                  Optional Settings toggle (username:{" "}
-                  <code>{config.basicAuthUsername || "(none)"}</code>). It will
-                  keep working unchanged. To manage authentication from the
-                  Security section instead, set Security Profile to 1 (Basic
-                  Auth) above and provide an Authorization Key — note the wire
-                  username becomes the Charge Point ID once you do, which may
-                  differ from the legacy username above.
-                </p>
+                <div className="mb-4">
+                  <p className="text-xs text-muted mb-2">
+                    Basic Authentication is currently active via the legacy
+                    Optional Settings toggle (username:{" "}
+                    <code>{config.basicAuthUsername || "(none)"}</code>). It
+                    will keep working unchanged. To manage authentication from
+                    the Security section instead, set Security Profile to 1
+                    (Basic Auth) above and provide an Authorization Key — note
+                    the wire username becomes the Charge Point ID once you do,
+                    which may differ from the legacy username above.
+                  </p>
+                  {/* #178 item F: legacy Basic Auth has no editable control in
+                      the Security section, so without this a remote+non-SOAP CP
+                      that already had it enabled could never turn it off from
+                      the UI. Mirrors the Optional Settings checkbox's off path
+                      (basicAuthEnabled → false). */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => updateConfig("basicAuthEnabled", false)}
+                  >
+                    Disable legacy Basic Authentication
+                  </Button>
+                </div>
               ) : (
                 <p className="text-xs text-muted mb-4">
                   No authentication configured. Set Security Profile to 1 above

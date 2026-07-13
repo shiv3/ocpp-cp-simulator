@@ -354,6 +354,17 @@ const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
 
 export const DEFAULT_SOAP_REQUEST_TIMEOUT_MS = 30_000;
 
+// Raw HTTP response bodies (e.g. an HTML error page from a misbehaving
+// proxy/CSMS) are embedded in error messages/log lines for diagnosis (#178
+// B-i) — truncate them to a sane length so a large body doesn't blow up logs.
+const RAW_RESPONSE_LOG_LIMIT = 240;
+
+function truncateForLog(text: string): string {
+  return text.length > RAW_RESPONSE_LOG_LIMIT
+    ? `${text.slice(0, RAW_RESPONSE_LOG_LIMIT)}…`
+    : text;
+}
+
 function textValue(value: SoapParsedValue | undefined): string | undefined {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") {
@@ -1083,7 +1094,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
 
     if (!response.ok) {
       throw new Error(
-        `HTTP ${response.status} ${response.statusText}: ${responseText.slice(0, 240)}`,
+        `HTTP ${response.status} ${response.statusText}: ${truncateForLog(responseText)}`,
       );
     }
     this._logger.info(
@@ -1122,7 +1133,21 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       const fault = parseSoapFaultEnvelope(responseText);
       return fault ? new SoapFaultError(fault, status) : null;
     } catch (error) {
-      if (status >= 200 && status < 300) throw error;
+      if (status >= 200 && status < 300) {
+        // The response body itself failed to parse as SOAP (e.g. the
+        // DOCTYPE/ENTITY XXE guard tripped on a non-SOAP HTML error page
+        // from SteVe/a proxy). Previously the raw body was captured in a
+        // local variable and then discarded here, leaving the failure
+        // undiagnosable (#178 B-i). Fold the HTTP status, the parse error,
+        // and a truncated copy of the raw response into the thrown error so
+        // it reaches the caller's log line (`enqueueRequest`'s catch).
+        const parseMessage =
+          error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `SOAP response parse failed (HTTP ${status}): ${parseMessage} — raw response: ${truncateForLog(responseText)}`,
+          { cause: error },
+        );
+      }
       return null;
     }
   }

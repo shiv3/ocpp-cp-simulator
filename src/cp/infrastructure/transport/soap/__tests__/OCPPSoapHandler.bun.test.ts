@@ -397,6 +397,18 @@ function withFakeFaultFetch(status: number, reason: string): () => void {
   };
 }
 
+function withFakeRawBodyFetch(status: number, body: string): () => void {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(body, {
+      status,
+      headers: { "content-type": "text/html" },
+    })) as unknown as typeof fetch;
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
 describe("OCPPSoapHandler CP-to-CSMS client", () => {
   it("posts OCPP 1.5 SOAP Boot, Heartbeat, Status, transaction, and MeterValues requests", async () => {
     await withGlobalFetch(async () => {
@@ -788,6 +800,91 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
           code: "s:Receiver",
           reason: "CSMS rejected request",
         });
+      } finally {
+        restoreFetch();
+      }
+    });
+  });
+
+  it("preserves the raw HTTP response when a 200 body fails SOAP parsing (#178 B-i)", async () => {
+    await withGlobalFetch(async () => {
+      const centralSystemUrl = "http://csms.example/CentralSystemService";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-XXE-200/ChargePointService";
+      const cp = createSoapChargePoint(
+        "CP-XXE-200",
+        centralSystemUrl,
+        callbackUrl,
+      );
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl,
+        soapCallbackUrl: callbackUrl,
+        requestTimeoutMs: 100,
+      });
+      // A 200-OK-but-non-SOAP body (e.g. a proxy's HTML error page). The
+      // DOCTYPE/ENTITY XXE guard in soapEnvelope.ts rejects it before any
+      // SOAP-specific parsing runs — this must not silently discard the
+      // body that caused the failure.
+      const htmlBody = `<!DOCTYPE html><html><body>${"x".repeat(2000)}</body></html>`;
+      const restoreFetch = withFakeRawBodyFetch(200, htmlBody);
+
+      try {
+        let error: unknown;
+        try {
+          await soapPostForTest(handler).postSoap("Heartbeat", {});
+        } catch (err) {
+          error = err;
+        }
+        expect(error).toBeInstanceOf(Error);
+        const message = (error as Error).message;
+        expect(message).toContain("HTTP 200");
+        expect(message).toContain(
+          "SOAP XML containing DOCTYPE or ENTITY is not supported",
+        );
+        // The raw body must survive in the surfaced error (truncated, not
+        // dropped) so the failure is diagnosable.
+        expect(message).toContain("<!DOCTYPE html>");
+        // ... and it must actually be truncated, not the full 300+ char body.
+        expect(message.length).toBeLessThan(htmlBody.length);
+      } finally {
+        restoreFetch();
+      }
+    });
+  });
+
+  it("preserves the raw HTTP response when a non-2xx body fails SOAP parsing (#178 B-i)", async () => {
+    await withGlobalFetch(async () => {
+      const centralSystemUrl = "http://csms.example/CentralSystemService";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-XXE-502/ChargePointService";
+      const cp = createSoapChargePoint(
+        "CP-XXE-502",
+        centralSystemUrl,
+        callbackUrl,
+      );
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl,
+        soapCallbackUrl: callbackUrl,
+        requestTimeoutMs: 100,
+      });
+      // Non-2xx bodies already flow through the `!response.ok` branch, which
+      // already embedded the raw (truncated) body — guard that this
+      // continues to hold with the shared truncation helper.
+      const htmlBody = `<!DOCTYPE html><html><body>Bad Gateway ${"x".repeat(2000)}</body></html>`;
+      const restoreFetch = withFakeRawBodyFetch(502, htmlBody);
+
+      try {
+        let error: unknown;
+        try {
+          await soapPostForTest(handler).postSoap("Heartbeat", {});
+        } catch (err) {
+          error = err;
+        }
+        expect(error).toBeInstanceOf(Error);
+        const message = (error as Error).message;
+        expect(message).toContain("HTTP 502");
+        expect(message).toContain("<!DOCTYPE html>");
+        expect(message.length).toBeLessThan(htmlBody.length);
       } finally {
         restoreFetch();
       }

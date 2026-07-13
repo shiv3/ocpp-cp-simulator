@@ -25,6 +25,10 @@ import type {
   AssertionStatus,
   ScenarioVerdict,
 } from "../scenario/ScenarioTypes";
+import {
+  redactSensitiveText,
+  redactSensitiveValue,
+} from "../../shared/redaction";
 
 /**
  * Deep partial match used by `payload_match`: every key in `subset` must be
@@ -428,20 +432,130 @@ export function evaluateAssertions(
 }
 
 /**
- * Minimal per-run report (#179 Phase 2b), stored by CLIChargePointService
- * once a scenario run ends. Phase 3 expands this into the full
- * `scenario_report` RPC surface; kept intentionally small here -- just
- * enough for `getScenarioRunResult` to answer "did this run pass".
+ * #179 Phase 3: one captured wire {@link Frame} flattened into the
+ * JSON-serializable shape used by the `scenario_report` transcript. A pure
+ * structural mapping -- no redaction here, see {@link redactTranscriptEntry}
+ * -- so this stays trivially testable against exact Frame fixtures.
+ */
+export interface TranscriptEntry {
+  seq: number;
+  ts: string;
+  direction: Direction;
+  kind: "call" | "callresult" | "callerror";
+  uniqueId: string;
+  action?: string;
+  payload?: unknown;
+  errorCode?: string;
+  errorDescription?: string;
+}
+
+/** Connector state captured at the start/end of a scenario run -- the
+ *  `initialState` / `finalState` fields of {@link ScenarioRunResult}. */
+export interface ScenarioStateSnapshot {
+  connectorStatus: string;
+  meterValue: number;
+  transactionId: number | null;
+}
+
+/**
+ * Maps a captured {@link Frame} to its flat {@link TranscriptEntry} shape.
+ * `seq` is the frame's position in capture order -- the caller (typically
+ * `frames.map((f, i) => frameToTranscriptEntry(f, i))`) supplies it, since
+ * TranscriptBuffer's public `frames` getter is typed as plain `Frame[]`
+ * (it can't expose TranscriptFrame's own `seq` without widening the type
+ * evaluateAssertions and every other Frame[] consumer already relies on).
+ */
+export function frameToTranscriptEntry(
+  frame: Frame,
+  seq: number,
+): TranscriptEntry {
+  const shared = {
+    seq,
+    ts: frame.timestamp,
+    direction: frame.direction,
+    uniqueId: frame.uniqueId,
+  };
+
+  switch (frame.kind) {
+    case "call":
+      return {
+        ...shared,
+        kind: "call",
+        action: frame.action,
+        payload: frame.payload,
+      };
+    case "callresult":
+      return { ...shared, kind: "callresult", payload: frame.payload };
+    case "callerror":
+      return {
+        ...shared,
+        kind: "callerror",
+        errorCode: frame.errorCode,
+        errorDescription: frame.errorDescription,
+      };
+    default: {
+      // Exhaustiveness guard: Frame is a closed union, so this only fires
+      // if a new Frame kind is added to ocpp.ts without updating this map.
+      const neverFrame: never = frame;
+      throw new Error(
+        `frameToTranscriptEntry: unhandled frame kind ${String((neverFrame as Frame).kind)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Redacts a {@link TranscriptEntry} (returns a new object; the input is
+ * never mutated) before it can flow into a `scenario_report` RPC response.
+ * Transcript payloads are raw OCPP-J CALL/CALLRESULT bodies and can carry
+ * auth material (AuthorizationKey, password, ...) -- see
+ * src/cp/shared/redaction.ts for exactly what `redactSensitiveValue`
+ * strips. `errorDescription` is redacted too since a CALLERROR's
+ * description is a free-text string that could echo back request content.
+ */
+export function redactTranscriptEntry(entry: TranscriptEntry): TranscriptEntry {
+  if (entry.kind === "callerror") {
+    return {
+      ...entry,
+      errorDescription:
+        entry.errorDescription !== undefined
+          ? redactSensitiveText(entry.errorDescription)
+          : entry.errorDescription,
+    };
+  }
+  return { ...entry, payload: redactSensitiveValue(entry.payload) };
+}
+
+/**
+ * Full per-run report (#179 Phase 3), stored by CLIChargePointService once
+ * a scenario run ends and surfaced over RPC as `scenario_report`.
+ * `schemaVersion` is pinned to `1` so a future breaking change to this
+ * shape can be detected by clients instead of silently misparsed.
+ * `templateId` / `profile` are omitted (left undefined) rather than
+ * invented -- ScenarioDefinition doesn't carry either field today.
  */
 export interface ScenarioRunResult {
+  schemaVersion: 1;
   runId: string;
   scenarioId: string;
+  templateId?: string;
+  scenarioName?: string;
+  profile?: string;
+  cpId: string;
   connectorId: number;
-  verdict: ScenarioVerdict;
-  assertions: AssertionResult[];
+  simulatorVersion: string;
+  ocppVersion: string;
   startedAt: string;
   endedAt: string;
-  frameCount: number;
+  durationMs: number;
+  executionState: "completed" | "error";
+  verdict: ScenarioVerdict;
+  assertions: AssertionResult[];
+  transcript: TranscriptEntry[];
+  errors: string[];
+  timeout: { nodeId: string; expectation?: unknown } | null;
+  initialState: ScenarioStateSnapshot;
+  finalState: ScenarioStateSnapshot;
 }
 
 export interface ComputeVerdictOptions {

@@ -89,7 +89,12 @@ describe("#179 Phase 2b: declarative assertions + verdict + per-run transcript",
     expect(result!.connectorId).toBe(1);
     expect(result!.verdict).toBe("SKIPPED");
     expect(result!.assertions).toEqual([]);
-    expect(typeof result!.frameCount).toBe("number");
+    // #179 Phase 3: the run result is now the full report.
+    expect(result!.schemaVersion).toBe(1);
+    expect(Array.isArray(result!.transcript)).toBe(true);
+    expect(result!.initialState).toBeDefined();
+    expect(result!.finalState).toBeDefined();
+    expect(typeof result!.durationMs).toBe("number");
     expect(new Date(result!.startedAt).getTime()).toBeLessThanOrEqual(
       new Date(result!.endedAt).getTime(),
     );

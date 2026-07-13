@@ -583,38 +583,55 @@ const FullPanelContent: React.FC<{
     }
   }, [mode, scenarios]);
 
-  // Remote mode: hydrate the editor with scenarios the daemon has loaded
-  // (e.g. via --scenario-template-file). Refetch on scenario lifecycle
-  // events so newly loaded templates appear without a manual reload.
+  // Remote mode: hydrate the editor with the connector's PERSISTED scenario
+  // definitions — the same source local mode selects from (#101 fix A).
+  //
+  // Previously this hydrated from `listScenarios` (the daemon's *runtime*
+  // loaded set). But `replaceConnectorScenarioDefinitions` (the editor
+  // upload/replace path) prunes only the persisted definitions, NOT the
+  // runtime — so a seeded default (CPRegistry.seedDefaultScenarios) that the
+  // user replaced still lingered in the runtime, got re-selected as `valid[0]`
+  // on the next refresh, and the editor's autosave then re-persisted it with a
+  // fresh timestamp, permanently shadowing the uploaded scenario. Sourcing
+  // from the persisted definitions (which the replace path DID prune) makes the
+  // upload survive a refresh, matching local mode. The runtime `list_scenarios`
+  // is now consulted only for the "which one is currently running" preference.
   useEffect(() => {
     if (mode !== "remote") return;
     let cancelled = false;
     const refresh = async () => {
       try {
-        const list = await chargePointService.listScenarios(cpId, connectorId);
-        if (cancelled) return;
-        setRemoteScenarioListError(false);
-        if (list.length === 0) return;
-        const defs = await Promise.all(
-          list.map((item) =>
-            chargePointService
-              .getScenario(cpId, connectorId, item.scenarioId)
-              .catch(() => null),
-          ),
+        const valid = await chargePointService.listScenarioDefinitions(
+          cpId,
+          connectorId,
         );
         if (cancelled) return;
-        const valid = defs.filter((d): d is ScenarioDefinition => d !== null);
+        setRemoteScenarioListError(false);
         if (valid.length === 0) return;
+        // The active-scenario preference comes from the runtime list, but only
+        // honor it when the active scenario is still one of the persisted
+        // definitions (so a stale runtime-only entry can't win). Runtime-list
+        // errors are non-fatal — it's just a selection hint.
+        let activeId: string | null = null;
+        try {
+          const runtime = await chargePointService.listScenarios(
+            cpId,
+            connectorId,
+          );
+          activeId = runtime.find((item) => item.active)?.scenarioId ?? null;
+        } catch {
+          /* selection hint only */
+        }
+        if (cancelled) return;
         setScenario((current) => {
           if (current) {
             const match = valid.find((s) => s.id === current.id);
             if (match) return match;
           }
-          // Prefer an active scenario, otherwise the first loaded one.
-          const activeItem = list.find((item) => item.active);
-          const preferred = activeItem
-            ? valid.find((d) => d.id === activeItem.scenarioId)
-            : null;
+          const preferred =
+            activeId != null ? valid.find((d) => d.id === activeId) : null;
+          // Otherwise the newest persisted definition (listByConnector orders
+          // by updated_at DESC, so valid[0] is the most recently saved).
           const next = preferred ?? valid[0];
           scenarioRef.current = next;
           return next;

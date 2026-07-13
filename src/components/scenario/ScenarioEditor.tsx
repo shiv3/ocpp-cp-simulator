@@ -442,6 +442,14 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setDefaultExecutionMode(scenarioProp.defaultExecutionMode || "oneshot");
       setScenarioEnabled(scenarioProp.enabled !== false);
       setScenarioEvSettings(scenarioProp.evSettings ?? {});
+      // #101 fix C: a scenario just hydrated from the daemon is already
+      // persisted verbatim — suppress the autosave this state change would
+      // otherwise trigger. Without this, re-hydrating a scenario re-saves it
+      // with a fresh updated_at, which (combined with the runtime/definition
+      // desync) let a seeded default keep winning the newest-wins selection and
+      // shadow the user's uploaded scenario across refreshes. The suppression
+      // is fingerprint-based, so the first real user edit still autosaves.
+      armAppliedScenarioAutosaveSuppression(scenarioProp);
       resetHistory();
       return;
     }
@@ -489,6 +497,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     chargePointService,
     setNodes,
     setEdges,
+    armAppliedScenarioAutosaveSuppression,
   ]);
 
   // Update execution context from props

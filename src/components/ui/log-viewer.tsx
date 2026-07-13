@@ -435,7 +435,11 @@ export function LogViewer({
       </div>
 
       {/* Right Side - Logs */}
-      <div className="flex-1 flex flex-col">
+      {/* min-w-0 overrides the flex-item default `min-width: auto`, which
+       *  would otherwise let a wide log table force this column (and the
+       *  whole page) wider instead of scrolling inside its own container
+       *  (#178 2.1). */}
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
         <div className="flex justify-between items-center p-3 border-b bg-muted/50">
           <div className="flex items-center gap-3">
@@ -501,7 +505,7 @@ export function LogViewer({
 
         {/* Log Table */}
         <div
-          className="flex-1 overflow-auto relative"
+          className="flex-1 overflow-x-auto overflow-y-auto relative"
           ref={containerRef}
           style={{ maxHeight }}
         >
@@ -559,7 +563,12 @@ export function LogViewer({
                         {log.type}
                       </Badge>
                     </td>
-                    <td className="p-2 align-middle break-all">
+                    {/* whitespace-nowrap (was break-all): a long payload
+                     *  now stays on one line and scrolls horizontally in
+                     *  the container above instead of wrapping
+                     *  character-by-character into a mangled block
+                     *  (#178 2.1). */}
+                    <td className="p-2 align-middle whitespace-nowrap">
                       {log.message}
                     </td>
                   </tr>

@@ -1032,10 +1032,26 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       .catch(() => undefined)
       .then(run)
       .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
         this._logger.error(
-          `SOAP ${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
+          `SOAP ${operation} failed: ${message}`,
           LogType.OCPP,
         );
+        if (operation === "BootNotification") {
+          // SOAP has no persistent connection, so there's no `onclose`
+          // handler to fall back on the way the WebSocket path has —
+          // `connect()` emits "connected" optimistically (before
+          // BootNotification round-trips), and without this, a failed
+          // round-trip would leave that "connected" state stuck forever,
+          // with Connect/Disconnect UI never recovering (#178 C). Mirror
+          // the WebSocket path's onclose transition: surface the failure
+          // via `error` and flip back with a "disconnected" event.
+          this._chargePoint.error = message;
+          this._chargePoint.events.emit("disconnected", {
+            code: 1006,
+            reason: message,
+          });
+        }
       });
   }
 

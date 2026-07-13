@@ -891,6 +891,53 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
     });
   });
 
+  it("emits disconnected and sets error when the initial SOAP BootNotification round-trip fails (#178 C)", async () => {
+    await withGlobalFetch(async () => {
+      const centralSystemUrl = "http://csms.example/CentralSystemService";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-BOOT-FAIL/ChargePointService";
+      const cp = createSoapChargePoint(
+        "CP-BOOT-FAIL",
+        centralSystemUrl,
+        callbackUrl,
+        100,
+      );
+      const connectedEvents: unknown[] = [];
+      const disconnectedEvents: { code: number; reason: string }[] = [];
+      cp.events.on("connected", () => connectedEvents.push(undefined));
+      cp.events.on("disconnected", (data) => disconnectedEvents.push(data));
+
+      // A 200-OK-but-non-SOAP body trips the DOCTYPE guard, so the
+      // BootNotification round-trip itself fails as a transport/parse
+      // error — not a business-level Rejected response.
+      const htmlBody = `<!DOCTYPE html><html><body>${"x".repeat(50)}</body></html>`;
+      const restoreFetch = withFakeRawBodyFetch(200, htmlBody);
+
+      try {
+        // connect() emits "connected" optimistically, before the boot
+        // round-trip resolves — mirrors the WebSocket path, which also
+        // emits "connected" as soon as the socket opens (#103).
+        cp.connect();
+        expect(connectedEvents.length).toBe(1);
+        expect(cp.error).toBe("");
+
+        // Previously nothing ever emitted "disconnected" for a SOAP
+        // charge point, so the UI's Connect/Disconnect state stayed
+        // stuck at "connected" forever after a failed boot (#178 C).
+        await waitUntil(() => disconnectedEvents.length === 1);
+
+        expect(disconnectedEvents[0].reason).toContain(
+          "SOAP XML containing DOCTYPE or ENTITY is not supported",
+        );
+        expect(cp.error).toContain(
+          "SOAP XML containing DOCTYPE or ENTITY is not supported",
+        );
+      } finally {
+        restoreFetch();
+      }
+    });
+  });
+
   it("sends OCPP 1.2 StatusNotification with exactly 3 fields and collapsed status", async () => {
     await withGlobalFetch(async () => {
       const csms = startFakeCentralSystemService();

@@ -274,6 +274,13 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "scenario_reset": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.resetScenario(connectorId, scenarioId);
+      return undefined;
+    }
+
     case "step_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");

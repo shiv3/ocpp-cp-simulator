@@ -1209,6 +1209,17 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async resetScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "scenario_reset", {
+      connector: connectorId,
+      scenarioId,
+    });
+  }
+
   async stepScenario(
     id: string,
     connectorId: number,

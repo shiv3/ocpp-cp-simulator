@@ -725,6 +725,16 @@ export class LocalChargePointService implements ChargePointService {
     manager?.stopScenario(scenarioId);
   }
 
+  async resetScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    const connector = this.requireConnector(id, connectorId);
+    const manager = connector.scenarioManager;
+    manager?.stopScenario(scenarioId);
+  }
+
   async stepScenario(
     id: string,
     connectorId: number,

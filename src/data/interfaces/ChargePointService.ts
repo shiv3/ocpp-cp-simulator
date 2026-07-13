@@ -463,6 +463,11 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void>;
+  resetScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void>;
   stepScenario(
     id: string,
     connectorId: number,

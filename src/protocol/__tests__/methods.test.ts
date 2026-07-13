@@ -35,6 +35,7 @@ const JSONMODE_COMMAND_IDS = [
   "scenario_report",
   "get_scenario",
   "stop_scenario",
+  "scenario_reset",
   "step_scenario",
   "stop_all_scenarios",
   "remove_scenario",

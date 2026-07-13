@@ -554,6 +554,14 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).stopScenario(connectorId, scenarioId);
   }
 
+  async resetScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).resetScenario(connectorId, scenarioId);
+  }
+
   async stepScenario(
     id: string,
     connectorId: number,

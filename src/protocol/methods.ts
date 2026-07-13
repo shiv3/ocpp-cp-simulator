@@ -249,6 +249,10 @@ export const METHODS = {
     params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
     result: ANY,
   },
+  scenario_reset: {
+    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    result: ANY,
+  },
   step_scenario: {
     params: z.object({
       connector: CONN_POS,

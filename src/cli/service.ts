@@ -1321,6 +1321,42 @@ export class CLIChargePointService {
     );
   }
 
+  /**
+   * #179 Phase 4: scenario-scoped reset. Unlike the global `state.reset`
+   * (`resetAllState` wipes every CP + the DB), this returns just ONE connector
+   * to a clean baseline so a campaign can run the next scenario without
+   * leakage from the previous one. Steps: stop the run if active (reusing
+   * `stopScenario`, which aborts the executor, finalizes + drops its
+   * transcript, and clears armed response overrides), then clear any active
+   * transaction and reservation on the connector, zero its meter, return it to
+   * Available (emitting the StatusNotification so a CSMS stays in sync), and
+   * drop the persisted scenario position.
+   */
+  resetScenario(connectorId: number, scenarioId: string): void {
+    if (this._executors.has(scenarioId)) {
+      this.stopScenario(connectorId, scenarioId);
+    }
+
+    const connector = this._chargePoint.connectors.get(connectorId);
+    if (!connector) return;
+
+    connector.transaction = null;
+
+    const reservation =
+      this._chargePoint.reservationManager.getReservationForConnector(
+        connectorId,
+      );
+    if (reservation) {
+      this._chargePoint.reservationManager.cancelReservation(
+        reservation.reservationId,
+      );
+    }
+
+    this._chargePoint.setMeterValue(connectorId, 0);
+    this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Available);
+    this._scenarioPositionByConnector.delete(connectorId);
+  }
+
   stopAllScenarios(connectorId: number): void {
     for (const [scenarioId, entry] of this._scenarios) {
       if (entry.connectorId === connectorId) {

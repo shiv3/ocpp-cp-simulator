@@ -1221,6 +1221,17 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "scenario_reset": {
+      const id = requireFacadeCpId(cpId);
+      await runFacadeOperation(() =>
+        chargePointService.resetScenario(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+        ),
+      );
+      return handled(undefined);
+    }
     case "step_scenario": {
       const id = requireFacadeCpId(cpId);
       await runFacadeOperation(() =>

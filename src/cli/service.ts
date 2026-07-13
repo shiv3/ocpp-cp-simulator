@@ -49,6 +49,12 @@ import type {
   HistoryOptions,
 } from "../cp/application/services/types/StateSnapshot";
 import { scenarioTemplates, getTemplateById } from "../utils/scenarioTemplates";
+import { TranscriptBuffer } from "../cp/application/verification/TranscriptBuffer";
+import {
+  evaluateAssertions,
+  computeVerdict,
+  type ScenarioRunResult,
+} from "../cp/application/verification/ScenarioAssertions";
 
 export type CLIEvent =
   | { readonly event: "connected"; readonly data: Record<string, never> }
@@ -230,6 +236,24 @@ export class CLIChargePointService {
   // and lifecycle events can be correlated to a specific run. Keyed like
   // _executors (by scenarioId) and cleared alongside it.
   private readonly _runIdByScenario: Map<string, string> = new Map();
+  // #179 Phase 2b: OCPP wire transcript capture for the currently-executing
+  // scenario, keyed like _executors/_runIdByScenario by scenarioId. Started
+  // alongside the run id in runScenario and stopped (then dropped) once the
+  // run ends, in finalizeScenarioRun.
+  private readonly _transcriptByScenario: Map<string, TranscriptBuffer> =
+    new Map();
+  // #179 Phase 2b: wall-clock start time (ISO) for the currently-executing
+  // scenario's run, read back by finalizeScenarioRun to build the
+  // ScenarioRunResult.
+  private readonly _runStartedAtByScenario: Map<string, string> = new Map();
+  // #179 Phase 2b: bounded history of per-run verdicts + assertion results,
+  // keyed by runId. Capped so a long-lived daemon doesn't accumulate
+  // results forever; recordRunResult evicts the oldest entry past the cap.
+  private readonly _runResults: Map<string, ScenarioRunResult> = new Map();
+  private static readonly MAX_RUN_RESULTS = 20;
+  // Latest runId recorded per scenarioId, so getScenarioRunResult can
+  // resolve "the latest run" without scanning _runResults.
+  private readonly _latestRunIdByScenario: Map<string, string> = new Map();
   private readonly _scenarioRepo: SqliteScenarioRepository;
   private readonly _runtimeRepo: ConnectorRuntimeRepository;
   /**
@@ -806,6 +830,16 @@ export class CLIChargePointService {
       executor.stop();
       this._executors.delete(scenarioId);
       this._runIdByScenario.delete(scenarioId);
+      // #179 Phase 2b: drop the transcript subscription for the run being
+      // torn down along with it -- otherwise it would keep capturing every
+      // future WebSocket frame on this CP with nothing left to stop it.
+      // No verdict is computed here (the scenario itself is being deleted).
+      const transcript = this._transcriptByScenario.get(scenarioId);
+      if (transcript) {
+        transcript.stop();
+        this._transcriptByScenario.delete(scenarioId);
+      }
+      this._runStartedAtByScenario.delete(scenarioId);
     }
     this._scenarios.delete(scenarioId);
     this._scenarioRepo.deleteOne(this._chargePoint.id, connectorId, scenarioId);
@@ -859,6 +893,17 @@ export class CLIChargePointService {
     const runId = makeScenarioRunId(scenarioId);
     this._runIdByScenario.set(scenarioId, runId);
 
+    // #179 Phase 2b: capture the OCPP wire transcript for this run so its
+    // declared assertions (if any) can be evaluated once it ends.
+    const transcript = new TranscriptBuffer(this._chargePoint.logger);
+    transcript.start();
+    this._transcriptByScenario.set(scenarioId, transcript);
+    this._runStartedAtByScenario.set(scenarioId, new Date().toISOString());
+
+    // Set by the onError hook below; read in executor.start().finally() to
+    // decide this run's verdict executionState ("error" vs "completed").
+    let hadError = false;
+
     const callbacks = createScenarioExecutorCallbacks({
       chargePoint: this._chargePoint,
       connector,
@@ -878,6 +923,7 @@ export class CLIChargePointService {
           });
         },
         onError: (error) => {
+          hadError = true;
           this.emit({
             event: "scenario_error",
             data: { connectorId, scenarioId, error: error.message, runId },
@@ -978,6 +1024,18 @@ export class CLIChargePointService {
         connector.clearEvSettingsOverride();
       }
       this.persistConnectorRuntime(connector, connectorId);
+      // #179 Phase 2b: the run has settled (naturally or via error) --
+      // stop capturing the transcript and compute this run's verdict. The
+      // stop-path methods (stopScenario/stopAllScenarios) finalize
+      // synchronously before this callback can fire (see their comments),
+      // so finalizeScenarioRun's transcript guard makes this a no-op then.
+      this.finalizeScenarioRun(
+        scenarioId,
+        connectorId,
+        runId,
+        hadError ? "error" : "completed",
+        false,
+      );
     });
   }
 
@@ -1025,6 +1083,87 @@ export class CLIChargePointService {
     return { ...executor.getContext(), runId };
   }
 
+  /**
+   * #179 Phase 2b: the verdict + assertion results for a scenario run, or
+   * null if no run has finished yet (or the given runId doesn't match a
+   * stored result for this scenario). Omitting runId returns the latest
+   * recorded run for the scenario. Only the last {@link MAX_RUN_RESULTS}
+   * runs across the whole service are retained. Phase 3 surfaces this over
+   * RPC as `scenario_report`; this accessor is the only new public surface
+   * added here.
+   */
+  getScenarioRunResult(
+    scenarioId: string,
+    runId?: string,
+  ): ScenarioRunResult | null {
+    const targetRunId = runId ?? this._latestRunIdByScenario.get(scenarioId);
+    if (!targetRunId) return null;
+    const result = this._runResults.get(targetRunId);
+    if (!result || result.scenarioId !== scenarioId) return null;
+    return result;
+  }
+
+  /**
+   * #179 Phase 2b: stop capturing this run's transcript, evaluate the
+   * scenario's declared assertions (if any) against it, and store the
+   * resulting {@link ScenarioRunResult}. A scenario with no `assertions`
+   * evaluates to zero results, which computeVerdict resolves to SKIPPED --
+   * unchanged behavior for every scenario written before this feature.
+   *
+   * Idempotent: the run's transcript is removed from
+   * `_transcriptByScenario` the first time this runs for a given
+   * scenarioId, so a second call for the same run (the stop-path methods
+   * finalize synchronously, ahead of the microtask-deferred
+   * executor.start().finally() callback racing them for the same run — see
+   * their comments) is a no-op.
+   */
+  private finalizeScenarioRun(
+    scenarioId: string,
+    connectorId: number,
+    runId: string,
+    executionState: "completed" | "error",
+    blocked: boolean,
+  ): void {
+    const transcript = this._transcriptByScenario.get(scenarioId);
+    if (!transcript) return;
+    transcript.stop();
+    this._transcriptByScenario.delete(scenarioId);
+
+    const startedAt =
+      this._runStartedAtByScenario.get(scenarioId) ?? new Date().toISOString();
+    this._runStartedAtByScenario.delete(scenarioId);
+
+    const assertionSpecs =
+      this._scenarios.get(scenarioId)?.definition.assertions ?? [];
+    const assertions = evaluateAssertions(assertionSpecs, transcript.frames);
+    const verdict = computeVerdict(assertions, { executionState, blocked });
+
+    this.recordRunResult({
+      runId,
+      scenarioId,
+      connectorId,
+      verdict,
+      assertions,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      frameCount: transcript.frames.length,
+    });
+  }
+
+  /** Stores a run result, evicting the oldest entry once
+   *  {@link MAX_RUN_RESULTS} is exceeded (Map iteration order is insertion
+   *  order, so the first key is the oldest). */
+  private recordRunResult(result: ScenarioRunResult): void {
+    this._runResults.set(result.runId, result);
+    this._latestRunIdByScenario.set(result.scenarioId, result.runId);
+    if (this._runResults.size > CLIChargePointService.MAX_RUN_RESULTS) {
+      const oldestKey = this._runResults.keys().next().value;
+      if (oldestKey !== undefined) {
+        this._runResults.delete(oldestKey);
+      }
+    }
+  }
+
   stopScenario(connectorId: number, scenarioId: string): void {
     const executor = this._executors.get(scenarioId);
     if (!executor) {
@@ -1033,6 +1172,12 @@ export class CLIChargePointService {
     // #179: capture the run id before stop() — executor.stop() lets the
     // start() promise settle, whose finally() clears _runIdByScenario.
     const runId = this._runIdByScenario.get(scenarioId) ?? "";
+    // #179 Phase 2b: capture whether the run was parked on a waiting node
+    // BEFORE stop() clears currentExpectation — a scenario stopped mid-wait
+    // couldn't reach a verifiable state, so its verdict should be BLOCKED
+    // rather than a possibly-misleading FAIL/PASS off a truncated
+    // transcript.
+    const wasWaiting = executor.getContext().state === "waiting";
     executor.stop();
     this._executors.delete(scenarioId);
     this._runIdByScenario.delete(scenarioId);
@@ -1050,6 +1195,17 @@ export class CLIChargePointService {
       event: "scenario_completed",
       data: { connectorId, scenarioId, runId },
     });
+    // #179 Phase 2b: finalize now, synchronously, before executor.start()'s
+    // own .finally() (deferred to a microtask by the abort machinery) can
+    // race it — finalizeScenarioRun's transcript guard makes that later
+    // call a no-op.
+    this.finalizeScenarioRun(
+      scenarioId,
+      connectorId,
+      runId,
+      "completed",
+      wasWaiting,
+    );
   }
 
   stopAllScenarios(connectorId: number): void {
@@ -1058,6 +1214,8 @@ export class CLIChargePointService {
         const executor = this._executors.get(scenarioId);
         if (executor) {
           const runId = this._runIdByScenario.get(scenarioId) ?? "";
+          // #179 Phase 2b: see stopScenario's comment.
+          const wasWaiting = executor.getContext().state === "waiting";
           executor.stop();
           this._executors.delete(scenarioId);
           this._runIdByScenario.delete(scenarioId);
@@ -1072,6 +1230,13 @@ export class CLIChargePointService {
             event: "scenario_completed",
             data: { connectorId, scenarioId, runId },
           });
+          this.finalizeScenarioRun(
+            scenarioId,
+            connectorId,
+            runId,
+            "completed",
+            wasWaiting,
+          );
         }
       }
     }
@@ -1097,6 +1262,14 @@ export class CLIChargePointService {
     }
     this._executors.clear();
     this._scenarios.clear();
+    // #179 Phase 2b: drop any in-flight transcript subscriptions so a
+    // torn-down service doesn't leave stale Logger listeners behind. No
+    // verdicts are computed here (the whole service is going away).
+    for (const transcript of this._transcriptByScenario.values()) {
+      transcript.stop();
+    }
+    this._transcriptByScenario.clear();
+    this._runStartedAtByScenario.clear();
     this._chargePoint.disconnect();
     this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {

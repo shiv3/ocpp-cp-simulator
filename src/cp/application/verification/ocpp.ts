@@ -64,17 +64,20 @@ const LOG_LINE_RE = /^\[([^\]]+)\]\s+\[[^\]]+\]\s+\[[^\]]+\]\s+(.*)$/;
 const FRAME_MESSAGE_RE = /^(Sent|Received):\s+(\[.*\])\s*$/;
 
 /**
- * Parses a single stdout line from the simulator CLI into a {@link Frame},
- * or returns null for anything that isn't an OCPP-J Sent/Received line
- * (structured JSON events, JSON command responses, other log lines, blank
- * lines).
+ * Parses just the `Sent:/Received: [...]` frame message half (no log-line
+ * prefix) into a {@link Frame}. `raw` is what ends up in the returned
+ * frame's `raw` field -- callers that only have the bare message (e.g.
+ * {@link TranscriptBuffer}, which subscribes to structured {@link LogEntry}s
+ * rather than formatted lines) can pass it explicitly; it defaults to
+ * `message` itself. {@link parseLogLine} passes the full formatted line so
+ * its frames' `raw` stays the whole line, matching prior behavior.
  */
-export function parseLogLine(line: string): Frame | null {
-  const lineMatch = LOG_LINE_RE.exec(line);
-  if (!lineMatch) return null;
-  const [, timestamp, rest] = lineMatch;
-
-  const frameMatch = FRAME_MESSAGE_RE.exec(rest);
+export function parseFrameMessage(
+  message: string,
+  timestamp: string,
+  raw: string = message,
+): Frame | null {
+  const frameMatch = FRAME_MESSAGE_RE.exec(message);
   if (!frameMatch) return null;
   const direction: Direction = frameMatch[1] === "Sent" ? "sent" : "received";
 
@@ -100,7 +103,7 @@ export function parseLogLine(line: string): Frame | null {
         action: parsed[2],
         payload: parsed[3],
         timestamp,
-        raw: line,
+        raw,
       };
     }
     case 3: {
@@ -111,7 +114,7 @@ export function parseLogLine(line: string): Frame | null {
         uniqueId,
         payload: parsed[2],
         timestamp,
-        raw: line,
+        raw,
       };
     }
     case 4: {
@@ -124,12 +127,25 @@ export function parseLogLine(line: string): Frame | null {
         errorDescription: String(parsed[3] ?? ""),
         errorDetails: parsed[4],
         timestamp,
-        raw: line,
+        raw,
       };
     }
     default:
       return null;
   }
+}
+
+/**
+ * Parses a single stdout line from the simulator CLI into a {@link Frame},
+ * or returns null for anything that isn't an OCPP-J Sent/Received line
+ * (structured JSON events, JSON command responses, other log lines, blank
+ * lines).
+ */
+export function parseLogLine(line: string): Frame | null {
+  const lineMatch = LOG_LINE_RE.exec(line);
+  if (!lineMatch) return null;
+  const [, timestamp, rest] = lineMatch;
+  return parseFrameMessage(rest, timestamp, line);
 }
 
 /** Parses a whole multi-line log (or stdout capture), preserving order. */

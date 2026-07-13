@@ -393,7 +393,77 @@ export interface ScenarioDefinition {
    * still be made via the `EV_SETTINGS_CHANGE` node.
    */
   evSettings?: Partial<EVSettings>;
+
+  /**
+   * #179 Phase 2b: declarative pass/fail assertions checked against the
+   * captured OCPP wire transcript once the run ends. Optional — a scenario
+   * with no assertions produces a SKIPPED verdict and runs exactly as
+   * before (no behavior change).
+   */
+  assertions?: AssertionSpec[];
 }
+
+/**
+ * #179 Phase 2b: the kind of check an {@link AssertionSpec} performs against
+ * the captured OCPP wire transcript of one scenario run.
+ */
+export type AssertionType =
+  | "ocpp_sent"
+  | "ocpp_received"
+  | "ocpp_absent"
+  | "response_status"
+  | "idtag_info_status"
+  | "payload_match"
+  | "message_order"
+  | "message_after"
+  | "state_transition"
+  | "no_unexpected";
+
+/**
+ * Declarative assertion attached to a {@link ScenarioDefinition}. Evaluated
+ * against the run's captured {@link Frame} transcript by
+ * `evaluateAssertions` (src/cp/application/verification/ScenarioAssertions.ts)
+ * once the run ends. Field usage varies by `type` — see that module's
+ * mapping doc.
+ */
+export interface AssertionSpec {
+  /** Stable identifier; echoed on the corresponding {@link AssertionResult}. */
+  id: string;
+  description?: string;
+  type: AssertionType;
+  /** OCPP action for frame-based assertion types. */
+  action?: string;
+  direction?: "sent" | "received";
+  /** Expected status for response_status / idtag_info_status. */
+  status?: string;
+  /** Nth (0-indexed) occurrence of `action`. Default 0. */
+  occurrence?: number;
+  /** Partial subset match against the matched CALL's payload (payload_match). */
+  payload?: Record<string, unknown>;
+  /** Expected connector status for state_transition. */
+  targetStatus?: string;
+  /** Set of actions that must not appear as a sent CALL (no_unexpected). */
+  actions?: string[];
+  /** Reference frame matcher for message_order / message_after. */
+  before?: { action: string; direction?: "sent" | "received" };
+  after?: { action: string; direction?: "sent" | "received" };
+}
+
+/** Outcome of evaluating one {@link AssertionSpec} against a run's transcript. */
+export type AssertionStatus = "passed" | "failed" | "skipped" | "blocked";
+
+export interface AssertionResult {
+  id: string;
+  type: AssertionType;
+  status: AssertionStatus;
+  description: string;
+  /** Explanation of what was/wasn't found; set on failure. */
+  detail?: string;
+}
+
+/** Overall pass/fail verdict for one scenario run, rolled up from its
+ *  {@link AssertionResult}s (see `computeVerdict`). */
+export type ScenarioVerdict = "PASS" | "FAIL" | "BLOCKED" | "SKIPPED";
 
 /**
  * Minimal runtime shape check for a value read from an operator-supplied

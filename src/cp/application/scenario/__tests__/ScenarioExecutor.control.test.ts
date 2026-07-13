@@ -123,7 +123,7 @@ function statusTriggerScenario(id: string): ScenarioDefinition {
 }
 
 describe("ScenarioExecutor control flow", () => {
-  it("pause then resume completes with running-paused-running-completed states", async () => {
+  it("pause then resume completes; parked-on-status-trigger reports waiting (#179)", async () => {
     const waitStarted = deferred();
     const statusGate = deferred();
     const states: string[] = [];
@@ -143,17 +143,28 @@ describe("ScenarioExecutor control flow", () => {
     const execution = executor.start();
     await waitStarted.promise;
 
-    expect(executor.getContext().state).toBe("running");
+    // #179: parked on the status trigger, the machine stays "running" but the
+    // reported state is now "waiting" with the awaited condition surfaced.
+    const parked = executor.getContext();
+    expect(parked.state).toBe("waiting");
+    expect(parked.expectation).toMatchObject({
+      type: "connector_status",
+      targetStatus: "Charging",
+    });
+
     executor.pause();
     expect(executor.getContext().state).toBe("paused");
     executor.resume();
-    expect(executor.getContext().state).toBe("running");
+    // Still parked after resume → back to "waiting", not "running".
+    expect(executor.getContext().state).toBe("waiting");
 
     statusGate.resolve();
     await execution;
 
-    expect(executor.getContext().state).toBe("completed");
-    expect(states).toContain("running");
+    const done = executor.getContext();
+    expect(done.state).toBe("completed");
+    expect(done.expectation).toBeFalsy();
+    expect(states).toContain("waiting");
     expect(states).toContain("paused");
     expect(states.at(-1)).toBe("completed");
   });

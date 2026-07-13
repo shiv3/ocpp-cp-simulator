@@ -420,6 +420,32 @@ export function isScenarioDefinitionShape(
 }
 
 /**
+ * Normalized description of the external condition a parked scenario node is
+ * waiting for (#179). Surfaced on `ScenarioExecutionContext` while a waiting
+ * node (a CSMS-call / status / reservation trigger) is blocked, so a headless
+ * runner can see *what* the scenario expects next without parsing scenario
+ * JSON internals.
+ */
+export interface ScenarioExpectation {
+  /** What kind of condition the parked node awaits. */
+  type: "ocpp_call" | "connector_status" | "reservation";
+  /** For ocpp_call / reservation: who must send the awaited CALL. */
+  direction?: "CSMS_TO_CP" | "CP_TO_CSMS";
+  /** For ocpp_call / reservation: the OCPP action awaited. */
+  action?: string;
+  /** For connector_status: the status the connector must reach. */
+  targetStatus?: string;
+  /** Partial-match constraints on the awaited event (e.g. connectorId).
+   *  Superset-matched, never exhaustive. */
+  constraints?: Record<string, unknown>;
+  /** Node timeout in ms (node.data.timeout seconds × 1000). Absent / 0 =
+   *  wait forever. */
+  timeoutMs?: number;
+  /** The graph node currently parked. */
+  nodeId: string;
+}
+
+/**
  * Scenario execution context
  */
 export interface ScenarioExecutionContext {
@@ -430,6 +456,12 @@ export interface ScenarioExecutionContext {
   executedNodes: string[];
   loopCount: number;
   error?: string;
+  /** #179: while a waiting node is parked, the normalized condition it
+   *  awaits. Null / absent when no node is parked. */
+  expectation?: ScenarioExpectation | null;
+  /** #179: stable identifier for this execution, set by the service layer so
+   *  a poller can tie status to a specific run. */
+  runId?: string;
 }
 
 /**

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { LogEntry, LogLevel, LogType } from "@/cp/shared/Logger";
+import { annotateOcppLogs } from "@/components/ui/logEntryParsing";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -82,6 +83,13 @@ export function LogViewer({
     [logs],
   );
 
+  // Best-effort OCPP action + wire direction per entry (#178 2.2/2.3).
+  // Parsed from `logs` (the full, chronological list) rather than
+  // `filteredLogs` — see logEntryParsing.ts: CALLRESULT/CALLERROR frames
+  // need to correlate back to an earlier CALL frame by message id, which
+  // breaks if an active filter hides that earlier entry.
+  const logOcppInfo = useMemo(() => annotateOcppLogs(logs), [logs]);
+
   // Calculate statistics
   const stats = useMemo(() => {
     const levelCounts: Record<LogLevel, number> = {
@@ -110,27 +118,35 @@ export function LogViewer({
     return { levelCounts, typeCounts, connectorCounts };
   }, [logs, logConnectors]);
 
+  // Pairs each surviving entry with its index in the original `logs` array
+  // (not its position after filtering) so the row renderer can still look
+  // up per-entry data — like `logOcppInfo` — keyed against the full list.
   const filteredLogs = useMemo(() => {
-    return logs.filter((log, idx) => {
-      if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
-        return false;
-      }
-      if (logLevelFilter.length > 0 && !logLevelFilter.includes(log.level)) {
-        return false;
-      }
-      if (logTypeFilter.length > 0 && !logTypeFilter.includes(log.type)) {
-        return false;
-      }
-      if (logConnectorFilter.length > 0) {
-        const ids = logConnectors[idx];
-        const match =
-          ids.length === 0
-            ? logConnectorFilter.includes(null)
-            : ids.some((id) => logConnectorFilter.includes(id));
-        if (!match) return false;
-      }
-      return true;
-    });
+    return logs
+      .map((log, idx) => ({ log, idx }))
+      .filter(({ log, idx }) => {
+        if (
+          filter &&
+          !log.message.toLowerCase().includes(filter.toLowerCase())
+        ) {
+          return false;
+        }
+        if (logLevelFilter.length > 0 && !logLevelFilter.includes(log.level)) {
+          return false;
+        }
+        if (logTypeFilter.length > 0 && !logTypeFilter.includes(log.type)) {
+          return false;
+        }
+        if (logConnectorFilter.length > 0) {
+          const ids = logConnectors[idx];
+          const match =
+            ids.length === 0
+              ? logConnectorFilter.includes(null)
+              : ids.some((id) => logConnectorFilter.includes(id));
+          if (!match) return false;
+        }
+        return true;
+      });
   }, [
     logs,
     filter,
@@ -521,6 +537,12 @@ export function LogViewer({
                 <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[140px]">
                   Type
                 </th>
+                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[100px]">
+                  Direction
+                </th>
+                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[180px]">
+                  Action
+                </th>
                 <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">
                   Message
                 </th>
@@ -530,7 +552,7 @@ export function LogViewer({
               {filteredLogs.length === 0 ? (
                 <tr className="border-b">
                   <td
-                    colSpan={4}
+                    colSpan={6}
                     className="p-2 text-center text-muted-foreground py-8"
                   >
                     {logs.length === 0
@@ -539,40 +561,67 @@ export function LogViewer({
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log, index) => (
-                  <tr
-                    key={index}
-                    className="border-b transition-colors hover:bg-muted/50 font-mono text-xs"
-                  >
-                    <td className="p-2 align-middle text-muted-foreground">
-                      {log.timestamp.toISOString().substring(11, 23)}
-                    </td>
-                    <td className="p-2 align-middle">
-                      <Badge variant={getLogLevelBadgeVariant(log.level)}>
-                        {LogLevel[log.level]}
-                      </Badge>
-                    </td>
-                    <td className="p-2 align-middle">
-                      <Badge
-                        variant="secondary"
-                        className={cn(
-                          "font-normal",
-                          getLogTypeBadgeColor(log.type),
+                filteredLogs.map(({ log, idx }) => {
+                  const ocppInfo = logOcppInfo[idx];
+                  return (
+                    <tr
+                      key={idx}
+                      className="border-b transition-colors hover:bg-muted/50 font-mono text-xs"
+                    >
+                      <td className="p-2 align-middle text-muted-foreground">
+                        {log.timestamp.toISOString().substring(11, 23)}
+                      </td>
+                      <td className="p-2 align-middle">
+                        <Badge variant={getLogLevelBadgeVariant(log.level)}>
+                          {LogLevel[log.level]}
+                        </Badge>
+                      </td>
+                      <td className="p-2 align-middle">
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "font-normal",
+                            getLogTypeBadgeColor(log.type),
+                          )}
+                        >
+                          {log.type}
+                        </Badge>
+                      </td>
+                      <td className="p-2 align-middle">
+                        {ocppInfo.direction ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "font-normal whitespace-nowrap",
+                              ocppInfo.direction === "sent"
+                                ? "border-sky-300 text-sky-700 dark:border-sky-700 dark:text-sky-300"
+                                : "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300",
+                            )}
+                          >
+                            {ocppInfo.direction === "sent"
+                              ? "→ Sent"
+                              : "← Received"}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
                         )}
-                      >
-                        {log.type}
-                      </Badge>
-                    </td>
-                    {/* whitespace-nowrap (was break-all): a long payload
-                     *  now stays on one line and scrolls horizontally in
-                     *  the container above instead of wrapping
-                     *  character-by-character into a mangled block
-                     *  (#178 2.1). */}
-                    <td className="p-2 align-middle whitespace-nowrap">
-                      {log.message}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="p-2 align-middle whitespace-nowrap">
+                        {ocppInfo.action ?? (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* whitespace-nowrap (was break-all): a long payload
+                       *  now stays on one line and scrolls horizontally in
+                       *  the container above instead of wrapping
+                       *  character-by-character into a mangled block
+                       *  (#178 2.1). */}
+                      <td className="p-2 align-middle whitespace-nowrap">
+                        {log.message}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

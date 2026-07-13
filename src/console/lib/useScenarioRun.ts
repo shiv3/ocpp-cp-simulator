@@ -36,7 +36,14 @@ export interface UseScenarioRunResult {
   start(mode?: ScenarioExecutionMode): Promise<void>;
   stop(): Promise<void>;
   /** `stepScenario` on the active runtime scenarioId. No-ops if no run is
-   *  active. */
+   *  active — and, even while a run IS active, is a no-op at the runtime
+   *  too: `ScenarioExecutor.step()` only acts when the executor's internal
+   *  state is "stepping", which nothing reaches today (`runScenario` always
+   *  starts execution in oneshot mode — see `start`'s doc comment above).
+   *  Kept as a thin, already-correct RPC wrapper for when step-mode
+   *  execution lands; `ScenarioRunPage` deliberately does not expose a Step
+   *  control (console redesign review, Finding 3) because it would be a
+   *  dead button today. */
   step(): Promise<void>;
   /** Session-local, newest first. */
   runs: ScenarioRunHistoryEntry[];

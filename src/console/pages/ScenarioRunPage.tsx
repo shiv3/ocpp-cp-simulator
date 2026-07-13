@@ -35,8 +35,17 @@ const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
  * Execution goes through `useScenarioRun`, which mirrors the real
  * `loadScenario` → `runScenario` RPC sequence (see that hook's doc comment
  * for the full discovery notes). There is no pause/resume at the
- * `ChargePointService` layer, so this page only offers a Start/Stop toggle
- * plus Step — no Pause/Resume affordance exists to wire up.
+ * `ChargePointService` layer, so this page only offers a Start/Stop toggle —
+ * no Pause/Resume/Step affordance exists to wire up (see the `cpScope` and
+ * "no Step button" notes below for why).
+ *
+ * Two dead-affordance fixes (console redesign review, Finding 3):
+ * - Charge-point-scope scenarios (`targetType: "chargePoint"`, reached with
+ *   an empty `connector` query param → `connectorId === null`) can't run
+ *   through `useScenarioRun.start()`, which requires a numeric connectorId
+ *   (`loadScenario` is connector-scoped). Start is disabled with an inline
+ *   explanation for that case instead of silently no-op'ing.
+ * - No Step button: see the comment above the Start/Stop button below.
  */
 const ScenarioRunPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -80,16 +89,15 @@ const ScenarioRunPage: React.FC = () => {
     };
   }, [chargePointService, cpId, connectorId, scenarioId]);
 
-  const {
-    state,
-    currentNodeId,
-    executedNodeIds,
-    error,
-    start,
-    stop,
-    step,
-    runs,
-  } = useScenarioRun(cpId || null, connectorId, scenario);
+  const { state, currentNodeId, executedNodeIds, error, start, stop, runs } =
+    useScenarioRun(cpId || null, connectorId, scenario);
+
+  // Charge-point-scope scenarios have no connectorId to load against —
+  // `useScenarioRun.start()` early-returns on `connectorId == null` since
+  // `loadScenario` needs a numeric connector. Rather than ship a Start
+  // button that silently no-ops, disable it and explain why (see the
+  // banner rendered below the header).
+  const cpScopeScenario = connectorId == null;
 
   const view = useChargePointView(cpId || null);
   const tailLogs = useMemo(() => view.logs.slice(-LOG_TAIL_LIMIT), [view.logs]);
@@ -158,19 +166,24 @@ const ScenarioRunPage: React.FC = () => {
               type="button"
               size="sm"
               variant={isRunning ? "destructive" : "success"}
+              disabled={!isRunning && cpScopeScenario}
+              aria-describedby={
+                cpScopeScenario ? "cp-scope-scenario-note" : undefined
+              }
               onClick={() => void (isRunning ? stop() : start())}
             >
               {isRunning ? "Stop" : "Start"}
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={!isRunning}
-              onClick={() => void step()}
-            >
-              Step
-            </Button>
+            {/* No Step button: `runScenario` always starts execution in
+                oneshot mode — `ScenarioManager.executeScenario` is
+                deliberately "always one-shot" (see its doc comment) and
+                `service.ts`'s `runScenario` never threads a mode into
+                `ScenarioExecutor.start()` either. The executor's internal
+                "stepping" state (which `stepScenario`/`ScenarioExecutor.step`
+                require) is therefore unreachable from this console, over
+                both local and remote `ChargePointService` — a Step button
+                here would be a dead control. Re-add once a code path exists
+                that starts a run in step mode. */}
           </>
         }
       >
@@ -185,6 +198,17 @@ const ScenarioRunPage: React.FC = () => {
           {stepLabel}
         </span>
       </PageHeader>
+
+      {cpScopeScenario && (
+        <div
+          id="cp-scope-scenario-note"
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          This is a charge-point-scope scenario — it runs automatically per
+          connector when its trigger fires, not via a manual Start here. Start
+          is disabled on this console.
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">

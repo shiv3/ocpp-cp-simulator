@@ -135,8 +135,11 @@ describe("ScenarioRunPage", () => {
       return button;
     };
 
-    // Step is disabled until a run is active.
-    expect(findButton("Step").disabled).toBe(true);
+    // No Step control is rendered at all — `runScenario` always runs
+    // oneshot, so `ScenarioExecutor` never reaches its "stepping" state and
+    // `stepScenario` would be a dead click (see ScenarioRunPage.tsx's
+    // comment). Not just disabled — genuinely absent.
+    expect(() => findButton("Step")).toThrow();
 
     await act(async () => {
       findButton("Start").click();
@@ -146,10 +149,10 @@ describe("ScenarioRunPage", () => {
     expect(loadScenario).toHaveBeenCalledWith("CP-1", 1, fixture);
     expect(runScenario).toHaveBeenCalledWith("CP-1", 1, "runtime-1");
     expect(container.textContent).toContain("Running");
-    // The Start/Stop toggle now reads "Stop", and Step is enabled.
+    // The Start/Stop toggle now reads "Stop"; still no Step control.
     expect(() => findButton("Start")).toThrow();
     expect(findButton("Stop")).toBeTruthy();
-    expect(findButton("Step").disabled).toBe(false);
+    expect(() => findButton("Step")).toThrow();
 
     await pushEvent(service, "CP-1", {
       type: "scenario-node-execute",
@@ -173,9 +176,56 @@ describe("ScenarioRunPage", () => {
     expect(container.textContent).not.toContain("Running");
     // Run history shows one closed, completed entry.
     expect(container.textContent).toContain("completed");
-    // Back to idle controls.
+    // Back to idle controls; still no Step button.
     expect(findButton("Start")).toBeTruthy();
-    expect(findButton("Step").disabled).toBe(true);
+    expect(() => findButton("Step")).toThrow();
+  });
+
+  it("disables Start and shows an explanatory banner for a charge-point-scope scenario (empty connector param)", async () => {
+    const fixture: ScenarioDefinition = {
+      ...linearFixture(),
+      targetType: "chargePoint",
+    };
+    const loadScenario = vi.fn(async () => ({ scenarioId: "runtime-1" }));
+    const runScenario = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+      loadScenario,
+      runScenario,
+    });
+
+    // Mirrors buildScenarioUrl("run", cpId, null, scenarioId): the
+    // `connector` query param is present but empty for CP-scope scenarios.
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(container.textContent).toContain("Boot demo");
+    // TargetChip renders cpId only (no "· C<n>") when connectorId is null.
+    expect(container.textContent).toContain("CP-1");
+    expect(container.textContent).not.toContain("CP-1 · C");
+
+    const startButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Start",
+    ) as HTMLButtonElement | undefined;
+    expect(startButton, 'expected a "Start" button').toBeTruthy();
+    expect(startButton!.disabled).toBe(true);
+
+    expect(container.textContent).toContain(
+      "This is a charge-point-scope scenario",
+    );
+
+    // Clicking (even though disabled) must never reach the RPCs — belt and
+    // suspenders alongside the `disabled` assertion above.
+    await act(async () => {
+      startButton!.click();
+    });
+    await flush();
+    expect(loadScenario).not.toHaveBeenCalled();
+    expect(runScenario).not.toHaveBeenCalled();
   });
 
   it("shows a not-found empty state for an unknown scenario id", async () => {

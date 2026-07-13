@@ -44,6 +44,7 @@ import type {
   ScenarioExecutionContext,
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -777,6 +778,18 @@ export class LocalChargePointService implements ChargePointService {
     const manager = connector.scenarioManager;
     if (!manager) return null;
     return manager.getScenarioExecutionContext(scenarioId) ?? null;
+  }
+
+  async getScenarioReport(
+    _id: string,
+    _connectorId: number,
+    _scenarioId: string,
+    _runId?: string,
+  ): Promise<ScenarioRunResult | null> {
+    // Local (in-browser) mode runs scenarios via ScenarioManager, which has
+    // no run-report machinery — reports are recorded only by the headless
+    // CLI service. Always null here.
+    return null;
   }
 
   async getScenario(

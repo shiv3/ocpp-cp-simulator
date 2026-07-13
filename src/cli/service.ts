@@ -1157,6 +1157,21 @@ export class CLIChargePointService {
   }
 
   /**
+   * #179 Phase 3: the `scenario_report` facade entry point — the full
+   * per-run report (verdict + assertions + transcript + snapshots) for a
+   * finished run, or null if none has finished. `connectorId` is accepted
+   * for facade-signature symmetry; runs are keyed by scenarioId. Omitting
+   * runId returns the latest recorded run.
+   */
+  getScenarioReport(
+    _connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): ScenarioRunResult | null {
+    return this.getScenarioRunResult(scenarioId, runId);
+  }
+
+  /**
    * #179 Phase 2b: stop capturing this run's transcript, evaluate the
    * scenario's declared assertions (if any) against it, and store the
    * resulting {@link ScenarioRunResult}. A scenario with no `assertions`

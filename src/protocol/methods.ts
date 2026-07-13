@@ -228,6 +228,19 @@ export const METHODS = {
     params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
     result: ANY,
   },
+  // #179 Phase 3: the machine-readable per-run certification report
+  // (verdict + assertion results + correlated transcript + state snapshots).
+  // runId omitted → latest run for the scenario. `format` is single-valued
+  // for now (JUnit is a later phase); kept as an enum so adding it is trivial.
+  scenario_report: {
+    params: z.object({
+      connector: CONN_POS,
+      scenarioId: STR_64K,
+      runId: STR_64K.optional(),
+      format: z.enum(["json"]).optional(),
+    }),
+    result: ANY,
+  },
   get_scenario: {
     params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
     result: ANY,

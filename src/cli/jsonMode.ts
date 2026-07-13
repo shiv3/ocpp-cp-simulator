@@ -253,6 +253,14 @@ export async function handleJsonCommand(
       return ops.getScenarioStatus(connectorId, scenarioId);
     }
 
+    case "scenario_report": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const runId =
+        params.runId === undefined ? undefined : requireString(params, "runId");
+      return ops.getScenarioReport(connectorId, scenarioId, runId);
+    }
+
     case "get_scenario": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");

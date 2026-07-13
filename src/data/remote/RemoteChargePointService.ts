@@ -25,6 +25,7 @@ import type {
   ScenarioExecutionContext,
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -1254,6 +1255,20 @@ export class RemoteChargePointService implements ChargePointService {
       scenarioId,
     });
     return (data as ScenarioExecutionContext | null) ?? null;
+  }
+
+  async getScenarioReport(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): Promise<ScenarioRunResult | null> {
+    const data = await this.runCpRpc(id, "scenario_report", {
+      connector: connectorId,
+      scenarioId,
+      ...(runId === undefined ? {} : { runId }),
+    });
+    return (data as ScenarioRunResult | null) ?? null;
   }
 
   async getScenario(

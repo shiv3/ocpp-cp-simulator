@@ -1183,6 +1183,21 @@ async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "scenario_report": {
+      const id = requireFacadeCpId(cpId);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getScenarioReport(
+            id,
+            requirePositiveInt(params, "connector"),
+            requireString(params, "scenarioId"),
+            params.runId === undefined
+              ? undefined
+              : requireString(params, "runId"),
+          ),
+        ),
+      );
+    }
     case "get_scenario": {
       const id = requireFacadeCpId(cpId);
       return handled(

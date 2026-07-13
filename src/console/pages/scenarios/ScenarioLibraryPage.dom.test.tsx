@@ -37,6 +37,15 @@ function twoStepScenario(): ScenarioDefinition {
   return { ...def, id: "s-demo", description: "A demo fixture" };
 }
 
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 describe("ScenarioLibraryPage", () => {
   let cleanup: (() => Promise<void>) | null = null;
 
@@ -104,5 +113,127 @@ describe("ScenarioLibraryPage", () => {
     });
 
     expect(container.textContent).toContain("No scenarios");
+  });
+
+  it("shows a distinct error state (not the empty state) when loading fails, and Retry recovers", async () => {
+    const cp1 = snapshot({ id: "CP-1", connectors: [] });
+    let shouldFail = true;
+    const listChargePoints = vi.fn(async () => {
+      if (shouldFail) throw new Error("boom");
+      return [cp1];
+    });
+
+    const service = createFakeChargePointService({ listChargePoints });
+
+    const { container, root } = await renderConsole("/scenarios", { service });
+    cleanup = () => unmount(root);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Couldn't load scenarios");
+    expect(container.textContent).toContain("boom");
+    expect(container.textContent).not.toContain("No scenarios");
+
+    const retryButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Retry",
+    );
+    expect(retryButton, "expected a Retry button").toBeTruthy();
+
+    shouldFail = false;
+    await act(async () => {
+      retryButton!.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).not.toContain("Couldn't load scenarios");
+    expect(container.textContent).toContain("No scenarios");
+  });
+
+  it("handles a rejected save in the dialog-confirm flow: alerts the user, doesn't navigate, and closes the dialog without an unhandled rejection", async () => {
+    const cp1 = snapshot({ id: "CP-1", connectors: [] });
+    const saveScenarioDefinition = vi.fn(async () => {
+      throw new Error("save failed");
+    });
+
+    const service = createFakeChargePointService({
+      snapshots: [cp1],
+      saveScenarioDefinition,
+    });
+
+    const { container, root } = await renderConsole("/scenarios", { service });
+    cleanup = () => unmount(root);
+
+    // Populate useChargePoints (remote mode subscribes to registry events)
+    // so the "+ New scenario" dialog has a charge point to default-select.
+    await act(async () => {
+      for (const handler of service.__handlers.subscribeRegistry) {
+        handler({ type: "snapshot", cps: [cp1] });
+      }
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const newScenarioButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((b) => b.textContent?.trim() === "+ New scenario");
+    expect(newScenarioButton, "expected a + New scenario button").toBeTruthy();
+
+    await act(async () => {
+      newScenarioButton!.click();
+      await Promise.resolve();
+    });
+
+    // The dialog renders via a Radix Portal into document.body, not into
+    // `container`.
+    const nameInput =
+      document.body.querySelector<HTMLInputElement>("#new-scenario-name");
+    expect(nameInput, "expected the dialog's Name field").toBeTruthy();
+    setInputValue(nameInput!, "My scenario");
+
+    const createButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent?.trim() === "Create");
+    expect(createButton, "expected a Create button").toBeTruthy();
+
+    await act(async () => {
+      createButton!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(saveScenarioDefinition).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Failed to save the scenario. Please try again.",
+      expect.any(Error),
+    );
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Failed to save the scenario. Please try again.",
+    );
+
+    // The dialog closes as soon as confirm is pressed (pendingAction is
+    // cleared before the save is awaited) even though the save failed, and
+    // the page never navigates away to the (nonexistent) new scenario's
+    // editor route.
+    expect(document.body.querySelector("#new-scenario-name")).toBeNull();
+    expect(
+      Array.from(container.querySelectorAll("button")).some(
+        (b) => b.textContent?.trim() === "+ New scenario",
+      ),
+    ).toBe(true);
+
+    alertSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });

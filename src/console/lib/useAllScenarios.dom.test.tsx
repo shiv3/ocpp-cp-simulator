@@ -64,6 +64,7 @@ function scenario(
 interface ProbeResult {
   items: ReturnType<typeof useAllScenarios>["items"];
   isLoading: boolean;
+  error: string | null;
   refreshCount: number;
 }
 
@@ -76,6 +77,7 @@ function Probe() {
   latestProbeResult = {
     items: api.items,
     isLoading: api.isLoading,
+    error: api.error,
     refreshCount: 0,
   };
   return (
@@ -208,7 +210,10 @@ describe("useAllScenarios", () => {
     expect(cpScopeItem?.connectorId).toBeNull();
   });
 
-  it("remove() replaces the connector's definitions with the list minus the target", async () => {
+  it("remove() calls deleteScenarioDefinition with the exact (cpId, connectorId, scenarioId) instead of read-filter-replace", async () => {
+    // Regression for the TOCTOU race: a whole-list replace here could
+    // resurrect a concurrent delete of a *different* scenario in the same
+    // scope, since both reads would happen before either write lands.
     const cp1 = snapshot({ id: "CP-1", connectors: [connector(1)] });
     const target = scenario({ id: "s-target", name: "To delete" });
     const sibling = scenario({ id: "s-sibling", name: "Keep me" });
@@ -231,6 +236,10 @@ describe("useAllScenarios", () => {
 
     expect(latestProbeResult?.items).toHaveLength(2);
 
+    // Simulate the atomic delete taking effect server-side, so the
+    // follow-up refresh() sees the post-delete state.
+    byScope["CP-1:1"] = [sibling];
+
     await act(async () => {
       await latestHookApi!.remove("CP-1", 1, "s-target");
     });
@@ -238,11 +247,29 @@ describe("useAllScenarios", () => {
       await Promise.resolve();
     });
 
-    expect(service.replaceConnectorScenarioDefinitions).toHaveBeenCalledWith(
+    expect(service.deleteScenarioDefinition).toHaveBeenCalledWith(
       "CP-1",
       1,
-      [sibling],
+      "s-target",
     );
+    expect(service.replaceConnectorScenarioDefinitions).not.toHaveBeenCalled();
+    expect(latestProbeResult?.items).toHaveLength(1);
+    expect(latestProbeResult?.items[0]?.scenario.id).toBe("s-sibling");
+  });
+
+  it("refresh() catches a load failure, exposes it via error, and doesn't wipe existing items", async () => {
+    const service = createFakeChargePointService({
+      listChargePoints: vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    });
+
+    const { root } = await renderProbe(service);
+    cleanup = () => unmount(root);
+
+    expect(latestProbeResult?.isLoading).toBe(false);
+    expect(latestProbeResult?.error).toBe("network down");
+    expect(latestProbeResult?.items).toHaveLength(0);
   });
 
   it("save() persists via saveScenarioDefinition and refreshes items", async () => {

@@ -22,6 +22,7 @@ export interface ScenarioLibraryItem {
 export interface UseAllScenariosResult {
   items: ScenarioLibraryItem[];
   isLoading: boolean;
+  error: string | null;
   refresh: () => Promise<void>;
   save: (
     cpId: string,
@@ -52,9 +53,11 @@ export function useAllScenarios(): UseAllScenariosResult {
   const { chargePointService } = useDataContext();
   const [items, setItems] = useState<ScenarioLibraryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const chargePoints = await chargePointService.listChargePoints();
 
@@ -98,6 +101,8 @@ export function useAllScenarios(): UseAllScenariosResult {
       }
 
       setItems(collected);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLoading(false);
     }
@@ -125,22 +130,22 @@ export function useAllScenarios(): UseAllScenariosResult {
 
   const remove = useCallback(
     async (cpId: string, connectorId: number | null, scenarioId: string) => {
-      const current = await chargePointService.listScenarioDefinitions(
+      // Atomic delete-by-id, not read-filter-replace: a whole-list write
+      // here would race a concurrent delete of a *different* scenario in
+      // the same (cpId, connectorId) scope — both reads happen before
+      // either write lands, so the second write resurrects the first
+      // deletion.
+      await chargePointService.deleteScenarioDefinition(
         cpId,
         connectorId,
-      );
-      const next = current.filter((s) => s.id !== scenarioId);
-      await chargePointService.replaceConnectorScenarioDefinitions(
-        cpId,
-        connectorId,
-        next,
+        scenarioId,
       );
       await refresh();
     },
     [chargePointService, refresh],
   );
 
-  return { items, isLoading, refresh, save, remove };
+  return { items, isLoading, error, refresh, save, remove };
 }
 
 /**

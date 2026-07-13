@@ -27,6 +27,16 @@ type PendingAction =
   | { kind: "template"; template: ScenarioTemplate }
   | { kind: "import"; scenario: ScenarioDefinition };
 
+/** console.error + a user-visible alert for a failed library action. Matches
+ *  the console.error convention already used by CpDetailPage/ScenarioEditPage,
+ *  plus an explicit alert since this page has no inline error slot per-row. */
+function reportActionError(message: string, err: unknown): void {
+  console.error(message, err);
+  if (typeof window !== "undefined") {
+    window.alert(message);
+  }
+}
+
 function duplicateScenario(scenario: ScenarioDefinition): ScenarioDefinition {
   const now = new Date().toISOString();
   return {
@@ -45,7 +55,7 @@ const ScenarioLibraryPage: React.FC = () => {
   const { chargePoints } = useChargePoints(config, {
     isLoading: configLoading,
   });
-  const { items, isLoading, save, remove } = useAllScenarios();
+  const { items, isLoading, error, save, remove, refresh } = useAllScenarios();
 
   const [enabledOnly, setEnabledOnly] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(
@@ -113,18 +123,37 @@ const ScenarioLibraryPage: React.FC = () => {
         );
       }
 
-      await save(cpId, connectorId, scenario);
-      navigate(buildScenarioUrl("edit", cpId, connectorId, scenario.id));
+      try {
+        await save(cpId, connectorId, scenario);
+        navigate(buildScenarioUrl("edit", cpId, connectorId, scenario.id));
+      } catch (err) {
+        reportActionError(
+          "Failed to save the scenario. Please try again.",
+          err,
+        );
+      }
     },
     [pendingAction, save, navigate],
   );
 
   const handleToggleEnabled = (item: ScenarioLibraryItem, enabled: boolean) => {
-    void save(item.cpId, item.connectorId, { ...item.scenario, enabled });
+    save(item.cpId, item.connectorId, { ...item.scenario, enabled }).catch(
+      (err) =>
+        reportActionError(
+          "Failed to update the scenario. Please try again.",
+          err,
+        ),
+    );
   };
 
   const handleDuplicate = (item: ScenarioLibraryItem) => {
-    void save(item.cpId, item.connectorId, duplicateScenario(item.scenario));
+    save(item.cpId, item.connectorId, duplicateScenario(item.scenario)).catch(
+      (err) =>
+        reportActionError(
+          "Failed to duplicate the scenario. Please try again.",
+          err,
+        ),
+    );
   };
 
   const handleExport = (item: ScenarioLibraryItem) => {
@@ -138,7 +167,12 @@ const ScenarioLibraryPage: React.FC = () => {
     ) {
       return;
     }
-    void remove(item.cpId, item.connectorId, item.scenario.id);
+    remove(item.cpId, item.connectorId, item.scenario.id).catch((err) =>
+      reportActionError(
+        "Failed to delete the scenario. Please try again.",
+        err,
+      ),
+    );
   };
 
   const newScenarioButton = (
@@ -234,7 +268,18 @@ const ScenarioLibraryPage: React.FC = () => {
         </label>
       </div>
 
-      {!isLoading && filteredItems.length === 0 ? (
+      {error ? (
+        <EmptyState
+          icon={ListTree}
+          title="Couldn't load scenarios"
+          hint={`Couldn't load scenarios: ${error}`}
+          action={
+            <Button type="button" size="sm" onClick={() => void refresh()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : !isLoading && filteredItems.length === 0 ? (
         <EmptyState
           icon={ListTree}
           title="No scenarios"

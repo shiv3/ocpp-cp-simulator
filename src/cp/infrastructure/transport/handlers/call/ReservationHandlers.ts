@@ -57,9 +57,15 @@ export class ReserveNowHandler implements CallHandler<
       reservationId,
     );
 
-    // If reservation was accepted, update connector status to Reserved
+    // If reservation was accepted, drive the connector to Reserved through
+    // updateConnectorStatus so an OCPP StatusNotification(Reserved) is emitted
+    // on the wire (a bare `connector.status = …` fires only the connector-local
+    // statusChange event and the CSMS never sees the transition).
     if (status === ReservationStatus.Accepted) {
-      connector.status = OCPPStatus.Reserved;
+      context.chargePoint.updateConnectorStatus(
+        connectorId,
+        OCPPStatus.Reserved,
+      );
     }
 
     return { status };
@@ -94,7 +100,12 @@ export class CancelReservationHandler implements CallHandler<
         reservation.connectorId,
       );
       if (connector && connector.status === OCPPStatus.Reserved) {
-        connector.status = OCPPStatus.Available;
+        // Route through updateConnectorStatus so StatusNotification(Available)
+        // is sent for the post-cancel transition (mirrors ReserveNow above).
+        context.chargePoint.updateConnectorStatus(
+          reservation.connectorId,
+          OCPPStatus.Available,
+        );
       }
 
       return { status: CancelReservationStatus.Accepted };

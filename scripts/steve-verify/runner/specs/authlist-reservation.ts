@@ -343,6 +343,19 @@ export const reservationBasicSpec: ScenarioSpec<void> = {
       "Accepted",
       "ReserveNow accepted",
     );
+    // #186: the CP core now drives the connector Reserved through
+    // updateConnectorStatus, so a StatusNotification(Reserved) reaches the
+    // wire on Accepted (previously a bare `connector.status =` write left the
+    // CSMS blind to the transition). assertLineAfter (not assertLineOrder):
+    // the connector's post-boot Available always precedes ReserveNow, so anchor
+    // on the ReserveNow exchange to confirm Reserved is the response to it.
+    assertLineAfter(
+      rec,
+      lines,
+      /Received: \[2,.*"ReserveNow"/,
+      /Sent: \[2,.*"StatusNotification".*"status":"Reserved"/,
+      "StatusNotification(Reserved) sent after ReserveNow accepted (#186)",
+    );
     assertLineMatches(
       rec,
       lines,
@@ -619,7 +632,7 @@ export const tc051CancelReservationSpec: ScenarioSpec<CancelReservationDriveStat
 
       return { reservationPk };
     },
-    async assert({ frames, rec, db, driveState }) {
+    async assert({ frames, lines, rec, db, driveState }) {
       assertResponseStatus(
         rec,
         frames,
@@ -633,6 +646,24 @@ export const tc051CancelReservationSpec: ScenarioSpec<CancelReservationDriveStat
         "CancelReservation",
         "Accepted",
         "CancelReservation accepted",
+      );
+      // #186: both reservation transitions are now OCPP-visible. ReserveNow
+      // drives Reserved; CancelReservation flips it back to Available -- both
+      // through updateConnectorStatus, so each emits a StatusNotification.req
+      // the CSMS can see (this scenario previously sent nothing for either).
+      assertLineAfter(
+        rec,
+        lines,
+        /Received: \[2,.*"ReserveNow"/,
+        /Sent: \[2,.*"StatusNotification".*"status":"Reserved"/,
+        "StatusNotification(Reserved) sent after ReserveNow (#186)",
+      );
+      assertLineAfter(
+        rec,
+        lines,
+        /Received: \[2,.*"CancelReservation"/,
+        /Sent: \[2,.*"StatusNotification".*"status":"Available"/,
+        "StatusNotification(Available) sent after CancelReservation (#186)",
       );
 
       if (!driveState.reservationPk) {

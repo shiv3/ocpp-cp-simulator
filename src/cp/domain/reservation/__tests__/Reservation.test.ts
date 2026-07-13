@@ -45,6 +45,38 @@ describe("ReservationManager expiry callback", () => {
     mgr.stopCleanupTimer();
   });
 
+  it("isolates a throwing onExpire so the cleanup loop keeps going", () => {
+    // The first connector's callback throws; the second must still be notified
+    // and the exception must not escape the (timer-invoked) cleanup loop.
+    const onExpire = vi.fn((connectorId: number) => {
+      if (connectorId === 1) throw new Error("boom");
+    });
+    const mgr = new ReservationManager(new Logger(), onExpire);
+    mgr.createReservation(
+      1,
+      new Date("2026-07-13T00:01:00Z"),
+      "TAG",
+      undefined,
+      1,
+    );
+    mgr.createReservation(
+      2,
+      new Date("2026-07-13T00:01:00Z"),
+      "TAG",
+      undefined,
+      2,
+    );
+
+    vi.setSystemTime(new Date("2026-07-13T00:02:00Z"));
+    expect(() => mgr.cleanupExpiredReservations()).not.toThrow();
+    expect(onExpire).toHaveBeenCalledWith(1);
+    expect(onExpire).toHaveBeenCalledWith(2);
+    // Both expired reservations were dropped regardless of the throw.
+    expect(mgr.getAllReservations()).toHaveLength(0);
+
+    mgr.stopCleanupTimer();
+  });
+
   it("does NOT fire onExpire on an explicit cancellation", () => {
     const onExpire = vi.fn();
     const mgr = new ReservationManager(new Logger(), onExpire);

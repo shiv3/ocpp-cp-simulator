@@ -24,7 +24,7 @@ export class ReservationManager {
   private cleanupTimer?: NodeJS.Timeout;
   /** Invoked with the connector id each time a reservation is dropped by
    *  cleanupExpiredReservations() because its expiry passed — from the periodic
-   *  timer, or lazily via getReservation()/getReservationForConnector(). Lets
+   *  timer, or lazily via getReservationForConnector()/getAllReservations(). Lets
    *  the owner (ChargePoint) return the connector Reserved → Available and emit
    *  the StatusNotification; without it a lapsed reservation left the connector
    *  stuck Reserved on the wire. Explicit cancel/use paths delete directly and
@@ -253,8 +253,18 @@ export class ReservationManager {
       );
       // Return the connector to Available on the wire — the reservation
       // lapsed without an explicit CancelReservation, so nothing else would.
+      // Guard the callback: this runs from the setInterval timer, so an
+      // uncaught throw here would escape the interval and could kill the
+      // process / stop future cleanups. Isolate it and keep cleaning up.
       if (reservation) {
-        this.onExpire?.(reservation.connectorId);
+        try {
+          this.onExpire?.(reservation.connectorId);
+        } catch (err) {
+          this.logger.error(
+            `onExpire callback threw for connector ${reservation.connectorId}: ${String(err)}`,
+            LogType.GENERAL,
+          );
+        }
       }
     }
   }

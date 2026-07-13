@@ -27,7 +27,9 @@ import {
   DataTransferNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
+  ScenarioExpectation,
 } from "./ScenarioTypes";
+import { deriveExpectation } from "./ScenarioExpectations";
 import {
   createScenarioMachine,
   getScenarioStateName,
@@ -100,6 +102,11 @@ export class ScenarioExecutor {
   private remoteStopReason: string | null = null;
   private remoteStopOptions: StopTransactionOptions | null = null;
   private currentNodeId: string | null = null;
+  // #179: the normalized condition the currently-parked node is waiting on
+  // (null when no node is parked). The robot3 machine stays "running" while a
+  // node awaits an external event (the "waiting" state is never entered), so
+  // getContext() derives the reported "waiting" state from this field.
+  private currentExpectation: ScenarioExpectation | null = null;
   private executedNodes: string[] = [];
   // Issue #110: track which response overrides were armed during this run,
   // so they can be cleared when the run ends (both normal completion and stop()).
@@ -164,6 +171,7 @@ export class ScenarioExecutor {
     // Fresh abort gate for this run.
     this.aborted = false;
     this.currentNodeId = null;
+    this.currentExpectation = null;
     this.executedNodes = [];
     this.stepResolve = null;
     this.pendingSteps = 0;
@@ -354,6 +362,7 @@ export class ScenarioExecutor {
 
     // Clear current node
     this.currentNodeId = null;
+    this.currentExpectation = null;
   }
 
   /**
@@ -490,7 +499,22 @@ export class ScenarioExecutor {
       node.type !== ScenarioNodeType.START &&
       node.type !== ScenarioNodeType.END
     ) {
-      await this.executeNode(node);
+      // #179: while a node that parks on an external event is awaiting, expose
+      // its normalized expectation (and a reported "waiting" state) through
+      // getContext(). deriveExpectation returns null for non-waiting nodes, so
+      // this is a no-op for them. Cleared as soon as the node resolves.
+      this.currentExpectation = deriveExpectation(node, this.scenario.targetId);
+      if (this.currentExpectation) {
+        this.notifyStateChange();
+      }
+      try {
+        await this.executeNode(node);
+      } finally {
+        if (this.currentExpectation) {
+          this.currentExpectation = null;
+          this.notifyStateChange();
+        }
+      }
     }
 
     // Dispatch NODE_COMPLETE event
@@ -1371,6 +1395,7 @@ export class ScenarioExecutor {
     // walker bails before executing the next node.
     this.aborted = true;
     this.currentNodeId = null;
+    this.currentExpectation = null;
     this.abortResolve?.();
     // Stop the connector's auto-meter now; otherwise a pending maxTime/maxValue
     // could later resume the flow and fire a downstream Stop Transaction on a
@@ -1432,14 +1457,26 @@ export class ScenarioExecutor {
     const stateName = getScenarioStateName(this.service);
     const context = getScenarioContext(this.service);
 
+    // #179: the robot3 machine stays "running" while a node parks on an
+    // external event (the "waiting" state is never dispatched), so surface
+    // the already-valid "waiting" state — and the awaited condition — from
+    // currentExpectation. Only override an otherwise-"running" machine so a
+    // paused / stepping / stopped scenario keeps its real state.
+    const parked = this.currentExpectation;
+    const state: ScenarioExecutionState =
+      parked && stateName === "running"
+        ? "waiting"
+        : (stateName as ScenarioExecutionState);
+
     return {
       scenarioId: context.scenarioId,
-      state: stateName as ScenarioExecutionState,
+      state,
       mode: context.mode,
       currentNodeId: this.currentNodeId,
       executedNodes: [...this.executedNodes],
       loopCount: context.loopCount,
       error: context.error,
+      expectation: parked ?? null,
     };
   }
 

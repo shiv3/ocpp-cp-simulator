@@ -104,6 +104,8 @@ export type CLIEvent =
       readonly data: {
         readonly connectorId: number;
         readonly scenarioId: string;
+        // #179: stable per-run identifier, correlates events/logs/reports.
+        readonly runId: string;
       };
     }
   | {
@@ -111,6 +113,7 @@ export type CLIEvent =
       readonly data: {
         readonly connectorId: number;
         readonly scenarioId: string;
+        readonly runId: string;
       };
     }
   | {
@@ -119,6 +122,7 @@ export type CLIEvent =
         readonly connectorId: number;
         readonly scenarioId: string;
         readonly error: string;
+        readonly runId: string;
       };
     }
   | {
@@ -127,6 +131,7 @@ export type CLIEvent =
         readonly connectorId: number;
         readonly scenarioId: string;
         readonly nodeId: string;
+        readonly runId: string;
       };
     }
   | {
@@ -200,6 +205,16 @@ export type CLIEvent =
 
 type EventHandler = (evt: CLIEvent) => void;
 
+/**
+ * #179: mint a stable, human-legible run id for one scenario execution.
+ * `scenarioId#<epochMs>-<rand>` — the scenarioId anchors it to the scenario,
+ * the epoch + short random suffix distinguish repeated runs of the same one.
+ */
+function makeScenarioRunId(scenarioId: string): string {
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `${scenarioId}#${Date.now()}-${rand}`;
+}
+
 export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _soapServer: OCPPSoapServer | null;
@@ -211,6 +226,10 @@ export class CLIChargePointService {
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
+  // #179: stable per-run id for the currently-executing scenario, so status
+  // and lifecycle events can be correlated to a specific run. Keyed like
+  // _executors (by scenarioId) and cleared alongside it.
+  private readonly _runIdByScenario: Map<string, string> = new Map();
   private readonly _scenarioRepo: SqliteScenarioRepository;
   private readonly _runtimeRepo: ConnectorRuntimeRepository;
   /**
@@ -786,6 +805,7 @@ export class CLIChargePointService {
     if (executor) {
       executor.stop();
       this._executors.delete(scenarioId);
+      this._runIdByScenario.delete(scenarioId);
     }
     this._scenarios.delete(scenarioId);
     this._scenarioRepo.deleteOne(this._chargePoint.id, connectorId, scenarioId);
@@ -833,6 +853,12 @@ export class CLIChargePointService {
       throw new Error(`Connector ${connectorId} not found`);
     }
 
+    // #179: mint a stable run id for this invocation, threaded into every
+    // lifecycle event (and echoed on scenario_status) so a headless runner can
+    // correlate a specific run.
+    const runId = makeScenarioRunId(scenarioId);
+    this._runIdByScenario.set(scenarioId, runId);
+
     const callbacks = createScenarioExecutorCallbacks({
       chargePoint: this._chargePoint,
       connector,
@@ -841,20 +867,20 @@ export class CLIChargePointService {
           if (context.state === "completed") {
             this.emit({
               event: "scenario_completed",
-              data: { connectorId, scenarioId },
+              data: { connectorId, scenarioId, runId },
             });
           }
         },
         onNodeExecute: (nodeId) => {
           this.emit({
             event: "scenario_node_execute",
-            data: { connectorId, scenarioId, nodeId },
+            data: { connectorId, scenarioId, nodeId, runId },
           });
         },
         onError: (error) => {
           this.emit({
             event: "scenario_error",
-            data: { connectorId, scenarioId, error: error.message },
+            data: { connectorId, scenarioId, error: error.message, runId },
           });
         },
       },
@@ -929,11 +955,15 @@ export class CLIChargePointService {
     this._executors.set(scenarioId, executor);
     this._executorConnectorIds.set(scenarioId, connectorId);
 
-    this.emit({ event: "scenario_started", data: { connectorId, scenarioId } });
+    this.emit({
+      event: "scenario_started",
+      data: { connectorId, scenarioId, runId },
+    });
 
     executor.start(resumeOpts).finally(() => {
       this._executors.delete(scenarioId);
       this._executorConnectorIds.delete(scenarioId);
+      this._runIdByScenario.delete(scenarioId);
       // Scenario exited cleanly — clear the persisted position so a
       // subsequent restart treats the connector as idle (the
       // connector_runtime row's transaction_json itself is already
@@ -990,7 +1020,9 @@ export class CLIChargePointService {
     if (!executor) {
       return null;
     }
-    return executor.getContext();
+    // #179: echo the run id so a poller can tie this status to a specific run.
+    const runId = this._runIdByScenario.get(scenarioId);
+    return { ...executor.getContext(), runId };
   }
 
   stopScenario(connectorId: number, scenarioId: string): void {
@@ -998,8 +1030,12 @@ export class CLIChargePointService {
     if (!executor) {
       throw new Error(`Scenario ${scenarioId} is not running`);
     }
+    // #179: capture the run id before stop() — executor.stop() lets the
+    // start() promise settle, whose finally() clears _runIdByScenario.
+    const runId = this._runIdByScenario.get(scenarioId) ?? "";
     executor.stop();
     this._executors.delete(scenarioId);
+    this._runIdByScenario.delete(scenarioId);
     // Release the EV settings override (#105) — only when this scenario
     // declared evSettings and therefore owns it; see runScenario's
     // executor.start().finally() for the natural-completion counterpart.
@@ -1012,7 +1048,7 @@ export class CLIChargePointService {
     // this scenario is running.
     this.emit({
       event: "scenario_completed",
-      data: { connectorId, scenarioId },
+      data: { connectorId, scenarioId, runId },
     });
   }
 
@@ -1021,8 +1057,10 @@ export class CLIChargePointService {
       if (entry.connectorId === connectorId) {
         const executor = this._executors.get(scenarioId);
         if (executor) {
+          const runId = this._runIdByScenario.get(scenarioId) ?? "";
           executor.stop();
           this._executors.delete(scenarioId);
+          this._runIdByScenario.delete(scenarioId);
           // Release the EV settings override (#105) only for the owning
           // (evSettings-declaring) scenario, same as stopScenario.
           if (entry.definition.evSettings) {
@@ -1032,7 +1070,7 @@ export class CLIChargePointService {
           }
           this.emit({
             event: "scenario_completed",
-            data: { connectorId, scenarioId },
+            data: { connectorId, scenarioId, runId },
           });
         }
       }

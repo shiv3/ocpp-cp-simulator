@@ -472,13 +472,16 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     const wsURLValue = () =>
       (document.getElementById("wsURL") as HTMLInputElement).value;
 
-    // JSON -> SOAP: ws:// becomes http://; host/port/path preserved.
+    // JSON -> SOAP: ws:// becomes http://; host/port preserved. The SteVe
+    // default path is transport-specific, so the well-known /websocket/
+    // boilerplate is also rewritten to the SOAP /services/ path (#178).
     await selectOption("ocppVersion", "OCPP 1.2 (SOAP)");
     expect(wsURLValue()).toBe(
-      "http://localhost:8080/steve/websocket/CentralSystemService/",
+      "http://localhost:8080/steve/services/CentralSystemService",
     );
 
-    // SOAP -> JSON: http:// converts back to ws://.
+    // SOAP -> JSON: http:// converts back to ws://, and the SteVe /services/
+    // path is rewritten back to /websocket/.
     await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
     expect(wsURLValue()).toBe(
       "ws://localhost:8080/steve/websocket/CentralSystemService/",

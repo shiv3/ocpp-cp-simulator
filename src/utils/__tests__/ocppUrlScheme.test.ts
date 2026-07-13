@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { adaptCentralSystemUrlScheme } from "../ocppUrlScheme";
 
 describe("adaptCentralSystemUrlScheme (#164)", () => {
-  const STEVE = "localhost:8080/steve/websocket/CentralSystemService/";
+  // A generic, non-SteVe-boilerplate host/path, used to verify the plain
+  // "scheme flips, everything else is preserved" invariant in isolation from
+  // the SteVe-specific path rewrite (#178, tested separately below).
+  const STEVE = "example.com:8080/ocpp/CentralSystemService/";
 
   describe("switching to a SOAP transport", () => {
     it("maps ws:// -> http:// and keeps host/port/path", () => {
@@ -78,5 +81,42 @@ describe("adaptCentralSystemUrlScheme (#164)", () => {
     expect(
       adaptCentralSystemUrlScheme("wss://ocpp.example.com:443/path?q=1", true),
     ).toBe("https://ocpp.example.com:443/path?q=1");
+  });
+
+  describe("SteVe default path rewrite (#178)", () => {
+    const STEVE_JSON = "localhost:8080/steve/websocket/CentralSystemService/";
+    const STEVE_SOAP = "localhost:8080/steve/services/CentralSystemService";
+
+    it("rewrites the SteVe JSON/websocket path to the SOAP services path when switching to SOAP", () => {
+      expect(adaptCentralSystemUrlScheme(`ws://${STEVE_JSON}`, true)).toBe(
+        `http://${STEVE_SOAP}`,
+      );
+      expect(adaptCentralSystemUrlScheme(`wss://${STEVE_JSON}`, true)).toBe(
+        `https://${STEVE_SOAP}`,
+      );
+    });
+
+    it("rewrites the SteVe SOAP services path back to the websocket path when switching to JSON", () => {
+      expect(adaptCentralSystemUrlScheme(`http://${STEVE_SOAP}`, false)).toBe(
+        `ws://${STEVE_JSON}`,
+      );
+      expect(adaptCentralSystemUrlScheme(`https://${STEVE_SOAP}`, false)).toBe(
+        `wss://${STEVE_JSON}`,
+      );
+    });
+
+    it("does not rewrite a customized path that isn't the exact SteVe boilerplate", () => {
+      expect(
+        adaptCentralSystemUrlScheme(
+          "ws://localhost:8080/steve/websocket/CentralSystemService/extra",
+          true,
+        ),
+      ).toBe(
+        "http://localhost:8080/steve/websocket/CentralSystemService/extra",
+      );
+      expect(
+        adaptCentralSystemUrlScheme("ws://otherhost/some/custom/path", true),
+      ).toBe("http://otherhost/some/custom/path");
+    });
   });
 });

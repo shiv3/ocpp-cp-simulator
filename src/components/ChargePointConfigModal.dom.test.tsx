@@ -202,15 +202,132 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     expect(document.getElementById("securityProfile")).toBeNull();
   });
 
-  it("hides the legacy Basic Auth toggle once a security profile is selected", async () => {
+  // #178 item F: the Security section is the single source of truth for
+  // Basic Auth in remote + non-SOAP mode, at every security profile
+  // (including the default profile 0) — the legacy Optional Settings
+  // toggle must never render alongside it.
+  it("never shows the legacy Basic Auth toggle in remote + non-SOAP mode, at any security profile", async () => {
     const rendered = await renderModal({ mode: "remote" });
     roots.push(rendered.root);
 
-    expect(document.getElementById("basicAuthEnabled")).not.toBeNull();
+    // Default profile (0): no toggle, informational pointer text instead.
+    expect(document.getElementById("basicAuthEnabled")).toBeNull();
+    expect(document.body.textContent).toContain("No authentication configured");
 
     await selectOption("securityProfile", "1 — Basic Auth");
+    expect(document.getElementById("basicAuthEnabled")).toBeNull();
+
+    await selectOption("securityProfile", "2 — Basic Auth + TLS (server cert)");
+    expect(document.getElementById("basicAuthEnabled")).toBeNull();
+
+    await selectOption("securityProfile", "3 — Mutual TLS (client cert)");
+    expect(document.getElementById("basicAuthEnabled")).toBeNull();
+  });
+
+  it("surfaces a persisted legacy Basic Auth value instead of dropping it, when Security Profile is 0", async () => {
+    const rendered = await renderModal({
+      mode: "remote",
+      isNewChargePoint: false,
+      initialConfig: baseConfig({
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 0,
+        basicAuthEnabled: true,
+        basicAuthUsername: "legacy-user",
+        basicAuthPassword: "",
+      }),
+    });
+    roots.push(rendered.root);
 
     expect(document.getElementById("basicAuthEnabled")).toBeNull();
+    expect(document.body.textContent).toContain(
+      "currently active via the legacy Optional Settings toggle",
+    );
+    expect(document.body.textContent).toContain("legacy-user");
+  });
+
+  it("round-trips a persisted legacy Basic Auth value on save without a visible edit control (no silent credential drop)", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      isNewChargePoint: false,
+      onSave,
+      initialConfig: baseConfig({
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 0,
+        basicAuthEnabled: true,
+        basicAuthUsername: "legacy-user",
+        basicAuthPassword: "",
+      }),
+    });
+    roots.push(rendered.root);
+
+    await act(async () => {
+      saveButton().click();
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as ChargePointConfig;
+    expect(saved.basicAuthEnabled).toBe(true);
+    expect(saved.basicAuthUsername).toBe("legacy-user");
+  });
+
+  // #178 item F regression guard: with the legacy toggle hidden in the
+  // Security section, a remote + non-SOAP CP that already had legacy Basic
+  // Auth on must still have SOME way to turn it off — the informational block
+  // exposes a "Disable" button that clears basicAuthEnabled.
+  it("lets a persisted legacy Basic Auth value be disabled from the Security section", async () => {
+    const onSave = vi.fn();
+    const rendered = await renderModal({
+      mode: "remote",
+      isNewChargePoint: false,
+      onSave,
+      initialConfig: baseConfig({
+        ocppVersion: "OCPP-1.6J",
+        securityProfile: 0,
+        basicAuthEnabled: true,
+        basicAuthUsername: "legacy-user",
+        basicAuthPassword: "",
+      }),
+    });
+    roots.push(rendered.root);
+
+    const disableButton = Array.from(document.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Disable legacy Basic Authentication"),
+    ) as HTMLButtonElement | undefined;
+    expect(disableButton).toBeDefined();
+
+    await act(async () => {
+      disableButton!.click();
+    });
+    await act(async () => {
+      saveButton().click();
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as ChargePointConfig;
+    expect(saved.basicAuthEnabled).toBe(false);
+  });
+
+  it("keeps the generic Basic Auth toggle for SOAP versions in remote mode (no Security Profile model)", async () => {
+    const rendered = await renderModal({
+      mode: "remote",
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.5" }),
+    });
+    roots.push(rendered.root);
+
+    expect(document.getElementById("securityProfile")).toBeNull();
+    expect(document.getElementById("basicAuthEnabled")).not.toBeNull();
+  });
+
+  it("keeps the generic Basic Auth toggle for local mode regardless of OCPP version", async () => {
+    const rendered = await renderModal({
+      mode: "local",
+      initialConfig: baseConfig({ ocppVersion: "OCPP-1.6J" }),
+    });
+    roots.push(rendered.root);
+
+    expect(document.getElementById("securityProfile")).toBeNull();
+    expect(document.getElementById("basicAuthEnabled")).not.toBeNull();
   });
 
   it("shows AuthorizationKey + CA field for profile 2 (not cert/key)", async () => {

@@ -149,14 +149,59 @@ function isNodeRuntime(): boolean {
   );
 }
 
+/** Which mechanism currently governs Basic Auth for a charge point. */
+export type BasicAuthSource = "security-profile" | "legacy" | "none";
+
+/**
+ * #178 item F — single source of truth for Basic Auth.
+ *
+ * Before this change, a charge point could carry Basic Auth credentials in
+ * two independent places: the legacy Optional-Settings toggle
+ * (`basicAuthEnabled`/`Username`/`Password`) and the 1.6+ Security Profile
+ * (`securityProfile` + `authorizationKey`). Both were read here, with
+ * Security Profile 1/2 always winning and profile 0/undefined falling back
+ * to the legacy fields.
+ *
+ * This classifier makes that precedence explicit and reusable outside the
+ * connect path (the ChargePointConfigModal UI uses it to decide what to
+ * tell the operator), without ever needing the plaintext password — it's a
+ * shape classification, not a value transformation.
+ *
+ * `securityProfile` 0/undefined intentionally still defers to the legacy
+ * flag rather than being auto-promoted to profile 1: OCPP's security-profile
+ * model forces the wire username to the charge point id, which a legacy
+ * config's custom username may not match, so an automatic promotion would
+ * silently change on-wire identity (and could brick a saved config whose
+ * daemon-side `authorizationKey` was never set). This fallback is what
+ * keeps a config saved before #178 authenticating unchanged — it is the
+ * "migration": legacy configs keep working via the same single resolver
+ * every other config goes through, forever, without needing their stored
+ * shape rewritten. Operators can opt into an explicit profile-1 conversion
+ * themselves via the Security Profile selector.
+ */
+export function classifyBasicAuthSource(params: {
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly legacyBasicAuthEnabled: boolean;
+}): BasicAuthSource {
+  if (params.securityProfile === 1 || params.securityProfile === 2) {
+    return "security-profile";
+  }
+  if (params.securityProfile === 3) return "none";
+  return params.legacyBasicAuthEnabled ? "legacy" : "none";
+}
+
 function resolveBasicAuth(params: {
   chargePointId: string;
   basicAuth: BasicAuthSettings | null;
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
 }): BasicAuthSettings | null {
-  if (params.securityProfile === 3) return null;
-  if (params.securityProfile === 1 || params.securityProfile === 2) {
+  const source = classifyBasicAuthSource({
+    securityProfile: params.securityProfile,
+    legacyBasicAuthEnabled: params.basicAuth !== null,
+  });
+  if (source === "none") return null;
+  if (source === "security-profile") {
     if (!params.authorizationKey) {
       throw new OcppSecurityProfileConfigError(
         `OCPP security profile ${params.securityProfile} requires ` +
@@ -168,7 +213,7 @@ function resolveBasicAuth(params: {
       password: params.authorizationKey,
     };
   }
-  return params.basicAuth;
+  return params.basicAuth; // "legacy"
 }
 
 function stripAuthorizationHeader(

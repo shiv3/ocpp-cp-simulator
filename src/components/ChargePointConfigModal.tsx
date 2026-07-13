@@ -4,9 +4,10 @@ import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { adaptCentralSystemUrlScheme } from "../utils/ocppUrlScheme";
-import type {
-  OcppSecurityProfile,
-  OcppTlsOptions,
+import {
+  classifyBasicAuthSource,
+  type OcppSecurityProfile,
+  type OcppTlsOptions,
 } from "../cp/infrastructure/transport/wsUrlWithBasic";
 import {
   Dialog,
@@ -231,6 +232,13 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const displayFullUrl = fullUrlDraft ?? composedFullUrl;
   const securityProfile = config.securityProfile ?? 0;
+  // #178 item F: what actually governs Basic Auth right now, per the same
+  // classifier the connection layer uses (wsUrlWithBasic.ts). Drives the
+  // Optional Settings pointer text below the Security section.
+  const basicAuthSource = classifyBasicAuthSource({
+    securityProfile: config.securityProfile,
+    legacyBasicAuthEnabled: config.basicAuthEnabled,
+  });
 
   // The SOAP callback / TLS material save-blocking errors above are only
   // valid for the config that was on screen when Save was clicked. Once the
@@ -674,8 +682,17 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
           <div className="card p-4">
             <h3 className="card-header mb-4">Optional Settings</h3>
 
-            {/* Basic Auth */}
-            {mode === "local" || securityProfile === 0 ? (
+            {/* Basic Auth — #178 item F: the Security section above (1.6+,
+                remote mode) is the single source of truth for Basic Auth.
+                This generic toggle is the fallback path retained for
+                configurations that have no Security Profile concept: local
+                mode (no per-CP TLS/profile plumbing) and SOAP versions
+                (OCPP 1.2 / 1.5 / 1.6S — the WS-based security-profile model
+                doesn't apply to the SOAP transport). See
+                classifyBasicAuthSource in wsUrlWithBasic.ts for the
+                single-resolver precedence both this UI and the connection
+                layer share. */}
+            {mode === "local" || isSoapVersion(config.ocppVersion) ? (
               <div className="mb-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Checkbox
@@ -733,6 +750,39 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                 Authentication is governed by the mutual TLS client certificate
                 and key in the Security section above (security profile 3).
               </p>
+            ) : securityProfile === 0 ? (
+              basicAuthSource === "legacy" ? (
+                <div className="mb-4">
+                  <p className="text-xs text-muted mb-2">
+                    Basic Authentication is currently active via the legacy
+                    Optional Settings toggle (username:{" "}
+                    <code>{config.basicAuthUsername || "(none)"}</code>). It
+                    will keep working unchanged. To manage authentication from
+                    the Security section instead, set Security Profile to 1
+                    (Basic Auth) above and provide an Authorization Key — note
+                    the wire username becomes the Charge Point ID once you do,
+                    which may differ from the legacy username above.
+                  </p>
+                  {/* #178 item F: legacy Basic Auth has no editable control in
+                      the Security section, so without this a remote+non-SOAP CP
+                      that already had it enabled could never turn it off from
+                      the UI. Mirrors the Optional Settings checkbox's off path
+                      (basicAuthEnabled → false). */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => updateConfig("basicAuthEnabled", false)}
+                  >
+                    Disable legacy Basic Authentication
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted mb-4">
+                  No authentication configured. Set Security Profile to 1 above
+                  to enable Basic Authentication.
+                </p>
+              )
             ) : (
               <p className="text-xs text-muted mb-4">
                 Authentication is governed by the Authorization Key in the

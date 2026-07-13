@@ -9,7 +9,11 @@ import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
 import V1App from "./v1/V1App.tsx";
 import ConsoleApp from "./console/ConsoleApp.tsx";
 
-const V2App: React.FC = () => {
+// Exported (not just used locally) so dom tests can mount the real V2 route
+// nesting under their own MemoryRouter — see
+// src/console/v2-settings-nav.dom.test.tsx, which proves Settings.tsx's
+// relative navigate("..") resolves to `/v2` (not `/`) when nested here.
+export const V2App: React.FC = () => {
   return (
     <DarkModeProvider>
       <div className="min-h-screen flex flex-col bg-gray-100 dark:bg-gray-900 transition-colors">

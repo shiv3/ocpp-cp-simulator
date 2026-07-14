@@ -132,8 +132,10 @@ describe("issue #111: drive a scenario verdict over the Socket.IO control plane"
       expect(ran.ok).toBe(true);
 
       // 4. Poll the machine-readable report until the run has finished.
+      // ~15s max at 200ms intervals, matching the Java awaitReport contract in
+      // examples/testcontainers-java so both harnesses tolerate slow CI equally.
       let report: any = null;
-      for (let i = 0; i < 25 && !report; i++) {
+      for (let i = 0; i < 75 && !report; i++) {
         const ack = await emitRpc(socket, {
           cpId: CP_ID,
           method: "scenario_report",
@@ -144,7 +146,7 @@ describe("issue #111: drive a scenario verdict over the Socket.IO control plane"
           report = ack.result;
           break;
         }
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 200));
       }
 
       // 5. Assert the verdict the way a CSMS certification IT would.

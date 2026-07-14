@@ -881,6 +881,55 @@ export class CLIChargePointService {
     return true;
   }
 
+  /**
+   * Reconcile the in-memory runtime scenario map for `connectorId` to exactly
+   * the given (already-persisted) definitions — issue #209.
+   *
+   * The Remote/Docker web-console upload persists definitions via the registry
+   * service's replaceConnectorScenarioDefinitions but does NOT touch this
+   * daemon runtime map, which is what connect-auto-start (tryAutoStartForConnector)
+   * reads. So after an upload the runtime still holds the stale seeded default
+   * (`essential-cp-behavior`) and lacks the uploaded scenario — the operator's
+   * connect-triggered scenario intermittently never fires. This syncs the
+   * runtime so connect-auto-start sees the upload. In-memory only: the caller
+   * already made the DB authoritative.
+   */
+  syncConnectorRuntimeScenarios(
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): void {
+    // The runtime map is keyed to numeric connectors (loadScenario requires a
+    // connector). CP-level (null) uploads have no connector runtime entries to
+    // reconcile; skip them.
+    if (connectorId === null) return;
+    const keepIds = new Set(definitions.map((d) => d.id));
+    // Prune stale runtime entries for this connector scope (in-memory only).
+    for (const [scenarioId, entry] of [...this._scenarios]) {
+      if (entry.connectorId !== connectorId) continue;
+      if (keepIds.has(scenarioId)) continue;
+      this._executors.get(scenarioId)?.stop();
+      this._executors.delete(scenarioId);
+      this._runIdByScenario.delete(scenarioId);
+      this._transcriptByScenario.get(scenarioId)?.stop();
+      this._transcriptByScenario.delete(scenarioId);
+      this._runStartByScenario.delete(scenarioId);
+      this._scenarios.delete(scenarioId);
+    }
+    // Load the provided definitions into runtime (already persisted upstream).
+    for (const def of definitions) {
+      this._scenarios.set(def.id, { definition: def, connectorId });
+    }
+    // The replaced set may drop whatever auto-started last, so clear the dedup
+    // key and — if the CP is already up — kick auto-start for the new set.
+    const connector = this._chargePoint.connectors.get(connectorId);
+    if (!connector) return;
+    connector.lastAutoStartedScenarioKey = null;
+    if (this._chargePoint.status === OCPPStatus.Available) {
+      this.tryAutoStartForConnector(connectorId, "connect", null);
+      this.tryAutoStartForConnector(connectorId, "status", connector.status);
+    }
+  }
+
   listScenarios(connectorId: number): ReadonlyArray<{
     readonly scenarioId: string;
     readonly name: string;

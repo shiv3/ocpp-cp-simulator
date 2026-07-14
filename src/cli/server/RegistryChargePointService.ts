@@ -443,6 +443,14 @@ export class RegistryChargePointService implements ChargePointService {
       definitions,
     );
     await this.deps.database?.flush?.();
+    // #209: the DB is now authoritative, but the daemon runtime scenario map
+    // (read by connect-auto-start) still holds the stale seeded default and
+    // lacks the upload. Reconcile it so a connect-triggered scenario uploaded
+    // from the web console actually fires on connect. No-op when the CP isn't
+    // currently instantiated (definitions-only edit) — restore rebuilds it.
+    this.registry
+      .get(id)
+      ?.syncConnectorRuntimeScenarios(connectorId, definitions);
     return [...definitions];
   }
 

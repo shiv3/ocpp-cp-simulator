@@ -19,7 +19,7 @@
  * URL and then reuse buildSoapCallbackUrl(), keeping this precedence intact.
  */
 
-const SOAP_SERVICE_SUFFIX = "ChargePointService";
+import { SOAP_SERVICE_SUFFIX, normalizeSoapPath } from "./soapPath";
 
 export interface SoapCallbackUrlInput {
   /** --soap-callback-url: the full callback URL, used verbatim when present. */
@@ -86,11 +86,4 @@ export function resolveSoapCallbackUrl(
     return buildSoapCallbackUrl(base, input.cpId, input.soapPath);
   }
   return null;
-}
-
-/** Mirror httpServer.normalizeSoapPath: ensure a leading slash, strip trailing. */
-function normalizeSoapPath(value: string): string {
-  const withLeading = value.startsWith("/") ? value : `/${value}`;
-  const trimmed = withLeading.replace(/\/+$/, "");
-  return trimmed.length > 0 ? trimmed : "/";
 }

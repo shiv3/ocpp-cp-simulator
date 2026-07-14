@@ -1,0 +1,25 @@
+# Codecov configuration (issue #131).
+#
+# Coverage is uploaded from vitest's lcov only (`bun run test:coverage`).
+# A large share of the daemon/runtime code is exercised by Bun tests
+# (`*.bun.test.ts`, run via `bun test bun.test`), whose coverage is NOT yet
+# part of the upload. Codecov therefore under-reports, and its default
+# project/patch status gates fail on Bun-tested changes even when the change is
+# well covered — which is not the intent (codecov here is for visibility, not a
+# merge gate).
+#
+# Keep the status checks informational so they still report the numbers on each
+# PR/commit but never fail. Follow-up: merge Bun coverage into the upload, then
+# these can become real gates.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: false

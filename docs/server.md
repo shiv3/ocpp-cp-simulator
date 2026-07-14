@@ -269,6 +269,10 @@ await rpc({ method: "server.shutdown", params: {} });
 socket.disconnect();
 ```
 
+For a JVM/Testcontainers harness that drives this same control plane (start the
+container, `cp.create`, `run_scenario`, assert the machine-readable verdict), see
+[`examples/testcontainers-java/`](../examples/testcontainers-java/) (issue #111).
+
 ## Controlling a Running Daemon from the CLI
 
 A daemon does not have to be driven by a raw Socket.IO client or the web

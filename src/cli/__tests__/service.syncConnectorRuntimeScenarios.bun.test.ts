@@ -29,35 +29,31 @@ function scenario(
   id: string,
   opts: { delay?: boolean } = {},
 ): ScenarioDefinition {
-  const nodes = [
-    {
-      id: "s",
-      type: ScenarioNodeType.START,
-      position: { x: 0, y: 0 },
-      data: { label: "S" },
-    },
-  ];
-  if (opts.delay) {
-    nodes.push({
-      id: "d",
-      type: ScenarioNodeType.DELAY,
-      position: { x: 0, y: 1 },
-      data: { label: "wait", delaySeconds: 60 },
-    } as (typeof nodes)[number]);
-  }
-  nodes.push({
+  const start = {
+    id: "s",
+    type: ScenarioNodeType.START,
+    position: { x: 0, y: 0 },
+    data: { label: "S" },
+  };
+  const delayNode = {
+    id: "d",
+    type: ScenarioNodeType.DELAY,
+    position: { x: 0, y: 1 },
+    data: { label: "wait", delaySeconds: 60 },
+  };
+  const end = {
     id: "e",
     type: ScenarioNodeType.END,
     position: { x: 0, y: 2 },
     data: { label: "E" },
-  });
-  const edges =
-    nodes.length === 3
-      ? [
-          { id: "e1", source: "s", target: "d" },
-          { id: "e2", source: "d", target: "e" },
-        ]
-      : [{ id: "e1", source: "s", target: "e" }];
+  };
+  const nodes = opts.delay ? [start, delayNode, end] : [start, end];
+  const edges = opts.delay
+    ? [
+        { id: "e1", source: "s", target: "d" },
+        { id: "e2", source: "d", target: "e" },
+      ]
+    : [{ id: "e1", source: "s", target: "e" }];
   return {
     id,
     name: id,

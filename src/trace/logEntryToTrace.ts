@@ -150,25 +150,35 @@ export function logLineToTraceRecord(
   return toRecord(line, frame, context);
 }
 
+/** Correlation key scoped per charge point: a batch can interleave multiple CPs
+ *  (e.g. the daemon's JSON log), and two CPs may reuse the same messageId. The
+ *  JSON tuple stays unambiguous whatever the cpId/messageId contain. */
+function correlationKey(record: OcppTraceRecord): string {
+  return JSON.stringify([record.chargePointId ?? "", record.messageId]);
+}
+
 /**
  * Convert a chronological batch of log lines to trace records, dropping
  * non-wire lines and back-filling each CALLRESULT/CALLERROR `action` from the
- * CALL that established its `messageId`.
+ * CALL that established its `messageId` (correlated per charge point).
  */
 export function logLinesToTrace(
   lines: readonly SerializedLogLine[],
   context: TraceContext = {},
 ): OcppTraceRecord[] {
-  const actionByMessageId = new Map<string, string>();
+  const actionByKey = new Map<string, string>();
   const records: OcppTraceRecord[] = [];
   for (const line of lines) {
     const record = logLineToTraceRecord(line, context);
     if (!record) continue;
-    if (record.action && record.messageId) {
-      actionByMessageId.set(record.messageId, record.action);
-    } else if (!record.action && record.messageId) {
-      const resolved = actionByMessageId.get(record.messageId);
-      if (resolved) record.action = resolved;
+    if (record.messageId !== undefined) {
+      const key = correlationKey(record);
+      if (record.action) {
+        actionByKey.set(key, record.action);
+      } else {
+        const resolved = actionByKey.get(key);
+        if (resolved) record.action = resolved;
+      }
     }
     records.push(record);
   }

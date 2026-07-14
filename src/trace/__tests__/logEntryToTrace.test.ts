@@ -123,4 +123,24 @@ describe("logLinesToTrace", () => {
     expect(records).toHaveLength(1);
     expect(records[0].action).toBeUndefined();
   });
+
+  it("scopes correlation per charge point when a batch reuses a messageId", () => {
+    // Two CPs both use messageId "1"; each CALLRESULT must inherit its own CP's
+    // action, not the other's.
+    const records = logLinesToTrace([
+      line('Sent: [2,"1","BootNotification",{}]', { cpId: "CP-A" }),
+      line('Sent: [2,"1","Heartbeat",{}]', { cpId: "CP-B" }),
+      line('Received: [3,"1",{"status":"Accepted"}]', { cpId: "CP-A" }),
+      line('Received: [3,"1",{}]', { cpId: "CP-B" }),
+    ]);
+
+    const resultA = records.find(
+      (r) => r.chargePointId === "CP-A" && r.messageType === "CALLRESULT",
+    );
+    const resultB = records.find(
+      (r) => r.chargePointId === "CP-B" && r.messageType === "CALLRESULT",
+    );
+    expect(resultA?.action).toBe("BootNotification");
+    expect(resultB?.action).toBe("Heartbeat");
+  });
 });

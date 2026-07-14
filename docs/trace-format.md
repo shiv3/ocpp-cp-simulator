@@ -114,6 +114,20 @@ lines). The type lives in `src/trace/OcppTraceRecord.ts` and
       }
     },
     "meta": { "type": "object" }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "messageType": { "const": "CALL" } } },
+      "then": { "required": ["action"] }
+    },
+    {
+      "if": { "properties": { "messageType": { "const": "CALLERROR" } } },
+      "then": { "required": ["error"] },
+      "else": { "properties": { "error": false } }
+    }
+  ]
 }
 ```
+
+The `allOf` conditionals mirror what the adapter emits: a `CALL` always carries
+an `action`, and `error` is present only on `CALLERROR`.

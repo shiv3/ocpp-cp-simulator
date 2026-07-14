@@ -356,7 +356,7 @@ export class CLIChargePointService {
     const centralSystemUrl = init.centralSystemUrl ?? init.wsUrl;
     if (isSoapVersion(ocppVersion) && !init.soapCallbackUrl) {
       throw new Error(
-        "OCPP SOAP versions require soapCallbackUrl (--soap-callback-url)",
+        "OCPP SOAP versions require a callback URL (--soap-callback-url, or --soap-public-base-url to derive one)",
       );
     }
 

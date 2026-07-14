@@ -11,6 +11,10 @@ import {
   isSoapVersion,
 } from "../../cp/domain/types/OcppVersion";
 import { soapFaultResponse } from "../../cp/infrastructure/transport/soap/OCPPSoapServer";
+import {
+  SOAP_CHARGE_POINT_SERVICE_ROUTE,
+  normalizeSoapPath,
+} from "../soapPath";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -224,7 +228,7 @@ function matchSoapChargePointService(
   pathname: string,
   registry: CPRegistry,
 ): SoapChargePointServiceRoute | null {
-  const match = /^(.*)\/([^/]+)\/ChargePointService$/.exec(pathname);
+  const match = SOAP_CHARGE_POINT_SERVICE_ROUTE.exec(pathname);
   if (!match) return null;
   const basePath = normalizeSoapPath(match[1] || "/");
   try {
@@ -263,7 +267,7 @@ function soapCallbackBasePath(
   if (!callbackUrl) return null;
   try {
     const pathname = new URL(callbackUrl).pathname;
-    const match = /^(.*)\/([^/]+)\/ChargePointService$/.exec(pathname);
+    const match = SOAP_CHARGE_POINT_SERVICE_ROUTE.exec(pathname);
     if (!match) return null;
     return decodeURIComponent(match[2]) === cpId
       ? normalizeSoapPath(match[1] || "/")
@@ -271,11 +275,6 @@ function soapCallbackBasePath(
   } catch {
     return null;
   }
-}
-
-function normalizeSoapPath(value: string): string {
-  const trimmed = value.replace(/\/+$/, "");
-  return trimmed.length > 0 ? trimmed : "/";
 }
 
 function isRegisteredSoapService(service: CLIChargePointService): boolean {

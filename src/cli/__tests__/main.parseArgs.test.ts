@@ -349,6 +349,67 @@ describe("parseArgs --ocpp-version", () => {
     });
   });
 
+  it("derives the SOAP callback URL from --soap-public-base-url", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      "--soap-public-base-url",
+      "https://abcd.ngrok-free.app",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ocppVersion: "OCPP-1.6S",
+      soapCallbackUrl:
+        "https://abcd.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+    });
+    expect(result.stderr).toContain(
+      "SOAP callback URL resolved from --soap-public-base-url",
+    );
+  });
+
+  it("lets an explicit --soap-callback-url win over --soap-public-base-url", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      "--soap-callback-url",
+      "http://explicit.test/ocpp/soap/CP-1/ChargePointService",
+      "--soap-public-base-url",
+      "https://abcd.ngrok-free.app",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      soapCallbackUrl: "http://explicit.test/ocpp/soap/CP-1/ChargePointService",
+    });
+  });
+
+  it("rejects a non-http(s) --soap-public-base-url", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      "--soap-public-base-url",
+      "ws://abcd.ngrok-free.app",
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Error: --soap-public-base-url must be an absolute http(s) URL",
+    );
+  });
+
   it("rejects unsupported versions", () => {
     const result = runParseArgs([
       "--cp-id",

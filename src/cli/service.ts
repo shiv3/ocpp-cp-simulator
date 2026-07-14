@@ -860,25 +860,30 @@ export class CLIChargePointService {
   removeScenario(connectorId: number, scenarioId: string): boolean {
     const entry = this._scenarios.get(scenarioId);
     if (!entry || entry.connectorId !== connectorId) return false;
-    const executor = this._executors.get(scenarioId);
-    if (executor) {
-      executor.stop();
-      this._executors.delete(scenarioId);
-      this._runIdByScenario.delete(scenarioId);
-      // #179 Phase 2b: drop the transcript subscription for the run being
-      // torn down along with it -- otherwise it would keep capturing every
-      // future WebSocket frame on this CP with nothing left to stop it.
-      // No verdict is computed here (the scenario itself is being deleted).
-      const transcript = this._transcriptByScenario.get(scenarioId);
-      if (transcript) {
-        transcript.stop();
-        this._transcriptByScenario.delete(scenarioId);
-      }
-      this._runStartByScenario.delete(scenarioId);
-    }
+    this.discardScenarioRun(scenarioId);
     this._scenarios.delete(scenarioId);
     this._scenarioRepo.deleteOne(this._chargePoint.id, connectorId, scenarioId);
     return true;
+  }
+
+  /**
+   * Tear down any in-flight run for `scenarioId` — stop the executor and drop
+   * its transcript subscription so it doesn't keep capturing WebSocket frames.
+   * No verdict is computed: the run is being discarded (scenario deleted or its
+   * definition replaced). A no-op when nothing is running for the id.
+   */
+  private discardScenarioRun(scenarioId: string): void {
+    const executor = this._executors.get(scenarioId);
+    if (!executor) return;
+    executor.stop();
+    this._executors.delete(scenarioId);
+    this._runIdByScenario.delete(scenarioId);
+    const transcript = this._transcriptByScenario.get(scenarioId);
+    if (transcript) {
+      transcript.stop();
+      this._transcriptByScenario.delete(scenarioId);
+    }
+    this._runStartByScenario.delete(scenarioId);
   }
 
   /**
@@ -903,17 +908,14 @@ export class CLIChargePointService {
     // reconcile; skip them.
     if (connectorId === null) return;
     const keepIds = new Set(definitions.map((d) => d.id));
-    // Prune stale runtime entries for this connector scope (in-memory only).
+    // Reconcile runtime entries for this connector scope (in-memory only). Any
+    // in-flight run is discarded first — the definition set is being replaced,
+    // and a lingering executor would also block auto-start via the
+    // active-executor gate in tryAutoStartForConnector.
     for (const [scenarioId, entry] of [...this._scenarios]) {
       if (entry.connectorId !== connectorId) continue;
-      if (keepIds.has(scenarioId)) continue;
-      this._executors.get(scenarioId)?.stop();
-      this._executors.delete(scenarioId);
-      this._runIdByScenario.delete(scenarioId);
-      this._transcriptByScenario.get(scenarioId)?.stop();
-      this._transcriptByScenario.delete(scenarioId);
-      this._runStartByScenario.delete(scenarioId);
-      this._scenarios.delete(scenarioId);
+      this.discardScenarioRun(scenarioId);
+      if (!keepIds.has(scenarioId)) this._scenarios.delete(scenarioId);
     }
     // Load the provided definitions into runtime (already persisted upstream).
     for (const def of definitions) {

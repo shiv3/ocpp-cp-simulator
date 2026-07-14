@@ -123,33 +123,37 @@ describe("issue #209: connect-auto-start after a web-console upload", () => {
       });
       await connectAck;
 
-      // 4. Give connect-auto-start time to fire.
-      await new Promise((r) => setTimeout(r, 400));
-
-      // 5. Did the scenario auto-start? Report is non-null once a run finished;
-      //    a running scenario shows a non-idle status.
-      const report = (
-        await emitRpc(socket, {
-          cpId,
-          method: "scenario_report",
-          params: { connector: CONNECTOR, scenarioId: scenario.id },
-        })
-      ).result;
-      const status = (
-        await emitRpc(socket, {
-          cpId,
-          method: "scenario_status",
-          params: { connector: CONNECTOR, scenarioId: scenario.id },
-        })
-      ).result;
-
-      const started =
-        (report && report.verdict) ||
-        (status &&
-          (status.running ||
-            status.state === "running" ||
-            status.state === "completed"));
-      expect(started).toBeTruthy();
+      // 4. Poll (condition-based, not a fixed sleep) for the UPLOADED scenario
+      //    to auto-start — specific to its id, so the seeded default running
+      //    instead would not satisfy it. Report is non-null once the run
+      //    finished; a live run shows a non-idle status.
+      let started = false;
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !started) {
+        const report = (
+          await emitRpc(socket, {
+            cpId,
+            method: "scenario_report",
+            params: { connector: CONNECTOR, scenarioId: scenario.id },
+          })
+        ).result;
+        const status = (
+          await emitRpc(socket, {
+            cpId,
+            method: "scenario_status",
+            params: { connector: CONNECTOR, scenarioId: scenario.id },
+          })
+        ).result;
+        started = Boolean(
+          (report && report.verdict) ||
+          (status &&
+            (status.running ||
+              status.state === "running" ||
+              status.state === "completed")),
+        );
+        if (!started) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(started).toBe(true);
     } finally {
       socket.disconnect();
     }

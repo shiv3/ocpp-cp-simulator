@@ -860,25 +860,76 @@ export class CLIChargePointService {
   removeScenario(connectorId: number, scenarioId: string): boolean {
     const entry = this._scenarios.get(scenarioId);
     if (!entry || entry.connectorId !== connectorId) return false;
-    const executor = this._executors.get(scenarioId);
-    if (executor) {
-      executor.stop();
-      this._executors.delete(scenarioId);
-      this._runIdByScenario.delete(scenarioId);
-      // #179 Phase 2b: drop the transcript subscription for the run being
-      // torn down along with it -- otherwise it would keep capturing every
-      // future WebSocket frame on this CP with nothing left to stop it.
-      // No verdict is computed here (the scenario itself is being deleted).
-      const transcript = this._transcriptByScenario.get(scenarioId);
-      if (transcript) {
-        transcript.stop();
-        this._transcriptByScenario.delete(scenarioId);
-      }
-      this._runStartByScenario.delete(scenarioId);
-    }
+    this.discardScenarioRun(scenarioId);
     this._scenarios.delete(scenarioId);
     this._scenarioRepo.deleteOne(this._chargePoint.id, connectorId, scenarioId);
     return true;
+  }
+
+  /**
+   * Tear down any in-flight run for `scenarioId` — stop the executor and drop
+   * its transcript subscription so it doesn't keep capturing WebSocket frames.
+   * No verdict is computed: the run is being discarded (scenario deleted or its
+   * definition replaced). A no-op when nothing is running for the id.
+   */
+  private discardScenarioRun(scenarioId: string): void {
+    const executor = this._executors.get(scenarioId);
+    if (!executor) return;
+    executor.stop();
+    this._executors.delete(scenarioId);
+    this._runIdByScenario.delete(scenarioId);
+    const transcript = this._transcriptByScenario.get(scenarioId);
+    if (transcript) {
+      transcript.stop();
+      this._transcriptByScenario.delete(scenarioId);
+    }
+    this._runStartByScenario.delete(scenarioId);
+  }
+
+  /**
+   * Reconcile the in-memory runtime scenario map for `connectorId` to exactly
+   * the given (already-persisted) definitions — issue #209.
+   *
+   * The Remote/Docker web-console upload persists definitions via the registry
+   * service's replaceConnectorScenarioDefinitions but does NOT touch this
+   * daemon runtime map, which is what connect-auto-start (tryAutoStartForConnector)
+   * reads. So after an upload the runtime still holds the stale seeded default
+   * (`essential-cp-behavior`) and lacks the uploaded scenario — the operator's
+   * connect-triggered scenario intermittently never fires. This syncs the
+   * runtime so connect-auto-start sees the upload. In-memory only: the caller
+   * already made the DB authoritative.
+   */
+  syncConnectorRuntimeScenarios(
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): void {
+    // The runtime map is keyed to numeric connectors (loadScenario requires a
+    // connector). CP-level (null) uploads have no connector runtime entries to
+    // reconcile; skip them.
+    if (connectorId === null) return;
+    const keepIds = new Set(definitions.map((d) => d.id));
+    // Reconcile runtime entries for this connector scope (in-memory only). Any
+    // in-flight run is discarded first — the definition set is being replaced,
+    // and a lingering executor would also block auto-start via the
+    // active-executor gate in tryAutoStartForConnector.
+    for (const [scenarioId, entry] of [...this._scenarios]) {
+      if (entry.connectorId !== connectorId) continue;
+      this.discardScenarioRun(scenarioId);
+      if (!keepIds.has(scenarioId)) this._scenarios.delete(scenarioId);
+    }
+    // Load the provided definitions into runtime (already persisted upstream).
+    for (const def of definitions) {
+      this._scenarios.set(def.id, { definition: def, connectorId });
+    }
+    // The replaced set may drop whatever auto-started last, so clear the dedup
+    // key and — if the CP is already up — kick auto-start for the new set.
+    const connector = this._chargePoint.connectors.get(connectorId);
+    if (!connector) return;
+    connector.lastAutoStartedScenarioKey = null;
+    if (this._chargePoint.status === OCPPStatus.Available) {
+      this.tryAutoStartForConnector(connectorId, "connect", null);
+      this.tryAutoStartForConnector(connectorId, "status", connector.status);
+    }
   }
 
   listScenarios(connectorId: number): ReadonlyArray<{

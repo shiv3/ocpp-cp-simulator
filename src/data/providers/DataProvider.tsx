@@ -76,7 +76,7 @@ interface DataContextValue {
   chargePointService: ChargePointService;
 }
 
-const DataContext = createContext<DataContextValue | null>(null);
+export const DataContext = createContext<DataContextValue | null>(null);
 
 interface DataProviderProps {
   children: ReactNode;

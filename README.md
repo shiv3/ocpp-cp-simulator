@@ -4,13 +4,14 @@
 
 OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CSMS development. Comes with a browser UI, a headless CLI, and a Socket.IO control API that any agent or script can drive.
 
-| Interface     | Description                                         | Docs                               |
-| ------------- | --------------------------------------------------- | ---------------------------------- |
-| **Browser**   | React + Tailwind web app / Tauri desktop app        | [docs/browser.md](docs/browser.md) |
-| **Legacy v1** | Original single-page web UI                         | [docs/v1.md](docs/v1.md)           |
-| **CLI**       | Headless mode for scripting, CI, and AI integration | [docs/cli.md](docs/cli.md)         |
-| **Server**    | Long-running Socket.IO server, multi-CP per process | [docs/server.md](docs/server.md)   |
-| **Docker**    | Pre-built image (daemon + web console) on GHCR      | [docs/docker.md](docs/docker.md)   |
+| Interface       | Description                                            | Docs                               |
+| --------------- | ------------------------------------------------------ | ---------------------------------- |
+| **Browser**     | Classic console (default, at `/`) / Tauri desktop app  | [docs/browser.md](docs/browser.md) |
+| **New console** | Redesigned console (React + Tailwind), served at `/v3` | [docs/browser.md](docs/browser.md) |
+| **Legacy v1**   | Original single-page web UI, served at `/v1`           | [docs/v1.md](docs/v1.md)           |
+| **CLI**         | Headless mode for scripting, CI, and AI integration    | [docs/cli.md](docs/cli.md)         |
+| **Server**      | Long-running Socket.IO server, multi-CP per process    | [docs/server.md](docs/server.md)   |
+| **Docker**      | Pre-built image (daemon + web console) on GHCR         | [docs/docker.md](docs/docker.md)   |
 
 ![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
 
@@ -240,6 +241,18 @@ See [docs/server.md](docs/server.md) for the full Socket.IO API reference and [d
 ## Persistence
 
 Both the browser UI and the daemon back their state with SQLite — sql.js + IndexedDB in the browser, `bun:sqlite` (via `--state-db <path>`) in the daemon. Scenarios, ChangeConfiguration overrides, charging profiles, availability flags, pending transaction messages, the daemon's CP registry and logs all survive reload / restart. See [docs/server.md → State persistence](docs/server.md#state-persistence).
+
+## Web console layout
+
+The browser app serves the UIs under distinct route prefixes from the same origin:
+
+- **`/`** — the classic console (the default). Also reachable at **`/v2`** for backward-compatible bookmarks.
+- **`/v3`** — the redesigned console: a fleet of **Charge Points**, per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with a linear step editor and a separate run console (`/v3/scenarios`), and a global **Message log** (`/v3/logs`).
+- **`/v1`** — the original single-page UI (maintenance only).
+
+The two consoles link to each other with a design switcher (the classic navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic design** button).
+
+The redesign reuses the existing data layer, scenario engine, and per-step forms unchanged; scenarios, charge points, and logs are simply promoted to first-class routes instead of nested panels.
 
 ## Local vs Remote mode (browser)
 

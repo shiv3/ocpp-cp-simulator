@@ -13,7 +13,14 @@ const pkgVersion = JSON.parse(
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: process.env.VITE_BASE_URL || "./",
+  // Absolute base so the SPA's deep nested routes (e.g. /cp/:id,
+  // /scenarios/edit) resolve their /assets/* references from the server root
+  // on a hard load / refresh / shared link. A relative "./" base resolves
+  // assets against the current route path (/cp/CP001 -> /cp/assets/... -> 404,
+  // blank page). GitHub Pages sets VITE_BASE_URL to its subpath explicitly;
+  // the daemon (--web-console), Docker, and Tauri all serve from root, and the
+  // daemon already SPA-falls-back extensionless paths to index.html.
+  base: process.env.VITE_BASE_URL || "/",
   define: {
     __APP_VERSION__: JSON.stringify(pkgVersion),
   },

@@ -129,6 +129,16 @@ All SOAP versions share the same endpoint pattern:
   relies on the daemon's `--web-console-basic-auth-*` gate or a trusted network
   boundary — OCPP-S has no per-message authentication field.
 
+The callback URL the CP advertises to the CSMS is resolved by precedence:
+
+1. `--soap-callback-url <url>` — the full URL, used verbatim.
+2. `--soap-public-base-url <url>` — a public base the CSMS can reach (e.g. a
+   tunnel origin); the callback URL is derived as
+   `<base><soap-path>/<cp-id>/ChargePointService`. Handy when the CSMS is hosted
+   remotely and cannot reach your machine directly — point the base at your
+   tunnel and skip hand-building the full URL. An explicit `--soap-callback-url`
+   still wins.
+
 Pairs with [SteVe](https://github.com/steve-community/steve) (register charge points
 with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 

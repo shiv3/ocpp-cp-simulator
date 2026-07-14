@@ -6,6 +6,7 @@ import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
 import { resolveClientLocation } from "./clientLocation";
+import { isHttpUrl, resolveSoapCallbackUrl } from "./soapCallbackUrl";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
@@ -140,6 +141,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   const extraWsHeaders: Record<string, string> = {};
   const extraWsSubprotocols: string[] = [];
   let soapCallbackUrl: string | null = null;
+  let soapPublicBaseUrl: string | null = null;
   let soapPath = "/ocpp/soap";
   let securityProfile: CLIOptions["securityProfile"];
   let authorizationKey: string | undefined;
@@ -350,6 +352,22 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         soapCallbackUrl = next;
+        i++;
+        break;
+      case "--soap-public-base-url":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --soap-public-base-url requires a URL\n",
+          );
+          process.exit(1);
+        }
+        if (!isHttpUrl(next)) {
+          process.stderr.write(
+            "Error: --soap-public-base-url must be an absolute http(s) URL\n",
+          );
+          process.exit(1);
+        }
+        soapPublicBaseUrl = next;
         i++;
         break;
       case "--soap-path":
@@ -584,6 +602,21 @@ export function parseArgs(argv: string[]): CLIOptions {
     }
   }
 
+  // Resolve the SOAP callback URL by precedence: an explicit --soap-callback-url
+  // wins; otherwise --soap-public-base-url derives it. (A tunnel provider such
+  // as ngrok would slot in below the public base — see soapCallbackUrl.ts.)
+  const resolvedSoapCallbackUrl = resolveSoapCallbackUrl({
+    explicitCallbackUrl: soapCallbackUrl,
+    publicBaseUrl: soapPublicBaseUrl,
+    cpId,
+    soapPath,
+  });
+  if (!soapCallbackUrl && soapPublicBaseUrl && resolvedSoapCallbackUrl) {
+    process.stderr.write(
+      `SOAP callback URL resolved from --soap-public-base-url: ${resolvedSoapCallbackUrl}\n`,
+    );
+  }
+
   return {
     wsUrl,
     cpId,
@@ -618,7 +651,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     healthPath,
     extraWsHeaders,
     extraWsSubprotocols,
-    soapCallbackUrl,
+    soapCallbackUrl: resolvedSoapCallbackUrl,
     soapPath,
     securityProfile,
     authorizationKey,
@@ -740,7 +773,13 @@ Options:
                            remote-mode auto-detect probe lines up.
   --soap-callback-url <url>
                            SOAP ChargePointService callback URL for OCPP 1.2, 1.5,
-                           or 1.6S. Required when using any SOAP version.
+                           or 1.6S. Required for SOAP versions unless
+                           --soap-public-base-url is given instead.
+  --soap-public-base-url <url>
+                           Public base URL (e.g. a tunnel origin) the CSMS can
+                           reach; the full callback URL is derived as
+                           {base}{soap-path}/{cp-id}/ChargePointService. An
+                           explicit --soap-callback-url takes precedence.
   --soap-path <path>       Base path reserved for the SOAP callback server
                            (default: /ocpp/soap).
                            OCPP-S has no per-message auth; rely on

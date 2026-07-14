@@ -10,6 +10,7 @@ import type {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
+import { consolePath } from "../routes";
 import {
   deriveLinearSteps,
   insertStep,
@@ -162,7 +163,7 @@ const ScenarioEditPage: React.FC = () => {
     return (
       <div className="p-6">
         <Link
-          to="/scenarios"
+          to={consolePath("/scenarios")}
           className="mb-4 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
         >
           ← Back to scenarios
@@ -201,7 +202,7 @@ const ScenarioEditPage: React.FC = () => {
       {!linear.isLinear && (
         <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           This scenario has branches — edit it in the classic graph editor.{" "}
-          <Link to="/v2" className="font-medium underline">
+          <Link to="/" className="font-medium underline">
             Open classic editor
           </Link>
         </div>

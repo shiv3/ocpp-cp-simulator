@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
+import { consolePath } from "../routes";
 
 /**
  * One scenario definition plus the (cpId, connectorId) scope it was loaded
@@ -164,5 +165,5 @@ export function buildScenarioUrl(
   params.set("cp", cpId);
   params.set("connector", connectorId != null ? String(connectorId) : "");
   params.set("id", scenarioId);
-  return `/scenarios/${kind}?${params.toString()}`;
+  return consolePath(`/scenarios/${kind}?${params.toString()}`);
 }

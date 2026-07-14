@@ -189,7 +189,7 @@ describe("DashboardPage", () => {
       a.textContent?.includes("Open Message Log"),
     );
     expect(openLogLink, "expected an Open Message Log link").toBeTruthy();
-    expect(openLogLink!.getAttribute("href")).toBe("/logs");
+    expect(openLogLink!.getAttribute("href")).toBe("/v3/logs");
 
     await pushEvent(service, "CP-A", {
       type: "log",
@@ -238,9 +238,9 @@ describe("DashboardPage", () => {
     const link = card!.querySelector("a");
     expect(link, "expected the cpId link").toBeTruthy();
     expect(link!.getAttribute("href")).toBe(
-      `/cp/${encodeURIComponent(specialId)}`,
+      `/v3/cp/${encodeURIComponent(specialId)}`,
     );
-    expect(link!.getAttribute("href")).toBe("/cp/CP%2FSpecial");
+    expect(link!.getAttribute("href")).toBe("/v3/cp/CP%2FSpecial");
 
     // End-to-end: clicking through actually lands on this CP's detail page
     // (an unencoded href would instead produce an extra path segment and

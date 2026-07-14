@@ -1,6 +1,7 @@
 // components/Navbar.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { SquarePen } from "lucide-react";
 import ThemeToggle from "./ThemeToggle.tsx";
 import { useDataContext } from "../data/providers/DataProvider";
 import type { RemoteConnectionState } from "../data/remote/RemoteChargePointService";
@@ -92,12 +93,12 @@ const Navbar: React.FC = () => {
           <div className="flex items-center gap-2">
             <Link
               className="text-xl font-bold hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
-              to="/v2"
+              to="/"
             >
               OCPP ChargePoint Simulator
             </Link>
             <Link
-              to="/v2/settings"
+              to="/settings"
               title={badgeTitle}
               className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded transition-colors ${badgeBg}`}
             >
@@ -116,7 +117,7 @@ const Navbar: React.FC = () => {
               <li>
                 <Link
                   className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
-                  to="/v2"
+                  to="/"
                 >
                   ChargePoint
                 </Link>
@@ -124,12 +125,21 @@ const Navbar: React.FC = () => {
               <li>
                 <Link
                   className="hover:text-blue-200 dark:hover:text-blue-400 transition-colors"
-                  to="/v2/settings"
+                  to="/settings"
                 >
                   Settings
                 </Link>
               </li>
             </ul>
+            {/* Design switcher — mirrored in the new console's sidebar so the
+                operator can hop between the two designs from either side. */}
+            <Link
+              to="/v3"
+              className="inline-flex items-center gap-1.5 rounded border border-white/40 px-2 py-1 text-xs font-semibold transition-colors hover:bg-white/15"
+            >
+              <SquarePen className="h-3.5 w-3.5" />
+              New design
+            </Link>
             <ThemeToggle />
           </div>
         </div>

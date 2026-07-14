@@ -1,9 +1,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 
 import { ConsoleRoutes } from "../ConsoleApp";
+import { CONSOLE_BASENAME, consolePath } from "../routes";
 import { DarkModeProvider } from "../../contexts/DarkModeContext";
 import { DataContext } from "../../data/providers/DataProvider";
 import type {
@@ -131,6 +132,11 @@ export interface RenderConsoleResult<S extends ChargePointService> {
  * wired to a fake (or caller-supplied) `ChargePointService`. Also wraps
  * with `DarkModeProvider` since `AppShell` (mounted on every route) renders
  * `ThemeToggle`, which needs it.
+ *
+ * The console is mounted at `/v3/*` (mirroring `App.tsx`), so `initialPath`
+ * is given console-relative (`/`, `/settings`, `/cp/:id`, …) and is
+ * prefixed here — matching how the app's in-console links resolve via
+ * `consolePath()`.
  */
 export async function renderConsole<
   S extends ChargePointService = FakeChargePointService,
@@ -147,7 +153,7 @@ export async function renderConsole<
 
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[initialPath]}>
+      <MemoryRouter initialEntries={[consolePath(initialPath)]}>
         <DarkModeProvider>
           <DataContext.Provider
             value={{
@@ -158,7 +164,12 @@ export async function renderConsole<
               chargePointService: service,
             }}
           >
-            <ConsoleRoutes />
+            <Routes>
+              <Route
+                path={`${CONSOLE_BASENAME}/*`}
+                element={<ConsoleRoutes />}
+              />
+            </Routes>
           </DataContext.Provider>
         </DarkModeProvider>
       </MemoryRouter>,

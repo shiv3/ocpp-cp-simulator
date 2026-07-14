@@ -1,17 +1,18 @@
 import React from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
-  LayoutGrid,
   PlugZap,
   Play,
   ScrollText,
   Settings as SettingsIcon,
+  SquarePen,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDataContext } from "../data/providers/DataProvider";
 import ThemeToggle from "../components/ThemeToggle";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
+import { consolePath } from "./routes";
 
 interface NavItem {
   label: string;
@@ -20,39 +21,37 @@ interface NavItem {
   isActive: (pathname: string) => boolean;
 }
 
-// "Charge Points" links to the dashboard (there's no standalone list route)
-// but lights up while the operator is drilled into a specific CP at
-// `/cp/:cpId`, so it needs its own active check independent of `to`.
+// The console is mounted under `/v3`, so links go through `consolePath()` and
+// `isActive` matches against the `/v3`-prefixed pathname.
+//
+// "Charge Points" is the home screen (there's no separate Dashboard route —
+// the console root lists the charge points), and it also stays lit while the
+// operator is drilled into a specific CP at `/cp/:cpId`.
 const NAV_ITEMS: NavItem[] = [
   {
-    label: "Dashboard",
-    to: "/",
-    icon: LayoutGrid,
-    isActive: (pathname) => pathname === "/",
-  },
-  {
     label: "Charge Points",
-    to: "/",
+    to: consolePath("/"),
     icon: PlugZap,
-    isActive: (pathname) => pathname.startsWith("/cp/"),
+    isActive: (pathname) =>
+      pathname === consolePath("/") || pathname.startsWith(consolePath("/cp/")),
   },
   {
     label: "Scenarios",
-    to: "/scenarios",
+    to: consolePath("/scenarios"),
     icon: Play,
-    isActive: (pathname) => pathname.startsWith("/scenarios"),
+    isActive: (pathname) => pathname.startsWith(consolePath("/scenarios")),
   },
   {
     label: "Message Log",
-    to: "/logs",
+    to: consolePath("/logs"),
     icon: ScrollText,
-    isActive: (pathname) => pathname.startsWith("/logs"),
+    isActive: (pathname) => pathname.startsWith(consolePath("/logs")),
   },
   {
     label: "Settings",
-    to: "/settings",
+    to: consolePath("/settings"),
     icon: SettingsIcon,
-    isActive: (pathname) => pathname.startsWith("/settings"),
+    isActive: (pathname) => pathname.startsWith(consolePath("/settings")),
   },
 ];
 
@@ -109,6 +108,16 @@ const AppShell: React.FC = () => {
               </span>
               <ThemeToggle />
             </div>
+            {/* Design switcher — mirrored on the classic UI's navbar so the
+                operator can hop between the two designs from either side.
+                The classic UI is served at the root. */}
+            <Link
+              to="/"
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              <SquarePen className="h-3.5 w-3.5" />
+              Switch to classic design
+            </Link>
             <div
               className="truncate font-mono text-xs text-gray-500 dark:text-gray-400"
               title={serverUrl}

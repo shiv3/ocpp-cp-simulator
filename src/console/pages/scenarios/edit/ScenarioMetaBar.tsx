@@ -9,6 +9,7 @@ import type {
 } from "../../../../cp/application/scenario/ScenarioTypes";
 import TargetChip from "../../../components/TargetChip";
 import { buildScenarioUrl } from "../../../lib/useAllScenarios";
+import { consolePath } from "../../../routes";
 
 export interface ScenarioMetaBarProps {
   scenario: ScenarioDefinition;
@@ -80,7 +81,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
   return (
     <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-4 dark:border-gray-800">
       <Link
-        to="/scenarios"
+        to={consolePath("/scenarios")}
         className="text-sm text-blue-600 hover:underline dark:text-blue-400"
       >
         ← Back

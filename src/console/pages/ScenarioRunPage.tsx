@@ -10,6 +10,7 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import TargetChip from "../components/TargetChip";
+import { consolePath } from "../routes";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
 import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
 import RunHistory from "./scenarios/run/RunHistory";
@@ -134,7 +135,7 @@ const ScenarioRunPage: React.FC = () => {
     return (
       <div className="p-6">
         <Link
-          to="/scenarios"
+          to={consolePath("/scenarios")}
           className="mb-4 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
         >
           ← Back to scenarios
@@ -152,7 +153,7 @@ const ScenarioRunPage: React.FC = () => {
   return (
     <div className="p-6">
       <Link
-        to="/scenarios"
+        to={consolePath("/scenarios")}
         className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
       >
         ← Back to scenarios

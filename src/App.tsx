@@ -37,18 +37,23 @@ const App: React.FC = () => {
         {/* V1 legacy routes - outside DarkModeProvider */}
         <Route path="/v1/*" element={<V1App />} />
 
-        {/* V2 classic routes - unchanged, now mounted under /v2 */}
-        <Route path="/v2/*" element={<V2App />} />
-
-        {/* New console - default UI */}
+        {/* V3 new console (redesign) - opt-in under /v3 */}
         <Route
-          path="/*"
+          path="/v3/*"
           element={
             <DarkModeProvider>
               <ConsoleApp />
             </DarkModeProvider>
           }
         />
+
+        {/* /v2 - backward-compatible alias for the classic UI (old bookmarks
+            and deep links keep working). */}
+        <Route path="/v2/*" element={<V2App />} />
+
+        {/* Classic UI is the default again, served at the root. Anything not
+            claimed by /v1, /v2, or /v3 lands here. */}
+        <Route path="/*" element={<V2App />} />
       </Routes>
     </Router>
   );

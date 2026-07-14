@@ -4,14 +4,14 @@
 
 OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CSMS development. Comes with a browser UI, a headless CLI, and a Socket.IO control API that any agent or script can drive.
 
-| Interface      | Description                                               | Docs                               |
-| -------------- | --------------------------------------------------------- | ---------------------------------- |
-| **Browser**    | Redesigned console (React + Tailwind) / Tauri desktop app | [docs/browser.md](docs/browser.md) |
-| **Classic UI** | Previous console, still served at `/v2`                   | [docs/browser.md](docs/browser.md) |
-| **Legacy v1**  | Original single-page web UI, served at `/v1`              | [docs/v1.md](docs/v1.md)           |
-| **CLI**        | Headless mode for scripting, CI, and AI integration       | [docs/cli.md](docs/cli.md)         |
-| **Server**     | Long-running Socket.IO server, multi-CP per process       | [docs/server.md](docs/server.md)   |
-| **Docker**     | Pre-built image (daemon + web console) on GHCR            | [docs/docker.md](docs/docker.md)   |
+| Interface       | Description                                            | Docs                               |
+| --------------- | ------------------------------------------------------ | ---------------------------------- |
+| **Browser**     | Classic console (default, at `/`) / Tauri desktop app  | [docs/browser.md](docs/browser.md) |
+| **New console** | Redesigned console (React + Tailwind), served at `/v3` | [docs/browser.md](docs/browser.md) |
+| **Legacy v1**   | Original single-page web UI, served at `/v1`           | [docs/v1.md](docs/v1.md)           |
+| **CLI**         | Headless mode for scripting, CI, and AI integration    | [docs/cli.md](docs/cli.md)         |
+| **Server**      | Long-running Socket.IO server, multi-CP per process    | [docs/server.md](docs/server.md)   |
+| **Docker**      | Pre-built image (daemon + web console) on GHCR         | [docs/docker.md](docs/docker.md)   |
 
 ![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
 
@@ -234,11 +234,13 @@ Both the browser UI and the daemon back their state with SQLite — sql.js + Ind
 
 ## Web console layout
 
-The browser app serves three UIs under distinct route prefixes from the same origin:
+The browser app serves the UIs under distinct route prefixes from the same origin:
 
-- **`/`** — the redesigned console: a fleet **Dashboard**, per-charge-point detail (`/cp/:id`), a cross-CP **Scenario library** with a linear step editor and a separate run console (`/scenarios`), and a global **Message log** (`/logs`).
-- **`/v2`** — the previous console, kept intact during the transition.
+- **`/`** — the classic console (the default). Also reachable at **`/v2`** for backward-compatible bookmarks.
+- **`/v3`** — the redesigned console: a fleet of **Charge Points**, per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with a linear step editor and a separate run console (`/v3/scenarios`), and a global **Message log** (`/v3/logs`).
 - **`/v1`** — the original single-page UI (maintenance only).
+
+The two consoles link to each other with a design switcher (the classic navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic design** button).
 
 The redesign reuses the existing data layer, scenario engine, and per-step forms unchanged; scenarios, charge points, and logs are simply promoted to first-class routes instead of nested panels.
 

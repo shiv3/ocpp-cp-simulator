@@ -7,6 +7,7 @@ import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointSe
 import { useChargePointView } from "../../../data/hooks/useChargePointView";
 import { useDataContext } from "../../../data/providers/DataProvider";
 import StatusPill from "../../components/StatusPill";
+import { consolePath } from "../../routes";
 
 export interface CpCardProps {
   cp: ChargePointSnapshot;
@@ -75,7 +76,7 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
     >
       <div className="flex items-start justify-between gap-2">
         <Link
-          to={`/cp/${encodeURIComponent(cp.id)}`}
+          to={consolePath(`/cp/${encodeURIComponent(cp.id)}`)}
           className="font-mono text-sm font-semibold text-gray-900 hover:underline dark:text-gray-100"
         >
           {cp.id}
@@ -122,7 +123,9 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => navigate(`/cp/${encodeURIComponent(cp.id)}`)}
+            onClick={() =>
+              navigate(consolePath(`/cp/${encodeURIComponent(cp.id)}`))
+            }
             className="rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             Open

@@ -33,7 +33,6 @@ describe("ConsoleApp routing", () => {
     cleanup = () => unmount(root);
 
     for (const label of [
-      "Dashboard",
       "Charge Points",
       "Scenarios",
       "Message Log",
@@ -61,9 +60,14 @@ describe("ConsoleApp routing", () => {
     expect(container.textContent).toContain("RFID Tag IDs");
     expect(container.textContent).toContain("Export Configuration");
 
-    const classicLink = container.querySelector('a[href="/v2"]');
+    // The Settings page itself carries an "Open classic UI" link back to the
+    // classic UI at the root. (The sidebar's "Switch to classic design" link
+    // also points at "/", so match on the link text rather than just the
+    // href.)
+    const classicLink = Array.from(
+      container.querySelectorAll('a[href="/"]'),
+    ).find((a) => a.textContent?.includes("Open classic UI"));
     expect(classicLink).toBeTruthy();
-    expect(classicLink?.textContent).toContain("Open classic UI");
   });
 
   it('"Back to Home" on the embedded Settings page returns to the console Dashboard (relative navigate("..") from /settings)', async () => {

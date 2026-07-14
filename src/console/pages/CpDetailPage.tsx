@@ -27,6 +27,7 @@ import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import StatusPill from "../components/StatusPill";
+import { consolePath } from "../routes";
 import ConnectorCard from "./cp/ConnectorCard";
 import ConfigTab from "./cp/ConfigTab";
 import CpTabs from "./cp/CpTabs";
@@ -238,7 +239,7 @@ const CpDetailPage: React.FC = () => {
   return (
     <div className="p-6">
       <Link
-        to="/"
+        to={consolePath("/")}
         className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
       >
         ← Back to charge points
@@ -249,7 +250,9 @@ const CpDetailPage: React.FC = () => {
         actions={
           <>
             <Button asChild variant="outline" size="sm">
-              <Link to={`/scenarios?cp=${encodeURIComponent(cpId)}`}>
+              <Link
+                to={consolePath(`/scenarios?cp=${encodeURIComponent(cpId)}`)}
+              >
                 Scenarios
               </Link>
             </Button>

@@ -108,4 +108,32 @@ describe("TraceCorrelator", () => {
     correlator.observe(noId);
     expect(noId.action).toBeUndefined();
   });
+
+  it("evicts the correlation entry once a CALLRESULT/CALLERROR consumes it, so a second response with the same messageId gets no action", () => {
+    const correlator = new TraceCorrelator();
+
+    correlator.observe(
+      record({ messageType: "CALL", messageId: "m-1", action: "Heartbeat" }),
+    );
+
+    const firstResult = record({
+      messageType: "CALLRESULT",
+      messageId: "m-1",
+      direction: "csms-to-cp",
+    });
+    correlator.observe(firstResult);
+    expect(firstResult.action).toBe("Heartbeat");
+
+    // OCPP-J has exactly one response per CALL. A second response reusing
+    // the same messageId (e.g. after the id space wraps around on a
+    // long-running daemon) must not resolve to the stale action — the
+    // entry should have been evicted on first consumption.
+    const secondResult = record({
+      messageType: "CALLRESULT",
+      messageId: "m-1",
+      direction: "csms-to-cp",
+    });
+    correlator.observe(secondResult);
+    expect(secondResult.action).toBeUndefined();
+  });
 });

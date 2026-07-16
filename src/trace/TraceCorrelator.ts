@@ -27,7 +27,13 @@ export class TraceCorrelator {
       this.actionByKey.set(key, record.action);
     } else {
       const resolved = this.actionByKey.get(key);
-      if (resolved) record.action = resolved;
+      if (resolved) {
+        record.action = resolved;
+        // OCPP-J has exactly one response per CALL: evict on consumption
+        // so a long-running daemon's actionByKey map doesn't grow one
+        // entry per unique messageId forever.
+        this.actionByKey.delete(key);
+      }
     }
     return record;
   }

@@ -8,9 +8,10 @@ either side to the other's internal models — see
 [issue #188](https://github.com/shiv3/ocpp-cp-simulator/issues/188).
 
 This is a **proof of concept**: it defines and versions the record shape and
-ships an adapter from the simulator's own logs. Producing trace files from a run
-(a `--trace-output` flag / an `analyze` subcommand) and any DebugKit integration
-are deliberately later steps.
+ships an adapter from the simulator's own logs. The simulator now writes trace
+files at runtime via `--trace-output <path>` (see [docs/cli.md](./cli.md)); an
+`analyze` subcommand and any DebugKit integration remain deliberately later
+steps.
 
 ## Status & scope
 

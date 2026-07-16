@@ -1,7 +1,15 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import { Logger, LogType } from "../../../cp/shared/Logger";
 import { TraceWriter } from "../TraceWriter";
 
@@ -93,5 +101,39 @@ describe("TraceWriter", () => {
   it("throws at construction when the path is unwritable", () => {
     const badPath = path.join(dir, "no-such-parent-dir", "trace.jsonl");
     expect(() => new TraceWriter(badPath)).toThrow();
+  });
+
+  describe("write failures after construction", () => {
+    let warnSpy: MockInstance;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("does not throw and warns when appendFileSync fails on a later write", () => {
+      const writer = new TraceWriter(filePath);
+      const logger = new Logger();
+      logger.setCpId("CP001");
+      writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+
+      // Replace the trace file with a directory at the same path, so a
+      // later fs.appendFileSync throws EISDIR — simulating a runtime I/O
+      // failure (disk full, file replaced, permission revoked) after the
+      // writer was constructed successfully.
+      fs.rmSync(filePath, { force: true });
+      fs.mkdirSync(filePath);
+
+      expect(() => {
+        logger.info('Sent: [2,"m-1","Heartbeat",{}]', LogType.WEBSOCKET);
+      }).not.toThrow();
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain("[TraceWriter]");
+      expect(warnSpy.mock.calls[0][0]).toContain(filePath);
+    });
   });
 });

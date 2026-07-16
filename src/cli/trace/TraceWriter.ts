@@ -61,21 +61,33 @@ export class TraceWriter {
     const ocppVersion = toTraceOcppVersion(ctx.ocppVersion);
 
     const listener = (entry: LogEntry) => {
-      const line: SerializedLogLine = {
-        timestamp: entry.timestamp.toISOString(),
-        level: LogLevel[entry.level],
-        type: entry.type,
-        message: entry.message,
-        cpId: ctx.cpId,
-      };
-      const record = logLineToTraceRecord(line, {
-        ocppVersion,
-        transport,
-        chargePointId: ctx.cpId,
-      });
-      if (!record) return;
-      this.correlator.observe(record);
-      fs.appendFileSync(this.filePath, JSON.stringify(record) + "\n");
+      // Logger.log() emits synchronously, so a runtime I/O failure here
+      // (disk full, file replaced, permission revoked) must not propagate
+      // out of whatever OCPP code path logged the message — that could
+      // crash every charge point sharing this daemon. Same swallow-and-warn
+      // convention as persistConnectorRuntime in src/cli/service.ts.
+      try {
+        const line: SerializedLogLine = {
+          timestamp: entry.timestamp.toISOString(),
+          level: LogLevel[entry.level],
+          type: entry.type,
+          message: entry.message,
+          cpId: ctx.cpId,
+        };
+        const record = logLineToTraceRecord(line, {
+          ocppVersion,
+          transport,
+          chargePointId: ctx.cpId,
+        });
+        if (!record) return;
+        this.correlator.observe(record);
+        fs.appendFileSync(this.filePath, JSON.stringify(record) + "\n");
+      } catch (err) {
+        console.warn(
+          `[TraceWriter] failed to write trace record to ${this.filePath}`,
+          err,
+        );
+      }
     };
 
     return ctx.logger.on("log.WebSocket", listener);

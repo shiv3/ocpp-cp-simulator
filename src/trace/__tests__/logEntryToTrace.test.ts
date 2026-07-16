@@ -40,6 +40,7 @@ describe("logLineToTraceRecord", () => {
       messageId: "abc-1",
       action: "BootNotification",
       payload: { chargePointVendor: "Example" },
+      raw: '[2,"abc-1","BootNotification",{"chargePointVendor":"Example"}]',
     });
   });
 
@@ -90,6 +91,33 @@ describe("logLineToTraceRecord", () => {
   });
 });
 
+describe("trace format v1.1", () => {
+  it("stamps records with schemaVersion 1.1", () => {
+    expect(OCPP_TRACE_SCHEMA_VERSION).toBe("1.1");
+  });
+
+  it("carries the verbatim frame text in raw, preserving spacing and key order", () => {
+    // Deliberately non-canonical JSON: spacing and key order must survive
+    // byte-exactly (hashing/dedup on raw is a consumer use case).
+    const frameText = '[2, "abc-1", "BootNotification", {"b": 1, "a": 2} ]';
+    const record = logLineToTraceRecord(line(`Sent: ${frameText}`));
+    expect(record?.raw).toBe(frameText);
+  });
+
+  it("round-trips a well-formed frame through JSON.parse(raw)", () => {
+    const record = logLineToTraceRecord(
+      line('Received: [4,"m-9","NotSupported","Boom",{"x":1}]'),
+    );
+    expect(JSON.parse(record?.raw ?? "")).toEqual([
+      4,
+      "m-9",
+      "NotSupported",
+      "Boom",
+      { x: 1 },
+    ]);
+  });
+});
+
 describe("logLinesToTrace", () => {
   it("drops non-wire lines and back-fills CALLRESULT action by messageId", () => {
     const records = logLinesToTrace([
@@ -122,6 +150,17 @@ describe("logLinesToTrace", () => {
     ]);
     expect(records).toHaveLength(1);
     expect(records[0].action).toBeUndefined();
+  });
+
+  it("emits raw on every record in a batch", () => {
+    const records = logLinesToTrace([
+      line('Sent: [2,"m-1","Heartbeat",{}]'),
+      line('Received: [3,"m-1",{}]'),
+    ]);
+    expect(records.map((r) => r.raw)).toEqual([
+      '[2,"m-1","Heartbeat",{}]',
+      '[3,"m-1",{}]',
+    ]);
   });
 
   it("scopes correlation per charge point when a batch reuses a messageId", () => {

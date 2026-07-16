@@ -31,7 +31,7 @@ export class TraceCorrelator {
       // Evict the oldest entry if we're at the cap before adding a new one
       if (this.actionByKey.size >= MAX_PENDING_CORRELATIONS) {
         const oldestKey = this.actionByKey.keys().next().value;
-        this.actionByKey.delete(oldestKey);
+        if (oldestKey !== undefined) this.actionByKey.delete(oldestKey);
       }
       this.actionByKey.set(key, record.action);
     } else {

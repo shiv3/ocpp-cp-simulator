@@ -8,6 +8,10 @@
 
 import type { OcppTraceRecord } from "./OcppTraceRecord";
 
+/** Cap on pending CALL entries awaiting a response. Pending CALLs that never
+ * receive a response must not grow unboundedly in a long daemon run. */
+export const MAX_PENDING_CORRELATIONS = 10_000;
+
 /** Correlation key scoped per charge point: a batch/stream can interleave
  *  multiple CPs (e.g. the daemon's JSON log), and two CPs may reuse the same
  *  messageId. The JSON tuple stays unambiguous whatever the cpId/messageId
@@ -24,6 +28,11 @@ export class TraceCorrelator {
     if (record.messageId === undefined) return record;
     const key = correlationKey(record);
     if (record.action) {
+      // Evict the oldest entry if we're at the cap before adding a new one
+      if (this.actionByKey.size >= MAX_PENDING_CORRELATIONS) {
+        const oldestKey = this.actionByKey.keys().next().value;
+        this.actionByKey.delete(oldestKey);
+      }
       this.actionByKey.set(key, record.action);
     } else {
       const resolved = this.actionByKey.get(key);

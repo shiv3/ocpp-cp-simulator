@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OCPP_TRACE_SCHEMA_VERSION } from "../OcppTraceRecord";
 import type { OcppTraceRecord } from "../OcppTraceRecord";
-import { TraceCorrelator } from "../TraceCorrelator";
+import { MAX_PENDING_CORRELATIONS, TraceCorrelator } from "../TraceCorrelator";
 
 function record(overrides: Partial<OcppTraceRecord> = {}): OcppTraceRecord {
   return {
@@ -135,5 +135,38 @@ describe("TraceCorrelator", () => {
     });
     correlator.observe(secondResult);
     expect(secondResult.action).toBeUndefined();
+  });
+
+  it("evicts the oldest pending CALL when the cap is reached, so responses to evicted CALLs do not resolve", () => {
+    const correlator = new TraceCorrelator();
+
+    // Feed MAX_PENDING_CORRELATIONS + 1 distinct CALL records
+    for (let i = 0; i <= MAX_PENDING_CORRELATIONS; i++) {
+      correlator.observe(
+        record({
+          messageType: "CALL",
+          messageId: `m-${i}`,
+          action: `Action${i}`,
+        }),
+      );
+    }
+
+    // CALLRESULT for the first messageId (evicted) should get no action
+    const firstResult = record({
+      messageType: "CALLRESULT",
+      messageId: "m-0",
+      direction: "csms-to-cp",
+    });
+    correlator.observe(firstResult);
+    expect(firstResult.action).toBeUndefined();
+
+    // CALLRESULT for the second messageId should still get its action
+    const secondResult = record({
+      messageType: "CALLRESULT",
+      messageId: "m-1",
+      direction: "csms-to-cp",
+    });
+    correlator.observe(secondResult);
+    expect(secondResult.action).toBe("Action1");
   });
 });

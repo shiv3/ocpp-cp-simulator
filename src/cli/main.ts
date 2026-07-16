@@ -11,6 +11,7 @@ import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import { setGlobalLogFormat } from "../cp/shared/Logger";
+import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
 import {
   startServer,
   DEFAULT_HTTP_PORT,
@@ -150,6 +151,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let tlsKeyPath: string | undefined;
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
+  let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -292,6 +294,14 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         stateDb = next;
+        i++;
+        break;
+      case "--trace-output":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --trace-output requires a file path\n");
+          process.exit(1);
+        }
+        traceOutput = next;
         i++;
         break;
       case "--log-format":
@@ -661,6 +671,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     tlsCertPath,
     tlsKeyPath,
     insecureTlsKeyPerms,
+    traceOutput,
   };
 }
 
@@ -765,6 +776,9 @@ Options:
   --log-format <fmt>       "plain" (default) or "json" — output one JSON
                            object per stderr line for structured-log
                            collectors (Loki, jq, etc.).
+  --trace-output <path>    Append every OCPP wire message as a JSONL trace
+                           record (docs/trace-format.md) — works in REPL,
+                           JSON, and daemon modes.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path
@@ -907,6 +921,25 @@ async function main(): Promise<void> {
   // every line that follows respects it — including "[server] xxx" setup
   // chatter via serverLog.
   setGlobalLogFormat(options.logFormat);
+
+  // --trace-output (#188): construct the global TraceWriter before any CP is
+  // built (CLIChargePointService.attach()es to it in its constructor, so
+  // every mode's CP -- standalone, daemon create/restore/update -- picks it
+  // up uniformly). A bad path (missing parent dir, no permission) must fail
+  // loudly at startup rather than silently losing every trace record.
+  if (options.traceOutput) {
+    try {
+      const traceWriter = new TraceWriter(options.traceOutput);
+      setGlobalTraceWriter(traceWriter);
+    } catch (err) {
+      process.stderr.write(
+        `Error: cannot write trace output: ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      process.exit(1);
+    }
+  }
 
   // Client modes (--send/--stop/--events) target a running daemon. Resolve the
   // canonical --http-url / --http-basic-auth-* flags, but keep honoring the

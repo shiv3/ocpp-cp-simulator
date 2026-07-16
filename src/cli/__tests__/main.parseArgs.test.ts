@@ -44,6 +44,7 @@ function runParseArgs(args: string[]) {
     "  soapCallbackUrl: options.soapCallbackUrl,",
     "  soapPath: options.soapPath,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
+    "  traceOutput: options.traceOutput,",
     "}));",
   ].join("\n");
 
@@ -494,5 +495,50 @@ describe("parseArgs socket.io daemon migration flags", () => {
       hasWebConsoleBasicAuth: true,
       unsafeRemote: false,
     });
+  });
+});
+
+describe("parseArgs --trace-output", () => {
+  it("lands the path in options.traceOutput", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "ws://127.0.0.1:9000/ocpp",
+      "--trace-output",
+      "trace.jsonl",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      traceOutput: "trace.jsonl",
+    });
+  });
+
+  it("defaults to null when omitted", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "ws://127.0.0.1:9000/ocpp",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ traceOutput: null });
+  });
+
+  it("exits with an error when given no path", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "ws://127.0.0.1:9000/ocpp",
+      "--trace-output",
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Error: --trace-output requires a file path",
+    );
   });
 });

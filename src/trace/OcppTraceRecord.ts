@@ -33,7 +33,7 @@ export interface TraceError {
 
 /** One OCPP message exchange in the shared, tool-independent trace format. */
 export interface OcppTraceRecord {
-  /** Trace schema version, e.g. "1.0" ({@link OCPP_TRACE_SCHEMA_VERSION}). */
+  /** Trace schema version, e.g. "1.1" ({@link OCPP_TRACE_SCHEMA_VERSION}). */
   schemaVersion: string;
   /** ISO-8601 timestamp of the message. */
   timestamp: string;
@@ -63,9 +63,11 @@ export interface OcppTraceRecord {
   /**
    * Verbatim frame text exactly as sent or received on the wire (v1.1+).
    * Producers that have the original bytes SHOULD emit it; it is the only
-   * lossless representation (byte-exact hashing/dedup, malformed frames).
-   * Consumers MUST NOT assume it parses as JSON; when the frame is
-   * well-formed, `JSON.parse(raw)` yields the OCPP-J array.
+   * lossless representation (byte-exact hashing/dedup; preserves frames whose
+   * shape or payload violates the OCPP schema). Note a frame that does not
+   * parse as an OCPP-J array cannot be represented as a record at all in
+   * v1.1 (`messageType` is required) — carrying such frames is an open
+   * question for the shared spec.
    */
   raw?: string;
   /** Populated for CALLERROR frames only. */

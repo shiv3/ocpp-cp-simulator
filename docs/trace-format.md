@@ -31,25 +31,29 @@ are deliberately later steps.
   conformant implementation outputs is a new version, not an edit.
 - Producer extensions MUST go in `meta`, never in undeclared top-level
   fields.
+- Known v1.1 limitation: a frame that does not parse as an OCPP-J array
+  cannot be represented as a record (`messageType` is required). How the shared
+  format should carry fully-unparseable frames is an open question for the
+  specification repo.
 
 ## Record shape
 
-| Field           | Type                                           | Notes                                                                                                                                         |
-| --------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion` | string                                         | Trace schema version, e.g. `"1.0"`.                                                                                                           |
-| `timestamp`     | string (ISO-8601)                              | When the message was observed.                                                                                                                |
-| `ocppVersion`   | string (optional)                              | OCPP protocol version, e.g. `"1.6"`, `"2.0.1"`.                                                                                               |
-| `transport`     | `"json"` \| `"soap"`                           | Wire transport.                                                                                                                               |
-| `chargePointId` | string (optional)                              | Charge-point identity.                                                                                                                        |
-| `connectorId`   | number (optional)                              | Connector id when connector-scoped and known.                                                                                                 |
-| `direction`     | `"cp-to-csms"` \| `"csms-to-cp"`               | Relative to the CP/CSMS pair.                                                                                                                 |
-| `messageType`   | `"CALL"` \| `"CALLRESULT"` \| `"CALLERROR"`    | OCPP-J frame kind.                                                                                                                            |
-| `messageId`     | string (optional)                              | Correlates a CALL with its CALLRESULT/CALLERROR.                                                                                              |
-| `action`        | string (optional)                              | Derived, optional. On CALLRESULT/CALLERROR back-filled by id correlation; MUST equal the correlated CALL's action when that CALL is present.  |
-| `payload`       | any (optional)                                 | The OCPP message body.                                                                                                                        |
-| `raw`           | string (optional)                              | Verbatim frame text exactly as sent/received. The only lossless representation (byte-exact hashing, malformed frames). May not parse as JSON. |
-| `error`         | `{ code?, description?, details? }` (optional) | Populated for CALLERROR only.                                                                                                                 |
-| `meta`          | object (optional)                              | Transport/execution metadata and analysis-specific extensions.                                                                                |
+| Field           | Type                                           | Notes                                                                                                                                                                        |
+| --------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion` | string                                         | Trace schema version, e.g. `"1.1"`.                                                                                                                                          |
+| `timestamp`     | string (ISO-8601)                              | When the message was observed.                                                                                                                                               |
+| `ocppVersion`   | string (optional)                              | OCPP protocol version, e.g. `"1.6"`, `"2.0.1"`.                                                                                                                              |
+| `transport`     | `"json"` \| `"soap"`                           | Wire transport.                                                                                                                                                              |
+| `chargePointId` | string (optional)                              | Charge-point identity.                                                                                                                                                       |
+| `connectorId`   | number (optional)                              | Connector id when connector-scoped and known.                                                                                                                                |
+| `direction`     | `"cp-to-csms"` \| `"csms-to-cp"`               | Relative to the CP/CSMS pair.                                                                                                                                                |
+| `messageType`   | `"CALL"` \| `"CALLRESULT"` \| `"CALLERROR"`    | OCPP-J frame kind.                                                                                                                                                           |
+| `messageId`     | string (optional)                              | Correlates a CALL with its CALLRESULT/CALLERROR.                                                                                                                             |
+| `action`        | string (optional)                              | Derived, optional. On CALLRESULT/CALLERROR back-filled by id correlation; MUST equal the correlated CALL's action when that CALL is present.                                 |
+| `payload`       | any (optional)                                 | The OCPP message body.                                                                                                                                                       |
+| `raw`           | string (optional)                              | Verbatim frame text exactly as sent/received. The only lossless representation (byte-exact hashing/dedup; preserves frames whose shape or payload violates the OCPP schema). |
+| `error`         | `{ code?, description?, details? }` (optional) | Populated for CALLERROR only.                                                                                                                                                |
+| `meta`          | object (optional)                              | Transport/execution metadata and analysis-specific extensions.                                                                                                               |
 
 ## Example
 
@@ -125,7 +129,7 @@ version string.
     "raw": { "type": "string" },
     "error": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "code": { "type": "string" },
         "description": { "type": "string" },
@@ -150,7 +154,8 @@ version string.
 
 The `additionalProperties: true` allows forward compatibility: consumers must
 accept records from a later minor version, so the schema does not reject
-unknown fields; producers must put extensions in `meta` instead.
+unknown fields; producers must put extensions in `meta` instead, and the same
+applies to the nested `error` object.
 
 The `allOf` conditionals mirror what the adapter emits: a `CALL` always carries
 an `action`, and `error` is present only on `CALLERROR`.

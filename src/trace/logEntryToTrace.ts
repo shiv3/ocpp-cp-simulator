@@ -51,6 +51,7 @@ interface ParsedFrame {
   action?: string;
   payload?: unknown;
   error?: TraceError;
+  raw: string;
 }
 
 function parseOcppJArray(
@@ -75,6 +76,7 @@ function parseOcppJArray(
       messageId,
       action: parsed[2],
       payload: parsed[3],
+      raw: json,
     };
   }
   if (type === OCPPJ_CALLRESULT) {
@@ -83,6 +85,7 @@ function parseOcppJArray(
       messageType: "CALLRESULT",
       messageId,
       payload: parsed[2],
+      raw: json,
     };
   }
   if (type === OCPPJ_CALLERROR) {
@@ -95,6 +98,7 @@ function parseOcppJArray(
         description: typeof parsed[3] === "string" ? parsed[3] : undefined,
         details: parsed[4],
       },
+      raw: json,
     };
   }
   return null;
@@ -133,6 +137,7 @@ function toRecord(
   if (frame.action !== undefined) record.action = frame.action;
   if (frame.payload !== undefined) record.payload = frame.payload;
   if (frame.error !== undefined) record.error = frame.error;
+  record.raw = frame.raw;
   return record;
 }
 

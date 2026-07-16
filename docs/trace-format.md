@@ -1,4 +1,4 @@
-# OCPP Trace Format (v1.0)
+# OCPP Trace Format (v1.1)
 
 A small, **implementation-independent** JSON/JSONL format for one OCPP message
 exchange. It is intended as a shared contract between tools that _produce_ OCPP
@@ -14,35 +14,48 @@ are deliberately later steps.
 
 ## Status & scope
 
-- **Version `1.0`** (`schemaVersion`). Bump on any breaking change.
+- **Version `1.1`** (`schemaVersion`).
 - This iteration recognizes **OCPP-J (JSON/WebSocket)** frames. SOAP transport
   is a documented follow-up (the format already carries a `transport` field).
 - The format is usable without this simulator or DebugKit; it is a plain JSON
   object per exchange (JSONL for a stream).
 
+## Versioning
+
+- Additive optional fields bump the **minor** version.
+- Consumers **MUST ignore unknown fields** (forward compatibility within a
+  major version).
+- Changing the meaning of an existing field, or removing one, is a new
+  **major** version.
+- A published version is immutable: any change that alters what a
+  conformant implementation outputs is a new version, not an edit.
+- Producer extensions MUST go in `meta`, never in undeclared top-level
+  fields.
+
 ## Record shape
 
-| Field           | Type                                           | Notes                                                                              |
-| --------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `schemaVersion` | string                                         | Trace schema version, e.g. `"1.0"`.                                                |
-| `timestamp`     | string (ISO-8601)                              | When the message was observed.                                                     |
-| `ocppVersion`   | string (optional)                              | OCPP protocol version, e.g. `"1.6"`, `"2.0.1"`.                                    |
-| `transport`     | `"json"` \| `"soap"`                           | Wire transport.                                                                    |
-| `chargePointId` | string (optional)                              | Charge-point identity.                                                             |
-| `connectorId`   | number (optional)                              | Connector id when connector-scoped and known.                                      |
-| `direction`     | `"cp-to-csms"` \| `"csms-to-cp"`               | Relative to the CP/CSMS pair.                                                      |
-| `messageType`   | `"CALL"` \| `"CALLRESULT"` \| `"CALLERROR"`    | OCPP-J frame kind.                                                                 |
-| `messageId`     | string (optional)                              | Correlates a CALL with its CALLRESULT/CALLERROR.                                   |
-| `action`        | string (optional)                              | e.g. `"BootNotification"`. On CALLRESULT/CALLERROR, back-filled by id correlation. |
-| `payload`       | any (optional)                                 | The OCPP message body.                                                             |
-| `error`         | `{ code?, description?, details? }` (optional) | Populated for CALLERROR only.                                                      |
-| `meta`          | object (optional)                              | Transport/execution metadata and analysis-specific extensions.                     |
+| Field           | Type                                           | Notes                                                                                                                                         |
+| --------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion` | string                                         | Trace schema version, e.g. `"1.0"`.                                                                                                           |
+| `timestamp`     | string (ISO-8601)                              | When the message was observed.                                                                                                                |
+| `ocppVersion`   | string (optional)                              | OCPP protocol version, e.g. `"1.6"`, `"2.0.1"`.                                                                                               |
+| `transport`     | `"json"` \| `"soap"`                           | Wire transport.                                                                                                                               |
+| `chargePointId` | string (optional)                              | Charge-point identity.                                                                                                                        |
+| `connectorId`   | number (optional)                              | Connector id when connector-scoped and known.                                                                                                 |
+| `direction`     | `"cp-to-csms"` \| `"csms-to-cp"`               | Relative to the CP/CSMS pair.                                                                                                                 |
+| `messageType`   | `"CALL"` \| `"CALLRESULT"` \| `"CALLERROR"`    | OCPP-J frame kind.                                                                                                                            |
+| `messageId`     | string (optional)                              | Correlates a CALL with its CALLRESULT/CALLERROR.                                                                                              |
+| `action`        | string (optional)                              | Derived, optional. On CALLRESULT/CALLERROR back-filled by id correlation; MUST equal the correlated CALL's action when that CALL is present.  |
+| `payload`       | any (optional)                                 | The OCPP message body.                                                                                                                        |
+| `raw`           | string (optional)                              | Verbatim frame text exactly as sent/received. The only lossless representation (byte-exact hashing, malformed frames). May not parse as JSON. |
+| `error`         | `{ code?, description?, details? }` (optional) | Populated for CALLERROR only.                                                                                                                 |
+| `meta`          | object (optional)                              | Transport/execution metadata and analysis-specific extensions.                                                                                |
 
 ## Example
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "timestamp": "2026-07-14T02:00:00.000Z",
   "ocppVersion": "1.6",
   "transport": "json",
@@ -51,7 +64,11 @@ are deliberately later steps.
   "messageType": "CALL",
   "messageId": "abc-1",
   "action": "BootNotification",
-  "payload": { "chargePointVendor": "Example", "chargePointModel": "Simulator" }
+  "payload": {
+    "chargePointVendor": "Example",
+    "chargePointModel": "Simulator"
+  },
+  "raw": "[2,\"abc-1\",\"BootNotification\",{\"chargePointVendor\":\"Example\",\"chargePointModel\":\"Simulator\"}]"
 }
 ```
 
@@ -67,18 +84,19 @@ import { logLinesToTrace } from "../src/trace/logEntryToTrace";
 const records = logLinesToTrace(jsonlLogLines, { ocppVersion: "1.6" });
 ```
 
-`logLinesToTrace` drops non-wire log lines and back-fills each
-CALLRESULT/CALLERROR `action` from the CALL that established its `messageId`.
-`logLineToTraceRecord` converts a single line (returning `null` for non-wire
-lines). The type lives in `src/trace/OcppTraceRecord.ts` and
-`OCPP_TRACE_SCHEMA_VERSION` is the current version string.
+`logLinesToTrace` drops non-wire log lines, emits the verbatim frame text in
+the `raw` field, and back-fills each CALLRESULT/CALLERROR `action` from the
+CALL that established its `messageId`. `logLineToTraceRecord` converts a single
+line (returning `null` for non-wire lines). The type lives in
+`src/trace/OcppTraceRecord.ts` and `OCPP_TRACE_SCHEMA_VERSION` is the current
+version string.
 
 ## JSON Schema
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/shiv3/ocpp-cp-simulator/docs/trace-format.md#v1.0",
+  "$id": "https://github.com/shiv3/ocpp-cp-simulator/docs/trace-format.md#v1.1",
   "title": "OcppTraceRecord",
   "type": "object",
   "required": [
@@ -88,7 +106,7 @@ lines). The type lives in `src/trace/OcppTraceRecord.ts` and
     "direction",
     "messageType"
   ],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
     "schemaVersion": { "type": "string" },
     "timestamp": { "type": "string", "format": "date-time" },
@@ -104,6 +122,7 @@ lines). The type lives in `src/trace/OcppTraceRecord.ts` and
     "messageId": { "type": "string" },
     "action": { "type": "string" },
     "payload": {},
+    "raw": { "type": "string" },
     "error": {
       "type": "object",
       "additionalProperties": false,
@@ -129,5 +148,14 @@ lines). The type lives in `src/trace/OcppTraceRecord.ts` and
 }
 ```
 
+The `additionalProperties: true` allows forward compatibility: consumers must
+accept records from a later minor version, so the schema does not reject
+unknown fields; producers must put extensions in `meta` instead.
+
 The `allOf` conditionals mirror what the adapter emits: a `CALL` always carries
 an `action`, and `error` is present only on `CALLERROR`.
+
+## Changelog
+
+- **v1.1**: Added `raw` field (verbatim frame text), clarified `action` semantics (derived, optional), documented versioning rules.
+- **v1.0**: Initial proof-of-concept.

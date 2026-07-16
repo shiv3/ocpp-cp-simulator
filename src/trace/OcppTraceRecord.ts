@@ -12,8 +12,8 @@
  * lives in `docs/trace-format.md`.
  */
 
-/** Bump on any breaking change to the record shape. Consumers should check it. */
-export const OCPP_TRACE_SCHEMA_VERSION = "1.0";
+/** Trace schema version. Additive optional fields bump the minor version; semantic changes bump the major. Consumers MUST ignore unknown fields. */
+export const OCPP_TRACE_SCHEMA_VERSION = "1.1";
 
 /** Direction relative to the charge point / CSMS pair. */
 export type TraceDirection = "cp-to-csms" | "csms-to-cp";
@@ -52,13 +52,22 @@ export interface OcppTraceRecord {
   /** OCPP message id used to correlate a CALL with its CALLRESULT/CALLERROR. */
   messageId?: string;
   /**
-   * Action name, e.g. "BootNotification". Present on CALL frames; on
-   * CALLRESULT/CALLERROR it is back-filled by message-id correlation when the
-   * originating CALL is available, otherwise omitted (correlate by messageId).
+   * Action name, e.g. "BootNotification". Present on CALL frames. On
+   * CALLRESULT/CALLERROR it is DERIVED by message-id correlation and
+   * optional: producers MAY back-fill it, and when the CALL with the same
+   * `messageId` is present in the trace it MUST equal that CALL's action.
    */
   action?: string;
   /** Request/response payload (the OCPP message body). */
   payload?: unknown;
+  /**
+   * Verbatim frame text exactly as sent or received on the wire (v1.1+).
+   * Producers that have the original bytes SHOULD emit it; it is the only
+   * lossless representation (byte-exact hashing/dedup, malformed frames).
+   * Consumers MUST NOT assume it parses as JSON; when the frame is
+   * well-formed, `JSON.parse(raw)` yields the OCPP-J array.
+   */
+  raw?: string;
   /** Populated for CALLERROR frames only. */
   error?: TraceError;
   /** Optional transport/execution metadata and analysis-specific extensions. */

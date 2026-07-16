@@ -103,6 +103,10 @@ export interface CLIOptions {
   readonly tlsCertPath?: string;
   readonly tlsKeyPath?: string;
   readonly insecureTlsKeyPerms: boolean;
+  /** Filesystem path to append every OCPP wire message to as a JSONL trace
+   *  record (docs/trace-format.md), streamed live during the run. `null`
+   *  (default) disables trace output entirely. */
+  readonly traceOutput: string | null;
 }
 
 export interface ChargePointInitOptions {

@@ -42,6 +42,7 @@
     "src/ocpp",
     "src/protocol",
     "src/store/store.ts",
+    "src/trace",
     "src/utils/scenarioTemplates.ts"
   ]
 }

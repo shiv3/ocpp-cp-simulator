@@ -12,6 +12,7 @@ import {
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
+import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import {
   waitForBootAccepted,
   type WaitForBootAcceptedOptions,
@@ -407,6 +408,21 @@ export class CLIChargePointService {
 
     this.attachEventForwarders();
     this.setupMeterValueCallbacks();
+    // --trace-output (#188): a single wiring point covers standalone,
+    // daemon create, daemon restore, and daemon update re-create, since
+    // every charge point in every mode is constructed through this
+    // constructor (unlike CPRegistry.onRegistryMembership, which the
+    // restore/update paths bypass).
+    const traceWriter = getGlobalTraceWriter();
+    if (traceWriter) {
+      this._unsubscribes.push(
+        traceWriter.attach({
+          cpId: init.cpId,
+          ocppVersion: init.ocppVersion,
+          logger: this._chargePoint.logger,
+        }),
+      );
+    }
   }
 
   static fromOptions(

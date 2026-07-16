@@ -17,6 +17,7 @@ import {
   type TraceMessageType,
   type TraceTransport,
 } from "./OcppTraceRecord";
+import { TraceCorrelator } from "./TraceCorrelator";
 
 /** A serialized simulator log line (`--log-format json`, `logs.get`, or the
  *  browser log-viewer download): `{ timestamp, level, type, message, cpId? }`. */
@@ -155,37 +156,24 @@ export function logLineToTraceRecord(
   return toRecord(line, frame, context);
 }
 
-/** Correlation key scoped per charge point: a batch can interleave multiple CPs
- *  (e.g. the daemon's JSON log), and two CPs may reuse the same messageId. The
- *  JSON tuple stays unambiguous whatever the cpId/messageId contain. */
-function correlationKey(record: OcppTraceRecord): string {
-  return JSON.stringify([record.chargePointId ?? "", record.messageId]);
-}
-
 /**
  * Convert a chronological batch of log lines to trace records, dropping
  * non-wire lines and back-filling each CALLRESULT/CALLERROR `action` from the
- * CALL that established its `messageId` (correlated per charge point).
+ * CALL that established its `messageId` (correlated per charge point). A thin
+ * wrapper over {@link logLineToTraceRecord} + a single {@link TraceCorrelator}
+ * — the correlation itself lives there so a live producer (the CLI's
+ * TraceWriter) can reuse it one record at a time.
  */
 export function logLinesToTrace(
   lines: readonly SerializedLogLine[],
   context: TraceContext = {},
 ): OcppTraceRecord[] {
-  const actionByKey = new Map<string, string>();
+  const correlator = new TraceCorrelator();
   const records: OcppTraceRecord[] = [];
   for (const line of lines) {
     const record = logLineToTraceRecord(line, context);
     if (!record) continue;
-    if (record.messageId !== undefined) {
-      const key = correlationKey(record);
-      if (record.action) {
-        actionByKey.set(key, record.action);
-      } else {
-        const resolved = actionByKey.get(key);
-        if (resolved) record.action = resolved;
-      }
-    }
-    records.push(record);
+    records.push(correlator.observe(record));
   }
   return records;
 }

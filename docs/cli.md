@@ -293,6 +293,113 @@ file. `--scenario` and `--scenario-template` fan out the same way when
 > removed. External clients should migrate to the Socket.IO `rpc` event and
 > `event` push envelopes. See [docs/migration.md](migration.md).
 
+## analyze
+
+```bash
+ocpp-cp-sim analyze <trace.jsonl> [--output <file>] [--format html|markdown]
+```
+
+Runs [OCPP DebugKit](https://github.com/ocpp-debugkit/toolkit)'s
+failure-pattern detection over a v1.1 trace file
+([docs/trace-format.md](./trace-format.md)) and writes a report. Unlike every
+mode above, `analyze` never bootstraps a charge point, opens a socket, or
+starts a server — it only reads the given file and writes a report.
+
+```bash
+# Markdown to stdout (default)
+ocpp-cp-sim analyze trace.jsonl
+
+# Self-contained HTML report written to a file
+ocpp-cp-sim analyze trace.jsonl --output report.html
+
+# Force a format regardless of the --output extension
+ocpp-cp-sim analyze trace.jsonl --output report.txt --format html
+```
+
+### Formats
+
+| Value               | When it's used                                         | Output                                                               |
+| ------------------- | ------------------------------------------------------ | -------------------------------------------------------------------- |
+| `--format markdown` | Default, unless `--output` ends in `.html`             | Markdown text                                                        |
+| `--format html`     | Default when `--output` ends in `.html`; can be forced | A single self-contained HTML file (inline CSS, no external requests) |
+
+### Multi charge-point traces
+
+The DebugKit toolkit's analysis pipeline has no concept of `chargePointId` —
+it was built around a single-station 1.6J model. Handing it a trace that
+mixes several charge points as-is would silently flatten them into one
+station, and two charge points that happen to reuse the same OCPP
+`messageId` (routine, since messageIds are only unique per connection) could
+have their CALLs/CALLRESULTs cross-correlate, hiding a real failure on one of
+them.
+
+`analyze` compensates by splitting the trace by `chargePointId` **before**
+handing anything to the toolkit, and analyzing each charge point
+independently:
+
+- A trace with exactly one charge point (or only unattributed records)
+  produces one report. With `--output <file>`, it is written to exactly that
+  path.
+- A trace with multiple charge points produces one report per charge point.
+  With `--output out.html`, each is written as `out.<chargePointId>.html`
+  (the charge point id is inserted before the extension and sanitized for
+  the filesystem: anything outside `[A-Za-z0-9._-]` becomes `_`). Records
+  with no `chargePointId` at all are grouped together and reported as charge
+  point `(no chargePointId)`.
+- With no `--output`, all reports are printed to stdout in Markdown, each
+  under its own `# Charge point <id>` heading.
+
+### Excluded records
+
+The toolkit only understands OCPP 1.6J. Records transported over SOAP
+(`transport: "soap"`) and records with a non-1.6 `ocppVersion` (e.g.
+`2.0.1`, `2.1`) are excluded before analysis rather than being silently
+misread as 1.6J frames — analyzing them would produce meaningless results.
+Records with no `ocppVersion` at all are kept (treated as 1.6J, matching the
+trace format's own default). Non-zero exclusion counts are printed to
+stderr, e.g.:
+
+```
+excluded: 2 soap record(s), 1 non-1.6 record(s), 0 unparseable line(s)
+```
+
+A line that fails to parse as JSON, or parses to something other than a JSON
+object, is counted as an unparseable line and skipped — it never aborts the
+run.
+
+### Disclaimer
+
+Failure-pattern detection is not a conformance checker: it recognizes a
+fixed catalog of known failure shapes, not the OCPP specification itself.
+Every `analyze` run — regardless of format or outcome — prints this sentence
+to stderr, appends it as a trailing paragraph to every Markdown report, and
+injects it as a `<p>` immediately before `</body>` in every HTML report:
+
+> Failure-pattern detection is not OCPP compliance certification: "no known
+> failure detected" does not mean "OCPP compliant".
+
+### Timeline is transaction-focused
+
+The toolkit's session timeline is built around transactions
+(`StartTransaction`/`StopTransaction`/`MeterValues`). Events outside a
+transaction — `StatusNotification`, some bare `CALLRESULT`s — are folded
+into a catch-all "no session" bucket rather than shown against the
+transaction they happened alongside. This is the toolkit's own model, not
+something `analyze` works around; read the report's timeline as
+transaction-focused, not as a complete blow-by-blow of every wire message
+(the Event Appendix at the end of each report still lists every event).
+
+### Dependency
+
+`analyze` requires `@ocpp-debugkit/toolkit`, pinned to an exact version
+(currently `0.4.0`, no `^` range) in `package.json` — this is a third-party
+analysis engine whose detection rules can change behavior between versions,
+so upgrades are a deliberate, coordinated change (re-verify the test matrix
+in `src/cli/analyze/__tests__/`), not an automatic dependency bump. The
+toolkit's `/core` and `/reporter` entry points are loaded via dynamic
+`import()` only inside the `analyze` code path, so every other CLI mode is
+unaffected if the dependency is ever missing.
+
 ## Events
 
 Events are emitted in all modes:

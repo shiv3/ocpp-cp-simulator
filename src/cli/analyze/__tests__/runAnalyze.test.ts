@@ -20,6 +20,45 @@ function rec(cpId: string, o: Record<string, unknown>): string {
   });
 }
 
+/** Computes the verbatim OCPP-J frame text for a CALL/CALLRESULT record's
+ *  own decomposed fields. Used only to build a realistic `raw` field below
+ *  (Fix 5, issue #188 review) -- not a general-purpose helper for other
+ *  fixtures in this file. */
+function ocppJFrame(o: {
+  messageType: string;
+  messageId?: string;
+  action?: string;
+  payload?: unknown;
+}): string {
+  switch (o.messageType) {
+    case "CALL":
+      return JSON.stringify([2, o.messageId, o.action, o.payload]);
+    case "CALLRESULT":
+      return JSON.stringify([3, o.messageId, o.payload]);
+    default:
+      throw new Error(`ocppJFrame: unsupported messageType ${o.messageType}`);
+  }
+}
+
+/** Same as `rec`, but also attaches a `raw` field holding the verbatim
+ *  OCPP-J frame matching the record's own decomposed fields -- real
+ *  `--trace-output` files always carry `raw`, and a fixture without it
+ *  under-tests the no-re-stringify constraint (Fix 5, issue #188 review).
+ *  Only the clean-session fixture below uses this; other fixtures in this
+ *  file are left untouched. */
+function recWithRaw(
+  cpId: string,
+  o: {
+    messageType: string;
+    messageId?: string;
+    action?: string;
+    payload?: unknown;
+    [key: string]: unknown;
+  },
+): string {
+  return rec(cpId, { ...o, raw: ocppJFrame(o) });
+}
+
 async function withCapturedIo<T>(
   fn: () => Promise<T>,
 ): Promise<{ result: T; stdout: string; stderr: string }> {
@@ -57,7 +96,7 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
     const outPath = path.join(dir, "report.md");
 
     const lines = [
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:00:00.000Z",
         direction: "cp-to-csms",
         messageType: "CALL",
@@ -65,7 +104,7 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
         action: "BootNotification",
         payload: { chargePointVendor: "V", chargePointModel: "M" },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:00:01.000Z",
         direction: "csms-to-cp",
         messageType: "CALLRESULT",
@@ -76,7 +115,7 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
           interval: 300,
         },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:00:02.000Z",
         direction: "cp-to-csms",
         messageType: "CALL",
@@ -84,14 +123,14 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
         action: "Authorize",
         payload: { idTag: "TAG1" },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:00:03.000Z",
         direction: "csms-to-cp",
         messageType: "CALLRESULT",
         messageId: "2",
         payload: { idTagInfo: { status: "Accepted" } },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         connectorId: 1,
         timestamp: "2026-01-01T00:00:04.000Z",
         direction: "cp-to-csms",
@@ -105,14 +144,14 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
           timestamp: "2026-01-01T00:00:04.000Z",
         },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:00:05.000Z",
         direction: "csms-to-cp",
         messageType: "CALLRESULT",
         messageId: "3",
         payload: { idTagInfo: { status: "Accepted" }, transactionId: 1001 },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         connectorId: 1,
         timestamp: "2026-01-01T00:00:30.000Z",
         direction: "cp-to-csms",
@@ -130,14 +169,14 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
           ],
         },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:00:31.000Z",
         direction: "csms-to-cp",
         messageType: "CALLRESULT",
         messageId: "4",
         payload: {},
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:01:00.000Z",
         direction: "cp-to-csms",
         messageType: "CALL",
@@ -151,7 +190,7 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
           reason: "Local",
         },
       }),
-      rec("CP001", {
+      recWithRaw("CP001", {
         timestamp: "2026-01-01T00:01:01.000Z",
         direction: "csms-to-cp",
         messageType: "CALLRESULT",
@@ -348,5 +387,136 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
 
     expect(code).toBe(1);
     expect(stderr).toContain("Error: cannot read trace file:");
+  });
+
+  it("disambiguates two cpIds that sanitize to the same filename instead of overwriting", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "analyze-collide-"));
+    const tracePath = path.join(dir, "trace.jsonl");
+    const outPath = path.join(dir, "out.md");
+
+    // "CP/A" and "CP_A" both sanitize to "CP_A" -- distinct chargePointIds,
+    // colliding filenames.
+    const lines = [
+      rec("CP/A", {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Authorize",
+        payload: { idTag: "TAG-SLASH" },
+      }),
+      rec("CP/A", {
+        timestamp: "2026-01-01T00:00:01.000Z",
+        direction: "csms-to-cp",
+        messageType: "CALLRESULT",
+        messageId: "1",
+        payload: { idTagInfo: { status: "Accepted" } },
+      }),
+      rec("CP_A", {
+        timestamp: "2026-01-01T00:00:02.000Z",
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Authorize",
+        payload: { idTag: "TAG-UNDERSCORE" },
+      }),
+    ];
+    fs.writeFileSync(tracePath, lines.join("\n") + "\n");
+
+    const {
+      result: code,
+      stdout,
+      stderr,
+    } = await withCapturedIo(() =>
+      runAnalyze({ file: tracePath, output: outPath }),
+    );
+
+    expect(code).toBe(0);
+
+    const firstPath = path.join(dir, "out.CP_A.md");
+    const secondPath = path.join(dir, "out.CP_A.2.md");
+    expect(fs.existsSync(firstPath)).toBe(true);
+    expect(fs.existsSync(secondPath)).toBe(true);
+
+    const firstContent = fs.readFileSync(firstPath, "utf8");
+    const secondContent = fs.readFileSync(secondPath, "utf8");
+    // Group iteration order follows first-appearance in the trace file:
+    // "CP/A" (lines 1-2) claims the plain path; "CP_A" (line 3) collides
+    // and lands in the disambiguated one. Each report names only its own
+    // station.
+    expect(firstContent).toContain("CP/A");
+    expect(firstContent).not.toContain("CP_A");
+    expect(secondContent).toContain("CP_A");
+    expect(secondContent).not.toContain("CP/A");
+
+    // Both success lines point at the distinct, actually-written paths.
+    expect(stdout).toContain(`Wrote report: ${firstPath}`);
+    expect(stdout).toContain(`Wrote report: ${secondPath}`);
+
+    // The disambiguation itself is noted on stderr, naming the original cpId.
+    expect(stderr).toContain("CP_A");
+    expect(stderr).toContain(secondPath);
+  });
+
+  it("isolates a per-group write failure: other groups still write, error on stderr, disclaimer still printed, exit code 1", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "analyze-writefail-"));
+    const tracePath = path.join(dir, "trace.jsonl");
+    const outPath = path.join(dir, "out.md");
+
+    const lines = [
+      rec("CP-A", {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Authorize",
+        payload: { idTag: "TAG-A" },
+      }),
+      rec("CP-A", {
+        timestamp: "2026-01-01T00:00:01.000Z",
+        direction: "csms-to-cp",
+        messageType: "CALLRESULT",
+        messageId: "1",
+        payload: { idTagInfo: { status: "Accepted" } },
+      }),
+      rec("CP-B", {
+        timestamp: "2026-01-01T00:00:02.000Z",
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Authorize",
+        payload: { idTag: "TAG-B" },
+      }),
+      rec("CP-B", {
+        timestamp: "2026-01-01T00:00:03.000Z",
+        direction: "csms-to-cp",
+        messageType: "CALLRESULT",
+        messageId: "1",
+        payload: { idTagInfo: { status: "Accepted" } },
+      }),
+    ];
+    fs.writeFileSync(tracePath, lines.join("\n") + "\n");
+
+    // Pre-create a DIRECTORY at CP-B's exact target path so writeFileSync
+    // throws EISDIR for that group only.
+    const cpBPath = path.join(dir, "out.CP-B.md");
+    fs.mkdirSync(cpBPath);
+
+    const { result: code, stderr } = await withCapturedIo(() =>
+      runAnalyze({ file: tracePath, output: outPath }),
+    );
+
+    expect(code).toBe(1);
+
+    const cpAPath = path.join(dir, "out.CP-A.md");
+    expect(fs.existsSync(cpAPath)).toBe(true);
+    expect(fs.readFileSync(cpAPath, "utf8")).toContain("CP-A");
+
+    expect(stderr).toContain("Error: cannot write report file:");
+    expect(stderr).toContain(cpBPath);
+    expect(stderr).toContain(ANALYZE_DISCLAIMER);
+    // Per-group summary lines still printed even though one group's write failed.
+    expect(stderr).toContain("CP-A:");
+    expect(stderr).toContain("CP-B:");
   });
 });

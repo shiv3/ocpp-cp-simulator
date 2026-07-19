@@ -345,9 +345,20 @@ independently:
   (the charge point id is inserted before the extension and sanitized for
   the filesystem: anything outside `[A-Za-z0-9._-]` becomes `_`). Records
   with no `chargePointId` at all are grouped together and reported as charge
-  point `(no chargePointId)`.
-- With no `--output`, all reports are printed to stdout in Markdown, each
-  under its own `# Charge point <id>` heading.
+  point `(no chargePointId)`. If two charge point ids sanitize to the same
+  filename (e.g. `CP/A` and `CP_A`), the later one in the trace gets a
+  numeric suffix instead of overwriting the first (`out.CP_A.html`,
+  `out.CP_A.2.html`, ...), and a note identifying the original charge point
+  id and the path used is printed to stderr.
+- With no `--output`: by default (no `--format`), all reports are printed to
+  stdout as Markdown, each under its own `# Charge point <id>` heading. With
+  an explicit `--format html`, each report is instead a self-contained HTML
+  document, and since an HTML document has no sensible place for that
+  heading, reports are separated by an `<!-- Charge point <id> -->` comment
+  marker instead (still one valid concatenated stream to redirect to a
+  file). An explicit `--format` always wins over the `--output` extension
+  (see [Formats](#formats) above) — this applies with or without
+  `--output`.
 
 ### Excluded records
 

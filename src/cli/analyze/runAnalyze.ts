@@ -66,6 +66,55 @@ export function perGroupOutputPath(
   return dir === "." ? fileName : path.join(dir, fileName);
 }
 
+/** Inserts a numeric suffix before `path`'s extension: `out.CP_A.html` ->
+ *  `out.CP_A.2.html`. Used to disambiguate a sanitized-filename collision
+ *  between two distinct chargePointIds (e.g. "CP/A" and "CP_A" both
+ *  sanitize to "CP_A"). */
+function withNumericSuffix(outPath: string, n: number): string {
+  const dir = path.dirname(outPath);
+  const ext = path.extname(outPath);
+  const base = path.basename(outPath, ext);
+  const fileName = `${base}.${n}${ext}`;
+  return dir === "." ? fileName : path.join(dir, fileName);
+}
+
+/** Computes each group's per-CP output path, in group iteration order,
+ *  disambiguating any sanitized-filename collision deterministically: the
+ *  first occupant of a filename keeps the plain path, later occupants get
+ *  `.2`, `.3`, ... suffixes inserted before the extension. Returns the
+ *  resolved path for each group plus a stderr note for any group that had
+ *  to be disambiguated (see Fix 1, issue #188 review). */
+function resolveGroupOutputPaths(
+  outputPath: string,
+  groups: Group[],
+): { path: string; note?: string }[] {
+  const used = new Set<string>();
+  const resolved: { path: string; note?: string }[] = [];
+  for (const group of groups) {
+    const candidate = perGroupOutputPath(outputPath, group.id);
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      resolved.push({ path: candidate });
+      continue;
+    }
+    let n = 2;
+    let disambiguated = withNumericSuffix(candidate, n);
+    while (used.has(disambiguated)) {
+      n++;
+      disambiguated = withNumericSuffix(candidate, n);
+    }
+    used.add(disambiguated);
+    resolved.push({
+      path: disambiguated,
+      note:
+        `Note: charge point "${group.id}" sanitizes to the same report ` +
+        `filename as another charge point; writing its report to ` +
+        `${disambiguated} instead of ${candidate}`,
+    });
+  }
+  return resolved;
+}
+
 export function appendMarkdownDisclaimer(markdown: string): string {
   const separator = markdown.endsWith("\n") ? "\n" : "\n\n";
   return `${markdown}${separator}${ANALYZE_DISCLAIMER}\n`;
@@ -164,11 +213,24 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
 
   const format = resolveReportFormat(opts.output, opts.format);
 
+  // Per-group output paths are computed up front, in group iteration order,
+  // so a sanitized-filename collision between two distinct chargePointIds
+  // (Fix 1, issue #188 review) is resolved deterministically before any
+  // file is written, rather than the second write silently clobbering the
+  // first.
+  const outputPaths: { path: string; note?: string }[] | undefined = opts.output
+    ? groups.length === 1
+      ? [{ path: opts.output }]
+      : resolveGroupOutputPaths(opts.output, groups)
+    : undefined;
+
   const stderrSummaryLines: string[] = [];
   const stdoutSections: string[] = [];
   const writtenPaths: string[] = [];
+  let hadWriteError = false;
 
-  for (const group of groups) {
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
     const { events, warnings } = parseOpenOcppTrace(group.jsonl);
     const sessions = buildSessionTimeline(events);
     const failures = detectFailures(events, sessions);
@@ -195,13 +257,24 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
       `${group.id}: ${events.length} events, ${failures.length} failures`,
     );
 
-    if (opts.output) {
-      const outPath =
-        groups.length === 1
-          ? opts.output
-          : perGroupOutputPath(opts.output, group.id);
-      fs.writeFileSync(outPath, content);
-      writtenPaths.push(outPath);
+    if (outputPaths) {
+      const { path: outPath, note } = outputPaths[i];
+      if (note) process.stderr.write(`${note}\n`);
+      // A write failure (Fix 2, issue #188 review) must not abort the run:
+      // other groups still get their reports, and the per-group summaries,
+      // exclusion counts, and disclaimer below are still printed. The run
+      // is still flagged as an operational error via the exit code.
+      try {
+        fs.writeFileSync(outPath, content);
+        writtenPaths.push(outPath);
+      } catch (err) {
+        hadWriteError = true;
+        process.stderr.write(
+          `Error: cannot write report file: ${outPath}: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+      }
     } else {
       // No --output: everything goes to stdout. The brief's default shape
       // is markdown with a per-group heading; a self-contained HTML report
@@ -234,5 +307,5 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   }
   process.stderr.write(`${ANALYZE_DISCLAIMER}\n`);
 
-  return 0;
+  return hadWriteError ? 1 : 0;
 }

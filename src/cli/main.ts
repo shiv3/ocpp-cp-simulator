@@ -781,7 +781,9 @@ Options:
   --trace-output <path>    Append every OCPP wire message as a JSONL trace
                            record (docs/trace-format.md) — works in REPL,
                            JSON, and daemon modes.
-  analyze <trace.jsonl> [--output <file>] [--format html|markdown]  Analyze a trace with OCPP DebugKit and write a report
+  analyze <trace.jsonl> [--output <file>] [--format html|markdown]
+                           Analyze a trace with OCPP DebugKit and write a
+                           report.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path

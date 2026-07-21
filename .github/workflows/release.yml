@@ -122,21 +122,24 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "OCPP CP Simulator ${{ github.ref_name }}"
-          releaseBody: |
-            See the assets to download this version and install.
-
-            ## What's Changed
-
-            ### Desktop App Downloads
-            - **macOS (Apple Silicon)**: `OCPP.CP.Simulator_*_aarch64.dmg`
-            - **macOS (Intel)**: `OCPP.CP.Simulator_*_x64.dmg`
-            - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `.msi`
-            - **Linux (Debian/Ubuntu)**: `OCPP.CP.Simulator_*_amd64.deb`
-            - **Linux (Fedora/RHEL)**: `OCPP.CP.Simulator-*.x86_64.rpm`
-
-            ### Web Version
-            The web version is available at: https://shiv3.github.io/ocpp-cp-simulator/
-          releaseDraft: true
+          # `releaseDraft: false` is load-bearing. By the time this workflow
+          # runs, the release for this tag is ALREADY PUBLISHED — publishing
+          # release-drafter's rolling draft is what creates the tag that
+          # triggers us. With `true`, tauri-action ignored that published
+          # release and parked the binaries in a NEW draft instead. Release
+          # Drafter then adopted that leftover draft on the next merge to main
+          # (it updates the newest existing draft rather than making its own),
+          # renamed it to the next version, and the operator published it — so
+          # every release shipped the PREVIOUS version's binaries: v0.7.2 got
+          # 0.7.1's, v0.7.1 got 0.7.0's, and v0.7.0 got none at all. Same class
+          # of bug as #121, where two mechanisms both drove Pages deploys.
+          releaseDraft: false
+          # No `releaseBody`: release-drafter owns the notes (its template
+          # already emits "## What's Changed", which update-release-notes below
+          # keys off to inject the commit list). Passing a body here would
+          # clobber those categorized notes with a static blurb. The download
+          # table that used to live here now lives in the drafter template, so
+          # it lands on every release regardless of who created it.
           prerelease: false
           args: ${{ matrix.args }}
 
@@ -156,11 +159,12 @@ jobs:
           script: |
             const tag = context.ref.replace('refs/tags/', '');
 
-            // tauri-action creates the release as a draft, and
-            // getReleaseByTag() (GET /releases/tags/{tag}) does NOT return
-            // draft releases — it 404s, which failed this whole job on every
-            // release. List releases (which includes drafts) and match on
-            // tag_name instead.
+            // Match on tag_name from listReleases rather than
+            // getReleaseByTag(). The release is published by the time we run
+            // (see releaseDraft above), so getReleaseByTag() would now work —
+            // but listReleases also surfaces drafts, which keeps this job
+            // working if a tag is ever pushed directly without publishing a
+            // drafter release first.
             const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,

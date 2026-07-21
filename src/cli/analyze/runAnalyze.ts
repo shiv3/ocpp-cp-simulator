@@ -20,20 +20,18 @@ import * as path from "path";
 import { splitTraceJsonl } from "./splitTrace";
 import type { AnalysisResult } from "@ocpp-debugkit/toolkit/reporter";
 
+// Shared with the web console's Session Analysis tab (issue #188 PoC item
+// 8) -- moved to a browser-safe module (no node imports) so both surfaces
+// use the same verbatim text; re-exported here so existing imports of
+// `ANALYZE_DISCLAIMER` from this module keep working unchanged.
+import { ANALYZE_DISCLAIMER } from "../../trace/analysisDisclaimer";
+export { ANALYZE_DISCLAIMER };
+
 export interface AnalyzeOptions {
   file: string;
   output?: string;
   format?: "html" | "markdown";
 }
-
-/**
- * Issue #188 PoC item 8: the detector only recognizes a fixed catalog of
- * known failure shapes -- it is not a conformance checker. Printed
- * unconditionally (stderr, every markdown report, every HTML report) so a
- * clean run can never be read as "this station is OCPP compliant".
- */
-export const ANALYZE_DISCLAIMER =
-  'Failure-pattern detection is not OCPP compliance certification: "no known failure detected" does not mean "OCPP compliant".';
 
 /** Label for the bucket of records with no `chargePointId` at all. */
 const UNATTRIBUTED_GROUP_LABEL = "(no chargePointId)";

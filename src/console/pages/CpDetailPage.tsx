@@ -37,8 +37,9 @@ import { useCpConfigActions } from "./dashboard/useCpConfigActions";
 const StateTransitionViewer = lazy(
   () => import("@/components/state-transition/StateTransitionViewer"),
 );
+const SessionAnalysisPanel = lazy(() => import("./cp/SessionAnalysisPanel"));
 
-type TabValue = "transactions" | "logs" | "config" | "diagnostics";
+type TabValue = "transactions" | "logs" | "config" | "diagnostics" | "analysis";
 
 /**
  * Builds the `ChargePointConfig` shape `ChargePointConfigModal` expects,
@@ -319,6 +320,20 @@ const CpDetailPage: React.FC = () => {
         </TabsContent>
         <TabsContent value="logs">
           <LogViewer logs={view.logs} onClear={view.clearLogs} />
+        </TabsContent>
+        <TabsContent value="analysis">
+          <Suspense
+            fallback={
+              <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
+                Loading session analysis…
+              </div>
+            }
+          >
+            <SessionAnalysisPanel
+              cpId={cpId}
+              ocppVersion={resolvedOcppVersion}
+            />
+          </Suspense>
         </TabsContent>
         <TabsContent value="config">
           <ConfigTab

@@ -88,8 +88,14 @@ jobs:
             # main       → `main` + `sha-<short>` + `latest`
             # feat/...   → branch-slug + `sha-<short>` (no `latest`)
             # v1.2.3 tag → `1.2.3` + `1.2` + `1` (semver release pins)
+            #
+            # `sha-<short>` is branch-builds ONLY: a `vX.Y.Z` tag build runs a
+            # version-stamped rebuild of the same commit, and without the
+            # enable guard it would push the same `sha-<short>` tag a second
+            # time and clobber the branch image the sha pin already points at
+            # (last writer wins — happened on v0.7.4).
             type=ref,event=branch
-            type=sha,format=short
+            type=sha,format=short,enable=${{ github.ref_type == 'branch' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}

@@ -6,19 +6,26 @@ Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/
 
 ### Image tags
 
-| Tag                      | Moves?    | Use it for                                                       |
-| ------------------------ | --------- | ---------------------------------------------------------------- |
-| `latest`                 | mutable   | Bleeding edge — tracks the newest `main` build.                  |
-| `main`                   | mutable   | Same as `latest`; explicit about the source branch.              |
-| `sha-<short>`            | immutable | Pin to one exact `main` commit.                                  |
-| `X.Y.Z` (e.g. `1.2.3`)   | immutable | **Reproducible release pin** — recommended for IaC / production. |
-| `X.Y` (e.g. `1.2`) / `X` | mutable   | Auto-track patch / minor releases within a version line.         |
+| Tag                      | Moves?    | Use it for                                                                                                  |
+| ------------------------ | --------- | ----------------------------------------------------------------------------------------------------------- |
+| `latest`                 | mutable   | Bleeding edge — tracks the newest `main` build.                                                             |
+| `main`                   | mutable   | Same as `latest`; explicit about the source branch.                                                         |
+| `sha-<short>`            | immutable | Pin to one exact branch commit (`main` or a published feature branch) — always the un-stamped branch build. |
+| `X.Y.Z` (e.g. `1.2.3`)   | immutable | **Reproducible release pin** — recommended for IaC / production.                                            |
+| `X.Y` (e.g. `1.2`) / `X` | mutable   | Auto-track patch / minor releases within a version line.                                                    |
 
 Semver tags are published when a `vX.Y.Z` git tag is pushed (the same tag that cuts the desktop-app [release](../.github/workflows/release.yml)). For production, pin to a full `X.Y.Z` (or a digest) rather than `latest`/`main`:
 
 ```sh
 docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
 ```
+
+> **Why `X.Y.Z` and `sha-<short>`/`latest` digests differ for the same commit:**
+> a release-tag build stamps the semver into `package.json` before building so
+> the CLI and web-console footer report the real version, then rebuilds the
+> image. The stamped bytes make it a different image (different digest) from
+> the `main` build of the same commit — expected, not a packaging error.
+> `sha-<short>` always refers to the un-stamped branch build.
 
 ## Quick start
 

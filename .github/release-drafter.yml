@@ -69,7 +69,7 @@ template: |
 
   - **macOS (Apple Silicon)**: `OCPP.CP.Simulator_*_aarch64.dmg`
   - **macOS (Intel)**: `OCPP.CP.Simulator_*_x64.dmg`
-  - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `.msi`
+  - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `OCPP.CP.Simulator_*_x64_en-US.msi`
   - **Linux (Debian/Ubuntu)**: `OCPP.CP.Simulator_*_amd64.deb`
   - **Linux (Fedora/RHEL)**: `OCPP.CP.Simulator-*.x86_64.rpm`
 

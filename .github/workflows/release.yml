@@ -193,11 +193,20 @@ jobs:
                 const commitList = diff.commits
                   .map((c) => `- ${c.commit.message.split('\n')[0]} (${c.sha.substring(0, 7)})`)
                   .join('\n');
+                // Normally the body came from release-drafter and already has
+                // a "## What's Changed" heading to slot the commits under. But
+                // if a tag is pushed directly rather than by publishing a
+                // drafter release, tauri-action creates the release itself with
+                // an empty body — so add the heading instead of silently
+                // dropping the commit list.
+                const section = `### Commits (since ${prev.tag_name})\n${commitList}\n`;
                 if (commitList && body.includes("## What's Changed")) {
                   body = body.replace(
                     "## What's Changed",
-                    `## What's Changed\n\n### Commits (since ${prev.tag_name})\n${commitList}\n`,
+                    `## What's Changed\n\n${section}`,
                   );
+                } else if (commitList) {
+                  body = `${body}${body ? '\n\n' : ''}## What's Changed\n\n${section}`;
                 }
               } catch (e) {
                 core.warning(`Failed to get commit history: ${e.message}`);

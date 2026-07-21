@@ -55,6 +55,12 @@ COPY src ./src
 # build time, so the vendor tree must be present or `bun run build` fails
 # with "Could not resolve ../../../vendor/ocpp-schemas/...".
 COPY vendor ./vendor
+# src/scenario/scenarioSchemaValidator.ts imports the scenario JSON Schema
+# (../../schema/scenario.schema.json, #214) and reaches the browser bundle via
+# src/utils/scenarioFile.ts -> ScenarioLibraryPage. Vite resolves that JSON
+# import at build time, so schema/ must be present or `bun run build` fails
+# with "[UNRESOLVED_IMPORT] Could not resolve ../../schema/scenario.schema.json".
+COPY schema ./schema
 
 # VITE_HEALTH_PATH is read by src/data/healthPath.ts at build time and
 # inlined into the bundle so the static UI knows which path to probe for
@@ -103,6 +109,18 @@ COPY src/data ./src/data
 # scenarioTemplates.ts left the daemon crashing on boot with
 # "Cannot find module './scenarios/essential-cp-behavior.json'".
 COPY src/utils ./src/utils
+# src/cli/server/{socketServer,startServer,RegistryChargePointService}.ts all
+# statically import ../../scenario/scenarioSchemaValidator (#214), which in turn
+# imports ../../schema/scenario.schema.json. Both must ship or the daemon
+# crashes on boot with "Cannot find module '../../scenario/
+# scenarioSchemaValidator'" — the same class of miss as src/protocol and
+# src/utils above. package.json's `files` already lists them for the npm
+# package; this keeps the image in step.
+COPY src/scenario ./src/scenario
+COPY schema ./schema
+# src/cli/analyze/runAnalyze.ts imports ../../trace/analysisDisclaimer (#188),
+# so the `analyze` subcommand's module graph is pulled in on CLI startup.
+COPY src/trace ./src/trace
 
 # Built-in scenario examples — kept handy under /app/docs.
 COPY docs/examples/scenarios ./docs/examples/scenarios

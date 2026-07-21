@@ -663,25 +663,25 @@ export function createHttpHandlers(deps: {
       }
 
       // Buffer the body (arrayBuffer), then reconstruct the Request.
-      return readArrayBufferWithLimit(req, MAX_MCP_REQUEST_BODY_BYTES).then(
-        async (buffer) => {
+      // The finally-decrement must cover EVERY exit — including a rejected
+      // body read (client aborts mid-upload) — or inFlight pins at the cap
+      // and the endpoint 429s forever.
+      return readArrayBufferWithLimit(req, MAX_MCP_REQUEST_BODY_BYTES)
+        .then((buffer) => {
           if (buffer === null) {
-            if (mcpLimiter) mcpLimiter.inFlight -= 1;
             return new Response("request body is too large", { status: 413 });
           }
-          try {
-            const reqWithBody = new Request(req.url, {
-              method: req.method,
-              headers: req.headers,
-              body: buffer.byteLength > 0 ? buffer : null,
-            });
-            const result = await mcpConfig.handler(reqWithBody);
-            return result;
-          } finally {
-            if (mcpLimiter) mcpLimiter.inFlight -= 1;
-          }
-        },
-      );
+          const reqWithBody = new Request(req.url, {
+            method: req.method,
+            headers: req.headers,
+            body: buffer.byteLength > 0 ? buffer : null,
+          });
+          return mcpConfig.handler(reqWithBody);
+        })
+        .catch(() => new Response("internal error", { status: 500 }))
+        .finally(() => {
+          if (mcpLimiter) mcpLimiter.inFlight -= 1;
+        });
     }
 
     if (url.pathname === "/v1" || url.pathname.startsWith("/v1/")) {

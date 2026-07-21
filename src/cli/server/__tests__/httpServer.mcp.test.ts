@@ -237,6 +237,59 @@ describe("httpServer MCP route", () => {
     expect((res as Response).status).toBe(413);
   });
 
+  it("releases the in-flight slot when the body read rejects (aborted upload)", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const lifecycle = createLifecycle({ pidPath: null, registry });
+    const mcpHandler = createMcpHandler(
+      createRuntimeDeps({ registry, bus, database: null }),
+    );
+    const handlers = createHttpHandlers({
+      registry,
+      bus,
+      lifecycle,
+      database: null,
+      healthPath: "/v1/healthz",
+      webConsoleBasicAuth: null,
+      // ratePerSec high enough that only the in-flight cap could 429.
+      mcp: { handler: mcpHandler, ratePerSec: 100, inflightCap: 1 },
+    });
+
+    // A body stream that errors mid-read, like a client aborting an upload.
+    const abortedBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{"));
+        controller.error(new Error("client aborted"));
+      },
+    });
+    const aborted = new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: abortedBody,
+      // @ts-expect-error duplex is required for streaming bodies but is
+      // missing from the RequestInit type in this TS lib version.
+      duplex: "half",
+    });
+    const abortedRes = await Promise.resolve(
+      handlers.fetch(aborted, stubServer),
+    );
+    expect((abortedRes as Response).status).toBe(500);
+
+    // The slot must be free again: a well-formed follow-up is not 429.
+    const followUp = new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    const followUpRes = await Promise.resolve(
+      handlers.fetch(followUp, stubServer),
+    );
+    expect((followUpRes as Response).status).not.toBe(429);
+  });
+
   it("enforces rate limiting with injected limits", async () => {
     const bus = new EventBus();
     const registry = new CPRegistry(bus, null);

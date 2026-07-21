@@ -9,9 +9,11 @@
 #                      comments together.
 #   * docker         — the oven/bun base image in the Dockerfile.
 #
-# Non-major updates are grouped into a single weekly PR per ecosystem to keep
-# the review load low; majors still come as individual PRs so breaking changes
-# get their own scrutiny.
+# Every update — majors included — is grouped into a single weekly PR per
+# ecosystem to keep the review load low. Omitting `update-types` from a group
+# is what pulls majors in; splitting them out again just means three or four
+# PRs land the same morning, and the breaking change gets read no more closely
+# for having its own branch. Read the group PR's changelog table instead.
 version: 2
 updates:
   - package-ecosystem: "bun"
@@ -20,10 +22,9 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      js-minor-and-patch:
-        update-types:
-          - "minor"
-          - "patch"
+      js-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -38,3 +39,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      docker:
+        patterns:
+          - "*"

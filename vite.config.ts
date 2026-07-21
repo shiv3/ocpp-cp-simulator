@@ -10,12 +10,20 @@ const pkgVersion = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 ).version as string;
 
+// The GitHub Pages deploy builds from `main`, not a tag, so there is no semver
+// to stamp into package.json (`npm version` only takes semver anyway). It sets
+// APP_COMMIT instead and the footer falls back to the short SHA, which is what
+// actually identifies a rolling deploy. Truncated here rather than in the
+// workflow because GitHub expressions can't substring `github.sha`.
+const appCommit = (process.env.APP_COMMIT ?? "").slice(0, 7);
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   base: process.env.VITE_BASE_URL || "./",
   define: {
     __APP_VERSION__: JSON.stringify(pkgVersion),
+    __APP_COMMIT__: JSON.stringify(appCommit),
   },
   // The Tauri dev shell pins its devUrl to this port; if some unrelated
   // Vite server already holds 5173 we don't want to silently float to

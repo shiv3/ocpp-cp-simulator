@@ -43,8 +43,13 @@ jobs:
           node-version: lts/*
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      # Pages builds from `main`, not a tag, so package.json stays 0.0.0 and the
+      # footer would render no build identifier. Stamp the short SHA instead —
+      # it's what actually identifies a rolling deploy (issue #93).
       - name: Build
         run: VITE_BASE_URL="/ocpp-cp-simulator" bun run build
+        env:
+          APP_COMMIT: ${{ github.sha }}
       - name: Copy index.html to 404.html for SPA routing
         run: cp dist/index.html dist/404.html
       - name: Upload Pages artifact

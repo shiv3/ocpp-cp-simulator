@@ -24,12 +24,21 @@ const GithubMark: React.FC<{ className?: string }> = ({ className }) => (
  * The version is injected at build time (`__APP_VERSION__`, see vite.config).
  * It's hidden for the unstamped dev default ("0.0.0") so we never show a
  * meaningless "v0.0.0".
+ *
+ * Only tag-triggered builds (Docker / Tauri / CLI release) carry a semver. The
+ * GitHub Pages deploy builds from `main`, so it stamps `__APP_COMMIT__` with
+ * the short SHA instead and we fall back to that — otherwise Pages would show
+ * no build identifier at all.
  */
 const Footer: React.FC = () => {
+  const commit =
+    typeof __APP_COMMIT__ !== "undefined" && __APP_COMMIT__ !== ""
+      ? __APP_COMMIT__
+      : null;
   const version =
     typeof __APP_VERSION__ !== "undefined" && __APP_VERSION__ !== "0.0.0"
       ? `v${__APP_VERSION__}`
-      : null;
+      : commit;
 
   return (
     <footer className="mt-auto border-t border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 px-4 py-2">

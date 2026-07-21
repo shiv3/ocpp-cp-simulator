@@ -114,7 +114,7 @@ export interface SocketIoDeps {
   readonly registryEvents?: RegistryEventBridge | null;
 }
 
-interface RuntimeSocketIoDeps extends SocketIoDeps {
+export interface RuntimeSocketIoDeps extends SocketIoDeps {
   readonly configRepository: SocketConfigRepository;
   readonly chargePointService: RegistryChargePointService;
   readonly registryEvents: RegistryEventBridge | null;
@@ -246,7 +246,7 @@ export function registerSocketHandlers(
   });
 }
 
-function createRuntimeDeps(
+export function createRuntimeDeps(
   deps: SocketIoDeps,
   registryEvents: RegistryEventBridge | null = deps.registryEvents ?? null,
 ): RuntimeSocketIoDeps {
@@ -331,9 +331,9 @@ async function dispatchRpc(
   return parsedResult.data;
 }
 
-async function dispatchValidatedRpc(
-  socket: SocketIoSocket,
-  state: SocketRpcState,
+// Socket-free RPC dispatch for use by non-socket transports (e.g., MCP HTTP endpoint).
+// Throws RpcFailure for events.subscribe/unsubscribe (socket-only operations).
+export async function dispatchRpcCore(
   deps: RuntimeSocketIoDeps,
   method: RpcMethod,
   cpId: string | undefined,
@@ -381,10 +381,15 @@ async function dispatchValidatedRpc(
     case "server.shutdown":
       return shutdownServer(deps);
     case "events.subscribe":
-      return subscribeSocket(socket, state, deps, rawParams);
+      throw new RpcFailure(
+        "not_found",
+        "events.subscribe/unsubscribe are only available over socket.io",
+      );
     case "events.unsubscribe":
-      unsubscribeSocket(socket, state, rawParams);
-      return { ok: true };
+      throw new RpcFailure(
+        "not_found",
+        "events.subscribe/unsubscribe are only available over socket.io",
+      );
     default:
       break;
   }
@@ -412,6 +417,47 @@ async function dispatchValidatedRpc(
   return method === "status"
     ? statusToWire(result as Parameters<typeof statusToWire>[0])
     : result;
+}
+
+async function dispatchValidatedRpc(
+  socket: SocketIoSocket,
+  state: SocketRpcState,
+  deps: RuntimeSocketIoDeps,
+  method: RpcMethod,
+  cpId: string | undefined,
+  rawParams: unknown,
+): Promise<unknown> {
+  switch (method) {
+    case "events.subscribe":
+      return subscribeSocket(socket, state, deps, rawParams);
+    case "events.unsubscribe":
+      unsubscribeSocket(socket, state, rawParams);
+      return { ok: true };
+    default:
+      return dispatchRpcCore(deps, method, cpId, rawParams);
+  }
+}
+
+// Socket-free RPC runner for non-socket transports (e.g., MCP HTTP endpoint).
+// Mirrors dispatchRpc behavior exactly, minus the socket and rate-limiting.
+export async function runRpc(
+  deps: RuntimeSocketIoDeps,
+  request: { cpId?: string; method: string; params?: unknown },
+): Promise<unknown> {
+  const { method, cpId } = request;
+  const rawParams = request.params ?? {};
+
+  if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
+
+  const params = METHODS[method].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  const result = await withRpcDeadline(
+    dispatchRpcCore(deps, method, cpId, rawParams),
+  );
+  const parsedResult = METHODS[method].result.safeParse(result);
+  if (!parsedResult.success) throw new Error("RPC result failed validation");
+  return parsedResult.data;
 }
 
 async function listCps(
@@ -1750,7 +1796,7 @@ function withRpcDeadline<T>(promise: Promise<T>): Promise<T> {
   });
 }
 
-function errorCodeFrom(err: unknown): RpcErrorCode {
+export function errorCodeFrom(err: unknown): RpcErrorCode {
   if (err instanceof RpcFailure) return err.code;
   return "internal";
 }
@@ -1774,7 +1820,7 @@ function errorAck(
  * mapped in runFacadeOperation) carry a specific, non-secret message naming
  * what's wrong — thread that through to the client instead of discarding it.
  */
-function rpcFailureMessage(err: unknown): string | undefined {
+export function rpcFailureMessage(err: unknown): string | undefined {
   if (err instanceof RpcFailure && err.message) {
     return redactSensitiveText(err.message);
   }

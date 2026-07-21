@@ -191,15 +191,16 @@ Security extension configuration keys include `SecurityProfile`, `AuthorizationK
 
 The daemon exposes a single Socket.IO control connection and emits structured logs, making it a scriptable OCPP stub that any AI agent or test harness can drive.
 
-| Feature                              | What it enables                                                 |
-| ------------------------------------ | --------------------------------------------------------------- |
-| `--log-format json`                  | One JSON object per line — easy to parse or feed to an LLM      |
-| Socket.IO `rpc` event                | Send OCPP commands from any language or agent                   |
-| Scenario templates (JSON)            | Declare a full charging flow, inject at runtime without restart |
-| Socket.IO `event` push + rooms       | Subscribe to real-time OCPP events for assertions               |
-| `GET /v1/healthz`                    | Unauthenticated local/remote detection and Docker healthcheck   |
-| `--state-db`                         | Persist CP state across restarts — no re-bootstrap needed       |
-| `socket.io-client` + `zod` contracts | Use the same typed contract as the browser UI and CLI           |
+| Feature                              | What it enables                                                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `--log-format json`                  | One JSON object per line — easy to parse or feed to an LLM                                                                 |
+| Socket.IO `rpc` event                | Send OCPP commands from any language or agent                                                                              |
+| `POST /mcp` endpoint                 | Drive the simulator via MCP clients (Claude Code, etc.) — see [docs/server.md § MCP Endpoint](docs/server.md#mcp-endpoint) |
+| Scenario templates (JSON)            | Declare a full charging flow, inject at runtime without restart                                                            |
+| Socket.IO `event` push + rooms       | Subscribe to real-time OCPP events for assertions                                                                          |
+| `GET /v1/healthz`                    | Unauthenticated local/remote detection and Docker healthcheck                                                              |
+| `--state-db`                         | Persist CP state across restarts — no re-bootstrap needed                                                                  |
+| `socket.io-client` + `zod` contracts | Use the same typed contract as the browser UI and CLI                                                                      |
 
 **Minimal setup for an AI agent:**
 

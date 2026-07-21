@@ -29,6 +29,7 @@
         "jotai-location": "^0.6.2",
         "jotai-zustand": "^0.6.0",
         "lucide-react": "^1.25.0",
+        "mcp-lite": "^0.10.0",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
         "react-robot": "^1.2.1",
@@ -1015,6 +1016,8 @@
     "magicast": ["magicast@0.5.3", "", { "dependencies": { "@babel/parser": "^7.29.3", "@babel/types": "^7.29.0", "source-map-js": "^1.2.1" } }, "sha512-pVKE4UdSQ7DvHzivsCIFx2BJn1mHG6KsyrFcaxFx6tONdneEuThrDx0Cj3AMg58KyN4pzYT+LHOotxDQDjNvkw=="],
 
     "make-dir": ["make-dir@4.0.0", "", { "dependencies": { "semver": "^7.5.3" } }, "sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw=="],
+
+    "mcp-lite": ["mcp-lite@0.10.0", "", { "dependencies": { "@standard-schema/spec": "^1.0.0" } }, "sha512-ts1PgXO5+MER3W77YjYUMqngF45l6eyh2V4Vc0O4S+oKU55ghvd3Q+/XpA4kqtMISqI9v5s1E8pChDICudxwXQ=="],
 
     "mdn-data": ["mdn-data@2.27.1", "", {}, "sha512-9Yubnt3e8A0OKwxYSXyhLymGW4sCufcLG6VdiDdUGVkPhpqLxlvP5vl1983gQjJl3tqbrM731mjaZaP68AgosQ=="],
 

@@ -58,13 +58,14 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 
 ## HTTP Surfaces
 
-| Method | Path                                  | Auth                                          | Returns / purpose                                                                                     |
-| ------ | ------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/healthz`                         | Exempt                                        | `{ "ok": true }`; used for browser Local/Remote detection, readiness checks, and Docker healthchecks. |
-| GET    | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling / upgrade transport. Not a REST control endpoint.                                   |
-| POST   | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling transport. Not a REST control endpoint.                                             |
-| POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP SOAP (1.2 / 1.5 / 1.6S) CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.        |
-| GET    | static asset URL                      | HTTP Basic Auth if enabled                    | Web console assets when `--web-console` is enabled. Unknown page paths fall back to `index.html`.     |
+| Method | Path                                  | Auth                                          | Returns / purpose                                                                                                 |
+| ------ | ------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/healthz`                         | Exempt                                        | `{ "ok": true }`; used for browser Local/Remote detection, readiness checks, and Docker healthchecks.             |
+| GET    | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling / upgrade transport. Not a REST control endpoint.                                               |
+| POST   | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling transport. Not a REST control endpoint.                                                         |
+| POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP SOAP (1.2 / 1.5 / 1.6S) CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.                    |
+| POST   | `/mcp`                                | HTTP Basic Auth if enabled                    | MCP Streamable HTTP endpoint (tools-only, stateless JSON-RPC). Connectable via `claude mcp add --transport http`. |
+| GET    | static asset URL                      | HTTP Basic Auth if enabled                    | Web console assets when `--web-console` is enabled. Unknown page paths fall back to `index.html`.                 |
 
 Every other `/v1/*` path returns `404`.
 
@@ -160,6 +161,71 @@ Runtime packages for this control plane are `socket.io`,
 | `server.shutdown`    | `{}`                                                                                                                                                                                                  | Request daemon shutdown.                                                              |
 | `events.subscribe`   | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Join event rooms and return an atomic snapshot.                                       |
 | `events.unsubscribe` | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Leave an event room.                                                                  |
+
+## MCP Endpoint
+
+The simulator exposes a Model Context Protocol (MCP) endpoint at `POST /mcp` for AI agents
+and external clients. The endpoint is stateless, Streamable HTTP, and tools-only — no resources,
+prompts, or server-to-client event push. It uses the same Basic Auth and CORS gates as the rest
+of the HTTP surface.
+
+Connect any MCP-compatible client (Claude Code, etc.) with:
+
+```bash
+# Default daemon (http://127.0.0.1:9700)
+claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp
+
+# With Basic Auth configured
+claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
+  --header "Authorization: Basic $(echo -n 'user:pass' | base64)"
+```
+
+### Curated Tools
+
+The endpoint exposes 16 curated tools wrapping the daemon's RPC methods:
+
+| Tool                    | RPC Method                | Params                                                                                            |
+| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| `cp_list`               | `cp.list`                 | —                                                                                                 |
+| `cp_create`             | `cp.create`               | `cpId`, `wsUrl`, `ocppVersion?`, `connectors?`, `vendor?`, `model?`, `basicAuth?`, `autoConnect?` |
+| `cp_delete`             | `cp.delete`               | `cpId`                                                                                            |
+| `cp_connect`            | `connect`                 | `cpId`                                                                                            |
+| `cp_disconnect`         | `disconnect`              | `cpId`                                                                                            |
+| `cp_status`             | `status`                  | `cpId`                                                                                            |
+| `start_transaction`     | `start_transaction`       | `cpId`, `connector`, `tagId`                                                                      |
+| `stop_transaction`      | `stop_transaction`        | `cpId`, `connector`                                                                               |
+| `authorize`             | `authorize`               | `cpId`, `tagId`                                                                                   |
+| `set_connector_status`  | `update_connector_status` | `cpId`, `connector`, `status`, `errorCode?`                                                       |
+| `set_meter_value`       | `set_meter_value`         | `cpId`, `connector`, `value`                                                                      |
+| `send_meter_value`      | `send_meter_value`        | `cpId`, `connector`                                                                               |
+| `scenario_templates`    | `scenario.templates`      | —                                                                                                 |
+| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`                                                                 |
+| `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                 |
+| `get_logs`              | `logs.get`                | `cpId`, `limit?`                                                                                  |
+
+### Generic Escape Hatch
+
+For any RPC method not in the curated set, use the generic tools:
+
+- **`list_methods`** — no params → returns all method names with one-line descriptions and whether `cpId` is required. Pass `{ method }` to retrieve the full JSON Schema for one method.
+- **`call_method`** — `{ method, cpId?, params? }` → dispatches any RPC method. Rejects `events.subscribe` / `events.unsubscribe` (socket-bound) with an error. The description warns that `server.shutdown` and `state.reset` are destructive operations.
+
+### Error Handling
+
+Tool-level failures return an MCP tool result with `isError: true` and text in the format
+`"<code>: <message>"`, using the same error codes as the Socket.IO RPC:
+`not_found`, `invalid_params`, `timeout`, `internal`, `unauthorized`.
+
+Transport-level errors (malformed JSON-RPC, invalid auth, rate limit) are handled by the MCP
+protocol layer. Every call is subject to a 30-second deadline; timeout failures surface as
+`timeout: <message>`.
+
+### Limits
+
+- Request body: 1 MB cap → `413 Payload Too Large`.
+- Rate limit: a dedicated token bucket with the same numbers as the Socket.IO RPC (100 calls/s refill, 64 in-flight) → `429 Too Many Requests`.
+- Non-POST requests to `/mcp` → `405 Method Not Allowed` (no server-initiated SSE stream, no sessions).
+- Per-call deadline: 30 seconds (same as Socket.IO RPC).
 
 ## Event Push and Rooms
 

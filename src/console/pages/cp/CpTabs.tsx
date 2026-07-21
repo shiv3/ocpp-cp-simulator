@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const TAB_ITEMS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "transactions", label: "Transactions" },
   { value: "logs", label: "Message Log" },
+  { value: "analysis", label: "Session Analysis" },
   { value: "config", label: "Configuration" },
   { value: "diagnostics", label: "Diagnostics" },
 ];

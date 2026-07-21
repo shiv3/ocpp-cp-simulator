@@ -301,13 +301,21 @@ on a mismatch.
 
 ```bash
 ocpp-cp-sim analyze <trace.jsonl> [--output <file>] [--format html|markdown]
+ocpp-cp-sim analyze --from-daemon --cp-id <id> [--http-url <url>]
+                     [--http-basic-auth-user <u> --http-basic-auth-pass <p>]
+                     [--output <file>] [--format html|markdown]
 ```
 
 Runs [OCPP DebugKit](https://github.com/ocpp-debugkit/toolkit)'s
-failure-pattern detection over a v1.1 trace file
+failure-pattern detection over a v1.1 trace
 ([docs/trace-format.md](./trace-format.md)) and writes a report. Unlike every
-mode above, `analyze` never bootstraps a charge point, opens a socket, or
-starts a server — it only reads the given file and writes a report.
+mode above, `analyze` never bootstraps a charge point or starts a server. In
+its default form it only reads the given file and writes a report; with
+`--from-daemon` it instead makes the same kind of short-lived client
+connection as `--send`/`--stop`/`--events` to pull the trace from a running
+daemon, then closes it — see
+[Reading from a running daemon](#reading-from-a-running-daemon---from-daemon)
+below.
 
 ```bash
 # Markdown to stdout (default)
@@ -318,7 +326,64 @@ ocpp-cp-sim analyze trace.jsonl --output report.html
 
 # Force a format regardless of the --output extension
 ocpp-cp-sim analyze trace.jsonl --output report.txt --format html
+
+# From a running daemon's stored logs, no trace file needed
+ocpp-cp-sim analyze --from-daemon --cp-id CP001 --output report.html
 ```
+
+### Reading from a running daemon (`--from-daemon`)
+
+A trace file only exists if the daemon was started with `--trace-output`.
+An operator running a long-lived daemon — in Kubernetes, say — usually
+wasn't, and restarting it just to get one loses whatever session is in
+flight and starts the trace from empty. `--from-daemon` avoids both: the
+daemon already persists every log line it produces and exposes them per
+charge point over the `logs.get` RPC
+([server.md → Related RPC methods](./server.md#related-rpc-methods)), and
+that log line shape (`{timestamp, level, type, message, cpId}`) is exactly
+what [`logEntryToTrace.ts`](../src/trace/logEntryToTrace.ts) already adapts
+into trace records for `--log-format json` and the browser log-viewer
+download (see
+[trace-format.md → Producing records](./trace-format.md#producing-records)).
+`--from-daemon` is that same adapter run against the live log store, not a
+second trace format, and it requires no daemon restart.
+
+- `--cp-id <id>` is required: `logs.get` is scoped to one charge point, the
+  same way `--send`/`--events` are scoped by `--cp-id`. `analyze` rejects
+  `--from-daemon` with no `--cp-id`, and rejects `--cp-id` /
+  `--http-url` / `--http-basic-auth-*` without `--from-daemon` — a daemon
+  and a trace file are two different trace sources, and silently preferring
+  one over the other would hide which of them a report actually describes,
+  so a positional trace file combined with `--from-daemon` is also rejected.
+- `--http-url <url>` targets the daemon, same as the other client modes
+  (default `http://127.0.0.1:9700`).
+- `--http-basic-auth-user <u>` / `--http-basic-auth-pass <p>` authenticate
+  against a daemon started with `--web-console-basic-auth-*`, exactly like
+  the top-level `--http-basic-auth-*` flags for `--send`/`--stop`/`--events`
+  do; the two must be given together, since a half-specified credential is a
+  misconfiguration, not a request for anonymous access.
+- `analyze --from-daemon` only sees what the log store still holds: with no
+  `--state-db`, that's the daemon's bounded in-memory Logger buffer, which
+  is lost on restart; with `--state-db`, it's the persisted `logs` table,
+  which can itself be trimmed by the `logs.clear` RPC or `state.reset`
+  ([server.md → Related RPC methods](./server.md#related-rpc-methods)). A
+  session whose log lines have aged out or were cleared is invisible to
+  `analyze --from-daemon` the same way it would be to any other consumer of
+  `logs.get` — a fresh `--trace-output` file remains the only source
+  guaranteed to have everything captured since the process last
+  (re)started.
+- If the daemon has no stored OCPP wire log lines for that charge point at
+  all — e.g. its logs are only scenario/diagnostic chatter, which
+  `logEntryToTrace.ts` maps to nothing — `analyze` exits 1 instead of
+  producing an empty report:
+
+  ```
+  Error: the daemon has no stored OCPP wire logs for charge point CP001 (nothing to analyze)
+  ```
+
+  A connection or auth failure while fetching the logs (daemon unreachable,
+  wrong `--http-basic-auth-*`, unknown `--cp-id`) is also reported and exits
+  1, prefixed `Error: cannot read logs from daemon: `.
 
 ### Formats
 

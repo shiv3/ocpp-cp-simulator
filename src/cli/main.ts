@@ -784,6 +784,16 @@ Options:
   analyze <trace.jsonl> [--output <file>] [--format html|markdown]
                            Analyze a trace with OCPP DebugKit and write a
                            report.
+  analyze --from-daemon --cp-id <id> [--http-url <url>]
+          [--http-basic-auth-user <u> --http-basic-auth-pass <p>]
+          [--output <file>] [--format html|markdown]
+                           Same report, built from a running daemon's stored
+                           logs (the logs.get RPC) instead of a trace file --
+                           no --trace-output needed, and no daemon restart.
+                           --cp-id is required (logs.get is scoped to one
+                           charge point); --http-url defaults to
+                           http://127.0.0.1:${DEFAULT_HTTP_PORT}, matching
+                           the other client modes (--send/--stop/--events).
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path

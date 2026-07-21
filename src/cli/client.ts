@@ -2,6 +2,7 @@ import type { EventEnvelope } from "../protocol";
 import { RemoteChargePointService } from "../data/remote/RemoteChargePointService";
 import { toJsonResponse } from "./output";
 import type { JsonCommand } from "./types";
+import type { SerializedLogLine } from "../trace/logEntryToTrace";
 
 export interface ClientLocation {
   readonly httpUrl: string;
@@ -53,6 +54,48 @@ export async function sendCommand(
   } finally {
     service.dispose();
   }
+}
+
+/**
+ * Fetch a charge point's stored log entries from a running daemon
+ * (`logs.get`), for callers that need the data rather than a printed line —
+ * `analyze --from-daemon` turns them into a trace via
+ * {@link logLinesToTrace}.
+ *
+ * Unlike {@link sendCommand} this throws instead of writing to stdout/stderr
+ * and setting `process.exitCode`, so the caller decides how a failure is
+ * reported. Entries the daemon returns in an unexpected shape are dropped
+ * rather than failing the whole fetch: the log store is append-only history
+ * from possibly-older daemon versions, and one odd row should not cost the
+ * operator the rest of the trace.
+ */
+export async function fetchStoredLogs(
+  loc: ClientLocation,
+  cpId: string,
+): Promise<SerializedLogLine[]> {
+  const service = createRemoteService(loc);
+  try {
+    const ack = await service.runRawRpc("logs.get", { cpId }, cpId);
+    if (!ack.ok) {
+      throw new Error(`daemon rejected logs.get: ${ack.error.message}`);
+    }
+    if (!Array.isArray(ack.result)) {
+      throw new Error("daemon returned a non-array result for logs.get");
+    }
+    return ack.result.filter(isSerializedLogLine);
+  } catch (err) {
+    throw new Error(formatSocketError(err, loc), { cause: err });
+  } finally {
+    service.dispose();
+  }
+}
+
+function isSerializedLogLine(value: unknown): value is SerializedLogLine {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.timestamp === "string" && typeof entry.message === "string"
+  );
 }
 
 export async function stopDaemon(loc: ClientLocation): Promise<void> {

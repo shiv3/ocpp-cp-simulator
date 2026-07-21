@@ -7,7 +7,63 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Resolve which release the binaries belong to, ONCE, before the matrix fans
+  # out. tauri-action is then handed a `releaseId` and acts as a pure asset
+  # uploader — see the comment on its step below for why it must not be allowed
+  # to resolve the release itself.
+  resolve-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.find.outputs.release_id }}
+    steps:
+      - name: Find (or create) the release for this tag
+        id: find
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            // workflow_dispatch runs off a branch, not a tag. Leave the id
+            // empty: tauri-action then has neither releaseId nor tagName and
+            // logs "skipping all uploads", so a manual run still smoke-builds
+            // the desktop app without inventing a release for a branch ref.
+            if (!context.ref.startsWith('refs/tags/')) {
+              core.notice(`${context.ref} is not a tag; building without uploading.`);
+              return;
+            }
+
+            const tag = context.ref.replace('refs/tags/', '');
+
+            // Normally release-drafter's draft was just published — that is
+            // what created this tag — so the release already exists.
+            // listReleases rather than getReleaseByTag so a draft is still
+            // found if a tag somehow exists without a published release.
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            let release = releases.find((r) => r.tag_name === tag);
+
+            // Fallback: the tag was pushed directly instead of by publishing a
+            // drafter release. Create one so the binaries have somewhere to go
+            // rather than failing the build.
+            if (!release) {
+              core.warning(`No release for ${tag}; creating one.`);
+              const created = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: tag,
+                generate_release_notes: true,
+              });
+              release = created.data;
+            }
+
+            core.setOutput('release_id', String(release.id));
+
   release:
+    needs: resolve-release
     permissions:
       contents: write
     strategy:
@@ -120,24 +176,29 @@ jobs:
           # for the cross-compiled x86_64 macOS build).
           TAURI_TARGET: ${{ matrix.target }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "OCPP CP Simulator ${{ github.ref_name }}"
-          releaseBody: |
-            See the assets to download this version and install.
-
-            ## What's Changed
-
-            ### Desktop App Downloads
-            - **macOS (Apple Silicon)**: `OCPP.CP.Simulator_*_aarch64.dmg`
-            - **macOS (Intel)**: `OCPP.CP.Simulator_*_x64.dmg`
-            - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `.msi`
-            - **Linux (Debian/Ubuntu)**: `OCPP.CP.Simulator_*_amd64.deb`
-            - **Linux (Fedora/RHEL)**: `OCPP.CP.Simulator-*.x86_64.rpm`
-
-            ### Web Version
-            The web version is available at: https://shiv3.github.io/ocpp-cp-simulator/
-          releaseDraft: true
-          prerelease: false
+          # Pass `releaseId` and NOT `tagName`. In tauri-action's index.ts the
+          # release-resolving branch is `if (tagName && !releaseId)`, so an id
+          # skips it entirely and the action only uploads assets. That matters
+          # for two reasons:
+          #
+          # 1. With `tagName` + `releaseDraft: true` (the old config) it ignored
+          #    the already-published release for this tag and parked the
+          #    binaries in a NEW draft. Release Drafter then adopted that
+          #    leftover draft on the next merge to main, renamed it to the next
+          #    version, and the operator published it — so every release shipped
+          #    the PREVIOUS version's binaries: v0.7.2 got 0.7.1's, v0.7.1 got
+          #    0.7.0's, v0.7.0 got none at all.
+          # 2. With `tagName` + `releaseDraft: false` it finds the published
+          #    release and calls updateRelease with `body: bodyFileContent ||
+          #    body` (create-release.ts). An omitted `releaseBody` is "", so it
+          #    would blank release-drafter's notes — five times over, once per
+          #    matrix leg.
+          #
+          # An id sidesteps both: the release is resolved once in
+          # resolve-release, and nothing here creates, renames or rewrites it.
+          # Same class of bug as #121, where two mechanisms both drove Pages
+          # deploys.
+          releaseId: ${{ needs.resolve-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
   update-release-notes:
@@ -156,11 +217,12 @@ jobs:
           script: |
             const tag = context.ref.replace('refs/tags/', '');
 
-            // tauri-action creates the release as a draft, and
-            // getReleaseByTag() (GET /releases/tags/{tag}) does NOT return
-            // draft releases — it 404s, which failed this whole job on every
-            // release. List releases (which includes drafts) and match on
-            // tag_name instead.
+            // Match on tag_name from listReleases rather than
+            // getReleaseByTag(). The release is published by the time we run
+            // (see releaseDraft above), so getReleaseByTag() would now work —
+            // but listReleases also surfaces drafts, which keeps this job
+            // working if a tag is ever pushed directly without publishing a
+            // drafter release first.
             const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -189,11 +251,20 @@ jobs:
                 const commitList = diff.commits
                   .map((c) => `- ${c.commit.message.split('\n')[0]} (${c.sha.substring(0, 7)})`)
                   .join('\n');
+                // Normally the body came from release-drafter and already has
+                // a "## What's Changed" heading to slot the commits under. But
+                // if a tag is pushed directly rather than by publishing a
+                // drafter release, tauri-action creates the release itself with
+                // an empty body — so add the heading instead of silently
+                // dropping the commit list.
+                const section = `### Commits (since ${prev.tag_name})\n${commitList}\n`;
                 if (commitList && body.includes("## What's Changed")) {
                   body = body.replace(
                     "## What's Changed",
-                    `## What's Changed\n\n### Commits (since ${prev.tag_name})\n${commitList}\n`,
+                    `## What's Changed\n\n${section}`,
                   );
+                } else if (commitList) {
+                  body = `${body}${body ? '\n\n' : ''}## What's Changed\n\n${section}`;
                 }
               } catch (e) {
                 core.warning(`Failed to get commit history: ${e.message}`);

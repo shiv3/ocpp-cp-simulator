@@ -61,5 +61,21 @@ template: |
 
   **Full Changelog**: https://github.com/$OWNER/$REPO/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
 
+  ### Desktop App Downloads
+
+  Attached by release.yml a few minutes after this release is published — the
+  tag created on publish is what starts the desktop builds, so the assets show
+  up shortly after, not instantly.
+
+  - **macOS (Apple Silicon)**: `OCPP.CP.Simulator_*_aarch64.dmg`
+  - **macOS (Intel)**: `OCPP.CP.Simulator_*_x64.dmg`
+  - **Windows**: `OCPP.CP.Simulator_*_x64-setup.exe` or `OCPP.CP.Simulator_*_x64_en-US.msi`
+  - **Linux (Debian/Ubuntu)**: `OCPP.CP.Simulator_*_amd64.deb`
+  - **Linux (Fedora/RHEL)**: `OCPP.CP.Simulator-*.x86_64.rpm`
+
+  ### Web Version
+
+  https://shiv3.github.io/ocpp-cp-simulator/
+
   ---
   Container image: `ghcr.io/$OWNER/$REPO:$RESOLVED_VERSION` (published when this release is tagged).

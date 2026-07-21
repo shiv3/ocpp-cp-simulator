@@ -368,9 +368,24 @@ export interface ScenarioTrigger {
 }
 
 /**
+ * Scenario file schema version (issue #214), mirroring the `"major.minor"`
+ * string convention and versioning rules of {@link
+ * ../../../trace/OcppTraceRecord.ts | OCPP_TRACE_SCHEMA_VERSION}: additive
+ * optional fields bump the minor version, consumers MUST ignore unknown
+ * fields, and a semantic change to an existing field is a new major version.
+ * See `schema/scenario.schema.json` (Draft 2020-12) and
+ * `docs/scenario-format.md`.
+ */
+export const SCENARIO_SCHEMA_VERSION = "1.0";
+
+/**
  * Scenario definition
  */
 export interface ScenarioDefinition {
+  /** Scenario schema version, e.g. {@link SCENARIO_SCHEMA_VERSION}. Optional:
+   *  absent on files exported before issue #214 (they remain valid — schema
+   *  conformance is advisory, never a hard gate). */
+  schemaVersion?: string;
   id: string;
   name: string;
   description?: string;

@@ -9,6 +9,7 @@ import {
   type ScenarioExecutionContext,
   type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
@@ -532,6 +533,13 @@ export class RegistryChargePointService implements ChargePointService {
     const parsed: unknown = JSON.parse(fs.readFileSync(path, "utf-8"));
     if (!isScenarioDefinitionShape(parsed)) {
       throw new Error(`file does not contain a scenario definition: ${path}`);
+    }
+    // Issue #214: advisory (warning-only) schema check — never blocks loading.
+    const schemaResult = validateScenarioSchema(parsed);
+    if (!schemaResult.valid) {
+      console.warn(
+        `[RegistryChargePointService] "${path}" does not match schema/scenario.schema.json (loading anyway): ${schemaResult.errors.slice(0, 5).join("; ")}`,
+      );
     }
     const scenarioId = service.loadScenario(connectorId, parsed);
     service.runScenario(connectorId, scenarioId);

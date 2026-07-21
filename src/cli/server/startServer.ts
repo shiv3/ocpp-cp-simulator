@@ -5,6 +5,7 @@ import { CLIChargePointService } from "../service";
 type AnyServer = Server<unknown>;
 import type { ChargePointInitOptions } from "../types";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { CPRegistry } from "./CPRegistry";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
@@ -300,6 +301,21 @@ function resolveConnectorIds(raw: string, connectorCount: number): number[] {
 }
 
 /**
+ * Issue #214: advisory (warning-only) schema check for a scenario file read
+ * from disk at startup. Never throws and never blocks loading — a schema
+ * mismatch is logged to stderr and the caller proceeds exactly as it would
+ * have before this check existed.
+ */
+function warnOnScenarioSchemaMismatch(source: string, value: unknown): void {
+  const result = validateScenarioSchema(value);
+  if (!result.valid) {
+    process.stderr.write(
+      `[server] Warning: "${source}" does not match schema/scenario.schema.json (loading anyway): ${result.errors.slice(0, 5).join("; ")}\n`,
+    );
+  }
+}
+
+/**
  * Start `scenarioId` unless it's already running. Loading a scenario
  * (loadScenario/loadScenarioTemplate) while the CP is already Available
  * synchronously triggers CLIChargePointService's own "connect"-trigger
@@ -399,6 +415,7 @@ export async function runStartupScenario(
       );
       return;
     }
+    warnOnScenarioSchemaMismatch(opt.scenarioTemplateFile, template);
     for (const connectorId of connectors) {
       try {
         const instance = instantiateTemplate(template, connectorId);
@@ -434,6 +451,7 @@ export async function runStartupScenario(
       );
       return;
     }
+    warnOnScenarioSchemaMismatch(opt.scenario, definition);
     for (const connectorId of connectors) {
       try {
         const instance =

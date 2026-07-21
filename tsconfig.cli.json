@@ -41,6 +41,7 @@
     "src/data/sqlite/SqliteConnectorSettingsRepository.ts",
     "src/ocpp",
     "src/protocol",
+    "src/scenario",
     "src/store/store.ts",
     "src/trace",
     "src/utils/scenarioTemplates.ts"

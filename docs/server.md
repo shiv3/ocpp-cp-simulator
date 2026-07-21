@@ -140,6 +140,12 @@ Runtime packages for this control plane are `socket.io`,
 | `stop_all_scenarios`              | `{ "connector": number }`                                              | Stop every scenario on a connector.                      |
 | `remove_scenario`                 | `{ "connector": number, "scenarioId": string }`                        | Remove a loaded scenario.                                |
 
+> Scenario definitions (the `scenario` param above, and the file read by
+> `load_scenario`'s `file` param / `run_scenario_file`) follow
+> [docs/scenario-format.md](scenario-format.md) and its published
+> [JSON Schema](../schema/scenario.schema.json). Validation against that
+> schema is advisory — a mismatch is logged, not rejected.
+
 ### Daemon methods
 
 | Method               | Params                                                                                                                                                                                                | Result / purpose                                                                      |

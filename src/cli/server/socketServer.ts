@@ -52,6 +52,7 @@ import {
   type ScenarioDefinition,
   type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
@@ -796,6 +797,21 @@ export function createSocketConfigRepository(
   return repository;
 }
 
+/**
+ * Issue #214: advisory (warning-only) schema check for a scenario value
+ * received over the `load_scenario` RPC. Never throws and never blocks
+ * loading — a schema mismatch is logged and the caller proceeds exactly as
+ * it would have before this check existed.
+ */
+function warnOnScenarioSchemaMismatch(source: string, value: unknown): void {
+  const result = validateScenarioSchema(value);
+  if (!result.valid) {
+    console.warn(
+      `[socketServer] "${source}" does not match schema/scenario.schema.json (loading anyway): ${result.errors.slice(0, 5).join("; ")}`,
+    );
+  }
+}
+
 async function dispatchFacadeCpCommand(
   chargePointService: RegistryChargePointService,
   method: RpcMethod,
@@ -1130,6 +1146,7 @@ async function dispatchFacadeCpCommand(
         if (!isScenarioDefinitionShape(parsed)) {
           throw new RpcFailure("invalid_params", "");
         }
+        warnOnScenarioSchemaMismatch(params.file, parsed);
         return handled(
           await runFacadeOperation(() =>
             chargePointService.loadScenario(id, connectorId, parsed),
@@ -1137,6 +1154,10 @@ async function dispatchFacadeCpCommand(
         );
       }
       if (params.scenario) {
+        warnOnScenarioSchemaMismatch(
+          "load_scenario params.scenario",
+          params.scenario,
+        );
         return handled(
           await runFacadeOperation(() =>
             chargePointService.loadScenario(

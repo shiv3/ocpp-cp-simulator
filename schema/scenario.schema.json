@@ -1,0 +1,487 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
+  "title": "ScenarioDefinition (scenario schema v1.0)",
+  "$comment": "Scenario file format v1.0 (issue #214). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "name", "targetType", "nodes", "edges"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Scenario schema version, e.g. \"1.0\". Optional: absent on files predating issue #214."
+    },
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "targetType": { "type": "string", "enum": ["chargePoint", "connector"] },
+    "targetId": {
+      "type": "number",
+      "description": "Connector id if targetType is \"connector\"."
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "createdAt": {
+      "type": "string",
+      "description": "ISO-8601 timestamp. Optional: most shipped templates omit it."
+    },
+    "updatedAt": {
+      "type": "string",
+      "description": "ISO-8601 timestamp. Optional: most shipped templates omit it."
+    },
+    "trigger": { "$ref": "#/$defs/trigger" },
+    "defaultExecutionMode": { "type": "string", "enum": ["oneshot", "step"] },
+    "enabled": { "type": "boolean" },
+    "evSettings": { "$ref": "#/$defs/evSettings" },
+    "assertions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assertion" }
+    }
+  },
+  "$defs": {
+    "ocppStatus": {
+      "type": "string",
+      "enum": [
+        "Available",
+        "Preparing",
+        "Charging",
+        "SuspendedEVSE",
+        "SuspendedEV",
+        "Finishing",
+        "Reserved",
+        "Unavailable",
+        "Faulted"
+      ]
+    },
+    "position": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": true,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "curvePoint": {
+      "type": "object",
+      "required": ["time", "value"],
+      "additionalProperties": true,
+      "properties": {
+        "time": { "type": "number" },
+        "value": { "type": "number" }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["manual", "statusChange"] },
+        "conditions": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "fromStatus": { "$ref": "#/$defs/ocppStatus" },
+            "toStatus": { "$ref": "#/$defs/ocppStatus" }
+          }
+        }
+      }
+    },
+    "evSettings": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Partial<EVSettings> — every field optional in a scenario file.",
+      "properties": {
+        "modelName": { "type": "string" },
+        "batteryCapacityKwh": { "type": "number" },
+        "maxChargingPowerKw": { "type": "number" },
+        "initialSoc": { "type": "number" },
+        "targetSoc": { "type": "number" }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ocpp_sent",
+            "ocpp_received",
+            "ocpp_absent",
+            "response_status",
+            "idtag_info_status",
+            "payload_match",
+            "message_order",
+            "message_after",
+            "state_transition",
+            "no_unexpected"
+          ]
+        },
+        "action": { "type": "string" },
+        "direction": { "type": "string", "enum": ["sent", "received"] },
+        "status": { "type": "string" },
+        "occurrence": { "type": "number" },
+        "payload": { "type": "object" },
+        "targetStatus": { "type": "string" },
+        "actions": { "type": "array", "items": { "type": "string" } },
+        "before": { "$ref": "#/$defs/assertionFrameRef" },
+        "after": { "$ref": "#/$defs/assertionFrameRef" }
+      }
+    },
+    "assertionFrameRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string" },
+        "direction": { "type": "string", "enum": ["sent", "received"] }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "source", "target"],
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string" },
+        "target": { "type": "string" },
+        "sourceHandle": { "type": ["string", "null"] },
+        "targetHandle": { "type": ["string", "null"] },
+        "type": { "type": "string" },
+        "animated": { "type": "boolean" }
+      }
+    },
+    "baseNodeData": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "type", "position", "data"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "statusChange",
+            "transaction",
+            "meterValue",
+            "delay",
+            "notification",
+            "connectorPlug",
+            "remoteStartTrigger",
+            "remoteStopTrigger",
+            "statusTrigger",
+            "reserveNow",
+            "cancelReservation",
+            "reservationTrigger",
+            "start",
+            "end",
+            "statusNotification",
+            "unlockOutcome",
+            "configSet",
+            "dataTransfer",
+            "csmsCallTrigger",
+            "responseOverride"
+          ]
+        },
+        "position": { "$ref": "#/$defs/position" },
+        "data": { "$ref": "#/$defs/baseNodeData" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "statusChange" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["status"],
+                "properties": {
+                  "status": { "$ref": "#/$defs/ocppStatus" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "transaction" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["action"],
+                "properties": {
+                  "action": { "type": "string", "enum": ["start", "stop"] },
+                  "tagId": { "type": "string" },
+                  "batteryCapacityKwh": { "type": "number" },
+                  "initialSoc": { "type": "number" },
+                  "stopReason": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "meterValue" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["value", "sendMessage"],
+                "properties": {
+                  "value": { "type": "number" },
+                  "sendMessage": { "type": "boolean" },
+                  "autoIncrement": { "type": "boolean" },
+                  "outputKw": { "type": "number" },
+                  "maxChargeKwh": { "type": "number" },
+                  "incrementInterval": { "type": "number" },
+                  "incrementAmount": { "type": "number" },
+                  "stopMode": {
+                    "type": "string",
+                    "enum": ["manual", "evSettings"]
+                  },
+                  "maxTime": { "type": "number" },
+                  "maxValue": { "type": "number" },
+                  "useCurve": { "type": "boolean" },
+                  "curvePoints": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/curvePoint" }
+                  },
+                  "autoCalculateInterval": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "delay" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["delaySeconds"],
+                "properties": {
+                  "delaySeconds": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "notification" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["messageType", "payload"],
+                "properties": {
+                  "messageType": { "type": "string" },
+                  "payload": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "connectorPlug" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["action"],
+                "properties": {
+                  "action": { "type": "string", "enum": ["plugin", "plugout"] }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "remoteStartTrigger",
+                  "remoteStopTrigger",
+                  "reservationTrigger"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "properties": {
+                  "timeout": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "csmsCallTrigger" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["action"],
+                "properties": {
+                  "action": { "type": "string" },
+                  "timeout": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "statusTrigger" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["targetStatus"],
+                "properties": {
+                  "targetStatus": { "$ref": "#/$defs/ocppStatus" },
+                  "timeout": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "reserveNow" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["expiryMinutes", "idTag"],
+                "properties": {
+                  "expiryMinutes": { "type": "number" },
+                  "idTag": { "type": "string" },
+                  "parentIdTag": { "type": "string" },
+                  "reservationId": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "cancelReservation" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["reservationId"],
+                "properties": {
+                  "reservationId": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "start" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "properties": {
+                  "triggerOn": {
+                    "type": "string",
+                    "enum": ["connect", "status"]
+                  },
+                  "targetStatus": { "$ref": "#/$defs/ocppStatus" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "statusNotification" } }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["status"],
+                "properties": {
+                  "status": { "$ref": "#/$defs/ocppStatus" },
+                  "errorCode": { "type": "string" },
+                  "info": { "type": "string" },
+                  "vendorErrorCode": { "type": "string" },
+                  "vendorId": { "type": "string" },
+                  "connectorId": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "unlockOutcome" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["outcome"],
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": ["Unlocked", "UnlockFailed", "NotSupported"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "configSet" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["key", "value"],
+                "properties": {
+                  "key": { "type": "string" },
+                  "value": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "dataTransfer" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["vendorId"],
+                "properties": {
+                  "vendorId": { "type": "string" },
+                  "messageId": { "type": "string" },
+                  "data": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "responseOverride" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "Valid `status` values depend on `action` (see RESPONSE_OVERRIDE_STATUSES in ScenarioTypes.ts). Not schema-enforced here — advisory only.",
+                "required": ["action", "status"],
+                "properties": {
+                  "action": { "type": "string" },
+                  "status": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -282,11 +282,15 @@ ocpp-cp-sim --daemon ... --scenario-template-file /path/to/template.json \
 ```
 
 `--scenario-template-file` reads a JSON file shaped like a
-`ScenarioDefinition` (the format the browser Scenario Editor exports), then
-clones it per connector — rewriting `targetType`, `targetId`, `id`, and
-`name` — so each connector runs an independent state machine from the same
-file. `--scenario` and `--scenario-template` fan out the same way when
-`--scenario-connector` resolves to more than one id.
+`ScenarioDefinition` (the format the browser Scenario Editor exports — see
+[docs/scenario-format.md](scenario-format.md) for the field reference and
+published [JSON Schema](../schema/scenario.schema.json)), then clones it per
+connector — rewriting `targetType`, `targetId`, `id`, and `name` — so each
+connector runs an independent state machine from the same file. `--scenario`
+and `--scenario-template` fan out the same way when `--scenario-connector`
+resolves to more than one id. Both `--scenario` and `--scenario-template-file`
+validate the file against that schema at load time and warn (never reject)
+on a mismatch.
 
 > **Breaking change (vs. earlier versions):** REST control endpoints, native
 > WebSocket event streams, and the Unix-domain control socket have been

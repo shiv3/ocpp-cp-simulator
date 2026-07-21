@@ -10,8 +10,10 @@
     "src/cli",
     "src/cp",
     "src/protocol",
+    "src/scenario",
     "src/utils/scenarioTemplates.ts",
     "src/utils/scenarios",
+    "schema",
     "dist"
   ],
   "scripts": {

@@ -832,6 +832,89 @@ describe("socket.io rpc dispatch", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("issue #214: warns but still loads a schema-invalid (yet structurally valid) scenario file via load_scenario/run_scenario_file", async () => {
+    const bus = new EventBus();
+    const service = {
+      loadScenario: vi.fn().mockReturnValue("schema-warn-scenario"),
+      runScenario: vi.fn(),
+    };
+    const registry = {
+      get: vi.fn((cpId: string) => (cpId === "cp-alpha" ? service : undefined)),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    const tmpDir = mkdtempSync(
+      join(tmpdir(), "ocpp-rpc-scenario-schema-warn-"),
+    );
+    // Structurally valid per isScenarioDefinitionShape (id/name/targetType/
+    // nodes[]/edges[]) but schema-invalid: delaySeconds must be a number.
+    const invalidSchemaFile = join(tmpDir, "invalid-schema.json");
+    writeFileSync(
+      invalidSchemaFile,
+      JSON.stringify({
+        id: "schema-invalid",
+        name: "Schema invalid",
+        targetType: "connector",
+        targetId: 1,
+        nodes: [
+          {
+            id: "wait",
+            type: "delay",
+            position: { x: 0, y: 0 },
+            data: { label: "Wait", delaySeconds: "not-a-number" },
+          },
+        ],
+        edges: [],
+      }),
+    );
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      registerSocketHandlers(io as never, {
+        registry: registry as never,
+        bus,
+        database: null,
+      });
+      io.connect(socket);
+
+      const loadAck = await socket.emitRpc({
+        cpId: "cp-alpha",
+        method: "load_scenario",
+        params: { connector: 1, file: invalidSchemaFile },
+      });
+      expect(loadAck).toMatchObject({ ok: true });
+      expect(service.loadScenario).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ id: "schema-invalid" }),
+      );
+
+      const runAck = await socket.emitRpc({
+        cpId: "cp-alpha",
+        method: "run_scenario_file",
+        params: { connector: 1, file: invalidSchemaFile },
+      });
+      expect(runAck).toMatchObject({
+        ok: true,
+        result: { scenarioId: "schema-warn-scenario" },
+      });
+      expect(service.runScenario).toHaveBeenCalledWith(
+        1,
+        "schema-warn-scenario",
+      );
+
+      expect(warnSpy).toHaveBeenCalled();
+      expect(
+        warnSpy.mock.calls.some((call) =>
+          String(call[0]).includes("schema/scenario.schema.json"),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 function simulatorConfig(

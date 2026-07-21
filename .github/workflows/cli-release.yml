@@ -89,6 +89,20 @@ jobs:
             | grep -q 'package/src/protocol/' \
             || { echo "::error::src/protocol missing from the CLI tarball"; exit 1; }
 
+      - name: Verify the tarball ships the scenario schema (issue #214)
+        run: |
+          # The daemon (src/cli/server/startServer.ts, socketServer.ts,
+          # RegistryChargePointService.ts) imports src/scenario for advisory
+          # scenario-schema validation, which itself imports
+          # schema/scenario.schema.json; if either is missing from the npm
+          # `files` list the published CLI crashes on boot.
+          tar -tf "${{ steps.pack.outputs.tarball }}" \
+            | grep -q 'package/src/scenario/scenarioSchemaValidator.ts' \
+            || { echo "::error::src/scenario missing from the CLI tarball"; exit 1; }
+          tar -tf "${{ steps.pack.outputs.tarball }}" \
+            | grep -q 'package/schema/scenario.schema.json' \
+            || { echo "::error::schema/scenario.schema.json missing from the CLI tarball"; exit 1; }
+
       - name: Create / update release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:

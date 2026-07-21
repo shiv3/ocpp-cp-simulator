@@ -1,4 +1,8 @@
-import type { ScenarioDefinition } from "../cp/application/scenario/ScenarioTypes";
+import {
+  SCENARIO_SCHEMA_VERSION,
+  type ScenarioDefinition,
+} from "../cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "../scenario/scenarioSchemaValidator";
 
 /**
  * Browser-only file I/O helpers for scenario JSON files. Lifted out of
@@ -7,10 +11,24 @@ import type { ScenarioDefinition } from "../cp/application/scenario/ScenarioType
  * to/from a `<a download>` Blob and a user-picked `File`.
  */
 
+/** Stamp the current {@link SCENARIO_SCHEMA_VERSION} onto a scenario without
+ *  mutating the input (issue #214). Exported separately from
+ *  {@link exportScenarioToJSON} so the stamping behavior is unit-testable
+ *  without a DOM (Blob/download) environment. */
+export function withScenarioSchemaVersion(
+  scenario: ScenarioDefinition,
+): ScenarioDefinition {
+  return { ...scenario, schemaVersion: SCENARIO_SCHEMA_VERSION };
+}
+
 /** Trigger a file download for the given scenario. The filename is
- *  `scenario_<name>_<timestamp>.json` so multiple exports don't collide. */
+ *  `scenario_<name>_<timestamp>.json` so multiple exports don't collide.
+ *  Stamps the current {@link SCENARIO_SCHEMA_VERSION} onto the exported
+ *  file (issue #214) so newly-exported scenarios declare their format
+ *  version; the in-memory `scenario` object passed in is not mutated. */
 export function exportScenarioToJSON(scenario: ScenarioDefinition): void {
-  const json = JSON.stringify(scenario, null, 2);
+  const withSchemaVersion = withScenarioSchemaVersion(scenario);
+  const json = JSON.stringify(withSchemaVersion, null, 2);
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -24,7 +42,13 @@ export function exportScenarioToJSON(scenario: ScenarioDefinition): void {
 
 /** Parse and validate a scenario from JSON text. Throws on invalid structure —
  *  rejects non-objects, requires a non-empty string `id`, and requires `nodes`
- *  and `edges` to be arrays (truthiness alone would accept `nodes: {}` etc.). */
+ *  and `edges` to be arrays (truthiness alone would accept `nodes: {}` etc.).
+ *
+ *  Issue #214: additionally runs the imported value through the published
+ *  `schema/scenario.schema.json` and, on a mismatch, logs a `console.warn`
+ *  listing the first few errors. This is ADVISORY ONLY — unlike the
+ *  structural checks above, a schema mismatch never throws; the scenario is
+ *  still returned and loads exactly as before. */
 export function parseScenarioJSON(text: string): ScenarioDefinition {
   const parsed: unknown = JSON.parse(text);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -38,6 +62,12 @@ export function parseScenarioJSON(text: string): ScenarioDefinition {
     !Array.isArray(scenario.edges)
   ) {
     throw new Error("Invalid scenario file format");
+  }
+  const schemaResult = validateScenarioSchema(parsed);
+  if (!schemaResult.valid) {
+    console.warn(
+      `[scenarioFile] Imported scenario "${scenario.id}" does not match schema/scenario.schema.json (loading anyway): ${schemaResult.errors.slice(0, 5).join("; ")}`,
+    );
   }
   return scenario as ScenarioDefinition;
 }

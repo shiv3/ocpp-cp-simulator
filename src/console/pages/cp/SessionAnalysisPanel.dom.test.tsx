@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
+import { cleanup as rtlCleanup, render } from "@testing-library/react";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +9,7 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
+import { DataContext } from "../../../data/providers/DataProvider";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type {
   ChargePointService,
@@ -15,6 +17,7 @@ import type {
   StoredLogEntry,
 } from "../../../data/interfaces/ChargePointService";
 import { ANALYZE_DISCLAIMER } from "../../../trace/analysisDisclaimer";
+import SessionAnalysisPanel from "./SessionAnalysisPanel";
 
 /** `CpDetailPage` always renders `TransactionsTab` (the default active tab),
  *  whose `useStateHistory` crashes on the harness's auto-stubbed
@@ -104,18 +107,11 @@ function findButton(
   ) as HTMLButtonElement | undefined;
 }
 
-/** Clicks "Analyze" and waits for the click handler's own dynamic
- *  `import("@ocpp-debugkit/toolkit/core")` to settle (button label reverts
- *  from "Analyzing..." once the analyzing/empty/results/error state
- *  transition lands). Same cold-import caveat as `openAnalysisTab`: real
- *  `setTimeout` polling, not a microtask-only flush. */
-async function clickAnalyzeAndWait(container: HTMLElement): Promise<void> {
-  const button = findButton(container, "Analyze");
-  expect(button, "expected an Analyze button").toBeTruthy();
-  await act(async () => {
-    button!.click();
-    await Promise.resolve();
-  });
+/** Waits for the "Analyzing…" button label to revert (to "Analyze") once
+ *  whatever async work is in flight settles into empty/results/error. Same
+ *  cold-import caveat as `openAnalysisTab`: real `setTimeout` polling, not a
+ *  microtask-only flush. */
+async function waitForAnalyzeSettle(container: HTMLElement): Promise<void> {
   for (let i = 0; i < 200; i++) {
     if (!findButton(container, "Analyzing…")) return;
     await act(async () => {
@@ -123,6 +119,60 @@ async function clickAnalyzeAndWait(container: HTMLElement): Promise<void> {
     });
   }
   throw new Error("timed out waiting for Analyze to settle");
+}
+
+/** Clicks "Analyze" and waits for the click handler's own dynamic
+ *  `import("@ocpp-debugkit/toolkit/core")` to settle (button label reverts
+ *  from "Analyzing..." once the analyzing/empty/results/error state
+ *  transition lands). */
+async function clickAnalyzeAndWait(container: HTMLElement): Promise<void> {
+  const button = findButton(container, "Analyze");
+  expect(button, "expected an Analyze button").toBeTruthy();
+  await act(async () => {
+    button!.click();
+    await Promise.resolve();
+  });
+  await waitForAnalyzeSettle(container);
+}
+
+/** A promise plus its externally-callable `resolve`, for tests that need to
+ *  hold an in-flight `listStoredLogs()` call open deterministically (rather
+ *  than racing against real timers) while they assert on the transient
+ *  "analyzing" state or exercise a stale-prop scenario. */
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** Renders `SessionAnalysisPanel` directly (not through the full console /
+ *  lazy tab machinery) wrapped in just the `DataContext` it needs. Used by
+ *  tests that need to change the `cpId` prop via `rerender` -- navigating
+ *  `renderConsole` to a different CP route wouldn't remount or re-prop this
+ *  lazy-loaded panel any differently than a plain prop change would, and
+ *  this way avoids the lazy-chunk-load and tab-click choreography entirely. */
+function renderPanel(
+  props: { cpId: string; ocppVersion?: string },
+  service: FakeChargePointService,
+) {
+  return render(
+    <DataContext.Provider
+      value={{
+        mode: "remote",
+        serverUrl: "http://test",
+        defaultEvSettings: null,
+        setDefaultEvSettings: () => {},
+        chargePointService: service,
+      }}
+    >
+      <SessionAnalysisPanel {...props} />
+    </DataContext.Provider>,
+  );
 }
 
 /** A wire-frame `Sent:`/`Received:` log row -- the shape `listStoredLogs`
@@ -214,8 +264,9 @@ describe("SessionAnalysisPanel", () => {
     expect(analyzeButton!.disabled).toBe(false);
   });
 
-  it("analyzes a clean session: timeline events render, FailureSummary says no failures, disclaimer stays visible", async () => {
-    const listStoredLogs = vi.fn(async () => CLEAN_SESSION_ROWS);
+  it("analyzes a clean session: shows the transient analyzing state, then timeline events render, FailureSummary says no failures, disclaimer stays visible", async () => {
+    const logs = deferred<StoredLogEntry[]>();
+    const listStoredLogs = vi.fn(() => logs.promise);
     const service = makeService({
       snapshots: [snapshot("CP-1")],
       listStoredLogs,
@@ -225,7 +276,26 @@ describe("SessionAnalysisPanel", () => {
     await flush();
     await openAnalysisTab(container);
 
-    await clickAnalyzeAndWait(container);
+    const analyzeButton = findButton(container, "Analyze");
+    expect(analyzeButton, "expected an Analyze button").toBeTruthy();
+    await act(async () => {
+      analyzeButton!.click();
+      await Promise.resolve();
+    });
+
+    // Transient state: immediately after clicking, before `listStoredLogs`
+    // (held open by the deferred promise) resolves.
+    const analyzingButton = findButton(container, "Analyzing…");
+    expect(
+      analyzingButton,
+      'expected the button to read "Analyzing…" while in flight',
+    ).toBeTruthy();
+    expect(analyzingButton!.disabled).toBe(true);
+
+    await act(async () => {
+      logs.resolve(CLEAN_SESSION_ROWS);
+    });
+    await waitForAnalyzeSettle(container);
 
     expect(listStoredLogs).toHaveBeenCalledWith("CP-1");
     expect(container.textContent).toContain("BootNotification");
@@ -293,6 +363,7 @@ describe("SessionAnalysisPanel", () => {
     expect(container.textContent).toContain(
       "Session analysis is not available in this runtime",
     );
+    expect(container.textContent).toContain(ANALYZE_DISCLAIMER);
     expect(findButton(container, "Analyze")).toBeUndefined();
   });
 
@@ -326,5 +397,79 @@ describe("SessionAnalysisPanel", () => {
     expect(container.textContent).toContain(
       "No logged traffic to analyze yet.",
     );
+  });
+
+  it("guards against a stale cpId: an analyze started for the old CP does not render its results once the panel has moved on to a new CP", async () => {
+    // `handleAnalyze` closes over `cpId`; nothing remounts the panel on a
+    // `cpId` prop change alone (CpDetailPage keeps one lazy-loaded panel
+    // instance across route param changes), so this renders the panel
+    // directly (not through the full console) to change `cpId` via
+    // `rerender` without unmounting -- exactly the scenario a stale async
+    // result would otherwise leak into.
+    const logsA = deferred<StoredLogEntry[]>();
+    const listStoredLogsA = vi.fn(() => logsA.promise);
+    const serviceA = makeService({
+      snapshots: [snapshot("CP-A")],
+      listStoredLogs: listStoredLogsA,
+    });
+
+    const { container, rerender } = renderPanel({ cpId: "CP-A" }, serviceA);
+    cleanup = async () => rtlCleanup();
+
+    const findAnalyze = () =>
+      Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "Analyze",
+      ) as HTMLButtonElement | undefined;
+
+    expect(findAnalyze(), "expected an Analyze button for CP-A").toBeTruthy();
+    await act(async () => {
+      findAnalyze()!.click();
+      await Promise.resolve();
+    });
+    expect(listStoredLogsA).toHaveBeenCalledWith("CP-A");
+
+    // CP-A's analyze is still in flight (listStoredLogsA's promise hasn't
+    // resolved yet) when the panel is handed a different cpId -- e.g. the
+    // user navigated to another charge point's detail page.
+    const serviceB = makeService({ snapshots: [snapshot("CP-B")] });
+    await act(async () => {
+      rerender(
+        <DataContext.Provider
+          value={{
+            mode: "remote",
+            serverUrl: "http://test",
+            defaultEvSettings: null,
+            setDefaultEvSettings: () => {},
+            chargePointService: serviceB,
+          }}
+        >
+          <SessionAnalysisPanel cpId="CP-B" />
+        </DataContext.Provider>,
+      );
+    });
+
+    // The panel resets to idle for CP-B as soon as the prop changes --
+    // it doesn't wait for CP-A's in-flight analyze to settle first.
+    expect(
+      findAnalyze(),
+      "expected the panel to already be idle (Analyze button) for CP-B",
+    ).toBeTruthy();
+    expect(findAnalyze()!.disabled).toBe(false);
+
+    // Now release CP-A's stale analyze. Its results must not leak onto
+    // CP-B's now-rendered page.
+    await act(async () => {
+      logsA.resolve(CLEAN_SESSION_ROWS);
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(container.textContent).not.toContain("BootNotification");
+    expect(container.textContent).not.toContain("No failures detected");
+    expect(
+      findAnalyze(),
+      "expected the panel to remain idle for CP-B",
+    ).toBeTruthy();
+    expect(findAnalyze()!.disabled).toBe(false);
   });
 });

@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   Event,
   Failure,
@@ -68,27 +74,51 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
   const [state, setState] = useState<PanelState>({ kind: "idle" });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
+  // Nothing remounts this panel when `cpId` changes (CpDetailPage keeps one
+  // lazy-loaded instance across route param changes), so `handleAnalyze`'s
+  // in-flight `listStoredLogs`/dynamic-import/pipeline work for the OLD cpId
+  // could otherwise land after the prop has already moved on to a new CP,
+  // rendering the wrong CP's results/error under the new CP's page. This ref
+  // tracks the current cpId for `handleAnalyze`'s staleness guard below, and
+  // the effect resets the panel back to idle the moment cpId changes so the
+  // new CP never shows a stale "analyzing"/results/error state either.
+  const cpIdRef = useRef(cpId);
+  useEffect(() => {
+    cpIdRef.current = cpId;
+    setState({ kind: "idle" });
+    setSelectedEventId(null);
+  }, [cpId]);
+
   const listStoredLogs = chargePointService.listStoredLogs;
   const canAnalyze = typeof listStoredLogs === "function";
 
   const handleAnalyze = useCallback(async () => {
     if (!listStoredLogs) return;
+    const requestCpId = cpId;
     setSelectedEventId(null);
     setState({ kind: "analyzing" });
 
+    // Only commits when the panel is still showing the CP this analyze was
+    // started for -- guards every post-await setState against a stale
+    // result from a cpId the panel has since moved away from.
+    const commit = (next: PanelState) => {
+      if (cpIdRef.current !== requestCpId) return;
+      setState(next);
+    };
+
     try {
-      const rows = await listStoredLogs(cpId);
+      const rows = await listStoredLogs(requestCpId);
       if (rows.length === 0) {
-        setState({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
+        commit({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
         return;
       }
 
       const records = logLinesToTrace(rows as SerializedLogLine[], {
         ocppVersion,
-        chargePointId: cpId,
+        chargePointId: requestCpId,
       });
       if (records.length === 0) {
-        setState({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
+        commit({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
         return;
       }
       const jsonl = records.map((record) => JSON.stringify(record)).join("\n");
@@ -97,7 +127,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
       try {
         core = await import("@ocpp-debugkit/toolkit/core");
       } catch {
-        setState({
+        commit({
           kind: "error",
           message: "Failed to load analysis toolkit",
         });
@@ -109,18 +139,18 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
         const sessions = core.buildSessionTimeline(events);
         const failures = core.detectFailures(events, sessions);
         const summaries = core.summarizeSessions(sessions, failures);
-        setState({
+        commit({
           kind: "results",
           data: { events, sessions, failures, summaries, warnings },
         });
       } catch (err) {
-        setState({
+        commit({
           kind: "error",
           message: `Analysis failed: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     } catch (err) {
-      setState({
+      commit({
         kind: "error",
         message: `Analysis failed: ${err instanceof Error ? err.message : String(err)}`,
       });
@@ -134,7 +164,10 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
 
   if (!canAnalyze) {
     return (
-      <EmptyState title="Session analysis is not available in this runtime" />
+      <EmptyState
+        title="Session analysis is not available in this runtime"
+        hint={ANALYZE_DISCLAIMER}
+      />
     );
   }
 

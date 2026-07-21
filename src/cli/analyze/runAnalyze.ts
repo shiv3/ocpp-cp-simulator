@@ -227,48 +227,66 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   const stderrSummaryLines: string[] = [];
   const stdoutSections: string[] = [];
   const writtenPaths: string[] = [];
-  let hadWriteError = false;
+  let hadError = false;
 
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
-    const { events, warnings } = parseOpenOcppTrace(group.jsonl);
-    const sessions = buildSessionTimeline(events);
-    const failures = detectFailures(events, sessions);
-    const summaries = summarizeSessions(sessions, failures);
-    const result: AnalysisResult = {
-      events,
-      sessions,
-      failures,
-      summaries,
-      warnings,
-      metadata: {
-        stationId: group.id,
-        source: opts.file,
-        ocppVersion: detectUniformOcppVersion(group.jsonl),
-      },
-    };
 
-    const content =
-      format === "html"
-        ? injectHtmlDisclaimer(generateHtmlReport(result))
-        : appendMarkdownDisclaimer(generateMarkdownReport(result));
+    // The toolkit pipeline (parseOpenOcppTrace -> buildSessionTimeline ->
+    // detectFailures -> summarizeSessions -> report generation) is not
+    // guaranteed to succeed for every charge point's data -- one CP's
+    // malformed session must not abort the whole run any more than a write
+    // failure does: other groups still get analyzed and reported, and the
+    // per-group summaries, exclusion counts, and disclaimer below are still
+    // printed. The run is still flagged as an operational error via the
+    // shared exit-code flag.
+    let content: string;
+    try {
+      const { events, warnings } = parseOpenOcppTrace(group.jsonl);
+      const sessions = buildSessionTimeline(events);
+      const failures = detectFailures(events, sessions);
+      const summaries = summarizeSessions(sessions, failures);
+      const result: AnalysisResult = {
+        events,
+        sessions,
+        failures,
+        summaries,
+        warnings,
+        metadata: {
+          stationId: group.id,
+          source: opts.file,
+          ocppVersion: detectUniformOcppVersion(group.jsonl),
+        },
+      };
 
-    stderrSummaryLines.push(
-      `${group.id}: ${events.length} events, ${failures.length} failures`,
-    );
+      content =
+        format === "html"
+          ? injectHtmlDisclaimer(generateHtmlReport(result))
+          : appendMarkdownDisclaimer(generateMarkdownReport(result));
+
+      stderrSummaryLines.push(
+        `${group.id}: ${events.length} events, ${failures.length} failures`,
+      );
+    } catch (err) {
+      hadError = true;
+      process.stderr.write(
+        `Error: cannot analyze charge point ${group.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      continue;
+    }
 
     if (outputPaths) {
       const { path: outPath, note } = outputPaths[i];
       if (note) process.stderr.write(`${note}\n`);
-      // A write failure (Fix 2, issue #188 review) must not abort the run:
-      // other groups still get their reports, and the per-group summaries,
-      // exclusion counts, and disclaimer below are still printed. The run
-      // is still flagged as an operational error via the exit code.
+      // A write failure (Fix 2, issue #188 review) must not abort the run,
+      // for the same reason as the analysis failure above.
       try {
         fs.writeFileSync(outPath, content);
         writtenPaths.push(outPath);
       } catch (err) {
-        hadWriteError = true;
+        hadError = true;
         process.stderr.write(
           `Error: cannot write report file: ${outPath}: ${
             err instanceof Error ? err.message : String(err)
@@ -307,5 +325,5 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   }
   process.stderr.write(`${ANALYZE_DISCLAIMER}\n`);
 
-  return hadWriteError ? 1 : 0;
+  return hadError ? 1 : 0;
 }

@@ -1,16 +1,19 @@
-# Codecov configuration (issue #131).
+# Codecov configuration (issue #131, #215).
 #
-# Coverage is uploaded from vitest's lcov only (`bun run test:coverage`).
-# A large share of the daemon/runtime code is exercised by Bun tests
-# (`*.bun.test.ts`, run via `bun test bun.test`), whose coverage is NOT yet
-# part of the upload. Codecov therefore under-reports, and its default
-# project/patch status gates fail on Bun-tested changes even when the change is
-# well covered — which is not the intent (codecov here is for visibility, not a
-# merge gate).
+# Coverage is uploaded from both vitest's lcov (`bun run test:coverage`, at
+# ./coverage/lcov.info) and Bun's lcov (`bun run test:coverage:bun`, at
+# ./coverage/bun/lcov.info) — Codecov merges the two reports for the same
+# commit, so the line coverage of daemon/runtime code exercised only by Bun
+# tests (`*.bun.test.ts`, run via `bun test bun.test`) is now reflected too.
+# Two caveats: Bun's lcov carries line coverage only (no branch/function
+# data), and a few Bun tests spawn subprocesses whose lines can't be
+# attributed to the parent — so the merged number is a floor, not a
+# fully-representative figure, for Bun-only-covered code.
 #
-# Keep the status checks informational so they still report the numbers on each
-# PR/commit but never fail. Follow-up: merge Bun coverage into the upload, then
-# these can become real gates.
+# Keep the status checks informational for now: the true combined % hasn't
+# been observed yet, and codecov here is for visibility, not a merge gate.
+# Follow-up (separate change): once the combined number is known, revisit
+# whether project/patch gates should become real (non-informational).
 coverage:
   status:
     project:

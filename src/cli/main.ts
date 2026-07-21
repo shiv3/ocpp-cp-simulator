@@ -12,6 +12,8 @@ import type { Database } from "../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import { setGlobalLogFormat } from "../cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
+import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
+import { runAnalyze } from "./analyze/runAnalyze";
 import {
   startServer,
   DEFAULT_HTTP_PORT,
@@ -779,6 +781,9 @@ Options:
   --trace-output <path>    Append every OCPP wire message as a JSONL trace
                            record (docs/trace-format.md) — works in REPL,
                            JSON, and daemon modes.
+  analyze <trace.jsonl> [--output <file>] [--format html|markdown]
+                           Analyze a trace with OCPP DebugKit and write a
+                           report.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path
@@ -916,6 +921,21 @@ function createStandaloneChargePointRuntime(
 }
 
 async function main(): Promise<void> {
+  // `analyze` is a subcommand, not a flag combination: it never bootstraps a
+  // charge point, so it is dispatched before parseArgs() (which requires
+  // --cp-id/--ws-url or a server mode) even sees argv. Its own small parser
+  // lives in ./analyze/parseAnalyzeArgs so the flag edge cases are unit
+  // testable without spawning a subprocess per case.
+  if (process.argv[2] === "analyze") {
+    const parsed = parseAnalyzeArgs(process.argv.slice(3));
+    if (!parsed.ok) {
+      process.stderr.write(`${parsed.message}\n`);
+      process.exit(1);
+    }
+    const code = await runAnalyze(parsed.args);
+    process.exit(code);
+  }
+
   const options = parseArgs(process.argv);
   // Apply log format BEFORE constructing any service / charge point so
   // every line that follows respects it — including "[server] xxx" setup

@@ -37,6 +37,7 @@
     "gen:ocpp": "bun run scripts/generate-ocpp.ts"
   },
   "dependencies": {
+    "@ocpp-debugkit/toolkit": "0.4.0",
     "@peculiar/x509": "^2.0.0",
     "@radix-ui/react-checkbox": "^1.3.7",
     "@radix-ui/react-dialog": "^1.1.19",

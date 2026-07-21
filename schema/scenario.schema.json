@@ -471,7 +471,7 @@
           "then": {
             "properties": {
               "data": {
-                "$comment": "Valid `status` values depend on `action` (see RESPONSE_OVERRIDE_STATUSES, ScenarioTypes.ts:855). Not schema-enforced here — advisory only.",
+                "$comment": "Valid `status` values depend on `action` (see RESPONSE_OVERRIDE_STATUSES in ScenarioTypes.ts). Not schema-enforced here — advisory only.",
                 "required": ["action", "status"],
                 "properties": {
                   "action": { "type": "string" },

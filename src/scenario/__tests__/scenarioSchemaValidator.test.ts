@@ -66,4 +66,59 @@ describe("validateScenarioSchema", () => {
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
+
+  it("accepts a well-formed assertions array", () => {
+    const scenario = {
+      ...minimalScenario(),
+      assertions: [
+        {
+          id: "a1",
+          type: "ocpp_sent",
+          action: "BootNotification",
+          direction: "sent",
+          occurrence: 1,
+        },
+        {
+          id: "a2",
+          type: "message_after",
+          before: { action: "Authorize", direction: "sent" },
+          after: { action: "StartTransaction" },
+        },
+      ],
+    };
+    const result = validateScenarioSchema(scenario);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects an assertion with an unknown type and a wrong-typed field", () => {
+    const scenario = {
+      ...minimalScenario(),
+      assertions: [
+        { id: "a1", type: "not_a_real_assertion", occurrence: "many" },
+      ],
+    };
+    const result = validateScenarioSchema(scenario);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("is permissive about unknown fields on nodes, node data, and edges", () => {
+    // Real editor exports carry xyflow UI fields (width/selected/style/…) and
+    // sometimes un-stripped runtime keys on data — none must trip validation.
+    const scenario = minimalScenario();
+    const nodes = scenario.nodes as Array<Record<string, unknown>>;
+    nodes[0] = {
+      ...nodes[0],
+      width: 160,
+      selected: true,
+      data: { label: "Start", progress: 0.5, style: { color: "red" } },
+    };
+    const edges = scenario.edges as Array<Record<string, unknown>>;
+    edges[0] = { ...edges[0], selected: false, animated: true };
+
+    const result = validateScenarioSchema(scenario);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
 });

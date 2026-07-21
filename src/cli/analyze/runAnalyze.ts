@@ -18,7 +18,38 @@
 import * as fs from "fs";
 import * as path from "path";
 import { splitTraceJsonl } from "./splitTrace";
+import { correctMeterValueAnomalies } from "./meterAnomaly";
+import { fetchStoredLogs } from "../client";
+import { logLinesToTrace } from "../../trace/logEntryToTrace";
+import { DEFAULT_HTTP_PORT } from "../server/constants";
 import type { AnalysisResult } from "@ocpp-debugkit/toolkit/reporter";
+
+/** Same default the other client modes (--send/--stop/--events) resolve to. */
+const DEFAULT_DAEMON_URL = `http://127.0.0.1:${DEFAULT_HTTP_PORT}`;
+
+/**
+ * Pull a charge point's stored logs off a running daemon and adapt them into
+ * trace JSONL, so `analyze` works against a daemon that was started WITHOUT
+ * `--trace-output`.
+ *
+ * The daemon persists its log entries, and `logEntryToTrace` already maps
+ * exactly that `{timestamp, level, type, message, cpId}` shape, so no new
+ * wire format is involved: this is the file-less path through the same
+ * adapter, not a second one. Non-wire log lines (scenario/diagnostic chatter)
+ * map to null and drop out here, which is why an all-chatter log yields empty
+ * text and the caller reports "nothing to analyze".
+ */
+async function fetchDaemonTraceJsonl(opts: AnalyzeOptions): Promise<string> {
+  const lines = await fetchStoredLogs(
+    {
+      httpUrl: opts.httpUrl ?? DEFAULT_DAEMON_URL,
+      basicAuth: opts.httpBasicAuth ?? null,
+    },
+    opts.cpId as string,
+  );
+  const records = logLinesToTrace(lines, { chargePointId: opts.cpId });
+  return records.map((r) => JSON.stringify(r)).join("\n");
+}
 
 // Shared with the web console's Session Analysis tab (issue #188 PoC item
 // 8) -- moved to a browser-safe module (no node imports) so both surfaces
@@ -28,9 +59,19 @@ import { ANALYZE_DISCLAIMER } from "../../trace/analysisDisclaimer";
 export { ANALYZE_DISCLAIMER };
 
 export interface AnalyzeOptions {
-  file: string;
+  /** Trace file to read. Undefined when `fromDaemon` is set. */
+  file?: string;
   output?: string;
   format?: "html" | "markdown";
+  /** Build the trace from a running daemon's stored logs instead of a file. */
+  fromDaemon?: true;
+  cpId?: string;
+  httpUrl?: string;
+  httpBasicAuth?: { username: string; password: string };
+  /** How to group trace records before analysis. Undefined means
+   *  "charge-point" (see splitTrace.ts's module docstring for what
+   *  "connector" does and why it's opt-in). */
+  splitBy?: "charge-point" | "connector";
 }
 
 /** Label for the bucket of records with no `chargePointId` at all. */
@@ -157,20 +198,51 @@ interface Group {
   jsonl: string;
 }
 
+/** What the report's `metadata.source` should say about where the trace
+ *  came from. A daemon-sourced run has no file to name, and "which daemon,
+ *  which charge point" is what makes the report reproducible. */
+export function describeTraceSource(opts: AnalyzeOptions): string {
+  if (opts.fromDaemon) {
+    const target = opts.httpUrl ?? DEFAULT_DAEMON_URL;
+    return `daemon ${target} (cp ${opts.cpId})`;
+  }
+  return opts.file ?? "(unknown)";
+}
+
 export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   let text: string;
-  try {
-    text = fs.readFileSync(opts.file, "utf8");
-  } catch (err) {
-    process.stderr.write(
-      `Error: cannot read trace file: ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
-    );
-    return 1;
+  if (opts.fromDaemon) {
+    try {
+      text = await fetchDaemonTraceJsonl(opts);
+    } catch (err) {
+      process.stderr.write(
+        `Error: cannot read logs from daemon: ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      return 1;
+    }
+    if (text.trim() === "") {
+      process.stderr.write(
+        `Error: the daemon has no stored OCPP wire logs for charge point ` +
+          `${opts.cpId} (nothing to analyze)\n`,
+      );
+      return 1;
+    }
+  } else {
+    try {
+      text = fs.readFileSync(opts.file as string, "utf8");
+    } catch (err) {
+      process.stderr.write(
+        `Error: cannot read trace file: ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      return 1;
+    }
   }
 
-  const split = splitTraceJsonl(text);
+  const split = splitTraceJsonl(text, opts.splitBy ?? "charge-point");
 
   const groups: Group[] = [];
   for (const [cpId, jsonl] of split.byChargePoint)
@@ -242,7 +314,15 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
     try {
       const { events, warnings } = parseOpenOcppTrace(group.jsonl);
       const sessions = buildSessionTimeline(events);
-      const failures = detectFailures(events, sessions);
+      const rawFailures = detectFailures(events, sessions);
+      // Toolkit fact (probed against the real 0.4.0 install, not inferred --
+      // see meterAnomaly.ts's module docstring): rule 14's
+      // METER_VALUE_ANOMALY flattens every measurand/phase/connector into
+      // one series per session, so a station sending more than one
+      // measurand per sample (routine) gets false non-monotonic warnings.
+      // Corrected here, between detectFailures and summarizeSessions, so
+      // the per-session failure counts below reflect the corrected set.
+      const failures = correctMeterValueAnomalies(sessions, rawFailures);
       const summaries = summarizeSessions(sessions, failures);
       const result: AnalysisResult = {
         events,
@@ -252,7 +332,7 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
         warnings,
         metadata: {
           stationId: group.id,
-          source: opts.file,
+          source: describeTraceSource(opts),
           ocppVersion: detectUniformOcppVersion(group.jsonl),
         },
       };

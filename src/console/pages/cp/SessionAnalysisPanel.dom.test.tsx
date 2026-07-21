@@ -303,6 +303,31 @@ describe("SessionAnalysisPanel", () => {
     expect(container.textContent).toContain(ANALYZE_DISCLAIMER);
   });
 
+  it("calls listStoredLogs as a method of the service (real implementations read `this`)", async () => {
+    // Every real ChargePointService implementation reads `this` inside
+    // listStoredLogs; a detached call would pass with the arrow-fn fakes
+    // above, so this fake explicitly rejects an unbound invocation.
+    const service = makeService({
+      snapshots: [snapshot("CP-1")],
+      listStoredLogs: function (this: unknown) {
+        if (this == null) {
+          throw new Error("listStoredLogs called without its service binding");
+        }
+        return Promise.resolve(CLEAN_SESSION_ROWS);
+      } as never,
+    });
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openAnalysisTab(container);
+    await clickAnalyzeAndWait(container);
+
+    expect(container.textContent).toContain("No failures detected");
+    expect(container.textContent).not.toContain(
+      "listStoredLogs called without its service binding",
+    );
+  });
+
   it("analyzes a failed-auth trace: FAILED_AUTHORIZATION is visible", async () => {
     const service = makeService({
       snapshots: [snapshot("CP-1")],

@@ -89,11 +89,12 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
     setSelectedEventId(null);
   }, [cpId]);
 
-  const listStoredLogs = chargePointService.listStoredLogs;
-  const canAnalyze = typeof listStoredLogs === "function";
+  const canAnalyze = typeof chargePointService.listStoredLogs === "function";
 
   const handleAnalyze = useCallback(async () => {
-    if (!listStoredLogs) return;
+    // Called as a method — every real implementation reads `this` inside
+    // listStoredLogs, so a detached reference breaks at runtime.
+    if (!chargePointService.listStoredLogs) return;
     const requestCpId = cpId;
     setSelectedEventId(null);
     setState({ kind: "analyzing" });
@@ -107,7 +108,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
     };
 
     try {
-      const rows = await listStoredLogs(requestCpId);
+      const rows = await chargePointService.listStoredLogs(requestCpId);
       if (rows.length === 0) {
         commit({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
         return;
@@ -155,7 +156,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
         message: `Analysis failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
-  }, [listStoredLogs, cpId, ocppVersion]);
+  }, [chargePointService, cpId, ocppVersion]);
 
   const selectedEvent = useMemo(() => {
     if (state.kind !== "results") return null;

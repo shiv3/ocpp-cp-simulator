@@ -13,8 +13,10 @@ import { createHttpHandlers, type CorsPolicy } from "./httpServer";
 import {
   attachSocketIo,
   createSocketConfigRepository,
+  createRuntimeDeps,
   isSocketIoPath,
 } from "./socketServer";
+import { createMcpHandler } from "./mcp/mcpServer";
 import { RegistryChargePointService } from "./RegistryChargePointService";
 import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../cp/domain/persistence/Database";
@@ -152,6 +154,20 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     handleRequest: socketIo.handleRequest,
   };
 
+  // Build runtime deps for MCP handler (shares state with socket.io).
+  // This uses the same instances as attachSocketIo to ensure both transports
+  // operate on the same CPRegistry, database, and repositories.
+  const runtimeDeps = createRuntimeDeps({
+    registry,
+    bus,
+    database,
+    configRepository,
+    scenarioRepository,
+    connectorSettingsRepository,
+    chargePointService,
+  });
+  const mcpHandler = createMcpHandler(runtimeDeps);
+
   // Two listener configurations:
   //   * "api"  — health + socket.io, no static fallback.
   //   * "console" — health + socket.io + static files (UI); used by the
@@ -166,6 +182,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     healthPath: opts.healthPath,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
     socketIo: socketIoRoute,
+    mcp: { handler: mcpHandler },
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -178,6 +195,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         healthPath: opts.healthPath,
         webConsoleBasicAuth: opts.webConsoleBasicAuth,
         socketIo: socketIoRoute,
+        mcp: { handler: mcpHandler },
       })
     : apiHandlers;
   if (opts.staticDir) {
@@ -214,6 +232,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       `Listening on http://${opts.httpHost}:${opts.httpPort}` +
         (httpPortShared ? " (socket.io + web console)" : " (socket.io)"),
     );
+    serverLog(
+      `MCP endpoint: POST http://${opts.httpHost}:${opts.httpPort}/mcp`,
+    );
   }
 
   if (opts.webConsolePort != null && !httpPortShared) {
@@ -227,6 +248,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     servers.push(consoleServer);
     lifecycle.attachServer(consoleServer);
     serverLog(`Web console on http://${opts.httpHost}:${opts.webConsolePort}`);
+    serverLog(
+      `MCP endpoint: POST http://${opts.httpHost}:${opts.webConsolePort}/mcp`,
+    );
   }
 
   if (servers.length === 0) {

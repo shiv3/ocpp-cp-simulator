@@ -15,6 +15,7 @@ import {
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
   normalizeSoapPath,
 } from "../soapPath";
+import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "../../protocol/limits";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -92,6 +93,7 @@ const COMMON_CORS_HEADERS: Record<string, string> = {
 
 export const DEFAULT_SOAP_PATH = "/ocpp/soap";
 export const MAX_SOAP_REQUEST_BODY_BYTES = 256 * 1024;
+export const MAX_MCP_REQUEST_BODY_BYTES = 1024 * 1024;
 
 export type CorsPolicy =
   | { kind: "any" }
@@ -319,6 +321,40 @@ async function readTextWithLimit(
   return text + decoder.decode();
 }
 
+async function readArrayBufferWithLimit(
+  req: Request,
+  maxBytes: number,
+): Promise<ArrayBuffer | null> {
+  if (!req.body) return new ArrayBuffer(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  let done = false;
+  while (!done) {
+    const chunk = await reader.read();
+    done = chunk.done;
+    if (done) break;
+    const value = chunk.value;
+    if (!value) continue;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  if (chunks.length === 0) return new ArrayBuffer(0);
+  const buffer = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return buffer.buffer;
+}
+
 /**
  * Default every response to `Cache-Control: no-store` unless the handler set
  * one explicitly (issue #79). serveStatic already stamps build assets as
@@ -431,12 +467,34 @@ export function createHttpHandlers(deps: {
   webConsoleBasicAuth?: { username: string; password: string } | null;
   /** Optional socket.io/Engine.IO route mounted on the same Bun listener. */
   socketIo?: SocketIoRoute | null;
+  /** Optional MCP handler for POST /mcp. Rate limiting and body cap are
+   *  applied. */
+  mcp?: {
+    handler: (req: Request) => Promise<Response>;
+    /** Rate limit (calls/sec). Defaults to RPC_RATE_PER_SEC. */
+    ratePerSec?: number;
+    /** Max in-flight requests. Defaults to INFLIGHT_CAP. */
+    inflightCap?: number;
+  } | null;
 }): HttpHandlers {
   const cors: CorsPolicy = deps.cors ?? { kind: "any" };
   const staticDir = deps.staticDir ?? null;
   const healthPath = deps.healthPath ?? "/v1/healthz";
   const webConsoleBasicAuth = deps.webConsoleBasicAuth ?? null;
   const socketIo = deps.socketIo ?? null;
+  const mcpConfig = deps.mcp ?? null;
+
+  // Rate limiting state for MCP handler (token bucket per invocation).
+  interface McpRateLimiterState {
+    tokens: number;
+    lastRefillMs: number;
+    inFlight: number;
+  }
+  const mcpRatePerSec = mcpConfig?.ratePerSec ?? RPC_RATE_PER_SEC;
+  const mcpInflightCap = mcpConfig?.inflightCap ?? INFLIGHT_CAP;
+  const mcpLimiter: McpRateLimiterState | null = mcpConfig
+    ? { tokens: mcpRatePerSec, lastRefillMs: Date.now(), inFlight: 0 }
+    : null;
 
   return {
     fetch(req, server) {
@@ -557,6 +615,71 @@ export function createHttpHandlers(deps: {
               400,
             )
           );
+        },
+      );
+    }
+
+    // /mcp — MCP (Model Context Protocol) Streamable HTTP endpoint.
+    // Stateless, POST-only: the spec requires 405 for GET when the server
+    // offers no server-initiated SSE stream (and DELETE has no session to
+    // terminate). Falls through to 404 when no handler is configured.
+    if (url.pathname === "/mcp" && mcpConfig && req.method !== "POST") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { allow: "POST" },
+      });
+    }
+    if (url.pathname === "/mcp" && req.method === "POST" && mcpConfig) {
+      const contentLength = declaredContentLength(req);
+      if (contentLength !== null && Number.isNaN(contentLength)) {
+        return new Response("invalid content-length header", {
+          status: 400,
+        });
+      }
+      if (
+        contentLength !== null &&
+        contentLength > MAX_MCP_REQUEST_BODY_BYTES
+      ) {
+        return new Response("request body is too large", { status: 413 });
+      }
+
+      // Check rate limit before consuming capacity.
+      if (mcpLimiter) {
+        const now = Date.now();
+        const elapsedSeconds =
+          Math.max(0, now - mcpLimiter.lastRefillMs) / 1_000;
+        mcpLimiter.tokens = Math.min(
+          mcpRatePerSec,
+          mcpLimiter.tokens + elapsedSeconds * mcpRatePerSec,
+        );
+        mcpLimiter.lastRefillMs = now;
+
+        if (mcpLimiter.tokens < 1 || mcpLimiter.inFlight >= mcpInflightCap) {
+          return new Response("rate limit exceeded", { status: 429 });
+        }
+
+        mcpLimiter.tokens -= 1;
+        mcpLimiter.inFlight += 1;
+      }
+
+      // Buffer the body (arrayBuffer), then reconstruct the Request.
+      return readArrayBufferWithLimit(req, MAX_MCP_REQUEST_BODY_BYTES).then(
+        async (buffer) => {
+          if (buffer === null) {
+            if (mcpLimiter) mcpLimiter.inFlight -= 1;
+            return new Response("request body is too large", { status: 413 });
+          }
+          try {
+            const reqWithBody = new Request(req.url, {
+              method: req.method,
+              headers: req.headers,
+              body: buffer.byteLength > 0 ? buffer : null,
+            });
+            const result = await mcpConfig.handler(reqWithBody);
+            return result;
+          } finally {
+            if (mcpLimiter) mcpLimiter.inFlight -= 1;
+          }
         },
       );
     }

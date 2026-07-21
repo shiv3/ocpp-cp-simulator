@@ -809,6 +809,7 @@ HTTP endpoints (see docs/server.md):
   GET    /v1/healthz       (or whatever --health-path is set to)
   GET    /socket.io/       Socket.IO / Engine.IO transport
   POST   /socket.io/       Socket.IO / Engine.IO transport
+  POST   /mcp             MCP (Model Context Protocol) Streamable HTTP endpoint
 `);
 }
 

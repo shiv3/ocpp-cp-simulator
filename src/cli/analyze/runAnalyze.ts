@@ -67,6 +67,10 @@ export interface AnalyzeOptions {
   cpId?: string;
   httpUrl?: string;
   httpBasicAuth?: { username: string; password: string };
+  /** How to group trace records before analysis. Undefined means
+   *  "charge-point" (see splitTrace.ts's module docstring for what
+   *  "connector" does and why it's opt-in). */
+  splitBy?: "charge-point" | "connector";
 }
 
 /** Label for the bucket of records with no `chargePointId` at all. */
@@ -237,7 +241,7 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
     }
   }
 
-  const split = splitTraceJsonl(text);
+  const split = splitTraceJsonl(text, opts.splitBy ?? "charge-point");
 
   const groups: Group[] = [];
   for (const [cpId, jsonl] of split.byChargePoint)

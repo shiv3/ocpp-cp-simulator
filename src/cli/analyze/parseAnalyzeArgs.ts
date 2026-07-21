@@ -22,6 +22,12 @@ export interface AnalyzeCliArgs {
   cpId?: string;
   httpUrl?: string;
   httpBasicAuth?: { username: string; password: string };
+  /** How to group trace records before handing them to the toolkit.
+   *  Undefined means "charge-point" (current behavior, unchanged) -- kept
+   *  undefined rather than defaulted here so `toEqual` assertions that
+   *  predate this flag keep passing (see splitTrace.ts for what each mode
+   *  does). */
+  splitBy?: "charge-point" | "connector";
 }
 
 export type AnalyzeCliParseResult =
@@ -29,9 +35,11 @@ export type AnalyzeCliParseResult =
 
 export const ANALYZE_USAGE =
   "Usage: ocpp-cp-sim analyze <trace.jsonl> [--output <file>] [--format html|markdown]\n" +
+  "                           [--split-by charge-point|connector]\n" +
   "       ocpp-cp-sim analyze --from-daemon --cp-id <id> [--http-url <url>]\n" +
   "                           [--http-basic-auth-user <u> --http-basic-auth-pass <p>]\n" +
-  "                           [--output <file>] [--format html|markdown]";
+  "                           [--output <file>] [--format html|markdown]\n" +
+  "                           [--split-by charge-point|connector]";
 
 /** Flags that only mean something when the trace comes from a daemon. */
 const DAEMON_ONLY_FLAGS = [
@@ -50,6 +58,7 @@ export function parseAnalyzeArgs(argv: string[]): AnalyzeCliParseResult {
   let httpUrl: string | undefined;
   let basicAuthUser: string | undefined;
   let basicAuthPass: string | undefined;
+  let splitBy: "charge-point" | "connector" | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -72,6 +81,16 @@ export function parseAnalyzeArgs(argv: string[]): AnalyzeCliParseResult {
       i++;
     } else if (arg === "--from-daemon") {
       fromDaemon = true;
+    } else if (arg === "--split-by") {
+      const next = argv[i + 1];
+      if (next !== "charge-point" && next !== "connector") {
+        return {
+          ok: false,
+          message: "Error: --split-by must be 'charge-point' or 'connector'",
+        };
+      }
+      splitBy = next;
+      i++;
     } else if (DAEMON_ONLY_FLAGS.includes(arg)) {
       const next = argv[i + 1];
       if (!next || next.startsWith("-")) {
@@ -147,6 +166,7 @@ export function parseAnalyzeArgs(argv: string[]): AnalyzeCliParseResult {
           basicAuthUser !== undefined && basicAuthPass !== undefined
             ? { username: basicAuthUser, password: basicAuthPass }
             : undefined,
+        splitBy,
       },
     };
   }
@@ -158,5 +178,5 @@ export function parseAnalyzeArgs(argv: string[]): AnalyzeCliParseResult {
     };
   }
 
-  return { ok: true, args: { file, output, format } };
+  return { ok: true, args: { file, output, format, splitBy } };
 }

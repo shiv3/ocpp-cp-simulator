@@ -176,4 +176,80 @@ describe("parseAnalyzeArgs", () => {
       }
     });
   });
+
+  describe("--split-by", () => {
+    it("defaults to undefined when not passed, so current behavior (split by charge point) is unchanged", () => {
+      const result = parseAnalyzeArgs(["trace.jsonl"]);
+      expect(result).toEqual({
+        ok: true,
+        args: {
+          file: "trace.jsonl",
+          output: undefined,
+          format: undefined,
+        },
+      });
+      if (result.ok) {
+        expect(result.args.splitBy).toBeUndefined();
+      }
+    });
+
+    it("parses --split-by connector", () => {
+      const result = parseAnalyzeArgs([
+        "trace.jsonl",
+        "--split-by",
+        "connector",
+      ]);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.args.splitBy).toBe("connector");
+      }
+    });
+
+    it("parses an explicit --split-by charge-point", () => {
+      const result = parseAnalyzeArgs([
+        "trace.jsonl",
+        "--split-by",
+        "charge-point",
+      ]);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.args.splitBy).toBe("charge-point");
+      }
+    });
+
+    it("rejects any value other than charge-point or connector", () => {
+      const result = parseAnalyzeArgs(["trace.jsonl", "--split-by", "phase"]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain(
+          "--split-by must be 'charge-point' or 'connector'",
+        );
+      }
+    });
+
+    it("rejects --split-by with a missing value", () => {
+      const result = parseAnalyzeArgs(["trace.jsonl", "--split-by"]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain(
+          "--split-by must be 'charge-point' or 'connector'",
+        );
+      }
+    });
+
+    it("combines with --from-daemon (an independent dimension from the trace source)", () => {
+      const result = parseAnalyzeArgs([
+        "--from-daemon",
+        "--cp-id",
+        "CP001",
+        "--split-by",
+        "connector",
+      ]);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.args.splitBy).toBe("connector");
+        expect(result.args.fromDaemon).toBe(true);
+      }
+    });
+  });
 });

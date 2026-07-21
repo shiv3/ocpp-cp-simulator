@@ -301,9 +301,11 @@ on a mismatch.
 
 ```bash
 ocpp-cp-sim analyze <trace.jsonl> [--output <file>] [--format html|markdown]
+                     [--split-by charge-point|connector]
 ocpp-cp-sim analyze --from-daemon --cp-id <id> [--http-url <url>]
                      [--http-basic-auth-user <u> --http-basic-auth-pass <p>]
                      [--output <file>] [--format html|markdown]
+                     [--split-by charge-point|connector]
 ```
 
 Runs [OCPP DebugKit](https://github.com/ocpp-debugkit/toolkit)'s
@@ -329,6 +331,9 @@ ocpp-cp-sim analyze trace.jsonl --output report.txt --format html
 
 # From a running daemon's stored logs, no trace file needed
 ocpp-cp-sim analyze --from-daemon --cp-id CP001 --output report.html
+
+# One report per connector instead of one per charge point
+ocpp-cp-sim analyze trace.jsonl --split-by connector --output report.html
 ```
 
 ### Reading from a running daemon (`--from-daemon`)
@@ -428,6 +433,58 @@ independently:
   file). An explicit `--format` always wins over the `--output` extension
   (see [Formats](#formats) above) — this applies with or without
   `--output`.
+
+### Splitting by connector (`--split-by connector`)
+
+Same root cause as the chargePointId problem above, one level down: the
+toolkit's rules operate over a whole station's events at once, and
+`connectorId` appears exactly once in the installed `dist/core/detection.js`
+— inside a comment. No rule groups by it. `STATUS_TRANSITION_VIOLATION` in
+particular treats connector A going `Available` while connector B (on the
+same station) goes `Finishing` as one invalid transition; on a real
+4-connector trace this produced 24 findings, and hand-filtering that trace
+down to a single connector reduced it to the 1 that was real.
+
+`--split-by connector` (default `--split-by charge-point`, i.e. today's
+behavior, unchanged) further splits each charge point's records by
+connector before analysis, so each connector gets its own report:
+
+- A record's connector is derived from `payload.connectorId` for
+  `StatusNotification`, `MeterValues`, `StartTransaction`, and
+  `RemoteStartTransaction`. `StopTransaction` / `RemoteStopTransaction`
+  carry only `transactionId`; their connector is resolved by correlating
+  each `StartTransaction` CALL's `messageId` to the `transactionId` in its
+  CALLRESULT, then mapping that transaction back to the StartTransaction's
+  connector. A CALLRESULT/CALLERROR itself carries no connector and
+  inherits whichever connector the CALL it answers resolved to.
+  `connectorId: 0` is station-level per OCPP 1.6 (the "whole station"
+  pseudo-connector), never connector 1.
+- Records with no derivable connector at all — `BootNotification`,
+  `Heartbeat`, `Authorize`, `DiagnosticsStatusNotification`,
+  `FirmwareStatusNotification`, `connectorId: 0`, or an unresolvable
+  `StopTransaction` — are **replicated into every connector's report**.
+  Rules like `UNEXPECTED_START` need to see the station's
+  `BootNotification`; a per-connector report that lacked it would itself
+  report a _new_ false positive ("StartTransaction without preceding
+  BootNotification"), the exact kind of artifact this flag exists to
+  remove. The consequence: a station-level finding (e.g. a real
+  `DIAGNOSTICS_FAILURE`) can appear in more than one connector's report —
+  read it as "this affects the whole station, seen from connector N's
+  report," not as N separate failures.
+- A charge point with no connector-scoped record at all (e.g. a boot-only
+  trace) has nothing to split on; it falls back to one report under its
+  plain charge point id, same as `--split-by charge-point`.
+- Report filenames follow the same `--output` splitting as multiple charge
+  points (above), with connector groups named
+  `<chargePointId>-connector<N>`: `--output out.html` with charge point
+  `CP001` and two connectors produces `out.CP001-connector1.html` and
+  `out.CP001-connector2.html`.
+
+This is opt-in rather than always-on: unlike the chargePointId split above
+(a pure toolkit bug with no legitimate alternative reading), "should
+`STATION_OFFLINE_DURING_SESSION` / `UNEXPECTED_START` etc. see the whole
+station or just one connector" is a real judgment call, so the default
+stays today's whole-station behavior.
 
 ### Excluded records
 

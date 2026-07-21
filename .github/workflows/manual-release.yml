@@ -79,7 +79,12 @@ jobs:
       - name: Install Rust stable
         # rust-toolchain derives the toolchain from the ref name, so a pinned
         # SHA needs the toolchain named explicitly.
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        #
+        # Pin to the `v1` tag, never to a `stable` branch head: upstream
+        # force-pushes `stable`, which orphans the SHA and leaves Dependabot
+        # unable to resolve it back to a ref (`unknown_error`, and the whole
+        # github-actions ecosystem job fails).
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}

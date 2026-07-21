@@ -18,6 +18,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { splitTraceJsonl } from "./splitTrace";
+import { correctMeterValueAnomalies } from "./meterAnomaly";
 import { fetchStoredLogs } from "../client";
 import { logLinesToTrace } from "../../trace/logEntryToTrace";
 import { DEFAULT_HTTP_PORT } from "../server/constants";
@@ -313,7 +314,15 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
     try {
       const { events, warnings } = parseOpenOcppTrace(group.jsonl);
       const sessions = buildSessionTimeline(events);
-      const failures = detectFailures(events, sessions);
+      const rawFailures = detectFailures(events, sessions);
+      // Toolkit fact (probed against the real 0.4.0 install, not inferred --
+      // see meterAnomaly.ts's module docstring): rule 14's
+      // METER_VALUE_ANOMALY flattens every measurand/phase/connector into
+      // one series per session, so a station sending more than one
+      // measurand per sample (routine) gets false non-monotonic warnings.
+      // Corrected here, between detectFailures and summarizeSessions, so
+      // the per-session failure counts below reflect the corrected set.
+      const failures = correctMeterValueAnomalies(sessions, rawFailures);
       const summaries = summarizeSessions(sessions, failures);
       const result: AnalysisResult = {
         events,

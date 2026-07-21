@@ -3,8 +3,12 @@
 # Coverage is uploaded from both vitest's lcov (`bun run test:coverage`, at
 # ./coverage/lcov.info) and Bun's lcov (`bun run test:coverage:bun`, at
 # ./coverage/bun/lcov.info) — Codecov merges the two reports for the same
-# commit, so the daemon/runtime code exercised only by Bun tests
-# (`*.bun.test.ts`, run via `bun test bun.test`) is now reflected too.
+# commit, so the line coverage of daemon/runtime code exercised only by Bun
+# tests (`*.bun.test.ts`, run via `bun test bun.test`) is now reflected too.
+# Two caveats: Bun's lcov carries line coverage only (no branch/function
+# data), and a few Bun tests spawn subprocesses whose lines can't be
+# attributed to the parent — so the merged number is a floor, not a
+# fully-representative figure, for Bun-only-covered code.
 #
 # Keep the status checks informational for now: the true combined % hasn't
 # been observed yet, and codecov here is for visibility, not a merge gate.

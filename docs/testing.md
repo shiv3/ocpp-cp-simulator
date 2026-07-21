@@ -11,5 +11,10 @@
 
 Coverage (`bun run test:coverage` / `test:coverage:bun`, uploaded to Codecov
 in CI) merges both reports — `coverage/lcov.info` (Vitest) and
-`coverage/bun/lcov.info` (Bun) — so code exercised only by Bun tests no
-longer shows as uncovered.
+`coverage/bun/lcov.info` (Bun) — so the **line** coverage of code exercised
+only by Bun tests no longer shows as uncovered. Two limitations to keep in
+mind: Bun's lcov reports line coverage only (no branch or per-function data,
+unlike Vitest's v8 report), and Bun tests that spawn a subprocess (e.g. the
+CLI-entry integration tests) only cover the parent process, so the child's
+lines are not attributed. The merged figure is therefore a floor for
+Bun-only-covered code, not a fully-representative number.

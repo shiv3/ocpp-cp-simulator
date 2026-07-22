@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "1.0",
+  "id": "fault-injection",
+  "name": "Fault Injection (GroundFailure) and Recovery",
+  "description": "OCPP 1.6 §4.9 error reporting: send a StatusNotification.req with status Faulted and errorCode GroundFailure (plus human-readable info), hold the fault for 5 s, then recover to Available with errorCode NoError. Useful for testing how a CSMS surfaces charge-point faults.",
+  "targetType": "connector",
+  "targetId": 1,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 400, "y": 0 },
+      "data": { "label": "Start on connect", "triggerOn": "connect" }
+    },
+    {
+      "id": "wait-boot",
+      "type": "delay",
+      "position": { "x": 400, "y": 100 },
+      "data": {
+        "label": "Wait for BootNotification.conf",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "fault",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "StatusNotification: Faulted / GroundFailure",
+        "description": "§4.9 — full StatusNotification.req with error context, not just a status flip.",
+        "status": "Faulted",
+        "errorCode": "GroundFailure",
+        "info": "Simulated ground failure"
+      }
+    },
+    {
+      "id": "hold",
+      "type": "delay",
+      "position": { "x": 400, "y": 300 },
+      "data": { "label": "Hold the fault", "delaySeconds": 5 }
+    },
+    {
+      "id": "recover",
+      "type": "statusNotification",
+      "position": { "x": 400, "y": 400 },
+      "data": {
+        "label": "StatusNotification: Available / NoError",
+        "description": "Recovery — the connector reports healthy again.",
+        "status": "Available",
+        "errorCode": "NoError"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 400, "y": 500 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "wait-boot" },
+    { "id": "e2", "source": "wait-boot", "target": "fault" },
+    { "id": "e3", "source": "fault", "target": "hold" },
+    { "id": "e4", "source": "hold", "target": "recover" },
+    { "id": "e5", "source": "recover", "target": "end" }
+  ],
+  "assertions": [
+    {
+      "id": "a1",
+      "description": "A StatusNotification.req was sent",
+      "type": "ocpp_sent",
+      "action": "StatusNotification"
+    },
+    {
+      "id": "a2",
+      "description": "The first StatusNotification of the run carries the injected fault",
+      "type": "payload_match",
+      "action": "StatusNotification",
+      "direction": "sent",
+      "occurrence": 0,
+      "payload": { "status": "Faulted", "errorCode": "GroundFailure" }
+    }
+  ]
+}

@@ -79,7 +79,7 @@ const CUMULATIVE_MEASURANDS = new Set<string>([
  * nothing to import here; this is a deliberate, pinned copy, not a guess.
  * `@ocpp-debugkit/toolkit` is pinned to an exact `0.4.0` (no `^` range) in
  * package.json specifically so an upstream wording change can't silently
- * drift this copy out from under us (docs/cli.md -> analyze -> Dependency).
+ * drift this copy out from under us (docs/reference/cli.md -> analyze -> Dependency).
  */
 const METER_VALUE_ANOMALY_SEVERITY: FailureSeverity = "warning";
 const METER_VALUE_ANOMALY_SUGGESTED_STEPS: string[] = [

@@ -12,7 +12,7 @@ import java.time.Duration;
  * <p>The image entrypoint starts the daemon with
  * {@code --http-host 0.0.0.0 --unsafe-remote --web-console 9700}, so the
  * Socket.IO control plane and the health endpoint are reachable over the mapped
- * port with no authentication. See {@code docs/server.md} and {@code Dockerfile}.
+ * port with no authentication. See {@code docs/reference/server.md} and {@code Dockerfile}.
  *
  * <p>Build the image first from the repository root:
  * <pre>{@code docker build -t ocpp-cp-simulator:local .}</pre>

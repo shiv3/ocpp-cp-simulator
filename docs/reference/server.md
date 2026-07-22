@@ -143,24 +143,36 @@ Runtime packages for this control plane are `socket.io`,
 
 > Scenario definitions (the `scenario` param above, and the file read by
 > `load_scenario`'s `file` param / `run_scenario_file`) follow
-> [docs/scenario-format.md](scenario-format.md) and its published
-> [JSON Schema](../schema/scenario.schema.json). Validation against that
+> [scenario-format.md](scenario-format.md) and its published
+> [JSON Schema](../../schema/scenario.schema.json). Validation against that
 > schema is advisory — a mismatch is logged, not rejected.
 
 ### Daemon methods
 
-| Method               | Params                                                                                                                                                                                                | Result / purpose                                                                      |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `cp.list`            | `{}`                                                                                                                                                                                                  | Array of redacted CP registry items.                                                  |
-| `cp.create`          | `{ "cpId": string, "wsUrl": string, "connectors"?: number, "vendor"?: string, "model"?: string, "ocppVersion"?: string, "basicAuth"?: object, "bootNotification"?: object, "autoConnect"?: boolean }` | Create a CP; `autoConnect: true` connects it after creation.                          |
-| `cp.update`          | Same as `cp.create`                                                                                                                                                                                   | Replace an existing CP config; `autoConnect: true` reconnects it after update.        |
-| `cp.delete`          | `{ "cpId": string }`                                                                                                                                                                                  | Remove a CP from the registry.                                                        |
-| `logs.get`           | `{ "cpId": string, "limit"?: number }`                                                                                                                                                                | Return persisted logs, or the in-memory log buffer when no state DB is configured.    |
-| `logs.clear`         | `{ "cpId": string }`                                                                                                                                                                                  | Delete persisted logs for the CP.                                                     |
-| `state.reset`        | `{}`                                                                                                                                                                                                  | Drop in-memory CPs and clear simulator-owned state DB tables while preserving schema. |
-| `server.shutdown`    | `{}`                                                                                                                                                                                                  | Request daemon shutdown.                                                              |
-| `events.subscribe`   | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Join event rooms and return an atomic snapshot.                                       |
-| `events.unsubscribe` | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Leave an event room.                                                                  |
+| Method                                   | Params                                                                                                                                                                                                | Result / purpose                                                                                                                 |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `cp.list`                                | `{}`                                                                                                                                                                                                  | Array of redacted CP registry items.                                                                                             |
+| `cp.create`                              | `{ "cpId": string, "wsUrl": string, "connectors"?: number, "vendor"?: string, "model"?: string, "ocppVersion"?: string, "basicAuth"?: object, "bootNotification"?: object, "autoConnect"?: boolean }` | Create a CP; `autoConnect: true` connects it after creation.                                                                     |
+| `cp.update`                              | Same as `cp.create`                                                                                                                                                                                   | Replace an existing CP config; `autoConnect: true` reconnects it after update.                                                   |
+| `cp.delete`                              | `{ "cpId": string }`                                                                                                                                                                                  | Remove a CP from the registry.                                                                                                   |
+| `logs.get`                               | `{ "cpId": string, "limit"?: number }`                                                                                                                                                                | Return persisted logs, or the in-memory log buffer when no state DB is configured.                                               |
+| `logs.clear`                             | `{ "cpId": string }`                                                                                                                                                                                  | Delete persisted logs for the CP.                                                                                                |
+| `state.reset`                            | `{}`                                                                                                                                                                                                  | Drop in-memory CPs and clear simulator-owned state DB tables while preserving schema.                                            |
+| `config.get`                             | `{}`                                                                                                                                                                                                  | Return the persisted simulator configuration (or `null` when none is stored).                                                    |
+| `config.save`                            | `{ "config": object \| null }`                                                                                                                                                                        | Persist (or clear with `null`) the simulator configuration.                                                                      |
+| `scenario.templates`                     | `{}`                                                                                                                                                                                                  | List the built-in scenario templates.                                                                                            |
+| `scenario.definitions.list`              | `{ "cpId": string, "connectorId": number }`                                                                                                                                                           | List stored scenario definitions for a connector.                                                                                |
+| `scenario.definitions.save`              | `{ "cpId": string, "connectorId": number, "definition": object }`                                                                                                                                     | Save one scenario definition; returns the stored definition.                                                                     |
+| `scenario.definitions.replace`           | `{ "cpId": string, "connectorId": number, "definitions": object[] }`                                                                                                                                  | Replace the connector's full definition set atomically.                                                                          |
+| `scenario.definitions.delete`            | `{ "cpId": string, "connectorId": number, "definitionId": string }`                                                                                                                                   | Delete one stored scenario definition.                                                                                           |
+| `connector_settings.auto_meter.get`      | `{ "cpId": string, "connectorId": number }`                                                                                                                                                           | Return the connector's automatic-meter config (or `null`).                                                                       |
+| `connector_settings.auto_meter.save`     | `{ "cpId": string, "connectorId": number, "config": object }`                                                                                                                                         | Persist the connector's automatic-meter config.                                                                                  |
+| `connector_settings.soc_meter_sync.get`  | `{ "cpId": string, "connectorId": number }`                                                                                                                                                           | Return whether SoC-meter sync is enabled for the connector.                                                                      |
+| `connector_settings.soc_meter_sync.save` | `{ "cpId": string, "connectorId": number, "enabled": boolean }`                                                                                                                                       | Toggle SoC-meter sync for the connector.                                                                                         |
+| `ev_settings.apply_default`              | `{ "settings": object }`                                                                                                                                                                              | Push Default EV Settings onto every connector of every registered CP (connectors with an explicit or scenario override keep it). |
+| `server.shutdown`                        | `{}`                                                                                                                                                                                                  | Request daemon shutdown.                                                                                                         |
+| `events.subscribe`                       | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Join event rooms and return an atomic snapshot.                                                                                  |
+| `events.unsubscribe`                     | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Leave an event room.                                                                                                             |
 
 ## MCP Endpoint
 
@@ -343,7 +355,7 @@ socket.disconnect();
 
 For a JVM/Testcontainers harness that drives this same control plane (start the
 container, `cp.create`, `run_scenario`, assert the machine-readable verdict), see
-[`examples/testcontainers-java/`](../examples/testcontainers-java/) (issue #111).
+[`examples/testcontainers-java/`](../../examples/testcontainers-java/) (issue #111).
 
 ## Controlling a Running Daemon from the CLI
 
@@ -502,7 +514,7 @@ downloaded log file.
 
 A `Dockerfile` and `docker-compose.yml` ship at the repo root, and a multi-arch
 image is published on every push to `main` / version tag at
-`ghcr.io/shiv3/ocpp-cp-simulator`. See [docs/docker.md](./docker.md) for the
+`ghcr.io/shiv3/ocpp-cp-simulator`. See [guides/docker.md](../guides/docker.md) for the
 full reference (volumes, environment variables, compose recipes, structured-log
 piping). Quick path:
 
@@ -623,9 +635,9 @@ ocpp-cp-sim --daemon --http-port 9700 --web-console \
 > caveat — prefer it when the public URL is fixed.
 
 A worked **nginx + Authelia** example lives at
-[`docs/examples/compose-reverse-proxy-sso.yml`](examples/compose-reverse-proxy-sso.yml)
+[`docs/examples/compose-reverse-proxy-sso.yml`](../examples/compose-reverse-proxy-sso.yml)
 (with its
-[`nginx-reverse-proxy-sso.conf`](examples/nginx-reverse-proxy-sso.conf)).
+[`nginx-reverse-proxy-sso.conf`](../examples/nginx-reverse-proxy-sso.conf)).
 
 ## Security
 

@@ -9,7 +9,7 @@ This is the format the browser Scenario Editor exports/imports, the shape
 — see [issue #214](https://github.com/shiv3/ocpp-cp-simulator/issues/214).
 
 A published **JSON Schema** (Draft 2020-12) lives at
-[`schema/scenario.schema.json`](../schema/scenario.schema.json) and is the
+[`schema/scenario.schema.json`](../../schema/scenario.schema.json) and is the
 source of truth for field names, types, and the closed vocabularies (node
 `type`, `OCPPStatus`, etc.). This document is a human-readable overview of
 that schema, not a replacement for it.
@@ -25,6 +25,8 @@ that schema, not a replacement for it.
   keeps every scenario file written before this schema existed — none of
   which carry `schemaVersion` or `createdAt`/`updatedAt` — working exactly
   as before.
+- Runnable examples, including assertion-bearing flows, live in
+  [`../examples/scenarios/`](../examples/scenarios/).
 
 ## Versioning
 
@@ -110,7 +112,7 @@ shape depends on `type`).
 Which `status` values are valid depends on `action` (e.g. `action:
 "RemoteStartTransaction"` only accepts `status: "Accepted" | "Rejected"`; see
 `RESPONSE_OVERRIDE_STATUSES` in
-[`ScenarioTypes.ts`](../src/cp/application/scenario/ScenarioTypes.ts)). The
+[`ScenarioTypes.ts`](../../src/cp/application/scenario/ScenarioTypes.ts)). The
 schema types both fields as plain strings and does **not** enforce this
 action → status constraint — encoding the full per-action status matrix
 into JSON Schema would make the schema harder to read for little benefit
@@ -132,7 +134,7 @@ allows but does not require.
 An optional array of declarative pass/fail checks evaluated against the
 run's captured OCPP transcript once a scenario finishes (see
 `evaluateAssertions` in
-[`ScenarioAssertions.ts`](../src/cp/application/verification/ScenarioAssertions.ts)).
+[`ScenarioAssertions.ts`](../../src/cp/application/verification/ScenarioAssertions.ts)).
 Each entry has `id` and `type` (one of `ocpp_sent`, `ocpp_received`,
 `ocpp_absent`, `response_status`, `idtag_info_status`, `payload_match`,
 `message_order`, `message_after`, `state_transition`, `no_unexpected`), plus

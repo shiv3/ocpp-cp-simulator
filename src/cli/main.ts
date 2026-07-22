@@ -764,7 +764,7 @@ Options:
                            With the same-origin default, also accept the
                            public origin a reverse proxy reports via
                            X-Forwarded-Proto / X-Forwarded-Host. Use only
-                           behind a trusted proxy (see docs/server.md).
+                           behind a trusted proxy (see docs/reference/server.md).
   --web-console [<port>]   Serve the bundled browser UI alongside socket.io.
                            With <port>: opens a second listener on that port.
                            Without <port>: shares the --http-port listener.
@@ -779,7 +779,7 @@ Options:
                            object per stderr line for structured-log
                            collectors (Loki, jq, etc.).
   --trace-output <path>    Append every OCPP wire message as a JSONL trace
-                           record (docs/trace-format.md) — works in REPL,
+                           record (docs/reference/trace-format.md) — works in REPL,
                            JSON, and daemon modes.
   analyze <trace.jsonl> [--output <file>] [--format html|markdown]
           [--split-by charge-point|connector]
@@ -799,7 +799,7 @@ Options:
                            --split-by connector further splits each charge
                            point's report by connector (default:
                            charge-point, i.e. current behavior). See
-                           docs/cli.md -> analyze -> "Splitting by
+                           docs/reference/cli.md -> analyze -> "Splitting by
                            connector" for what gets replicated into every
                            connector's report and why.
   --health-path <path>     Absolute path the health-check JSON is served on
@@ -823,7 +823,7 @@ Options:
                            --web-console-basic-auth-* or a trusted network.
   -h, --help               Show this help
 
-HTTP endpoints (see docs/server.md):
+HTTP endpoints (see docs/reference/server.md):
   GET    /v1/healthz       (or whatever --health-path is set to)
   GET    /socket.io/       Socket.IO / Engine.IO transport
   POST   /socket.io/       Socket.IO / Engine.IO transport

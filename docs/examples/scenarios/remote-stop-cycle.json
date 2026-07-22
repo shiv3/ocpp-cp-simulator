@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0",
+  "id": "remote-stop-cycle",
+  "name": "Full Remote Lifecycle (RemoteStart → charge → RemoteStop)",
+  "description": "OCPP 1.6 §5.11 / §5.12 CSMS-driven session: wait for RemoteStartTransaction.req (the forwarded idTag flows into StartTransaction), charge with periodic MeterValues, then wait for RemoteStopTransaction.req and stop with reason Remote. Pair with a CSMS that issues both remote commands.",
+  "targetType": "connector",
+  "targetId": 1,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 400, "y": 0 },
+      "data": { "label": "Start on connect", "triggerOn": "connect" }
+    },
+    {
+      "id": "await-remote-start",
+      "type": "remoteStartTrigger",
+      "position": { "x": 400, "y": 100 },
+      "data": {
+        "label": "Wait for RemoteStartTransaction",
+        "description": "§5.11 — parks until the CSMS sends RemoteStartTransaction.req; its idTag feeds the next node.",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "start-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "StartTransaction.req",
+        "description": "§4.7 — uses the idTag forwarded by RemoteStart.",
+        "action": "start",
+        "tagId": "TAG001"
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 300 },
+      "data": {
+        "label": "MeterValues until remote stop",
+        "description": "§4.6 — keeps metering; the remoteStopTrigger below ends the wait.",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 300,
+        "stopMode": "manual",
+        "maxTime": 15,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "await-remote-stop",
+      "type": "remoteStopTrigger",
+      "position": { "x": 400, "y": 400 },
+      "data": {
+        "label": "Wait for RemoteStopTransaction",
+        "description": "§5.12 — parks until the CSMS remote-stops the active transaction.",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "stop-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 500 },
+      "data": {
+        "label": "StopTransaction.req (reason Remote)",
+        "action": "stop",
+        "stopReason": "Remote"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 400, "y": 600 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "await-remote-start" },
+    { "id": "e2", "source": "await-remote-start", "target": "start-tx" },
+    { "id": "e3", "source": "start-tx", "target": "meter" },
+    { "id": "e4", "source": "meter", "target": "await-remote-stop" },
+    { "id": "e5", "source": "await-remote-stop", "target": "stop-tx" },
+    { "id": "e6", "source": "stop-tx", "target": "end" }
+  ],
+  "assertions": [
+    {
+      "id": "a1",
+      "description": "RemoteStartTransaction.req arrived from the CSMS",
+      "type": "ocpp_received",
+      "action": "RemoteStartTransaction"
+    },
+    {
+      "id": "a2",
+      "description": "Start and Stop arrived in order",
+      "type": "message_order",
+      "actions": ["StartTransaction", "StopTransaction"]
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 The image bundles **both** the daemon and the React browser UI in a single Bun-based container. `--web-console` is enabled by default, so opening the published port in a browser gives you the full UI talking to the Socket.IO control plane on the same origin.
 
-Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) on push to `main` and on `v*` / `cli-v*` tags).
+Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) on push to `main` and on `v*` / `cli-v*` tags).
 
 ### Image tags
 
@@ -14,7 +14,7 @@ Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/
 | `X.Y.Z` (e.g. `1.2.3`)   | immutable | **Reproducible release pin** — recommended for IaC / production.                                            |
 | `X.Y` (e.g. `1.2`) / `X` | mutable   | Auto-track patch / minor releases within a version line.                                                    |
 
-Semver tags are published when a `vX.Y.Z` git tag is pushed (the same tag that cuts the desktop-app [release](../.github/workflows/release.yml)). For production, pin to a full `X.Y.Z` (or a digest) rather than `latest`/`main`:
+Semver tags are published when a `vX.Y.Z` git tag is pushed (the same tag that cuts the desktop-app [release](../../.github/workflows/release.yml)). For production, pin to a full `X.Y.Z` (or a digest) rather than `latest`/`main`:
 
 ```sh
 docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
@@ -77,7 +77,7 @@ To opt out of persistence entirely:
 docker run -e STATE_DB=:memory: ghcr.io/shiv3/ocpp-cp-simulator:latest …
 ```
 
-See [server.md → State persistence](server.md#state-persistence) for the table catalog and the `state.reset` RPC used by the Reset action.
+See [server.md → State persistence](../reference/server.md#state-persistence) for the table catalog and the `state.reset` RPC used by the Reset action.
 
 ## docker-compose
 
@@ -107,7 +107,7 @@ Variables read by the compose file (all optional):
 The compose file also includes a commented `--cors-origin ${CORS_ORIGIN}` block.
 Uncomment it when the console is reached from another origin or behind a
 reverse proxy; otherwise the image's `0.0.0.0` bind uses the safe `same-origin`
-policy. See [server.md → CORS](server.md#cors).
+policy. See [server.md → CORS](../reference/server.md#cors).
 
 ## Mounting a scenario template
 
@@ -134,7 +134,7 @@ docker run --rm -p 9700:9700 \
   2>&1 | jq -r 'select(.type=="WebSocket") | "\(.timestamp) \(.message)"'
 ```
 
-See [server.md → Log format](server.md#log-format) for the schema and the related `logs.get` / `logs.clear` RPC methods.
+See [server.md → Log format](../reference/server.md#log-format) for the schema and the related `logs.get` / `logs.clear` RPC methods.
 
 ## Image details
 
@@ -184,4 +184,4 @@ docker run --rm -p 9700:9700 \
   --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
 ```
 
-With compose, the same `HEALTH_PATH` env on the host machine flows to both the build args and the container env (see [`docker-compose.yml`](../docker-compose.yml)).
+With compose, the same `HEALTH_PATH` env on the host machine flows to both the build args and the container env (see [`docker-compose.yml`](../../docker-compose.yml)).

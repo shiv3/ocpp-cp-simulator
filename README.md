@@ -2,68 +2,76 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/shiv3/ocpp-cp-simulator)
 
-OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CSMS development. Comes with a browser UI, a headless CLI, and a Socket.IO control API that any agent or script can drive.
+A charge point (EV charging station) simulator with two core strengths:
 
-| Interface       | Description                                            | Docs                                                 |
-| --------------- | ------------------------------------------------------ | ---------------------------------------------------- |
-| **Browser**     | Classic console (default, at `/`) / Tauri desktop app  | [docs/guides/browser.md](docs/guides/browser.md)     |
-| **New console** | Redesigned console (React + Tailwind), served at `/v3` | [docs/guides/browser.md](docs/guides/browser.md)     |
-| **Legacy v1**   | Original single-page web UI, served at `/v1`           | [docs/guides/legacy-v1.md](docs/guides/legacy-v1.md) |
-| **CLI**         | Headless mode for scripting, CI, and AI integration    | [docs/reference/cli.md](docs/reference/cli.md)       |
-| **Server**      | Long-running Socket.IO server, multi-CP per process    | [docs/reference/server.md](docs/reference/server.md) |
-| **Docker**      | Pre-built image (daemon + web console) on GHCR         | [docs/guides/docker.md](docs/guides/docker.md)       |
+- **Multi-version OCPP** — speaks OCPP **1.2, 1.5, 1.6J, 1.6S, 2.0.1, and 2.1** from one core: WebSocket JSON and SOAP transports, plus OCPP 1.6 security profiles 1–3.
+- **Automation-first** — every function is scriptable: a headless daemon with a typed Socket.IO RPC, an MCP endpoint for AI agents, JSON-line logs, declarative scenarios with pass/fail assertions, and SQLite persistence.
 
 ![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
 
-## Quick Start
+## Version support
+
+| Version    | Transport            | Browser      | CLI / daemon                            |
+| ---------- | -------------------- | ------------ | --------------------------------------- |
+| OCPP 1.6J  | WebSocket (JSON)     | ✅           | ✅ security profiles 1–3                |
+| OCPP 2.0.1 | WebSocket (JSON)     | ✅           | ✅                                      |
+| OCPP 2.1   | WebSocket (JSON)     | ✅           | ✅                                      |
+| OCPP 1.6S  | SOAP / WS-Addressing | ⚠️ send-only | ✅ bidirectional, full 1.6 message set  |
+| OCPP 1.5   | SOAP / WS-Addressing | ⚠️ send-only | ✅ bidirectional                        |
+| OCPP 1.2   | SOAP / WS-Addressing | ⚠️ send-only | ✅ bidirectional (narrower 1.2 surface) |
+
+⚠️ send-only: the browser cannot host the SOAP callback endpoint, so CSMS-initiated commands need CLI/daemon mode — see the [SOAP guide](docs/guides/soap.md).
+
+## Interfaces
+
+| Interface   | Description                                                      | Docs                                            |
+| ----------- | ---------------------------------------------------------------- | ----------------------------------------------- |
+| **Browser** | Classic console at `/`, redesigned console at `/v3`, desktop app | [guides/browser.md](docs/guides/browser.md)     |
+| **CLI**     | Interactive REPL, JSON-lines mode, `analyze` reports             | [reference/cli.md](docs/reference/cli.md)       |
+| **Daemon**  | Long-running Socket.IO control plane, multi-CP, MCP endpoint     | [reference/server.md](docs/reference/server.md) |
+| **Docker**  | Pre-built image (daemon + web console) on GHCR                   | [guides/docker.md](docs/guides/docker.md)       |
+
+## Quick start
 
 ```bash
-# Install dependencies
-npm install
+# Browser UI from a checkout
+npm install && npm run dev
 
-# Browser UI (dev server)
-npm run dev
+# CLI: install the released binary tarball globally (requires Bun)
+pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
 
-# CLI / Server mode (requires Bun)
-ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
+# Daemon + bundled web console on one port, pointed at your CSMS
+ocpp-cp-sim --http-port 5172 --web-console \
+            --cp-id CP001 --connectors 2 \
+            --ws-url wss://csms.example.com/ocpp/
 ```
 
-Full install options (global `ocpp-cp-sim` command, pinned releases, `bun link`), first-run recipes, Docker, and reverse-proxy notes: [docs/getting-started.md](docs/getting-started.md).
+More install options (bun, pinned releases, `bun link`), first-run recipes, Docker, and reverse-proxy notes: [docs/getting-started.md](docs/getting-started.md).
 
-> **SOAP versions (1.2 / 1.5 / 1.6S):** full bidirectional SOAP from the CLI/daemon, send-only in the browser — see [docs/guides/soap.md](docs/guides/soap.md).
-> **OCPP 1.6 security profiles 1–3:** Basic Auth, server-cert verification, mutual TLS — see [docs/guides/security-profiles.md](docs/guides/security-profiles.md).
+## Drive it from agents and scripts
 
-> **Driving the simulator from AI agents, scripts, or JVM tests** (Socket.IO RPC, MCP endpoint, runnable Node/Python examples, Testcontainers): see [docs/guides/automation.md](docs/guides/automation.md).
+The daemon is a scriptable OCPP stub: one Socket.IO connection (or `POST /mcp` for MCP clients such as Claude Code) controls charge points, scenarios, and logs; every event streams back in real time.
 
-## Persistence
+```bash
+ocpp-cp-sim --http-port 5172 --cp-id CP001 --ws-url wss://your-csms/ocpp/ \
+            --state-db ./state.db --log-format json
+node docs/examples/automation/agent.mjs
+```
 
-Both the browser UI and the daemon back their state with SQLite — sql.js + IndexedDB in the browser, `bun:sqlite` (via `--state-db <path>`) in the daemon. Scenarios, ChangeConfiguration overrides, charging profiles, availability flags, pending transaction messages, the daemon's CP registry and logs all survive reload / restart. See [docs/reference/server.md → State persistence](docs/reference/server.md#state-persistence).
+Runnable Node/Python/MCP/Testcontainers examples: [docs/guides/automation.md](docs/guides/automation.md).
 
-## Web console layout
+## Scenarios
 
-The browser app serves the UIs under distinct route prefixes from the same origin:
+Declare a full charging flow (or fault injection, reservations, certification steps) as a JSON graph, run it from any interface, and assert on the captured OCPP transcript. Format: [reference/scenario-format.md](docs/reference/scenario-format.md) · Library: [docs/examples/scenarios/](docs/examples/scenarios/).
 
-- **`/`** — the classic console (the default). Also reachable at **`/v2`** for backward-compatible bookmarks.
-- **`/v3`** — the redesigned console: a fleet of **Charge Points**, per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with a linear step editor and a separate run console (`/v3/scenarios`), and a global **Message log** (`/v3/logs`).
-- **`/v1`** — the original single-page UI (maintenance only).
+## Documentation
 
-The two consoles link to each other with a design switcher (the classic navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic design** button).
+- **[Getting started](docs/getting-started.md)** — install, first runs, Docker
+- **[Features](docs/features.md)** — the full capability list with doc links
+- **[Docs index](docs/README.md)** — all guides and reference pages
 
-The redesign reuses the existing data layer, scenario engine, and per-step forms unchanged; scenarios, charge points, and logs are simply promoted to first-class routes instead of nested panels.
-
-## Local vs Remote mode (browser)
-
-The browser UI auto-detects which mode to run in by probing `/v1/healthz` at its own origin (path configurable, see [docs/reference/server.md → Health](docs/reference/server.md#health)):
-
-- Served by `ocpp-cp-sim --web-console`, the Docker image, or the **Tauri desktop app** (which bundles the daemon as a sidecar) → **Remote**: every operation uses the daemon's Socket.IO control plane.
-- Static build (GitHub Pages, `bun run dev`) → **Local**: charge points run entirely in-browser, persistence via sql.js.
-
-There is no toggle — the mode is decided once on page load and never overridden.
-
-## Doc
-
-https://deepwiki.com/shiv3/ocpp-cp-simulator
+Persistence (SQLite in both browser and daemon), local-vs-remote mode detection, reverse-proxy/CORS setup, and the SOAP/security-profile deep dives all live in the docs tree above.
 
 ## Contributing
 
-Review `AGENTS.md` for repository guidelines covering project layout, required commands, and pull request expectations.
+See `AGENTS.md` for repository guidelines (project layout, required commands, PR expectations).

@@ -15,6 +15,27 @@ daemon is present. After that detection, all simulator control uses the same
 Socket.IO connection documented in [server.md](../reference/server.md): `rpc` acks for
 commands and `event` push envelopes for CP / registry updates.
 
+## Web console layout
+
+The browser app serves the UIs under distinct route prefixes from the same origin:
+
+- **`/`** — the classic console (the default). Also reachable at **`/v2`** for backward-compatible bookmarks.
+- **`/v3`** — the redesigned console: a fleet of **Charge Points**, per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with a linear step editor and a separate run console (`/v3/scenarios`), and a global **Message log** (`/v3/logs`).
+- **`/v1`** — the original single-page UI (maintenance only, see [legacy-v1.md](legacy-v1.md)).
+
+The two consoles link to each other with a design switcher (the classic navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic design** button).
+
+The redesign reuses the existing data layer, scenario engine, and per-step forms unchanged; scenarios, charge points, and logs are simply promoted to first-class routes instead of nested panels.
+
+## Local vs Remote mode
+
+The browser UI auto-detects which mode to run in by probing `/v1/healthz` at its own origin (path configurable, see [server.md → Health](../reference/server.md#health)):
+
+- Served by `ocpp-cp-sim --web-console`, the Docker image, or the **Tauri desktop app** (which bundles the daemon as a sidecar) → **Remote**: every operation uses the daemon's Socket.IO control plane.
+- Static build (GitHub Pages, `bun run dev`) → **Local**: charge points run entirely in-browser, persistence via sql.js.
+
+There is no toggle — the mode is decided once on page load and never overridden.
+
 ## Desktop Application
 
 The desktop app is **not** a wrapper around the static Local-mode build. On launch it spins up the bundled simulator daemon as a sidecar, waits for `/v1/healthz`, then opens the full web console served by that daemon — so you get the same Remote-mode UX as `ocpp-cp-sim --web-console`, without having to install anything else.

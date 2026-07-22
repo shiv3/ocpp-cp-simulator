@@ -4,16 +4,17 @@ Everything the simulator can do, with links to the page that documents it. Modes
 
 ## Interfaces
 
-| Feature                    | Description                                                     | Modes | Docs                                       |
-| -------------------------- | --------------------------------------------------------------- | ----- | ------------------------------------------ |
-| Classic web console (`/`)  | Default browser console, also served at `/v2`                   | B, D  | [guides/browser.md](guides/browser.md)     |
-| Redesigned console (`/v3`) | Fleet view, per-CP detail, scenario library, global message log | B, D  | [guides/browser.md](guides/browser.md)     |
-| Legacy v1 UI (`/v1`)       | Original single-page UI (maintenance only)                      | B, D  | [guides/legacy-v1.md](guides/legacy-v1.md) |
-| Tauri desktop app          | Bundles the daemon as a sidecar; macOS / Windows / Linux builds | D     | [guides/browser.md](guides/browser.md)     |
-| Interactive REPL           | Terminal prompt with per-CP commands                            | C     | [reference/cli.md](reference/cli.md)       |
-| JSON Lines mode (`--json`) | One request/response/event JSON object per line for automation  | C     | [reference/cli.md](reference/cli.md)       |
-| Daemon / server mode       | Long-running Socket.IO control plane, multi-CP per process      | D     | [reference/server.md](reference/server.md) |
-| Docker image               | Prebuilt daemon + web console on GHCR                           | D     | [guides/docker.md](guides/docker.md)       |
+| Feature                    | Description                                                     | Modes | Docs                                                    |
+| -------------------------- | --------------------------------------------------------------- | ----- | ------------------------------------------------------- |
+| Classic web console (`/`)  | Default browser console, also served at `/v2`                   | B, D  | [guides/browser.md](guides/browser.md)                  |
+| Redesigned console (`/v3`) | Fleet view, per-CP detail, scenario library, global message log | B, D  | [guides/browser.md](guides/browser.md)                  |
+| Legacy v1 UI (`/v1`)       | Original single-page UI (maintenance only)                      | B, D  | [guides/legacy-v1.md](guides/legacy-v1.md)              |
+| Tauri desktop app          | Bundles the daemon as a sidecar; macOS / Windows / Linux builds | D     | [guides/browser.md](guides/browser.md)                  |
+| Interactive REPL           | Terminal prompt with per-CP commands                            | C     | [reference/cli.md](reference/cli.md)                    |
+| JSON Lines mode (`--json`) | One request/response/event JSON object per line for automation  | C     | [reference/cli.md](reference/cli.md)                    |
+| Daemon / server mode       | Long-running Socket.IO control plane, multi-CP per process      | D     | [reference/server.md](reference/server.md)              |
+| MCP endpoint (`POST /mcp`) | Drive the daemon from MCP clients (Claude Code, etc.)           | D     | [reference/server.md](reference/server.md#mcp-endpoint) |
+| Docker image               | Prebuilt daemon + web console on GHCR                           | D     | [guides/docker.md](guides/docker.md)                    |
 
 ## OCPP versions
 

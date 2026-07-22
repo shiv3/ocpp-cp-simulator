@@ -24,12 +24,13 @@ A charge point (EV charging station) simulator with two core strengths:
 
 ## Interfaces
 
-| Interface   | Description                                                      | Docs                                            |
-| ----------- | ---------------------------------------------------------------- | ----------------------------------------------- |
-| **Browser** | Classic console at `/`, redesigned console at `/v3`, desktop app | [guides/browser.md](docs/guides/browser.md)     |
-| **CLI**     | Interactive REPL, JSON-lines mode, `analyze` reports             | [reference/cli.md](docs/reference/cli.md)       |
-| **Daemon**  | Long-running Socket.IO control plane, multi-CP, MCP endpoint     | [reference/server.md](docs/reference/server.md) |
-| **Docker**  | Pre-built image (daemon + web console) on GHCR                   | [guides/docker.md](docs/guides/docker.md)       |
+| Interface   | Description                                                        | Docs                                                               |
+| ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| **Browser** | Classic console at `/`, redesigned console at `/v3`, desktop app   | [guides/browser.md](docs/guides/browser.md)                        |
+| **CLI**     | Interactive REPL, JSON-lines mode, `analyze` reports               | [reference/cli.md](docs/reference/cli.md)                          |
+| **Daemon**  | Long-running Socket.IO control plane, multi-CP per process         | [reference/server.md](docs/reference/server.md)                    |
+| **MCP**     | `POST /mcp` on the daemon — drive it from Claude Code & MCP agents | [reference/server.md § MCP](docs/reference/server.md#mcp-endpoint) |
+| **Docker**  | Pre-built image (daemon + web console) on GHCR                     | [guides/docker.md](docs/guides/docker.md)                          |
 
 ## Quick start
 

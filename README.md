@@ -78,57 +78,7 @@ ocpp-cp-sim --http-port 5172 --web-console \
 > **SOAP versions (1.2 / 1.5 / 1.6S):** full bidirectional SOAP from the CLI/daemon, send-only in the browser — see [docs/guides/soap.md](docs/guides/soap.md).
 > **OCPP 1.6 security profiles 1–3:** Basic Auth, server-cert verification, mutual TLS — see [docs/guides/security-profiles.md](docs/guides/security-profiles.md).
 
-## AI Agent & Automation Testing
-
-The daemon exposes a single Socket.IO control connection and emits structured logs, making it a scriptable OCPP stub that any AI agent or test harness can drive.
-
-| Feature                              | What it enables                                                                                                                                |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--log-format json`                  | One JSON object per line — easy to parse or feed to an LLM                                                                                     |
-| Socket.IO `rpc` event                | Send OCPP commands from any language or agent                                                                                                  |
-| `POST /mcp` endpoint                 | Drive the simulator via MCP clients (Claude Code, etc.) — see [docs/reference/server.md § MCP Endpoint](docs/reference/server.md#mcp-endpoint) |
-| Scenario templates (JSON)            | Declare a full charging flow, inject at runtime without restart                                                                                |
-| Socket.IO `event` push + rooms       | Subscribe to real-time OCPP events for assertions                                                                                              |
-| `GET /v1/healthz`                    | Unauthenticated local/remote detection and Docker healthcheck                                                                                  |
-| `--state-db`                         | Persist CP state across restarts — no re-bootstrap needed                                                                                      |
-| `socket.io-client` + `zod` contracts | Use the same typed contract as the browser UI and CLI                                                                                          |
-
-**Minimal setup for an AI agent:**
-
-```bash
-# 1. Start daemon with structured logs
-ocpp-cp-sim --http-port 5172 --cp-id CP001 --connectors 1 \
-            --ws-url wss://your-csms/ocpp/ \
-            --state-db ./state.db --log-format json
-
-# 2. External agent connects once with socket.io-client
-node agent.mjs
-```
-
-```js
-// agent.mjs
-import { io } from "socket.io-client";
-
-const socket = io("http://127.0.0.1:5172", { path: "/socket.io/" });
-const rpc = (request) => socket.timeout(30_000).emitWithAck("rpc", request);
-
-socket.on("event", (envelope) => console.log(JSON.stringify(envelope)));
-await new Promise((resolve, reject) => {
-  socket.once("connect", resolve);
-  socket.once("connect_error", reject);
-});
-
-await rpc({ method: "events.subscribe", params: { scope: "CP001" } });
-await rpc({
-  cpId: "CP001",
-  method: "start_transaction",
-  params: { connector: 1, tagId: "TAG001" },
-});
-```
-
-Prefer not to write a client? The same `ocpp-cp-sim` binary doubles as a TCP Socket.IO client for a running daemon — `--send` a CP command, `--stop` it, or `--events` to stream. It targets `http://127.0.0.1:9700` by default or a custom `--http-url`. If the daemon is gated with `--web-console-basic-auth-*`, authenticate with `--http-basic-auth-user/pass`. See [docs/reference/server.md → Controlling a running daemon from the CLI](docs/reference/server.md#controlling-a-running-daemon-from-the-cli).
-
-See [docs/reference/server.md](docs/reference/server.md) for the full Socket.IO API reference and [docs/guides/migration.md](docs/guides/migration.md) for the REST/Unix migration guide.
+> **Driving the simulator from AI agents, scripts, or JVM tests** (Socket.IO RPC, MCP endpoint, runnable Node/Python examples, Testcontainers): see [docs/guides/automation.md](docs/guides/automation.md).
 
 ## Persistence
 

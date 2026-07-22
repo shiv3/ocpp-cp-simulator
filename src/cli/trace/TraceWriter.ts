@@ -23,7 +23,7 @@ export interface TraceWriterAttachContext {
 }
 
 /** Map an {@link OcppVersion} constant to the plain protocol number the
- *  trace format wants (docs/trace-format.md), e.g. "OCPP-1.6J" -> "1.6".
+ *  trace format wants (docs/reference/trace-format.md), e.g. "OCPP-1.6J" -> "1.6".
  *  Undefined falls back to "1.6", matching `parseOcppVersion`'s fallback. */
 function toTraceOcppVersion(ocppVersion: string | undefined): string {
   switch (ocppVersion) {

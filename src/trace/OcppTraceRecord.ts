@@ -9,7 +9,7 @@
  *
  * This is the schema definition only. {@link ./logEntryToTrace} adapts the
  * simulator's own JSONL log lines into these records; a documented JSON Schema
- * lives in `docs/trace-format.md`.
+ * lives in `docs/reference/trace-format.md`.
  */
 
 /** Trace schema version. Additive optional fields bump the minor version; semantic changes bump the major. Consumers MUST ignore unknown fields. */

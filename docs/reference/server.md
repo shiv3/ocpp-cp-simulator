@@ -143,8 +143,8 @@ Runtime packages for this control plane are `socket.io`,
 
 > Scenario definitions (the `scenario` param above, and the file read by
 > `load_scenario`'s `file` param / `run_scenario_file`) follow
-> [docs/scenario-format.md](scenario-format.md) and its published
-> [JSON Schema](../schema/scenario.schema.json). Validation against that
+> [scenario-format.md](scenario-format.md) and its published
+> [JSON Schema](../../schema/scenario.schema.json). Validation against that
 > schema is advisory — a mismatch is logged, not rejected.
 
 ### Daemon methods
@@ -343,7 +343,7 @@ socket.disconnect();
 
 For a JVM/Testcontainers harness that drives this same control plane (start the
 container, `cp.create`, `run_scenario`, assert the machine-readable verdict), see
-[`examples/testcontainers-java/`](../examples/testcontainers-java/) (issue #111).
+[`examples/testcontainers-java/`](../../examples/testcontainers-java/) (issue #111).
 
 ## Controlling a Running Daemon from the CLI
 
@@ -502,7 +502,7 @@ downloaded log file.
 
 A `Dockerfile` and `docker-compose.yml` ship at the repo root, and a multi-arch
 image is published on every push to `main` / version tag at
-`ghcr.io/shiv3/ocpp-cp-simulator`. See [docs/docker.md](./docker.md) for the
+`ghcr.io/shiv3/ocpp-cp-simulator`. See [guides/docker.md](../guides/docker.md) for the
 full reference (volumes, environment variables, compose recipes, structured-log
 piping). Quick path:
 
@@ -623,9 +623,9 @@ ocpp-cp-sim --daemon --http-port 9700 --web-console \
 > caveat — prefer it when the public URL is fixed.
 
 A worked **nginx + Authelia** example lives at
-[`docs/examples/compose-reverse-proxy-sso.yml`](examples/compose-reverse-proxy-sso.yml)
+[`docs/examples/compose-reverse-proxy-sso.yml`](../examples/compose-reverse-proxy-sso.yml)
 (with its
-[`nginx-reverse-proxy-sso.conf`](examples/nginx-reverse-proxy-sso.conf)).
+[`nginx-reverse-proxy-sso.conf`](../examples/nginx-reverse-proxy-sso.conf)).
 
 ## Security
 

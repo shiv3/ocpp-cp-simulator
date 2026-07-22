@@ -15,7 +15,7 @@ import java.util.function.Consumer;
 
 /**
  * Thin blocking wrapper over the daemon's Socket.IO control plane
- * (docs/server.md). Every request/response call goes through the {@code "rpc"}
+ * (docs/reference/server.md). Every request/response call goes through the {@code "rpc"}
  * event: emit {@code { cpId?, method, params }} and receive an ack of
  * {@code { ok: true, result }} or {@code { ok: false, error: { code, message } }}.
  * Server-to-client pushes arrive on the {@code "event"} event.

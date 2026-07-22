@@ -69,7 +69,7 @@ example:
 Common command IDs include `connect`, `disconnect`, `status`,
 `start_transaction`, `stop_transaction`, `set_meter_value`,
 `send_meter_value`, `run_scenario`, `set_soc_meter_sync`, and
-`get_state_history`. The full table is in [server.md](server.md#cp-command-methods).
+`get_state_history`. The full table is in [server.md](../reference/server.md#cp-command-methods).
 
 ## Subscriptions
 

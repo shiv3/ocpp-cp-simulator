@@ -60,7 +60,7 @@ services:
       # - --cors-origin
       # - "${CORS_ORIGIN}"
       # ...or, behind a trusted reverse proxy that sets X-Forwarded-*,
-      # let the daemon derive the public origin instead (see docs/server.md):
+      # let the daemon derive the public origin instead (see docs/reference/server.md):
       # - --trust-forwarded-headers
       # Pass `--cors-origin "*"` to deliberately opt into open CORS.
       # Scenario template (optional) — uncomment + adjust:

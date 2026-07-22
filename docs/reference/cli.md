@@ -186,7 +186,7 @@ mode.
 ### 3. Daemon / Server Mode
 
 Long-running process that exposes health, optional static web-console assets,
-and a Socket.IO control plane on TCP. See [docs/server.md](server.md) for the
+and a Socket.IO control plane on TCP. See [server.md](server.md) for the
 full Socket.IO API reference.
 
 ```bash
@@ -283,8 +283,8 @@ ocpp-cp-sim --daemon ... --scenario-template-file /path/to/template.json \
 
 `--scenario-template-file` reads a JSON file shaped like a
 `ScenarioDefinition` (the format the browser Scenario Editor exports — see
-[docs/scenario-format.md](scenario-format.md) for the field reference and
-published [JSON Schema](../schema/scenario.schema.json)), then clones it per
+[scenario-format.md](scenario-format.md) for the field reference and
+published [JSON Schema](../../schema/scenario.schema.json)), then clones it per
 connector — rewriting `targetType`, `targetId`, `id`, and `name` — so each
 connector runs an independent state machine from the same file. `--scenario`
 and `--scenario-template` fan out the same way when `--scenario-connector`
@@ -295,7 +295,7 @@ on a mismatch.
 > **Breaking change (vs. earlier versions):** REST control endpoints, native
 > WebSocket event streams, and the Unix-domain control socket have been
 > removed. External clients should migrate to the Socket.IO `rpc` event and
-> `event` push envelopes. See [docs/migration.md](migration.md).
+> `event` push envelopes. See [guides/migration.md](../guides/migration.md).
 
 ## analyze
 
@@ -310,7 +310,7 @@ ocpp-cp-sim analyze --from-daemon --cp-id <id> [--http-url <url>]
 
 Runs [OCPP DebugKit](https://github.com/ocpp-debugkit/toolkit)'s
 failure-pattern detection over a v1.1 trace
-([docs/trace-format.md](./trace-format.md)) and writes a report. Unlike every
+([trace-format.md](./trace-format.md)) and writes a report. Unlike every
 mode above, `analyze` never bootstraps a charge point or starts a server. In
 its default form it only reads the given file and writes a report; with
 `--from-daemon` it instead makes the same kind of short-lived client
@@ -346,7 +346,7 @@ daemon already persists every log line it produces and exposes them per
 charge point over the `logs.get` RPC
 ([server.md → Related RPC methods](./server.md#related-rpc-methods)), and
 that log line shape (`{timestamp, level, type, message, cpId}`) is exactly
-what [`logEntryToTrace.ts`](../src/trace/logEntryToTrace.ts) already adapts
+what [`logEntryToTrace.ts`](../../src/trace/logEntryToTrace.ts) already adapts
 into trace records for `--log-format json` and the browser log-viewer
 download (see
 [trace-format.md → Producing records](./trace-format.md#producing-records)).
@@ -597,7 +597,7 @@ Events are emitted in all modes:
 | `--scenario-connector <list>`                      | No       | `1`                                     | `all`, single id (`1`), or list (`1,2,3`)                                                                                                                                                                                                 |
 | `--state-db <path>`                                | No       | _(in-memory)_                           | Persist scenarios, ChangeConfiguration overrides, charging profile state, availability flags, pending transaction messages, registered CPs and logs to a SQLite file. See [server.md → State persistence](./server.md#state-persistence). |
 | `--log-format <fmt>`                               | No       | `plain`                                 | `plain` writes the legacy `[ts] [LEVEL] [TYPE] message` lines; `json` writes one JSON Lines object per line (same shape as the `logs` table + browser export + `logs.get` RPC). See [server.md → Log format](./server.md#log-format).     |
-| `--trace-output <path>`                            | No       | -                                       | Append each OCPP-J (WebSocket) wire message as a JSONL trace record ([docs/trace-format.md](./trace-format.md)) in REPL, JSON, and daemon modes; SOAP transport is not captured yet.                                                      |
+| `--trace-output <path>`                            | No       | -                                       | Append each OCPP-J (WebSocket) wire message as a JSONL trace record ([trace-format.md](./trace-format.md)) in REPL, JSON, and daemon modes; SOAP transport is not captured yet.                                                           |
 | `--health-path <path>`                             | No       | `/v1/healthz`                           | Absolute path for the unauthenticated health-check JSON. The browser UI build must use matching `VITE_HEALTH_PATH` when this changes.                                                                                                     |
 | `--cors-origin <origin>`                           | No       | loopback: open; remote: same-origin     | Restrict browser Origins. Repeatable. Pass literal `"*"` to opt into open CORS.                                                                                                                                                           |
 | `--trust-forwarded-headers`                        | No       | -                                       | With same-origin CORS, also accept the public origin reported by `X-Forwarded-Proto` / `X-Forwarded-Host`. Use only behind a trusted reverse proxy.                                                                                       |

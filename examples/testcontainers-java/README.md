@@ -13,7 +13,7 @@ machine-readable verdict ([#179](https://github.com/shiv3/ocpp-cp-simulator/issu
 ## What it does
 
 `CertificationScenarioIT` drives the daemon entirely over the documented
-[Socket.IO control plane](../../docs/server.md):
+[Socket.IO control plane](../../docs/reference/server.md):
 
 1. start the simulator image with Testcontainers and wait on `GET /v1/healthz`;
 2. connect a Socket.IO client and `cp.create` a charge point;

@@ -12,7 +12,7 @@ When the same React UI is served by `ocpp-cp-sim --web-console`, the Docker
 image, or the desktop app, it runs in **Remote mode**. The page first probes
 `/v1/healthz` at its own origin; a `200` response with `{ "ok": true }` means a
 daemon is present. After that detection, all simulator control uses the same
-Socket.IO connection documented in [server.md](server.md): `rpc` acks for
+Socket.IO connection documented in [server.md](../reference/server.md): `rpc` acks for
 commands and `event` push envelopes for CP / registry updates.
 
 ## Desktop Application

@@ -9,7 +9,7 @@ either side to the other's internal models — see
 
 This is a **proof of concept**: it defines and versions the record shape and
 ships an adapter from the simulator's own logs. The simulator now writes trace
-files at runtime via `--trace-output <path>` (see [docs/cli.md](./cli.md)); an
+files at runtime via `--trace-output <path>` (see [cli.md](./cli.md)); an
 `analyze` subcommand and any DebugKit integration remain deliberately later
 steps.
 
@@ -79,7 +79,7 @@ steps.
 
 ## Producing records
 
-The adapter in [`src/trace/`](../src/trace/) maps this simulator's JSONL log
+The adapter in [`src/trace/`](../../src/trace/) maps this simulator's JSONL log
 lines (`--log-format json`, the `logs.get` RPC, or the browser log-viewer
 download) into trace records:
 

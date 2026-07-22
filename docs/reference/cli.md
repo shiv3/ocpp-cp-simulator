@@ -142,46 +142,48 @@ Asynchronous events are emitted as JSON lines without an `ok` field:
 These command IDs are also the CP-scoped Socket.IO RPC method names in daemon
 mode.
 
-| Command                           | Params                                         | Description                        |
-| --------------------------------- | ---------------------------------------------- | ---------------------------------- |
-| `connect`                         | -                                              | Connect to CSMS                    |
-| `disconnect`                      | -                                              | Disconnect                         |
-| `status`                          | -                                              | Get charge point status            |
-| `heartbeat`                       | -                                              | Send heartbeat                     |
-| `start_heartbeat`                 | `interval`                                     | Start periodic heartbeat (seconds) |
-| `stop_heartbeat`                  | -                                              | Stop periodic heartbeat            |
-| `start_transaction`               | `connector`, `tagId`                           | Start transaction                  |
-| `stop_transaction`                | `connector`                                    | Stop transaction                   |
-| `authorize`                       | `tagId`                                        | Send authorization                 |
-| `diagnostics_status_notification` | `status`                                       | Send diagnostics status            |
-| `firmware_status_notification`    | `status`                                       | Send firmware status               |
-| `update_connector_status`         | `connector`, `status`                          | Update connector status            |
-| `set_meter_value`                 | `connector`, `value`                           | Set meter value (Wh)               |
-| `send_meter_value`                | `connector`                                    | Send meter value to CSMS           |
-| `remove_connector`                | `connector`                                    | Remove a connector                 |
-| `set_ev_settings`                 | `connector`, `settings`                        | Set EV settings                    |
-| `get_ev_settings`                 | `connector`                                    | Get EV settings                    |
-| `set_auto_meter_config`           | `connector`, `config`                          | Configure automatic meter values   |
-| `get_auto_meter_config`           | `connector`                                    | Get automatic meter config         |
-| `set_auto_reset_to_available`     | `connector`, `enabled`                         | Toggle auto-reset to Available     |
-| `set_mode`                        | `connector`, `mode`                            | Set connector mode                 |
-| `set_soc`                         | `connector`, `soc`                             | Set or clear SoC                   |
-| `set_soc_meter_sync`              | `connector`, `enabled`                         | Toggle SoC-meter sync              |
-| `get_charging_profiles`           | `connector`                                    | Get active charging profiles       |
-| `get_state_history`               | `options` (optional)                           | Get state history                  |
-| `list_scenario_templates`         | -                                              | List built-in scenario templates   |
-| `load_scenario_template`          | `templateId`, `connector`, `evSettings` (opt.) | Load a scenario template           |
-| `load_scenario`                   | `connector`, `file` or `scenario`              | Load scenario from file or inline  |
-| `list_scenarios`                  | `connector`                                    | List loaded scenarios              |
-| `run_scenario`                    | `connector`, `scenarioId`                      | Run a loaded scenario              |
-| `run_scenario_file`               | `connector`, `file`                            | Load and run scenario from file    |
-| `run_scenario_template`           | `connector`, `templateId`, `evSettings` (opt.) | Load and run a template            |
-| `scenario_status`                 | `connector`, `scenarioId`                      | Get scenario execution status      |
-| `get_scenario`                    | `connector`, `scenarioId`                      | Get a loaded scenario              |
-| `stop_scenario`                   | `connector`, `scenarioId`                      | Stop a running scenario            |
-| `step_scenario`                   | `connector`, `scenarioId`, `force` (optional)  | Step a scenario                    |
-| `stop_all_scenarios`              | `connector`                                    | Stop all scenarios on connector    |
-| `remove_scenario`                 | `connector`, `scenarioId`                      | Remove a loaded scenario           |
+| Command                           | Params                                         | Description                                                                    |
+| --------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| `connect`                         | -                                              | Connect to CSMS                                                                |
+| `disconnect`                      | -                                              | Disconnect                                                                     |
+| `status`                          | -                                              | Get charge point status                                                        |
+| `heartbeat`                       | -                                              | Send heartbeat                                                                 |
+| `start_heartbeat`                 | `interval`                                     | Start periodic heartbeat (seconds)                                             |
+| `stop_heartbeat`                  | -                                              | Stop periodic heartbeat                                                        |
+| `start_transaction`               | `connector`, `tagId`                           | Start transaction                                                              |
+| `stop_transaction`                | `connector`                                    | Stop transaction                                                               |
+| `authorize`                       | `tagId`                                        | Send authorization                                                             |
+| `diagnostics_status_notification` | `status`                                       | Send diagnostics status                                                        |
+| `firmware_status_notification`    | `status`                                       | Send firmware status                                                           |
+| `update_connector_status`         | `connector`, `status`                          | Update connector status                                                        |
+| `set_meter_value`                 | `connector`, `value`                           | Set meter value (Wh)                                                           |
+| `send_meter_value`                | `connector`                                    | Send meter value to CSMS                                                       |
+| `remove_connector`                | `connector`                                    | Remove a connector                                                             |
+| `set_ev_settings`                 | `connector`, `settings`                        | Set EV settings                                                                |
+| `get_ev_settings`                 | `connector`                                    | Get EV settings                                                                |
+| `set_auto_meter_config`           | `connector`, `config`                          | Configure automatic meter values                                               |
+| `get_auto_meter_config`           | `connector`                                    | Get automatic meter config                                                     |
+| `set_auto_reset_to_available`     | `connector`, `enabled`                         | Toggle auto-reset to Available                                                 |
+| `set_mode`                        | `connector`, `mode`                            | Set connector mode                                                             |
+| `set_soc`                         | `connector`, `soc`                             | Set or clear SoC                                                               |
+| `set_soc_meter_sync`              | `connector`, `enabled`                         | Toggle SoC-meter sync                                                          |
+| `get_charging_profiles`           | `connector`                                    | Get active charging profiles                                                   |
+| `get_state_history`               | `options` (optional)                           | Get state history                                                              |
+| `list_scenario_templates`         | -                                              | List built-in scenario templates                                               |
+| `load_scenario_template`          | `templateId`, `connector`, `evSettings` (opt.) | Load a scenario template                                                       |
+| `load_scenario`                   | `connector`, `file` or `scenario`              | Load scenario from file or inline                                              |
+| `list_scenarios`                  | `connector`                                    | List loaded scenarios                                                          |
+| `run_scenario`                    | `connector`, `scenarioId`                      | Run a loaded scenario                                                          |
+| `run_scenario_file`               | `connector`, `file`                            | Load and run scenario from file                                                |
+| `run_scenario_template`           | `connector`, `templateId`, `evSettings` (opt.) | Load and run a template                                                        |
+| `scenario_status`                 | `connector`, `scenarioId`                      | Get scenario execution status                                                  |
+| `scenario_report`                 | `connector`, `scenarioId`, `runId` (optional)  | Get the machine-readable run report (verdict + assertion results + transcript) |
+| `scenario_reset`                  | `connector`, `scenarioId`                      | Reset a scenario to its initial state                                          |
+| `get_scenario`                    | `connector`, `scenarioId`                      | Get a loaded scenario                                                          |
+| `stop_scenario`                   | `connector`, `scenarioId`                      | Stop a running scenario                                                        |
+| `step_scenario`                   | `connector`, `scenarioId`, `force` (optional)  | Step a scenario                                                                |
+| `stop_all_scenarios`              | `connector`                                    | Stop all scenarios on connector                                                |
+| `remove_scenario`                 | `connector`, `scenarioId`                      | Remove a loaded scenario                                                       |
 
 ### 3. Daemon / Server Mode
 

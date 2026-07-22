@@ -82,6 +82,7 @@ See [guides/docker.md](guides/docker.md) for image tags, persistent state, compo
 
 ## Next steps
 
+- [features.md](features.md) — everything the simulator can do, with doc links
 - [guides/browser.md](guides/browser.md) — web console tour, desktop app, local vs remote mode
 - [guides/automation.md](guides/automation.md) — drive the simulator from agents and scripts
 - [reference/cli.md](reference/cli.md) — every flag, REPL/JSON modes, `analyze` reports

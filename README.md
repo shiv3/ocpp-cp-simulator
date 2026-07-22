@@ -28,52 +28,7 @@ npm run dev
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
-### Install as a global command (`ocpp-cp-sim`)
-
-```bash
-# pnpm (recommended)
-pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
-
-# bun
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
-
-# Or pin to a specific CLI release
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
-
-# From a local checkout
-bun link              # in this repo
-bun link ocpp-cp-simulator   # in any other project
-```
-
-> The release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags. A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
-
-Then run from anywhere:
-
-```bash
-# Interactive REPL against a CSMS
-ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
-
-# Headless daemon (Socket.IO control API only)
-ocpp-cp-sim --daemon --http-port 9700
-
-# Daemon + bundled browser UI on the same origin
-#   open http://127.0.0.1:5172 to drive the daemon from the web console
-ocpp-cp-sim --http-port 5172 --web-console \
-            --cp-id CP001 --connectors 2 \
-            --ws-url wss://csms.example.com/ocpp/
-
-# Full kitchen-sink: persistent SQLite, JSON-line logs, demo scenario auto-loaded
-ocpp-cp-sim --http-port 5172 --web-console \
-            --cp-id CP001 --connectors 5 \
-            --ws-url wss://csms.example.com/ocpp/ \
-            --scenario-template-file docs/examples/scenarios/demo-charging.json \
-            --scenario-connector all \
-            --state-db ./state.db --log-format json
-```
-
-`--web-console` serves the browser UI (built into `dist/` and shipped inside the release tarball) from the same HTTP port as the Socket.IO control plane, so a single port is all you need to expose. See [docs/reference/cli.md](docs/reference/cli.md) for the full flag reference and [docs/reference/server.md](docs/reference/server.md) for the Socket.IO protocol.
-
-> **Behind a reverse proxy?** Bound to a non-loopback host the daemon applies a safe same-origin CORS policy, so the web console served at a public URL will `403` its own assets until you name that origin with `--cors-origin https://your.url` (or, behind a trusted proxy, `--trust-forwarded-headers`). See [docs/reference/server.md → Behind a reverse proxy](docs/reference/server.md#behind-a-reverse-proxy-traefik-nginx-caddy-) for details and an nginx + Authelia example compose.
+Full install options (global `ocpp-cp-sim` command, pinned releases, `bun link`), first-run recipes, Docker, and reverse-proxy notes: [docs/getting-started.md](docs/getting-started.md).
 
 > **SOAP versions (1.2 / 1.5 / 1.6S):** full bidirectional SOAP from the CLI/daemon, send-only in the browser — see [docs/guides/soap.md](docs/guides/soap.md).
 > **OCPP 1.6 security profiles 1–3:** Basic Auth, server-cert verification, mutual TLS — see [docs/guides/security-profiles.md](docs/guides/security-profiles.md).

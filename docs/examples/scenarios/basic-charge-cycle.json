@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "1.0",
+  "id": "basic-charge-cycle",
+  "name": "Basic Charge Cycle (local auth)",
+  "description": "OCPP 1.6 §4 lifecycle driven entirely from the CP side: plug in, StartTransaction with a local idTag (§4.7), periodic MeterValues (§4.6), StopTransaction with reason Local (§4.8), unplug. Assertions verify the wire transcript ordering.",
+  "targetType": "connector",
+  "targetId": 1,
+  "evSettings": {
+    "modelName": "Generic EV",
+    "batteryCapacityKwh": 60,
+    "maxChargingPowerKw": 50,
+    "initialSoc": 30,
+    "targetSoc": 80
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 400, "y": 0 },
+      "data": { "label": "Start on connect", "triggerOn": "connect" }
+    },
+    {
+      "id": "wait-boot",
+      "type": "delay",
+      "position": { "x": 400, "y": 100 },
+      "data": {
+        "label": "Wait for BootNotification.conf",
+        "description": "§4.2 — give the CSMS time to Accept the BootNotification before exercising the connector.",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "Plug in the cable",
+        "description": "§4.9 — the domain transitions Available → Preparing and sends the StatusNotification.",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "start-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 300 },
+      "data": {
+        "label": "StartTransaction.req (local idTag)",
+        "description": "§4.7 — local authorization with TAG001, no RemoteStart involved.",
+        "action": "start",
+        "tagId": "TAG001"
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 400 },
+      "data": {
+        "label": "MeterValues every 5 s for 20 s",
+        "description": "§4.6 — auto-increment 300 Wh per tick and send MeterValues.req.",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 300,
+        "stopMode": "manual",
+        "maxTime": 20,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "stop-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 500 },
+      "data": {
+        "label": "StopTransaction.req (reason Local)",
+        "description": "§4.8 — the user stops the session at the CP.",
+        "action": "stop",
+        "stopReason": "Local"
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": { "x": 400, "y": 600 },
+      "data": {
+        "label": "Unplug the cable",
+        "description": "§4.9 — Finishing → Available cascade.",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 400, "y": 700 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "wait-boot" },
+    { "id": "e2", "source": "wait-boot", "target": "plug-in" },
+    { "id": "e3", "source": "plug-in", "target": "start-tx" },
+    { "id": "e4", "source": "start-tx", "target": "meter" },
+    { "id": "e5", "source": "meter", "target": "stop-tx" },
+    { "id": "e6", "source": "stop-tx", "target": "plug-out" },
+    { "id": "e7", "source": "plug-out", "target": "end" }
+  ],
+  "assertions": [
+    {
+      "id": "a1",
+      "description": "StartTransaction.req was sent",
+      "type": "ocpp_sent",
+      "action": "StartTransaction"
+    },
+    {
+      "id": "a2",
+      "description": "At least one MeterValues.req was sent",
+      "type": "ocpp_sent",
+      "action": "MeterValues"
+    },
+    {
+      "id": "a3",
+      "description": "Start → MeterValues → Stop arrived in order",
+      "type": "message_order",
+      "actions": ["StartTransaction", "MeterValues", "StopTransaction"]
+    }
+  ]
+}

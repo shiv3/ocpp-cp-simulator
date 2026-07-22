@@ -25,6 +25,8 @@ that schema, not a replacement for it.
   keeps every scenario file written before this schema existed — none of
   which carry `schemaVersion` or `createdAt`/`updatedAt` — working exactly
   as before.
+- Runnable examples, including assertion-bearing flows, live in
+  [`../examples/scenarios/`](../examples/scenarios/).
 
 ## Versioning
 

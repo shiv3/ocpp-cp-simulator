@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1.0",
+  "id": "reservation-flow",
+  "name": "Reservation, Then Charge With the Reserved Tag",
+  "description": "OCPP 1.6 §5.13 reservation lifecycle from the CP side: create a local reservation (id 42, TAG-RES, 5 min expiry), then start a transaction with the reserved idTag — consuming the reservation — charge briefly, and stop. Assertions verify the transaction hit the wire.",
+  "targetType": "connector",
+  "targetId": 1,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 400, "y": 0 },
+      "data": { "label": "Start on connect", "triggerOn": "connect" }
+    },
+    {
+      "id": "wait-boot",
+      "type": "delay",
+      "position": { "x": 400, "y": 100 },
+      "data": {
+        "label": "Wait for BootNotification.conf",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "reserve",
+      "type": "reserveNow",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "Reserve connector for TAG-RES",
+        "description": "§5.13 — the connector transitions to Reserved.",
+        "expiryMinutes": 5,
+        "idTag": "TAG-RES",
+        "reservationId": 42
+      }
+    },
+    {
+      "id": "arrive",
+      "type": "delay",
+      "position": { "x": 400, "y": 300 },
+      "data": { "label": "Driver arrives", "delaySeconds": 3 }
+    },
+    {
+      "id": "start-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 400 },
+      "data": {
+        "label": "StartTransaction.req with the reserved tag",
+        "description": "§5.13.3 — starting with the reserved idTag consumes the reservation.",
+        "action": "start",
+        "tagId": "TAG-RES"
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": { "x": 400, "y": 500 },
+      "data": {
+        "label": "MeterValues for 10 s",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 300,
+        "stopMode": "manual",
+        "maxTime": 10,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "stop-tx",
+      "type": "transaction",
+      "position": { "x": 400, "y": 600 },
+      "data": {
+        "label": "StopTransaction.req",
+        "action": "stop",
+        "stopReason": "Local"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 400, "y": 700 },
+      "data": { "label": "End" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "wait-boot" },
+    { "id": "e2", "source": "wait-boot", "target": "reserve" },
+    { "id": "e3", "source": "reserve", "target": "arrive" },
+    { "id": "e4", "source": "arrive", "target": "start-tx" },
+    { "id": "e5", "source": "start-tx", "target": "meter" },
+    { "id": "e6", "source": "meter", "target": "stop-tx" },
+    { "id": "e7", "source": "stop-tx", "target": "end" }
+  ],
+  "assertions": [
+    {
+      "id": "a1",
+      "description": "StartTransaction.req was sent with the reserved tag",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "direction": "sent",
+      "occurrence": 0,
+      "payload": { "idTag": "TAG-RES" }
+    },
+    {
+      "id": "a2",
+      "description": "Start and Stop arrived in order",
+      "type": "message_order",
+      "actions": ["StartTransaction", "StopTransaction"]
+    }
+  ]
+}

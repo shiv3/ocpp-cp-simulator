@@ -61,6 +61,11 @@ import type {
   OCPPWebSocket,
 } from "./OCPPWebSocket";
 import type { Settlement } from "./network-sim";
+import {
+  ResponseEffectQueue,
+  normalizeHandlerResult,
+  type HandlerResult,
+} from "./network-sim";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Transaction } from "../../domain/connector/Transaction";
@@ -255,6 +260,9 @@ export class OCPPMessageHandler {
   // TransactionMessageRetryInterval (60s).
   private static readonly SERIAL_CALL_TIMEOUT_MS = 30_000;
 
+  // Response effect queue for deferred handler side effects
+  private _responseEffectQueue: ResponseEffectQueue;
+
   constructor(
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
@@ -269,6 +277,21 @@ export class OCPPMessageHandler {
       chargePoint.id,
       chargePoint.database,
     );
+
+    // Initialize response effect queue with deps
+    this._responseEffectQueue = new ResponseEffectQueue({
+      isGenerationCurrent: (gen) =>
+        gen.gen === this._webSocket.currentGeneration().gen,
+      defer: (run) => queueMicrotask(run),
+      log: (message) => this._logger.info(message, LogType.OCPP),
+    });
+
+    // Register close-transaction callback for effect flushing (if available)
+    if (this._webSocket.onCloseTransaction) {
+      this._webSocket.onCloseTransaction((finalized) =>
+        this._responseEffectQueue.flushAfterCloseFinalization(finalized),
+      );
+    }
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
     this.initializeHandlers();
@@ -920,6 +943,10 @@ export class OCPPMessageHandler {
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
   ): Promise<void> {
+    // Capture the generation at dispatch time (before the await) so a response
+    // produced by an async handler settles against its originating generation.
+    const gen = this._webSocket.currentGeneration();
+
     // Issue #110: surface every incoming CSMS call to the scenario layer
     // (csmsCallTrigger nodes), regardless of handler outcome.
     this._chargePoint.notifyIncomingCall(action, payload);
@@ -938,9 +965,13 @@ export class OCPPMessageHandler {
       // Response overrides intentionally carry a caller-chosen status
       // string (e.g. "Rejected" for TC_026); the closed response union
       // can't express that, so assert the shape at this one call site.
-      this.sendCallResult(messageId, {
-        status: overrideStatus,
-      } as OcppMessageResponsePayload);
+      this.sendCallResult(
+        messageId,
+        {
+          status: overrideStatus,
+        } as OcppMessageResponsePayload,
+        gen,
+      );
       return;
     }
 
@@ -953,6 +984,7 @@ export class OCPPMessageHandler {
         messageId,
         "NotImplemented",
         "This action is not supported",
+        gen,
       );
       return;
     }
@@ -965,11 +997,22 @@ export class OCPPMessageHandler {
       // `handle()` may return its response synchronously or as a Promise
       // (see `CallHandler` in MessageHandlerRegistry.ts) — `await` resolves
       // a plain value immediately, so this is a no-op for sync handlers.
-      const response = await handler.handle(payload, context);
-      this.sendCallResult(messageId, response);
+      const rawResult = await handler.handle(payload, context);
+      const { payload: normalizedPayload, effect } = normalizeHandlerResult(
+        rawResult as HandlerResult,
+      );
+      const onSettled = effect
+        ? this._responseEffectQueue.register(gen, effect)
+        : undefined;
+      this.sendCallResult(
+        messageId,
+        normalizedPayload as OcppMessageResponsePayload,
+        gen,
+        onSettled,
+      );
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
-      this.sendCallError(messageId, "InternalError", String(error));
+      this.sendCallError(messageId, "InternalError", String(error), gen);
     }
   }
 
@@ -1079,20 +1122,24 @@ export class OCPPMessageHandler {
   private sendCallResult(
     messageId: string,
     payload: OcppMessageResponsePayload,
+    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
+    onSettled?: (s: Settlement) => void,
   ): void {
-    this._webSocket.sendResult(messageId, payload);
+    this._webSocket.sendResult(messageId, payload, gen, onSettled);
   }
 
   private sendCallError(
     messageId: string,
     errorCode: OCPPErrorCode,
     errorDescription: string,
+    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
+    onSettled?: (s: Settlement) => void,
   ): void {
     const errorDetails = {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.sendError(messageId, errorDetails);
+    this._webSocket.sendError(messageId, errorDetails, gen, onSettled);
   }
 
   private generateMessageId(): string {

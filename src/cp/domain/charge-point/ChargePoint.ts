@@ -7,6 +7,7 @@ import type { ChargePointEvents } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
+import type { ResolvedNetworkSimConfig } from "../../infrastructure/transport/network-sim";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -1155,8 +1156,8 @@ export class ChargePoint {
         : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
-    this.teardownAfterClose();
-    this._webSocket?.disconnect();
+    this._webSocket?.disconnect(); // drains network-sim pipelines synchronously (spec 2.6 step 1)
+    this.teardownAfterClose(); // handler teardown incl. serializer _serialQueue salvage (step 2)
   }
 
   /**
@@ -1201,8 +1202,25 @@ export class ChargePoint {
   }
 
   reset(): void {
-    this.disconnect();
+    if (this._webSocket) {
+      // WebSocket CP: use cause-aware internal reset (preserves reconnect reservation)
+      this._webSocket.disconnectInternal(); // drains, does NOT set manual, does NOT clear reservation
+      this.teardownAfterClose(); // drain-before-teardown order preserved
+    } else {
+      // SOAP CP: fallback to the old disconnect+connect semantics
+      this.disconnect();
+    }
     this.connect();
+  }
+
+  /**
+   * Terminal teardown: permanently releases the charge point.
+   * Shuts down the network-sim controller and closes the socket,
+   * then runs final CP-side teardown.
+   */
+  dispose(): void {
+    this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
+    this.teardownAfterClose(); // final CP-side teardown
   }
 
   applyRemoteReset(
@@ -1687,5 +1705,31 @@ export class ChargePoint {
       return;
     }
     this._outbox.sendStatusNotification(connectorId, connector.status);
+  }
+
+  /**
+   * Public network-sim forwarding: apply network simulation config at runtime.
+   * No-op for SOAP charge points (this._webSocket is null).
+   */
+  setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {
+    this._webSocket?.setNetworkSimConfig(resolved);
+  }
+
+  /**
+   * Public network-sim forwarding: trigger a manual-disconnect rule.
+   * Returns { ok: false; error: "not_connected" } for SOAP or null-socket charge points.
+   */
+  triggerNetworkSimDisconnect(
+    ruleId: string,
+  ):
+    | { ok: true }
+    | {
+        ok: false;
+        error: "sim_disabled" | "rule_not_manual" | "not_connected";
+      } {
+    if (!this._webSocket) {
+      return { ok: false, error: "not_connected" }; // SOAP or no socket
+    }
+    return this._webSocket.triggerNetworkSimDisconnect(ruleId);
   }
 }

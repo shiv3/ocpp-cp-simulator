@@ -236,6 +236,13 @@ export class OCPPWebSocket {
   }
 
   public disconnect(): void {
+    if (this._disposed) {
+      return;
+    }
+
+    // Drain synchronously FIRST (spec 2.6 step 1)
+    this.runCloseTransaction("manual");
+
     // Set manual disconnect flag to prevent auto-reconnect
     this._isManualDisconnect = true;
 
@@ -480,6 +487,16 @@ export class OCPPWebSocket {
    */
   public setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {
     this._controller.applyConfig(resolved);
+  }
+
+  /**
+   * Trigger a manual-disconnect rule by its id.
+   * Returns { ok: true } on success, or { ok: false; error } if sim is disabled or rule is not manual-disconnect.
+   */
+  public triggerNetworkSimDisconnect(
+    ruleId: string,
+  ): { ok: true } | { ok: false; error: "sim_disabled" | "rule_not_manual" } {
+    return this._controller.triggerManualDisconnect(ruleId);
   }
 
   /**

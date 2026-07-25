@@ -4,6 +4,12 @@ import type { ServerWebSocket } from "bun";
 
 export type OcppFrame = unknown[];
 
+export interface MockCsmsConnection {
+  frames: Array<{ raw: string; receivedAt: number }>;
+  openedAt: number;
+  closedAt: number | null;
+}
+
 interface FrameWaiter {
   pred: (frame: OcppFrame) => boolean;
   resolve: (frame: OcppFrame) => void;
@@ -33,12 +39,20 @@ export interface MockCsms {
   replyCallResult: (messageId: string, payload: unknown) => void;
   send: (frame: OcppFrame) => void;
   stop: () => Promise<void>;
+  closeCurrentConnection: (code?: number) => void;
+  connections: () => MockCsmsConnection[];
+  openCount: () => number;
+  closeCount: () => number;
 }
 
 export function startMockCsms(): MockCsms {
   const received: OcppFrame[] = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
+  const connectionsList: MockCsmsConnection[] = [];
+  let currentConnection: MockCsmsConnection | null = null;
+  let openCountValue = 0;
+  let closeCountValue = 0;
   let socket: ServerWebSocket<unknown> | null = null;
 
   const server = Bun.serve({
@@ -52,6 +66,14 @@ export function startMockCsms(): MockCsms {
     websocket: {
       open(ws) {
         socket = ws;
+        // Create a new connection record
+        currentConnection = {
+          frames: [],
+          openedAt: Date.now(),
+          closedAt: null,
+        };
+        connectionsList.push(currentConnection);
+        openCountValue++;
         for (const w of [...connectionWaiters]) {
           w.resolve(); // resolve() removes the waiter and clears its timer
         }
@@ -60,6 +82,10 @@ export function startMockCsms(): MockCsms {
         const raw = typeof message === "string" ? message : message.toString();
         const frame = JSON.parse(raw) as OcppFrame;
         received.push(frame);
+        // Add frame to current connection's transcript if a connection is open
+        if (currentConnection) {
+          currentConnection.frames.push({ raw, receivedAt: Date.now() });
+        }
         for (const w of [...waiters]) {
           if (w.pred(frame)) {
             w.resolve(frame); // resolve() removes the waiter and clears its timer
@@ -67,6 +93,11 @@ export function startMockCsms(): MockCsms {
         }
       },
       close() {
+        // Mark current connection as closed
+        if (currentConnection) {
+          currentConnection.closedAt = Date.now();
+        }
+        closeCountValue++;
         socket = null;
       },
     },
@@ -147,6 +178,20 @@ export function startMockCsms(): MockCsms {
     },
     send(frame) {
       socket?.send(JSON.stringify(frame));
+    },
+    closeCurrentConnection(code?: number) {
+      if (socket) {
+        socket.close(code);
+      }
+    },
+    connections() {
+      return [...connectionsList];
+    },
+    openCount() {
+      return openCountValue;
+    },
+    closeCount() {
+      return closeCountValue;
     },
     async stop() {
       for (const w of [...waiters]) {

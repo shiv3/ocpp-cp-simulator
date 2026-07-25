@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { OCPPWebSocket } from "../OCPPWebSocket";
+import { OCPPWebSocket, type OcppMessageErrorPayload } from "../OCPPWebSocket";
 import { Logger } from "../../../shared/Logger";
 import type {
   Settlement,
@@ -77,16 +77,39 @@ const createMockLogger = (): Logger => {
 
 // Mock openOcppWebSocket to return FakeWebSocket with handlers set up
 vi.mock("../wsUrlWithBasic", () => ({
-  openOcppWebSocket: (options: any) => {
+  openOcppWebSocket: (options: unknown) => {
+    const opts = options as {
+      onopen?: () => void;
+      onmessage?: (ev: MessageEvent) => void;
+      onerror?: (ev: Event) => void;
+      onclose?: (ev: CloseEvent) => void;
+    };
     const fakeWs = new FakeWebSocket();
     // Set up the event handlers passed in options
-    if (options.onopen) fakeWs.onopen = options.onopen;
-    if (options.onmessage) fakeWs.onmessage = options.onmessage;
-    if (options.onerror) fakeWs.onerror = options.onerror;
-    if (options.onclose) fakeWs.onclose = options.onclose;
+    if (opts.onopen) fakeWs.onopen = opts.onopen;
+    if (opts.onmessage) fakeWs.onmessage = opts.onmessage;
+    if (opts.onerror) fakeWs.onerror = opts.onerror;
+    if (opts.onclose) fakeWs.onclose = opts.onclose;
     return fakeWs;
   },
 }));
+
+// Helper type for accessing private members in tests
+type WebSocketTestAccess = {
+  _ws: FakeWebSocket;
+  _reconnectNotBefore: number | null;
+  _isManualDisconnect: boolean;
+  _disposed: boolean;
+  _reconnectTimer: ReturnType<typeof setTimeout> | null;
+  _controller: {
+    resolved?: unknown;
+    shutdownPipelines: (arg: unknown) => void;
+    onSocketOpen: () => void;
+    applyConfig: (config: unknown) => void;
+    sendUpstream: (message: string, callback?: (s: unknown) => void) => boolean;
+  };
+  runCloseTransaction: (cause: string) => void;
+};
 
 describe("OCPPWebSocket Network Simulation", () => {
   let logger: Logger;
@@ -100,7 +123,7 @@ describe("OCPPWebSocket Network Simulation", () => {
 
     // Replace the internal WebSocket with our fake
     ws.connect();
-    fakeWs = (ws as any)._ws;
+    fakeWs = (ws as unknown as WebSocketTestAccess)._ws;
     fakeWs.simulateOpen();
   });
 
@@ -134,9 +157,9 @@ describe("OCPPWebSocket Network Simulation", () => {
       ws.sendError(
         "msg-1",
         {
-          errorCode: "InternalError" as any,
+          errorCode: "InternalError",
           errorDescription: "test",
-        },
+        } as unknown as OcppMessageErrorPayload,
         gen,
         (s) => settlements.push(s),
       );
@@ -204,9 +227,9 @@ describe("OCPPWebSocket Network Simulation", () => {
       ws.sendError(
         "msg-1",
         {
-          errorCode: "InternalError" as any,
+          errorCode: "InternalError",
           errorDescription: "test",
-        },
+        } as unknown as OcppMessageErrorPayload,
         gen1,
         (s) => settlements.push(s),
       );
@@ -245,11 +268,13 @@ describe("OCPPWebSocket Network Simulation", () => {
 
   describe("reconnect reservation", () => {
     it("simulateConnectionLoss installs reservation before drain", () => {
-      const reservationBefore = (ws as any)._reconnectNotBefore;
+      const reservationBefore = (ws as unknown as WebSocketTestAccess)
+        ._reconnectNotBefore;
       expect(reservationBefore).toBeNull();
 
       ws.simulateConnectionLoss(5000);
-      const reservationAfter = (ws as any)._reconnectNotBefore;
+      const reservationAfter = (ws as unknown as WebSocketTestAccess)
+        ._reconnectNotBefore;
 
       expect(reservationAfter).not.toBeNull();
       expect(reservationAfter).toBeGreaterThan(Date.now());
@@ -261,42 +286,56 @@ describe("OCPPWebSocket Network Simulation", () => {
 
       // Manually simulate what attemptReconnect does
       // the reconnect should be scheduled for at least 5000ms
-      const reservationDeadline = (ws as any)._reconnectNotBefore;
+      const reservationDeadline = (ws as unknown as WebSocketTestAccess)
+        ._reconnectNotBefore;
       expect(reservationDeadline).toBeLessThanOrEqual(Date.now() + 5000 + 100); // Allow small margin
 
       // Advance to 4999ms - reservation should not be consumed yet
       vi.advanceTimersByTime(4999);
-      expect((ws as any)._reconnectNotBefore).not.toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).not.toBeNull();
 
       // Advance past 5000ms - reservation should be consumed
       vi.advanceTimersByTime(1000);
-      expect((ws as any)._reconnectNotBefore).toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).toBeNull();
     });
 
     it("reservation is consumed when socket-open attempt begins", () => {
       ws.simulateConnectionLoss(5000);
       fakeWs.simulateClose();
 
-      expect((ws as any)._reconnectNotBefore).not.toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).not.toBeNull();
 
       // Advance to the reconnect time
       vi.advanceTimersByTime(5000);
 
       // Connect is called in the timer callback, which should consume the reservation
-      expect((ws as any)._reconnectNotBefore).toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).toBeNull();
     });
 
     it("manual disconnect clears the reservation", () => {
       ws.simulateConnectionLoss(5000);
-      expect((ws as any)._reconnectNotBefore).not.toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).not.toBeNull();
 
       ws.disconnect();
-      expect((ws as any)._reconnectNotBefore).toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).toBeNull();
     });
 
     it("reservation survives internal timer cancellation", () => {
       ws.simulateConnectionLoss(5000);
-      const reservation = (ws as any)._reconnectNotBefore;
+      const reservation = (ws as unknown as WebSocketTestAccess)
+        ._reconnectNotBefore;
       expect(reservation).not.toBeNull();
 
       // Simulate internal reset (which cancels the timer)
@@ -304,15 +343,21 @@ describe("OCPPWebSocket Network Simulation", () => {
       fakeWs.simulateClose();
 
       // Reservation should still be set
-      expect((ws as any)._reconnectNotBefore).toBe(reservation);
+      expect((ws as unknown as WebSocketTestAccess)._reconnectNotBefore).toBe(
+        reservation,
+      );
     });
 
     it("dispose clears the reservation", () => {
       ws.simulateConnectionLoss(5000);
-      expect((ws as any)._reconnectNotBefore).not.toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).not.toBeNull();
 
       ws.dispose();
-      expect((ws as any)._reconnectNotBefore).toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).toBeNull();
     });
   });
 
@@ -334,8 +379,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       const gen = ws.currentGeneration();
 
       // Manually set the flag and run close transaction to simulate disconnect
-      (ws as any)._isManualDisconnect = true;
-      (ws as any).runCloseTransaction("manual");
+      (ws as unknown as WebSocketTestAccess)._isManualDisconnect = true;
+      (ws as unknown as WebSocketTestAccess).runCloseTransaction("manual");
 
       expect(gen.closeCause).toBe("manual");
 
@@ -359,7 +404,7 @@ describe("OCPPWebSocket Network Simulation", () => {
 
   describe("close transaction", () => {
     it("runCloseTransaction is idempotent within a generation", () => {
-      const controller = (ws as any)._controller;
+      const controller = (ws as unknown as WebSocketTestAccess)._controller;
       const shutdownSpy = vi.spyOn(controller, "shutdownPipelines");
 
       // First close
@@ -387,7 +432,7 @@ describe("OCPPWebSocket Network Simulation", () => {
 
       // Connect to new generation
       ws.connect();
-      const newFakeWs = (ws as any)._ws;
+      const newFakeWs = (ws as unknown as WebSocketTestAccess)._ws;
       newFakeWs.simulateOpen();
 
       const gen2 = ws.currentGeneration();
@@ -405,13 +450,17 @@ describe("OCPPWebSocket Network Simulation", () => {
   describe("disconnectInternal", () => {
     it("closes without _isManualDisconnect, allowing reconnect", () => {
       // disconnectInternal should not set _isManualDisconnect
-      expect((ws as any)._isManualDisconnect).toBe(false);
+      expect((ws as unknown as WebSocketTestAccess)._isManualDisconnect).toBe(
+        false,
+      );
 
       // Call disconnectInternal which calls close without setting _isManualDisconnect
       ws.disconnectInternal();
 
       // After disconnectInternal, _isManualDisconnect should still be false
-      expect((ws as any)._isManualDisconnect).toBe(false);
+      expect((ws as unknown as WebSocketTestAccess)._isManualDisconnect).toBe(
+        false,
+      );
 
       // Since _isManualDisconnect is false, handleClose should call attemptReconnect
       // The reconnectTimer should be set by attemptReconnect
@@ -419,17 +468,21 @@ describe("OCPPWebSocket Network Simulation", () => {
       fakeWs.simulateClose();
 
       // Now the reconnectTimer should be set
-      const reconnectTimer = (ws as any)._reconnectTimer;
+      const reconnectTimer = (ws as unknown as WebSocketTestAccess)
+        ._reconnectTimer;
       expect(reconnectTimer).not.toBeNull();
     });
 
     it("does not clear the reservation", () => {
       ws.simulateConnectionLoss(5000);
-      const reservation = (ws as any)._reconnectNotBefore;
+      const reservation = (ws as unknown as WebSocketTestAccess)
+        ._reconnectNotBefore;
 
       ws.disconnectInternal();
 
-      expect((ws as any)._reconnectNotBefore).toBe(reservation);
+      expect((ws as unknown as WebSocketTestAccess)._reconnectNotBefore).toBe(
+        reservation,
+      );
     });
 
     it("latches 'internal' cause", () => {
@@ -441,9 +494,9 @@ describe("OCPPWebSocket Network Simulation", () => {
 
   describe("dispose", () => {
     it("marks transport as terminal", () => {
-      expect((ws as any)._disposed).toBe(false);
+      expect((ws as unknown as WebSocketTestAccess)._disposed).toBe(false);
       ws.dispose();
-      expect((ws as any)._disposed).toBe(true);
+      expect((ws as unknown as WebSocketTestAccess)._disposed).toBe(true);
     });
 
     it("ignores close events after dispose", () => {
@@ -457,10 +510,14 @@ describe("OCPPWebSocket Network Simulation", () => {
 
     it("clears the reservation", () => {
       ws.simulateConnectionLoss(5000);
-      expect((ws as any)._reconnectNotBefore).not.toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).not.toBeNull();
 
       ws.dispose();
-      expect((ws as any)._reconnectNotBefore).toBeNull();
+      expect(
+        (ws as unknown as WebSocketTestAccess)._reconnectNotBefore,
+      ).toBeNull();
     });
   });
 
@@ -472,7 +529,7 @@ describe("OCPPWebSocket Network Simulation", () => {
         rules: {},
       };
 
-      const controller = (ws as any)._controller;
+      const controller = (ws as unknown as WebSocketTestAccess)._controller;
       const applySpy = vi.spyOn(controller, "applyConfig");
 
       ws.setNetworkSimConfig(config);
@@ -494,15 +551,17 @@ describe("OCPPWebSocket Network Simulation", () => {
 
       // Config should still be active in the new generation
       // (We test this by verifying the controller retains its config)
-      const controller = (ws as any)._controller;
-      expect((controller as any).resolved).toEqual(config);
+      const controller = (ws as unknown as WebSocketTestAccess)._controller;
+      expect(
+        (controller as unknown as { resolved?: unknown }).resolved,
+      ).toEqual(config);
     });
   });
 
   describe("sendResult/sendError queue_overflow handling", () => {
     it("sendResult with queue_overflow settles once", () => {
       const gen = ws.currentGeneration();
-      const controller = (ws as any)._controller;
+      const controller = (ws as unknown as WebSocketTestAccess)._controller;
       vi.spyOn(controller, "sendUpstream").mockReturnValue(false);
 
       const settlements: Settlement[] = [];
@@ -514,16 +573,16 @@ describe("OCPPWebSocket Network Simulation", () => {
 
     it("sendError with queue_overflow settles once", () => {
       const gen = ws.currentGeneration();
-      const controller = (ws as any)._controller;
+      const controller = (ws as unknown as WebSocketTestAccess)._controller;
       vi.spyOn(controller, "sendUpstream").mockReturnValue(false);
 
       const settlements: Settlement[] = [];
       ws.sendError(
         "msg-1",
         {
-          errorCode: "InternalError" as any,
+          errorCode: "InternalError",
           errorDescription: "test",
-        },
+        } as unknown as OcppMessageErrorPayload,
         gen,
         (s) => settlements.push(s),
       );
@@ -545,12 +604,14 @@ describe("OCPPWebSocket Network Simulation", () => {
       );
 
       // Spy BEFORE connecting
-      const controller = (freshWs as any)._controller;
+      const controller = (freshWs as unknown as WebSocketTestAccess)
+        ._controller;
       const onSocketOpenSpy = vi.spyOn(controller, "onSocketOpen");
 
       // Now connect
       freshWs.connect();
-      const freshFakeWs = (freshWs as any)._ws as FakeWebSocket;
+      const freshFakeWs = (freshWs as unknown as WebSocketTestAccess)
+        ._ws as FakeWebSocket;
 
       // The spy shouldn't have been called yet (connect doesn't open the socket)
       expect(onSocketOpenSpy).not.toHaveBeenCalled();
@@ -570,7 +631,8 @@ describe("OCPPWebSocket Network Simulation", () => {
 
       // Connect but don't open the socket
       ws2.connect();
-      const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
+      const fakeWs2 = (ws2 as unknown as WebSocketTestAccess)
+        ._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
       const gen = ws2.currentGeneration();
@@ -596,7 +658,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       const ws2 = new OCPPWebSocket("ws://localhost:8080", "CP-003", logger2);
 
       ws2.connect();
-      const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
+      const fakeWs2 = (ws2 as unknown as WebSocketTestAccess)
+        ._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
       const gen = ws2.currentGeneration();
@@ -618,7 +681,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       const ws2 = new OCPPWebSocket("ws://localhost:8080", "CP-004", logger2);
 
       ws2.connect();
-      const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
+      const fakeWs2 = (ws2 as unknown as WebSocketTestAccess)
+        ._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
       const gen = ws2.currentGeneration();
@@ -626,9 +690,9 @@ describe("OCPPWebSocket Network Simulation", () => {
       ws2.sendError(
         "msg-1",
         {
-          errorCode: "InternalError" as any,
+          errorCode: "InternalError",
           errorDescription: "test",
-        },
+        } as unknown as OcppMessageErrorPayload,
         gen,
         (s) => settlements.push(s),
       );
@@ -672,9 +736,9 @@ describe("OCPPWebSocket Network Simulation", () => {
       ws.sendError(
         "msg-1",
         {
-          errorCode: "InternalError" as any,
+          errorCode: "InternalError",
           errorDescription: "test",
-        },
+        } as unknown as OcppMessageErrorPayload,
         gen,
         (s) => settlements.push(s),
       );
@@ -699,7 +763,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       ws2.setNetworkSimConfig(config);
 
       ws2.connect();
-      const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
+      const fakeWs2 = (ws2 as unknown as WebSocketTestAccess)
+        ._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
       const gen = ws2.currentGeneration();

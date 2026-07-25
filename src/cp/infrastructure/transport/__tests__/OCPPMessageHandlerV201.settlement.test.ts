@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
+import type { OCPPWebSocket } from "../OCPPWebSocket";
 import { Logger, LogType } from "../../../shared/Logger";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
 import type { Settlement, GenerationToken } from "../network-sim";
@@ -85,7 +86,7 @@ class FakeOCPPWebSocket {
       (e) => e.messageId === messageId,
     );
     if (entry?.callback) {
-      const settlement: Settlement = { outcome: outcome as any };
+      const settlement: Settlement = { outcome };
       entry.callback(settlement);
     }
   }
@@ -131,8 +132,8 @@ const createMockChargePoint = (): ChargePoint => {
       meterValuesSampledData: vi.fn(() => []),
       getString: vi.fn(),
     },
-    database: {} as any,
-    certificateStore: {} as any,
+    database: {} as unknown,
+    certificateStore: {} as unknown,
     consumeResponseOverride: vi.fn(() => null),
   } as unknown as ChargePoint;
 };
@@ -154,11 +155,13 @@ const createRegistryWithEffects = (): V201InboundRegistry => {
   // GetReport handler with afterResult (sends NotifyReport later)
   registry.set("GetReport", {
     validate: () => true,
-    handle: (_payload: any, ctx: any) => ({
+    handle: (_payload: unknown, ctx: unknown) => ({
       response: { status: "Accepted" },
       afterResult: () => {
         // Simulate sending a follow-up CALL
-        ctx.sendCall("NotifyReport", { requestId: 123 });
+        (
+          ctx as { sendCall: (action: string, payload: unknown) => void }
+        ).sendCall("NotifyReport", { requestId: 123 });
       },
     }),
   });
@@ -166,11 +169,13 @@ const createRegistryWithEffects = (): V201InboundRegistry => {
   // GetVariables handler with afterResult
   registry.set("GetVariables", {
     validate: () => true,
-    handle: (_payload: any, ctx: any) => ({
+    handle: (_payload: unknown, ctx: unknown) => ({
       response: { status: "Accepted" },
       afterResult: () => {
         // Simulate sending a follow-up CALL
-        ctx.sendCall("NotifyReport", { requestId: 456 });
+        (
+          ctx as { sendCall: (action: string, payload: unknown) => void }
+        ).sendCall("NotifyReport", { requestId: 456 });
       },
     }),
   });
@@ -186,6 +191,12 @@ const createRegistryWithEffects = (): V201InboundRegistry => {
   return registry as V201InboundRegistry;
 };
 
+// Test helper type for accessing private members
+type HandlerTestAccess = {
+  _pendingRequests: Map<string, unknown>;
+  handleIncomingMessage: (...args: unknown[]) => void;
+};
+
 describe("OCPPMessageHandlerV201 Settlement", () => {
   let fakeSocket: FakeOCPPWebSocket;
   let mockChargePoint: ChargePoint;
@@ -199,7 +210,7 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
     mockLogger = createMockLogger();
     handler = new OCPPMessageHandlerV201(
       mockChargePoint,
-      fakeSocket as any,
+      fakeSocket as unknown as OCPPWebSocket,
       mockLogger,
       createRegistryWithEffects(),
     );
@@ -216,16 +227,22 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       const [messageId, , , , onSettled] = spy.mock.calls[0];
 
       // Before settlement: _pendingRequests should be empty
-      const pendingBefore = (handler as any)._pendingRequests.size;
+      const pendingBefore = (handler as unknown as HandlerTestAccess)
+        ._pendingRequests.size;
       expect(pendingBefore).toBe(0);
 
       // After written settlement: _pendingRequests should have the entry
       if (onSettled) {
         onSettled({ outcome: "written" });
       }
-      const pendingAfter = (handler as any)._pendingRequests.size;
+      const pendingAfter = (handler as unknown as HandlerTestAccess)
+        ._pendingRequests.size;
       expect(pendingAfter).toBe(1);
-      expect((handler as any)._pendingRequests.has(messageId)).toBe(true);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.has(
+          messageId,
+        ),
+      ).toBe(true);
     });
 
     it("does NOT register entry on drop outcomes (socket_closed, write_failed, disposed)", () => {
@@ -239,7 +256,11 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       if (onSettled) {
         onSettled({ outcome: "socket_closed", closeCause: "network" });
       }
-      expect((handler as any)._pendingRequests.has(messageId)).toBe(false);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.has(
+          messageId,
+        ),
+      ).toBe(false);
 
       // Test with a new call for write_failed
       handler.sendHeartbeat();
@@ -248,7 +269,11 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       if (onSettled2) {
         onSettled2({ outcome: "write_failed" });
       }
-      expect((handler as any)._pendingRequests.has(messageId2)).toBe(false);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.has(
+          messageId2,
+        ),
+      ).toBe(false);
     });
 
     it("calls notifyOutgoingCall only on written settlement", () => {
@@ -268,7 +293,7 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       expect(mockChargePoint.notifyOutgoingCall).toHaveBeenCalledWith(true);
 
       // On drop: should NOT call notifyOutgoingCall
-      (mockChargePoint.notifyOutgoingCall as any).mockClear();
+      vi.mocked(mockChargePoint.notifyOutgoingCall).mockClear();
       handler.sendHeartbeat();
       const [, , , , onSettled2] = spy.mock.calls[1];
       if (onSettled2) {
@@ -291,13 +316,17 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       }
 
       // Request should not be registered
-      expect((handler as any)._pendingRequests.has(messageId)).toBe(false);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.has(
+          messageId,
+        ),
+      ).toBe(false);
 
       // Now simulate a late CALLRESULT arriving
       // This should be handled gracefully (logged as unknown)
-      const handleIncoming = (handler as any).handleIncomingMessage.bind(
-        handler,
-      );
+      const handleIncoming = (
+        handler as unknown as HandlerTestAccess
+      ).handleIncomingMessage.bind(handler);
       // No crash expected
       expect(() => {
         handleIncoming(2, messageId, "Heartbeat", {}); // 2 = CALLRESULT
@@ -316,13 +345,21 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       if (onSettled) {
         onSettled({ outcome: "written" });
       }
-      expect((handler as any)._pendingRequests.has(messageId)).toBe(true);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.has(
+          messageId,
+        ),
+      ).toBe(true);
 
       // Advance timers far (10 minutes)
       vi.advanceTimersByTime(10 * 60 * 1000);
 
       // Entry should still be there (no timeout cleanup)
-      expect((handler as any)._pendingRequests.has(messageId)).toBe(true);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.has(
+          messageId,
+        ),
+      ).toBe(true);
     });
   });
 
@@ -346,21 +383,25 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
         cb2({ outcome: "written" });
       }
 
-      expect((handler as any)._pendingRequests.size).toBe(2);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.size,
+      ).toBe(2);
 
       // Call onWebSocketClosed
       handler.onWebSocketClosed();
 
       // Should clear all entries
-      expect((handler as any)._pendingRequests.size).toBe(0);
+      expect(
+        (handler as unknown as HandlerTestAccess)._pendingRequests.size,
+      ).toBe(0);
     });
   });
 
   describe("afterResult effects at settlement", () => {
     it("inbound CALL with afterResult does not run immediately; runs deferred after 'written' settlement", () => {
-      const handleIncoming = (handler as any).handleIncomingMessage.bind(
-        handler,
-      );
+      const handleIncoming = (
+        handler as unknown as HandlerTestAccess
+      ).handleIncomingMessage.bind(handler);
 
       // Simulate incoming GetReport request
       handleIncoming(OCPPMessageType.CALL, "msg-123", "GetReport", {
@@ -377,14 +418,14 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       const registry = createRegistryWithEffects();
       const handler2 = new OCPPMessageHandlerV201(
         mockChargePoint,
-        fakeSocket as any,
+        fakeSocket as unknown as OCPPWebSocket,
         mockLogger,
         registry,
       );
 
-      const handleIncoming = (handler2 as any).handleIncomingMessage.bind(
-        handler2,
-      );
+      const handleIncoming = (
+        handler2 as unknown as HandlerTestAccess
+      ).handleIncomingMessage.bind(handler2);
 
       // First: simulate GetReport
       handleIncoming(OCPPMessageType.CALL, "msg-1", "GetReport", {
@@ -407,7 +448,12 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
   describe("gen threading in sendResult/sendError", () => {
     it("sendResult receives the generation captured at dispatch", () => {
       // Track calls to sendResult
-      const sendResultCalls: any[] = [];
+      const sendResultCalls: Array<{
+        messageId: string;
+        payload: unknown;
+        gen: GenerationToken;
+        onSettled?: (s: Settlement) => void;
+      }> = [];
       const originalSendResult = fakeSocket.sendResult.bind(fakeSocket);
       fakeSocket.sendResult = (
         messageId: string,
@@ -419,9 +465,9 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
         originalSendResult(messageId, payload, gen, onSettled);
       };
 
-      const handleIncoming = (handler as any).handleIncomingMessage.bind(
-        handler,
-      );
+      const handleIncoming = (
+        handler as unknown as HandlerTestAccess
+      ).handleIncomingMessage.bind(handler);
 
       // Simulate incoming Heartbeat (OCPPMessageType.CALL = 2)
       handleIncoming(OCPPMessageType.CALL, "msg-123", "Heartbeat", {});
@@ -431,12 +477,17 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       const call = sendResultCalls[0];
       expect(call.messageId).toBe("msg-123");
       expect(call.gen).toBeDefined();
-      expect((call.gen as any).gen).toBe(1);
+      expect((call.gen as GenerationToken).gen).toBe(1);
     });
 
     it("sendError receives the generation captured at dispatch", () => {
       // Track calls to sendError
-      const sendErrorCalls: any[] = [];
+      const sendErrorCalls: Array<{
+        messageId: string;
+        payload: unknown;
+        gen: GenerationToken;
+        onSettled?: (s: Settlement) => void;
+      }> = [];
       const originalSendError = fakeSocket.sendError.bind(fakeSocket);
       fakeSocket.sendError = (
         messageId: string,
@@ -448,9 +499,9 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
         originalSendError(messageId, payload, gen, onSettled);
       };
 
-      const handleIncoming = (handler as any).handleIncomingMessage.bind(
-        handler,
-      );
+      const handleIncoming = (
+        handler as unknown as HandlerTestAccess
+      ).handleIncomingMessage.bind(handler);
 
       // Simulate incoming unknown action (OCPPMessageType.CALL = 2)
       handleIncoming(OCPPMessageType.CALL, "msg-456", "UnknownAction", {});
@@ -460,7 +511,7 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       const call = sendErrorCalls[0];
       expect(call.messageId).toBe("msg-456");
       expect(call.gen).toBeDefined();
-      expect((call.gen as any).gen).toBe(1);
+      expect((call.gen as GenerationToken).gen).toBe(1);
     });
   });
 
@@ -486,7 +537,7 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       // Create handler (in constructor, it registers callback)
       new OCPPMessageHandlerV201(
         mockChargePoint,
-        fakeSocket as any,
+        fakeSocket as unknown as OCPPWebSocket,
         mockLogger,
         createRegistryWithEffects(),
       );

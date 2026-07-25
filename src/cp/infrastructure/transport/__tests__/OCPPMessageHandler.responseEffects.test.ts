@@ -4,7 +4,11 @@ import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { Logger } from "../../../shared/Logger";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
-import type { HandlerOutcome, Settlement } from "../network-sim";
+import type {
+  HandlerOutcome,
+  Settlement,
+  GenerationToken,
+} from "../network-sim";
 
 // Mock ChargePoint and minimal dependencies
 const mockChargePoint = {
@@ -31,26 +35,30 @@ const mockCodec = {} as ProtocolCodec;
 
 // Mock OCPPWebSocket with the necessary methods for this test
 class MockOCPPWebSocket implements Partial<OCPPWebSocket> {
-  private closeTransactionCallback: ((gen: any) => void) | null = null;
+  private closeTransactionCallback:
+    ((finalized: GenerationToken) => void) | null = null;
   private generationCounter = 1;
-  private currentGenToken = { gen: 1, closeCause: null as any };
+  private currentGenToken: { gen: number; closeCause: null | string } = {
+    gen: 1,
+    closeCause: null,
+  };
 
   setMessageHandler(): void {
     // No-op for test
   }
 
-  onCloseTransaction(cb: (finalized: any) => void): void {
+  onCloseTransaction(cb: (finalized: GenerationToken) => void): void {
     this.closeTransactionCallback = cb;
   }
 
   currentGeneration(): ReturnType<OCPPWebSocket["currentGeneration"]> {
-    return this.currentGenToken;
+    return this.currentGenToken as unknown as GenerationToken;
   }
 
   sendResult(
     _messageId: string,
     _payload: unknown,
-    _gen?: any,
+    _gen?: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
     // Immediately settle with 'written' to test the queue
@@ -63,8 +71,8 @@ class MockOCPPWebSocket implements Partial<OCPPWebSocket> {
 
   sendError(
     _messageId: string,
-    _payload: any,
-    _gen?: any,
+    _payload: unknown,
+    _gen?: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
     if (onSettled) {
@@ -78,7 +86,9 @@ class MockOCPPWebSocket implements Partial<OCPPWebSocket> {
   simulateClose(): void {
     if (this.closeTransactionCallback) {
       this.currentGenToken.closeCause = "network";
-      this.closeTransactionCallback(this.currentGenToken);
+      this.closeTransactionCallback(
+        this.currentGenToken as unknown as GenerationToken,
+      );
     }
   }
 
@@ -98,7 +108,7 @@ describe("OCPPMessageHandler.responseEffects", () => {
     // Initialize handler to verify integration (and that constructor doesn't throw)
     void new OCPPMessageHandler(
       mockChargePoint,
-      mockWebSocket as any,
+      mockWebSocket as unknown as OCPPWebSocket,
       mockLogger,
       mockCodec,
     );

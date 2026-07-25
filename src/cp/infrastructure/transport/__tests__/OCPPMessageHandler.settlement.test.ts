@@ -4,6 +4,7 @@ import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { Logger, LogLevel } from "../../../shared/Logger";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Settlement } from "../network-sim";
 import type { GenerationToken } from "../network-sim";
 
@@ -20,7 +21,7 @@ class FakeSocket implements Partial<OCPPWebSocket> {
     onSettled: (s: Settlement) => void;
   }> = [];
 
-  setMessageHandler(_handler: any): void {
+  setMessageHandler(_handler: unknown): void {
     // No-op for this test
   }
 
@@ -109,7 +110,7 @@ class FakeSocket implements Partial<OCPPWebSocket> {
  */
 class MockChargePoint {
   id = "TEST-CP";
-  database: any = null;
+  database: unknown = null;
 
   configuration = {
     transactionMessageAttempts: () => 3,
@@ -120,7 +121,7 @@ class MockChargePoint {
     // No-op for this test
   }
 
-  notifyIncomingCall(_action: string, _payload: any): void {
+  notifyIncomingCall(_action: string, _payload: unknown): void {
     // No-op for this test
   }
 
@@ -128,7 +129,7 @@ class MockChargePoint {
     return null;
   }
 
-  getConnector(_connectorId: number): any {
+  getConnector(_connectorId: number): unknown {
     return { id: _connectorId };
   }
 
@@ -136,7 +137,7 @@ class MockChargePoint {
     // No-op for this test
   }
 
-  updateConnectorStatus(_connectorId: number, _status: any): void {
+  updateConnectorStatus(_connectorId: number, _status: unknown): void {
     // No-op for this test
   }
 
@@ -149,7 +150,7 @@ class MockChargePoint {
  * Mock ProtocolCodec for outgoing warnings.
  */
 class MockCodec implements Partial<ProtocolCodec> {
-  outgoingWarning(_action: string, _payload: any): string | null {
+  outgoingWarning(_action: string, _payload: unknown): string | null {
     return null;
   }
 }
@@ -169,10 +170,10 @@ describe("OCPPMessageHandler settlement-based serializer custody", () => {
     codec = new MockCodec();
 
     handler = new OCPPMessageHandler(
-      mockChargePoint as any,
-      fakeSocket as any,
+      mockChargePoint as unknown as ChargePoint,
+      fakeSocket as unknown as OCPPWebSocket,
       logger,
-      codec as any,
+      codec as unknown as ProtocolCodec,
     );
 
     // Open the boot gate for most tests (except where we're testing the boot gate itself)
@@ -311,10 +312,10 @@ describe("OCPPMessageHandler settlement-based serializer custody", () => {
     it("without boot gate, CALLs are blocked until Accepted", () => {
       // Create a fresh handler without opening the boot gate
       const freshHandler = new OCPPMessageHandler(
-        mockChargePoint as any,
-        fakeSocket as any,
+        mockChargePoint as unknown as ChargePoint,
+        fakeSocket as unknown as OCPPWebSocket,
         logger,
-        codec as any,
+        codec as unknown as ProtocolCodec,
       );
 
       // Try to send a Heartbeat (should NOT go to wire because boot gate is closed)

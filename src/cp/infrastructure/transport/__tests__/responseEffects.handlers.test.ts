@@ -54,7 +54,7 @@ function buildContext() {
 }
 
 describe("responseEffects.handlers", () => {
-  let fetchSpy: any = null;
+  let fetchSpy: { mockRestore(): void } | null = null;
 
   beforeEach(() => {
     // Polyfill Blob/File/FormData for GetDiagnosticsHandler
@@ -489,7 +489,6 @@ describe("responseEffects.handlers", () => {
     it("returns HandlerOutcome with Accepted status", () => {
       const { ctx } = buildContext();
       const handler = new SignedUpdateFirmwareHandler();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = handler.handle(
         {
           requestId: 456,
@@ -499,7 +498,7 @@ describe("responseEffects.handlers", () => {
             signingCertificate: "cert",
             signature: "sig",
           },
-        } as any,
+        } as unknown as Parameters<typeof handler.handle>[0],
         ctx,
       );
 
@@ -513,7 +512,6 @@ describe("responseEffects.handlers", () => {
       const { ctx, chargePointCalls } = buildContext();
       const handler = new SignedUpdateFirmwareHandler();
       const now = new Date();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = handler.handle(
         {
           requestId: 789,
@@ -523,7 +521,7 @@ describe("responseEffects.handlers", () => {
             signingCertificate: "cert",
             signature: "sig",
           },
-        } as any,
+        } as unknown as Parameters<typeof handler.handle>[0],
         ctx,
       );
 

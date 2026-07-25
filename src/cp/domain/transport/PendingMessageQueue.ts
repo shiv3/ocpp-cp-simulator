@@ -49,7 +49,11 @@ interface PendingRow extends PendingMessage {
  */
 export class PendingMessageQueue {
   private items: PendingRow[] = [];
+  /** Persisted FIFO ordering key; seeded from MAX(seq) for this cp on load. */
   private nextSeq = 0;
+  /** Independent counter for the user-visible message id — keeping it apart
+   *  from `nextSeq` stops an id allocation from perturbing the ordering key. */
+  private nextIdSuffix = 0;
 
   constructor(
     private readonly chargePointId: string,
@@ -135,8 +139,9 @@ export class PendingMessageQueue {
 
   private load(): void {
     if (!this.database) {
-      // In-memory-only mode: start seq counter at 1.
+      // In-memory-only mode: nothing persisted, so both counters start fresh.
       this.nextSeq = 1;
+      this.nextIdSuffix = 0;
       return;
     }
     try {
@@ -168,9 +173,14 @@ export class PendingMessageQueue {
         0,
       );
       this.nextSeq = maxSeq + 1;
+      // The id suffix rides the same high-water mark so a queue reopened
+      // within the same millisecond cannot mint an id that collides with a
+      // persisted row (message_id is part of the primary key).
+      this.nextIdSuffix = maxSeq;
     } catch (err) {
       console.error("Failed to load pending transaction queue:", err);
       this.nextSeq = 1;
+      this.nextIdSuffix = 0;
     }
   }
 
@@ -225,8 +235,8 @@ export class PendingMessageQueue {
     // Per-instance monotonic id; mixed with the wall-clock so concurrent
     // queues for different cps don't collide (cp_id is part of the PK
     // anyway, but the id is also user-visible in logs).
-    const seq = (this.nextSeq += 1);
-    return `${Date.now().toString(36)}-${seq.toString(36)}`;
+    const suffix = (this.nextIdSuffix += 1);
+    return `${Date.now().toString(36)}-${suffix.toString(36)}`;
   }
 }
 

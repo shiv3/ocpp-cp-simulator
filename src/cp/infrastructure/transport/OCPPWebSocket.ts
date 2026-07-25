@@ -525,12 +525,18 @@ export class OCPPWebSocket {
    * This is what the ControllerHost.writeUpstream calls.
    */
   private writeUpstreamPhysical(raw: string): void {
-    if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      this._ws.send(raw);
-      this._logger.info(`Sent: ${raw}`, LogType.WEBSOCKET);
-    } else {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+      // A delayed frame can reach its release after the socket dropped. Throw
+      // so the pipeline settles it `write_failed` instead of `written` — a
+      // frame that never hit the wire must stay in its sender's custody
+      // (transaction CALLs are salvaged into PendingMessageQueue from there).
+      // The send methods gate on isConnected(), so the immediate paths never
+      // land here.
       this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
+      throw new Error("WebSocket is not connected");
     }
+    this._ws.send(raw);
+    this._logger.info(`Sent: ${raw}`, LogType.WEBSOCKET);
   }
 
   /**

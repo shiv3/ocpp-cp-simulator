@@ -157,6 +157,19 @@ class MockSqliteDatabase implements Database {
   }
 }
 
+/** Raw persisted rows for a cp, in seq order — bypasses the queue's own
+ *  mapping so tests can assert on `seq` / `message_id` directly. */
+function readRows(
+  db: Database,
+  cpId: string,
+): { message_id: string; seq: number }[] {
+  return db.all<{ message_id: string; seq: number }>(
+    "SELECT message_id, action, connector_id, payload, attempts, created_at, seq " +
+      "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
+    [cpId],
+  );
+}
+
 describe("PendingMessageQueue with seq", () => {
   describe("in-memory mode (no database)", () => {
     it("enqueues and dequeues with seq assignment", () => {
@@ -334,6 +347,37 @@ describe("PendingMessageQueue with seq", () => {
       expect(queue3.size()).toBe(3);
       const all = queue3.all();
       expect(all[2].action).toBe(OCPPAction.StopTransaction);
+    });
+
+    it("advances seq by exactly 1 per enqueue", () => {
+      const queue = new PendingMessageQueue("cp-db-test", db);
+      queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
+      queue.enqueue({ action: OCPPAction.MeterValues, payload: {} });
+      queue.enqueue({ action: OCPPAction.StopTransaction, payload: {} });
+
+      const seqs = readRows(db, "cp-db-test").map((r) => r.seq);
+      expect(seqs).toEqual([1, 2, 3]);
+    });
+
+    it("keeps message ids unique across restarts within one millisecond", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+      // Two queue instances for the same cp, opened while the clock is
+      // frozen: the second one loads the first one's rows and must not mint
+      // an id that collides with them ((cp_id, message_id) is the PK).
+      const queue1 = new PendingMessageQueue("cp-db-test", db);
+      queue1.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
+      queue1.enqueue({ action: OCPPAction.MeterValues, payload: {} });
+
+      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      queue2.enqueue({ action: OCPPAction.StopTransaction, payload: {} });
+
+      vi.useRealTimers();
+
+      const ids = readRows(db, "cp-db-test").map((r) => r.message_id);
+      expect(ids).toHaveLength(3);
+      expect(new Set(ids).size).toBe(3);
     });
 
     it("flush() removes delivered messages and retries failed ones", () => {

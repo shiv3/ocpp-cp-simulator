@@ -780,6 +780,42 @@ describe("OCPPWebSocket Network Simulation", () => {
       expect(fakeWs2.sent.length).toBe(0);
     });
 
+    it("settles write_failed when a delayed frame is released after the socket dropped", () => {
+      // A latency rule holds the frame in the pipeline; meanwhile the socket
+      // goes away without an onclose event (CLOSING), so no close transaction
+      // drains the pipeline. The release must settle `write_failed` — settling
+      // it `written` would tell the sender the CALL reached the wire and drop
+      // it from PendingMessageQueue custody.
+      const config: ResolvedNetworkSimConfig = {
+        enabled: true,
+        seed: 12345,
+        rules: {
+          slow: { type: "latency", direction: "upstream", delayMs: 500 },
+        },
+      };
+      ws.setNetworkSimConfig(config);
+
+      const settlements: Settlement[] = [];
+      const gen = ws.currentGeneration();
+      const accepted = ws.sendAction(
+        "msg-1",
+        "StartTransaction",
+        {},
+        gen,
+        (s) => settlements.push(s),
+      );
+
+      expect(accepted).toBe(true);
+      expect(fakeWs.sent).toHaveLength(0);
+      expect(settlements).toHaveLength(0);
+
+      fakeWs.readyState = WebSocket.CLOSING;
+      vi.advanceTimersByTime(1000);
+
+      expect(fakeWs.sent).toHaveLength(0);
+      expect(settlements).toEqual([{ outcome: "write_failed" }]);
+    });
+
     it("sendAction with enabled network sim returns true and delays frame when socket IS open", () => {
       // Set up network sim on the existing ws (which has socket open)
       const config: ResolvedNetworkSimConfig = {

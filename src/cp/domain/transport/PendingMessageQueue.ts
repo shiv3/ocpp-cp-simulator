@@ -22,10 +22,12 @@ export interface PendingMessage {
 /**
  * Internal row shape — `messageId` is the PRIMARY KEY in the
  * `pending_messages` table but isn't part of the public PendingMessage
- * shape, so we keep it next to the payload here.
+ * shape, so we keep it next to the payload here. `seq` is a monotonic
+ * per-CP sequence number for stable ordering across restarts.
  */
 interface PendingRow extends PendingMessage {
   messageId: string;
+  seq: number;
 }
 
 /**
@@ -71,6 +73,7 @@ export class PendingMessageQueue {
       queuedAt: Date.now(),
       attempts: 0,
       messageId: this.nextMessageId(),
+      seq: this.nextSeq++,
     };
     this.items.push(row);
     this.insertRow(row);
@@ -131,7 +134,11 @@ export class PendingMessageQueue {
   // ── persistence helpers ────────────────────────────────────────────────
 
   private load(): void {
-    if (!this.database) return;
+    if (!this.database) {
+      // In-memory-only mode: start seq counter at 1.
+      this.nextSeq = 1;
+      return;
+    }
     try {
       const rows = this.database.all<{
         message_id: string;
@@ -140,9 +147,10 @@ export class PendingMessageQueue {
         payload: string;
         attempts: number;
         created_at: string;
+        seq: number | null;
       }>(
-        "SELECT message_id, action, connector_id, payload, attempts, created_at " +
-          "FROM pending_messages WHERE cp_id = ? ORDER BY created_at ASC",
+        "SELECT message_id, action, connector_id, payload, attempts, created_at, seq " +
+          "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
         [this.chargePointId],
       );
       this.items = rows.map((r) => ({
@@ -152,9 +160,17 @@ export class PendingMessageQueue {
         connectorId: r.connector_id ?? undefined,
         queuedAt: Date.parse(r.created_at) || Date.now(),
         attempts: r.attempts,
+        seq: r.seq ?? 0,
       }));
+      // Initialize seq counter to 1 + MAX(seq) to avoid collisions.
+      const maxSeq = this.items.reduce(
+        (max, item) => Math.max(max, item.seq),
+        0,
+      );
+      this.nextSeq = maxSeq + 1;
     } catch (err) {
       console.error("Failed to load pending transaction queue:", err);
+      this.nextSeq = 1;
     }
   }
 
@@ -163,8 +179,8 @@ export class PendingMessageQueue {
     try {
       this.database.run(
         "INSERT INTO pending_messages " +
-          "(cp_id, message_id, action, connector_id, payload, attempts, created_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "(cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           this.chargePointId,
           row.messageId,
@@ -173,6 +189,7 @@ export class PendingMessageQueue {
           JSON.stringify(row.payload),
           row.attempts,
           new Date(row.queuedAt).toISOString(),
+          row.seq,
         ],
       );
     } catch (err) {

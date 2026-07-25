@@ -3,6 +3,7 @@ import { GetLogHandler } from "../GetLogHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 type LogStatus =
   | "BadMessage"
@@ -47,16 +48,19 @@ describe("GetLogHandler", () => {
       },
       ctx,
     );
-    expect(res).toEqual({
-      status: "Accepted",
-      filename: "CP-LOG-TEST-DiagnosticsLog-7.log",
-    });
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      expect(res.payload).toEqual({
+        status: "Accepted",
+        filename: "CP-LOG-TEST-DiagnosticsLog-7.log",
+      });
+    }
   });
 
   it("emits Uploading then Uploaded carrying requestId, after the CALLRESULT microtask", async () => {
     const { ctx, sent } = buildContext();
     const handler = new GetLogHandler();
-    handler.handle(
+    const res = handler.handle(
       {
         logType: "SecurityLog",
         requestId: 42,
@@ -64,15 +68,18 @@ describe("GetLogHandler", () => {
       },
       ctx,
     );
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      expect(sent).toEqual([]);
+      // Invoke the effect to trigger the upload sequence
+      res.afterResponseSettled();
+      expect(sent).toEqual([{ status: "Uploading", requestId: 42 }]);
 
-    expect(sent).toEqual([]);
-    await Promise.resolve();
-    expect(sent).toEqual([{ status: "Uploading", requestId: 42 }]);
-
-    vi.advanceTimersByTime(2000);
-    expect(sent).toEqual([
-      { status: "Uploading", requestId: 42 },
-      { status: "Uploaded", requestId: 42 },
-    ]);
+      vi.advanceTimersByTime(2000);
+      expect(sent).toEqual([
+        { status: "Uploading", requestId: 42 },
+        { status: "Uploaded", requestId: 42 },
+      ]);
+    }
   });
 });

@@ -48,6 +48,7 @@ import {
   type V201InboundRegistry,
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
+import { ResponseEffectQueue } from "./network-sim";
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -138,6 +139,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     string,
     { action: V201Action; payload: V201RequestPayload }
   >();
+  // Response effect queue for deferred handler side effects
+  private readonly _responseEffectQueue: ResponseEffectQueue;
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -156,6 +159,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this._logger = logger;
     this._codec = codec;
     this._inbound = inboundRegistry ?? buildV201InboundRegistry();
+
+    // Initialize response effect queue with deps
+    this._responseEffectQueue = new ResponseEffectQueue({
+      isGenerationCurrent: (gen) =>
+        gen.gen === this._webSocket.currentGeneration().gen,
+      defer: (run) => queueMicrotask(run),
+      log: (message) => this._logger.info(message, LogType.OCPP),
+    });
+
+    // Register close-transaction callback for effect flushing
+    // Note: OCPPWebSocket.onCloseTransaction stores a SINGLE callback;
+    // since one protocol per connection, this is fine.
+    this._webSocket.onCloseTransaction((finalized) =>
+      this._responseEffectQueue.flushAfterCloseFinalization(finalized),
+    );
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
   }
@@ -180,10 +198,28 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (warning) {
       this._logger.warn(warning, LogType.OCPP);
     }
-    const sent = this._webSocket.sendAction(messageId, action, payload);
-    if (sent) {
-      this._pendingRequests.set(messageId, { action, payload });
-      this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
+    const gen = this._webSocket.currentGeneration();
+    const accepted = this._webSocket.sendAction(
+      messageId,
+      action,
+      payload,
+      gen,
+      (settlement) => {
+        if (settlement.outcome === "written") {
+          this._pendingRequests.set(messageId, { action, payload });
+          this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
+        }
+        // On drop outcomes (socket_closed, disposed, write_failed, queue_overflow):
+        // do NOTHING. A 2.x drop is unrecovered wire loss per spec; no retries.
+      },
+    );
+    if (!accepted) {
+      // send-false: the CALL was never accepted; preserve current behavior
+      // (likely just a warn/log already in place from isConnected check above)
+      this._logger.debug(
+        `[v2.0.1] sendAction returned false for ${action}`,
+        LogType.WEBSOCKET,
+      );
     }
   }
 
@@ -197,34 +233,49 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const entry = this._inbound.get(action);
       if (entry) {
         if (!entry.validate(payload)) {
-          this._webSocket.sendError(messageId, {
-            errorCode: "FormationViolation" as OCPPErrorCode,
-            errorDescription: `Invalid ${action} payload`,
-            errorDetails: {},
-          });
+          const gen = this._webSocket.currentGeneration();
+          this._webSocket.sendError(
+            messageId,
+            {
+              errorCode: "FormationViolation" as OCPPErrorCode,
+              errorDescription: `Invalid ${action} payload`,
+              errorDetails: {},
+            },
+            gen,
+          );
           return;
         }
 
+        // Capture generation before handler execution
+        const gen = this._webSocket.currentGeneration();
         const ctx: V201InboundContext = {
           chargePoint: this._chargePoint,
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
         };
         const { response, afterResult } = entry.handle(payload, ctx);
-        this._webSocket.sendResult(messageId, response);
-        afterResult?.();
+        // Register effect with queue if present, get settlement callback
+        const onSettled = afterResult
+          ? this._responseEffectQueue.register(gen, afterResult)
+          : undefined;
+        this._webSocket.sendResult(messageId, response, gen, onSettled);
         return;
       }
 
+      const gen = this._webSocket.currentGeneration();
       this._logger.warn(
         `[v2.0.1] Unsupported CSMS action ${action}`,
         LogType.OCPP,
       );
-      this._webSocket.sendError(messageId, {
-        errorCode: "NotImplemented" as OCPPErrorCode,
-        errorDescription: "This action is not supported",
-        errorDetails: {},
-      });
+      this._webSocket.sendError(
+        messageId,
+        {
+          errorCode: "NotImplemented" as OCPPErrorCode,
+          errorDescription: "This action is not supported",
+          errorDetails: {},
+        },
+        gen,
+      );
     } else if (messageType === OCPPMessageType.CALLRESULT) {
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {
@@ -622,7 +673,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this._dataTransferHandler;
   }
 
-  public onWebSocketClosed(): void {}
+  public onWebSocketClosed(): void {
+    // Clear written-but-unanswered correlation entries on disconnect.
+    // A disconnect must not leave stale correlation state.
+    this._pendingRequests.clear();
+  }
 
   public flushPendingQueue(): void {
     // OCPP 2.0.1: pending queue handled by TransactionEvent seqNo mechanism

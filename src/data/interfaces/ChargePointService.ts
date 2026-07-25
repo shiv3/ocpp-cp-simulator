@@ -21,6 +21,10 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import type {
+  NetworkSimLayerConfig,
+  ResolvedNetworkSimConfig,
+} from "../../cp/infrastructure/transport/network-sim/config";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 
 export interface ConnectorSnapshot {
@@ -51,6 +55,9 @@ export interface ChargePointSnapshot {
    *  string for remote-mode JSON safety; null if no Heartbeat.req has been
    *  sent since the daemon started. */
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
+  /** Network simulation summary: { enabled, manualRuleIds } when a config has
+   *  been applied, null for SOAP CPs or when no config has been applied. */
+  networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
   /** Init the CP was constructed with — exposed in Remote mode so the web
    *  console can prefill the "Edit CP" modal. Undefined in Local mode
    *  (the browser already owns the config) and on older daemons that
@@ -288,6 +295,22 @@ export interface ChargePointService {
   subscribeConfig(
     handler: (config: WireSimulatorConfig | null) => void,
   ): () => void;
+
+  // Network simulation
+  getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null>;
+  saveNetworkSimGlobal(config: NetworkSimLayerConfig | null): Promise<void>;
+  getNetworkSimCp(cpId: string): Promise<{
+    config: NetworkSimLayerConfig | null;
+    resolved: ResolvedNetworkSimConfig;
+  }>;
+  saveNetworkSimCp(
+    cpId: string,
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void>;
+  triggerNetworkSimDisconnect(
+    cpId: string,
+    ruleId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 
   // Lifecycle
   connect(id: string): Promise<void>;

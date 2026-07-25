@@ -63,6 +63,7 @@ import {
 } from "../../cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
@@ -358,6 +359,16 @@ export async function dispatchRpcCore(
       return getConfig(deps.chargePointService);
     case "config.save":
       return saveConfig(deps, rawParams);
+    case "network_sim.global.get":
+      return getNetworkSimGlobal(deps);
+    case "network_sim.global.save":
+      return saveNetworkSimGlobal(deps, rawParams);
+    case "network_sim.cp.get":
+      return getNetworkSimCp(deps, rawParams);
+    case "network_sim.cp.save":
+      return saveNetworkSimCp(deps, rawParams);
+    case "network_sim.disconnect.trigger":
+      return triggerNetworkSimDisconnect(deps, rawParams);
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
     case "scenario.definitions.list":
@@ -572,6 +583,84 @@ async function saveConfig(
   });
   deps.registryEvents?.emitConfigChanged(saved);
   return { ok: true };
+}
+
+async function getNetworkSimGlobal(
+  deps: RuntimeSocketIoDeps,
+): Promise<unknown> {
+  const config = await runFacadeOperation(() =>
+    deps.chargePointService.getNetworkSimGlobal(),
+  );
+  return { config };
+}
+
+async function saveNetworkSimGlobal(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params = METHODS["network_sim.global.save"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  try {
+    await runFacadeOperation(() =>
+      deps.chargePointService.saveNetworkSimGlobal(
+        params.data.config as NetworkSimLayerConfig | null,
+      ),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    throw new RpcFailure("invalid_params", message);
+  }
+  return { ok: true };
+}
+
+async function getNetworkSimCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<unknown> {
+  const params = METHODS["network_sim.cp.get"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  return runFacadeOperation(() =>
+    deps.chargePointService.getNetworkSimCp(params.data.cpId),
+  );
+}
+
+async function saveNetworkSimCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params = METHODS["network_sim.cp.save"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  try {
+    await runFacadeOperation(() =>
+      deps.chargePointService.saveNetworkSimCp(
+        params.data.cpId,
+        params.data.config as NetworkSimLayerConfig | null,
+      ),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    throw new RpcFailure("invalid_params", message);
+  }
+  return { ok: true };
+}
+
+async function triggerNetworkSimDisconnect(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const params =
+    METHODS["network_sim.disconnect.trigger"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  return runFacadeOperation(() =>
+    deps.chargePointService.triggerNetworkSimDisconnect(
+      params.data.cpId,
+      params.data.ruleId,
+    ),
+  );
 }
 
 async function applyDefaultEVSettingsRpc(
@@ -1524,12 +1613,14 @@ function snapshotToFullCp(snapshot: ChargePointSnapshot): FullCp {
         basicAuth: null,
         bootNotification: null,
       },
+      networkSim: snapshot.networkSim,
     };
   }
   return {
     id: snapshot.id,
     status: snapshot.status,
     config: snapshot.config,
+    networkSim: snapshot.networkSim,
   };
 }
 
@@ -1540,6 +1631,7 @@ function snapshotToWireStatus(snapshot: ChargePointSnapshot): StatusWire {
     error: snapshot.error,
     connectors: snapshot.connectors.map(connectorSnapshotToWire),
     heartbeat: snapshot.heartbeat,
+    networkSim: snapshot.networkSim,
     config: snapshot.config,
   });
 }

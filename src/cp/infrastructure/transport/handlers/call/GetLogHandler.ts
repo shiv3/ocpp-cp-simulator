@@ -1,4 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import type { GetLogRequestV16, GetLogResponseV16 } from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
@@ -18,30 +19,33 @@ export class GetLogHandler implements CallHandler<
   handle(
     payload: GetLogRequestV16,
     context: HandlerContext,
-  ): GetLogResponseV16 {
+  ): GetLogResponseV16 | HandlerOutcome {
     context.logger.info(
       `GetLog request received: logType=${payload.logType} requestId=${payload.requestId}`,
       LogType.DIAGNOSTICS,
     );
 
     const filename = `${context.chargePoint.id}-${payload.logType}-${payload.requestId}.log`;
-
-    // §4.4-style contract: status notifications follow the CALLRESULT, not
-    // precede it. queueMicrotask defers Uploading until the response has
-    // been serialized onto the wire (same pattern as GetDiagnostics).
-    queueMicrotask(() => {
-      context.chargePoint.sendLogStatusNotification(
-        "Uploading",
-        payload.requestId,
-      );
-      setTimeout(() => {
+    const response = { status: "Accepted", filename } as const;
+    const outcome: HandlerOutcome = {
+      kind: "handler-outcome",
+      payload: response,
+      afterResponseSettled: () => {
+        // §4.4-style contract: status notifications follow the CALLRESULT, not
+        // precede it. The effect defers Uploading until the response has
+        // been settled on the wire (same pattern as GetDiagnostics).
         context.chargePoint.sendLogStatusNotification(
-          "Uploaded",
+          "Uploading",
           payload.requestId,
         );
-      }, 2000);
-    });
-
-    return { status: "Accepted", filename };
+        setTimeout(() => {
+          context.chargePoint.sendLogStatusNotification(
+            "Uploaded",
+            payload.requestId,
+          );
+        }, 2000);
+      },
+    };
+    return outcome;
   }
 }

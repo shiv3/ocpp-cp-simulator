@@ -53,6 +53,7 @@ import type {
 import { OCPPAction } from "../../../../domain/types/OcppTypes";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { Logger } from "../../../../shared/Logger";
+import type { HandlerOutcome } from "../network-sim/ResponseEffectQueue";
 
 /**
  * Context provided to message handlers
@@ -69,12 +70,15 @@ export interface HandlerContext {
  * latter is needed by handlers that compute certificate hashes via
  * WebCrypto (GetInstalledCertificateIds/DeleteCertificate). The dispatch
  * loop (`OCPPMessageHandler.handleCall`) awaits the result either way.
+ *
+ * Handlers may also return a `HandlerOutcome` to schedule a post-response
+ * side effect (running after the CALLRESULT settles, via the ResponseEffectQueue).
  */
 export interface CallHandler<TRequest = unknown, TResponse = unknown> {
   handle(
     payload: TRequest,
     context: HandlerContext,
-  ): TResponse | Promise<TResponse>;
+  ): TResponse | HandlerOutcome | Promise<TResponse | HandlerOutcome>;
 }
 
 /**

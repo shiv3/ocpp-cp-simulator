@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS pending_messages (
   payload      TEXT NOT NULL,
   attempts     INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL,
+  seq          INTEGER,
   PRIMARY KEY (cp_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS pending_by_cp
@@ -278,6 +279,27 @@ export function runMigrations(db: Database): void {
     if (!have.has("tls_key_path")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN tls_key_path TEXT");
     }
+  }
+
+  // v5 → v6: persist monotonic per-CP `seq` column for stable ordering
+  // of pending messages enqueued in the same millisecond (e.g., during
+  // close-time salvage). Fresh DBs get the column in SCHEMA_SQL; older DBs
+  // are migrated via ALTER + backfill. After migration, load() orders by
+  // seq so same-millisecond bursts maintain enqueue order across restarts.
+  if (stored < 6) {
+    const cols = db.all<{ name: string }>(
+      "PRAGMA table_info(pending_messages)",
+    );
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("seq")) {
+      db.exec("ALTER TABLE pending_messages ADD COLUMN seq INTEGER");
+    }
+    // Backfill seq from rowid (stable, monotonic within the table).
+    db.run("UPDATE pending_messages SET seq = rowid WHERE seq IS NULL");
+    // Create index for efficient reload by (cp_id, seq).
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS pending_by_cp_seq ON pending_messages (cp_id, seq)",
+    );
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

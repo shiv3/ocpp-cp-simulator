@@ -239,6 +239,8 @@ There is no Unix-domain socket listener. `--unix-socket <path|none>` is still
 accepted for launcher compatibility, prints a deprecation warning, and is
 ignored.
 
+**Network Simulation** — configuration is applied at runtime via the daemon's Socket.IO RPC methods or MCP tools (see [docs/server.md § Network Simulation](server.md#network-simulation)); there are no `--network-sim-*` startup flags. In Phase 1, configure latency, forced disconnects, and delayed reconnection through the browser UI (`/v3/settings` for global, `/v3/cp/:id` for per-CP), or directly via RPC methods `network_sim.global.save`, `network_sim.cp.save`, and `network_sim.disconnect.trigger`.
+
 #### Multiple Charge Points in One Process
 
 `--cp-id` becomes optional in server mode. Additional CPs can be added at

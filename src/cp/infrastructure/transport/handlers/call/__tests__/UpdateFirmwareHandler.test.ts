@@ -3,6 +3,7 @@ import { UpdateFirmwareHandler } from "../UpdateFirmwareHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 type FirmwareStatus =
   | "Downloaded"
@@ -80,53 +81,68 @@ describe("UpdateFirmwareHandler", () => {
       },
       ctx,
     );
-    expect(res).toEqual({});
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      expect(res.payload).toEqual({});
+    }
   });
 
   it("fires Downloading → Downloaded → Installing → Installed after retrieveDate", async () => {
     const { ctx, sent } = buildContext();
     const handler = new UpdateFirmwareHandler();
-    handler.handle(
+    const res = handler.handle(
       {
         location: "http://example.invalid/firmware.bin",
         retrieveDate: new Date(Date.now() + 1000).toISOString(),
       },
       ctx,
     );
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      // Invoke the effect to start the firmware update
+      res.afterResponseSettled();
 
-    // microtask: schedules the actual update
-    await Promise.resolve();
-    expect(sent).toEqual([]);
+      // microtask: schedules the actual update
+      await Promise.resolve();
+      expect(sent).toEqual([]);
 
-    // before retrieveDate: nothing yet
-    vi.advanceTimersByTime(999);
-    expect(sent).toEqual([]);
+      // before retrieveDate: nothing yet
+      vi.advanceTimersByTime(999);
+      expect(sent).toEqual([]);
 
-    // hit retrieveDate → Downloading
-    vi.advanceTimersByTime(1);
-    expect(sent).toEqual(["Downloading"]);
+      // hit retrieveDate → Downloading
+      vi.advanceTimersByTime(1);
+      expect(sent).toEqual(["Downloading"]);
 
-    vi.advanceTimersByTime(2000);
-    expect(sent).toEqual(["Downloading", "Downloaded"]);
+      vi.advanceTimersByTime(2000);
+      expect(sent).toEqual(["Downloading", "Downloaded"]);
 
-    vi.advanceTimersByTime(2000);
-    expect(sent).toEqual(["Downloading", "Downloaded", "Installing"]);
+      vi.advanceTimersByTime(2000);
+      expect(sent).toEqual(["Downloading", "Downloaded", "Installing"]);
 
-    vi.advanceTimersByTime(2000);
-    expect(sent).toEqual([
-      "Downloading",
-      "Downloaded",
-      "Installing",
-      "Installed",
-    ]);
+      vi.advanceTimersByTime(2000);
+      expect(sent).toEqual([
+        "Downloading",
+        "Downloaded",
+        "Installing",
+        "Installed",
+      ]);
+    }
   });
 
   it("starts immediately when retrieveDate is invalid", async () => {
     const { ctx, sent } = buildContext();
     const handler = new UpdateFirmwareHandler();
-    handler.handle({ location: "http://x", retrieveDate: "not-a-date" }, ctx);
-    await Promise.resolve();
-    vi.advanceTimersByTime(0);
-    expect(sent[0]).toBe("Downloading");
+    const res = handler.handle(
+      { location: "http://x", retrieveDate: "not-a-date" },
+      ctx,
+    );
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      res.afterResponseSettled();
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+      expect(sent[0]).toBe("Downloading");
+    }
   });
 });

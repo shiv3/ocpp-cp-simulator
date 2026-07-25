@@ -413,6 +413,81 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       }
     },
   });
+
+  mcp.tool("network_sim_get", {
+    description:
+      "Get the network-simulation config: the global layer (omit cpId) or a charge point's layer + resolved config (with cpId).",
+    inputSchema: z.object({
+      cpId: z
+        .string()
+        .optional()
+        .describe("Charge point id; omit for the global config"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: args.cpId ? "network_sim.cp.get" : "network_sim.global.get",
+          params: args.cpId ? { cpId: args.cpId } : {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("network_sim_set", {
+    description:
+      "Set the network-simulation layer config. Rules apply to WebSocket CPs only. Passing null for config clears/deletes it.",
+    inputSchema: z.object({
+      cpId: z
+        .string()
+        .optional()
+        .describe("Charge point id; omit to set the global config"),
+      config: z
+        .record(z.string(), z.unknown())
+        .nullable()
+        .describe("Network-sim layer config, or null to delete/clear"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: args.cpId ? "network_sim.cp.save" : "network_sim.global.save",
+          params: args.cpId
+            ? { cpId: args.cpId, config: args.config }
+            : { config: args.config },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("network_sim_trigger_disconnect", {
+    description:
+      "Trigger a manual-disconnect rule's forced disconnection on a charge point.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point id"),
+      ruleId: z
+        .string()
+        .describe("Id of a manual-disconnect rule in the CP's resolved config"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "network_sim.disconnect.trigger",
+          params: {
+            cpId: args.cpId,
+            ruleId: args.ruleId,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
 }
 
 function registerListMethods(mcp: McpServer, _deps: RuntimeSocketIoDeps): void {

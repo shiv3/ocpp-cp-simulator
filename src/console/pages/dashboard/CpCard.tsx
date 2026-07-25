@@ -7,6 +7,7 @@ import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointSe
 import { useChargePointView } from "../../../data/hooks/useChargePointView";
 import { useDataContext } from "../../../data/providers/DataProvider";
 import StatusPill from "../../components/StatusPill";
+import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
 import { consolePath } from "../../routes";
 
 export interface CpCardProps {
@@ -81,7 +82,10 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
         >
           {cp.id}
         </Link>
-        <StatusPill status={isConnected ? status : "Disconnected"} />
+        <div className="flex items-center gap-2">
+          <StatusPill status={isConnected ? status : "Disconnected"} />
+          <NetworkSimBadge summary={cp.networkSim} />
+        </div>
       </div>
 
       {resolvedOcppVersion && (

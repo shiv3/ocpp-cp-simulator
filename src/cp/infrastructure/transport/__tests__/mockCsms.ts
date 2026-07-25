@@ -4,6 +4,12 @@ import type { ServerWebSocket } from "bun";
 
 export type OcppFrame = unknown[];
 
+export interface MockCsmsConnection {
+  frames: Array<{ raw: string; receivedAt: number }>;
+  openedAt: number;
+  closedAt: number | null;
+}
+
 interface FrameWaiter {
   pred: (frame: OcppFrame) => boolean;
   resolve: (frame: OcppFrame) => void;
@@ -33,13 +39,22 @@ export interface MockCsms {
   replyCallResult: (messageId: string, payload: unknown) => void;
   send: (frame: OcppFrame) => void;
   stop: () => Promise<void>;
+  closeCurrentConnection: (code?: number) => void;
+  connections: () => MockCsmsConnection[];
+  openCount: () => number;
+  closeCount: () => number;
 }
 
 export function startMockCsms(): MockCsms {
   const received: OcppFrame[] = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
+  const connectionsList: MockCsmsConnection[] = [];
+  let currentConnection: MockCsmsConnection | null = null;
+  let openCountValue = 0;
+  let closeCountValue = 0;
   let socket: ServerWebSocket<unknown> | null = null;
+  let stopPromise: Promise<void> | null = null;
 
   const server = Bun.serve({
     port: 0,
@@ -52,6 +67,14 @@ export function startMockCsms(): MockCsms {
     websocket: {
       open(ws) {
         socket = ws;
+        // Create a new connection record
+        currentConnection = {
+          frames: [],
+          openedAt: Date.now(),
+          closedAt: null,
+        };
+        connectionsList.push(currentConnection);
+        openCountValue++;
         for (const w of [...connectionWaiters]) {
           w.resolve(); // resolve() removes the waiter and clears its timer
         }
@@ -60,6 +83,10 @@ export function startMockCsms(): MockCsms {
         const raw = typeof message === "string" ? message : message.toString();
         const frame = JSON.parse(raw) as OcppFrame;
         received.push(frame);
+        // Add frame to current connection's transcript if a connection is open
+        if (currentConnection) {
+          currentConnection.frames.push({ raw, receivedAt: Date.now() });
+        }
         for (const w of [...waiters]) {
           if (w.pred(frame)) {
             w.resolve(frame); // resolve() removes the waiter and clears its timer
@@ -67,6 +94,11 @@ export function startMockCsms(): MockCsms {
         }
       },
       close() {
+        // Mark current connection as closed
+        if (currentConnection) {
+          currentConnection.closedAt = Date.now();
+        }
+        closeCountValue++;
         socket = null;
       },
     },
@@ -148,14 +180,40 @@ export function startMockCsms(): MockCsms {
     send(frame) {
       socket?.send(JSON.stringify(frame));
     },
+    closeCurrentConnection(code?: number) {
+      if (socket) {
+        socket.close(code);
+      }
+    },
+    connections() {
+      return [...connectionsList];
+    },
+    openCount() {
+      return openCountValue;
+    },
+    closeCount() {
+      return closeCountValue;
+    },
     async stop() {
+      // Idempotent: tests stop mid-body to assert waiter rejection and then
+      // stop again in cleanup. A second `server.stop(true)` never settles, so
+      // the first call's promise is what every later caller awaits.
+      if (stopPromise) return stopPromise;
       for (const w of [...waiters]) {
         w.reject(new Error("mock CSMS stopped")); // reject() clears the timer and removes the waiter
       }
       for (const w of [...connectionWaiters]) {
         w.reject(new Error("mock CSMS stopped")); // reject() clears the timer and removes the waiter
       }
-      await server.stop(true);
+      // Bun 1.3: if the server closed a WebSocket itself (closeCurrentConnection),
+      // `server.stop()` tears the listener down immediately but its promise
+      // never settles. Awaiting it verbatim wedges test cleanup, so cap the
+      // wait — by the time it elapses the port is already free.
+      stopPromise = Promise.race([
+        server.stop(true),
+        new Promise<void>((resolve) => setTimeout(resolve, 50)),
+      ]);
+      await stopPromise;
     },
   };
 }

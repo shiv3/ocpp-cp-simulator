@@ -26,6 +26,14 @@ import type {
   TriggerMessageResponseV16,
   UnlockConnectorResponseV16,
 } from "../../../ocpp";
+import {
+  NetworkSimController,
+  type ControllerHost,
+  type GenerationToken,
+  type CloseCause,
+  type Settlement,
+  type ResolvedNetworkSimConfig,
+} from "./network-sim";
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -67,6 +75,28 @@ type MessageHandler = (
   payload: OcppMessagePayload,
 ) => void;
 
+/**
+ * GenerationTokenImpl: immutable per-generation object carrying the generation number
+ * and, once closed, its latched close cause. First-cause latching: the first close
+ * of a generation latches its cause; later close processing for that same generation
+ * must NOT overwrite it.
+ */
+class GenerationTokenImpl implements GenerationToken {
+  private _closeCause: CloseCause | null = null;
+
+  constructor(readonly gen: number) {}
+
+  get closeCause(): CloseCause | null {
+    return this._closeCause;
+  }
+
+  latchCloseCause(cause: CloseCause): void {
+    if (this._closeCause === null) {
+      this._closeCause = cause;
+    }
+  }
+}
+
 export class OCPPWebSocket {
   private _ws: WebSocket | null = null;
   private _url: string;
@@ -93,6 +123,15 @@ export class OCPPWebSocket {
   private _authorizationKey?: string;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
+
+  // Network simulation
+  private _controller: NetworkSimController;
+  private _generationCounter: number = 0;
+  private _currentGeneration: GenerationTokenImpl;
+  private _reconnectNotBefore: number | null = null;
+  private _onCloseTransactionCallback:
+    ((finalized: GenerationToken) => void) | null = null;
+  private _disposed: boolean = false;
 
   constructor(
     url: string,
@@ -123,6 +162,17 @@ export class OCPPWebSocket {
     this._authorizationKey = authorizationKey;
     this._cpoName = cpoName;
     this._tls = tls;
+
+    // Initialize network simulation controller and current generation
+    this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
+    const controllerHost: ControllerHost = {
+      writeUpstream: (raw: string) => this.writeUpstreamPhysical(raw),
+      dispatchDownstream: (raw: string) => this.dispatchIncoming(raw),
+      requestSimulatedDisconnect: (reconnectDelayMs: number, ruleId: string) =>
+        this.simulateConnectionLoss(reconnectDelayMs, ruleId),
+      log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
+    };
+    this._controller = new NetworkSimController(controllerHost, chargePointId);
   }
 
   get url(): string {
@@ -133,6 +183,10 @@ export class OCPPWebSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null,
   ): void {
+    // Increment generation on new connection
+    this._generationCounter++;
+    this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
+
     // Store callbacks for reconnection
     if (onopen) this._onOpenCallback = onopen;
     if (onclose) this._onCloseCallback = onclose;
@@ -145,10 +199,18 @@ export class OCPPWebSocket {
         this._onOpenCallback();
       }
     };
-    const onmessageHandler = this.handleMessage.bind(this);
+    const onmessageHandler = (ev: MessageEvent) => {
+      this._controller.receiveDownstream(ev.data.toString());
+    };
     const onerrorHandler = this.handleError.bind(this);
+
+    // Capture the current generation for this socket connection
+    const socketGeneration = this._generationCounter;
     const oncloseHandler = (ev: CloseEvent) => {
-      this.handleClose(ev);
+      // Generation guard: only process close if this socket belongs to the current generation
+      if (socketGeneration === this._generationCounter) {
+        this.handleClose(ev);
+      }
       if (this._onCloseCallback) {
         this._onCloseCallback(ev);
       }
@@ -174,6 +236,13 @@ export class OCPPWebSocket {
   }
 
   public disconnect(): void {
+    if (this._disposed) {
+      return;
+    }
+
+    // Drain synchronously FIRST (spec 2.6 step 1)
+    this.runCloseTransaction("manual");
+
     // Set manual disconnect flag to prevent auto-reconnect
     this._isManualDisconnect = true;
 
@@ -183,6 +252,9 @@ export class OCPPWebSocket {
       this._reconnectTimer = null;
     }
     this._reconnectAttempts = 0;
+
+    // Clear the reconnect reservation (operator manual disconnect)
+    this._reconnectNotBefore = null;
 
     if (this._ws) {
       this._ws.close();
@@ -194,30 +266,168 @@ export class OCPPWebSocket {
     }
   }
 
+  /**
+   * Closes the socket WITHOUT setting _isManualDisconnect (so auto-reconnect still runs)
+   * and does NOT clear the reservation. Latches cause 'internal'.
+   * Used by Task 7's cause-aware reset.
+   */
+  public disconnectInternal(): void {
+    if (this._disposed) {
+      return;
+    }
+
+    this.runCloseTransaction("internal");
+
+    // Close the socket WITHOUT setting _isManualDisconnect (so auto-reconnect runs)
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
+    }
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
+  }
+
+  /**
+   * Terminal disposal: closes the controller, clears the reservation, cancels timers,
+   * closes the socket, and marks the transport disposed/inert.
+   * Settlement reason is 'disposed' (not a latched cause).
+   */
+  public dispose(): void {
+    if (this._disposed) {
+      return;
+    }
+
+    this._disposed = true;
+
+    // Shut down controller with reason 'disposed'
+    this._controller.shutdownPipelines({ reason: "disposed" });
+
+    // Clear the reconnect reservation
+    this._reconnectNotBefore = null;
+
+    // Clear reconnect timer
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
+    }
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
+  }
+
+  /**
+   * Register a callback invoked AFTER the close transaction drain completes.
+   * This is a seam for Task 7/8/9 effect flushing.
+   */
+  public onCloseTransaction(cb: (finalized: GenerationToken) => void): void {
+    this._onCloseTransactionCallback = cb;
+  }
+
   public sendAction(
     messageId: string,
     action: string,
     payload: unknown,
+    gen: GenerationToken,
+    onSettled?: (s: Settlement) => void,
   ): boolean {
+    // Stale generation check
+    if (gen.gen !== this._currentGeneration.gen) {
+      // Stale generation: sendAction returns false, onSettled does NOT fire
+      return false;
+    }
+
+    // Socket-open gate: spec section 2.5 requires send-false when socket is not open
+    if (!this.isConnected()) {
+      return false;
+    }
+
     const message = JSON.stringify([
       OCPPMessageType.CALL,
       messageId,
       action,
       payload,
     ]);
-    return this.send(message);
+    return this._controller.sendUpstream(message, onSettled);
   }
 
-  public sendResult(messageId: string, payload: unknown): void {
+  public sendResult(
+    messageId: string,
+    payload: unknown,
+    gen: GenerationToken,
+    onSettled?: (s: Settlement) => void,
+  ): void {
+    // Stale generation check
+    if (gen.gen !== this._currentGeneration.gen) {
+      // Stale generation: settle immediately with socket_closed + old generation's cause
+      const settlement: Settlement = {
+        outcome: "socket_closed",
+        closeCause: gen.closeCause ?? "network",
+      };
+      onSettled?.(settlement);
+      return;
+    }
+
+    // Socket-open gate: spec section 2.5 requires settlement when socket is not open
+    if (!this.isConnected()) {
+      onSettled?.({
+        outcome: "socket_closed",
+        closeCause: this._currentGeneration.closeCause ?? "network",
+      });
+      return;
+    }
+
     const message = JSON.stringify([
       OCPPMessageType.CALLRESULT,
       messageId,
       payload,
     ]);
-    this.send(message);
+    const accepted = this._controller.sendUpstream(message, onSettled);
+
+    // If sendUpstream returns false (overflow/stopped), settle immediately with queue_overflow
+    if (!accepted && onSettled) {
+      const settlement: Settlement = { outcome: "queue_overflow" };
+      try {
+        onSettled(settlement);
+      } catch {
+        // Custody callback exception isolation
+      }
+    }
   }
 
-  public sendError(messageId: string, payload: OcppMessageErrorPayload): void {
+  public sendError(
+    messageId: string,
+    payload: OcppMessageErrorPayload,
+    gen: GenerationToken,
+    onSettled?: (s: Settlement) => void,
+  ): void {
+    // Stale generation check
+    if (gen.gen !== this._currentGeneration.gen) {
+      // Stale generation: settle immediately with socket_closed + old generation's cause
+      const settlement: Settlement = {
+        outcome: "socket_closed",
+        closeCause: gen.closeCause ?? "network",
+      };
+      onSettled?.(settlement);
+      return;
+    }
+
+    // Socket-open gate: spec section 2.5 requires settlement when socket is not open
+    if (!this.isConnected()) {
+      onSettled?.({
+        outcome: "socket_closed",
+        closeCause: this._currentGeneration.closeCause ?? "network",
+      });
+      return;
+    }
+
     // OCPP 1.6J CALLERROR: [4, messageId, errorCode, errorDescription, errorDetails]
     const message = JSON.stringify([
       OCPPMessageType.CALLERROR,
@@ -226,7 +436,17 @@ export class OCPPWebSocket {
       payload.errorDescription,
       payload.errorDetails ?? {},
     ]);
-    this.send(message);
+    const accepted = this._controller.sendUpstream(message, onSettled);
+
+    // If sendUpstream returns false (overflow/stopped), settle immediately with queue_overflow
+    if (!accepted && onSettled) {
+      const settlement: Settlement = { outcome: "queue_overflow" };
+      try {
+        onSettled(settlement);
+      } catch {
+        // Custody callback exception isolation
+      }
+    }
   }
 
   /** True when the underlying socket is open and ready to transmit. */
@@ -245,39 +465,88 @@ export class OCPPWebSocket {
     );
   }
 
-  private send(message: string): boolean {
-    if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      this._ws.send(message);
-      this._logger.info(`Sent: ${message}`, LogType.WEBSOCKET);
-      return true;
+  /**
+   * Returns the current generation token.
+   * Callers read .closeCause later and must see the latched value.
+   */
+  public currentGeneration(): GenerationToken {
+    return this._currentGeneration;
+  }
+
+  /**
+   * Apply network simulation config at runtime.
+   */
+  public setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {
+    this._controller.applyConfig(resolved);
+  }
+
+  /**
+   * Trigger a manual-disconnect rule by its id.
+   * Returns { ok: true } on success, or { ok: false; error } if sim is disabled or rule is not manual-disconnect.
+   */
+  public triggerNetworkSimDisconnect(
+    ruleId: string,
+  ): { ok: true } | { ok: false; error: "sim_disabled" | "rule_not_manual" } {
+    return this._controller.triggerManualDisconnect(ruleId);
+  }
+
+  /**
+   * Simulate a connection loss with a delayed reconnection.
+   * FIRST installs the reservation, THEN runs the close transaction,
+   * THEN closes the socket WITHOUT setting _isManualDisconnect (so auto-reconnect runs).
+   */
+  public simulateConnectionLoss(
+    reconnectDelayMs: number,
+    _ruleId: string = "",
+  ): void {
+    if (this._disposed) {
+      return;
     }
-    this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
-    return false;
-  }
 
-  public setMessageHandler(handler: MessageHandler): void {
-    this._messageHandler = handler;
-  }
+    // FIRST install the reservation BEFORE draining
+    this._reconnectNotBefore = Date.now() + reconnectDelayMs;
 
-  private handleOpen(): void {
-    this._logger.info("WebSocket connected successfully", LogType.WEBSOCKET);
+    // THEN run the close transaction for a 'simulated' cause
+    this.runCloseTransaction("simulated");
 
-    // Reset reconnect attempts on successful connection
-    if (this._reconnectAttempts > 0) {
-      this._logger.info(
-        `Reconnection successful after ${this._reconnectAttempts} attempt(s)`,
-        LogType.WEBSOCKET,
-      );
+    // THEN close the socket WITHOUT setting _isManualDisconnect
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
     }
-    this._reconnectAttempts = 0;
-
-    // this.startPingInterval();
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
   }
 
-  private handleMessage(ev: MessageEvent): void {
-    this._logger.info(`Received: ${ev.data}`, LogType.WEBSOCKET);
+  /**
+   * Physical send (the actual websocket.send call).
+   * This is what the ControllerHost.writeUpstream calls.
+   */
+  private writeUpstreamPhysical(raw: string): void {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+      // A delayed frame can reach its release after the socket dropped. Throw
+      // so the pipeline settles it `write_failed` instead of `written` — a
+      // frame that never hit the wire must stay in its sender's custody
+      // (transaction CALLs are salvaged into PendingMessageQueue from there).
+      // The send methods gate on isConnected(), so the immediate paths never
+      // land here.
+      this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
+      throw new Error("WebSocket is not connected");
+    }
+    this._ws.send(raw);
+    this._logger.info(`Sent: ${raw}`, LogType.WEBSOCKET);
+  }
+
+  /**
+   * Dispatch incoming message through the normal parse/validate path.
+   * This is what the ControllerHost.dispatchDownstream calls after any delay.
+   */
+  private dispatchIncoming(raw: string): void {
+    this._logger.info(`Received: ${raw}`, LogType.WEBSOCKET);
     try {
-      const messageArray = JSON.parse(ev.data.toString());
+      const messageArray = JSON.parse(raw);
 
       // Validate message format: must be array with length 3 (CALLRESULT), 4 (CALL), or 5 (CALLERROR)
       if (
@@ -308,8 +577,6 @@ export class OCPPWebSocket {
           this._messageHandler(messageType, messageId, action, payload);
         } else if (messageArray.length === 5) {
           // CALLERROR: [messageType, messageId, errorCode, errorDescription, errorDetails]
-          // Action is set to CallResult (sentinel) since CALLERROR has no action field.
-          // handleIncomingMessage dispatches on messageType (4=CALLERROR), not the action param.
           const [
             messageType,
             messageId,
@@ -331,6 +598,59 @@ export class OCPPWebSocket {
     }
   }
 
+  public setMessageHandler(handler: MessageHandler): void {
+    this._messageHandler = handler;
+  }
+
+  private handleOpen(): void {
+    this._logger.info("WebSocket connected successfully", LogType.WEBSOCKET);
+
+    // Reset reconnect attempts on successful connection
+    if (this._reconnectAttempts > 0) {
+      this._logger.info(
+        `Reconnection successful after ${this._reconnectAttempts} attempt(s)`,
+        LogType.WEBSOCKET,
+      );
+    }
+    this._reconnectAttempts = 0;
+
+    // Call controller.onSocketOpen() to arm periodic timers
+    this._controller.onSocketOpen();
+
+    // this.startPingInterval();
+  }
+
+  /**
+   * Close transaction: idempotent per generation.
+   * Determines close cause (manual vs network), latches it on the current generation,
+   * drains pipelines, invokes the close-transaction callback, and (implicitly via handleClose)
+   * registers a reconnect request if applicable.
+   */
+  private runCloseTransaction(closeCause: CloseCause): void {
+    // If the current generation's cause is already latched, this is idempotent — return
+    if (this._currentGeneration.closeCause !== null) {
+      return;
+    }
+
+    // Latch the cause on the current generation token
+    this._currentGeneration.latchCloseCause(closeCause);
+
+    // Drain pipelines synchronously (custody callbacks run inline)
+    this._controller.shutdownPipelines({
+      reason: "socket_closed",
+      closeCause,
+    });
+
+    // Invoke the close-transaction callback (for Task 7/8/9 effect flushing)
+    if (this._onCloseTransactionCallback) {
+      try {
+        this._onCloseTransactionCallback(this._currentGeneration);
+      } catch {
+        // Callback exception isolation
+      }
+    }
+  }
+
   private handleError(evt: Event): void {
     this._logger.error(`WebSocket error type: ${evt.type}`, LogType.WEBSOCKET);
   }
@@ -341,6 +661,19 @@ export class OCPPWebSocket {
       LogType.WEBSOCKET,
     );
     this.stopPingInterval();
+
+    if (this._disposed) {
+      // Transport is disposed — terminal state, ignore close events
+      return;
+    }
+
+    // Determine the close cause
+    const closeCause: CloseCause = this._isManualDisconnect
+      ? "manual"
+      : "network";
+
+    // Run the close transaction (idempotent per generation)
+    this.runCloseTransaction(closeCause);
 
     // Only attempt reconnect if not manually disconnected
     if (!this._isManualDisconnect) {
@@ -376,20 +709,31 @@ export class OCPPWebSocket {
     // Example: 1s, 2s, 4s, 8s, 16s, 30s (max)
     const exponentialDelay =
       this._baseReconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
-    const delay = Math.min(exponentialDelay, this._maxReconnectDelay);
+    const backoffDelay = Math.min(exponentialDelay, this._maxReconnectDelay);
+
+    // Reconnect reservation: the actual scheduled delay is the max of the exponential backoff
+    // and the remaining time until reconnectNotBefore
+    const reservationDelay = this._reconnectNotBefore
+      ? Math.max(0, this._reconnectNotBefore - Date.now())
+      : 0;
+    const actualDelay = Math.max(backoffDelay, reservationDelay);
 
     this._logger.info(
-      `Reconnecting in ${delay / 1000}s... (attempt ${this._reconnectAttempts})`,
+      `Reconnecting in ${actualDelay / 1000}s... (attempt ${this._reconnectAttempts})`,
       LogType.WEBSOCKET,
     );
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
+
+      // Consume the reservation at socket-open attempt (irreversible consumption point)
+      this._reconnectNotBefore = null;
+
       this._logger.info(
         `Attempting reconnection (attempt ${this._reconnectAttempts})...`,
         LogType.WEBSOCKET,
       );
       this.connect();
-    }, delay);
+    }, actualDelay);
   }
 }

@@ -187,6 +187,26 @@ ocpp-cp-sim --ws-url wss://steve.example.com/steve/websocket/CentralSystemServic
 
 Security extension configuration keys include `SecurityProfile`, `AuthorizationKey`, `AdditionalRootCertificateCheck`, `CertificateSignedMaxChainSize`, `CertificateStoreMaxLength`, and `CpoName`. The simulator can send `SecurityEventNotification` and `SignCertificate`, handle inbound `CertificateSigned`, and exposes JSON-mode RPC commands `security_event_notification` and `sign_certificate`.
 
+## Network Simulation
+
+Phase 1 of network condition simulation adds in-process fault injection for WebSocket charge points: configurable latency (with jitter), forced disconnects, and delayed reconnection. Configuration is **off by default** and applies globally (all CPs) or per-charger with null-tombstone override semantics. Same seed always produces the same fault sequence (deterministic via a seeded PRNG).
+
+**Configuration** — via the browser UI (`/v3/settings` for global, `/v3/cp/:id` for per-charger) or the daemon's RPC/MCP control plane. No startup flags in Phase 1 — configuration is applied at runtime or persisted to the state database (`networkSim:global`, `networkSim:cp:<cpId>` keys).
+
+**Layering & null semantics** — global and per-CP layers merge with per-CP overrides winning. Setting per-CP config to `null` deletes the override and reverts to the global layer. A `null` global and `null` per-CP means the feature is disabled.
+
+**Determinism** — the rule engine is seeded; identical seed + rule order produces identical fault timings across different instances. Useful for reproducing issues or running A/B tests.
+
+**WebSocket only** — OCPP 1.2/1.5/1.6 (SOAP) charge points are unaffected. The simulation applies only to WebSocket transports.
+
+**Documented limitations** (these require future proxy-mode work):
+
+- Cannot reproduce TCP-level half-open connection states.
+- TLS-level handshake failures are out of scope.
+- Browser Ping/Pong frames and their failures are not simulated.
+
+For configuration details, rule schemas, and protocol-timer behavior (e.g., how a delayed BootNotification affects the boot acceptance gate), see [docs/server.md § Network Simulation](docs/server.md#network-simulation).
+
 ## AI Agent & Automation Testing
 
 The daemon exposes a single Socket.IO control connection and emits structured logs, making it a scriptable OCPP stub that any AI agent or test harness can drive.

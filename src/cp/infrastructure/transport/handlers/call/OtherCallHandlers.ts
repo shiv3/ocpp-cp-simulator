@@ -9,6 +9,7 @@ import type {
   UnlockConnectorRequestV16,
   UnlockConnectorResponseV16,
 } from "../../../../../ocpp";
+import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";
 
@@ -44,7 +45,7 @@ export class TriggerMessageHandler implements CallHandler<
   handle(
     payload: TriggerMessageRequestV16,
     context: HandlerContext,
-  ): TriggerMessageResponseV16 {
+  ): TriggerMessageResponseV16 | HandlerOutcome {
     context.logger.info(
       `Trigger message request received: ${payload.requestedMessage}` +
         (payload.connectorId !== undefined
@@ -54,55 +55,87 @@ export class TriggerMessageHandler implements CallHandler<
     );
 
     // OCPP 1.6J §6.51: the response is sent first (Accepted/Rejected), then
-    // the CP fires the requested message after answering. Schedule via
-    // queueMicrotask so the CALLRESULT goes out before the new CALL.
+    // the CP fires the requested message after answering. The effect is
+    // deferred via HandlerOutcome so the CALLRESULT goes out before the new CALL.
     switch (payload.requestedMessage) {
-      case "StatusNotification":
-        queueMicrotask(() =>
-          context.chargePoint.sendCurrentStatusNotification(
-            payload.connectorId,
-          ),
-        );
-        return { status: "Accepted" };
+      case "StatusNotification": {
+        const response = { status: "Accepted" } as const;
+        const outcome: HandlerOutcome = {
+          kind: "handler-outcome",
+          payload: response,
+          afterResponseSettled: () =>
+            context.chargePoint.sendCurrentStatusNotification(
+              payload.connectorId,
+            ),
+        };
+        return outcome;
+      }
 
-      case "Heartbeat":
-        queueMicrotask(() => context.chargePoint.sendHeartbeat());
-        return { status: "Accepted" };
+      case "Heartbeat": {
+        const response = { status: "Accepted" } as const;
+        const outcome: HandlerOutcome = {
+          kind: "handler-outcome",
+          payload: response,
+          afterResponseSettled: () => context.chargePoint.sendHeartbeat(),
+        };
+        return outcome;
+      }
 
       case "MeterValues": {
         const targetConnectorId = payload.connectorId;
-        queueMicrotask(() => {
-          if (targetConnectorId === undefined || targetConnectorId === 0) {
-            for (const id of context.chargePoint.connectors.keys()) {
-              context.chargePoint.sendMeterValue(id);
+        const response = { status: "Accepted" } as const;
+        const outcome: HandlerOutcome = {
+          kind: "handler-outcome",
+          payload: response,
+          afterResponseSettled: () => {
+            if (targetConnectorId === undefined || targetConnectorId === 0) {
+              for (const id of context.chargePoint.connectors.keys()) {
+                context.chargePoint.sendMeterValue(id);
+              }
+              return;
             }
-            return;
-          }
-          context.chargePoint.sendMeterValue(targetConnectorId);
-        });
-        return { status: "Accepted" };
+            context.chargePoint.sendMeterValue(targetConnectorId);
+          },
+        };
+        return outcome;
       }
 
-      case "BootNotification":
+      case "BootNotification": {
         // §5.17 + §4.2: re-send BootNotification. This is permitted even
         // while the boot gate is Pending/Rejected — TriggerMessage is one
         // of the few CSMS-driven escapes from those states.
-        queueMicrotask(() => context.chargePoint.boot());
-        return { status: "Accepted" };
+        const response = { status: "Accepted" } as const;
+        const outcome: HandlerOutcome = {
+          kind: "handler-outcome",
+          payload: response,
+          afterResponseSettled: () => context.chargePoint.boot(),
+        };
+        return outcome;
+      }
 
-      case "DiagnosticsStatusNotification":
+      case "DiagnosticsStatusNotification": {
         // §4.4: when not busy uploading diagnostics, respond Idle.
-        queueMicrotask(() =>
-          context.chargePoint.sendDiagnosticsStatusNotification("Idle"),
-        );
-        return { status: "Accepted" };
+        const response = { status: "Accepted" } as const;
+        const outcome: HandlerOutcome = {
+          kind: "handler-outcome",
+          payload: response,
+          afterResponseSettled: () =>
+            context.chargePoint.sendDiagnosticsStatusNotification("Idle"),
+        };
+        return outcome;
+      }
 
-      case "FirmwareStatusNotification":
+      case "FirmwareStatusNotification": {
         // §4.5: same shape as DiagnosticsStatus — Idle if not busy.
-        queueMicrotask(() =>
-          context.chargePoint.sendFirmwareStatusNotification("Idle"),
-        );
-        return { status: "Accepted" };
+        const response = { status: "Accepted" } as const;
+        const outcome: HandlerOutcome = {
+          kind: "handler-outcome",
+          payload: response,
+          afterResponseSettled: () =>
+            context.chargePoint.sendFirmwareStatusNotification("Idle"),
+        };
+        return outcome;
+      }
 
       default:
         return { status: "NotImplemented" };

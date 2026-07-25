@@ -35,6 +35,10 @@ import type {
   ScenarioTemplateInfo,
   StoredLogEntry,
 } from "../../data/interfaces/ChargePointService";
+import type {
+  NetworkSimLayerConfig,
+  ResolvedNetworkSimConfig,
+} from "../../cp/infrastructure/transport/network-sim/config";
 import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
 import { mergeWriteOnlyConfigSecrets } from "../../data/configPort";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
@@ -210,9 +214,7 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async reset(id: string): Promise<void> {
-    const service = this.requireService(id);
-    service.disconnect();
-    await service.connect();
+    this.requireService(id).reset();
   }
 
   async sendHeartbeat(id: string): Promise<void> {
@@ -638,6 +640,57 @@ export class RegistryChargePointService implements ChargePointService {
     });
   }
 
+  async getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null> {
+    const manager = this.registry.getNetworkSimManager();
+    return manager.getGlobal();
+  }
+
+  async saveNetworkSimGlobal(
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    const manager = this.registry.getNetworkSimManager();
+    manager.saveGlobal(config);
+  }
+
+  async getNetworkSimCp(cpId: string): Promise<{
+    config: NetworkSimLayerConfig | null;
+    resolved: ResolvedNetworkSimConfig;
+  }> {
+    const manager = this.registry.getNetworkSimManager();
+    return {
+      config: manager.getCp(cpId),
+      resolved: manager.resolveFor(cpId),
+    };
+  }
+
+  async saveNetworkSimCp(
+    cpId: string,
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    const manager = this.registry.getNetworkSimManager();
+    manager.saveCp(cpId, config);
+  }
+
+  async triggerNetworkSimDisconnect(
+    cpId: string,
+    ruleId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    // Check if CP exists
+    if (!this.registry.has(cpId)) {
+      return { ok: false, error: "cp_not_found" };
+    }
+
+    // Check if CP is SOAP (unsupported)
+    const service = this.registry.get(cpId);
+    if (service?.isSoapChargePoint()) {
+      return { ok: false, error: "soap_unsupported" };
+    }
+
+    // Trigger the disconnect
+    const manager = this.registry.getNetworkSimManager();
+    return manager.triggerDisconnect(cpId, ruleId);
+  }
+
   private listChargePointSnapshots(): ChargePointSnapshot[] {
     return this.registry
       .list()
@@ -709,6 +762,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
     error: status.error,
     connectors: status.connectors.map(toConnectorSnapshot),
     heartbeat: status.heartbeat,
+    networkSim: status.networkSim,
     config: status.config
       ? {
           wsUrl: status.config.wsUrl,

@@ -60,6 +60,12 @@ import type {
   OcppMessageResponsePayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
+import type { Settlement } from "./network-sim";
+import {
+  ResponseEffectQueue,
+  normalizeHandlerResult,
+  type HandlerResult,
+} from "./network-sim";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Transaction } from "../../domain/connector/Transaction";
@@ -240,15 +246,22 @@ export class OCPPMessageHandler {
     payload: OcppMessageRequestPayload;
     connectorId?: number;
   }> = [];
-  private _serialInFlight: {
-    action: OCPPAction;
-    id: string;
-    timer: ReturnType<typeof setTimeout>;
-  } | null = null;
+  private _serialInFlight:
+    | { phase: "queued"; action: OCPPAction; id: string }
+    | {
+        phase: "written";
+        action: OCPPAction;
+        id: string;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | null = null;
   // §4.1.1 lets the implementation pick the CALL timeout. 30s is a common
   // CSMS default and roughly matches Configuration's default
   // TransactionMessageRetryInterval (60s).
   private static readonly SERIAL_CALL_TIMEOUT_MS = 30_000;
+
+  // Response effect queue for deferred handler side effects
+  private _responseEffectQueue: ResponseEffectQueue;
 
   constructor(
     chargePoint: ChargePoint,
@@ -264,6 +277,21 @@ export class OCPPMessageHandler {
       chargePoint.id,
       chargePoint.database,
     );
+
+    // Initialize response effect queue with deps
+    this._responseEffectQueue = new ResponseEffectQueue({
+      isGenerationCurrent: (gen) =>
+        gen.gen === this._webSocket.currentGeneration().gen,
+      defer: (run) => queueMicrotask(run),
+      log: (message) => this._logger.info(message, LogType.OCPP),
+    });
+
+    // Register close-transaction callback for effect flushing (if available)
+    if (this._webSocket.onCloseTransaction) {
+      this._webSocket.onCloseTransaction((finalized) =>
+        this._responseEffectQueue.flushAfterCloseFinalization(finalized),
+      );
+    }
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
     this.initializeHandlers();
@@ -641,9 +669,42 @@ export class OCPPMessageHandler {
   }
 
   /**
+   * Centralize custody: salvage transaction-related messages or drop informational ones.
+   * Transaction-related messages (StartTransaction/StopTransaction/MeterValues) are
+   * queued for retry; others are logged and discarded.
+   */
+  private salvageOrDiscard(
+    entry: {
+      action: OCPPAction;
+      id: string;
+      payload: OcppMessageRequestPayload;
+      connectorId?: number;
+    },
+    reason: string,
+  ): void {
+    if (isTransactionRelated(entry.action)) {
+      this._pendingQueue.enqueue({
+        action: entry.action,
+        payload: entry.payload,
+        connectorId: entry.connectorId,
+      });
+      this._logger.warn(
+        `Salvaged ${entry.action} to PendingMessageQueue (${reason}); size=${this._pendingQueue.size()}`,
+        LogType.OCPP,
+      );
+    } else {
+      this._logger.warn(
+        `Dropping ${entry.action} (informational, ${reason})`,
+        LogType.OCPP,
+      );
+    }
+  }
+
+  /**
    * Drain one CALL off `_serialQueue` and put it in flight. No-op when
-   * another CALL is already in flight; the eventual CALLRESULT/CALLERROR/
-   * timeout will pump us again.
+   * another CALL is already in flight (queued OR written); the eventual
+   * settlement callback will pump us again when the in-flight CALL transitions
+   * from "written" → timeout/CALLRESULT.
    */
   private pumpSerialQueue(): void {
     if (this._serialInFlight) return;
@@ -655,7 +716,6 @@ export class OCPPMessageHandler {
         return;
       }
       this._serialQueue.shift();
-
       this._requests.add({
         type: OCPPMessageType.CALL,
         action: head.action,
@@ -663,52 +723,97 @@ export class OCPPMessageHandler {
         payload: head.payload,
         connectorId: head.connectorId,
       });
-      const sent = this._webSocket.sendAction(
+
+      // Create the slot in "queued" phase BEFORE sendAction, because the settlement
+      // callback may fire SYNCHRONOUSLY (disabled path) and must find a slot to transition.
+      this._serialInFlight = {
+        phase: "queued",
+        action: head.action,
+        id: head.id,
+      };
+
+      const gen = this._webSocket.currentGeneration();
+      const accepted = this._webSocket.sendAction(
         head.id,
         head.action,
         head.payload,
+        gen,
+        (settlement) => this.onSerialSettled(head, settlement),
       );
-      if (!sent) {
-        // WebSocket isn't open: transaction-related messages get retried
-        // via PendingMessageQueue on reconnect; others (Heartbeat /
-        // StatusNotification / DataTransfer / …) are informational and
-        // safe to drop. Loop to try the next entry — no point holding the
-        // queue if WS is gone, the next iteration will fail too and
-        // either retry or drop.
-        if (isTransactionRelated(head.action)) {
-          this._pendingQueue.enqueue({
-            action: head.action,
-            payload: head.payload,
-            connectorId: head.connectorId,
-          });
-          this._logger.warn(
-            `WS send failed; queued ${head.action} (PendingQueue size=${this._pendingQueue.size()})`,
-            LogType.OCPP,
-          );
-        } else {
-          this._logger.warn(
-            `WS send failed; dropping ${head.action} (informational)`,
-            LogType.OCPP,
-          );
-        }
+
+      if (!accepted) {
+        // send-false: the pre-created slot must be cleared; the request never went out.
+        this._serialInFlight = null;
+        this._requests.remove(head.id);
+        this.salvageOrDiscard(head, "send-false");
         continue;
       }
+      // Accepted. If the settlement already fired synchronously (disabled), onSerialSettled
+      // has already transitioned the slot to "written" (armed timer + notifyOutgoingCall).
+      // If async (enabled/delayed), the slot stays "queued" and holds the serializer.
+      return;
+    }
+  }
 
-      // §4.6: any outgoing CALL resets the heartbeat idle timer. Stamp
-      // lastSentAt only when the CALL is itself a Heartbeat — that way
-      // BootNotification/StatusNotification/etc. count as activity but
-      // don't pretend to be heartbeats in the UI.
+  /**
+   * Settlement callback for the in-flight serialized CALL. Fires exactly once per
+   * sendAction, either when the frame is physically written or when a drop occurs
+   * (socket_closed, disposed, write_failed). Handles the phase transition from
+   * "queued" → "written" and manages custody (salvage vs. drop) on failure.
+   */
+  private onSerialSettled(
+    head: {
+      action: OCPPAction;
+      id: string;
+      payload: OcppMessageRequestPayload;
+      connectorId?: number;
+    },
+    settlement: Settlement,
+  ): void {
+    const cur = this._serialInFlight;
+    // Staleness guard: ignore a settlement that no longer matches the current slot.
+    if (!cur || cur.id !== head.id) return;
+
+    if (settlement.outcome === "written") {
+      // Now it is physically on the wire: NOW arm the 30s response timeout and count heartbeat activity.
       this._chargePoint.notifyOutgoingCall(
         head.action === OCPPAction.Heartbeat,
       );
-
       const timer = setTimeout(
         () => this.handleSerialTimeout(head.id),
         OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS,
       );
-      this._serialInFlight = { action: head.action, id: head.id, timer };
+      this._serialInFlight = {
+        phase: "written",
+        action: head.action,
+        id: head.id,
+        timer,
+      };
       return;
     }
+
+    // Drop outcomes: the frame never physically went out (or its write failed).
+    this._serialInFlight = null;
+    this._requests.remove(head.id);
+    this.salvageOrDiscard(head, settlement.outcome);
+
+    if (
+      settlement.outcome === "socket_closed" ||
+      settlement.outcome === "disposed"
+    ) {
+      // Do NOT pump here. The close/teardown path (onWebSocketClosed) owns salvaging the
+      // remaining _serialQueue in order; pumping now could write into a closing socket
+      // or reorder salvage. Just release the slot.
+      return;
+    }
+    if (settlement.outcome === "write_failed") {
+      // Salvaged above; defer a pump that re-checks the socket is still open before releasing the next CALL.
+      queueMicrotask(() => {
+        if (this._webSocket.isConnected()) this.pumpSerialQueue();
+      });
+      return;
+    }
+    // queue_overflow cannot occur for a CALL (sendAction returns false on overflow -> the send-false path).
   }
 
   /** Release the serialization slot when a response settles the in-flight
@@ -717,7 +822,7 @@ export class OCPPMessageHandler {
   private settleSerialInFlight(messageId: string): void {
     const cur = this._serialInFlight;
     if (!cur || cur.id !== messageId) return;
-    clearTimeout(cur.timer);
+    if (cur.phase === "written") clearTimeout(cur.timer);
     this._serialInFlight = null;
     this.pumpSerialQueue();
   }
@@ -725,7 +830,9 @@ export class OCPPMessageHandler {
   /** Per-CALL watchdog. §4.1.1 says implementations choose the timeout;
    *  on expiry we proceed to the next CALL so a stuck CSMS doesn't deadlock
    *  the queue forever. The dead CALL is dropped (transaction-related
-   *  ones are also tracked via the persistent PendingMessageQueue). */
+   *  ones are also tracked via the persistent PendingMessageQueue). This timer
+   *  only fires when the slot is in "written" phase (that is the only phase
+   *  with an armed timer). */
   private handleSerialTimeout(messageId: string): void {
     const cur = this._serialInFlight;
     if (!cur || cur.id !== messageId) return;
@@ -737,14 +844,23 @@ export class OCPPMessageHandler {
     this.pumpSerialQueue();
   }
 
-  /** Called by the ChargePoint after the WebSocket has closed. Cancels the
-   *  in-flight timer and discards anything still queued — those CALLs would
-   *  reference a dead connection. Transaction-related messages survive via
-   *  PendingMessageQueue (already persisted on send-fail). */
+  /** Called by the ChargePoint after the WebSocket has closed (during teardown,
+   *  after the pipeline drain in Task 7 ordering). Cancels the in-flight timer,
+   *  salvages unsent queued CALLs, and clears the queue. The written-but-unanswered
+   *  in-flight CALL is not salvaged here (it keeps existing discard behavior);
+   *  it was already handled via onSerialSettled during the drain when the
+   *  settlement fired (socket_closed). */
   public onWebSocketClosed(): void {
     if (this._serialInFlight) {
-      clearTimeout(this._serialInFlight.timer);
+      if (this._serialInFlight.phase === "written") {
+        clearTimeout(this._serialInFlight.timer);
+      }
+      // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation).
       this._serialInFlight = null;
+    }
+    // Salvage every UNSENT queued CALL (they never reached the wire) in FIFO order.
+    for (const entry of this._serialQueue) {
+      this.salvageOrDiscard(entry, "socket_closed");
     }
     this._serialQueue = [];
   }
@@ -827,6 +943,10 @@ export class OCPPMessageHandler {
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
   ): Promise<void> {
+    // Capture the generation at dispatch time (before the await) so a response
+    // produced by an async handler settles against its originating generation.
+    const gen = this._webSocket.currentGeneration();
+
     // Issue #110: surface every incoming CSMS call to the scenario layer
     // (csmsCallTrigger nodes), regardless of handler outcome.
     this._chargePoint.notifyIncomingCall(action, payload);
@@ -845,9 +965,13 @@ export class OCPPMessageHandler {
       // Response overrides intentionally carry a caller-chosen status
       // string (e.g. "Rejected" for TC_026); the closed response union
       // can't express that, so assert the shape at this one call site.
-      this.sendCallResult(messageId, {
-        status: overrideStatus,
-      } as OcppMessageResponsePayload);
+      this.sendCallResult(
+        messageId,
+        {
+          status: overrideStatus,
+        } as OcppMessageResponsePayload,
+        gen,
+      );
       return;
     }
 
@@ -860,6 +984,7 @@ export class OCPPMessageHandler {
         messageId,
         "NotImplemented",
         "This action is not supported",
+        gen,
       );
       return;
     }
@@ -872,11 +997,22 @@ export class OCPPMessageHandler {
       // `handle()` may return its response synchronously or as a Promise
       // (see `CallHandler` in MessageHandlerRegistry.ts) — `await` resolves
       // a plain value immediately, so this is a no-op for sync handlers.
-      const response = await handler.handle(payload, context);
-      this.sendCallResult(messageId, response);
+      const rawResult = await handler.handle(payload, context);
+      const { payload: normalizedPayload, effect } = normalizeHandlerResult(
+        rawResult as HandlerResult,
+      );
+      const onSettled = effect
+        ? this._responseEffectQueue.register(gen, effect)
+        : undefined;
+      this.sendCallResult(
+        messageId,
+        normalizedPayload as OcppMessageResponsePayload,
+        gen,
+        onSettled,
+      );
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
-      this.sendCallError(messageId, "InternalError", String(error));
+      this.sendCallError(messageId, "InternalError", String(error), gen);
     }
   }
 
@@ -986,20 +1122,36 @@ export class OCPPMessageHandler {
   private sendCallResult(
     messageId: string,
     payload: OcppMessageResponsePayload,
+    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
+    onSettled?: (s: Settlement) => void,
   ): void {
-    this._webSocket.sendResult(messageId, payload);
+    // Callers without a dispatch-captured generation (response overrides,
+    // unsupported-action errors) respond in the current generation.
+    this._webSocket.sendResult(
+      messageId,
+      payload,
+      gen ?? this._webSocket.currentGeneration(),
+      onSettled,
+    );
   }
 
   private sendCallError(
     messageId: string,
     errorCode: OCPPErrorCode,
     errorDescription: string,
+    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
+    onSettled?: (s: Settlement) => void,
   ): void {
     const errorDetails = {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.sendError(messageId, errorDetails);
+    this._webSocket.sendError(
+      messageId,
+      errorDetails,
+      gen ?? this._webSocket.currentGeneration(),
+      onSettled,
+    );
   }
 
   private generateMessageId(): string {

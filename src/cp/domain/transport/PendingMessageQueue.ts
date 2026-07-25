@@ -22,10 +22,12 @@ export interface PendingMessage {
 /**
  * Internal row shape — `messageId` is the PRIMARY KEY in the
  * `pending_messages` table but isn't part of the public PendingMessage
- * shape, so we keep it next to the payload here.
+ * shape, so we keep it next to the payload here. `seq` is a monotonic
+ * per-CP sequence number for stable ordering across restarts.
  */
 interface PendingRow extends PendingMessage {
   messageId: string;
+  seq: number;
 }
 
 /**
@@ -47,7 +49,11 @@ interface PendingRow extends PendingMessage {
  */
 export class PendingMessageQueue {
   private items: PendingRow[] = [];
+  /** Persisted FIFO ordering key; seeded from MAX(seq) for this cp on load. */
   private nextSeq = 0;
+  /** Independent counter for the user-visible message id — keeping it apart
+   *  from `nextSeq` stops an id allocation from perturbing the ordering key. */
+  private nextIdSuffix = 0;
 
   constructor(
     private readonly chargePointId: string,
@@ -58,7 +64,7 @@ export class PendingMessageQueue {
 
   /** Snapshot of the current queue (FIFO order). */
   all(): PendingMessage[] {
-    return this.items.map(({ messageId: _id, ...msg }) => msg);
+    return this.items.map(toPendingMessage);
   }
 
   size(): number {
@@ -71,6 +77,7 @@ export class PendingMessageQueue {
       queuedAt: Date.now(),
       attempts: 0,
       messageId: this.nextMessageId(),
+      seq: this.nextSeq++,
     };
     this.items.push(row);
     this.insertRow(row);
@@ -81,8 +88,7 @@ export class PendingMessageQueue {
     const row = this.items.shift();
     if (!row) return undefined;
     this.deleteRow(row.messageId);
-    const { messageId: _id, ...msg } = row;
-    return msg;
+    return toPendingMessage(row);
   }
 
   /**
@@ -98,8 +104,7 @@ export class PendingMessageQueue {
     let delivered = 0;
     while (this.items.length > 0) {
       const head = this.items[0];
-      const { messageId: _id, ...msg } = head;
-      const ok = send(msg);
+      const ok = send(toPendingMessage(head));
       if (!ok) {
         head.attempts += 1;
         if (head.attempts >= maxAttempts) {
@@ -131,7 +136,12 @@ export class PendingMessageQueue {
   // ── persistence helpers ────────────────────────────────────────────────
 
   private load(): void {
-    if (!this.database) return;
+    if (!this.database) {
+      // In-memory-only mode: nothing persisted, so both counters start fresh.
+      this.nextSeq = 1;
+      this.nextIdSuffix = 0;
+      return;
+    }
     try {
       const rows = this.database.all<{
         message_id: string;
@@ -140,9 +150,10 @@ export class PendingMessageQueue {
         payload: string;
         attempts: number;
         created_at: string;
+        seq: number | null;
       }>(
-        "SELECT message_id, action, connector_id, payload, attempts, created_at " +
-          "FROM pending_messages WHERE cp_id = ? ORDER BY created_at ASC",
+        "SELECT message_id, action, connector_id, payload, attempts, created_at, seq " +
+          "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
         [this.chargePointId],
       );
       this.items = rows.map((r) => ({
@@ -152,9 +163,22 @@ export class PendingMessageQueue {
         connectorId: r.connector_id ?? undefined,
         queuedAt: Date.parse(r.created_at) || Date.now(),
         attempts: r.attempts,
+        seq: r.seq ?? 0,
       }));
+      // Initialize seq counter to 1 + MAX(seq) to avoid collisions.
+      const maxSeq = this.items.reduce(
+        (max, item) => Math.max(max, item.seq),
+        0,
+      );
+      this.nextSeq = maxSeq + 1;
+      // The id suffix rides the same high-water mark so a queue reopened
+      // within the same millisecond cannot mint an id that collides with a
+      // persisted row (message_id is part of the primary key).
+      this.nextIdSuffix = maxSeq;
     } catch (err) {
       console.error("Failed to load pending transaction queue:", err);
+      this.nextSeq = 1;
+      this.nextIdSuffix = 0;
     }
   }
 
@@ -163,8 +187,8 @@ export class PendingMessageQueue {
     try {
       this.database.run(
         "INSERT INTO pending_messages " +
-          "(cp_id, message_id, action, connector_id, payload, attempts, created_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "(cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           this.chargePointId,
           row.messageId,
@@ -173,6 +197,7 @@ export class PendingMessageQueue {
           JSON.stringify(row.payload),
           row.attempts,
           new Date(row.queuedAt).toISOString(),
+          row.seq,
         ],
       );
     } catch (err) {
@@ -208,9 +233,16 @@ export class PendingMessageQueue {
     // Per-instance monotonic id; mixed with the wall-clock so concurrent
     // queues for different cps don't collide (cp_id is part of the PK
     // anyway, but the id is also user-visible in logs).
-    const seq = (this.nextSeq += 1);
-    return `${Date.now().toString(36)}-${seq.toString(36)}`;
+    const suffix = (this.nextIdSuffix += 1);
+    return `${Date.now().toString(36)}-${suffix.toString(36)}`;
   }
+}
+
+/** Strip the persistence-only columns so callers see exactly the declared
+ *  {@link PendingMessage} shape — `messageId` and `seq` are storage details. */
+function toPendingMessage(row: PendingRow): PendingMessage {
+  const { messageId: _id, seq: _seq, ...msg } = row;
+  return msg;
 }
 
 function safeParse(raw: string): unknown {

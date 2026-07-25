@@ -3,6 +3,7 @@ import { GetDiagnosticsHandler } from "../GetDiagnosticsHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 type DiagStatus = "Idle" | "Uploaded" | "UploadFailed" | "Uploading";
 
@@ -74,7 +75,10 @@ describe("GetDiagnosticsHandler", () => {
     const { ctx } = buildContext();
     const handler = new GetDiagnosticsHandler();
     const res = handler.handle({ location: "http://example/upload" }, ctx);
-    expect(res).toEqual({ fileName: "diagnostics.txt" });
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      expect(res.payload).toEqual({ fileName: "diagnostics.txt" });
+    }
   });
 
   it("sends Uploading then Uploaded on HTTP success", async () => {
@@ -83,13 +87,18 @@ describe("GetDiagnosticsHandler", () => {
       .mockResolvedValue(new Response("", { status: 200 }));
     const { ctx, sent } = buildContext();
     const handler = new GetDiagnosticsHandler();
-    handler.handle({ location: "http://example/upload" }, ctx);
-    // microtask drain → schedules Uploading + starts fetch
-    await Promise.resolve();
-    // fetch promise resolves on the next microtask + the await chain
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(sent).toEqual(["Uploading", "Uploaded"]);
+    const res = handler.handle({ location: "http://example/upload" }, ctx);
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      // invoke the effect to trigger the upload sequence
+      res.afterResponseSettled();
+      // microtask drain → schedules Uploading + starts fetch
+      await Promise.resolve();
+      // fetch promise resolves on the next microtask + the await chain
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(sent).toEqual(["Uploading", "Uploaded"]);
+    }
   });
 
   it("sends UploadFailed when fetch rejects", async () => {
@@ -98,9 +107,13 @@ describe("GetDiagnosticsHandler", () => {
       .mockRejectedValue(new Error("ECONNREFUSED"));
     const { ctx, sent } = buildContext();
     const handler = new GetDiagnosticsHandler();
-    handler.handle({ location: "http://nope/upload" }, ctx);
-    for (let i = 0; i < 4; i++) await Promise.resolve();
-    expect(sent).toEqual(["Uploading", "UploadFailed"]);
+    const res = handler.handle({ location: "http://nope/upload" }, ctx);
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      res.afterResponseSettled();
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      expect(sent).toEqual(["Uploading", "UploadFailed"]);
+    }
   });
 
   it("sends UploadFailed on non-2xx HTTP", async () => {
@@ -109,8 +122,12 @@ describe("GetDiagnosticsHandler", () => {
       .mockResolvedValue(new Response("", { status: 500 }));
     const { ctx, sent } = buildContext();
     const handler = new GetDiagnosticsHandler();
-    handler.handle({ location: "http://broken/upload" }, ctx);
-    for (let i = 0; i < 4; i++) await Promise.resolve();
-    expect(sent).toEqual(["Uploading", "UploadFailed"]);
+    const res = handler.handle({ location: "http://broken/upload" }, ctx);
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      res.afterResponseSettled();
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      expect(sent).toEqual(["Uploading", "UploadFailed"]);
+    }
   });
 });

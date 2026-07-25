@@ -1,10 +1,22 @@
 import { describe, it, expect } from "vitest";
 import {
   coerceSoapPayloadWithSchema,
+  dispatchSoapCallViaV16Registry,
   transformResponseForOcpp12,
 } from "../v16RegistryDispatch";
+import { OCPP16_DIALECT } from "../dialect";
+import { Logger } from "../../../../shared/Logger";
+import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
 type TestSchema = Record<string, unknown>;
+
+const silentLogger = (): Logger =>
+  ({
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+  }) as unknown as Logger;
 
 describe("coerceSoapPayloadWithSchema", () => {
   it("coerces string integers to numbers", () => {
@@ -416,5 +428,45 @@ describe("transformResponseForOcpp12", () => {
       status: "Rejected",
       extra: "field",
     });
+  });
+});
+
+describe("dispatchSoapCallViaV16Registry", () => {
+  it("unwraps a HandlerOutcome instead of serializing the wrapper", async () => {
+    const sent: (number | undefined)[] = [];
+    const chargePoint = {
+      sendCurrentStatusNotification: (connectorId?: number) =>
+        sent.push(connectorId),
+    } as unknown as ChargePoint;
+
+    const response = await dispatchSoapCallViaV16Registry({
+      operation: "TriggerMessage",
+      payload: { requestedMessage: "StatusNotification", connectorId: "1" },
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    // The 1.6 handlers are shared with the JSON transport and may wrap their
+    // response in a HandlerOutcome; SOAP must reply with the bare payload.
+    expect(response).toEqual({ status: "Accepted" });
+    expect(response).not.toHaveProperty("kind");
+    expect(response).not.toHaveProperty("afterResponseSettled");
+
+    // …and still run the handler's deferred follow-up.
+    await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+    expect(sent).toEqual([1]);
+  });
+
+  it("returns a bare-payload handler's response untouched", async () => {
+    const response = await dispatchSoapCallViaV16Registry({
+      operation: "ClearCache",
+      payload: {},
+      chargePoint: {} as unknown as ChargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    expect(response).toEqual({ status: "Accepted" });
   });
 });

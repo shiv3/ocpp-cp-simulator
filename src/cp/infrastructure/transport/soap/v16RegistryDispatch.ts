@@ -11,6 +11,10 @@ import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegi
 import { DataTransferHandler } from "../handlers";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
 import { v16Schemas } from "../../../../ocpp/v16";
+import {
+  normalizeHandlerResult,
+  type HandlerResult,
+} from "../network-sim/ResponseEffectQueue";
 
 /**
  * Map operation names to their v16 schema and validator.
@@ -285,7 +289,7 @@ export async function dispatchSoapCallViaV16Registry(input: {
       chargePoint,
       logger,
     });
-    return (await Promise.resolve(response)) as SoapPayload;
+    return unwrapHandlerResult(await Promise.resolve(response));
   }
 
   // Look up the CALL handler
@@ -302,7 +306,21 @@ export async function dispatchSoapCallViaV16Registry(input: {
     logger,
   });
 
-  return (await Promise.resolve(response)) as SoapPayload;
+  return unwrapHandlerResult(await Promise.resolve(response));
+}
+
+/**
+ * Handlers shared with the JSON transport may return a {@link HandlerOutcome}
+ * wrapping the response and a post-response side effect. SOAP has no write
+ * settlement to hang that effect on, so unwrap the payload — returning the
+ * wrapper would serialize `kind`/`afterResponseSettled` into the response
+ * body — and defer the effect past this reply, matching how the legacy Reset
+ * handler schedules its own follow-up.
+ */
+function unwrapHandlerResult(raw: unknown): SoapPayload {
+  const { payload, effect } = normalizeHandlerResult(raw as HandlerResult);
+  if (effect) queueMicrotask(effect);
+  return payload as SoapPayload;
 }
 
 /**

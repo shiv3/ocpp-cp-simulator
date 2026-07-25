@@ -40,9 +40,18 @@ function createHookHarness(): HookHarness {
   }));
   vi.doMock("jotai", () => ({
     Provider: ({ children }: { children: unknown }) => children,
+    getDefaultStore: () => ({
+      get: () => ({ version: 1, global: null, perCp: {} }),
+      set: () => undefined,
+      sub: () => () => undefined,
+    }),
   }));
   vi.doMock("jotai/vanilla", () => ({
-    createStore: () => ({}),
+    createStore: () => ({
+      get: () => ({ version: 1, global: null, perCp: {} }),
+      set: () => undefined,
+      sub: () => () => undefined,
+    }),
   }));
 
   return {

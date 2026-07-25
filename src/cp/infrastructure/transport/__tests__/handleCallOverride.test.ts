@@ -66,11 +66,12 @@ describe("OCPPMessageHandler.handleCall response override dispatch (issue #110)"
       payload: OcppMessageErrorPayload;
     }> = [];
 
-    // Duck-typed fake: OCPPMessageHandler only ever touches these four
+    // Duck-typed fake: OCPPMessageHandler only ever touches these five
     // OCPPWebSocket methods — `setMessageHandler` (constructor, line ~267),
     // `sendAction` (pumpSerialQueue, line ~665 — unused by this test, no
-    // outgoing CP->CSMS call is triggered), and `sendResult`/`sendError`
-    // (sendCallResult/sendCallError, lines ~973/~985).
+    // outgoing CP->CSMS call is triggered), `sendResult`/`sendError`
+    // (sendCallResult/sendCallError, lines ~973/~985), and `currentGeneration`
+    // (handleCall, line ~948 — captures generation at dispatch time).
     const fakeSocket = {
       setMessageHandler: (handler: IncomingMessageHandler) => {
         capturedHandler = handler;
@@ -84,6 +85,7 @@ describe("OCPPMessageHandler.handleCall response override dispatch (issue #110)"
         order.push("sendError");
         sendErrorCalls.push({ messageId, payload });
       },
+      currentGeneration: () => ({ gen: 1, closeCause: null }),
     } as unknown as OCPPWebSocket;
 
     new OCPPMessageHandler(cp, fakeSocket, logger, codec);

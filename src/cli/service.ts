@@ -12,6 +12,7 @@ import {
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
+import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import {
   waitForBootAccepted,
@@ -555,6 +556,7 @@ export class CLIChargePointService {
           ? this._chargePoint.heartbeat.lastSentAt.toISOString()
           : null,
       },
+      networkSim: this._chargePoint.networkSimSummary(),
       config: {
         wsUrl: this._init.wsUrl,
         connectors: this._init.connectors,
@@ -579,6 +581,24 @@ export class CLIChargePointService {
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {
     return this._init;
+  }
+
+  setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {
+    this._chargePoint.setNetworkSimConfig(resolved);
+  }
+
+  triggerNetworkSimDisconnect(
+    ruleId: string,
+  ): { ok: true } | { ok: false; error: string } {
+    return this._chargePoint.triggerNetworkSimDisconnect(ruleId);
+  }
+
+  reset(): void {
+    this._chargePoint.reset();
+  }
+
+  isSoapChargePoint(): boolean {
+    return this._chargePoint.isSoapChargePoint();
   }
 
   startTransaction(connectorId: number, tagId: string): void {
@@ -1482,7 +1502,7 @@ export class CLIChargePointService {
     return this._chargePoint.getInMemoryLogs();
   }
 
-  cleanup(): void {
+  cleanup(permanent: boolean = false): void {
     for (const executor of this._executors.values()) {
       executor.stop();
     }
@@ -1496,7 +1516,13 @@ export class CLIChargePointService {
     }
     this._transcriptByScenario.clear();
     this._runStartByScenario.clear();
-    this._chargePoint.disconnect();
+    // Permanent deletion uses dispose() to cancel controller timers;
+    // non-permanent (update, shutdown) uses disconnect().
+    if (permanent) {
+      this._chargePoint.dispose();
+    } else {
+      this._chargePoint.disconnect();
+    }
     this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {
       unsub();

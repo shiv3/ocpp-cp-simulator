@@ -1,4 +1,5 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import type {} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
@@ -19,7 +20,7 @@ export class UpdateFirmwareHandler implements CallHandler<
   handle(
     payload: UpdateFirmwareRequestV16,
     context: HandlerContext,
-  ): UpdateFirmwareResponseV16 {
+  ): UpdateFirmwareResponseV16 | HandlerOutcome {
     const retrieveDate = new Date(payload.retrieveDate);
     if (Number.isNaN(retrieveDate.getTime())) {
       context.logger.warn(
@@ -36,14 +37,19 @@ export class UpdateFirmwareHandler implements CallHandler<
       LogType.OCPP,
     );
 
-    // §6.19: response is empty and sent immediately. Defer the simulated
-    // download train so the CALLRESULT goes out first — same pattern as
-    // TriggerMessage handler.
+    // §6.19: response is empty and sent immediately. The effect defers the
+    // simulated download train so the CALLRESULT goes out first — same
+    // pattern as TriggerMessage handler.
     const startAt = Number.isNaN(retrieveDate.getTime())
       ? new Date()
       : retrieveDate;
-    queueMicrotask(() => context.chargePoint.simulateFirmwareUpdate(startAt));
-
-    return {};
+    const response = {} as const;
+    const outcome: HandlerOutcome = {
+      kind: "handler-outcome",
+      payload: response,
+      afterResponseSettled: () =>
+        context.chargePoint.simulateFirmwareUpdate(startAt),
+    };
+    return outcome;
   }
 }

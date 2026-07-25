@@ -251,6 +251,8 @@ const AutoScrollingLogDisplay: React.FC<AutoScrollingLogDisplayProps> = ({
         return "log-configuration";
       case LogType.DIAGNOSTICS:
         return "log-diagnostics";
+      case LogType.NETWORK_SIM:
+        return "log-network-sim";
       default:
         return "log-general";
     }

@@ -3,6 +3,7 @@ import type {
   SignedUpdateFirmwareRequestV16,
   SignedUpdateFirmwareResponseV16,
 } from "../../../../../ocpp";
+import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { LogType } from "../../../../shared/Logger";
 
 /**
@@ -24,7 +25,7 @@ export class SignedUpdateFirmwareHandler implements CallHandler<
   handle(
     payload: SignedUpdateFirmwareRequestV16,
     context: HandlerContext,
-  ): SignedUpdateFirmwareResponseV16 {
+  ): SignedUpdateFirmwareResponseV16 | HandlerOutcome {
     const retrieveDate = new Date(payload.firmware.retrieveDateTime);
     if (Number.isNaN(retrieveDate.getTime())) {
       context.logger.warn(
@@ -41,18 +42,21 @@ export class SignedUpdateFirmwareHandler implements CallHandler<
       LogType.OCPP,
     );
 
-    // §6.19-style contract: response is empty/immediate; defer the
-    // simulated train so the CALLRESULT goes out first.
+    // §6.19-style contract: response is empty/immediate; the effect defers
+    // the simulated train so the CALLRESULT goes out first.
     const startAt = Number.isNaN(retrieveDate.getTime())
       ? new Date()
       : retrieveDate;
-    queueMicrotask(() =>
-      context.chargePoint.simulateSignedFirmwareUpdate(
-        startAt,
-        payload.requestId,
-      ),
-    );
-
-    return { status: "Accepted" };
+    const response = { status: "Accepted" } as const;
+    const outcome: HandlerOutcome = {
+      kind: "handler-outcome",
+      payload: response,
+      afterResponseSettled: () =>
+        context.chargePoint.simulateSignedFirmwareUpdate(
+          startAt,
+          payload.requestId,
+        ),
+    };
+    return outcome;
   }
 }

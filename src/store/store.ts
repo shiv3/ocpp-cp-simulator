@@ -1,5 +1,6 @@
 import { atomWithStorage } from "jotai/utils";
 import { BootNotification } from "../cp/domain/types/OcppTypes";
+import type { NetworkSimLayerConfig } from "../cp/infrastructure/transport/network-sim/config";
 
 export interface Config {
   wsURL: string;
@@ -35,7 +36,21 @@ interface ExperimentalChargePoint {
   ConnectorNumber: number;
 }
 
+export interface NetworkSimStore {
+  version: 1;
+  global: NetworkSimLayerConfig | null;
+  perCp: Record<string, NetworkSimLayerConfig>;
+}
+
 const key = "config";
 export const configAtom = atomWithStorage<Config | null>(key, null, undefined, {
   getOnInit: true,
 });
+
+export const NETWORK_SIM_STORAGE_KEY = "networkSim";
+export const networkSimAtom = atomWithStorage<NetworkSimStore>(
+  NETWORK_SIM_STORAGE_KEY,
+  { version: 1, global: null, perCp: {} },
+  undefined,
+  { getOnInit: true },
+);

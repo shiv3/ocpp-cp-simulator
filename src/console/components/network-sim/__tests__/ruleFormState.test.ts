@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   type LayerFormState,
+  type CpLayerFormState,
   emptyLayerForm,
   layerConfigToForm,
   formToLayerConfig,
+  cpLayerToForm,
+  formToCpLayer,
 } from "../ruleFormState";
 import type {
   NetworkSimLayerConfig,
@@ -569,6 +572,299 @@ describe("ruleFormState", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.config).toEqual(config);
+      }
+    });
+  });
+});
+
+describe("Per-CP layer form state (cpLayerToForm, formToCpLayer)", () => {
+  describe("cpLayerToForm", () => {
+    it("classifies inherited rules (in global, not in per-CP)", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+
+      const form = cpLayerToForm(null, inheritedRules);
+
+      expect(form.enabled).toBeUndefined();
+      expect(form.rules).toHaveLength(1);
+      expect(form.rules[0].id).toBe("g-latency");
+      expect(form.rules[0].classification).toBe("inherited");
+    });
+
+    it("classifies overridden rules (in both, non-null)", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "g-latency": {
+            type: "latency",
+            delayMs: 200,
+          } as LatencyRule,
+        },
+      };
+
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+
+      expect(form.rules).toHaveLength(1);
+      expect(form.rules[0].classification).toBe("overridden");
+      expect(form.rules[0].delayMs).toBe(200);
+    });
+
+    it("classifies disabled-inherited rules (null tombstone in per-CP)", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "g-latency": null,
+        },
+      };
+
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+
+      expect(form.rules).toHaveLength(1);
+      expect(form.rules[0].classification).toBe("disabled-inherited");
+    });
+
+    it("classifies local rules (in per-CP only)", () => {
+      const inheritedRules: Record<string, LatencyRule> = {};
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "local-rule": {
+            type: "latency",
+            delayMs: 50,
+          } as LatencyRule,
+        },
+      };
+
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+
+      expect(form.rules).toHaveLength(1);
+      expect(form.rules[0].id).toBe("local-rule");
+      expect(form.rules[0].classification).toBe("local");
+    });
+
+    it("tri-state enabled: undefined (inherit)", () => {
+      const form = cpLayerToForm(null, {});
+      expect(form.enabled).toBeUndefined();
+    });
+
+    it("tri-state enabled: true (on)", () => {
+      const perCpLayer: NetworkSimLayerConfig = {
+        enabled: true,
+        rules: {},
+      };
+      const form = cpLayerToForm(perCpLayer, {});
+      expect(form.enabled).toBe(true);
+    });
+
+    it("includes mixed classifications in output", () => {
+      const baseInheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "g-latency": {
+            type: "latency",
+            delayMs: 200,
+          } as LatencyRule,
+          "local-rule": {
+            type: "latency",
+            delayMs: 50,
+          } as LatencyRule,
+        },
+      };
+      const form = cpLayerToForm(perCpLayer, baseInheritedRules);
+
+      expect(form.rules).toHaveLength(2);
+      const overridden = form.rules.find((r) => r.id === "g-latency");
+      const local = form.rules.find((r) => r.id === "local-rule");
+
+      expect(overridden?.classification).toBe("overridden");
+      expect(local?.classification).toBe("local");
+    });
+
+    it("tri-state enabled: false (off)", () => {
+      const perCpLayer: NetworkSimLayerConfig = {
+        enabled: false,
+        rules: {},
+      };
+      const form = cpLayerToForm(perCpLayer, {});
+      expect(form.enabled).toBe(false);
+    });
+
+    it("drops a tombstone whose inherited rule no longer exists (spec §3 no-op)", () => {
+      // The global layer dropped "gone-from-global" after the CP disabled it.
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: { "gone-from-global": null },
+      };
+      const form = cpLayerToForm(perCpLayer, {});
+      expect(form.rules).toHaveLength(0);
+    });
+  });
+
+  describe("formToCpLayer", () => {
+    it("returns null config when no editable changes and enabled undefined", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const form = cpLayerToForm(null, inheritedRules);
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.config).toBeNull();
+      }
+    });
+
+    it("includes overridden rules in output", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "g-latency": {
+            type: "latency",
+            delayMs: 200,
+          } as LatencyRule,
+        },
+      };
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const config = result.config;
+        expect(config).not.toBeNull();
+        expect(config!.rules["g-latency"]).toEqual({
+          type: "latency",
+          delayMs: 200,
+        });
+      }
+    });
+
+    it("includes disabled (null tombstone) rules in output", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "g-latency": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "g-latency": null,
+        },
+      };
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const config = result.config;
+        expect(config).not.toBeNull();
+        expect(config!.rules["g-latency"]).toBeNull();
+      }
+    });
+
+    it("includes local rules in output", () => {
+      const inheritedRules: Record<string, LatencyRule> = {};
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "local-rule": {
+            type: "latency",
+            delayMs: 50,
+          } as LatencyRule,
+        },
+      };
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const config = result.config;
+        expect(config).not.toBeNull();
+        expect(config!.rules["local-rule"]).toEqual({
+          type: "latency",
+          delayMs: 50,
+        });
+      }
+    });
+
+    it("validates only editable (overridden/local) rules", () => {
+      const form: CpLayerFormState = {
+        enabled: undefined,
+        seed: "1",
+        rules: [
+          {
+            id: "g-latency",
+            type: "latency",
+            delayMs: -1, // invalid
+            classification: "inherited",
+          },
+        ],
+      };
+
+      const result = formToCpLayer(form);
+
+      // Inherited rule should not be validated
+      expect(result.ok).toBe(true);
+    });
+
+    it("rejects invalid editable rule", () => {
+      const form: CpLayerFormState = {
+        enabled: undefined,
+        seed: "1",
+        rules: [
+          {
+            id: "local-rule",
+            type: "latency",
+            delayMs: -1, // invalid
+            classification: "local",
+          },
+        ],
+      };
+
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors["rules.0.delayMs"]).toBeDefined();
+      }
+    });
+
+    it("supports tri-state enabled in output config", () => {
+      const form: CpLayerFormState = {
+        enabled: true,
+        seed: "1",
+        rules: [],
+      };
+
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.config).not.toBeNull();
+        expect(result.config!.enabled).toBe(true);
       }
     });
   });

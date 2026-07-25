@@ -3,89 +3,202 @@ import { Plus, Trash2 } from "lucide-react";
 
 import {
   type NetworkSimLayerConfig,
+  type NetworkSimRule,
   NETWORK_SIM_LIMITS,
 } from "../../../cp/infrastructure/transport/network-sim/config";
 import {
   type RuleFormEntry,
   type LayerFormState,
+  type CpLayerFormState,
+  type CpRuleFormEntry,
   layerConfigToForm,
   formToLayerConfig,
+  cpLayerToForm,
+  formToCpLayer,
 } from "./ruleFormState";
 
-interface NetworkSimEditorProps {
-  value: NetworkSimLayerConfig | null;
-  onSave: (config: NetworkSimLayerConfig | null) => Promise<void>;
-  mode: "global"; // Extensible for Task 24: "global" | "cp"
-}
+type NetworkSimEditorProps =
+  | {
+      mode: "global";
+      value: NetworkSimLayerConfig | null;
+      onSave: (config: NetworkSimLayerConfig | null) => Promise<void>;
+    }
+  | {
+      mode: "cp";
+      value: NetworkSimLayerConfig | null;
+      inheritedRules: Record<string, NetworkSimRule>;
+      inheritedEnabled: boolean;
+      onSave: (config: NetworkSimLayerConfig | null) => Promise<void>;
+      onDeleteOverride: () => Promise<void>;
+    };
 
-export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = ({
-  value,
-  onSave,
-  mode: _mode,
-}) => {
-  const [form, setForm] = useState<LayerFormState>(() =>
-    layerConfigToForm(value),
-  );
+export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
+  const isGlobalMode = props.mode === "global";
+
+  const [globalForm, setGlobalForm] = useState<LayerFormState | null>(null);
+  const [cpForm, setCpForm] = useState<CpLayerFormState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isDeletingOverride, setIsDeletingOverride] = useState(false);
+
+  // Initialize form based on mode
+  React.useEffect(() => {
+    if (isGlobalMode) {
+      setGlobalForm(layerConfigToForm(props.value));
+    } else if ("inheritedRules" in props) {
+      setCpForm(cpLayerToForm(props.value, props.inheritedRules));
+    }
+  }, [props, isGlobalMode]);
 
   const handleSave = async () => {
-    const result = formToLayerConfig(form);
-    if (!result.ok) {
-      setErrors(result.errors);
+    if (isGlobalMode && globalForm) {
+      const result = formToLayerConfig(globalForm);
+      if (!result.ok) {
+        setErrors(result.errors);
+        return;
+      }
+
+      setErrors({});
+      setIsSaving(true);
+      setSaveError(null);
+      try {
+        await props.onSave(result.config);
+      } catch (error) {
+        setSaveError(
+          error instanceof Error
+            ? error.message
+            : "Failed to save configuration",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    } else if (!isGlobalMode && cpForm && props.mode === "cp") {
+      const result = formToCpLayer(cpForm);
+      if (!result.ok) {
+        setErrors(result.errors);
+        return;
+      }
+
+      setErrors({});
+      setIsSaving(true);
+      setSaveError(null);
+      try {
+        await props.onSave(result.config);
+      } catch (error) {
+        setSaveError(
+          error instanceof Error
+            ? error.message
+            : "Failed to save configuration",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    }
+  };
+
+  const handleDeleteOverride = async () => {
+    if (props.mode !== "cp") {
       return;
     }
-
-    setErrors({});
-    setIsSaving(true);
+    setIsDeletingOverride(true);
     setSaveError(null);
     try {
-      await onSave(result.config);
+      await props.onDeleteOverride();
     } catch (error) {
       setSaveError(
-        error instanceof Error ? error.message : "Failed to save configuration",
+        error instanceof Error ? error.message : "Failed to delete override",
       );
     } finally {
-      setIsSaving(false);
+      setIsDeletingOverride(false);
     }
   };
 
   const addRule = () => {
-    const newRule: RuleFormEntry = {
-      id: `rule-${Date.now()}`,
-      type: "latency",
-      delayMs: 0,
-    };
-    setForm((prev) => ({
-      ...prev,
-      rules: [...prev.rules, newRule],
-    }));
+    if (isGlobalMode && globalForm) {
+      const newRule: RuleFormEntry = {
+        id: `rule-${Date.now()}`,
+        type: "latency",
+        delayMs: 0,
+      };
+      setGlobalForm((prev) => ({
+        ...prev!,
+        rules: [...prev!.rules, newRule],
+      }));
+    } else if (!isGlobalMode && cpForm) {
+      const newRule: CpRuleFormEntry = {
+        id: `rule-${Date.now()}`,
+        type: "latency",
+        delayMs: 0,
+        classification: "local",
+      };
+      setCpForm((prev) => ({
+        ...prev!,
+        rules: [...prev!.rules, newRule],
+      }));
+    }
   };
 
   const removeRule = (index: number) => {
-    setForm((prev) => ({
-      ...prev,
-      rules: prev.rules.filter((_, i) => i !== index),
-    }));
+    if (isGlobalMode && globalForm) {
+      setGlobalForm((prev) => ({
+        ...prev!,
+        rules: prev!.rules.filter((_, i) => i !== index),
+      }));
+    } else if (!isGlobalMode && cpForm) {
+      setCpForm((prev) => ({
+        ...prev!,
+        rules: prev!.rules.filter((_, i) => i !== index),
+      }));
+    }
   };
 
-  const updateRule = (index: number, updates: Partial<RuleFormEntry>) => {
-    setForm((prev) => ({
-      ...prev,
-      rules: prev.rules.map((r, i) => (i === index ? { ...r, ...updates } : r)),
-    }));
+  const updateRule = (
+    index: number,
+    updates: Partial<RuleFormEntry | CpRuleFormEntry>,
+  ) => {
+    if (isGlobalMode && globalForm) {
+      setGlobalForm((prev) => ({
+        ...prev!,
+        rules: prev!.rules.map((r, i) =>
+          i === index ? { ...r, ...updates } : r,
+        ),
+      }));
+    } else if (!isGlobalMode && cpForm) {
+      setCpForm((prev) => ({
+        ...prev!,
+        rules: prev!.rules.map((r, i) =>
+          i === index ? { ...r, ...updates } : r,
+        ),
+      }));
+    }
   };
 
   const updateSeed = (seedStr: string) => {
-    setForm((prev) => ({ ...prev, seed: seedStr }));
+    if (isGlobalMode && globalForm) {
+      setGlobalForm((prev) => ({ ...prev!, seed: seedStr }));
+    } else if (!isGlobalMode && cpForm) {
+      setCpForm((prev) => ({ ...prev!, seed: seedStr }));
+    }
   };
 
-  const updateEnabled = (enabled: boolean) => {
-    setForm((prev) => ({ ...prev, enabled }));
+  const updateEnabled = (enabled: boolean | undefined) => {
+    if (isGlobalMode && globalForm) {
+      setGlobalForm((prev) => ({ ...prev!, enabled: enabled ?? false }));
+    } else if (!isGlobalMode && cpForm) {
+      setCpForm((prev) => ({ ...prev!, enabled }));
+    }
   };
 
   const hasError = Object.keys(errors).length > 0;
+  const form = isGlobalMode ? globalForm : cpForm;
+  const rules = form?.rules ?? [];
+
+  if (!form) {
+    return (
+      <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -98,64 +211,71 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = ({
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="network-sim-enabled"
-              checked={form.enabled}
-              onChange={(e) => updateEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+          {isGlobalMode ? (
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="network-sim-enabled"
+                checked={form.enabled}
+                onChange={(e) => updateEnabled(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <label
+                htmlFor="network-sim-enabled"
+                className="text-sm font-medium text-gray-700 dark:text-gray-200"
+              >
+                Enable network simulation
+              </label>
+            </div>
+          ) : (
+            <TriStateEnabledControl
+              enabled={form.enabled}
+              inheritedEnabled={props.inheritedEnabled}
+              onChange={updateEnabled}
             />
-            <label
-              htmlFor="network-sim-enabled"
-              className="text-sm font-medium text-gray-700 dark:text-gray-200"
-            >
-              Enable network simulation
-            </label>
-          </div>
+          )}
 
-          <div>
-            <label
-              htmlFor="network-sim-seed"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-200"
-            >
-              Seed
-            </label>
-            <input
-              id="network-sim-seed"
-              type="text"
-              value={form.seed}
-              onChange={(e) => updateSeed(e.target.value)}
-              placeholder="1"
-              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm placeholder-gray-400 transition ${
-                errors["seed"]
-                  ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                  : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
-              }`}
-            />
-            {errors["seed"] && (
-              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                {errors["seed"]}
-              </p>
-            )}
-          </div>
+          {isGlobalMode && (
+            <div>
+              <label
+                htmlFor="network-sim-seed"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-200"
+              >
+                Seed
+              </label>
+              <input
+                id="network-sim-seed"
+                type="text"
+                value={form.seed}
+                onChange={(e) => updateSeed(e.target.value)}
+                placeholder="1"
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm placeholder-gray-400 transition ${
+                  errors["seed"]
+                    ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
+                    : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+                }`}
+              />
+              {errors["seed"] && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {errors["seed"]}
+                </p>
+              )}
+            </div>
+          )}
 
           <div>
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Rules ({form.rules.length}/{NETWORK_SIM_LIMITS.maxRulesPerLayer}
-                )
+                Rules ({rules.length}/{NETWORK_SIM_LIMITS.maxRulesPerLayer})
               </h3>
               <button
                 type="button"
                 onClick={addRule}
-                disabled={
-                  form.rules.length >= NETWORK_SIM_LIMITS.maxRulesPerLayer
-                }
+                disabled={rules.length >= NETWORK_SIM_LIMITS.maxRulesPerLayer}
                 className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed dark:hover:bg-blue-700"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Add Rule
+                {isGlobalMode ? "Add Rule" : "Add Local Rule"}
               </button>
             </div>
 
@@ -166,7 +286,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = ({
             )}
 
             <div className="space-y-3">
-              {form.rules.map((rule, index) => (
+              {rules.map((rule, index) => (
                 <RuleEditor
                   key={`${rule.id}-${index}`}
                   rule={rule}
@@ -200,6 +320,64 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = ({
         >
           {isSaving ? "Saving…" : "Save"}
         </button>
+        {!isGlobalMode && (
+          <button
+            type="button"
+            onClick={handleDeleteOverride}
+            disabled={isDeletingOverride || isSaving}
+            className="inline-flex items-center gap-2 rounded-md border border-red-600 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:border-gray-400 disabled:text-gray-400 disabled:cursor-not-allowed dark:border-red-500 dark:text-red-400 dark:hover:bg-red-950"
+          >
+            {isDeletingOverride ? "Deleting…" : "Delete per-CP override"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+interface TriStateEnabledControlProps {
+  enabled: boolean | undefined;
+  inheritedEnabled: boolean;
+  onChange: (enabled: boolean | undefined) => void;
+}
+
+const TriStateEnabledControl: React.FC<TriStateEnabledControlProps> = ({
+  enabled,
+  inheritedEnabled,
+  onChange,
+}) => {
+  const options: Array<{
+    label: string;
+    value: boolean | undefined;
+  }> = [
+    {
+      label: `Inherit (${inheritedEnabled ? "on" : "off"})`,
+      value: undefined,
+    },
+    { label: "On", value: true },
+    { label: "Off", value: false },
+  ];
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+        Enable network simulation
+      </label>
+      <div className="flex gap-2">
+        {options.map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              enabled === option.value
+                ? "bg-blue-600 text-white hover:bg-blue-700"
+                : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
       </div>
     </div>
   );

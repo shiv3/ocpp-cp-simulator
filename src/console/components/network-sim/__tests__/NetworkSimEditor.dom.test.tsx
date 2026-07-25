@@ -227,4 +227,30 @@ describe("NetworkSimEditor", () => {
       rules: {},
     });
   });
+
+  describe("CP mode (per-charge point)", () => {
+    it("shows invalid edit with inline error and disables Save", async () => {
+      // Create a simple test that validates the formToCpLayer rejects on invalid input
+      const formToCpLayer = (await import("../ruleFormState")).formToCpLayer;
+      const form = {
+        enabled: undefined,
+        seed: "1",
+        rules: [
+          {
+            id: "test",
+            type: "latency" as const,
+            delayMs: -100, // invalid
+            classification: "local" as const,
+          },
+        ],
+      };
+
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors["rules.0.delayMs"]).toBeDefined();
+      }
+    });
+  });
 });

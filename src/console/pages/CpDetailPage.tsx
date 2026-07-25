@@ -21,6 +21,7 @@ import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
 import type { ChargePointSnapshot } from "@/data/interfaces/ChargePointService";
 import type { WireSimulatorConfig } from "@/protocol";
+import type { NetworkSimLayerConfig } from "@/cp/infrastructure/transport/network-sim/config";
 import type { ChargePoint } from "@/cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
@@ -33,6 +34,7 @@ import ConfigTab from "./cp/ConfigTab";
 import CpTabs from "./cp/CpTabs";
 import TransactionsTab from "./cp/TransactionsTab";
 import { useCpConfigActions } from "./dashboard/useCpConfigActions";
+import { NetworkSimEditor } from "../components/network-sim/NetworkSimEditor";
 
 const StateTransitionViewer = lazy(
   () => import("@/components/state-transition/StateTransitionViewer"),
@@ -149,6 +151,15 @@ const CpDetailPage: React.FC = () => {
   const [isConnectPending, setIsConnectPending] = useState(false);
   const [diagnosticsConnectorOverride, setDiagnosticsConnectorOverride] =
     useState<number | null>(null);
+  const [networkSimGlobalConfig, setNetworkSimGlobalConfig] = useState<
+    NetworkSimLayerConfig | null | undefined
+  >();
+  const [networkSimCpConfig, setNetworkSimCpConfig] = useState<
+    NetworkSimLayerConfig | null | undefined
+  >();
+  const [networkSimLoadError, setNetworkSimLoadError] = useState<string | null>(
+    null,
+  );
 
   const refreshSnapshot = useCallback(() => {
     if (!cpId) {
@@ -163,9 +174,35 @@ const CpDetailPage: React.FC = () => {
       });
   }, [cpId, chargePointService]);
 
+  const refreshNetworkSim = useCallback(() => {
+    if (!cpId) {
+      setNetworkSimGlobalConfig(undefined);
+      setNetworkSimCpConfig(undefined);
+      return;
+    }
+    setNetworkSimLoadError(null);
+    Promise.all([
+      chargePointService.getNetworkSimGlobal(),
+      chargePointService.getNetworkSimCp(cpId),
+    ])
+      .then(([global, cp]) => {
+        setNetworkSimGlobalConfig(global);
+        setNetworkSimCpConfig(cp.config);
+      })
+      .catch((err) => {
+        console.error(`Failed to fetch network sim config for ${cpId}`, err);
+        setNetworkSimLoadError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load network simulation config",
+        );
+      });
+  }, [cpId, chargePointService]);
+
   useEffect(() => {
     refreshSnapshot();
-  }, [refreshSnapshot]);
+    refreshNetworkSim();
+  }, [refreshSnapshot, refreshNetworkSim]);
 
   const connectorList = useMemo(
     () => Array.from(view.connectors.values()).sort((a, b) => a.id - b.id),
@@ -381,6 +418,71 @@ const CpDetailPage: React.FC = () => {
           )}
         </TabsContent>
       </CpTabs>
+
+      {snapshot?.networkSim !== null &&
+        networkSimGlobalConfig !== undefined && (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Network Simulation
+            </h2>
+            {networkSimLoadError && (
+              <div className="mb-4 rounded-md border border-red-500 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500 dark:bg-red-950 dark:text-red-400">
+                {networkSimLoadError}
+              </div>
+            )}
+            {networkSimGlobalConfig !== null && (
+              <NetworkSimEditor
+                mode="cp"
+                value={networkSimCpConfig ?? null}
+                inheritedRules={(() => {
+                  const filtered: Record<
+                    string,
+                    (typeof networkSimGlobalConfig)["rules"][string]
+                  > = {};
+                  for (const [id, rule] of Object.entries(
+                    networkSimGlobalConfig.rules,
+                  )) {
+                    if (rule !== null) {
+                      filtered[id] = rule;
+                    }
+                  }
+                  return filtered as Record<
+                    string,
+                    Exclude<
+                      (typeof networkSimGlobalConfig)["rules"][string],
+                      null
+                    >
+                  >;
+                })()}
+                inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
+                onSave={async (config) => {
+                  try {
+                    await chargePointService.saveNetworkSimCp(cpId, config);
+                    await refreshNetworkSim();
+                  } catch (err) {
+                    console.error(
+                      `Failed to save network sim config for ${cpId}`,
+                      err,
+                    );
+                    throw err;
+                  }
+                }}
+                onDeleteOverride={async () => {
+                  try {
+                    await chargePointService.saveNetworkSimCp(cpId, null);
+                    await refreshNetworkSim();
+                  } catch (err) {
+                    console.error(
+                      `Failed to delete network sim override for ${cpId}`,
+                      err,
+                    );
+                    throw err;
+                  }
+                }}
+              />
+            )}
+          </div>
+        )}
 
       <ChargePointConfigModal
         isOpen={isEditOpen}

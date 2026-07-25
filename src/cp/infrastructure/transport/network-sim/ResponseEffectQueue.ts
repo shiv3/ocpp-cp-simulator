@@ -14,7 +14,9 @@ export type HandlerResult = unknown | HandlerOutcome;
  */
 export function isHandlerOutcome(r: HandlerResult): r is HandlerOutcome {
   return (
-    r != null && typeof r === "object" && (r as any).kind === "handler-outcome"
+    r != null &&
+    typeof r === "object" &&
+    (r as { kind?: unknown }).kind === "handler-outcome"
   );
 }
 

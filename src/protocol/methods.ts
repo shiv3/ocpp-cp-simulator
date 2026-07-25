@@ -95,6 +95,7 @@ export const METHODS = {
   // -- lifecycle --
   connect: { params: EMPTY, result: ANY },
   disconnect: { params: EMPTY, result: ANY },
+  reset: { params: EMPTY, result: ANY },
   status: { params: EMPTY, result: statusWireSchema },
   heartbeat: { params: EMPTY, result: ANY },
   start_heartbeat: {
@@ -270,6 +271,28 @@ export const METHODS = {
     result: ANY,
   },
 
+  // -- network simulation --
+  "network_sim.global.get": { params: EMPTY, result: ANY },
+  "network_sim.global.save": {
+    params: z.object({ config: boundedObject(OBJ_MAX_BYTES).nullable() }),
+    result: ANY,
+  },
+  "network_sim.cp.get": {
+    params: z.object({ cpId: STR_64K }),
+    result: ANY,
+  },
+  "network_sim.cp.save": {
+    params: z.object({
+      cpId: STR_64K,
+      config: boundedObject(OBJ_MAX_BYTES).nullable(),
+    }),
+    result: ANY,
+  },
+  "network_sim.disconnect.trigger": {
+    params: z.object({ cpId: STR_64K, ruleId: STR_64K }),
+    result: ANY,
+  },
+
   // -- explicit non-jsonMode ops (~10) --
   "cp.list": { params: EMPTY, result: ARRAY_1000(cpListItemSchema) },
   "cp.create": { params: createParamsSchema, result: ANY },
@@ -380,4 +403,9 @@ export const EXPLICIT_METHODS = [
   "server.shutdown",
   "events.subscribe",
   "events.unsubscribe",
+  "network_sim.global.get",
+  "network_sim.global.save",
+  "network_sim.cp.get",
+  "network_sim.cp.save",
+  "network_sim.disconnect.trigger",
 ] as const;

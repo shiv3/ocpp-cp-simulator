@@ -168,9 +168,9 @@ export class OCPPWebSocket {
     const controllerHost: ControllerHost = {
       writeUpstream: (raw: string) => this.writeUpstreamPhysical(raw),
       dispatchDownstream: (raw: string) => this.dispatchIncoming(raw),
-      requestSimulatedDisconnect: (reconnectDelayMs: number) =>
-        this.simulateConnectionLoss(reconnectDelayMs),
-      log: (message: string) => this._logger.info(message, LogType.WEBSOCKET),
+      requestSimulatedDisconnect: (reconnectDelayMs: number, ruleId: string) =>
+        this.simulateConnectionLoss(reconnectDelayMs, ruleId),
+      log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
     };
     this._controller = new NetworkSimController(controllerHost, chargePointId);
   }
@@ -495,7 +495,10 @@ export class OCPPWebSocket {
    * FIRST installs the reservation, THEN runs the close transaction,
    * THEN closes the socket WITHOUT setting _isManualDisconnect (so auto-reconnect runs).
    */
-  public simulateConnectionLoss(reconnectDelayMs: number): void {
+  public simulateConnectionLoss(
+    reconnectDelayMs: number,
+    _ruleId: string = "",
+  ): void {
     if (this._disposed) {
       return;
     }

@@ -1,4 +1,4 @@
-import { evaluateDelayMs } from "./LatencyPolicy";
+import { evaluateDelayMsWithLogging } from "./LatencyPolicy";
 import {
   NetworkSimPipeline,
   type CloseCause,
@@ -6,6 +6,7 @@ import {
 } from "./NetworkSimPipeline";
 import { parseFrameContext } from "./FrameContext";
 import { draw, makeRuleRng } from "./SeededRng";
+import { sanitizeForLog } from "./logSanitize";
 import {
   MAX_TIMER_MS,
   type PeriodicDisconnectRule,
@@ -88,11 +89,25 @@ export class NetworkSimController {
       return this.upstreamPipeline.enqueue(raw, 0, onSettled);
     }
 
-    const delayMs = evaluateDelayMs(
-      parseFrameContext(raw, "upstream"),
+    const frameContext = parseFrameContext(raw, "upstream");
+    const { delayMs, matchedRules } = evaluateDelayMsWithLogging(
+      frameContext,
       this.resolved.rules,
       (ruleId) => this.rngFor(ruleId),
     );
+
+    // Log each matched latency rule
+    for (const { ruleId, delayMs: ruleDelay } of matchedRules) {
+      if (ruleDelay > 0) {
+        const sanitizedRuleId = sanitizeForLog(ruleId);
+        const sanitizedAction = sanitizeForLog(frameContext.action ?? "");
+        const sanitizedMessageId = sanitizeForLog(frameContext.messageId ?? "");
+        this.host.log(
+          `[RULE:${sanitizedRuleId}] LATENCY +${ruleDelay}ms → ${sanitizedAction} (${sanitizedMessageId})`,
+        );
+      }
+    }
+
     return this.upstreamPipeline.enqueue(raw, delayMs, onSettled);
   }
 
@@ -113,11 +128,25 @@ export class NetworkSimController {
       return;
     }
 
-    const delayMs = evaluateDelayMs(
-      parseFrameContext(raw, "downstream"),
+    const frameContext = parseFrameContext(raw, "downstream");
+    const { delayMs, matchedRules } = evaluateDelayMsWithLogging(
+      frameContext,
       this.resolved.rules,
       (ruleId) => this.rngFor(ruleId),
     );
+
+    // Log each matched latency rule
+    for (const { ruleId, delayMs: ruleDelay } of matchedRules) {
+      if (ruleDelay > 0) {
+        const sanitizedRuleId = sanitizeForLog(ruleId);
+        const sanitizedAction = sanitizeForLog(frameContext.action ?? "");
+        const sanitizedMessageId = sanitizeForLog(frameContext.messageId ?? "");
+        this.host.log(
+          `[RULE:${sanitizedRuleId}] LATENCY +${ruleDelay}ms → ${sanitizedAction} (${sanitizedMessageId})`,
+        );
+      }
+    }
+
     if (!this.downstreamPipeline.enqueue(raw, delayMs)) {
       this.host.log(
         `Network simulation discarded downstream frame for ${this.chargePointId}: queue_overflow`,
@@ -165,6 +194,10 @@ export class NetworkSimController {
 
     if (!this.disconnectRequestedThisSession) {
       this.disconnectRequestedThisSession = true;
+      const sanitizedRuleId = sanitizeForLog(ruleId);
+      this.host.log(
+        `[RULE:${sanitizedRuleId}] DISCONNECT forced; reconnect blocked ${rule.reconnectDelayMs}ms`,
+      );
       this.host.requestSimulatedDisconnect(rule.reconnectDelayMs, ruleId);
     }
     return { ok: true };
@@ -282,6 +315,10 @@ export class NetworkSimController {
       }
 
       this.disconnectRequestedThisSession = true;
+      const sanitizedRuleId = sanitizeForLog(ruleId);
+      this.host.log(
+        `[RULE:${sanitizedRuleId}] DISCONNECT forced; reconnect blocked ${timer.rule.reconnectDelayMs}ms`,
+      );
       this.host.requestSimulatedDisconnect(timer.rule.reconnectDelayMs, ruleId);
     }
   }

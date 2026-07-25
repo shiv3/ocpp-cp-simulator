@@ -533,8 +533,12 @@ describe("NetworkSimController", () => {
       closeCause: "simulated",
     });
 
-    expect(host.log).toHaveBeenCalledOnce();
-    expect(host.log.mock.calls[0]?.[0]).toContain("socket_closed");
+    // Expects 2 calls: one for latency log, one for shutdown discard log
+    expect(host.log).toHaveBeenCalledTimes(2);
+    // First call is latency log (delay > 0)
+    expect(host.log.mock.calls[0]?.[0]).toContain("LATENCY");
+    // Second call is shutdown discard log
+    expect(host.log.mock.calls[1]?.[0]).toContain("socket_closed");
   });
 
   it("logs a downstream frame discarded by queue overflow", () => {
@@ -555,8 +559,11 @@ describe("NetworkSimController", () => {
     }
 
     expect(host.dispatchDownstream).not.toHaveBeenCalled();
-    expect(host.log).toHaveBeenCalledOnce();
-    expect(host.log).toHaveBeenCalledWith(
+    // Loop runs 513 times (0 to 512 inclusive), each produces a latency log,
+    // plus the 513th call also produces a queue_overflow log = 514 total
+    expect(host.log).toHaveBeenCalledTimes(PIPELINE_BUDGET.maxFrames + 2);
+    // Check that the last call is the queue_overflow message
+    expect(host.log.mock.calls[PIPELINE_BUDGET.maxFrames + 1]?.[0]).toContain(
       "Network simulation discarded downstream frame for CP-001: queue_overflow",
     );
   });

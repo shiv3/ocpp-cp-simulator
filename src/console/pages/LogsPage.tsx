@@ -29,6 +29,7 @@ const LOG_TYPE_CLASS: Record<LogType, string> = {
   [LogType.SCENARIO]: "log-general",
   [LogType.GENERAL]: "log-general",
   [LogType.SYSTEM]: "log-general",
+  [LogType.NETWORK_SIM]: "log-network-sim",
 };
 
 const LOG_LEVEL_CLASS: Record<LogLevel, string> = {

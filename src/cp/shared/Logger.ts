@@ -17,6 +17,7 @@ export enum LogType {
   SCENARIO = "Scenario",
   GENERAL = "General",
   SYSTEM = "System",
+  NETWORK_SIM = "NetworkSim",
 }
 
 export interface LogEntry {

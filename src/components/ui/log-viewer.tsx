@@ -251,6 +251,8 @@ export function LogViewer({
         return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300";
       case LogType.SCENARIO:
         return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300";
+      case LogType.NETWORK_SIM:
+        return "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-300";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300";
     }

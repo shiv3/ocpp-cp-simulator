@@ -227,6 +227,10 @@
     @apply bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200;
   }
 
+  .log-network-sim {
+    @apply bg-violet-100 dark:bg-violet-900 text-violet-800 dark:text-violet-200;
+  }
+
   .log-general {
     @apply bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200;
   }

@@ -140,8 +140,10 @@ export class ChargePoint {
   // Network simulation summary: { enabled, manualRuleIds } when a config has
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
-  private _networkSimSummary: { enabled: boolean; manualRuleIds: string[] } | null =
-    null;
+  private _networkSimSummary: {
+    enabled: boolean;
+    manualRuleIds: string[];
+  } | null = null;
 
   constructor(
     private readonly _id: string,
@@ -1743,9 +1745,7 @@ export class ChargePoint {
    * Public network-sim forwarding: trigger a manual-disconnect rule.
    * Returns { ok: false; error: "not_connected" } for SOAP or null-socket charge points.
    */
-  triggerNetworkSimDisconnect(
-    ruleId: string,
-  ):
+  triggerNetworkSimDisconnect(ruleId: string):
     | { ok: true }
     | {
         ok: false;

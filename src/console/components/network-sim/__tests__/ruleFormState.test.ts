@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   type LayerFormState,
   type CpLayerFormState,
+  type RuleFormEntry,
   emptyLayerForm,
   layerConfigToForm,
   formToLayerConfig,
   cpLayerToForm,
   formToCpLayer,
 } from "../ruleFormState";
+import { validateLayerConfig } from "../../../../cp/infrastructure/transport/network-sim/config";
 import type {
   NetworkSimLayerConfig,
   LatencyRule,
@@ -925,5 +927,67 @@ describe("Per-CP layer form state (cpLayerToForm, formToCpLayer)", () => {
         expect(errorKey).toBe("rules.1.delayMs");
       }
     });
+  });
+});
+
+describe("form output survives the config validator", () => {
+  // The editor's output goes straight to saveNetworkSimGlobal /
+  // saveNetworkSimCp, which validate before applying. Asserting on the shape
+  // alone missed that optional fields were emitted as explicit `undefined`,
+  // which validateLayerConfig rejects — so a default latency rule could be
+  // built by the form and then refused on save.
+  const row = (over: Partial<RuleFormEntry> = {}): RuleFormEntry => ({
+    id: "r1",
+    type: "latency",
+    delayMs: 100,
+    ...over,
+  });
+
+  it("accepts a latency rule with every optional field left blank", () => {
+    const result = formToLayerConfig({
+      enabled: true,
+      seed: "1",
+      rules: [row()],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(validateLayerConfig(result.config).ok).toBe(true);
+      expect("direction" in result.config.rules["r1"]!).toBe(false);
+      expect("jitterMs" in result.config.rules["r1"]!).toBe(false);
+    }
+  });
+
+  it("accepts a periodic-disconnect rule without jitter", () => {
+    const result = formToLayerConfig({
+      enabled: true,
+      seed: "1",
+      rules: [
+        row({
+          type: "periodic-disconnect",
+          delayMs: undefined,
+          intervalMs: 30000,
+          reconnectDelayMs: 5000,
+        }),
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(validateLayerConfig(result.config).ok).toBe(true);
+    }
+  });
+
+  it("accepts a per-CP layer whose local rule leaves optionals blank", () => {
+    const result = formToCpLayer({
+      enabled: true,
+      seed: "1",
+      rules: [{ ...row(), classification: "local" }],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok && result.config) {
+      expect(validateLayerConfig(result.config).ok).toBe(true);
+    }
   });
 });

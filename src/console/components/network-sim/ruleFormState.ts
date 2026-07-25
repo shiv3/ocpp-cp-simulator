@@ -124,6 +124,53 @@ export function layerConfigToForm(
  * Convert form state to domain config with validation.
  * Reject-only: never partial. Returns keyed field errors on failure.
  */
+/**
+ * Build the domain rule for one form row, omitting every optional field the
+ * user left blank. The key must be absent, not present-and-undefined:
+ * `validateLayerConfig` rejects an explicit `undefined` so that a required
+ * field lost in a JSON round-trip is caught rather than silently dropped.
+ */
+function buildRule(
+  rule: RuleFormEntry | CpRuleFormEntry,
+): NetworkSimRule | null {
+  if (rule.type === "latency") {
+    const actionList = rule.actions
+      ? rule.actions
+          .split(",")
+          .map((a) => a.trim())
+          .filter((a) => a.length > 0)
+      : [];
+
+    const latency: LatencyRule = { type: "latency", delayMs: rule.delayMs! };
+    if (rule.direction !== undefined) latency.direction = rule.direction;
+    if (actionList.length > 0) latency.match = { actions: actionList };
+    if (rule.jitterMs !== undefined) latency.jitterMs = rule.jitterMs;
+    return latency;
+  }
+
+  if (rule.type === "manual-disconnect") {
+    const manual: ManualDisconnectRule = {
+      type: "manual-disconnect",
+      reconnectDelayMs: rule.reconnectDelayMs!,
+    };
+    return manual;
+  }
+
+  if (rule.type === "periodic-disconnect") {
+    const periodic: PeriodicDisconnectRule = {
+      type: "periodic-disconnect",
+      intervalMs: rule.intervalMs!,
+      reconnectDelayMs: rule.reconnectDelayMs!,
+    };
+    if (rule.intervalJitterMs !== undefined) {
+      periodic.intervalJitterMs = rule.intervalJitterMs;
+    }
+    return periodic;
+  }
+
+  return null;
+}
+
 export function formToLayerConfig(
   form: LayerFormState,
 ):
@@ -271,34 +318,8 @@ export function formToLayerConfig(
   const rules: Record<string, NetworkSimRule | null> = {};
 
   for (const rule of form.rules) {
-    if (rule.type === "latency") {
-      const actionList = rule.actions
-        ? rule.actions
-            .split(",")
-            .map((a) => a.trim())
-            .filter((a) => a.length > 0)
-        : [];
-
-      rules[rule.id] = {
-        type: "latency",
-        direction: rule.direction,
-        match: actionList.length > 0 ? { actions: actionList } : undefined,
-        delayMs: rule.delayMs!,
-        jitterMs: rule.jitterMs,
-      };
-    } else if (rule.type === "manual-disconnect") {
-      rules[rule.id] = {
-        type: "manual-disconnect",
-        reconnectDelayMs: rule.reconnectDelayMs!,
-      };
-    } else if (rule.type === "periodic-disconnect") {
-      rules[rule.id] = {
-        type: "periodic-disconnect",
-        intervalMs: rule.intervalMs!,
-        intervalJitterMs: rule.intervalJitterMs,
-        reconnectDelayMs: rule.reconnectDelayMs!,
-      };
-    }
+    const built = buildRule(rule);
+    if (built) rules[rule.id] = built;
   }
 
   const config: NetworkSimLayerConfig = {
@@ -557,34 +578,8 @@ export function formToCpLayer(
     // In this form, deleted rules are simply not included in editable rules
     // Tombstones are managed by keeping null entries in perCpLayer
 
-    if (rule.type === "latency") {
-      const actionList = rule.actions
-        ? rule.actions
-            .split(",")
-            .map((a) => a.trim())
-            .filter((a) => a.length > 0)
-        : [];
-
-      rules[rule.id] = {
-        type: "latency",
-        direction: rule.direction,
-        match: actionList.length > 0 ? { actions: actionList } : undefined,
-        delayMs: rule.delayMs!,
-        jitterMs: rule.jitterMs,
-      };
-    } else if (rule.type === "manual-disconnect") {
-      rules[rule.id] = {
-        type: "manual-disconnect",
-        reconnectDelayMs: rule.reconnectDelayMs!,
-      };
-    } else if (rule.type === "periodic-disconnect") {
-      rules[rule.id] = {
-        type: "periodic-disconnect",
-        intervalMs: rule.intervalMs!,
-        intervalJitterMs: rule.intervalJitterMs,
-        reconnectDelayMs: rule.reconnectDelayMs!,
-      };
-    }
+    const built = buildRule(rule);
+    if (built) rules[rule.id] = built;
   }
 
   // Add tombstones for disabled entries

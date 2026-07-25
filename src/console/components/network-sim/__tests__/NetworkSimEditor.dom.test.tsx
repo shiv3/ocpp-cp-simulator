@@ -242,6 +242,57 @@ describe("NetworkSimEditor", () => {
     });
   });
 
+  it("re-enables Save once the invalid field is edited", async () => {
+    // Save is gated on `hasError`. Errors used to be cleared only by a
+    // successful save, so one invalid rule left the button dead with no way
+    // back short of a page reload.
+    const { NetworkSimEditor } = await import("../NetworkSimEditor");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    cleanup = () => unmount(root);
+
+    await act(async () => {
+      root.render(
+        <NetworkSimEditor
+          mode="global"
+          value={{ enabled: true, seed: 1, rules: {} }}
+          onSave={async () => {}}
+        />,
+      );
+    });
+
+    const button = (label: string) =>
+      [...host.querySelectorAll("button")].find((b) =>
+        b.textContent?.includes(label),
+      );
+
+    await act(async () => {
+      button("Add Rule")!.click();
+    });
+
+    // A latency rule with no delay is rejected by formToLayerConfig.
+    const delay = host.querySelector<HTMLInputElement>('input[type="number"]');
+    expect(delay).not.toBeNull();
+    await act(async () => {
+      setInputValue(delay!, "");
+    });
+    await act(async () => {
+      button("Save")!.click();
+    });
+
+    expect(button("Save")!.disabled).toBe(true);
+
+    await act(async () => {
+      setInputValue(
+        host.querySelector<HTMLInputElement>('input[type="number"]')!,
+        "250",
+      );
+    });
+
+    expect(button("Save")!.disabled).toBe(false);
+  });
+
   describe("CP mode (per-charge point)", () => {
     it("shows invalid edit with inline error and disables Save", async () => {
       // Create a simple test that validates the formToCpLayer rejects on invalid input

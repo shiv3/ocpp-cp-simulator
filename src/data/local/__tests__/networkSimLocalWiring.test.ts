@@ -309,44 +309,36 @@ describe("NetworkSim local wiring", () => {
   });
 
   describe("validation on save", () => {
-    it("validates global config before saving", async () => {
+    it("rejects invalid global config on save", async () => {
       const testStore = createStore();
       const service = new LocalChargePointService(null, testStore);
       services.push(service);
 
       await service.syncLocalChargePoints([localDefinition({ id: "CP-1" })]);
-
-      const cp = service.getLocalChargePoint("CP-1") as ChargePoint;
-      const spy = vi.spyOn(cp, "setNetworkSimConfig");
 
       const invalidConfig = {
         enabled: true,
       } as unknown as NetworkSimLayerConfig;
 
-      await service.saveNetworkSimGlobal(invalidConfig);
-
-      const callsBefore = spy.mock.calls.length;
-      expect(callsBefore).toBeGreaterThanOrEqual(0);
+      await expect(
+        service.saveNetworkSimGlobal(invalidConfig),
+      ).rejects.toThrow();
     });
 
-    it("validates per-CP config before saving", async () => {
+    it("rejects invalid per-CP config on save", async () => {
       const testStore = createStore();
       const service = new LocalChargePointService(null, testStore);
       services.push(service);
 
       await service.syncLocalChargePoints([localDefinition({ id: "CP-1" })]);
 
-      const cp = service.getLocalChargePoint("CP-1") as ChargePoint;
-      const spy = vi.spyOn(cp, "setNetworkSimConfig");
-
       const invalidConfig = {
         enabled: "invalid",
       } as unknown as NetworkSimLayerConfig;
 
-      await service.saveNetworkSimCp("CP-1", invalidConfig);
-
-      const callsBefore = spy.mock.calls.length;
-      expect(callsBefore).toBeGreaterThanOrEqual(0);
+      await expect(
+        service.saveNetworkSimCp("CP-1", invalidConfig),
+      ).rejects.toThrow();
     });
 
     it("allows null config to delete entry", async () => {

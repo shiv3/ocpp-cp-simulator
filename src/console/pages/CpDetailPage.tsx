@@ -21,7 +21,10 @@ import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
 import type { ChargePointSnapshot } from "@/data/interfaces/ChargePointService";
 import type { WireSimulatorConfig } from "@/protocol";
-import type { NetworkSimLayerConfig } from "@/cp/infrastructure/transport/network-sim/config";
+import type {
+  NetworkSimLayerConfig,
+  NetworkSimRule,
+} from "@/cp/infrastructure/transport/network-sim/config";
 import type { ChargePoint } from "@/cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
@@ -162,6 +165,17 @@ const CpDetailPage: React.FC = () => {
   const [networkSimLoadError, setNetworkSimLoadError] = useState<string | null>(
     null,
   );
+
+  /** Global rules minus tombstones, as the per-CP editor's inherited baseline. */
+  const inheritedNetworkSimRules = useMemo(() => {
+    const filtered: Record<string, NetworkSimRule> = {};
+    for (const [id, rule] of Object.entries(
+      networkSimGlobalConfig?.rules ?? {},
+    )) {
+      if (rule !== null) filtered[id] = rule;
+    }
+    return filtered;
+  }, [networkSimGlobalConfig]);
 
   const refreshSnapshot = useCallback(() => {
     if (!cpId) {
@@ -438,26 +452,7 @@ const CpDetailPage: React.FC = () => {
                 <NetworkSimEditor
                   mode="cp"
                   value={networkSimCpConfig ?? null}
-                  inheritedRules={(() => {
-                    const filtered: Record<
-                      string,
-                      (typeof networkSimGlobalConfig)["rules"][string]
-                    > = {};
-                    for (const [id, rule] of Object.entries(
-                      networkSimGlobalConfig.rules,
-                    )) {
-                      if (rule !== null) {
-                        filtered[id] = rule;
-                      }
-                    }
-                    return filtered as Record<
-                      string,
-                      Exclude<
-                        (typeof networkSimGlobalConfig)["rules"][string],
-                        null
-                      >
-                    >;
-                  })()}
+                  inheritedRules={inheritedNetworkSimRules}
                   inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
                   onSave={async (config) => {
                     try {

@@ -10,16 +10,30 @@ const SettingsPage: React.FC = () => {
   const [networkSimConfig, setNetworkSimConfig] =
     useState<NetworkSimLayerConfig | null>(null);
   const [isLoadingNetSim, setIsLoadingNetSim] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoadingNetSim(true);
-    void chargePointService.getNetworkSimGlobal().then((config) => {
-      if (!cancelled) {
-        setNetworkSimConfig(config);
-        setIsLoadingNetSim(false);
-      }
-    });
+    setLoadError(null);
+    void chargePointService
+      .getNetworkSimGlobal()
+      .then((config) => {
+        if (!cancelled) {
+          setNetworkSimConfig(config);
+          setIsLoadingNetSim(false);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load network simulation configuration",
+          );
+          setIsLoadingNetSim(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -42,7 +56,13 @@ const SettingsPage: React.FC = () => {
       </div>
       <Settings />
 
-      {!isLoadingNetSim && (
+      {!isLoadingNetSim && loadError && (
+        <div className="rounded-md border border-red-500 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500 dark:bg-red-950 dark:text-red-400">
+          {loadError}
+        </div>
+      )}
+
+      {!isLoadingNetSim && !loadError && (
         <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
           <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
             Network Simulation

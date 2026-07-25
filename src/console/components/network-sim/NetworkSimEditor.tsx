@@ -34,6 +34,7 @@ type NetworkSimEditorProps =
 
 export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   const isGlobalMode = props.mode === "global";
+  const inheritedRules = props.mode === "cp" ? props.inheritedRules : undefined;
 
   const [globalForm, setGlobalForm] = useState<LayerFormState | null>(null);
   const [cpForm, setCpForm] = useState<CpLayerFormState | null>(null);
@@ -42,14 +43,23 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDeletingOverride, setIsDeletingOverride] = useState(false);
 
+  // Reinitializing throws away whatever the user has typed, so the effect has
+  // to key on the *contents* of the inputs, not their identity: a caller that
+  // rebuilds `inheritedRules` inline re-renders it as a fresh object on every
+  // parent render, and an identity-keyed effect would wipe the form each time.
+  const valueKey = JSON.stringify(props.value);
+  const inheritedKey = JSON.stringify(inheritedRules ?? null);
+
   // Initialize form based on mode
   React.useEffect(() => {
     if (isGlobalMode) {
       setGlobalForm(layerConfigToForm(props.value));
-    } else if ("inheritedRules" in props) {
-      setCpForm(cpLayerToForm(props.value, props.inheritedRules));
+    } else if (inheritedRules !== undefined) {
+      setCpForm(cpLayerToForm(props.value, inheritedRules));
     }
-  }, [props, isGlobalMode]);
+    // props.value / inheritedRules are read through their serialized keys above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valueKey, inheritedKey, isGlobalMode]);
 
   const handleSave = async () => {
     if (isGlobalMode && globalForm) {
@@ -115,6 +125,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   };
 
   const addRule = () => {
+    setErrors({});
     if (isGlobalMode && globalForm) {
       const newRule: RuleFormEntry = {
         id: `rule-${Date.now()}`,
@@ -140,6 +151,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   };
 
   const removeRule = (index: number) => {
+    setErrors({});
     if (isGlobalMode && globalForm) {
       setGlobalForm((prev) => ({
         ...prev!,
@@ -157,6 +169,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
     index: number,
     updates: Partial<RuleFormEntry | CpRuleFormEntry>,
   ) => {
+    setErrors({});
     if (isGlobalMode && globalForm) {
       setGlobalForm((prev) => ({
         ...prev!,
@@ -175,6 +188,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   };
 
   const updateSeed = (seedStr: string) => {
+    setErrors({});
     if (isGlobalMode && globalForm) {
       setGlobalForm((prev) => ({ ...prev!, seed: seedStr }));
     } else if (!isGlobalMode && cpForm) {
@@ -183,6 +197,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   };
 
   const updateEnabled = (enabled: boolean | undefined) => {
+    setErrors({});
     if (isGlobalMode && globalForm) {
       setGlobalForm((prev) => ({ ...prev!, enabled: enabled ?? false }));
     } else if (!isGlobalMode && cpForm) {

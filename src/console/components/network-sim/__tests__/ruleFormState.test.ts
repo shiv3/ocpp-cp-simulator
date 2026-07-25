@@ -867,5 +867,63 @@ describe("Per-CP layer form state (cpLayerToForm, formToCpLayer)", () => {
         expect(result.config!.enabled).toBe(true);
       }
     });
+
+    it("per-CP config has NO seed key (seed is derived per-charger)", () => {
+      const form: CpLayerFormState = {
+        enabled: true,
+        seed: "123",
+        rules: [
+          {
+            id: "local-rule",
+            type: "latency",
+            delayMs: 50,
+            classification: "local",
+          },
+        ],
+      };
+
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.config).not.toBeNull();
+        expect(result.config!.seed).toBeUndefined();
+      }
+    });
+
+    it("per-CP validation errors key to the correct row when inherited row precedes editable", () => {
+      const inheritedRules: Record<string, LatencyRule> = {
+        "inherited-1": {
+          type: "latency",
+          delayMs: 100,
+        } as LatencyRule,
+      };
+      const perCpLayer: NetworkSimLayerConfig = {
+        rules: {
+          "inherited-1": {
+            type: "latency",
+            delayMs: 100,
+          } as LatencyRule,
+          "local-1": {
+            type: "latency",
+            delayMs: -1, // invalid
+          } as LatencyRule,
+        },
+      };
+
+      const form = cpLayerToForm(perCpLayer, inheritedRules);
+      const result = formToCpLayer(form);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        // The error should key to the ACTUAL row index in form.rules, not filtered index
+        // form.rules has: [inherited-1 (index 0), local-1 (index 1)]
+        // Only local-1 is editable, but error should be at rules.1.delayMs
+        const errorKey = Object.keys(result.errors).find((k) =>
+          k.startsWith("rules."),
+        );
+        expect(errorKey).toBe("rules.1.delayMs");
+      }
+    });
   });
 });

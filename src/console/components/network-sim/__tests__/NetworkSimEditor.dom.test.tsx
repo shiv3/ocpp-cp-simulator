@@ -1,12 +1,26 @@
 // @vitest-environment jsdom
 import { act } from "react";
-import type { Root } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
   renderConsole,
 } from "../../../test/harness";
+import type {
+  NetworkSimLayerConfig,
+  NetworkSimRule,
+} from "../../../../cp/infrastructure/transport/network-sim/config";
+
+/** Drive a controlled input the way React's synthetic onChange expects. */
+function setInputValue(input: HTMLInputElement, next: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  setter?.call(input, next);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {
@@ -251,6 +265,63 @@ describe("NetworkSimEditor", () => {
       if (!result.ok) {
         expect(result.errors["rules.0.delayMs"]).toBeDefined();
       }
+    });
+
+    it("keeps in-progress edits when the parent re-renders with rebuilt props", async () => {
+      // CpDetailPage polls a snapshot, so the editor re-renders constantly. Its
+      // props are derived objects, so each render hands it a structurally equal
+      // but freshly allocated `inheritedRules` / `value`. Reinitializing on that
+      // would silently discard whatever the user has typed.
+      const { NetworkSimEditor } = await import("../NetworkSimEditor");
+      const inherited = (): Record<string, NetworkSimRule> => ({
+        slow: { type: "latency", delayMs: 100 },
+      });
+      const value = (): NetworkSimLayerConfig => ({ enabled: true, rules: {} });
+
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const root = createRoot(host);
+      cleanup = () => unmount(root);
+
+      const render = async () => {
+        await act(async () => {
+          root.render(
+            <NetworkSimEditor
+              mode="cp"
+              value={value()}
+              inheritedRules={inherited()}
+              inheritedEnabled
+              onSave={async () => {}}
+              onDeleteOverride={async () => {}}
+            />,
+          );
+        });
+      };
+
+      await render();
+
+      const addRule = [...host.querySelectorAll("button")].find((b) =>
+        b.textContent?.includes("Add Local Rule"),
+      );
+      expect(addRule).toBeDefined();
+      await act(async () => {
+        addRule!.click();
+      });
+
+      const idInput =
+        host.querySelector<HTMLInputElement>('input[type="text"]');
+      expect(idInput).not.toBeNull();
+      await act(async () => {
+        setInputValue(idInput!, "half-typed-rule");
+      });
+      expect(idInput!.value).toBe("half-typed-rule");
+
+      // Parent re-render with equal-but-new prop objects.
+      await render();
+
+      expect(
+        host.querySelector<HTMLInputElement>('input[type="text"]')?.value,
+      ).toBe("half-typed-rule");
     });
   });
 });

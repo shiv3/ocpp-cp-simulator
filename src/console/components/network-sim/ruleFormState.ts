@@ -420,37 +420,38 @@ export function formToCpLayer(
   | { ok: false; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
 
-  // Filter to only editable entries (overridden and local)
-  const editableRules = form.rules.filter(
-    (r) => r.classification === "overridden" || r.classification === "local",
-  );
+  // Map rules with their original indices, then filter to only editable entries
+  const editableRulesWithIndex = form.rules
+    .map((rule, index) => ({ rule, index }))
+    .filter(
+      ({ rule }) =>
+        rule.classification === "overridden" || rule.classification === "local",
+    );
 
   // Check for duplicate rule IDs among editable rules
   const seenIds = new Set<string>();
-  for (let i = 0; i < editableRules.length; i += 1) {
-    const rule = editableRules[i];
+  for (const { rule, index } of editableRulesWithIndex) {
     if (!rule.id.trim()) {
-      errors[`rules.${i}.id`] = "Rule ID cannot be empty";
+      errors[`rules.${index}.id`] = "Rule ID cannot be empty";
     } else if (rule.id.length > NETWORK_SIM_LIMITS.maxIdLength) {
-      errors[`rules.${i}.id`] =
+      errors[`rules.${index}.id`] =
         `Rule ID must be at most ${NETWORK_SIM_LIMITS.maxIdLength} characters`;
     } else if (seenIds.has(rule.id)) {
-      errors[`rules.${i}.id`] = `Duplicate rule ID: "${rule.id}"`;
+      errors[`rules.${index}.id`] = `Duplicate rule ID: "${rule.id}"`;
     } else {
       seenIds.add(rule.id);
     }
   }
 
   // Check rule count (editable only)
-  if (editableRules.length > NETWORK_SIM_LIMITS.maxRulesPerLayer) {
+  if (editableRulesWithIndex.length > NETWORK_SIM_LIMITS.maxRulesPerLayer) {
     errors["rules"] =
       `At most ${NETWORK_SIM_LIMITS.maxRulesPerLayer} rules are allowed`;
   }
 
   // Validate per-rule fields (only for editable rules)
-  for (let i = 0; i < editableRules.length; i += 1) {
-    const rule = editableRules[i];
-    const prefix = `rules.${i}`;
+  for (const { rule, index } of editableRulesWithIndex) {
+    const prefix = `rules.${index}`;
 
     if (rule.type === "latency") {
       if (!rule.delayMs && rule.delayMs !== 0) {
@@ -551,7 +552,7 @@ export function formToCpLayer(
   // Build per-CP layer config with overrides, tombstones, and locals
   const rules: Record<string, NetworkSimRule | null> = {};
 
-  for (const rule of editableRules) {
+  for (const { rule } of editableRulesWithIndex) {
     // Handle rules marked for deletion (null in form)
     // In this form, deleted rules are simply not included in editable rules
     // Tombstones are managed by keeping null entries in perCpLayer
@@ -603,7 +604,6 @@ export function formToCpLayer(
 
   const config: NetworkSimLayerConfig = {
     enabled: form.enabled,
-    seed: 1, // Not editable in per-CP form
     rules,
   };
 

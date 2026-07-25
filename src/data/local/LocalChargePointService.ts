@@ -970,11 +970,11 @@ export class LocalChargePointService implements ChargePointService {
     if (config !== null) {
       const validation = validateLayerConfig(config);
       if (!validation.ok) {
-        console.warn(
-          "[LocalChargePointService] Invalid global networkSim config:",
-          validation.errors,
+        throw new Error(
+          `Invalid global networkSim config: ${Object.entries(validation.errors)
+            .map(([key, msg]) => `${key}: ${msg}`)
+            .join("; ")}`,
         );
-        return;
       }
     }
 
@@ -1014,11 +1014,13 @@ export class LocalChargePointService implements ChargePointService {
     if (config !== null) {
       const validation = validateLayerConfig(config);
       if (!validation.ok) {
-        console.warn(
-          `[LocalChargePointService] Invalid per-CP networkSim config for ${cpId}:`,
-          validation.errors,
+        throw new Error(
+          `Invalid per-CP networkSim config for ${cpId}: ${Object.entries(
+            validation.errors,
+          )
+            .map(([key, msg]) => `${key}: ${msg}`)
+            .join("; ")}`,
         );
-        return;
       }
     }
 

@@ -65,6 +65,13 @@ export class CPRegistry {
     this.networkSimManager = manager;
   }
 
+  getNetworkSimManager(): NetworkSimManager {
+    if (!this.networkSimManager) {
+      throw new Error("NetworkSimManager not initialized");
+    }
+    return this.networkSimManager;
+  }
+
   /** Get all live WebSocket (non-SOAP) CP IDs. Used by NetworkSimManager
    *  to filter which CPs get fan-out config updates. */
   liveWsCpIds(): string[] {

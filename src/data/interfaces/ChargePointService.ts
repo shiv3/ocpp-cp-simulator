@@ -21,6 +21,10 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import type {
+  NetworkSimLayerConfig,
+  ResolvedNetworkSimConfig,
+} from "../../cp/infrastructure/transport/network-sim/config";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
 
 export interface ConnectorSnapshot {
@@ -288,6 +292,22 @@ export interface ChargePointService {
   subscribeConfig(
     handler: (config: WireSimulatorConfig | null) => void,
   ): () => void;
+
+  // Network simulation
+  getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null>;
+  saveNetworkSimGlobal(config: NetworkSimLayerConfig | null): Promise<void>;
+  getNetworkSimCp(cpId: string): Promise<{
+    config: NetworkSimLayerConfig | null;
+    resolved: ResolvedNetworkSimConfig;
+  }>;
+  saveNetworkSimCp(
+    cpId: string,
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void>;
+  triggerNetworkSimDisconnect(
+    cpId: string,
+    ruleId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 
   // Lifecycle
   connect(id: string): Promise<void>;

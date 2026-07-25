@@ -30,6 +30,10 @@ import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
+import type {
+  NetworkSimLayerConfig,
+  ResolvedNetworkSimConfig,
+} from "../../cp/infrastructure/transport/network-sim/config";
 import {
   RPC_TIMEOUT_MS,
   RpcFailure,
@@ -742,12 +746,9 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async reset(id: string): Promise<void> {
-    // OCPP-level reset = disconnect then reconnect the CP to the CSMS. The
-    // browser's socket.io subscription to the daemon (the events room) is
-    // independent of the CP↔CSMS connection, so it persists across a reset —
-    // no room re-subscribe is needed.
-    await this.runCpRpc(id, "disconnect");
-    await this.runCpRpc(id, "connect");
+    // Route through the cause-aware reset method, which preserves the
+    // reconnect reservation (Task 20). Single RPC call, not disconnect+connect.
+    await this.runCpRpc(id, "reset");
   }
 
   async sendHeartbeat(id: string): Promise<void> {
@@ -1436,6 +1437,52 @@ export class RemoteChargePointService implements ChargePointService {
         }).catch(() => {});
       }
     };
+  }
+
+  async getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null> {
+    const result = (await this.rpc(
+      "network_sim.global.get",
+      {},
+    )) as unknown as { config: NetworkSimLayerConfig | null };
+    return result?.config ?? null;
+  }
+
+  async saveNetworkSimGlobal(
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    await this.rpc("network_sim.global.save", {
+      config: config as unknown as Record<string, unknown>,
+    });
+  }
+
+  async getNetworkSimCp(cpId: string): Promise<{
+    config: NetworkSimLayerConfig | null;
+    resolved: ResolvedNetworkSimConfig;
+  }> {
+    return (await this.rpc("network_sim.cp.get", { cpId })) as unknown as {
+      config: NetworkSimLayerConfig | null;
+      resolved: ResolvedNetworkSimConfig;
+    };
+  }
+
+  async saveNetworkSimCp(
+    cpId: string,
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    await this.rpc("network_sim.cp.save", {
+      cpId,
+      config: config as unknown as Record<string, unknown>,
+    });
+  }
+
+  async triggerNetworkSimDisconnect(
+    cpId: string,
+    ruleId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.rpc("network_sim.disconnect.trigger", {
+      cpId,
+      ruleId,
+    })) as unknown as { ok: true } | { ok: false; error: string };
   }
 
   /**

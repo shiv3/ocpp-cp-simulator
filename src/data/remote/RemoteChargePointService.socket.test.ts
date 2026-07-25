@@ -488,11 +488,8 @@ describe("RemoteChargePointService socket.io rpc", () => {
       {
         name: "reset",
         invoke: (service) => service.reset("cp-1"),
-        expected: [
-          { cpId: "cp-1", method: "disconnect", params: {} },
-          { cpId: "cp-1", method: "connect", params: {} },
-        ],
-        results: [undefined, undefined],
+        expected: [{ cpId: "cp-1", method: "reset", params: {} }],
+        results: [undefined],
       },
       {
         name: "sendHeartbeat",
@@ -1709,7 +1706,7 @@ describe("RemoteChargePointService socket.io rpc", () => {
     expect(["events.subscribe", ...methods]).not.toContain("status");
   });
 
-  it("reset is composed from a disconnect rpc then a connect rpc", async () => {
+  it("reset makes a single reset rpc (cause-aware, preserves reconnect reservation)", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
 
     service.subscribe("cp-1", () => {});
@@ -1742,17 +1739,15 @@ describe("RemoteChargePointService socket.io rpc", () => {
     await promise;
     expect(settled).toBe(true);
 
-    // reset = OCPP-level disconnect then connect (no separate cp.reset).
+    // reset = single "reset" rpc (cause-aware, preserves reconnect reservation).
     const methods = socketMockState.sockets.flatMap((sock) =>
       sock.emitWithAck.mock.calls.map(
         (call) => (call[1] as { method: string }).method,
       ),
     );
-    expect(methods).toContain("disconnect");
-    expect(methods).toContain("connect");
-    expect(methods.indexOf("disconnect")).toBeLessThan(
-      methods.lastIndexOf("connect"),
-    );
+    expect(methods).toContain("reset");
+    expect(methods).not.toContain("disconnect");
+    expect(methods).not.toContain("connect");
   });
 
   it("throws Error with server rpc failure message", async () => {

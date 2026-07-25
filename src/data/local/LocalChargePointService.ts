@@ -49,6 +49,11 @@ import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
+import type {
+  NetworkSimLayerConfig,
+  ResolvedNetworkSimConfig,
+} from "../../cp/infrastructure/transport/network-sim/config";
+import { resolveNetworkSimConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import {
   scenarioTemplates,
   getTemplateById,
@@ -846,6 +851,49 @@ export class LocalChargePointService implements ChargePointService {
         this.listeners.delete(id);
       }
     };
+  }
+
+  async getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null> {
+    // Task 21 adds local storage; for now, return disabled config
+    return null;
+  }
+
+  async saveNetworkSimGlobal(
+    _config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    // Task 21 adds local storage and persistence
+  }
+
+  async getNetworkSimCp(cpId: string): Promise<{
+    config: NetworkSimLayerConfig | null;
+    resolved: ResolvedNetworkSimConfig;
+  }> {
+    // Task 21 adds local storage; for now, return disabled config
+    return {
+      config: null,
+      resolved: resolveNetworkSimConfig(null, null, cpId),
+    };
+  }
+
+  async saveNetworkSimCp(
+    _cpId: string,
+    _config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    // Task 21 adds local storage and applies to live CP if reachable
+  }
+
+  async triggerNetworkSimDisconnect(
+    cpId: string,
+    _ruleId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    // Task 21 wires this to the live ChargePoint's triggerNetworkSimDisconnect
+    // For now, return not_connected since the local CP doesn't have network-sim
+    // triggering wired yet
+    const cp = this.chargePoints.get(cpId);
+    if (!cp) {
+      return { ok: false, error: "not_connected" };
+    }
+    return { ok: false, error: "not_connected" };
   }
 
   private getExistingChargePointOrThrow(id: string): ChargePoint {

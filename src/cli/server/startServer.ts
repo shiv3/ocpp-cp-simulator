@@ -7,6 +7,7 @@ import type { ChargePointInitOptions } from "../types";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { CPRegistry } from "./CPRegistry";
+import { NetworkSimManager } from "./NetworkSimManager";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
 import { createHttpHandlers, type CorsPolicy } from "./httpServer";
@@ -105,6 +106,23 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms,
   });
+  // Create network simulation manager and wire it to the registry BEFORE
+  // restoring CPs so they get their config attached before connect().
+  const networkSimManager = new NetworkSimManager(database, {
+    listLiveWsCpIds: () => registry.liveWsCpIds(),
+    applyToCp: (cpId, resolved) => {
+      registry.get(cpId)?.setNetworkSimConfig(resolved);
+    },
+    triggerCpDisconnect: (cpId, ruleId) => {
+      const svc = registry.get(cpId);
+      if (!svc) {
+        return { ok: false, error: "not_connected" };
+      }
+      return svc.triggerNetworkSimDisconnect(ruleId);
+    },
+  });
+  registry.setNetworkSimManager(networkSimManager);
+
   const configRepository = createSocketConfigRepository(database);
   const scenarioRepository = new SqliteScenarioRepository(database);
   const connectorSettingsRepository = new SqliteConnectorSettingsRepository(

@@ -4,6 +4,7 @@ import { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { EventBus } from "./eventBus";
 import type { Database } from "../../cp/domain/persistence/Database";
+import type { NetworkSimManager } from "./NetworkSimManager";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type {
   OcppSecurityProfile,
@@ -50,6 +51,7 @@ export class CPRegistry {
   private readonly services = new Map<string, CLIChargePointService>();
   private readonly unsubscribes = new Map<string, () => void>();
   private readonly registrySinks = new Set<RegistryMembershipSink>();
+  private networkSimManager: NetworkSimManager | null = null;
 
   constructor(
     private readonly bus: EventBus,
@@ -58,6 +60,18 @@ export class CPRegistry {
     private readonly database: Database | null = null,
     private readonly options: CPRegistryOptions = {},
   ) {}
+
+  setNetworkSimManager(manager: NetworkSimManager): void {
+    this.networkSimManager = manager;
+  }
+
+  /** Get all live WebSocket (non-SOAP) CP IDs. Used by NetworkSimManager
+   *  to filter which CPs get fan-out config updates. */
+  liveWsCpIds(): string[] {
+    return [...this.services.values()]
+      .filter((svc) => !svc.isSoapChargePoint())
+      .map((svc) => svc.getInit().cpId);
+  }
 
   /**
    * Re-create every CP recorded in the `charge_points` table. Called once
@@ -139,6 +153,11 @@ export class CPRegistry {
           `[CPRegistry] Restored ${restoredScenarios} scenario(s) for CP "${row.cp_id}"`,
         );
       }
+      // Attach network simulation config BEFORE connecting so the CP
+      // starts with its faults applied.
+      if (this.networkSimManager) {
+        this.networkSimManager.onCpCreated(row.cp_id);
+      }
       // Kick the WebSocket open so BootNotification + StatusNotification
       // fly to the CSMS automatically. Fire-and-forget — connect() is
       // synchronous from JS's POV (returns immediately, opens in
@@ -213,6 +232,11 @@ export class CPRegistry {
     const preparedInit = this.prepareInit(init);
     this.persistCreate(preparedInit);
     const svc = this.instantiate(preparedInit);
+    // Attach network simulation config before seeding so scenarios
+    // run with faults applied.
+    if (this.networkSimManager) {
+      this.networkSimManager.onCpCreated(preparedInit.cpId);
+    }
     // Restore path (restoreFromDatabase) calls instantiate() directly and
     // skips this seed — that path rehydrates whatever scenarios the
     // operator had, so we don't override an explicitly-cleared slot with
@@ -259,6 +283,10 @@ export class CPRegistry {
     this.services.delete(init.cpId);
     this.persistCreate(preparedInit); // ON CONFLICT UPDATE — leaves scenarios intact
     const svc = this.instantiate(preparedInit);
+    // Attach network simulation config so the re-created CP gets its faults.
+    if (this.networkSimManager) {
+      this.networkSimManager.onCpCreated(preparedInit.cpId);
+    }
     // Re-attach scenarios that the previous instance had loaded so the
     // re-created service picks up the same set without the operator
     // having to reload them.
@@ -469,7 +497,12 @@ export class CPRegistry {
     if (opts.notify !== false) {
       this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
     }
-    svc.cleanup();
+    // Permanent deletion: use dispose() to cancel controller timers.
+    svc.cleanup(true);
+    // Drop from network sim config store.
+    if (this.networkSimManager) {
+      this.networkSimManager.onCpDeleted(cpId);
+    }
     // Operator-initiated removal: drop the persisted row too. Process
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.

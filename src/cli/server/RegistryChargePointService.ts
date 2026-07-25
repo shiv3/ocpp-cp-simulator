@@ -762,6 +762,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
     error: status.error,
     connectors: status.connectors.map(toConnectorSnapshot),
     heartbeat: status.heartbeat,
+    networkSim: status.networkSim,
     config: status.config
       ? {
           wsUrl: status.config.wsUrl,

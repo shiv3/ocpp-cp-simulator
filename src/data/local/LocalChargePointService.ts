@@ -110,6 +110,7 @@ function toChargePointSnapshot(cp: ChargePoint): ChargePointSnapshot {
         ? cp.heartbeat.lastSentAt.toISOString()
         : null,
     },
+    networkSim: cp.networkSimSummary(),
   };
 }
 

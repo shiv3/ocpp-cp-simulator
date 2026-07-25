@@ -257,6 +257,14 @@ export const statusWireSchema = z
       })
       .strict()
       .optional(),
+    networkSim: z
+      .object({
+        enabled: z.boolean(),
+        manualRuleIds: z.array(STR_64K).max(1000),
+      })
+      .strict()
+      .nullable()
+      .optional(),
     config: wireCpConfigSchema.optional(),
   })
   .strict();
@@ -271,6 +279,7 @@ interface FullStatus {
   // signature and would otherwise not be assignable to Record<string, unknown>.
   connectors: ReadonlyArray<unknown>;
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
+  networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
   config?: FullCpConfig;
 }
 
@@ -282,6 +291,7 @@ export function statusToWire(status: FullStatus): StatusWire {
     error: status.error,
     connectors: status.connectors as StatusWire["connectors"],
     heartbeat: status.heartbeat,
+    networkSim: status.networkSim,
     config: status.config ? redactCp(status.config) : undefined,
   };
 }
@@ -293,6 +303,14 @@ export function statusToWire(status: FullStatus): StatusWire {
 export const cpListItemSchema = wireCpConfigSchema.extend({
   cpId: STR_64K,
   status: STR_64K,
+  networkSim: z
+    .object({
+      enabled: z.boolean(),
+      manualRuleIds: z.array(STR_64K).max(1000),
+    })
+    .strict()
+    .nullable()
+    .optional(),
 });
 export type CpListItem = z.infer<typeof cpListItemSchema>;
 
@@ -300,11 +318,17 @@ interface FullCp {
   id: string;
   status: string;
   config: FullCpConfig;
+  networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
 }
 
 /** The ONLY constructor for a registry `cp` push payload (structurally redacted). */
 export function registryCpToWire(cp: FullCp): CpListItem {
-  return { ...redactCp(cp.config), cpId: cp.id, status: cp.status };
+  return {
+    ...redactCp(cp.config),
+    cpId: cp.id,
+    status: cp.status,
+    networkSim: cp.networkSim,
+  };
 }
 
 // ---------------------------------------------------------------------------

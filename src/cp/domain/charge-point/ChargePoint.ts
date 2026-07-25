@@ -137,6 +137,11 @@ export class ChargePoint {
   // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
   // send-only (browser local mode). For non-SOAP versions, always false.
   private readonly _hasSoapCallbackUrl: boolean;
+  // Network simulation summary: { enabled, manualRuleIds } when a config has
+  // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
+  // has been applied yet.
+  private _networkSimSummary: { enabled: boolean; manualRuleIds: string[] } | null =
+    null;
 
   constructor(
     private readonly _id: string,
@@ -1710,9 +1715,28 @@ export class ChargePoint {
   /**
    * Public network-sim forwarding: apply network simulation config at runtime.
    * No-op for SOAP charge points (this._webSocket is null).
+   * Stores a summary { enabled, manualRuleIds } for dashboard UI.
    */
   setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {
+    // Store summary for UI (null for SOAP CPs)
+    if (!this.isSoapChargePoint()) {
+      const manualRuleIds = Object.entries(resolved.rules)
+        .filter(([, rule]) => rule.type === "manual-disconnect")
+        .map(([id]) => id);
+      this._networkSimSummary = {
+        enabled: resolved.enabled,
+        manualRuleIds,
+      };
+    }
     this._webSocket?.setNetworkSimConfig(resolved);
+  }
+
+  /**
+   * Network simulation summary: { enabled, manualRuleIds } if a config has been
+   * applied, or null for SOAP CPs / when no config has been applied yet.
+   */
+  networkSimSummary(): { enabled: boolean; manualRuleIds: string[] } | null {
+    return this.isSoapChargePoint() ? null : this._networkSimSummary;
   }
 
   /**

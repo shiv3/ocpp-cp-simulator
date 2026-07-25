@@ -207,6 +207,9 @@ export interface ChargePointStatus {
     readonly intervalSeconds: number;
     readonly lastSentAt: string | null;
   };
+  /** Network simulation summary: { enabled, manualRuleIds } when a config has
+   *  been applied, null for SOAP CPs or when no config has been applied. */
+  readonly networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
   /** Snapshot of the init the CP was constructed with. Surfaced so the
    *  web console can prefill the "Edit CP" modal in Remote mode without
    *  needing a second roundtrip — local-mode persistence is already in

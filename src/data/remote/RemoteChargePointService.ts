@@ -185,6 +185,7 @@ function toChargePointSnapshot(s: StatusWire): ChargePointSnapshot {
           lastSentAt: s.heartbeat.lastSentAt,
         }
       : undefined,
+    networkSim: s.networkSim ?? null,
     config: s.config ? toSnapshotConfig(s.config) : undefined,
   };
 }
@@ -223,6 +224,7 @@ function cpListItemToSnapshot(item: CpListItem): ChargePointSnapshot {
     connectors: Array.from({ length: connectorCount }, (_, i) =>
       emptyConnectorSnapshot(i + 1),
     ),
+    networkSim: item.networkSim ?? null,
     config: toSnapshotConfig(item),
   };
 }

@@ -1613,12 +1613,14 @@ function snapshotToFullCp(snapshot: ChargePointSnapshot): FullCp {
         basicAuth: null,
         bootNotification: null,
       },
+      networkSim: snapshot.networkSim,
     };
   }
   return {
     id: snapshot.id,
     status: snapshot.status,
     config: snapshot.config,
+    networkSim: snapshot.networkSim,
   };
 }
 
@@ -1629,6 +1631,7 @@ function snapshotToWireStatus(snapshot: ChargePointSnapshot): StatusWire {
     error: snapshot.error,
     connectors: snapshot.connectors.map(connectorSnapshotToWire),
     heartbeat: snapshot.heartbeat,
+    networkSim: snapshot.networkSim,
     config: snapshot.config,
   });
 }

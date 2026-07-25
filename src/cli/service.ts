@@ -556,6 +556,7 @@ export class CLIChargePointService {
           ? this._chargePoint.heartbeat.lastSentAt.toISOString()
           : null,
       },
+      networkSim: this._chargePoint.networkSimSummary(),
       config: {
         wsUrl: this._init.wsUrl,
         connectors: this._init.connectors,

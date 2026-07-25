@@ -55,6 +55,9 @@ export interface ChargePointSnapshot {
    *  string for remote-mode JSON safety; null if no Heartbeat.req has been
    *  sent since the daemon started. */
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
+  /** Network simulation summary: { enabled, manualRuleIds } when a config has
+   *  been applied, null for SOAP CPs or when no config has been applied. */
+  networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
   /** Init the CP was constructed with — exposed in Remote mode so the web
    *  console can prefill the "Edit CP" modal. Undefined in Local mode
    *  (the browser already owns the config) and on older daemons that

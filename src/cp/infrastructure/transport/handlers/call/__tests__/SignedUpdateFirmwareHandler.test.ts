@@ -3,6 +3,7 @@ import { SignedUpdateFirmwareHandler } from "../SignedUpdateFirmwareHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 type FirmwareStatus =
   | "Downloading"
@@ -92,45 +93,56 @@ describe("SignedUpdateFirmwareHandler", () => {
     const { ctx } = buildContext();
     const handler = new SignedUpdateFirmwareHandler();
     const res = handler.handle(firmwarePayload(), ctx);
-    expect(res).toEqual({ status: "Accepted" });
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      expect(res.payload).toEqual({ status: "Accepted" });
+    }
   });
 
   it("fires Downloading → Downloaded → SignatureVerified → Installing → Installed carrying requestId", async () => {
     const { ctx, sent } = buildContext();
     const handler = new SignedUpdateFirmwareHandler();
-    handler.handle(firmwarePayload({ requestId: 9 }), ctx);
+    const res = handler.handle(firmwarePayload({ requestId: 9 }), ctx);
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      res.afterResponseSettled();
 
-    await Promise.resolve();
-    expect(sent).toEqual([]);
+      await Promise.resolve();
+      expect(sent).toEqual([]);
 
-    vi.advanceTimersByTime(999);
-    expect(sent).toEqual([]);
+      vi.advanceTimersByTime(999);
+      expect(sent).toEqual([]);
 
-    vi.advanceTimersByTime(1);
-    expect(sent).toEqual([{ status: "Downloading", requestId: 9 }]);
+      vi.advanceTimersByTime(1);
+      expect(sent).toEqual([{ status: "Downloading", requestId: 9 }]);
 
-    vi.advanceTimersByTime(2000);
-    vi.advanceTimersByTime(2000);
-    vi.advanceTimersByTime(2000);
-    vi.advanceTimersByTime(2000);
-    expect(sent).toEqual([
-      { status: "Downloading", requestId: 9 },
-      { status: "Downloaded", requestId: 9 },
-      { status: "SignatureVerified", requestId: 9 },
-      { status: "Installing", requestId: 9 },
-      { status: "Installed", requestId: 9 },
-    ]);
+      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(2000);
+      expect(sent).toEqual([
+        { status: "Downloading", requestId: 9 },
+        { status: "Downloaded", requestId: 9 },
+        { status: "SignatureVerified", requestId: 9 },
+        { status: "Installing", requestId: 9 },
+        { status: "Installed", requestId: 9 },
+      ]);
+    }
   });
 
   it("starts immediately when retrieveDateTime is invalid", async () => {
     const { ctx, sent } = buildContext();
     const handler = new SignedUpdateFirmwareHandler();
-    handler.handle(
+    const res = handler.handle(
       firmwarePayload({ retrieveDateTime: "not-a-date", requestId: 1 }),
       ctx,
     );
-    await Promise.resolve();
-    vi.advanceTimersByTime(0);
-    expect(sent[0]).toEqual({ status: "Downloading", requestId: 1 });
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (isHandlerOutcome(res)) {
+      res.afterResponseSettled();
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+      expect(sent[0]).toEqual({ status: "Downloading", requestId: 1 });
+    }
   });
 });

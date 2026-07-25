@@ -173,6 +173,9 @@ describe("MCP server", () => {
       "run_scenario_template",
       "scenario_status",
       "get_logs",
+      "network_sim_get",
+      "network_sim_set",
+      "network_sim_trigger_disconnect",
       "list_methods",
       "call_method",
     ];

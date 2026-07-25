@@ -64,7 +64,7 @@ export class PendingMessageQueue {
 
   /** Snapshot of the current queue (FIFO order). */
   all(): PendingMessage[] {
-    return this.items.map(({ messageId: _id, ...msg }) => msg);
+    return this.items.map(toPendingMessage);
   }
 
   size(): number {
@@ -88,8 +88,7 @@ export class PendingMessageQueue {
     const row = this.items.shift();
     if (!row) return undefined;
     this.deleteRow(row.messageId);
-    const { messageId: _id, ...msg } = row;
-    return msg;
+    return toPendingMessage(row);
   }
 
   /**
@@ -105,8 +104,7 @@ export class PendingMessageQueue {
     let delivered = 0;
     while (this.items.length > 0) {
       const head = this.items[0];
-      const { messageId: _id, ...msg } = head;
-      const ok = send(msg);
+      const ok = send(toPendingMessage(head));
       if (!ok) {
         head.attempts += 1;
         if (head.attempts >= maxAttempts) {
@@ -238,6 +236,13 @@ export class PendingMessageQueue {
     const suffix = (this.nextIdSuffix += 1);
     return `${Date.now().toString(36)}-${suffix.toString(36)}`;
   }
+}
+
+/** Strip the persistence-only columns so callers see exactly the declared
+ *  {@link PendingMessage} shape — `messageId` and `seq` are storage details. */
+function toPendingMessage(row: PendingRow): PendingMessage {
+  const { messageId: _id, seq: _seq, ...msg } = row;
+  return msg;
 }
 
 function safeParse(raw: string): unknown {

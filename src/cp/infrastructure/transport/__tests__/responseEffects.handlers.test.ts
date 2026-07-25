@@ -419,29 +419,39 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect sends Uploading status and schedules Uploaded", () => {
-      const { ctx, chargePointCalls } = buildContext();
-      const handler = new GetLogHandler();
-      const result = handler.handle(
-        {
-          logType: "SecurityLog",
-          requestId: 123,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          log: { remoteLocation: "http://example.invalid/upload" } as any,
-        },
-        ctx,
-      );
+    it("effect sends Uploading, then Uploaded once the upload window elapses", () => {
+      vi.useFakeTimers();
+      try {
+        const { ctx, chargePointCalls } = buildContext();
+        const handler = new GetLogHandler();
+        const result = handler.handle(
+          {
+            logType: "SecurityLog",
+            requestId: 123,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            log: { remoteLocation: "http://example.invalid/upload" } as any,
+          },
+          ctx,
+        );
 
-      expect(isHandlerOutcome(result)).toBe(true);
-      if (isHandlerOutcome(result)) {
-        expect(chargePointCalls.sendLogStatusNotification).toBeUndefined();
-        result.afterResponseSettled();
-        // First call should be Uploading
-        expect(chargePointCalls.sendLogStatusNotification?.[0]).toEqual([
-          "Uploading",
-          123,
-        ]);
-        // The Uploaded call is scheduled via setTimeout, so we don't verify it here
+        expect(isHandlerOutcome(result)).toBe(true);
+        if (isHandlerOutcome(result)) {
+          expect(chargePointCalls.sendLogStatusNotification).toBeUndefined();
+          result.afterResponseSettled();
+
+          expect(chargePointCalls.sendLogStatusNotification).toEqual([
+            ["Uploading", 123],
+          ]);
+
+          vi.advanceTimersByTime(2000);
+
+          expect(chargePointCalls.sendLogStatusNotification).toEqual([
+            ["Uploading", 123],
+            ["Uploaded", 123],
+          ]);
+        }
+      } finally {
+        vi.useRealTimers();
       }
     });
   });

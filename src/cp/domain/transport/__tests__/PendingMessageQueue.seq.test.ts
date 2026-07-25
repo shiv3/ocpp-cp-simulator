@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { PendingMessageQueue } from "../PendingMessageQueue";
+import {
+  PendingMessageQueue,
+  type PendingMessage,
+} from "../PendingMessageQueue";
 import type { Database } from "../../persistence/Database";
 import { OCPPAction } from "../../types/OcppTypes";
 
@@ -357,6 +360,26 @@ describe("PendingMessageQueue with seq", () => {
 
       const seqs = readRows(db, "cp-db-test").map((r) => r.seq);
       expect(seqs).toEqual([1, 2, 3]);
+    });
+
+    it("does not leak persistence columns through the public shape", () => {
+      const queue = new PendingMessageQueue("cp-db-test", db);
+      queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
+
+      const flushed: PendingMessage[] = [];
+      queue.flush((msg) => {
+        flushed.push(msg);
+        return true;
+      }, 3);
+
+      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      queue2.enqueue({ action: OCPPAction.MeterValues, payload: {} });
+      const seen = [...queue2.all(), queue2.dequeue()!, ...flushed];
+
+      for (const msg of seen) {
+        expect(msg).not.toHaveProperty("seq");
+        expect(msg).not.toHaveProperty("messageId");
+      }
     });
 
     it("keeps message ids unique across restarts within one millisecond", () => {

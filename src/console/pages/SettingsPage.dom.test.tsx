@@ -35,7 +35,7 @@ describe("SettingsPage", () => {
     }
   });
 
-  it("surfaces error when getNetworkSimGlobal is rejected and does not leave section hidden", async () => {
+  it("surfaces the error and keeps the editor hidden when getNetworkSimGlobal rejects", async () => {
     const getNetworkSimGlobal = vi.fn(async () => {
       return new Promise<null>((_resolve, reject) => {
         reject(new Error("Failed to load network sim config"));

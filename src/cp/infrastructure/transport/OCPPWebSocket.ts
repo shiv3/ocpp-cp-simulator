@@ -335,14 +335,11 @@ export class OCPPWebSocket {
     messageId: string,
     action: string,
     payload: unknown,
-    gen?: GenerationToken,
+    gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): boolean {
-    // TEMPORARY COMPATIBILITY: gen defaults to currentGeneration() when omitted
-    const token = gen ?? this._currentGeneration;
-
     // Stale generation check
-    if (token.gen !== this._currentGeneration.gen) {
+    if (gen.gen !== this._currentGeneration.gen) {
       // Stale generation: sendAction returns false, onSettled does NOT fire
       return false;
     }
@@ -364,18 +361,15 @@ export class OCPPWebSocket {
   public sendResult(
     messageId: string,
     payload: unknown,
-    gen?: GenerationToken,
+    gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    // TEMPORARY COMPATIBILITY: gen defaults to currentGeneration() when omitted
-    const token = gen ?? this._currentGeneration;
-
     // Stale generation check
-    if (token.gen !== this._currentGeneration.gen) {
+    if (gen.gen !== this._currentGeneration.gen) {
       // Stale generation: settle immediately with socket_closed + old generation's cause
       const settlement: Settlement = {
         outcome: "socket_closed",
-        closeCause: token.closeCause ?? "network",
+        closeCause: gen.closeCause ?? "network",
       };
       onSettled?.(settlement);
       return;
@@ -411,18 +405,15 @@ export class OCPPWebSocket {
   public sendError(
     messageId: string,
     payload: OcppMessageErrorPayload,
-    gen?: GenerationToken,
+    gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    // TEMPORARY COMPATIBILITY: gen defaults to currentGeneration() when omitted
-    const token = gen ?? this._currentGeneration;
-
     // Stale generation check
-    if (token.gen !== this._currentGeneration.gen) {
+    if (gen.gen !== this._currentGeneration.gen) {
       // Stale generation: settle immediately with socket_closed + old generation's cause
       const settlement: Settlement = {
         outcome: "socket_closed",
-        closeCause: token.closeCause ?? "network",
+        closeCause: gen.closeCause ?? "network",
       };
       onSettled?.(settlement);
       return;

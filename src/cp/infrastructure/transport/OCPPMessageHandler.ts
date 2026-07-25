@@ -1125,7 +1125,14 @@ export class OCPPMessageHandler {
     gen?: ReturnType<typeof this._webSocket.currentGeneration>,
     onSettled?: (s: Settlement) => void,
   ): void {
-    this._webSocket.sendResult(messageId, payload, gen, onSettled);
+    // Callers without a dispatch-captured generation (response overrides,
+    // unsupported-action errors) respond in the current generation.
+    this._webSocket.sendResult(
+      messageId,
+      payload,
+      gen ?? this._webSocket.currentGeneration(),
+      onSettled,
+    );
   }
 
   private sendCallError(
@@ -1139,7 +1146,12 @@ export class OCPPMessageHandler {
       errorCode: errorCode,
       errorDescription: errorDescription,
     };
-    this._webSocket.sendError(messageId, errorDetails, gen, onSettled);
+    this._webSocket.sendError(
+      messageId,
+      errorDetails,
+      gen ?? this._webSocket.currentGeneration(),
+      onSettled,
+    );
   }
 
   private generateMessageId(): string {

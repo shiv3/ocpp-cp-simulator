@@ -111,7 +111,8 @@ describe("OCPPWebSocket Network Simulation", () => {
 
   describe("disabled bit-identical behavior", () => {
     it("sendAction should send synchronously when network sim is disabled", () => {
-      const result = ws.sendAction("msg-1", "Heartbeat", {});
+      const gen = ws.currentGeneration();
+      const result = ws.sendAction("msg-1", "Heartbeat", {}, gen);
 
       expect(result).toBe(true);
       expect(fakeWs.sent.length).toBe(1);
@@ -119,14 +120,16 @@ describe("OCPPWebSocket Network Simulation", () => {
     });
 
     it("sendResult should settle with 'written' synchronously when disabled", () => {
+      const gen = ws.currentGeneration();
       const settlements: Settlement[] = [];
-      ws.sendResult("msg-1", {}, undefined, (s) => settlements.push(s));
+      ws.sendResult("msg-1", {}, gen, (s) => settlements.push(s));
 
       expect(settlements.length).toBe(1);
       expect(settlements[0]).toEqual({ outcome: "written" });
     });
 
     it("sendError should settle with 'written' synchronously when disabled", () => {
+      const gen = ws.currentGeneration();
       const settlements: Settlement[] = [];
       ws.sendError(
         "msg-1",
@@ -134,7 +137,7 @@ describe("OCPPWebSocket Network Simulation", () => {
           errorCode: "InternalError" as any,
           errorDescription: "test",
         },
-        undefined,
+        gen,
         (s) => settlements.push(s),
       );
 
@@ -498,17 +501,19 @@ describe("OCPPWebSocket Network Simulation", () => {
 
   describe("sendResult/sendError queue_overflow handling", () => {
     it("sendResult with queue_overflow settles once", () => {
+      const gen = ws.currentGeneration();
       const controller = (ws as any)._controller;
       vi.spyOn(controller, "sendUpstream").mockReturnValue(false);
 
       const settlements: Settlement[] = [];
-      ws.sendResult("msg-1", {}, undefined, (s) => settlements.push(s));
+      ws.sendResult("msg-1", {}, gen, (s) => settlements.push(s));
 
       expect(settlements.length).toBe(1);
       expect(settlements[0]).toEqual({ outcome: "queue_overflow" });
     });
 
     it("sendError with queue_overflow settles once", () => {
+      const gen = ws.currentGeneration();
       const controller = (ws as any)._controller;
       vi.spyOn(controller, "sendUpstream").mockReturnValue(false);
 
@@ -519,7 +524,7 @@ describe("OCPPWebSocket Network Simulation", () => {
           errorCode: "InternalError" as any,
           errorDescription: "test",
         },
-        undefined,
+        gen,
         (s) => settlements.push(s),
       );
 
@@ -568,7 +573,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
-      const result = ws2.sendAction("msg-1", "Heartbeat", {});
+      const gen = ws2.currentGeneration();
+      const result = ws2.sendAction("msg-1", "Heartbeat", {}, gen);
 
       // Should return false when socket is not open
       expect(result).toBe(false);
@@ -578,7 +584,8 @@ describe("OCPPWebSocket Network Simulation", () => {
 
     it("sendAction returns true when socket IS open (disabled + socket open)", () => {
       // This is the common case with socket open (from beforeEach setup)
-      const result = ws.sendAction("msg-1", "Heartbeat", {});
+      const gen = ws.currentGeneration();
+      const result = ws.sendAction("msg-1", "Heartbeat", {}, gen);
 
       expect(result).toBe(true);
       expect(fakeWs.sent.length).toBe(1);
@@ -592,8 +599,9 @@ describe("OCPPWebSocket Network Simulation", () => {
       const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
+      const gen = ws2.currentGeneration();
       const settlements: Settlement[] = [];
-      ws2.sendResult("msg-1", {}, undefined, (s) => settlements.push(s));
+      ws2.sendResult("msg-1", {}, gen, (s) => settlements.push(s));
 
       // Should settle immediately with socket_closed
       expect(settlements.length).toBe(1);
@@ -613,6 +621,7 @@ describe("OCPPWebSocket Network Simulation", () => {
       const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
+      const gen = ws2.currentGeneration();
       const settlements: Settlement[] = [];
       ws2.sendError(
         "msg-1",
@@ -620,7 +629,7 @@ describe("OCPPWebSocket Network Simulation", () => {
           errorCode: "InternalError" as any,
           errorDescription: "test",
         },
-        undefined,
+        gen,
         (s) => settlements.push(s),
       );
 
@@ -642,7 +651,7 @@ describe("OCPPWebSocket Network Simulation", () => {
       expect(gen.closeCause).toBe("network");
 
       const settlements: Settlement[] = [];
-      ws.sendResult("msg-1", {}, undefined, (s) => settlements.push(s));
+      ws.sendResult("msg-1", {}, gen, (s) => settlements.push(s));
 
       // Should settle immediately with the latched cause
       expect(settlements.length).toBe(1);
@@ -666,7 +675,7 @@ describe("OCPPWebSocket Network Simulation", () => {
           errorCode: "InternalError" as any,
           errorDescription: "test",
         },
-        undefined,
+        gen,
         (s) => settlements.push(s),
       );
 
@@ -693,7 +702,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       const fakeWs2 = (ws2 as any)._ws as FakeWebSocket;
       // Socket is CONNECTING, not OPEN
 
-      const result = ws2.sendAction("msg-1", "Heartbeat", {});
+      const gen = ws2.currentGeneration();
+      const result = ws2.sendAction("msg-1", "Heartbeat", {}, gen);
 
       // Should return false when socket is not open, regardless of network sim
       expect(result).toBe(false);
@@ -714,7 +724,8 @@ describe("OCPPWebSocket Network Simulation", () => {
       };
       ws.setNetworkSimConfig(config);
 
-      const result = ws.sendAction("msg-1", "Heartbeat", {});
+      const gen = ws.currentGeneration();
+      const result = ws.sendAction("msg-1", "Heartbeat", {}, gen);
 
       // Should return true when socket is open
       expect(result).toBe(true);

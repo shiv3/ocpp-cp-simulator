@@ -28,6 +28,8 @@ import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import StatusPill from "../components/StatusPill";
+import NetworkSimBadge from "../components/network-sim/NetworkSimBadge";
+import ManualDisconnectButtons from "../components/network-sim/ManualDisconnectButtons";
 import { consolePath } from "../routes";
 import ConnectorCard from "./cp/ConnectorCard";
 import ConfigTab from "./cp/ConfigTab";
@@ -315,6 +317,7 @@ const CpDetailPage: React.FC = () => {
         }
       >
         <StatusPill status={isConnected ? view.status : "Disconnected"} />
+        <NetworkSimBadge summary={snapshot?.networkSim} />
         {resolvedOcppVersion && (
           <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
             {resolvedOcppVersion}
@@ -431,55 +434,75 @@ const CpDetailPage: React.FC = () => {
               </div>
             )}
             {networkSimGlobalConfig !== null && (
-              <NetworkSimEditor
-                mode="cp"
-                value={networkSimCpConfig ?? null}
-                inheritedRules={(() => {
-                  const filtered: Record<
-                    string,
-                    (typeof networkSimGlobalConfig)["rules"][string]
-                  > = {};
-                  for (const [id, rule] of Object.entries(
-                    networkSimGlobalConfig.rules,
-                  )) {
-                    if (rule !== null) {
-                      filtered[id] = rule;
+              <>
+                <NetworkSimEditor
+                  mode="cp"
+                  value={networkSimCpConfig ?? null}
+                  inheritedRules={(() => {
+                    const filtered: Record<
+                      string,
+                      (typeof networkSimGlobalConfig)["rules"][string]
+                    > = {};
+                    for (const [id, rule] of Object.entries(
+                      networkSimGlobalConfig.rules,
+                    )) {
+                      if (rule !== null) {
+                        filtered[id] = rule;
+                      }
                     }
-                  }
-                  return filtered as Record<
-                    string,
-                    Exclude<
-                      (typeof networkSimGlobalConfig)["rules"][string],
-                      null
-                    >
-                  >;
-                })()}
-                inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
-                onSave={async (config) => {
-                  try {
-                    await chargePointService.saveNetworkSimCp(cpId, config);
-                    await refreshNetworkSim();
-                  } catch (err) {
-                    console.error(
-                      `Failed to save network sim config for ${cpId}`,
-                      err,
-                    );
-                    throw err;
-                  }
-                }}
-                onDeleteOverride={async () => {
-                  try {
-                    await chargePointService.saveNetworkSimCp(cpId, null);
-                    await refreshNetworkSim();
-                  } catch (err) {
-                    console.error(
-                      `Failed to delete network sim override for ${cpId}`,
-                      err,
-                    );
-                    throw err;
-                  }
-                }}
-              />
+                    return filtered as Record<
+                      string,
+                      Exclude<
+                        (typeof networkSimGlobalConfig)["rules"][string],
+                        null
+                      >
+                    >;
+                  })()}
+                  inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
+                  onSave={async (config) => {
+                    try {
+                      await chargePointService.saveNetworkSimCp(cpId, config);
+                      await refreshNetworkSim();
+                    } catch (err) {
+                      console.error(
+                        `Failed to save network sim config for ${cpId}`,
+                        err,
+                      );
+                      throw err;
+                    }
+                  }}
+                  onDeleteOverride={async () => {
+                    try {
+                      await chargePointService.saveNetworkSimCp(cpId, null);
+                      await refreshNetworkSim();
+                    } catch (err) {
+                      console.error(
+                        `Failed to delete network sim override for ${cpId}`,
+                        err,
+                      );
+                      throw err;
+                    }
+                  }}
+                />
+                {snapshot?.networkSim?.manualRuleIds &&
+                  snapshot.networkSim.manualRuleIds.length > 0 && (
+                    <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
+                      <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-gray-100">
+                        Manual Rules
+                      </h3>
+                      <ManualDisconnectButtons
+                        manualRuleIds={snapshot.networkSim.manualRuleIds}
+                        isConnected={isConnected}
+                        onTriggerDisconnect={async (ruleId) =>
+                          chargePointService.triggerNetworkSimDisconnect(
+                            cpId,
+                            ruleId,
+                          )
+                        }
+                      />
+                    </div>
+                  )}
+              </>
             )}
           </div>
         )}

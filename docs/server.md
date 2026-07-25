@@ -162,6 +162,18 @@ Runtime packages for this control plane are `socket.io`,
 | `events.subscribe`   | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Join event rooms and return an atomic snapshot.                                       |
 | `events.unsubscribe` | `{ "scope": "*" \| "registry" \| "<cpId>" }`                                                                                                                                                          | Leave an event room.                                                                  |
 
+### Network Simulation methods
+
+| Method                           | Params                                             | Result / purpose                                                                                                                                                        |
+| -------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `network_sim.global.get`         | `{}`                                               | Return the global network-sim layer config, or `null` if disabled.                                                                                                      |
+| `network_sim.global.save`        | `{ "config": NetworkSimLayerConfig                 | null }`                                                                                                                                                                 | Validate and persist the global config. `null` disables the feature. Applies to all live WebSocket CPs. |
+| `network_sim.cp.get`             | `{ "cpId": string }`                               | Return `{ config: NetworkSimLayerConfig                                                                                                                                 | null, resolved: ResolvedNetworkSimConfig }` for the CP.                                                 |
+| `network_sim.cp.save`            | `{ "cpId": string, "config": NetworkSimLayerConfig | null }`                                                                                                                                                                 | Validate and persist per-CP config. `null` deletes the override (reverts to global layer).              |
+| `network_sim.disconnect.trigger` | `{ "cpId": string, "ruleId": string }`             | Manually trigger a network-sim rule (must be a manual-disconnect rule). Errors: `cp_not_found`, `soap_unsupported`, `sim_disabled`, `rule_not_manual`, `not_connected`. |
+
+**Persistence** — Configs are stored in the state database (if `--state-db` is configured) under keys `networkSim:global` and `networkSim:cp:<cpId>`. Configs survive daemon restart and are automatically applied before a restored CP reconnects. A corrupt stored value is logged and treated as absent (graceful degradation).
+
 ## MCP Endpoint
 
 The simulator exposes a Model Context Protocol (MCP) endpoint at `POST /mcp` for AI agents
@@ -209,6 +221,10 @@ For any RPC method not in the curated set, use the generic tools:
 
 - **`list_methods`** — no params → returns all method names with one-line descriptions and whether `cpId` is required. Pass `{ method }` to retrieve the full JSON Schema for one method.
 - **`call_method`** — `{ method, cpId?, params? }` → dispatches any RPC method. Rejects `events.subscribe` / `events.unsubscribe` (socket-bound) with an error. The description warns that `server.shutdown` and `state.reset` are destructive operations.
+
+| `network_sim_get` | `network_sim.global.get`, `network_sim.cp.get` | `cpId?` - if omitted, returns global config; if set, returns per-CP config and resolved state |
+| `network_sim_set` | `network_sim.global.save`, `network_sim.cp.save` | `cpId?`, `config` - if omitted, saves global config; if set, saves per-CP config |
+| `network_sim_trigger_disconnect` | `network_sim.disconnect.trigger` | `cpId`, `ruleId` - triggers a manual-disconnect rule for the CP |
 
 ### Error Handling
 
@@ -626,6 +642,57 @@ A worked **nginx + Authelia** example lives at
 [`docs/examples/compose-reverse-proxy-sso.yml`](examples/compose-reverse-proxy-sso.yml)
 (with its
 [`nginx-reverse-proxy-sso.conf`](examples/nginx-reverse-proxy-sso.conf)).
+
+## Network Simulation
+
+**Configuration** is applied at runtime via RPC/MCP methods; there are no `--network-sim-*` startup flags in Phase 1. Global config applies to all WebSocket CPs; per-CP config overrides the global layer. Setting per-CP config to `null` reverts that CP to the global layer.
+
+### Rule schema and example
+
+A layer config contains an optional seed (uint32) and a flat rules object. Each rule must have a type:
+
+```json
+{
+  "enabled": true,
+  "seed": 12345,
+  "rules": {
+    "latency-rule": {
+      "type": "latency",
+      "direction": "both",
+      "delayMs": 500,
+      "jitterMs": 100,
+      "messageType": "CALL"
+    },
+    "disconnect-rule": {
+      "type": "manual-disconnect",
+      "reconnectDelayMs": 2000
+    },
+    "periodic-rule": {
+      "type": "periodic-disconnect",
+      "intervalMs": 10000,
+      "intervalJitterMs": 2000,
+      "reconnectDelayMs": 1500
+    }
+  }
+}
+```
+
+All bounds come from the spec: `delayMs`, `jitterMs`, `reconnectDelayMs` ∈ [0, 120000] ms; `intervalMs` ∈ [1, 2000000] ms; `intervalJitterMs` ∈ [0, 2000000] ms.
+
+### Seeded determinism
+
+The same seed always produces the same fault sequence within a rule set. Useful for reproducing issues or running repeatable A/B tests:
+
+```js
+// Both instances with seed 42 will have identical latency timing
+{ "enabled": true, "seed": 42, "rules": { ... } }
+```
+
+### Protocol timer behaviors
+
+- **Delayed BootNotification**: A CALL delayed by latency rules does not release the boot gate until the response is received. A boot acceptance gate blocks transitions until BootNotification receives CALLRESULT.
+- **Periodic disconnects**: Periodic rules may fire before boot acceptance completes. This is **tolerated** — not a protocol violation, merely a fault condition that CSMS must handle.
+- **Heartbeat idle tracking**: Heartbeat timeout tracking anchors to the moment the frame is **physically written** to the socket (after all latency delays). A 30-second heartbeat interval becomes (30s + applied latency), so do not set heartbeat intervals below 60s when injecting significant latency.
 
 ## Security
 

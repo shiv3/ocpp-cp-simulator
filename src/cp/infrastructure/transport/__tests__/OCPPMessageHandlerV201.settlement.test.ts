@@ -18,6 +18,8 @@ class FakeOCPPWebSocket {
     messageId: string;
     callback?: (s: Settlement) => void;
   }> = [];
+  /** Every outbound CALL, in order — the observable for deferred effects. */
+  sentCalls: Array<{ action: string; payload: unknown }> = [];
 
   constructor() {
     this._generation = 1;
@@ -50,31 +52,34 @@ class FakeOCPPWebSocket {
 
   sendAction(
     messageId: string,
-    _action: string,
-    _payload: unknown,
+    action: string,
+    payload: unknown,
     _gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): boolean {
     this.pendingSettlements.push({ messageId, callback: onSettled });
+    this.sentCalls.push({ action, payload });
     return true;
   }
 
   sendResult(
-    _messageId: string,
+    messageId: string,
     _payload: unknown,
     _gen: GenerationToken,
-    _onSettled?: (s: Settlement) => void,
+    onSettled?: (s: Settlement) => void,
   ): void {
-    // No-op for fake
+    // Capture the callback for test-driven settlement
+    this.pendingSettlements.push({ messageId, callback: onSettled });
   }
 
   sendError(
-    _messageId: string,
+    messageId: string,
     _payload: unknown,
     _gen: GenerationToken,
-    _onSettled?: (s: Settlement) => void,
+    onSettled?: (s: Settlement) => void,
   ): void {
-    // No-op for fake
+    // Capture the callback for test-driven settlement
+    this.pendingSettlements.push({ messageId, callback: onSettled });
   }
 
   // Test helpers
@@ -190,6 +195,13 @@ const createRegistryWithEffects = (): V201InboundRegistry => {
 
   return registry as V201InboundRegistry;
 };
+
+/** Response effects are deferred off the settlement callback, so a settle()
+ *  only shows up on the wire after the microtask queue drains. */
+async function flushEffects(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 // Test helper type for accessing private members
 type HandlerTestAccess = {
@@ -398,23 +410,30 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
   });
 
   describe("afterResult effects at settlement", () => {
-    it("inbound CALL with afterResult does not run immediately; runs deferred after 'written' settlement", () => {
+    it("inbound CALL with afterResult does not run immediately; runs deferred after 'written' settlement", async () => {
       const handleIncoming = (
         handler as unknown as HandlerTestAccess
       ).handleIncomingMessage.bind(handler);
 
-      // Simulate incoming GetReport request
+      // The GetReport handler's afterResult sends NotifyReport{requestId:123},
+      // so that CALL appearing on the wire is the effect having run.
       handleIncoming(OCPPMessageType.CALL, "msg-123", "GetReport", {
         requestId: 100,
         componentVariable: [],
       });
 
-      // Should have registered a settlement callback via sendResult
-      // The effect queue defers the afterResult callback to after 'written' settlement
-      expect(true).toBe(true);
+      // The CALLRESULT is only accepted, not yet written: the effect must wait.
+      expect(fakeSocket.sentCalls).toEqual([]);
+
+      fakeSocket.settleCall("msg-123", "written");
+      await flushEffects();
+
+      expect(fakeSocket.sentCalls).toEqual([
+        { action: "NotifyReport", payload: { requestId: 123 } },
+      ]);
     });
 
-    it("two distinct inbound actions with afterResult (GetReport and GetVariables)", () => {
+    it("two distinct inbound actions with afterResult (GetReport and GetVariables)", async () => {
       const registry = createRegistryWithEffects();
       const handler2 = new OCPPMessageHandlerV201(
         mockChargePoint,
@@ -439,9 +458,18 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
         variableAttribute: [],
       });
 
-      // Both should complete without error
-      // The effects will be queued and deferred (tested via ResponseEffectQueue tests)
-      expect(true).toBe(true);
+      expect(fakeSocket.sentCalls).toEqual([]);
+
+      fakeSocket.settleCall("msg-1", "written");
+      fakeSocket.settleCall("msg-2", "written");
+      await flushEffects();
+
+      // Each handler carries its own requestId, so this also proves the two
+      // effects didn't get crossed or collapsed into one.
+      expect(fakeSocket.sentCalls).toEqual([
+        { action: "NotifyReport", payload: { requestId: 123 } },
+        { action: "NotifyReport", payload: { requestId: 456 } },
+      ]);
     });
   });
 

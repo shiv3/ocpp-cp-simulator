@@ -1,10 +1,34 @@
-import { describe, it, expect } from "bun:test";
-import { startMockCsms } from "./mockCsms";
+import { describe, it, expect, afterEach } from "bun:test";
+import { startMockCsms, type MockCsms } from "./mockCsms";
+
+// Every server and client goes through these so a failing assertion can't
+// strand a listening Bun.serve or an open socket in the next test's process.
+const openServers: MockCsms[] = [];
+const openClients: WebSocket[] = [];
+
+function trackedCsms(): MockCsms {
+  const csms = startMockCsms();
+  openServers.push(csms);
+  return csms;
+}
+
+function trackedClient(url: string): WebSocket {
+  const client = new WebSocket(url);
+  openClients.push(client);
+  return client;
+}
+
+afterEach(async () => {
+  for (const client of openClients.splice(0)) client.close();
+  // stop() is safe to call twice — several tests stop the server mid-body to
+  // assert that pending waiters reject.
+  await Promise.all(openServers.splice(0).map((csms) => csms.stop()));
+});
 
 describe("mock CSMS harness", () => {
   it("captures a raw client frame and rejects pending waiters on stop", async () => {
-    const csms = startMockCsms();
-    const client = new WebSocket(csms.url);
+    const csms = trackedCsms();
+    const client = trackedClient(csms.url);
     await new Promise<void>((resolve, reject) => {
       client.onopen = () => resolve();
       client.onerror = () => reject(new Error("client failed to open"));
@@ -22,7 +46,7 @@ describe("mock CSMS harness", () => {
   });
 
   it("rejects pending connection waiters on stop", async () => {
-    const csms = startMockCsms();
+    const csms = trackedCsms();
     const pending = csms.waitForConnection(5000);
     void pending.catch(() => undefined);
     await csms.stop();
@@ -47,13 +71,13 @@ async function waitForWebSocketOpen(
 
 describe("mockCsms extensions (new API)", () => {
   it("increments open and close counters across sequential connections", async () => {
-    const mock = startMockCsms();
+    const mock = trackedCsms();
 
     expect(mock.openCount()).toBe(0);
     expect(mock.closeCount()).toBe(0);
 
     // First connection
-    const ws1 = new WebSocket(mock.url);
+    const ws1 = trackedClient(mock.url);
     await waitForWebSocketOpen(ws1);
     expect(mock.openCount()).toBe(1);
     expect(mock.closeCount()).toBe(0);
@@ -69,7 +93,7 @@ describe("mockCsms extensions (new API)", () => {
     expect(mock.closeCount()).toBe(1);
 
     // Second connection
-    const ws2 = new WebSocket(mock.url);
+    const ws2 = trackedClient(mock.url);
     await waitForWebSocketOpen(ws2);
     expect(mock.openCount()).toBe(2);
     expect(mock.closeCount()).toBe(1);
@@ -86,9 +110,9 @@ describe("mockCsms extensions (new API)", () => {
   });
 
   it("captures per-connection transcripts with separate frame records", async () => {
-    const mock = startMockCsms();
+    const mock = trackedCsms();
 
-    const ws1 = new WebSocket(mock.url);
+    const ws1 = trackedClient(mock.url);
     await waitForWebSocketOpen(ws1);
 
     // Send multiple frames on first connection
@@ -101,7 +125,7 @@ describe("mockCsms extensions (new API)", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Second connection
-    const ws2 = new WebSocket(mock.url);
+    const ws2 = trackedClient(mock.url);
     await waitForWebSocketOpen(ws2);
 
     // Send frames on second connection
@@ -135,9 +159,9 @@ describe("mockCsms extensions (new API)", () => {
   });
 
   it("captures receivedAt timestamps and maintains monotonicity within a connection", async () => {
-    const mock = startMockCsms();
+    const mock = trackedCsms();
 
-    const ws = new WebSocket(mock.url);
+    const ws = trackedClient(mock.url);
     await waitForWebSocketOpen(ws);
 
     const sendTime = Date.now();
@@ -176,9 +200,9 @@ describe("mockCsms extensions (new API)", () => {
   });
 
   it("closeCurrentConnection() triggers the close handler on the server", async () => {
-    const mock = startMockCsms();
+    const mock = trackedCsms();
 
-    const ws = new WebSocket(mock.url);
+    const ws = trackedClient(mock.url);
     await waitForWebSocketOpen(ws);
 
     expect(mock.openCount()).toBe(1);
@@ -200,9 +224,9 @@ describe("mockCsms extensions (new API)", () => {
   });
 
   it("maintains both flat received[] and per-connection transcripts in sync", async () => {
-    const mock = startMockCsms();
+    const mock = trackedCsms();
 
-    const ws1 = new WebSocket(mock.url);
+    const ws1 = trackedClient(mock.url);
     await waitForWebSocketOpen(ws1);
 
     ws1.send(JSON.stringify([1, "msg-1", "Heartbeat", {}]));
@@ -213,7 +237,7 @@ describe("mockCsms extensions (new API)", () => {
     mock.closeCurrentConnection();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const ws2 = new WebSocket(mock.url);
+    const ws2 = trackedClient(mock.url);
     await waitForWebSocketOpen(ws2);
 
     ws2.send(JSON.stringify([1, "msg-3", "Heartbeat", {}]));
@@ -236,9 +260,9 @@ describe("mockCsms extensions (new API)", () => {
   });
 
   it("existing API (waitForCall, replyCallResult) still works", async () => {
-    const mock = startMockCsms();
+    const mock = trackedCsms();
 
-    const ws = new WebSocket(mock.url);
+    const ws = trackedClient(mock.url);
     await waitForWebSocketOpen(ws);
 
     // Send a CALL frame

@@ -240,45 +240,45 @@ describe("Network simulation restart and persistence", () => {
       const attachmentOrder: string[] = [];
 
       try {
-        // Spy on applyToCp to track when config is attached
-        let configAttachedBeforeConnect = false;
+        // Import CLIChargePointService to patch its prototype
+        const { CLIChargePointService } = await import("../../service");
 
-        setup2.manager["deps"].applyToCp = (cpId: string, resolved) => {
-          attachmentOrder.push(`applyToCp:${cpId}`);
-          configAttachedBeforeConnect = true;
-          // Also call original
-          const svc = setup2.registry.get(cpId);
-          if (svc) {
-            svc.setNetworkSimConfig(resolved);
-          }
+        // Patch the prototype BEFORE restore so we observe instances created during restore
+        const origConnect = CLIChargePointService.prototype.connect;
+        CLIChargePointService.prototype.connect = async function () {
+          attachmentOrder.push("connect");
+          return origConnect.call(this);
         };
 
-        // Spy on connect to verify config was attached first
-        const restoredCpSvc = setup2.registry.get("CP-B");
-        if (restoredCpSvc) {
-          const origConnect = restoredCpSvc.connect.bind(restoredCpSvc);
-          restoredCpSvc.connect = async () => {
-            attachmentOrder.push("connect");
-            return origConnect();
+        try {
+          // Spy on applyToCp to track when config is attached
+          setup2.manager["deps"].applyToCp = (cpId: string, resolved) => {
+            attachmentOrder.push(`applyToCp:${cpId}`);
+            // Also call original
+            const svc = setup2.registry.get(cpId);
+            if (svc) {
+              svc.setNetworkSimConfig(resolved);
+            }
           };
-        }
 
-        // Call restoreFromDatabase to trigger restoration
-        setup2.registry.restoreFromDatabase();
+          // Call restoreFromDatabase to trigger restoration
+          setup2.registry.restoreFromDatabase();
 
-        // Verify config was attached before connect
-        // The restore process calls onCpCreated which calls applyToCp
-        // before calling svc.connect()
-        expect(attachmentOrder.length).toBeGreaterThan(0);
-        // Check if applyToCp was called before connect
-        const attachIndex = attachmentOrder.findIndex((x) =>
-          x.startsWith("applyToCp:CP-B"),
-        );
-        const connectIndex = attachmentOrder.indexOf("connect");
-        if (attachIndex >= 0 && connectIndex >= 0) {
+          // Verify config was attached before connect
+          // The restore process calls onCpCreated which calls applyToCp
+          // before calling svc.connect()
+          const attachIndex = attachmentOrder.findIndex((x) =>
+            x.startsWith("applyToCp:CP-B"),
+          );
+          const connectIndex = attachmentOrder.indexOf("connect");
+          // UNCONDITIONAL: both indices must be >= 0 and assert ordering
+          expect(attachIndex).toBeGreaterThanOrEqual(0);
+          expect(connectIndex).toBeGreaterThanOrEqual(0);
           expect(attachIndex).toBeLessThan(connectIndex);
+        } finally {
+          // Restore the prototype
+          CLIChargePointService.prototype.connect = origConnect;
         }
-        expect(configAttachedBeforeConnect).toBe(true);
       } finally {
         setup2.registry.shutdownAll();
         await settleWebSocketClose();

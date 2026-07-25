@@ -9,11 +9,12 @@ import type {
   Settlement,
   GenerationToken,
 } from "../network-sim";
+import { OCPPAction, OCPPMessageType } from "../../../domain/types/OcppTypes";
 
 // Mock ChargePoint and minimal dependencies
 const mockChargePoint = {
   id: "test-cp",
-  database: {},
+  database: null,
   notifyIncomingCall: vi.fn(),
   consumeResponseOverride: vi.fn(() => null),
   configuration: {
@@ -42,6 +43,12 @@ class MockOCPPWebSocket implements Partial<OCPPWebSocket> {
     gen: 1,
     closeCause: null,
   };
+  // Capture onSettled callbacks for manual testing
+  capturedCallbacks: Array<{
+    messageId: string;
+    gen?: GenerationToken;
+    onSettled?: (s: Settlement) => void;
+  }> = [];
 
   setMessageHandler(): void {
     // No-op for test
@@ -56,36 +63,29 @@ class MockOCPPWebSocket implements Partial<OCPPWebSocket> {
   }
 
   sendResult(
-    _messageId: string,
+    messageId: string,
     _payload: unknown,
-    _gen?: GenerationToken,
+    gen?: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    // Immediately settle with 'written' to test the queue
-    if (onSettled) {
-      queueMicrotask(() => {
-        onSettled({ outcome: "written" });
-      });
-    }
+    // Capture the callback for test-driven settlement
+    this.capturedCallbacks.push({ messageId, gen, onSettled });
   }
 
   sendError(
-    _messageId: string,
+    messageId: string,
     _payload: unknown,
-    _gen?: GenerationToken,
+    gen?: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    if (onSettled) {
-      queueMicrotask(() => {
-        onSettled({ outcome: "written" });
-      });
-    }
+    // Capture the callback for test-driven settlement
+    this.capturedCallbacks.push({ messageId, gen, onSettled });
   }
 
-  // Trigger close for testing late registration
-  simulateClose(): void {
+  // Trigger close for testing close transaction behavior
+  simulateClose(closeCause: string = "network"): void {
     if (this.closeTransactionCallback) {
-      this.currentGenToken.closeCause = "network";
+      this.currentGenToken.closeCause = closeCause;
       this.closeTransactionCallback(
         this.currentGenToken as unknown as GenerationToken,
       );
@@ -97,16 +97,69 @@ class MockOCPPWebSocket implements Partial<OCPPWebSocket> {
     this.generationCounter++;
     this.currentGenToken = { gen: this.generationCounter, closeCause: null };
   }
+
+  /** Settle the response the handler sent for `messageId`, exactly as the
+   *  transport pipeline would. Fails loudly if nothing was ever sent — the
+   *  effect wiring is only under test if a real response went out. */
+  settleCallback(messageId: string, settlement: Settlement): void {
+    const entry = this.capturedCallbacks.find((c) => c.messageId === messageId);
+    if (!entry) throw new Error(`no response was sent for ${messageId}`);
+    entry.onSettled?.(settlement);
+  }
+
+  settlementHookFor(messageId: string): ((s: Settlement) => void) | undefined {
+    return this.capturedCallbacks.find((c) => c.messageId === messageId)
+      ?.onSettled;
+  }
+}
+
+/** The queue defers effects with queueMicrotask; drain that before asserting. */
+async function flushEffects(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+type HandlerTestAccess = {
+  _registry: {
+    registerCallHandler: (action: OCPPAction, handler: unknown) => void;
+  };
+  handleIncomingMessage: (
+    type: number,
+    messageId: string,
+    action: string,
+    payload: unknown,
+  ) => Promise<void> | void;
+};
+
+/** Replace DataTransfer's handler with one returning `result`, so an inbound
+ *  CALL exercises the production normalize → register → sendResult path. */
+function installHandler(handler: OCPPMessageHandler, result: unknown): void {
+  (handler as unknown as HandlerTestAccess)._registry.registerCallHandler(
+    OCPPAction.DataTransfer,
+    { handle: () => result },
+  );
+}
+
+async function deliverDataTransfer(
+  handler: OCPPMessageHandler,
+  messageId: string,
+): Promise<void> {
+  await (handler as unknown as HandlerTestAccess).handleIncomingMessage(
+    OCPPMessageType.CALL,
+    messageId,
+    OCPPAction.DataTransfer,
+    { vendorId: "test" },
+  );
 }
 
 describe("OCPPMessageHandler.responseEffects", () => {
   let mockWebSocket: MockOCPPWebSocket;
+  let handler: OCPPMessageHandler;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockWebSocket = new MockOCPPWebSocket();
-    // Initialize handler to verify integration (and that constructor doesn't throw)
-    void new OCPPMessageHandler(
+    handler = new OCPPMessageHandler(
       mockChargePoint,
       mockWebSocket as unknown as OCPPWebSocket,
       mockLogger,
@@ -114,74 +167,94 @@ describe("OCPPMessageHandler.responseEffects", () => {
     );
   });
 
-  it("handler returning HandlerOutcome has its effect run at settlement", async () => {
-    // Inject a fake handler that returns a HandlerOutcome
+  it("defers a HandlerOutcome effect until settlement, then runs it once", async () => {
     const effectFn = vi.fn();
     const outcome: HandlerOutcome = {
       kind: "handler-outcome",
       payload: { status: "Accepted" },
       afterResponseSettled: effectFn,
     };
+    installHandler(handler, outcome);
 
-    // The test validates that handlers can return HandlerOutcome
-    // and effects are properly queued and run at settlement
-    expect(outcome.afterResponseSettled).toBe(effectFn);
+    await deliverDataTransfer(handler, "msg-1");
+
+    // The CALLRESULT has been handed to the transport but not yet written:
+    // running the effect now would act on a response that may never land.
+    expect(effectFn).not.toHaveBeenCalled();
+
+    mockWebSocket.settleCallback("msg-1", { outcome: "written" });
+    expect(effectFn).not.toHaveBeenCalled(); // deferred, not synchronous
+    await flushEffects();
+
+    expect(effectFn).toHaveBeenCalledTimes(1);
   });
 
-  it("bare-payload handler has no effect and behaves exactly as before", async () => {
-    // This test verifies that existing handlers (returning bare payloads)
-    // continue to work without any effect routing
+  it("drops the effect when the generation was superseded before it ran", async () => {
+    const effectFn = vi.fn();
+    installHandler(handler, {
+      kind: "handler-outcome",
+      payload: { status: "Accepted" },
+      afterResponseSettled: effectFn,
+    } satisfies HandlerOutcome);
 
-    // Mock a bare response
-    const bareResponse = { status: "Accepted" };
+    await deliverDataTransfer(handler, "msg-stale");
 
-    // The handler should not attempt to route through the effect queue
-    // because normalizeHandlerResult(bareResponse) yields effect=null
-    expect(bareResponse).toEqual({ status: "Accepted" });
-  });
-
-  it("generation is captured at dispatch and stale responses settle correctly", async () => {
-    // This test verifies that:
-    // 1. Generation is captured at dispatch time
-    // 2. A response that settles after generation advances is correctly identified as stale
-
-    // The generation token at dispatch
-    const dispatchGen = mockWebSocket.currentGeneration();
-    expect(dispatchGen.gen).toBe(1);
-
-    // If generation advances before response settlement,
-    // the effect should be skipped (stale generation check)
+    // Reconnect between send and settlement: the response belongs to a dead
+    // socket, so its follow-up must not fire on the new one.
     mockWebSocket.advanceGeneration();
-    const newGen = mockWebSocket.currentGeneration();
-    expect(newGen.gen).toBe(2);
+    mockWebSocket.settleCallback("msg-stale", { outcome: "written" });
+    await flushEffects();
 
-    // In a real scenario, the effect deferred for gen 1 would be skipped
-    // because when it runs, the current generation would be 2
+    expect(effectFn).not.toHaveBeenCalled();
   });
 
-  it("response effect queue is properly integrated with close transaction", async () => {
-    // Verify that the response effect queue is registered with onCloseTransaction
-    // This is tested by ensuring the callback is set
+  it("holds a socket_closed effect and runs it when the close was a network drop", async () => {
+    const effectFn = vi.fn();
+    installHandler(handler, {
+      kind: "handler-outcome",
+      payload: { status: "Accepted" },
+      afterResponseSettled: effectFn,
+    } satisfies HandlerOutcome);
 
-    // The onCloseTransaction callback should have been registered in the constructor
-    // We can verify this by checking that mockWebSocket's closeTransactionCallback is set
-    expect(mockWebSocket["closeTransactionCallback"]).not.toBeNull();
+    await deliverDataTransfer(handler, "msg-netclose");
+
+    mockWebSocket.settleCallback("msg-netclose", { outcome: "socket_closed" });
+    await flushEffects();
+    // Held: the close transaction has not finalized, so the cause is unknown.
+    expect(effectFn).not.toHaveBeenCalled();
+
+    mockWebSocket.simulateClose("network");
+    await flushEffects();
+
+    expect(effectFn).toHaveBeenCalledTimes(1);
   });
 
-  it("multiple handlers with effects are all queued independently", async () => {
-    // This test verifies that multiple concurrent handlers with effects
-    // don't interfere with each other
+  it("drops a held effect when the operator disconnected manually", async () => {
+    const effectFn = vi.fn();
+    installHandler(handler, {
+      kind: "handler-outcome",
+      payload: { status: "Accepted" },
+      afterResponseSettled: effectFn,
+    } satisfies HandlerOutcome);
 
-    // Create two independent effect functions
-    const effect1 = vi.fn();
-    const effect2 = vi.fn();
+    await deliverDataTransfer(handler, "msg-manualclose");
 
-    // In the ResponseEffectQueue, each generation can have multiple effects
-    // They are independent and should all execute (unless stale)
+    mockWebSocket.settleCallback("msg-manualclose", {
+      outcome: "socket_closed",
+    });
+    mockWebSocket.simulateClose("manual");
+    await flushEffects();
 
-    // This is a structural test — the actual integration is proven
-    // by the ResponseEffectQueue unit tests
-    expect(effect1).not.toHaveBeenCalled();
-    expect(effect2).not.toHaveBeenCalled();
+    expect(effectFn).not.toHaveBeenCalled();
+  });
+
+  it("registers no settlement hook for a bare-payload handler", async () => {
+    installHandler(handler, { status: "Accepted" });
+
+    await deliverDataTransfer(handler, "msg-bare");
+
+    // No effect to run means nothing should be subscribed to the settlement,
+    // keeping the pre-existing handlers on their original code path.
+    expect(mockWebSocket.settlementHookFor("msg-bare")).toBeUndefined();
   });
 });

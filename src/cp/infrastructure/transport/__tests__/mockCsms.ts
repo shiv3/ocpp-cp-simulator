@@ -54,6 +54,7 @@ export function startMockCsms(): MockCsms {
   let openCountValue = 0;
   let closeCountValue = 0;
   let socket: ServerWebSocket<unknown> | null = null;
+  let stopPromise: Promise<void> | null = null;
 
   const server = Bun.serve({
     port: 0,
@@ -194,13 +195,25 @@ export function startMockCsms(): MockCsms {
       return closeCountValue;
     },
     async stop() {
+      // Idempotent: tests stop mid-body to assert waiter rejection and then
+      // stop again in cleanup. A second `server.stop(true)` never settles, so
+      // the first call's promise is what every later caller awaits.
+      if (stopPromise) return stopPromise;
       for (const w of [...waiters]) {
         w.reject(new Error("mock CSMS stopped")); // reject() clears the timer and removes the waiter
       }
       for (const w of [...connectionWaiters]) {
         w.reject(new Error("mock CSMS stopped")); // reject() clears the timer and removes the waiter
       }
-      await server.stop(true);
+      // Bun 1.3: if the server closed a WebSocket itself (closeCurrentConnection),
+      // `server.stop()` tears the listener down immediately but its promise
+      // never settles. Awaiting it verbatim wedges test cleanup, so cap the
+      // wait — by the time it elapses the port is already free.
+      stopPromise = Promise.race([
+        server.stop(true),
+        new Promise<void>((resolve) => setTimeout(resolve, 50)),
+      ]);
+      await stopPromise;
     },
   };
 }

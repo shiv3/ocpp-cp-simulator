@@ -143,7 +143,7 @@ describe.skipIf(!canBindBunServe())(
         // Find the frame in connections to get receivedAt
         const connections = csms.connections();
         const lastConnection = connections[connections.length - 1];
-        const heartbeatReceived = lastConnection.frames
+        const heartbeatReceived = [...lastConnection.frames]
           .reverse()
           .find(
             (f) =>
@@ -626,7 +626,7 @@ describe.skipIf(!canBindBunServe())(
         // Find receivedAt from connections
         const connections = csms.connections();
         const lastConnection = connections[connections.length - 1];
-        const heartbeatReceived = lastConnection.frames
+        const heartbeatReceived = [...lastConnection.frames]
           .reverse()
           .find(
             (f) =>
@@ -700,7 +700,7 @@ describe.skipIf(!canBindBunServe())(
         // Get receivedAt
         const connections = csms.connections();
         const lastConnection = connections[connections.length - 1];
-        const heartbeatReceived = lastConnection.frames
+        const heartbeatReceived = [...lastConnection.frames]
           .reverse()
           .find(
             (f) =>

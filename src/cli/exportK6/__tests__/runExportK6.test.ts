@@ -87,6 +87,19 @@ describe("runExportK6", () => {
     ).toBe("t1");
   });
 
+  it("fails cleanly when the scenario file contains null", async () => {
+    const file = join(dir, "null.json");
+    writeFileSync(file, "null");
+    const code = await runExportK6({
+      scenarioFile: file,
+      outDir: join(dir, "out"),
+      ocppVersion: "1.6",
+      force: false,
+    });
+    expect(code).toBe(1);
+    expect(stderr.join("")).toMatch(/schema/i);
+  });
+
   it("fails on invalid JSON", async () => {
     const file = join(dir, "bad.json");
     writeFileSync(file, "{nope");

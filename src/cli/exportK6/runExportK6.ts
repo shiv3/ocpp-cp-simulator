@@ -50,6 +50,20 @@ export async function runExportK6(args: ExportK6Args): Promise<number> {
     return fail(`scenario file is not valid JSON: ${message(err)}`);
   }
 
+  // A non-object JSON value (most importantly `null`, since `typeof null
+  // === "object"`) has no `.nodes` to look at — go straight to the
+  // schema check, which is documented to never throw and to report
+  // `valid: false` for exactly this case, instead of letting
+  // validateExportability's property access below throw a TypeError.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    const schema = validateScenarioSchema(parsed);
+    return fail(
+      `scenario does not match schema/scenario.schema.json:\n  ${schema.errors
+        .slice(0, 5)
+        .join("\n  ")}`,
+    );
+  }
+
   // Exportability checks (unsupported node/assertion types, missing start
   // node) run before the JSON-schema check: the schema's node/assertion
   // `type` enums are a superset of what this exporter actually supports

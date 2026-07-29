@@ -35,6 +35,13 @@ class FakeHost implements ScenarioHost {
   }
   async sleep(ms: number): Promise<void> {
     this.slept.push(ms);
+    // Yield a real macrotask instead of resolving on the microtask queue.
+    // This lets the main walk and a background auto-meter loop take turns
+    // (each sleep is a discrete "tick") instead of one starving the other
+    // via an unbroken chain of microtasks — needed for the finally-stop test
+    // below, where the loop would otherwise spin forever ahead of the walk
+    // ever reaching runScenario's `finally`.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
   nowIso(): string {
     return "2026-07-29T00:00:00.000Z";
@@ -258,6 +265,42 @@ describe("runScenario", () => {
         )[0].sampledValue[0].value,
     );
     expect(values).toEqual(["0", "500", "1000"]);
+  });
+
+  it("stops a still-running auto-meter loop when the scenario ends", async () => {
+    // Unlike the maxValue test above (which parks the walk until the loop
+    // self-terminates), this loop has no maxTime/maxValue/curve and would
+    // run forever unless runScenario's `finally` actively stops it. If the
+    // finally-stop path were broken, this test would hang instead of
+    // resolving — that hang IS the assertion.
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: {
+            value: 0,
+            sendMessage: false,
+            autoIncrement: true,
+            incrementInterval: 1,
+            incrementAmount: 100,
+            stopMode: "manual",
+            // no maxTime/maxValue: the loop would run forever unless stopped
+          },
+        },
+        { id: "c", type: "delay", data: { delaySeconds: 0 } },
+        { id: "d", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(true); // resolving at all proves the finally stopped the loop
   });
 
   it("errors on transaction stop without an active transaction", async () => {

@@ -1,6 +1,8 @@
 import {
   type BaseNodeData,
   type CancelReservationNodeData,
+  CERT_SIGNATURE_ALGORITHMS,
+  type CertQuirksNodeData,
   type ConfigSetNodeData,
   type ConnectorPlugNodeData,
   CSMS_CALL_TRIGGER_ACTIONS,
@@ -31,6 +33,7 @@ import {
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { CurvePoint } from "../../../cp/domain/connector/MeterValueCurve";
 import CancelReservationForm from "./CancelReservationForm";
+import CertQuirksForm from "./CertQuirksForm";
 import ConfigSetForm from "./ConfigSetForm";
 import ConnectorPlugForm from "./ConnectorPlugForm";
 import CsmsCallTriggerForm from "./CsmsCallTriggerForm";
@@ -135,6 +138,9 @@ function asResponseOverrideStatus(
 }
 
 const INBOUND_POLICY_ACTIONS_SET = new Set<string>(INBOUND_POLICY_ACTIONS);
+const CERT_SIGNATURE_ALGORITHMS_SET = new Set<string>(
+  CERT_SIGNATURE_ALGORITHMS,
+);
 const INBOUND_POLICY_ERROR_CODES_SET = new Set<string>(
   INBOUND_POLICY_ERROR_CODES,
 );
@@ -687,6 +693,76 @@ function inboundPolicyFormToNodeData(
   }) as InboundPolicyNodeData;
 }
 
+function asCertQuirksMode(value: unknown): "set" | "clear" {
+  return value === "clear" ? "clear" : "set";
+}
+
+function asCertQuirksPreset(value: unknown): "octt" | undefined {
+  return value === "octt" ? "octt" : undefined;
+}
+
+function asCertKeyAlgorithm(value: unknown): "ECDSA" | "RSA" | undefined {
+  return value === "ECDSA" || value === "RSA" ? value : undefined;
+}
+
+function asCertLineEndings(value: unknown): "lf" | "crlf" | undefined {
+  return value === "lf" || value === "crlf" ? value : undefined;
+}
+
+/** Free-text entries reach this parser, and the CertificateSigned handler
+ *  compares them verbatim against the leaf certificate's algorithm name —
+ *  a typo would silently make the acceptance policy reject everything.
+ *  Only the advertised algorithm names survive; an all-invalid list drops
+ *  to undefined (no policy) rather than persisting as reject-everything. */
+function parseCertAlgorithmArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const valid = value.filter(
+    (v): v is string =>
+      typeof v === "string" && CERT_SIGNATURE_ALGORITHMS_SET.has(v),
+  );
+  return valid.length > 0 ? valid : undefined;
+}
+
+function parseStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((v) => typeof v === "string");
+}
+
+function certQuirksNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  const data = nodeData as Partial<CertQuirksNodeData>;
+  return compactDefined({
+    ...baseToForm(nodeData),
+    mode: asCertQuirksMode(data.mode),
+    preset: asCertQuirksPreset(data.preset),
+    csrKeyAlgorithm: asCertKeyAlgorithm(data.csrKeyAlgorithm),
+    csrPemLineEndings: asCertLineEndings(data.csrPemLineEndings),
+    requiredCertificateSignatureAlgorithms:
+      data.requiredCertificateSignatureAlgorithms,
+    hiddenConfigurationKeys: data.hiddenConfigurationKeys,
+  });
+}
+
+function certQuirksFormToNodeData(formData: NodeFormData): CertQuirksNodeData {
+  const mode = asCertQuirksMode(formData.mode);
+  return compactDefined({
+    ...baseFromForm(formData),
+    mode,
+    ...(mode === "set"
+      ? {
+          preset: asCertQuirksPreset(formData.preset),
+          csrKeyAlgorithm: asCertKeyAlgorithm(formData.csrKeyAlgorithm),
+          csrPemLineEndings: asCertLineEndings(formData.csrPemLineEndings),
+          requiredCertificateSignatureAlgorithms: parseCertAlgorithmArray(
+            formData.requiredCertificateSignatureAlgorithms,
+          ),
+          hiddenConfigurationKeys: parseStringArray(
+            formData.hiddenConfigurationKeys,
+          ),
+        }
+      : {}),
+  }) as CertQuirksNodeData;
+}
+
 export const NODE_FORM_REGISTRY = {
   [ScenarioNodeType.STATUS_CHANGE]: {
     title: "Status Change",
@@ -801,6 +877,12 @@ export const NODE_FORM_REGISTRY = {
     Component: InboundPolicyForm,
     nodeDataToForm: inboundPolicyNodeDataToForm,
     formToNodeData: inboundPolicyFormToNodeData,
+  },
+  [ScenarioNodeType.CERT_QUIRKS]: {
+    title: "Certificate Quirks",
+    Component: CertQuirksForm,
+    nodeDataToForm: certQuirksNodeDataToForm,
+    formToNodeData: certQuirksFormToNodeData,
   },
   [ScenarioNodeType.CONFIG_SET]: {
     title: "Config Set",

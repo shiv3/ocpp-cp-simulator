@@ -1,4 +1,4 @@
-import { generateCsr } from "./csr";
+import { generateCsr, type CsrGenerationOptions } from "./csr";
 
 export type RootCertificateType =
   "CentralSystemRootCertificate" | "ManufacturerRootCertificate";
@@ -23,8 +23,12 @@ export class CertificateStore {
   #signedChains: string[][] = [];
   #rootCerts: InstalledRootCertificate[] = [];
 
-  async generateNewCsr(serial: string, cpoName: string): Promise<string> {
-    const generated = await generateCsr(serial, cpoName);
+  async generateNewCsr(
+    serial: string,
+    cpoName: string,
+    options?: CsrGenerationOptions,
+  ): Promise<string> {
+    const generated = await generateCsr(serial, cpoName, options);
 
     this.#keyPair = {
       privateKey: generated.privateKey,

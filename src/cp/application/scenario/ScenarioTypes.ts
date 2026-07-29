@@ -72,6 +72,11 @@ export enum ScenarioNodeType {
   // (callerror or ignore). Policies survive reconnects until explicitly
   // cleared, unlike responseOverride which is one-shot.
   INBOUND_POLICY = "inboundPolicy",
+  // Issue #247 Phase 3: set or clear certificate quirks (ChargePoint
+  // domain-specific behaviors like CSR key algorithm, PEM line endings,
+  // signature algorithm requirements, hidden configuration keys). Used to
+  // emulate certification-tool behaviors (e.g., OCTT strictness).
+  CERT_QUIRKS = "certQuirks",
 }
 
 /**
@@ -332,6 +337,34 @@ export interface InboundPolicyNodeData extends BaseNodeData {
 }
 
 /**
+ * Certificate Quirks Node Data — sets or clears ChargePoint domain-specific
+ * certificate behaviors (CSR key algorithm, PEM line endings, required
+ * signature algorithms, hidden configuration keys). Issue #247 Phase 3.
+ *
+ * Two modes:
+ * - "set": apply quirks from an optional preset and/or explicit fields.
+ * - "clear": clear all quirks (resume normal behavior).
+ *
+ * Presets (e.g., "octt") encode certification-tool behaviors. Explicit
+ * fields override preset values. Quirks are tracked and cleared when the
+ * scenario completes or stops (same lifecycle as inboundPolicy).
+ */
+export interface CertQuirksNodeData extends BaseNodeData {
+  /** Mode: "set" to apply quirks, "clear" to remove them. */
+  mode: "set" | "clear";
+  /** Optional preset name; only meaningful when mode === "set". */
+  preset?: "octt";
+  /** CSR key algorithm (only for mode="set" and optional). */
+  csrKeyAlgorithm?: "ECDSA" | "RSA";
+  /** CSR PEM line endings (only for mode="set" and optional). */
+  csrPemLineEndings?: "lf" | "crlf";
+  /** Required certificate signature algorithms (only for mode="set" and optional). */
+  requiredCertificateSignatureAlgorithms?: string[];
+  /** Hidden configuration keys (only for mode="set" and optional). */
+  hiddenConfigurationKeys?: string[];
+}
+
+/**
  * Config Set Node Data — applies a ChangeConfiguration locally (without
  * round-tripping through CSMS). Useful for tightening
  * MeterValueSampleInterval / changing MeterValuesSampledData mid-scenario.
@@ -372,6 +405,7 @@ export type ScenarioNodeData =
   | UnlockOutcomeNodeData
   | ResponseOverrideNodeData
   | InboundPolicyNodeData
+  | CertQuirksNodeData
   | ConfigSetNodeData
   | DataTransferNodeData
   | StartNodeData
@@ -713,6 +747,18 @@ export interface ScenarioExecutorCallbacks {
   /** Issue #247: clear the inbound call policy for the given action (or all
    *  if action is omitted). Called when a scenario run ends to clean up. */
   onClearInboundPolicy?: (action?: string) => void;
+  /** Issue #247 Phase 3: set certificate quirks (merge with existing). */
+  onSetCertificateQuirks?: (
+    quirks: Partial<{
+      csrKeyAlgorithm?: "ECDSA" | "RSA";
+      csrPemLineEndings?: "lf" | "crlf";
+      requiredCertificateSignatureAlgorithms?: string[];
+      hiddenConfigurationKeys?: string[];
+    }>,
+  ) => void;
+  /** Issue #247 Phase 3: clear all certificate quirks. Called when a scenario
+   *  run ends to clean up any quirks armed during the run. */
+  onClearCertificateQuirks?: () => void;
   /** §5.3: apply a Configuration key change locally. */
   onConfigSet?: (key: string, value: string) => void;
   /** §4.3: send CP-initiated DataTransfer.req. */
@@ -942,4 +988,25 @@ export const INBOUND_POLICY_ERROR_CODES = [
   "OccurenceConstraintViolation",
   "TypeConstraintViolation",
   "GenericError",
+] as const;
+
+/** Presets for certQuirks node; currently "octt" encodes legacy OCTT
+ *  strictness (RSA CSR, CRLF PEM, RSASSA-PKCS1-v1_5 only, hide CpoName). */
+export const CERT_QUIRKS_PRESETS = ["octt"] as const;
+
+/** The OCTT preset expansion: legacy SHA256withRSA-only acceptance
+ *  (reject RSA-PSS), RSA CSR, CRLF PEM, no CpoName reference.
+ *  See steve-community/steve#2093. */
+export const OCTT_PRESET_QUIRKS = {
+  csrKeyAlgorithm: "RSA",
+  csrPemLineEndings: "crlf",
+  requiredCertificateSignatureAlgorithms: ["RSASSA-PKCS1-v1_5"],
+  hiddenConfigurationKeys: ["CpoName"],
+} as const;
+
+/** Valid certificate signature algorithm names for certQuirks validation. */
+export const CERT_SIGNATURE_ALGORITHMS = [
+  "ECDSA",
+  "RSASSA-PKCS1-v1_5",
+  "RSA-PSS",
 ] as const;

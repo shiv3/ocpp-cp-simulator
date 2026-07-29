@@ -639,6 +639,12 @@ export const createScenarioExecutorCallbacks = (
     onClearInboundPolicy: (action) => {
       chargePoint.clearInboundCallPolicy(action);
     },
+    onSetCertificateQuirks: (quirks) => {
+      chargePoint.setCertificateQuirks(quirks);
+    },
+    onClearCertificateQuirks: () => {
+      chargePoint.clearCertificateQuirks();
+    },
     onConfigSet: (key, value) => {
       chargePoint.configuration.applyChange(key, value);
     },

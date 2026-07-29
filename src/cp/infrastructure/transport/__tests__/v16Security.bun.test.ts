@@ -223,5 +223,160 @@ describe.skipIf(!canBindBunServe())(
         await csms.stop();
       }
     });
+
+    it("with RSA quirk set: SignCertificate CSR has RSA public key and sha256WithRSAEncryption signature", async () => {
+      const csms = startMockCsms();
+      const cp = new ChargePoint(
+        "CP016-SEC-CSR-RSA",
+        DefaultBootNotification,
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.6J",
+        {},
+        1,
+        "startup-auth-key",
+        "Example CPO",
+      );
+      cp.events.on("error", () => undefined);
+
+      try {
+        cp.connect();
+        await acceptBootAndDrainStartup(csms);
+
+        // Set RSA quirk before sending SignCertificate
+        cp.setCertificateQuirks({ csrKeyAlgorithm: "RSA" });
+
+        await cp.sendSignCertificate();
+
+        const signCertificate = await csms.waitForCall("SignCertificate");
+        const signPayload =
+          signCertificate.payload as SignCertificateRequestV16;
+        expect(isValidSignCertificateRequestV16(signPayload)).toBe(true);
+
+        const csr = new x509.Pkcs10CertificateRequest(signPayload.csr);
+        expect(csr.subject).toContain("CN=CP016-SEC-CSR-RSA");
+
+        // Verify public key is RSA
+        const publicKey = csr.publicKey;
+        expect(publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
+        expect((publicKey.algorithm as RsaKeyAlgorithm).modulusLength).toBe(
+          2048,
+        );
+
+        // Verify signature algorithm is RSASSA-PKCS1-v1_5
+        const sigAlg = csr.signatureAlgorithm;
+        expect(sigAlg.name).toBe("RSASSA-PKCS1-v1_5");
+
+        expect(await csr.verify()).toBe(true);
+
+        csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+
+    it("with CRLF quirk set: SignCertificate CSR PEM has CRLF line endings", async () => {
+      const csms = startMockCsms();
+      const cp = new ChargePoint(
+        "CP016-SEC-CSR-CRLF",
+        DefaultBootNotification,
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.6J",
+        {},
+        1,
+        "startup-auth-key",
+        "Example CPO",
+      );
+      cp.events.on("error", () => undefined);
+
+      try {
+        cp.connect();
+        await acceptBootAndDrainStartup(csms);
+
+        // Set CRLF quirk
+        cp.setCertificateQuirks({ csrPemLineEndings: "crlf" });
+
+        await cp.sendSignCertificate();
+
+        const signCertificate = await csms.waitForCall("SignCertificate");
+        const signPayload =
+          signCertificate.payload as SignCertificateRequestV16;
+
+        // Verify PEM has CRLF line endings
+        expect(signPayload.csr).toContain("\r\n");
+        // Verify no isolated LF
+        const lines = signPayload.csr.split("\r\n");
+        for (const line of lines) {
+          expect(line).not.toContain("\r");
+          expect(line).not.toContain("\n");
+        }
+
+        csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+
+    it("quirks are sticky and survive multiple calls", async () => {
+      const csms = startMockCsms();
+      const cp = new ChargePoint(
+        "CP016-SEC-CSR-STICKY",
+        DefaultBootNotification,
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.6J",
+        {},
+        1,
+        "startup-auth-key",
+        "Example CPO",
+      );
+      cp.events.on("error", () => undefined);
+
+      try {
+        cp.connect();
+        await acceptBootAndDrainStartup(csms);
+
+        // Set RSA quirk and send CSR
+        cp.setCertificateQuirks({ csrKeyAlgorithm: "RSA" });
+        await cp.sendSignCertificate();
+
+        let signCertificate = await csms.waitForCall("SignCertificate");
+        let csr = new x509.Pkcs10CertificateRequest(
+          signCertificate.payload.csr,
+        );
+        expect(csr.publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
+        csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });
+
+        // Send another CSR without clearing - should still be RSA
+        await cp.sendSignCertificate();
+
+        signCertificate = await csms.waitForCall("SignCertificate");
+        csr = new x509.Pkcs10CertificateRequest(signCertificate.payload.csr);
+        // Should still be RSA because quirks are sticky
+        expect(csr.publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
+        csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
   },
 );

@@ -2,6 +2,7 @@ import type { Edge } from "@xyflow/react";
 
 import {
   type CancelReservationNodeData,
+  type CertQuirksNodeData,
   type ConfigSetNodeData,
   type ConnectorPlugNodeData,
   type CsmsCallTriggerNodeData,
@@ -456,6 +457,16 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           errorDescription: "",
         } satisfies InboundPolicyNodeData,
       };
+    case ScenarioNodeType.CERT_QUIRKS:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Certificate Quirks",
+          mode: "set",
+        } satisfies CertQuirksNodeData,
+      };
     case ScenarioNodeType.START:
       return {
         id,
@@ -586,6 +597,19 @@ export function stepSummary(node: ScenarioNode): string {
         return `${d.action} → ignore`;
       }
     }
+    case ScenarioNodeType.CERT_QUIRKS: {
+      const d = node.data as CertQuirksNodeData;
+      if (d.mode === "clear") {
+        return "clear all quirks";
+      } else {
+        const parts: string[] = [];
+        if (d.preset) parts.push(`preset: ${d.preset}`);
+        if (d.csrKeyAlgorithm) parts.push(`CSR: ${d.csrKeyAlgorithm}`);
+        if (d.csrPemLineEndings)
+          parts.push(`PEM: ${d.csrPemLineEndings.toUpperCase()}`);
+        return parts.length > 0 ? parts.join(" · ") : "set quirks";
+      }
+    }
     case ScenarioNodeType.CONFIG_SET: {
       const d = node.data as ConfigSetNodeData;
       return `${d.key} = ${d.value}`;
@@ -643,6 +667,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
     types: [
       ScenarioNodeType.RESPONSE_OVERRIDE,
       ScenarioNodeType.INBOUND_POLICY,
+      ScenarioNodeType.CERT_QUIRKS,
       ScenarioNodeType.CONFIG_SET,
       ScenarioNodeType.DATA_TRANSFER,
       ScenarioNodeType.NOTIFICATION,

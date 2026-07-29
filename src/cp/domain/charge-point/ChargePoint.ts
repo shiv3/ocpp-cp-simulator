@@ -91,6 +91,30 @@ export type InboundCallPolicy =
   | { kind: "callerror"; errorCode: string; errorDescription: string }
   | { kind: "ignore" };
 
+/**
+ * Certificate quirks for CSR generation and acceptance (issue #247).
+ * Used to emulate OCPP conformance tool behavior and test edge cases.
+ * All fields are optional; unset fields revert to default behavior.
+ */
+export interface CertificateQuirks {
+  /** Key algorithm for generated CSRs. Default (unset): ECDSA P-256. */
+  csrKeyAlgorithm?: "ECDSA" | "RSA";
+  /** Line endings for emitted CSR PEM. Default (unset): "lf". */
+  csrPemLineEndings?: "lf" | "crlf";
+  /** Accepted signature algorithms for certificates received via CertificateSigned.
+   *  Unset/empty = accept anything (default behavior). The handler checks the leaf
+   *  certificate's signature algorithm name (via X509Certificate.signatureAlgorithm.name)
+   *  and rejects the chain if its name is not in this list. Matchable algorithm names
+   *  include "ECDSA" (P-256, P-384, P-521), "RSASSA-PKCS1-v1_5" (RSA PKCS#1),
+   *  and "RSA-PSS" (RSA-PSS). */
+  requiredCertificateSignatureAlgorithms?: string[];
+  /** OCPP 1.6 configuration keys to omit from GetConfiguration responses.
+   *  When a hidden key is requested by name, it appears in the response's
+   *  unknownKey array instead of the configurationKey list. Unset/empty =
+   *  no keys are hidden (default behavior). */
+  hiddenConfigurationKeys?: string[];
+}
+
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
@@ -144,6 +168,9 @@ export class ChargePoint {
    *  CALL arrives for an action with a policy, reply with CALLERROR or stay silent
    *  instead of processing normally. Survive reconnects until explicitly cleared. */
   private readonly _inboundCallPolicies = new Map<string, InboundCallPolicy>();
+  /** Certificate quirks for CSR generation and acceptance (issue #247).
+   *  Used to emulate OCPP conformance tool behavior. Sticky until cleared. */
+  private _certificateQuirks: CertificateQuirks = {};
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
@@ -784,6 +811,23 @@ export class ChargePoint {
     } else {
       this._inboundCallPolicies.delete(action);
     }
+  }
+
+  /** Set certificate quirks (CSR generation options, acceptance policies, etc.).
+   *  Shallow-merges into current quirks; unset fields inherit prior values.
+   *  Sticky until explicitly cleared. */
+  setCertificateQuirks(quirks: Partial<CertificateQuirks>): void {
+    this._certificateQuirks = { ...this._certificateQuirks, ...quirks };
+  }
+
+  /** Reset all certificate quirks to empty state. */
+  clearCertificateQuirks(): void {
+    this._certificateQuirks = {};
+  }
+
+  /** Read-only access to current certificate quirks. */
+  get certificateQuirks(): CertificateQuirks {
+    return this._certificateQuirks;
   }
 
   set loggingCallback(callback: (entry: LogEntry) => void) {

@@ -72,6 +72,10 @@ import cert16Tc023_1AuthorizeInvalidJson from "./scenarios/cert16-tc023-1-author
 import cert16Tc023_2AuthorizeExpiredJson from "./scenarios/cert16-tc023-2-authorize-expired.json";
 import cert16Tc023_3AuthorizeBlockedJson from "./scenarios/cert16-tc023-3-authorize-blocked.json";
 
+// OCPP 1.6 Certificate quirks (issue #247 Phase 3): probe with OCTT legacy
+// behaviors (RSA CSR, CRLF PEM, RSASSA-PKCS1-v1_5 only, hidden CpoName).
+import cert16OcttStrictnessProbeJson from "./scenarios/cert16-octt-strictness-probe.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -226,6 +230,10 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(cert16Tc023_1AuthorizeInvalidJson as ScenarioDefinition),
   templateFromJson(cert16Tc023_2AuthorizeExpiredJson as ScenarioDefinition),
   templateFromJson(cert16Tc023_3AuthorizeBlockedJson as ScenarioDefinition),
+
+  // OCPP 1.6 Certificate quirks scenarios (issue #247 Phase 3) —
+  // emulate certification-tool behaviors.
+  templateFromJson(cert16OcttStrictnessProbeJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

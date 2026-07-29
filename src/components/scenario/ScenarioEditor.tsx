@@ -80,6 +80,7 @@ import RemoteStartTriggerNode from "./nodes/RemoteStartTriggerNode";
 import RemoteStopTriggerNode from "./nodes/RemoteStopTriggerNode";
 import CsmsCallTriggerNode from "./nodes/CsmsCallTriggerNode";
 import ResponseOverrideNode from "./nodes/ResponseOverrideNode";
+import InboundPolicyNode from "./nodes/InboundPolicyNode";
 import StatusTriggerNode from "./nodes/StatusTriggerNode";
 import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
@@ -197,6 +198,7 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.REMOTE_STOP_TRIGGER]: RemoteStopTriggerNode,
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: CsmsCallTriggerNode,
   [ScenarioNodeType.RESPONSE_OVERRIDE]: ResponseOverrideNode,
+  [ScenarioNodeType.INBOUND_POLICY]: InboundPolicyNode,
   [ScenarioNodeType.STATUS_TRIGGER]: StatusTriggerNode,
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
@@ -1985,6 +1987,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 icon="🚫"
               />
               <NodePaletteItem
+                type={ScenarioNodeType.INBOUND_POLICY}
+                label="Inbound Policy"
+                icon="🔐"
+              />
+              <NodePaletteItem
                 type={ScenarioNodeType.STATUS_NOTIFICATION}
                 label="StatusNotif"
                 icon="📡"
@@ -2239,6 +2246,19 @@ function createNodeByType(
           label: "Response Override",
           action: "RemoteStartTransaction",
           status: "Rejected",
+        },
+      };
+    case ScenarioNodeType.INBOUND_POLICY:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Inbound Policy",
+          action: "Reset",
+          policy: "callerror",
+          errorCode: "NotImplemented",
+          errorDescription: "",
         },
       };
     case ScenarioNodeType.STATUS_TRIGGER:

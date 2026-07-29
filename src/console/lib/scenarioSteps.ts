@@ -7,6 +7,7 @@ import {
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
   type DelayNodeData,
+  type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
   type RemoteStartTriggerNodeData,
@@ -442,6 +443,19 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           status: "Rejected",
         } satisfies ResponseOverrideNodeData,
       };
+    case ScenarioNodeType.INBOUND_POLICY:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Inbound Policy",
+          action: "Reset",
+          policy: "callerror",
+          errorCode: "NotImplemented",
+          errorDescription: "",
+        } satisfies InboundPolicyNodeData,
+      };
     case ScenarioNodeType.START:
       return {
         id,
@@ -562,6 +576,16 @@ export function stepSummary(node: ScenarioNode): string {
       const d = node.data as ResponseOverrideNodeData;
       return `${d.action} → ${d.status}`;
     }
+    case ScenarioNodeType.INBOUND_POLICY: {
+      const d = node.data as InboundPolicyNodeData;
+      if (d.policy === "answer") {
+        return `${d.action} → normal`;
+      } else if (d.policy === "callerror") {
+        return `${d.action} → error(${d.errorCode ?? "NotImplemented"})`;
+      } else {
+        return `${d.action} → ignore`;
+      }
+    }
     case ScenarioNodeType.CONFIG_SET: {
       const d = node.data as ConfigSetNodeData;
       return `${d.key} = ${d.value}`;
@@ -618,6 +642,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
     label: "Advanced",
     types: [
       ScenarioNodeType.RESPONSE_OVERRIDE,
+      ScenarioNodeType.INBOUND_POLICY,
       ScenarioNodeType.CONFIG_SET,
       ScenarioNodeType.DATA_TRANSFER,
       ScenarioNodeType.NOTIFICATION,

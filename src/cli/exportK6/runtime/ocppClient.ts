@@ -47,12 +47,14 @@ interface QueuedCall {
 interface CallWaiter {
   actions: readonly string[];
   resolve: (evt: { action: string; payload: Record<string, unknown> }) => void;
+  reject: (err: Error) => void;
   timeoutId: number | null;
 }
 
 interface StatusWaiter {
   target: string;
   resolve: () => void;
+  reject: (err: Error) => void;
   timeoutId: number | null;
 }
 
@@ -236,7 +238,7 @@ export class OcppChargePoint implements ScenarioHost {
     timeoutMs: number | null,
   ): Promise<{ action: string; payload: Record<string, unknown> }> {
     return new Promise((resolve, reject) => {
-      const waiter: CallWaiter = { actions, resolve, timeoutId: null };
+      const waiter: CallWaiter = { actions, resolve, reject, timeoutId: null };
       if (timeoutMs !== null) {
         waiter.timeoutId = setTimeout(() => {
           const i = this.callWaiters.indexOf(waiter);
@@ -279,7 +281,7 @@ export class OcppChargePoint implements ScenarioHost {
   waitForLocalStatus(target: string, timeoutMs: number | null): Promise<void> {
     if (this.localStatus === target) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const waiter: StatusWaiter = { target, resolve, timeoutId: null };
+      const waiter: StatusWaiter = { target, resolve, reject, timeoutId: null };
       if (timeoutMs !== null) {
         waiter.timeoutId = setTimeout(() => {
           const i = this.statusWaiters.indexOf(waiter);
@@ -347,6 +349,11 @@ export class OcppChargePoint implements ScenarioHost {
     for (const q of this.queue.splice(0)) q.reject(err);
     for (const w of this.callWaiters.splice(0)) {
       if (w.timeoutId !== null) clearTimeout(w.timeoutId);
+      w.reject(err);
+    }
+    for (const w of this.statusWaiters.splice(0)) {
+      if (w.timeoutId !== null) clearTimeout(w.timeoutId);
+      w.reject(err);
     }
   }
 }

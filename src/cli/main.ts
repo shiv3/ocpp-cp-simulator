@@ -14,6 +14,8 @@ import { setGlobalLogFormat } from "../cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
 import { runAnalyze } from "./analyze/runAnalyze";
+import { parseExportK6Args } from "./exportK6/parseExportK6Args";
+import { runExportK6 } from "./exportK6/runExportK6";
 import {
   startServer,
   DEFAULT_HTTP_PORT,
@@ -802,6 +804,11 @@ Options:
                            docs/cli.md -> analyze -> "Splitting by
                            connector" for what gets replicated into every
                            connector's report and why.
+  export-k6 --scenario <file.json> [-o <dir>] [--ocpp-version 1.6] [--force]
+                           Export a scenario as a runnable k6 load-test
+                           bundle (entry script + self-contained OCPP
+                           runtime + README). Requires k6 >= v1.0 to run
+                           the generated test. See docs/cli.md -> export-k6.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path
@@ -952,6 +959,18 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     const code = await runAnalyze(parsed.args);
+    process.exit(code);
+  }
+
+  // `export-k6`, like `analyze`, is a subcommand: it never bootstraps a
+  // charge point, so it is dispatched before parseArgs().
+  if (process.argv[2] === "export-k6") {
+    const parsed = parseExportK6Args(process.argv.slice(3));
+    if (!parsed.ok) {
+      process.stderr.write(`${parsed.message}\n`);
+      process.exit(1);
+    }
+    const code = await runExportK6(parsed.args);
     process.exit(code);
   }
 

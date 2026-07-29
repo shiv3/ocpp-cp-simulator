@@ -8,6 +8,7 @@ import {
   type DataTransferNodeData,
   type DelayNodeData,
   INBOUND_POLICY_ACTIONS,
+  INBOUND_POLICY_ERROR_CODES,
   type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
@@ -134,6 +135,9 @@ function asResponseOverrideStatus(
 }
 
 const INBOUND_POLICY_ACTIONS_SET = new Set<string>(INBOUND_POLICY_ACTIONS);
+const INBOUND_POLICY_ERROR_CODES_SET = new Set<string>(
+  INBOUND_POLICY_ERROR_CODES,
+);
 
 function asInboundPolicyAction(
   value: unknown,
@@ -147,6 +151,18 @@ function asInboundPolicyMode(
   value: unknown,
 ): "answer" | "callerror" | "ignore" {
   return value === "answer" || value === "ignore" ? value : "callerror";
+}
+
+/** Imported/programmatic node data can carry any string here, and the
+ *  transport casts the code straight into a CALLERROR frame — so an
+ *  unknown value must not survive conversion. Absent stays absent (the
+ *  runtime applies its own NotImplemented default); present-but-invalid
+ *  normalizes to NotImplemented, mirroring asInboundPolicyAction. */
+function asInboundPolicyErrorCode(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "string" && INBOUND_POLICY_ERROR_CODES_SET.has(value)
+    ? value
+    : "NotImplemented";
 }
 
 function baseToForm(nodeData: ScenarioNodeData): NodeFormData {
@@ -649,7 +665,7 @@ function inboundPolicyNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
     ...baseToForm(nodeData),
     action: asInboundPolicyAction(data.action),
     policy: asInboundPolicyMode(data.policy),
-    errorCode: optionalString(data.errorCode),
+    errorCode: asInboundPolicyErrorCode(data.errorCode),
     errorDescription: optionalString(data.errorDescription),
   });
 }
@@ -664,7 +680,7 @@ function inboundPolicyFormToNodeData(
     policy,
     ...(policy === "callerror"
       ? {
-          errorCode: optionalString(formData.errorCode),
+          errorCode: asInboundPolicyErrorCode(formData.errorCode),
           errorDescription: optionalString(formData.errorDescription),
         }
       : {}),

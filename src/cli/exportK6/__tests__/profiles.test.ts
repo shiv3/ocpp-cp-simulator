@@ -50,4 +50,20 @@ describe("buildOptions", () => {
   it("rejects an unknown profile", () => {
     expect(() => buildOptions({ PROFILE: "nope" })).toThrow(/PROFILE/);
   });
+
+  it("rejects a non-numeric VUS", () => {
+    expect(() => buildOptions({ VUS: "abc" })).toThrow(/VUS/);
+  });
+
+  it('rejects VUS of "0"', () => {
+    expect(() => buildOptions({ VUS: "0" })).toThrow(/VUS/);
+  });
+
+  it("rejects a negative VUS", () => {
+    expect(() => buildOptions({ VUS: "-5" })).toThrow(/VUS/);
+  });
+
+  it("rejects a VUS with trailing garbage", () => {
+    expect(() => buildOptions({ VUS: "10oops" })).toThrow(/VUS/);
+  });
 });

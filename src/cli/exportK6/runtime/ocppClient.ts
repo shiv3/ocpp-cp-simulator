@@ -2,7 +2,7 @@
 // The k6-side OCPP charge point: WebSocket transport, serial outgoing-call
 // queue (OCPP §4.1.1: one in-flight CALL), auto-responder wiring, heartbeat
 // scheduler, and the ScenarioHost implementation the interpreter drives.
-import { WebSocket } from "k6/experimental/websockets";
+import { WebSocket } from "k6/websockets";
 import {
   clearInterval,
   clearTimeout,
@@ -94,18 +94,22 @@ export class OcppChargePoint implements ScenarioHost {
   connect(): Promise<void> {
     const { url, identity } = this.opts;
     const wsUrl = `${url.replace(/\/+$/, "")}/${encodeURIComponent(identity.cpId)}`;
-    // Subprotocol is set via the WebSocket constructor's `protocols` argument
-    // only (k6 >= 1.0 supports it there); a duplicated
-    // Sec-WebSocket-Protocol header would break the handshake for every VU.
+    // k6's WebSocket constructor accepts a `protocols` argument, but it is
+    // documented as "Not yet implemented, reserved for future use" — passing
+    // the subprotocol there sends nothing over the wire. The only working way
+    // to set Sec-WebSocket-Protocol (required by OCPP) is via params.headers,
+    // so we pass `null` for `protocols` and set the header explicitly below.
     // The Phase-3 smoke e2e verifies the handshake against a real CSMS.
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      "Sec-WebSocket-Protocol": this.wire.subprotocol,
+    };
     if (identity.basicPassword !== undefined) {
       // btoa is not available in k6's runtime; polyfill-free base64 via
       // Uint8Array is overkill for ASCII credentials — encodeCredentials
       // below handles it.
       headers.Authorization = `Basic ${encodeCredentials(identity.cpId, identity.basicPassword)}`;
     }
-    this.ws = new WebSocket(wsUrl, this.wire.subprotocol, { headers });
+    this.ws = new WebSocket(wsUrl, null, { headers });
     const ws = this.ws;
     return new Promise<void>((resolve, reject) => {
       const bootStarted = Date.now();
@@ -220,8 +224,15 @@ export class OcppChargePoint implements ScenarioHost {
     } catch (err) {
       clearTimeout(timeoutId);
       this.pending = null;
+      entry.errorCode = "SendFailed";
       ocppErrors.add(1, { action: call.action, kind: "send_failed" });
-      reject(err instanceof Error ? err : new Error(String(err)));
+      // The socket is dead: retrying is pointless, and any calls still
+      // queued behind this one would otherwise be left with no pending
+      // entry and no timeout, so their promises would never settle. Fail
+      // everything now instead of recursing into flush().
+      const sendErr = err instanceof Error ? err : new Error(String(err));
+      reject(sendErr);
+      for (const q of this.queue.splice(0)) q.reject(sendErr);
       return;
     }
   }
@@ -265,7 +276,13 @@ export class OcppChargePoint implements ScenarioHost {
       frame.payload,
       this.responder,
     );
-    this.ws?.send(encodeCallResult(frame.messageId, response));
+    try {
+      this.ws?.send(encodeCallResult(frame.messageId, response));
+    } catch {
+      ocppErrors.add(1, { action: frame.action, kind: "send_failed" });
+      // Fall through: the CALL was genuinely received, so waiters below
+      // still need to be notified even though the auto-response failed.
+    }
     for (let i = 0; i < this.callWaiters.length; i++) {
       const w = this.callWaiters[i];
       if (w.actions.includes(frame.action)) {

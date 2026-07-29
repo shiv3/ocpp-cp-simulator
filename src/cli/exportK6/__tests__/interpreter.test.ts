@@ -340,6 +340,28 @@ describe("runScenario", () => {
     expect(result.error).toMatch(/steps/);
   });
 
+  it("sends {} for a notification node with a non-object payload", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "notification",
+          data: { messageType: "DataTransfer", payload: "not-an-object" },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    const sent = host.sent.find((c) => c.action === "DataTransfer");
+    expect(sent?.payload).toEqual({});
+  });
+
   it("errors when the scenario has no start node", async () => {
     const host = new FakeHost();
     const result = await runScenario(

@@ -56,7 +56,9 @@ export function resolveIdentity(
 ): CpIdentity {
   if (identities !== null) return identities[(vu - 1) % identities.length];
   const template = env.CP_ID_TEMPLATE ?? "CP-${__VU}";
-  const cpId = template.replace("${__VU}", String(vu));
+  // Global regex replace, not replaceAll: the repo's browser tsconfig type-
+  // checks this file against lib ES2020, which predates replaceAll (ES2021).
+  const cpId = template.replace(/\$\{__VU\}/g, String(vu));
   const basicPassword = env.BASIC_AUTH_PASSWORD;
   return basicPassword !== undefined && basicPassword !== ""
     ? { cpId, basicPassword }

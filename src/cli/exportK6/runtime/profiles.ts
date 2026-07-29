@@ -7,7 +7,7 @@ export function buildOptions(
   env: Record<string, string | undefined>,
 ): Record<string, unknown> {
   const profile = env.PROFILE ?? "steady";
-  const vus = Number.parseInt(env.VUS ?? "5", 10);
+  const vus = parsePositiveInt(env.VUS ?? "5", "VUS");
   const ramp = env.RAMP_DURATION ?? "1m";
   const thresholds = { scenario_success: ["rate>0.99"] };
   switch (profile) {
@@ -54,4 +54,13 @@ export function buildOptions(
         `Unknown PROFILE "${profile}" (expected spike, steady, or soak)`,
       );
   }
+}
+
+/** Strict positive-integer parse: rejects "0", negative values, decimals, and
+ * trailing garbage (e.g. "10oops") that Number.parseInt would silently accept. */
+function parsePositiveInt(raw: string, name: string): number {
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error(`Invalid ${name} "${raw}" (expected a positive integer)`);
+  }
+  return Number.parseInt(raw, 10);
 }

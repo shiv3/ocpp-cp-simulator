@@ -39,7 +39,10 @@ declare module "k6/data" {
   }
 }
 
-declare module "k6/experimental/websockets" {
+// Requires k6 >= 1.6.0 (k6/websockets graduated from
+// k6/experimental/websockets in grafana/k6#5579); k6/timers above has been
+// stable since k6 v0.51.
+declare module "k6/websockets" {
   export interface WebSocketParams {
     headers?: Record<string, string>;
   }

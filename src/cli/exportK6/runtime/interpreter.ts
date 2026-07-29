@@ -119,6 +119,15 @@ async function walkFrom(
   }
 }
 
+/** Mirrors frames.ts's asRecord: only non-null, non-array objects pass through
+ * as a payload — a string/number/array would otherwise reach host.call and
+ * produce a frame the CSMS rejects. */
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
 async function executeNode(
   node: ScenarioNodeJson,
   host: ScenarioHost,
@@ -197,7 +206,7 @@ async function executeNode(
     case "notification":
       await host.call({
         action: str(d.messageType) ?? "DataTransfer",
-        payload: (d.payload as Record<string, unknown>) ?? {},
+        payload: asRecord(d.payload),
       });
       return;
     case "connectorPlug":

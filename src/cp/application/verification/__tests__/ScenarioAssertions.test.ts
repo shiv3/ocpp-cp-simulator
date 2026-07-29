@@ -515,6 +515,21 @@ describe("computeVerdictSummary", () => {
     expect(summary.verdict).toBe("PASS");
   });
 
+  it("conformance axis with only skipped/blocked results → conformanceVerdict SKIPPED", () => {
+    const results = [
+      makeSkipped("failure"),
+      makeBlocked("failure"),
+      makePassed("warning"),
+    ];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.conformanceVerdict).toBe("SKIPPED");
+    expect(summary.compatibilityVerdict).toBe("PASS");
+    expect(summary.verdict).toBe("PASS");
+  });
+
   it("assertion-less errored run → verdict SKIPPED (legacy priority: SKIPPED outranks BLOCKED)", () => {
     const summary = computeVerdictSummary([], {
       executionState: "error",

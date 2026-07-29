@@ -59,7 +59,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 | `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                   |
 | `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`.                                |
 | `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides. |
-| `assertions`            | [Assertion](#assertions)`[]`                                                    | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                    |
+| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                    |
 
 ## Node shape
 

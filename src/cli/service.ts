@@ -923,6 +923,7 @@ export class CLIChargePointService {
       this._transcriptByScenario.delete(scenarioId);
     }
     this._runStartByScenario.delete(scenarioId);
+    this._strictByScenario.delete(scenarioId);
   }
 
   /**

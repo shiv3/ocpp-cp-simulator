@@ -608,7 +608,10 @@ function computeSingleAxisVerdict(
   results: AssertionResult[],
   opts: Pick<ComputeVerdictOptions, "executionState" | "blocked">,
 ): ScenarioVerdict {
-  if (results.length === 0 || results.every((r) => r.status === "skipped")) {
+  if (
+    results.length === 0 ||
+    results.every((r) => r.status === "skipped" || r.status === "blocked")
+  ) {
     return "SKIPPED";
   }
   if (opts.executionState === "error" || opts.blocked === true) {

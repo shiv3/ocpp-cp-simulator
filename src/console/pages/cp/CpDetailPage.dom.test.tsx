@@ -6,9 +6,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createFakeChargePointService,
   renderConsole,
+  type FakeChargePointService,
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
+import { LogLevel, LogType } from "../../../cp/shared/Logger";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
+import type { ChargePointEvent } from "../../../data/interfaces/ChargePointService";
 import type { StateHistoryEntry } from "../../../cp/application/services/types/StateSnapshot";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
 
@@ -44,6 +47,21 @@ async function flush(times = 3): Promise<void> {
       await Promise.resolve();
     });
   }
+}
+
+/** Pushes a synthetic event to all handlers subscribed to a specific CP. */
+async function pushEvent(
+  service: FakeChargePointService,
+  cpId: string,
+  event: ChargePointEvent,
+): Promise<void> {
+  const handlers = service.__handlers.subscribe.get(cpId);
+  if (!handlers || handlers.size === 0) {
+    throw new Error(`no subscribe handler recorded for ${cpId}`);
+  }
+  await act(async () => {
+    handlers.forEach((handler) => handler(event));
+  });
 }
 
 function connector(
@@ -433,5 +451,171 @@ describe("CpDetailPage", () => {
     );
 
     consoleErrorSpy.mockRestore();
+  });
+
+  it("Message Log tab shows entries logged before navigating to the CP (from global ring buffer)", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      status: OCPPStatus.Available,
+      connectors: [connector({ id: 1 })],
+    });
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    // Render at dashboard (/) so CpDetailPage is NOT mounted yet, but
+    // GlobalLogsProvider IS mounted (via AppShell). This is the key to
+    // reproducing the bug: log events delivered now go into globalLogEntries
+    // but will NOT be in useChargePointView's view.logs (which only exists
+    // after CpDetailPage mounts).
+    const { container, root } = await renderConsole("/", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    // Notify GlobalLogsProvider about the CP registry snapshot so it knows to
+    // subscribe to CP-1.
+    await act(async () => {
+      for (const handler of service.__handlers.subscribeRegistry) {
+        handler({ type: "snapshot", cps: [cp] });
+      }
+      await Promise.resolve();
+    });
+    await flush();
+
+    // Emit a log entry for CP-1 BEFORE navigating to its detail page. This
+    // log will be in the global ring buffer but NOT in useChargePointView
+    // (which doesn't exist yet). This is what the bug reproduces: the old code
+    // would show nothing in the tab because view.logs is empty.
+    await pushEvent(service, "CP-1", {
+      type: "log",
+      entry: {
+        timestamp: new Date("2026-01-01T10:00:00.000Z"),
+        level: LogLevel.INFO,
+        type: LogType.OCPP,
+        message: "BootNotification accepted",
+      },
+    });
+    await flush();
+
+    // Navigate to CP-1's detail page by clicking the link to it in the
+    // dashboard. Find the link by looking for CP-1 text and finding an <a> tag.
+    const cpLink = Array.from(container.querySelectorAll("a")).find((a) =>
+      a.textContent?.trim().startsWith("CP-1"),
+    );
+    expect(cpLink, "expected a link to CP-1 in the dashboard").toBeTruthy();
+
+    await act(async () => {
+      cpLink!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // Click on the "Message Log" tab to see if pre-navigation logs are visible.
+    const logsTrigger = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ).find((el) => el.textContent?.trim() === "Message Log");
+    expect(logsTrigger, "expected a Message Log tab").toBeTruthy();
+
+    await act(async () => {
+      logsTrigger!.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      logsTrigger!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // The message emitted BEFORE navigating to this CP should now be visible.
+    // The old code would fail here because useChargePointView's view.logs
+    // never received the event (it wasn't mounted yet). The fix makes the tab
+    // read from the global ring buffer instead, so it shows all entries for
+    // this CP, including those logged before the page mounted.
+    expect(container.textContent).toContain("BootNotification accepted");
+  });
+
+  it("Message Log tab Clear button hides old entries but shows new ones", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      status: OCPPStatus.Available,
+      connectors: [connector({ id: 1 })],
+    });
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    // Notify GlobalLogsProvider about the CP registry snapshot.
+    await act(async () => {
+      for (const handler of service.__handlers.subscribeRegistry) {
+        handler({ type: "snapshot", cps: [cp] });
+      }
+      await Promise.resolve();
+    });
+    await flush();
+
+    // Emit an initial log entry.
+    await pushEvent(service, "CP-1", {
+      type: "log",
+      entry: {
+        timestamp: new Date("2026-01-01T10:00:00.000Z"),
+        level: LogLevel.INFO,
+        type: LogType.OCPP,
+        message: "initial entry",
+      },
+    });
+    await flush();
+
+    // Click on the "Message Log" tab to show the logs.
+    const logsTrigger = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ).find((el) => el.textContent?.trim() === "Message Log");
+    expect(logsTrigger, "expected a Message Log tab").toBeTruthy();
+
+    await act(async () => {
+      logsTrigger!.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      logsTrigger!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // Verify the initial entry is shown.
+    expect(container.textContent).toContain("initial entry");
+
+    // Click the "Clear screen" button to clear the tab's visible logs.
+    const clearButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Clear screen",
+    );
+    expect(clearButton, "expected a Clear screen button").toBeTruthy();
+
+    await act(async () => {
+      clearButton!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    // The old entry should now be gone.
+    expect(container.textContent).not.toContain("initial entry");
+
+    // Emit a new log entry after clearing.
+    await pushEvent(service, "CP-1", {
+      type: "log",
+      entry: {
+        timestamp: new Date("2026-01-01T10:00:01.000Z"),
+        level: LogLevel.INFO,
+        type: LogType.OCPP,
+        message: "new entry after clear",
+      },
+    });
+    await flush();
+
+    // The new entry should be visible.
+    expect(container.textContent).toContain("new entry after clear");
   });
 });

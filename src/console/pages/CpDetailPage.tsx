@@ -19,6 +19,7 @@ import { getConfigBasicAuthPassword } from "@/data/configPort";
 import { useChargePointView } from "@/data/hooks/useChargePointView";
 import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
+import { useGlobalLogs } from "../lib/useGlobalLogs";
 import type { ChargePointSnapshot } from "@/data/interfaces/ChargePointService";
 import type { WireSimulatorConfig } from "@/protocol";
 import type {
@@ -150,6 +151,7 @@ const CpDetailPage: React.FC = () => {
   const { updateCp } = useCpConfigActions();
 
   const view = useChargePointView(cpId || null);
+  const { entries: globalLogEntries } = useGlobalLogs();
   const [snapshot, setSnapshot] = useState<ChargePointSnapshot | undefined>();
   const [activeTab, setActiveTab] = useState<TabValue>("transactions");
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -165,6 +167,9 @@ const CpDetailPage: React.FC = () => {
   const [networkSimLoadError, setNetworkSimLoadError] = useState<string | null>(
     null,
   );
+  // Watermark to track which global log entries have been cleared from this
+  // tab's view. Only entries with seq > logsClearedBeforeSeq are shown.
+  const [logsClearedBeforeSeq, setLogsClearedBeforeSeq] = useState(-1);
 
   /** Global rules minus tombstones, as the per-CP editor's inherited baseline. */
   const inheritedNetworkSimRules = useMemo(() => {
@@ -220,10 +225,39 @@ const CpDetailPage: React.FC = () => {
     refreshNetworkSim();
   }, [refreshSnapshot, refreshNetworkSim]);
 
+  // When navigating to a different CP, reset the watermark so all entries in
+  // the global ring buffer for this CP become visible (old cleared entries are
+  // not rehydrated; only new/existing entries in the buffer).
+  useEffect(() => {
+    setLogsClearedBeforeSeq(-1);
+  }, [cpId]);
+
   const connectorList = useMemo(
     () => Array.from(view.connectors.values()).sort((a, b) => a.id - b.id),
     [view.connectors],
   );
+
+  // Derive the logs to show in the Message Log tab by filtering global entries
+  // for this CP and reversing them to match the chronological order expected
+  // by LogViewer (oldest-first). Entries are newest-first in globalLogEntries,
+  // so we reverse after filtering. The watermark only hides entries the user
+  // cleared from this tab; old cleared entries remain cleared across tab
+  // switches but new global entries appear.
+  const tabLogs = useMemo(() => {
+    const filtered = globalLogEntries.filter(
+      (e) => e.cpId === cpId && e.seq > logsClearedBeforeSeq,
+    );
+    return filtered.reverse().map((e) => e.entry);
+  }, [globalLogEntries, cpId, logsClearedBeforeSeq]);
+
+  const handleClearTabLogs = useCallback(() => {
+    // Set watermark to the highest seq in globalLogEntries (newest-first, so [0]
+    // has the max). This ensures only entries logged after this Clear persist
+    // in the tab view. Ignores scope parameter from LogViewer (which offers
+    // "screen" vs "all" options) because the global buffer is read-only from
+    // this tab's perspective; clearing only affects this tab's watermark.
+    setLogsClearedBeforeSeq(globalLogEntries[0]?.seq ?? -1);
+  }, [globalLogEntries]);
 
   const diagnosticsConnectorId =
     diagnosticsConnectorOverride ?? connectorList[0]?.id ?? null;
@@ -373,7 +407,7 @@ const CpDetailPage: React.FC = () => {
           <TransactionsTab cpId={cpId} />
         </TabsContent>
         <TabsContent value="logs">
-          <LogViewer logs={view.logs} onClear={view.clearLogs} />
+          <LogViewer logs={tabLogs} onClear={handleClearTabLogs} />
         </TabsContent>
         <TabsContent value="analysis">
           <Suspense

@@ -81,6 +81,7 @@ import RemoteStopTriggerNode from "./nodes/RemoteStopTriggerNode";
 import CsmsCallTriggerNode from "./nodes/CsmsCallTriggerNode";
 import ResponseOverrideNode from "./nodes/ResponseOverrideNode";
 import InboundPolicyNode from "./nodes/InboundPolicyNode";
+import CertQuirksNode from "./nodes/CertQuirksNode";
 import StatusTriggerNode from "./nodes/StatusTriggerNode";
 import ReserveNowNode from "./nodes/ReserveNowNode";
 import CancelReservationNode from "./nodes/CancelReservationNode";
@@ -199,6 +200,7 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: CsmsCallTriggerNode,
   [ScenarioNodeType.RESPONSE_OVERRIDE]: ResponseOverrideNode,
   [ScenarioNodeType.INBOUND_POLICY]: InboundPolicyNode,
+  [ScenarioNodeType.CERT_QUIRKS]: CertQuirksNode,
   [ScenarioNodeType.STATUS_TRIGGER]: StatusTriggerNode,
   [ScenarioNodeType.RESERVE_NOW]: ReserveNowNode,
   [ScenarioNodeType.CANCEL_RESERVATION]: CancelReservationNode,
@@ -234,6 +236,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   [ScenarioNodeType.UNLOCK_OUTCOME]: "#06b6d4",
   [ScenarioNodeType.CONFIG_SET]: "#6b7280",
   [ScenarioNodeType.DATA_TRANSFER]: "#a8a29e",
+  [ScenarioNodeType.CERT_QUIRKS]: "#f59e0b",
 };
 
 // slate-500 fallback — stays visible on both the white (light) and
@@ -2259,6 +2262,16 @@ function createNodeByType(
           policy: "callerror",
           errorCode: "NotImplemented",
           errorDescription: "",
+        },
+      };
+    case ScenarioNodeType.CERT_QUIRKS:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Certificate Quirks",
+          mode: "set",
         },
       };
     case ScenarioNodeType.STATUS_TRIGGER:

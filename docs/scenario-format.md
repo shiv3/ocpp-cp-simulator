@@ -78,28 +78,30 @@ shape depends on `type`).
 
 ## Node types
 
-| `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                    |
-| -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `statusChange`       | `status`                                                         |                                                                                                                                                                            |
-| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                  |
-| `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval` |
-| `delay`              | `delaySeconds`                                                   |                                                                                                                                                                            |
-| `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                            |
-| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             |                                                                                                                                                                            |
-| `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                  |
-| `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                  |
-| `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                  |
-| `reserveNow`         | `expiryMinutes`, `idTag`                                         | `parentIdTag`, `reservationId`                                                                                                                                             |
-| `cancelReservation`  | `reservationId`                                                  |                                                                                                                                                                            |
-| `reservationTrigger` | —                                                                | `timeout`                                                                                                                                                                  |
-| `start`              | —                                                                | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                    |
-| `end`                | —                                                                |                                                                                                                                                                            |
-| `statusNotification` | `status`                                                         | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                          |
-| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                            |
-| `configSet`          | `key`, `value`                                                   |                                                                                                                                                                            |
-| `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                        |
-| `csmsCallTrigger`    | `action`                                                         | `timeout`                                                                                                                                                                  |
-| `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                 |
+| `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                               |
+| -------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `statusChange`       | `status`                                                         |                                                                                                                                                                                       |
+| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                             |
+| `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`            |
+| `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                       |
+| `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                       |
+| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             |                                                                                                                                                                                       |
+| `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                             |
+| `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                             |
+| `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                             |
+| `reserveNow`         | `expiryMinutes`, `idTag`                                         | `parentIdTag`, `reservationId`                                                                                                                                                        |
+| `cancelReservation`  | `reservationId`                                                  |                                                                                                                                                                                       |
+| `reservationTrigger` | —                                                                | `timeout`                                                                                                                                                                             |
+| `start`              | —                                                                | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                               |
+| `end`                | —                                                                |                                                                                                                                                                                       |
+| `statusNotification` | `status`                                                         | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                     |
+| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                                       |
+| `configSet`          | `key`, `value`                                                   |                                                                                                                                                                                       |
+| `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                                   |
+| `csmsCallTrigger`    | `action`                                                         | `timeout`                                                                                                                                                                             |
+| `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                            |
+| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                       |
+| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below. |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -116,6 +118,24 @@ action → status constraint — encoding the full per-action status matrix
 into JSON Schema would make the schema harder to read for little benefit
 over the existing editor-side check. This is called out as a `$comment` in
 the schema itself.
+
+### `inboundPolicy` and certificate quirks notes
+
+**Issue #247**: `inboundPolicy` sets a persistent policy for CSMS→CP calls
+(`policy: "callerror"` sends a CALLRESULT with the given error code, `"ignore"`
+sends no response, `"answer"` clears any prior policy). Policies survive
+reconnects and are only cleared at the end of the scenario run or via another
+`inboundPolicy` node with `policy: "answer"`.
+
+**Issue #247 Phase 3**: `certQuirks` (mode `"set"` or `"clear"`) arms
+ChargePoint domain-specific certificate behaviors. Mode `"set"` supports an
+optional `preset: "octt"` (encodes legacy OCTT behaviors: RSA CSR, CRLF PEM,
+RSASSA-PKCS1-v1_5 signature algorithm only, hidden CpoName config — see
+[steve-community/steve#2093](https://github.com/steve-community/steve/issues/2093)).
+Explicit fields override preset values. Together with `inboundPolicy` and
+declarative `assertions` (e.g., `ocpp_absent`, `no_unexpected`), certificate
+quirks let you emulate certification-tool strictness to verify a CP's
+conformance.
 
 ## Edge shape
 

@@ -198,7 +198,9 @@
             "configSet",
             "dataTransfer",
             "csmsCallTrigger",
-            "responseOverride"
+            "responseOverride",
+            "inboundPolicy",
+            "certQuirks"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -476,6 +478,49 @@
                 "properties": {
                   "action": { "type": "string" },
                   "status": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "inboundPolicy" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "Valid `action` values are the csmsCallTrigger action set (INBOUND_POLICY_ACTIONS in ScenarioTypes.ts). Not schema-enforced here — advisory only.",
+                "required": ["action", "policy"],
+                "properties": {
+                  "action": { "type": "string" },
+                  "policy": { "enum": ["answer", "callerror", "ignore"] },
+                  "errorCode": { "type": "string" },
+                  "errorDescription": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "certQuirks" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["mode"],
+                "properties": {
+                  "mode": { "enum": ["set", "clear"] },
+                  "preset": { "enum": ["octt"] },
+                  "csrKeyAlgorithm": { "enum": ["ECDSA", "RSA"] },
+                  "csrPemLineEndings": { "enum": ["lf", "crlf"] },
+                  "requiredCertificateSignatureAlgorithms": {
+                    "type": "array",
+                    "items": {
+                      "enum": ["ECDSA", "RSASSA-PKCS1-v1_5", "RSA-PSS"]
+                    }
+                  },
+                  "hiddenConfigurationKeys": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
                 }
               }
             }

@@ -1,0 +1,114 @@
+{
+  "id": "cert16-octt-strictness-probe",
+  "name": "OCPP 1.6 OCTT-style strictness probe",
+  "description": "Emulate legacy OCTT strictness: RSA-only CSR, CRLF PEM, RSASSA-PKCS1-v1_5-only certificate acceptance, hidden CpoName, and a FAIL verdict if the CSMS sends an automatic GetConfiguration after connect.",
+  "targetType": "connector",
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "arm-octt",
+      "type": "certQuirks",
+      "position": {
+        "x": 400,
+        "y": 100
+      },
+      "data": {
+        "label": "OCTT strictness preset",
+        "mode": "set",
+        "preset": "octt"
+      }
+    },
+    {
+      "id": "reject-unsupported",
+      "type": "inboundPolicy",
+      "position": {
+        "x": 400,
+        "y": 200
+      },
+      "data": {
+        "label": "Reject GetDiagnostics",
+        "action": "GetDiagnostics",
+        "policy": "callerror",
+        "errorCode": "NotImplemented",
+        "errorDescription": "GetDiagnostics not supported in this OCPP 1.6 implementation"
+      }
+    },
+    {
+      "id": "wait-for-config",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 300
+      },
+      "data": {
+        "label": "Observe CSMS traffic",
+        "delaySeconds": 15
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 400
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "arm-octt"
+    },
+    {
+      "id": "e2",
+      "source": "arm-octt",
+      "target": "reject-unsupported"
+    },
+    {
+      "id": "e3",
+      "source": "reject-unsupported",
+      "target": "wait-for-config"
+    },
+    {
+      "id": "e4",
+      "source": "wait-for-config",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-07-29T00:00:00Z",
+  "updatedAt": "2026-07-29T00:00:00Z",
+  "assertions": [
+    {
+      "id": "no-auto-get-configuration",
+      "type": "no_unexpected",
+      "description": "OCTT fails when the CSMS sends an automatic GetConfiguration after connect (steve-community/steve#2093)",
+      "actions": ["GetConfiguration"]
+    },
+    {
+      "id": "no-get-diagnostics",
+      "type": "no_unexpected",
+      "description": "OCTT does not expect GetDiagnostics during this sequence",
+      "actions": ["GetDiagnostics"]
+    }
+  ]
+}

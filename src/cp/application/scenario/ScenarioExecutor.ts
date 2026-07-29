@@ -24,6 +24,7 @@ import {
   UnlockOutcomeNodeData,
   ResponseOverrideNodeData,
   InboundPolicyNodeData,
+  CertQuirksNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
   StartTransactionOptions,
@@ -115,6 +116,9 @@ export class ScenarioExecutor {
   // Issue #247: track which inbound policies were armed during this run,
   // so they can be cleared when the run ends (both normal completion and stop()).
   private armedInboundPolicyActions: string[] = [];
+  // Issue #247 Phase 3: track whether certificate quirks were armed during this
+  // run, so they can be cleared when the run ends (both normal completion and stop()).
+  private armedCertificateQuirks = false;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -278,6 +282,12 @@ export class ScenarioExecutor {
         this.callbacks.onClearInboundPolicy?.(action);
       }
       this.armedInboundPolicyActions = [];
+
+      // Issue #247 Phase 3: clear any certificate quirks armed during this run.
+      if (this.armedCertificateQuirks) {
+        this.callbacks.onClearCertificateQuirks?.();
+        this.armedCertificateQuirks = false;
+      }
 
       this.notifyStateChange();
     }
@@ -649,6 +659,10 @@ export class ScenarioExecutor {
         await this.executeInboundPolicy(node.data as InboundPolicyNodeData);
         break;
 
+      case ScenarioNodeType.CERT_QUIRKS:
+        await this.executeCertQuirks(node.data as CertQuirksNodeData);
+        break;
+
       case ScenarioNodeType.CONFIG_SET:
         await this.executeConfigSet(node.data as ConfigSetNodeData);
         break;
@@ -763,6 +777,69 @@ export class ScenarioExecutor {
           : "ignore";
       this.callbacks.log?.(
         `Armed inbound policy: ${data.action} → ${policyDesc}`,
+        "info",
+      );
+    }
+  }
+
+  /** Issue #247 Phase 3: set or clear certificate quirks. */
+  private async executeCertQuirks(data: CertQuirksNodeData): Promise<void> {
+    if (data.mode === "clear") {
+      // Clear all quirks.
+      if (!this.callbacks.onClearCertificateQuirks) {
+        this.callbacks.log?.(
+          "CertQuirks: no onClearCertificateQuirks callback wired",
+          "warn",
+        );
+        return;
+      }
+      this.callbacks.onClearCertificateQuirks();
+      this.callbacks.log?.("Cleared certificate quirks", "info");
+    } else if (data.mode === "set") {
+      // Build quirks from preset (if any) + explicit overrides.
+      const quirks: Record<string, unknown> = {};
+
+      // Start with preset if specified
+      if (data.preset === "octt") {
+        quirks.csrKeyAlgorithm = "RSA";
+        quirks.csrPemLineEndings = "crlf";
+        quirks.requiredCertificateSignatureAlgorithms = ["RSASSA-PKCS1-v1_5"];
+        quirks.hiddenConfigurationKeys = ["CpoName"];
+      }
+
+      // Apply explicit field overrides
+      if (data.csrKeyAlgorithm !== undefined) {
+        quirks.csrKeyAlgorithm = data.csrKeyAlgorithm;
+      }
+      if (data.csrPemLineEndings !== undefined) {
+        quirks.csrPemLineEndings = data.csrPemLineEndings;
+      }
+      if (data.requiredCertificateSignatureAlgorithms !== undefined) {
+        quirks.requiredCertificateSignatureAlgorithms =
+          data.requiredCertificateSignatureAlgorithms;
+      }
+      if (data.hiddenConfigurationKeys !== undefined) {
+        quirks.hiddenConfigurationKeys = data.hiddenConfigurationKeys;
+      }
+
+      if (!this.callbacks.onSetCertificateQuirks) {
+        this.callbacks.log?.(
+          "CertQuirks: no onSetCertificateQuirks callback wired",
+          "warn",
+        );
+        return;
+      }
+
+      this.callbacks.onSetCertificateQuirks(
+        quirks as Parameters<
+          NonNullable<typeof this.callbacks.onSetCertificateQuirks>
+        >[0],
+      );
+      this.armedCertificateQuirks = true;
+
+      const presetDesc = data.preset ? ` (preset: ${data.preset})` : "";
+      this.callbacks.log?.(
+        `Armed certificate quirks${presetDesc}: ${JSON.stringify(quirks)}`,
         "info",
       );
     }

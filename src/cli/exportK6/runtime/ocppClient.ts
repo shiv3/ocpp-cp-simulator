@@ -94,9 +94,11 @@ export class OcppChargePoint implements ScenarioHost {
   connect(): Promise<void> {
     const { url, identity } = this.opts;
     const wsUrl = `${url.replace(/\/+$/, "")}/${encodeURIComponent(identity.cpId)}`;
-    const headers: Record<string, string> = {
-      "Sec-WebSocket-Protocol": this.wire.subprotocol,
-    };
+    // Subprotocol is set via the WebSocket constructor's `protocols` argument
+    // only (k6 >= 1.0 supports it there); a duplicated
+    // Sec-WebSocket-Protocol header would break the handshake for every VU.
+    // The Phase-3 smoke e2e verifies the handshake against a real CSMS.
+    const headers: Record<string, string> = {};
     if (identity.basicPassword !== undefined) {
       // btoa is not available in k6's runtime; polyfill-free base64 via
       // Uint8Array is overkill for ASCII credentials — encodeCredentials
@@ -107,14 +109,32 @@ export class OcppChargePoint implements ScenarioHost {
     const ws = this.ws;
     return new Promise<void>((resolve, reject) => {
       const bootStarted = Date.now();
+      let settled = false;
+      const settleReject = (err: Error): void => {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      };
+      const settleResolve = (): void => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
       ws.addEventListener("error", (e) => {
         this.failAll(
           new Error(`websocket error: ${String(e.error ?? "unknown")}`),
         );
-        reject(new Error(`websocket error for ${identity.cpId}`));
+        settleReject(new Error(`websocket error for ${identity.cpId}`));
       });
       ws.addEventListener("close", () => {
         this.failAll(new Error("websocket closed"));
+        settleReject(
+          new Error(
+            `websocket closed before boot completed for ${identity.cpId}`,
+          ),
+        );
       });
       ws.addEventListener("message", (e) => {
         if (typeof e.data === "string") this.onFrame(e.data);
@@ -124,7 +144,9 @@ export class OcppChargePoint implements ScenarioHost {
           .then((conf) => {
             ocppBootTime.add(Date.now() - bootStarted);
             if (conf.status !== "Accepted") {
-              reject(new Error(`BootNotification ${String(conf.status)}`));
+              settleReject(
+                new Error(`BootNotification ${String(conf.status)}`),
+              );
               return;
             }
             const intervalSec =
@@ -136,9 +158,9 @@ export class OcppChargePoint implements ScenarioHost {
                 // Heartbeat failures surface via ocpp_errors; keep the VU alive.
               });
             }, intervalSec * 1000);
-            resolve();
+            settleResolve();
           })
-          .catch(reject);
+          .catch(settleReject);
       });
     });
   }

@@ -521,8 +521,9 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     scenarioId: string,
+    options?: { strict?: boolean },
   ): Promise<void> {
-    this.requireService(id).runScenario(connectorId, scenarioId);
+    this.requireService(id).runScenario(connectorId, scenarioId, options);
   }
 
   async runScenarioFile(
@@ -544,7 +545,11 @@ export class RegistryChargePointService implements ChargePointService {
       );
     }
     const scenarioId = service.loadScenario(connectorId, parsed);
-    service.runScenario(connectorId, scenarioId);
+    if (opts.strict === undefined) {
+      service.runScenario(connectorId, scenarioId);
+    } else {
+      service.runScenario(connectorId, scenarioId, { strict: opts.strict });
+    }
     return { scenarioId };
   }
 
@@ -560,7 +565,11 @@ export class RegistryChargePointService implements ChargePointService {
       connectorId,
       opts.evSettings,
     );
-    service.runScenario(connectorId, scenarioId);
+    if (opts.strict === undefined) {
+      service.runScenario(connectorId, scenarioId);
+    } else {
+      service.runScenario(connectorId, scenarioId, { strict: opts.strict });
+    }
     return { scenarioId };
   }
 

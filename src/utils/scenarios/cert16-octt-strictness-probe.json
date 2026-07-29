@@ -1,7 +1,7 @@
 {
   "id": "cert16-octt-strictness-probe",
   "name": "OCPP 1.6 OCTT-style strictness probe",
-  "description": "Emulate legacy OCTT strictness: RSA-only CSR, CRLF PEM, RSASSA-PKCS1-v1_5-only certificate acceptance, hidden CpoName, and a FAIL verdict if the CSMS sends an automatic GetConfiguration after connect.",
+  "description": "Emulate legacy OCTT strictness: RSA-only CSR, CRLF PEM, RSASSA-PKCS1-v1_5-only certificate acceptance, hidden CpoName, and compatibility warnings for automatic GetConfiguration/GetDiagnostics after connect (promoted to failures in strict mode).",
   "targetType": "connector",
   "trigger": {
     "type": "manual"
@@ -103,14 +103,16 @@
       "type": "ocpp_absent",
       "action": "GetConfiguration",
       "direction": "received",
-      "description": "OCTT fails when the CSMS sends an automatic GetConfiguration after connect (steve-community/steve#2093)"
+      "severity": "warning",
+      "description": "Valid per OCPP, but an automatic GetConfiguration right after connect has been observed to fail OCTT certification scenarios"
     },
     {
       "id": "no-get-diagnostics",
       "type": "ocpp_absent",
       "action": "GetDiagnostics",
       "direction": "received",
-      "description": "OCTT does not expect GetDiagnostics during this sequence"
+      "severity": "warning",
+      "description": "Valid per OCPP, but GetDiagnostics has been observed to break OCTT certification scenarios"
     }
   ]
 }

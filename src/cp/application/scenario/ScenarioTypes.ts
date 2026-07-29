@@ -476,6 +476,12 @@ export interface ScenarioDefinition {
    * before (no behavior change).
    */
   assertions?: AssertionSpec[];
+
+  /**
+   * Promotes warning-severity assertion failures to run failures (strict
+   * mode, #247). Default false; a per-run `strict` option overrides it.
+   */
+  strictCompatibility?: boolean;
 }
 
 /**
@@ -493,6 +499,14 @@ export type AssertionType =
   | "message_after"
   | "state_transition"
   | "no_unexpected";
+
+/**
+ * How an assertion failure affects the run verdict (#247). "failure"
+ * (default): normative OCPP conformance check; failing it fails the run.
+ * "warning": compatibility observation (e.g. OCTT quirks); failing it yields
+ * a compatibility WARNING, promoted to FAIL only in strict mode.
+ */
+export type AssertionSeverity = "failure" | "warning";
 
 /**
  * Declarative assertion attached to a {@link ScenarioDefinition}. Evaluated
@@ -522,6 +536,8 @@ export interface AssertionSpec {
   /** Reference frame matcher for message_order / message_after. */
   before?: { action: string; direction?: "sent" | "received" };
   after?: { action: string; direction?: "sent" | "received" };
+  /** How an assertion failure affects the run verdict. Default "failure". */
+  severity?: AssertionSeverity;
 }
 
 /** Outcome of evaluating one {@link AssertionSpec} against a run's transcript. */
@@ -534,11 +550,16 @@ export interface AssertionResult {
   description: string;
   /** Explanation of what was/wasn't found; set on failure. */
   detail?: string;
+  /** How this assertion failure affects the verdict. */
+  severity: AssertionSeverity;
 }
 
 /** Overall pass/fail verdict for one scenario run, rolled up from its
  *  {@link AssertionResult}s (see `computeVerdict`). */
 export type ScenarioVerdict = "PASS" | "FAIL" | "BLOCKED" | "SKIPPED";
+
+/** Compatibility-only verdict for warning-severity assertions (see `computeVerdictSummary`). */
+export type CompatibilityVerdict = "PASS" | "WARNING" | "FAIL" | "SKIPPED";
 
 /**
  * Minimal runtime shape check for a value read from an operator-supplied

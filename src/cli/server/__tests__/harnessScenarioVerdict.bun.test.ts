@@ -166,4 +166,214 @@ describe("issue #111: drive a scenario verdict over the Socket.IO control plane"
       socket.disconnect();
     }
   });
+
+  it("run_scenario with strict: true promotes warning to FAIL", async () => {
+    const server = await serverWithDb();
+    const socket = await connectTestClient(server);
+
+    try {
+      const cpId = "CP-STRICT-TEST";
+      const created = await emitRpc(socket, {
+        method: "cp.create",
+        params: {
+          cpId,
+          wsUrl: "ws://127.0.0.1:65534/never",
+          connectors: 1,
+        },
+      });
+      expect(created.ok).toBe(true);
+
+      const subscribed = await emitRpc(socket, {
+        method: "events.subscribe",
+        params: { scope: cpId },
+      });
+      expect(subscribed.ok).toBe(true);
+
+      // Scenario with a warning-severity assertion that will fail.
+      const scenario = {
+        id: "strict-warning-scenario",
+        name: "Strict warning test",
+        targetType: "connector",
+        targetId: 1,
+        nodes: [
+          {
+            id: "s",
+            type: "start",
+            position: { x: 0, y: 0 },
+            data: { label: "S" },
+          },
+          {
+            id: "m",
+            type: "meterValue",
+            position: { x: 0, y: 1 },
+            data: { label: "MV", value: 100, sendMessage: false },
+          },
+          {
+            id: "e",
+            type: "end",
+            position: { x: 0, y: 2 },
+            data: { label: "E" },
+          },
+        ],
+        edges: [
+          { id: "e1", source: "s", target: "m" },
+          { id: "e2", source: "m", target: "e" },
+        ],
+        assertions: [
+          {
+            id: "boot-warning",
+            type: "ocpp_sent",
+            action: "BootNotification",
+            severity: "warning",
+          },
+        ],
+      };
+
+      const loaded = await emitRpc(socket, {
+        cpId,
+        method: "load_scenario",
+        params: { connector: CONNECTOR, scenario },
+      });
+      expect(loaded.ok).toBe(true);
+      const scenarioId: string =
+        typeof loaded.result === "string"
+          ? loaded.result
+          : (loaded.result?.scenarioId ?? scenario.id);
+
+      // Run with strict: true
+      const ran = await emitRpc(socket, {
+        cpId,
+        method: "run_scenario",
+        params: { connector: CONNECTOR, scenarioId, strict: true },
+      });
+      expect(ran.ok).toBe(true);
+
+      // Wait for report with strict: true
+      let report: any = null;
+      for (let i = 0; i < 75 && !report; i++) {
+        const ack = await emitRpc(socket, {
+          cpId,
+          method: "scenario_report",
+          params: { connector: CONNECTOR, scenarioId },
+        });
+        expect(ack.ok).toBe(true);
+        if (ack.result && ack.result.strict !== undefined) {
+          report = ack.result;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      expect(report).not.toBeNull();
+      expect(report.verdict).toBe("FAIL");
+      expect(report.compatibilityVerdict).toBe("FAIL");
+      expect(report.strict).toBe(true);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("run_scenario without strict reports warning without promoting to FAIL", async () => {
+    const server = await serverWithDb();
+    const socket = await connectTestClient(server);
+
+    try {
+      const cpId = "CP-WARNING-TEST";
+      const created = await emitRpc(socket, {
+        method: "cp.create",
+        params: {
+          cpId,
+          wsUrl: "ws://127.0.0.1:65534/never",
+          connectors: 1,
+        },
+      });
+      expect(created.ok).toBe(true);
+
+      const subscribed = await emitRpc(socket, {
+        method: "events.subscribe",
+        params: { scope: cpId },
+      });
+      expect(subscribed.ok).toBe(true);
+
+      const scenario = {
+        id: "warning-scenario",
+        name: "Warning test",
+        targetType: "connector",
+        targetId: 1,
+        nodes: [
+          {
+            id: "s",
+            type: "start",
+            position: { x: 0, y: 0 },
+            data: { label: "S" },
+          },
+          {
+            id: "m",
+            type: "meterValue",
+            position: { x: 0, y: 1 },
+            data: { label: "MV", value: 100, sendMessage: false },
+          },
+          {
+            id: "e",
+            type: "end",
+            position: { x: 0, y: 2 },
+            data: { label: "E" },
+          },
+        ],
+        edges: [
+          { id: "e1", source: "s", target: "m" },
+          { id: "e2", source: "m", target: "e" },
+        ],
+        assertions: [
+          {
+            id: "boot-warning",
+            type: "ocpp_sent",
+            action: "BootNotification",
+            severity: "warning",
+          },
+        ],
+      };
+
+      const loaded = await emitRpc(socket, {
+        cpId,
+        method: "load_scenario",
+        params: { connector: CONNECTOR, scenario },
+      });
+      expect(loaded.ok).toBe(true);
+      const scenarioId: string =
+        typeof loaded.result === "string"
+          ? loaded.result
+          : (loaded.result?.scenarioId ?? scenario.id);
+
+      // Run without strict (defaults to false)
+      const ran = await emitRpc(socket, {
+        cpId,
+        method: "run_scenario",
+        params: { connector: CONNECTOR, scenarioId },
+      });
+      expect(ran.ok).toBe(true);
+
+      let report: any = null;
+      for (let i = 0; i < 75 && !report; i++) {
+        const ack = await emitRpc(socket, {
+          cpId,
+          method: "scenario_report",
+          params: { connector: CONNECTOR, scenarioId },
+        });
+        expect(ack.ok).toBe(true);
+        if (ack.result && ack.result.strict !== undefined) {
+          report = ack.result;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      expect(report).not.toBeNull();
+      expect(report.verdict).toBe("PASS");
+      expect(report.compatibilityVerdict).toBe("WARNING");
+      expect(report.strict).toBe(false);
+    } finally {
+      socket.disconnect();
+    }
+  });
 });

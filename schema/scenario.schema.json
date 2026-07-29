@@ -11,6 +11,10 @@
       "type": "string",
       "description": "Scenario schema version, e.g. \"1.0\". Optional: absent on files predating issue #214."
     },
+    "strictCompatibility": {
+      "type": "boolean",
+      "description": "Promote warning-severity assertion failures to run failures (default false). A per-run strict option overrides this."
+    },
     "id": { "type": "string" },
     "name": { "type": "string" },
     "description": { "type": "string" },
@@ -126,6 +130,11 @@
             "state_transition",
             "no_unexpected"
           ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["failure", "warning"],
+          "description": "How a failed assertion affects the verdict. \"failure\" (default): normative OCPP conformance check; failing it fails the run. \"warning\": compatibility observation (e.g. OCTT quirks); failing it yields a compatibility WARNING unless strict mode promotes it."
         },
         "action": { "type": "string" },
         "direction": { "type": "string", "enum": ["sent", "received"] },

@@ -210,11 +210,19 @@ export const METHODS = {
   },
   list_scenarios: { params: z.object({ connector: CONN_POS }), result: ANY },
   run_scenario: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({
+      connector: CONN_POS,
+      scenarioId: STR_64K,
+      strict: z.boolean().optional(),
+    }),
     result: ANY,
   },
   run_scenario_file: {
-    params: z.object({ connector: CONN_POS, file: STR_64K }),
+    params: z.object({
+      connector: CONN_POS,
+      file: STR_64K,
+      strict: z.boolean().optional(),
+    }),
     result: ANY,
   },
   run_scenario_template: {
@@ -222,6 +230,7 @@ export const METHODS = {
       connector: CONN_POS,
       templateId: STR_64K,
       evSettings: OBJ().optional(),
+      strict: z.boolean().optional(),
     }),
     result: ANY,
   },

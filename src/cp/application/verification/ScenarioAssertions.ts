@@ -24,6 +24,7 @@ import type {
   AssertionSpec,
   AssertionStatus,
   ScenarioVerdict,
+  CompatibilityVerdict,
 } from "../scenario/ScenarioTypes";
 import {
   redactSensitiveText,
@@ -86,6 +87,7 @@ function makeResult(
     status,
     description: spec.description ?? defaultDescription,
     detail,
+    severity: spec.severity ?? "failure",
   };
 }
 
@@ -549,7 +551,14 @@ export interface ScenarioRunResult {
   endedAt: string;
   durationMs: number;
   executionState: "completed" | "error";
+  /** Overall verdict combining conformance and compatibility axes. */
   verdict: ScenarioVerdict;
+  /** Verdict for failure-severity assertions only (conformance). */
+  conformanceVerdict: ScenarioVerdict;
+  /** Verdict for warning-severity assertions only (compatibility). */
+  compatibilityVerdict: CompatibilityVerdict;
+  /** Whether strict mode was enabled (promotes warnings to failures). */
+  strict: boolean;
   assertions: AssertionResult[];
   transcript: TranscriptEntry[];
   errors: string[];
@@ -570,21 +579,39 @@ export interface ComputeVerdictOptions {
 }
 
 /**
- * Rolls a run's per-assertion results up into one {@link ScenarioVerdict}:
+ * Two-axis verdict from {@link computeVerdictSummary}: separates conformance
+ * (failure-severity assertions) from compatibility (warning-severity assertions).
+ */
+export interface VerdictSummary {
+  /** Overall verdict combining both axes. */
+  verdict: ScenarioVerdict;
+  /** Verdict for failure-severity assertions only (conformance). */
+  conformanceVerdict: ScenarioVerdict;
+  /** Verdict for warning-severity assertions only (compatibility). */
+  compatibilityVerdict: CompatibilityVerdict;
+  /** Whether strict mode was enabled (promotes warnings to failures). */
+  strict: boolean;
+}
+
+/**
+ * Rolls one severity axis' results up into a {@link ScenarioVerdict}, with the
+ * same priority order computeVerdict has used since #179 Phase 2b:
  *
- * 1. SKIPPED -- no assertions were declared, or every declared assertion
- *    resolved to "skipped".
+ * 1. SKIPPED -- the axis has no assertions, or every one resolved "skipped".
  * 2. BLOCKED -- the run errored or was blocked (outranks FAIL: a run that
  *    never reached a verifiable state shouldn't be reported as a clean
  *    failure).
  * 3. FAIL -- at least one assertion failed.
  * 4. PASS -- every assertion passed.
  */
-export function computeVerdict(
+function computeSingleAxisVerdict(
   results: AssertionResult[],
-  opts: ComputeVerdictOptions,
+  opts: Pick<ComputeVerdictOptions, "executionState" | "blocked">,
 ): ScenarioVerdict {
-  if (results.length === 0 || results.every((r) => r.status === "skipped")) {
+  if (
+    results.length === 0 ||
+    results.every((r) => r.status === "skipped" || r.status === "blocked")
+  ) {
     return "SKIPPED";
   }
   if (opts.executionState === "error" || opts.blocked === true) {
@@ -594,4 +621,81 @@ export function computeVerdict(
     return "FAIL";
   }
   return "PASS";
+}
+
+/**
+ * Two-axis verdict (#247): partitions results by {@link AssertionSeverity}.
+ *
+ * - conformanceVerdict: failure-severity assertions only, ranked exactly like
+ *   the legacy computeVerdict.
+ * - compatibilityVerdict: warning-severity assertions only. SKIPPED when the
+ *   axis has no assertions or none produced a pass/fail outcome; WARNING when
+ *   one failed (FAIL instead under strict); PASS otherwise. Warnings mark
+ *   behavior that is legal OCPP but observed to trip picky peers (e.g. OCTT),
+ *   so they never fail a non-strict run.
+ * - verdict: overall. Keeps the legacy priority (SKIPPED for an
+ *   assertion-less run outranks BLOCKED), fails on conformance failures, and
+ *   fails on compatibility findings only under strict.
+ */
+export function computeVerdictSummary(
+  results: AssertionResult[],
+  opts: ComputeVerdictOptions & { strict?: boolean },
+): VerdictSummary {
+  const strict = opts.strict ?? false;
+  const conformanceResults = results.filter((r) => r.severity === "failure");
+  const compatibilityResults = results.filter((r) => r.severity === "warning");
+
+  const conformanceVerdict = computeSingleAxisVerdict(conformanceResults, opts);
+
+  let compatibilityVerdict: CompatibilityVerdict;
+  if (
+    compatibilityResults.every(
+      (r) => r.status === "skipped" || r.status === "blocked",
+    )
+  ) {
+    compatibilityVerdict = "SKIPPED";
+  } else if (compatibilityResults.some((r) => r.status === "failed")) {
+    compatibilityVerdict = strict ? "FAIL" : "WARNING";
+  } else {
+    compatibilityVerdict = "PASS";
+  }
+
+  let verdict: ScenarioVerdict;
+  if (results.length === 0 || results.every((r) => r.status === "skipped")) {
+    verdict = "SKIPPED";
+  } else if (opts.executionState === "error" || opts.blocked === true) {
+    verdict = "BLOCKED";
+  } else if (
+    conformanceVerdict === "FAIL" ||
+    (strict && compatibilityVerdict === "FAIL")
+  ) {
+    verdict = "FAIL";
+  } else {
+    verdict = "PASS";
+  }
+
+  return { verdict, conformanceVerdict, compatibilityVerdict, strict };
+}
+
+/**
+ * Rolls a run's per-assertion results up into one {@link ScenarioVerdict}:
+ *
+ * 1. SKIPPED -- no assertions were declared, or every declared assertion
+ *    resolved to "skipped".
+ * 2. BLOCKED -- the run errored or was blocked (outranks FAIL: a run that
+ *    never reached a verifiable state shouldn't be reported as a clean
+ *    failure).
+ * 3. FAIL -- at least one assertion failed.
+ * 4. PASS -- every assertion passed.
+ *
+ * NOTE: This function provides backward compatibility for legacy callers.
+ * It uses strict=true semantics internally, which means warning-severity
+ * assertions are treated as failures. For new code, use computeVerdictSummary
+ * to get the two-axis verdict and control strictness explicitly.
+ */
+export function computeVerdict(
+  results: AssertionResult[],
+  opts: ComputeVerdictOptions,
+): ScenarioVerdict {
+  return computeVerdictSummary(results, { ...opts, strict: true }).verdict;
 }

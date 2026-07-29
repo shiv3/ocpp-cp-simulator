@@ -57,7 +57,7 @@ import { scenarioTemplates, getTemplateById } from "../utils/scenarioTemplates";
 import { TranscriptBuffer } from "../cp/application/verification/TranscriptBuffer";
 import {
   evaluateAssertions,
-  computeVerdict,
+  computeVerdictSummary,
   frameToTranscriptEntry,
   redactTranscriptEntry,
   type ScenarioRunResult,
@@ -283,6 +283,9 @@ export class CLIChargePointService {
     string,
     { readonly startedAt: string; readonly initialState: ScenarioStateSnapshot }
   > = new Map();
+  // Per-run strict flag, keyed like _executors/_runIdByScenario by scenarioId.
+  // Stores the per-run strict option if provided, consulted by finalizeScenarioRun.
+  private readonly _strictByScenario: Map<string, boolean> = new Map();
   // #179 Phase 2b: bounded history of per-run verdicts + assertion results,
   // keyed by runId. Capped so a long-lived daemon doesn't accumulate
   // results forever; recordRunResult evicts the oldest entry past the cap.
@@ -920,6 +923,7 @@ export class CLIChargePointService {
       this._transcriptByScenario.delete(scenarioId);
     }
     this._runStartByScenario.delete(scenarioId);
+    this._strictByScenario.delete(scenarioId);
   }
 
   /**
@@ -990,7 +994,11 @@ export class CLIChargePointService {
     return result;
   }
 
-  runScenario(connectorId: number, scenarioId: string): void {
+  runScenario(
+    connectorId: number,
+    scenarioId: string,
+    options?: { strict?: boolean },
+  ): void {
     const entry = this._scenarios.get(scenarioId);
     if (!entry) {
       throw new Error(`Scenario ${scenarioId} not found`);
@@ -1014,6 +1022,14 @@ export class CLIChargePointService {
     // correlate a specific run.
     const runId = makeScenarioRunId(scenarioId);
     this._runIdByScenario.set(scenarioId, runId);
+
+    // Record the per-run strict override; clear any leftover from a prior run
+    // of the same scenario that never reached finalizeScenarioRun.
+    if (options?.strict !== undefined) {
+      this._strictByScenario.set(scenarioId, options.strict);
+    } else {
+      this._strictByScenario.delete(scenarioId);
+    }
 
     // #179 Phase 2b: capture the OCPP wire transcript for this run so its
     // declared assertions (if any) can be evaluated once it ends.
@@ -1299,7 +1315,20 @@ export class CLIChargePointService {
     const definition = this._scenarios.get(scenarioId)?.definition;
     const assertionSpecs = definition?.assertions ?? [];
     const assertions = evaluateAssertions(assertionSpecs, transcript.frames);
-    const verdict = computeVerdict(assertions, { executionState, blocked });
+
+    // Effective strict: per-run option, then the scenario definition, then off.
+    const perRunStrict = this._strictByScenario.get(scenarioId);
+    this._strictByScenario.delete(scenarioId);
+    const effectiveStrict =
+      perRunStrict !== undefined
+        ? perRunStrict
+        : (definition?.strictCompatibility ?? false);
+
+    const verdictSummary = computeVerdictSummary(assertions, {
+      executionState,
+      blocked,
+      strict: effectiveStrict,
+    });
 
     // #179 Phase 3: flatten + redact the captured transcript before it can
     // reach a client (payloads carry auth material -- redactTranscriptEntry).
@@ -1328,7 +1357,10 @@ export class CLIChargePointService {
         new Date(endedAt).getTime() - new Date(startedAt).getTime(),
       ),
       executionState,
-      verdict,
+      verdict: verdictSummary.verdict,
+      conformanceVerdict: verdictSummary.conformanceVerdict,
+      compatibilityVerdict: verdictSummary.compatibilityVerdict,
+      strict: verdictSummary.strict,
       assertions,
       transcript: transcriptEntries,
       errors,

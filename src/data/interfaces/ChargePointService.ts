@@ -235,6 +235,7 @@ export interface ScenarioTemplateInfo {
 export interface ScenarioRunOptions {
   connectorId?: number;
   evSettings?: Partial<EVSettings>;
+  strict?: boolean;
 }
 
 export interface ChargePointSummary {

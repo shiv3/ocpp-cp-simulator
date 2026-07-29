@@ -497,4 +497,35 @@ describe("SessionAnalysisPanel", () => {
     ).toBeTruthy();
     expect(findAnalyze()!.disabled).toBe(false);
   });
+
+  it("analyzes without Node's Buffer global (real browsers, issue #238)", async () => {
+    // The toolkit's input-size guard (`Buffer.byteLength` in
+    // dist/core/parseLimits.js) runs before any parsing, and browsers have
+    // no `Buffer` — every in-browser analysis died with "Analysis failed:
+    // Buffer is not defined" (issue #238). vitest/jsdom runs in Node where
+    // `Buffer` always exists, so this test deletes the global around the
+    // click. Kept last-ish in this file: earlier tests have already loaded
+    // the panel chunk and the toolkit, so no module transform I/O (which
+    // may legitimately need Buffer) happens inside the deletion window.
+    const service = makeService({
+      snapshots: [snapshot("CP-1")],
+      listStoredLogs: vi.fn(async () => CLEAN_SESSION_ROWS),
+    });
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openAnalysisTab(container);
+
+    const holder = globalThis as { Buffer?: unknown };
+    const savedBuffer = holder.Buffer;
+    delete holder.Buffer;
+    try {
+      await clickAnalyzeAndWait(container);
+    } finally {
+      holder.Buffer = savedBuffer;
+    }
+
+    expect(container.textContent).not.toContain("Buffer is not defined");
+    expect(container.textContent).toContain("No failures detected");
+  });
 });

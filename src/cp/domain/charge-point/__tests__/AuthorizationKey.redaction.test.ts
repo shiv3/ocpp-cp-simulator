@@ -31,7 +31,7 @@ function contextFor(
   logger: Logger = { info: vi.fn() } as unknown as Logger,
 ): HandlerContext {
   return {
-    chargePoint: { configuration: store } as ChargePoint,
+    chargePoint: { configuration: store, certificateQuirks: {} } as ChargePoint,
     logger,
   };
 }

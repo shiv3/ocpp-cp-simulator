@@ -28,7 +28,34 @@ export class GetConfigurationHandler implements CallHandler<
 
     const store = context.chargePoint.configuration;
     const { known, unknown } = store.readRedacted(payload.key ?? []);
-    const configurationKey = this.mapConfiguration(known);
+
+    // Apply certificate quirk: hiddenConfigurationKeys. Filter out any
+    // keys in the hidden list from the known results, and add them to
+    // unknownKey (making them appear as if they don't exist).
+    const quirks = context.chargePoint.certificateQuirks;
+    let hiddenCount = 0;
+    const configurationKey = this.mapConfiguration(
+      known.filter((c) => {
+        if (
+          quirks.hiddenConfigurationKeys &&
+          quirks.hiddenConfigurationKeys.includes(c.key.name)
+        ) {
+          hiddenCount++;
+          unknown.push(c.key.name);
+          return false;
+        }
+        return true;
+      }),
+    );
+
+    // Log once per request if any keys were hidden
+    if (hiddenCount > 0) {
+      context.logger.info(
+        `GetConfiguration: hid ${hiddenCount} key(s) (certificate quirk)`,
+        LogType.CONFIGURATION,
+      );
+    }
+
     // §5.8 says unknownKey is optional; only include it when non-empty so
     // the response is the smallest legal payload.
     if (unknown.length === 0) {

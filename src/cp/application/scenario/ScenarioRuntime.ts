@@ -625,6 +625,20 @@ export const createScenarioExecutorCallbacks = (
     onClearResponseOverride: (action) => {
       chargePoint.clearResponseOverride(action);
     },
+    onSetInboundPolicy: (action, policy, errorCode, errorDescription) => {
+      if (policy === "callerror") {
+        chargePoint.setInboundCallPolicy(action, {
+          kind: "callerror",
+          errorCode: errorCode ?? "NotImplemented",
+          errorDescription: errorDescription ?? "",
+        });
+      } else if (policy === "ignore") {
+        chargePoint.setInboundCallPolicy(action, { kind: "ignore" });
+      }
+    },
+    onClearInboundPolicy: (action) => {
+      chargePoint.clearInboundCallPolicy(action);
+    },
     onConfigSet: (key, value) => {
       chargePoint.configuration.applyChange(key, value);
     },

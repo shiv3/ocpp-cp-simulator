@@ -951,6 +951,31 @@ export class OCPPMessageHandler {
     // (csmsCallTrigger nodes), regardless of handler outcome.
     this._chargePoint.notifyIncomingCall(action, payload);
 
+    // Issue #247: inbound call policy — if set, enforce it before handler lookup.
+    // Unlike responseOverride (one-shot), policies are sticky and survive reconnects.
+    const inboundPolicy = this._chargePoint.getInboundCallPolicy(action);
+    if (inboundPolicy) {
+      if (inboundPolicy.kind === "callerror") {
+        this._logger.warn(
+          `Inbound policy: replied CallError(${inboundPolicy.errorCode}) to ${action}`,
+          LogType.OCPP,
+        );
+        this.sendCallError(
+          messageId,
+          inboundPolicy.errorCode as OCPPErrorCode,
+          inboundPolicy.errorDescription,
+          gen,
+        );
+        return;
+      } else if (inboundPolicy.kind === "ignore") {
+        this._logger.warn(
+          `Inbound policy: ignored ${action} (no response)`,
+          LogType.OCPP,
+        );
+        return;
+      }
+    }
+
     // Issue #110: a scenario responseOverride node may have armed a
     // one-shot canned response for this action (e.g. RemoteStartTransaction
     // → Rejected for TC_026). It replaces the handler entirely, so the legacy

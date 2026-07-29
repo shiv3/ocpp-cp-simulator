@@ -68,6 +68,10 @@ export enum ScenarioNodeType {
   // CALL of a given action (e.g. RemoteStartTransaction → Rejected for
   // TC_026). The armed `{ status }` replaces the handler's response.
   RESPONSE_OVERRIDE = "responseOverride",
+  // Issue #247: set a persistent inbound call policy for an action
+  // (callerror or ignore). Policies survive reconnects until explicitly
+  // cleared, unlike responseOverride which is one-shot.
+  INBOUND_POLICY = "inboundPolicy",
 }
 
 /**
@@ -307,6 +311,27 @@ export interface ResponseOverrideNodeData extends BaseNodeData {
 }
 
 /**
+ * Inbound Policy Node Data — sets a persistent per-action policy for
+ * incoming CSMS→CP calls. Issue #247.
+ *
+ * Policies are sticky and survive reconnects (unlike responseOverride which
+ * is one-shot). Three modes:
+ * - "answer": clear any existing policy for the action (resume normal handling).
+ * - "callerror": reply with CALLERROR(errorCode, errorDescription).
+ * - "ignore": send no response (caller's timeout fires).
+ */
+export interface InboundPolicyNodeData extends BaseNodeData {
+  /** OCPP 1.6 action to arm a policy for. */
+  action: string;
+  /** Policy mode: "answer" to clear, "callerror" to reject, "ignore" to silence. */
+  policy: "answer" | "callerror" | "ignore";
+  /** Error code for policy === "callerror"; must be a valid OCPPErrorCodeV16. */
+  errorCode?: string;
+  /** Optional error description for policy === "callerror". */
+  errorDescription?: string;
+}
+
+/**
  * Config Set Node Data — applies a ChangeConfiguration locally (without
  * round-tripping through CSMS). Useful for tightening
  * MeterValueSampleInterval / changing MeterValuesSampledData mid-scenario.
@@ -346,6 +371,7 @@ export type ScenarioNodeData =
   | StatusNotificationNodeData
   | UnlockOutcomeNodeData
   | ResponseOverrideNodeData
+  | InboundPolicyNodeData
   | ConfigSetNodeData
   | DataTransferNodeData
   | StartNodeData
@@ -677,6 +703,16 @@ export interface ScenarioExecutorCallbacks {
    *  run ends (both normal completion and stop()) to clean up any overrides
    *  armed during the run. */
   onClearResponseOverride?: (action: string) => void;
+  /** Issue #247: set a persistent inbound call policy for the given action. */
+  onSetInboundPolicy?: (
+    action: string,
+    policy: "callerror" | "ignore",
+    errorCode?: string,
+    errorDescription?: string,
+  ) => void;
+  /** Issue #247: clear the inbound call policy for the given action (or all
+   *  if action is omitted). Called when a scenario run ends to clean up. */
+  onClearInboundPolicy?: (action?: string) => void;
   /** §5.3: apply a Configuration key change locally. */
   onConfigSet?: (key: string, value: string) => void;
   /** §4.3: send CP-initiated DataTransfer.req. */
@@ -888,3 +924,22 @@ export const RESPONSE_OVERRIDE_STATUSES: Record<
   ClearChargingProfile: ["Accepted", "Unknown"],
   ChangeAvailability: ["Accepted", "Rejected", "Scheduled"],
 };
+
+/** Actions a inboundPolicy node may target. Uses the full set of
+ *  inbound CSMS→CP actions (like csmsCallTrigger), since policies can
+ *  apply to any incoming call — not just those with `{ status }` responses. */
+export const INBOUND_POLICY_ACTIONS = CSMS_CALL_TRIGGER_ACTIONS;
+
+/** Valid OCPP 1.6 error codes for inboundPolicy callerror mode. */
+export const INBOUND_POLICY_ERROR_CODES = [
+  "NotImplemented",
+  "NotSupported",
+  "InternalError",
+  "ProtocolError",
+  "SecurityError",
+  "FormationViolation",
+  "PropertyConstraintViolation",
+  "OccurenceConstraintViolation",
+  "TypeConstraintViolation",
+  "GenericError",
+] as const;

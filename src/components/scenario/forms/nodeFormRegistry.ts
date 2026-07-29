@@ -7,6 +7,9 @@ import {
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
   type DelayNodeData,
+  INBOUND_POLICY_ACTIONS,
+  INBOUND_POLICY_ERROR_CODES,
+  type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
   type RemoteStartTriggerNodeData,
@@ -34,6 +37,7 @@ import CsmsCallTriggerForm from "./CsmsCallTriggerForm";
 import DataTransferForm from "./DataTransferForm";
 import DelayForm from "./DelayForm";
 import EndForm from "./EndForm";
+import InboundPolicyForm from "./InboundPolicyForm";
 import MeterValueForm from "./MeterValueForm";
 import NotificationForm from "./NotificationForm";
 import RemoteStartTriggerForm from "./RemoteStartTriggerForm";
@@ -128,6 +132,37 @@ function asResponseOverrideStatus(
   return typeof value === "string" && validStatuses.includes(value)
     ? value
     : validStatuses[0];
+}
+
+const INBOUND_POLICY_ACTIONS_SET = new Set<string>(INBOUND_POLICY_ACTIONS);
+const INBOUND_POLICY_ERROR_CODES_SET = new Set<string>(
+  INBOUND_POLICY_ERROR_CODES,
+);
+
+function asInboundPolicyAction(
+  value: unknown,
+): (typeof INBOUND_POLICY_ACTIONS)[number] {
+  return typeof value === "string" && INBOUND_POLICY_ACTIONS_SET.has(value)
+    ? (value as (typeof INBOUND_POLICY_ACTIONS)[number])
+    : "Reset";
+}
+
+function asInboundPolicyMode(
+  value: unknown,
+): "answer" | "callerror" | "ignore" {
+  return value === "answer" || value === "ignore" ? value : "callerror";
+}
+
+/** Imported/programmatic node data can carry any string here, and the
+ *  transport casts the code straight into a CALLERROR frame — so an
+ *  unknown value must not survive conversion. Absent stays absent (the
+ *  runtime applies its own NotImplemented default); present-but-invalid
+ *  normalizes to NotImplemented, mirroring asInboundPolicyAction. */
+function asInboundPolicyErrorCode(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "string" && INBOUND_POLICY_ERROR_CODES_SET.has(value)
+    ? value
+    : "NotImplemented";
 }
 
 function baseToForm(nodeData: ScenarioNodeData): NodeFormData {
@@ -624,6 +659,34 @@ function responseOverrideFormToNodeData(
   };
 }
 
+function inboundPolicyNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  const data = nodeData as Partial<InboundPolicyNodeData>;
+  return compactDefined({
+    ...baseToForm(nodeData),
+    action: asInboundPolicyAction(data.action),
+    policy: asInboundPolicyMode(data.policy),
+    errorCode: asInboundPolicyErrorCode(data.errorCode),
+    errorDescription: optionalString(data.errorDescription),
+  });
+}
+
+function inboundPolicyFormToNodeData(
+  formData: NodeFormData,
+): InboundPolicyNodeData {
+  const policy = asInboundPolicyMode(formData.policy);
+  return compactDefined({
+    ...baseFromForm(formData),
+    action: asInboundPolicyAction(formData.action),
+    policy,
+    ...(policy === "callerror"
+      ? {
+          errorCode: asInboundPolicyErrorCode(formData.errorCode),
+          errorDescription: optionalString(formData.errorDescription),
+        }
+      : {}),
+  }) as InboundPolicyNodeData;
+}
+
 export const NODE_FORM_REGISTRY = {
   [ScenarioNodeType.STATUS_CHANGE]: {
     title: "Status Change",
@@ -732,6 +795,12 @@ export const NODE_FORM_REGISTRY = {
     Component: ResponseOverrideForm,
     nodeDataToForm: responseOverrideNodeDataToForm,
     formToNodeData: responseOverrideFormToNodeData,
+  },
+  [ScenarioNodeType.INBOUND_POLICY]: {
+    title: "Inbound Policy",
+    Component: InboundPolicyForm,
+    nodeDataToForm: inboundPolicyNodeDataToForm,
+    formToNodeData: inboundPolicyFormToNodeData,
   },
   [ScenarioNodeType.CONFIG_SET]: {
     title: "Config Set",

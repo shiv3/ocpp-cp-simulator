@@ -80,6 +80,17 @@ interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
 }
 
+/**
+ * Per-action inbound call policy (issue #247). When a CSMS-initiated CALL
+ * arrives for an action with a policy, the CP replies with CALLERROR or
+ * remains silent instead of processing normally. Policies are sticky and
+ * survive reconnects — they must be explicitly cleared (not one-shot like
+ * responseOverride).
+ */
+export type InboundCallPolicy =
+  | { kind: "callerror"; errorCode: string; errorDescription: string }
+  | { kind: "ignore" };
+
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
@@ -129,6 +140,10 @@ export class ChargePoint {
   /** One-shot canned `{ status }` responses per incoming action,
    *  armed by a scenario responseOverride node (issue #110). */
   private readonly _responseOverrides = new Map<string, string>();
+  /** Sticky per-action inbound call policies (issue #247). When a CSMS-initiated
+   *  CALL arrives for an action with a policy, reply with CALLERROR or stay silent
+   *  instead of processing normally. Survive reconnects until explicitly cleared. */
+  private readonly _inboundCallPolicies = new Map<string, InboundCallPolicy>();
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
@@ -748,6 +763,27 @@ export class ChargePoint {
   /** Clear an armed response override. No-op if not armed. */
   clearResponseOverride(action: string): void {
     this._responseOverrides.delete(action);
+  }
+
+  /** Set an inbound call policy for `action`. Policies are sticky and survive
+   *  reconnects; use clearInboundCallPolicy to remove. */
+  setInboundCallPolicy(action: string, policy: InboundCallPolicy): void {
+    this._inboundCallPolicies.set(action, policy);
+  }
+
+  /** Get the inbound call policy for `action`, or undefined if none is set. */
+  getInboundCallPolicy(action: string): InboundCallPolicy | undefined {
+    return this._inboundCallPolicies.get(action);
+  }
+
+  /** Clear the inbound call policy for `action`. If `action` is not provided,
+   *  clear all policies. */
+  clearInboundCallPolicy(action?: string): void {
+    if (action === undefined) {
+      this._inboundCallPolicies.clear();
+    } else {
+      this._inboundCallPolicies.delete(action);
+    }
   }
 
   set loggingCallback(callback: (entry: LogEntry) => void) {

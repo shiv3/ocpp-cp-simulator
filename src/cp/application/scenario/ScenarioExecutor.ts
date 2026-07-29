@@ -23,6 +23,7 @@ import {
   StatusNotificationNodeData,
   UnlockOutcomeNodeData,
   ResponseOverrideNodeData,
+  InboundPolicyNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
   StartTransactionOptions,
@@ -111,6 +112,9 @@ export class ScenarioExecutor {
   // Issue #110: track which response overrides were armed during this run,
   // so they can be cleared when the run ends (both normal completion and stop()).
   private armedOverrideActions: string[] = [];
+  // Issue #247: track which inbound policies were armed during this run,
+  // so they can be cleared when the run ends (both normal completion and stop()).
+  private armedInboundPolicyActions: string[] = [];
 
   constructor(
     scenario: ScenarioDefinition,
@@ -176,6 +180,7 @@ export class ScenarioExecutor {
     this.stepResolve = null;
     this.pendingSteps = 0;
     this.armedOverrideActions = [];
+    this.armedInboundPolicyActions = [];
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
@@ -264,6 +269,15 @@ export class ScenarioExecutor {
         this.callbacks.onClearResponseOverride?.(action);
       }
       this.armedOverrideActions = [];
+
+      // Issue #247: clear any inbound policies armed during this run,
+      // both on normal completion and on stop(). Iterate through the
+      // tracking list (which was populated by executeInboundPolicy)
+      // and call the clear callback for each one.
+      for (const action of this.armedInboundPolicyActions) {
+        this.callbacks.onClearInboundPolicy?.(action);
+      }
+      this.armedInboundPolicyActions = [];
 
       this.notifyStateChange();
     }
@@ -631,6 +645,10 @@ export class ScenarioExecutor {
         );
         break;
 
+      case ScenarioNodeType.INBOUND_POLICY:
+        await this.executeInboundPolicy(node.data as InboundPolicyNodeData);
+        break;
+
       case ScenarioNodeType.CONFIG_SET:
         await this.executeConfigSet(node.data as ConfigSetNodeData);
         break;
@@ -703,6 +721,51 @@ export class ScenarioExecutor {
       `Armed response override: ${data.action} → ${data.status}`,
       "info",
     );
+  }
+
+  /** Issue #247: set or clear an inbound call policy. */
+  private async executeInboundPolicy(
+    data: InboundPolicyNodeData,
+  ): Promise<void> {
+    if (data.policy === "answer") {
+      // Clear the policy for this action.
+      if (!this.callbacks.onClearInboundPolicy) {
+        this.callbacks.log?.(
+          "InboundPolicy: no onClearInboundPolicy callback wired",
+          "warn",
+        );
+        return;
+      }
+      this.callbacks.onClearInboundPolicy(data.action);
+      this.callbacks.log?.(`Cleared inbound policy: ${data.action}`, "info");
+    } else if (data.policy === "callerror" || data.policy === "ignore") {
+      // Arm a new policy.
+      if (!this.callbacks.onSetInboundPolicy) {
+        this.callbacks.log?.(
+          "InboundPolicy: no onSetInboundPolicy callback wired",
+          "warn",
+        );
+        return;
+      }
+      this.callbacks.onSetInboundPolicy(
+        data.action,
+        data.policy,
+        data.errorCode,
+        data.errorDescription,
+      );
+      // Track this action so we can clear it when the run ends.
+      if (!this.armedInboundPolicyActions.includes(data.action)) {
+        this.armedInboundPolicyActions.push(data.action);
+      }
+      const policyDesc =
+        data.policy === "callerror"
+          ? `callerror(${data.errorCode ?? "NotImplemented"})`
+          : "ignore";
+      this.callbacks.log?.(
+        `Armed inbound policy: ${data.action} → ${policyDesc}`,
+        "info",
+      );
+    }
   }
 
   /** Apply a ChangeConfiguration locally via the ConfigurationStore. */

@@ -26,6 +26,7 @@ import {
   type SerializedLogLine,
 } from "@/trace/logEntryToTrace";
 import { ANALYZE_DISCLAIMER } from "@/trace/analysisDisclaimer";
+import { ensureToolkitBufferShim } from "@/trace/toolkitBufferShim";
 
 import EmptyState from "../../components/EmptyState";
 
@@ -123,6 +124,10 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
         return;
       }
       const jsonl = records.map((record) => JSON.stringify(record)).join("\n");
+
+      // The toolkit's parse guards call Node's `Buffer.byteLength`; in a
+      // browser that global doesn't exist (issue #238) — see the shim's doc.
+      ensureToolkitBufferShim();
 
       let core: typeof import("@ocpp-debugkit/toolkit/core");
       try {

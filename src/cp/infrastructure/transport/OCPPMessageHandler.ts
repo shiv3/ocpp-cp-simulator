@@ -460,12 +460,30 @@ export class OCPPMessageHandler {
   /** Generate or forward a CSR for the charge point certificate signing flow. */
   public async sendSignCertificate(csr?: string): Promise<void> {
     const cpoName = this._chargePoint.configuration.getString("CpoName") ?? "";
-    const payloadCsr =
-      csr ??
-      (await this._chargePoint.certificateStore.generateNewCsr(
+    const quirks = this._chargePoint.certificateQuirks;
+
+    let payloadCsr: string;
+    if (csr) {
+      payloadCsr = csr;
+    } else {
+      // Log when a non-default key algorithm is used
+      if (quirks.csrKeyAlgorithm === "RSA") {
+        this._logger.info(
+          "SignCertificate: generating RSA CSR (certificate quirk)",
+          LogType.OCPP,
+        );
+      }
+
+      payloadCsr = await this._chargePoint.certificateStore.generateNewCsr(
         this._chargePoint.id,
         cpoName,
-      ));
+        {
+          keyAlgorithm: quirks.csrKeyAlgorithm,
+          pemLineEndings: quirks.csrPemLineEndings,
+        },
+      );
+    }
+
     const messageId = this.generateMessageId();
     const payload: SignCertificateRequestV16 = { csr: payloadCsr };
     this.sendRequest(OCPPAction.SignCertificate, messageId, payload);

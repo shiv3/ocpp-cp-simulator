@@ -539,6 +539,25 @@ toolkit's `/core` and `/reporter` entry points are loaded via dynamic
 `import()` only inside the `analyze` code path, so every other CLI mode is
 unaffected if the dependency is ever missing.
 
+## export-k6
+
+Export a scenario JSON as a runnable [k6](https://k6.io) load-test bundle:
+
+```shell
+ocpp-cp-sim export-k6 --scenario charge.json -o loadtest/
+```
+
+The bundle contains a `scenario.k6.ts` entry, a self-contained TypeScript
+OCPP runtime (`ocpp-runtime/`), the scenario, and a README with the full
+environment-variable reference (`PROFILE=spike|steady|soak`, `VUS`,
+`CP_IDS_FILE`, mTLS notes). Requires k6 >= v1.6.0 (the bundle uses the
+stable `k6/websockets` module, not the deprecated
+`k6/experimental/websockets`). Phase 1 supports OCPP 1.6J.
+
+```shell
+CSMS_URL=wss://csms.example.com/ocpp k6 run loadtest/scenario.k6.ts
+```
+
 ## Events
 
 Events are emitted in all modes:

@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { evaluateAssertions, computeVerdict } from "../ScenarioAssertions";
+import {
+  evaluateAssertions,
+  computeVerdict,
+  computeVerdictSummary,
+} from "../ScenarioAssertions";
 import type { CallFrame, CallResultFrame, Frame } from "../ocpp";
 import type {
   AssertionResult,
   AssertionSpec,
+  AssertionSeverity,
 } from "../../scenario/ScenarioTypes";
 
 /** Builds a synthetic wire transcript covering every assertion type this
@@ -325,6 +330,212 @@ describe("evaluateAssertions", () => {
     });
     expect(r.description).toBe("boot happened");
   });
+
+  it("propagates severity: spec without severity defaults to 'failure'", () => {
+    const r = evalOne({
+      id: "m1",
+      type: "ocpp_sent",
+      action: "BootNotification",
+    });
+    expect(r.severity).toBe("failure");
+  });
+
+  it("propagates severity: spec with severity='warning' yields result severity='warning'", () => {
+    const r = evalOne({
+      id: "m2",
+      type: "ocpp_sent",
+      action: "BootNotification",
+      severity: "warning",
+    });
+    expect(r.severity).toBe("warning");
+  });
+
+  it("propagates severity: on failed assertion with warning severity", () => {
+    const r = evalOne({
+      id: "m3",
+      type: "ocpp_sent",
+      action: "NeverSent",
+      severity: "warning",
+    });
+    expect(r.status).toBe("failed");
+    expect(r.severity).toBe("warning");
+  });
+});
+
+describe("computeVerdictSummary", () => {
+  const makePassed = (
+    severity: AssertionSeverity = "failure",
+  ): AssertionResult => ({
+    id: "p",
+    type: "ocpp_sent",
+    status: "passed",
+    description: "p",
+    severity,
+  });
+
+  const makeFailed = (
+    severity: AssertionSeverity = "failure",
+  ): AssertionResult => ({
+    id: "f",
+    type: "ocpp_sent",
+    status: "failed",
+    description: "f",
+    severity,
+  });
+
+  const makeSkipped = (
+    severity: AssertionSeverity = "failure",
+  ): AssertionResult => ({
+    id: "s",
+    type: "ocpp_sent",
+    status: "skipped",
+    description: "s",
+    severity,
+  });
+
+  const makeBlocked = (
+    severity: AssertionSeverity = "failure",
+  ): AssertionResult => ({
+    id: "b",
+    type: "ocpp_sent",
+    status: "blocked",
+    description: "b",
+    severity,
+  });
+
+  it("non-strict: one failed warning-severity + one passed failure-severity → verdict PASS, conformanceVerdict PASS, compatibilityVerdict WARNING", () => {
+    const results = [makePassed("failure"), makeFailed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("PASS");
+    expect(summary.conformanceVerdict).toBe("PASS");
+    expect(summary.compatibilityVerdict).toBe("WARNING");
+    expect(summary.strict).toBe(false);
+  });
+
+  it("strict: same inputs with strict true → verdict FAIL, compatibilityVerdict FAIL, conformanceVerdict PASS", () => {
+    const results = [makePassed("failure"), makeFailed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: true,
+    });
+    expect(summary.verdict).toBe("FAIL");
+    expect(summary.conformanceVerdict).toBe("PASS");
+    expect(summary.compatibilityVerdict).toBe("FAIL");
+    expect(summary.strict).toBe(true);
+  });
+
+  it("only warning-severity assertions, all passed, non-strict → verdict PASS, conformanceVerdict SKIPPED, compatibilityVerdict PASS", () => {
+    const results = [makePassed("warning"), makePassed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("PASS");
+    expect(summary.conformanceVerdict).toBe("SKIPPED");
+    expect(summary.compatibilityVerdict).toBe("PASS");
+  });
+
+  it("no warning-severity assertions → compatibilityVerdict SKIPPED; conformance failure still → verdict FAIL", () => {
+    const results = [makeFailed("failure"), makePassed("failure")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("FAIL");
+    expect(summary.conformanceVerdict).toBe("FAIL");
+    expect(summary.compatibilityVerdict).toBe("SKIPPED");
+  });
+
+  it("blocked/executionState error → verdict BLOCKED regardless of severities", () => {
+    const results = [makePassed("warning"), makeFailed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "error",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("BLOCKED");
+  });
+
+  it("blocked option true → verdict BLOCKED regardless of severities", () => {
+    const results = [makePassed("warning"), makeFailed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      blocked: true,
+      strict: false,
+    });
+    expect(summary.verdict).toBe("BLOCKED");
+  });
+
+  it("all results skipped → all verdicts SKIPPED", () => {
+    const results = [makeSkipped("failure"), makeSkipped("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("SKIPPED");
+    expect(summary.conformanceVerdict).toBe("SKIPPED");
+    expect(summary.compatibilityVerdict).toBe("SKIPPED");
+  });
+
+  it("empty results → all verdicts SKIPPED", () => {
+    const results: AssertionResult[] = [];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("SKIPPED");
+    expect(summary.conformanceVerdict).toBe("SKIPPED");
+    expect(summary.compatibilityVerdict).toBe("SKIPPED");
+  });
+
+  it("conformance FAIL with all-passed compatibility, non-strict → verdict FAIL", () => {
+    const results = [makeFailed("failure"), makePassed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("FAIL");
+    expect(summary.conformanceVerdict).toBe("FAIL");
+    expect(summary.compatibilityVerdict).toBe("PASS");
+  });
+
+  it("compatibility axis with only skipped/blocked results → compatibilityVerdict SKIPPED", () => {
+    const results = [
+      makeSkipped("warning"),
+      makeBlocked("warning"),
+      makePassed("failure"),
+    ];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      strict: false,
+    });
+    expect(summary.compatibilityVerdict).toBe("SKIPPED");
+    expect(summary.verdict).toBe("PASS");
+  });
+
+  it("assertion-less errored run → verdict SKIPPED (legacy priority: SKIPPED outranks BLOCKED)", () => {
+    const summary = computeVerdictSummary([], {
+      executionState: "error",
+      strict: false,
+    });
+    expect(summary.verdict).toBe("SKIPPED");
+    expect(summary.conformanceVerdict).toBe("SKIPPED");
+    expect(summary.compatibilityVerdict).toBe("SKIPPED");
+  });
+
+  it("blocked run still reports per-axis outcomes: conformance BLOCKED, compatibility from results", () => {
+    const results = [makePassed("failure"), makeFailed("warning")];
+    const summary = computeVerdictSummary(results, {
+      executionState: "completed",
+      blocked: true,
+      strict: false,
+    });
+    expect(summary.verdict).toBe("BLOCKED");
+    expect(summary.conformanceVerdict).toBe("BLOCKED");
+    expect(summary.compatibilityVerdict).toBe("WARNING");
+  });
 });
 
 describe("computeVerdict", () => {
@@ -333,18 +544,21 @@ describe("computeVerdict", () => {
     type: "ocpp_sent",
     status: "passed",
     description: "p",
+    severity: "failure",
   };
   const failed: AssertionResult = {
     id: "f",
     type: "ocpp_sent",
     status: "failed",
     description: "f",
+    severity: "failure",
   };
   const skipped: AssertionResult = {
     id: "s",
     type: "ocpp_sent",
     status: "skipped",
     description: "s",
+    severity: "failure",
   };
 
   it("SKIPPED when there are no results", () => {
@@ -382,5 +596,19 @@ describe("computeVerdict", () => {
         blocked: true,
       }),
     ).toBe("BLOCKED");
+  });
+
+  it("legacy behavior unchanged: computeVerdict with warning-severity failed assertion still → FAIL", () => {
+    const warningFailed: AssertionResult = {
+      id: "w",
+      type: "ocpp_sent",
+      status: "failed",
+      description: "w",
+      severity: "warning",
+    };
+    // Old behavior: any failed assertion → FAIL; computeVerdict should use strict semantics
+    expect(
+      computeVerdict([passed, warningFailed], { executionState: "completed" }),
+    ).toBe("FAIL");
   });
 });

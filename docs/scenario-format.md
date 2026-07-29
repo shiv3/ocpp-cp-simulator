@@ -43,22 +43,23 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 ## Top-level fields
 
-| Field                   | Type                                                                            | Required | Notes                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.0"`. Absent on files predating issue #214 — still valid.                   |
-| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                         |
-| `name`                  | string                                                                          | Yes      |                                                                                     |
-| `description`           | string                                                                          | No       |                                                                                     |
-| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                     |
-| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                      |
-| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                     |
-| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                     |
-| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.           |
-| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                           |
-| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                 |
-| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                    |
-| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`. |
-| `assertions`            | [Assertion](#assertions)`[]`                                                    | No       | Declarative pass/fail checks against the run's OCPP transcript.                     |
+| Field                   | Type                                                                            | Required | Notes                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.0"`. Absent on files predating issue #214 — still valid.                                                  |
+| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                        |
+| `name`                  | string                                                                          | Yes      |                                                                                                                    |
+| `description`           | string                                                                          | No       |                                                                                                                    |
+| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                    |
+| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                     |
+| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                    |
+| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                    |
+| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                          |
+| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                          |
+| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                |
+| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                   |
+| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`.                                |
+| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides. |
+| `assertions`            | [Assertion](#assertions)`[]`                                                    | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                    |
 
 ## Node shape
 
@@ -147,7 +148,7 @@ conformance.
 (`sourceHandle`, `targetHandle`, `type`, `animated`, ...) which the schema
 allows but does not require.
 
-## Assertions
+## Assertions & verdicts
 
 An optional array of declarative pass/fail checks evaluated against the
 run's captured OCPP transcript once a scenario finishes (see
@@ -157,8 +158,35 @@ Each entry has `id` and `type` (one of `ocpp_sent`, `ocpp_received`,
 `ocpp_absent`, `response_status`, `idtag_info_status`, `payload_match`,
 `message_order`, `message_after`, `state_transition`, `no_unexpected`), plus
 type-dependent fields (`action`, `direction`, `status`, `occurrence`,
-`payload`, `targetStatus`, `actions`, `before`, `after`). A scenario with no
-`assertions` produces a `SKIPPED` verdict and runs exactly as before.
+`payload`, `targetStatus`, `actions`, `before`, `after`).
+
+### Severity: conformance vs. compatibility
+
+Each assertion optionally carries a `severity` field (`"failure"` or `"warning"`; default: `"failure"`):
+
+- **`"failure"` (default)**: A normative OCPP conformance check. If it fails, the run's `conformanceVerdict` is `FAIL` and the overall scenario verdict fails.
+- **`"warning"`**: A compatibility observation (e.g., an OCTT certification quirk): behavior that is legal per the OCPP specification but has been observed to trip a particular peer. If it fails, the run's `compatibilityVerdict` is `WARNING` and the run does **not** fail. Strict mode promotes such warnings to failures when either:
+  - the scenario sets `strictCompatibility: true`, or
+  - the run is started with `strict: true` (accepted by the `run_scenario`, `run_scenario_file`, and `run_scenario_template` RPCs; overrides the scenario-level setting).
+
+The run report carries both axes alongside the overall `verdict`: `conformanceVerdict` (`PASS`/`FAIL`/`BLOCKED`/`SKIPPED`, from failure-severity assertions only) and `compatibilityVerdict` (`PASS`/`WARNING`/`FAIL`/`SKIPPED`, from warning-severity assertions only), plus the effective `strict` flag.
+
+**Example run report**:
+
+```json
+{
+  "conformanceVerdict": "PASS",
+  "compatibilityVerdict": "WARNING",
+  "strict": false,
+  "verdict": "PASS"
+}
+```
+
+A scenario with no `assertions` produces a `SKIPPED` verdict and runs exactly as before.
+
+### OCTT strictness probe
+
+The bundled `cert16-octt-strictness-probe.json` scenario uses warning-severity `ocpp_absent` assertions for two CSMS behaviors that are valid per OCPP 1.6 but have been observed to break OCTT certification scenarios: an automatic `GetConfiguration` right after connect, and a `GetDiagnostics` during the sequence. By default such a run reports `OCPP conformance: PASS / compatibility: WARNING`; enable strict mode (`strictCompatibility: true` or per-run `strict: true`) to promote those warnings to failures when rehearsing for an official certification run.
 
 ## Validating a scenario file
 

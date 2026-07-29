@@ -1318,11 +1318,16 @@ async function dispatchFacadeCpCommand(
     }
     case "run_scenario": {
       const id = requireFacadeCpId(cpId);
+      const strict =
+        params.strict === undefined
+          ? undefined
+          : requireBoolean(params, "strict");
       await runFacadeOperation(() =>
         chargePointService.runScenario(
           id,
           requirePositiveInt(params, "connector"),
           requireString(params, "scenarioId"),
+          strict !== undefined ? { strict } : undefined,
         ),
       );
       return handled(undefined);
@@ -1429,18 +1434,26 @@ async function dispatchFacadeCpCommand(
     }
     case "run_scenario_file": {
       const id = requireFacadeCpId(cpId);
+      const strict =
+        params.strict === undefined
+          ? undefined
+          : requireBoolean(params, "strict");
       return handled(
         await runFacadeOperation(() =>
           chargePointService.runScenarioFile(
             id,
             requireString(params, "file"),
-            { connectorId: requirePositiveInt(params, "connector") },
+            { connectorId: requirePositiveInt(params, "connector"), strict },
           ),
         ),
       );
     }
     case "run_scenario_template": {
       const id = requireFacadeCpId(cpId);
+      const strict =
+        params.strict === undefined
+          ? undefined
+          : requireBoolean(params, "strict");
       return handled(
         await runFacadeOperation(() =>
           chargePointService.runScenarioTemplate(
@@ -1449,6 +1462,7 @@ async function dispatchFacadeCpCommand(
             {
               connectorId: requirePositiveInt(params, "connector"),
               evSettings: params.evSettings as Partial<EVSettings> | undefined,
+              strict,
             },
           ),
         ),

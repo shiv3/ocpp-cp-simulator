@@ -205,3 +205,120 @@ describe("#179 Phase 4: scenario_reset", () => {
     expect(connector1(svc).status).toBe("Available");
   });
 });
+
+describe("Verdict severity axes + strict mode", () => {
+  it("a failing warning-severity assertion in non-strict mode produces PASS verdict + WARNING compatibilityVerdict", async () => {
+    const svc = newService();
+    // A scenario with a warning-severity assertion that will fail (no BootNotification sent).
+    const id = svc.loadScenario(
+      1,
+      completingScenario("warning-fails-nonstrict", [
+        {
+          id: "boot-warning",
+          type: "ocpp_sent",
+          action: "BootNotification",
+          severity: "warning",
+        },
+      ]),
+    );
+    svc.runScenario(1, id);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const result = svc.getScenarioRunResult(id);
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe("PASS");
+    expect(result!.conformanceVerdict).toBe("SKIPPED");
+    expect(result!.compatibilityVerdict).toBe("WARNING");
+    expect(result!.strict).toBe(false);
+    expect(result!.assertions).toHaveLength(1);
+    expect(result!.assertions[0]).toMatchObject({
+      id: "boot-warning",
+      severity: "warning",
+      status: "failed",
+    });
+  });
+
+  it("a failing warning-severity assertion with strict: true produces FAIL verdict + FAIL compatibilityVerdict", async () => {
+    const svc = newService();
+    const id = svc.loadScenario(
+      1,
+      completingScenario("warning-fails-strict", [
+        {
+          id: "boot-warning",
+          type: "ocpp_sent",
+          action: "BootNotification",
+          severity: "warning",
+        },
+      ]),
+    );
+    svc.runScenario(1, id, { strict: true });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const result = svc.getScenarioRunResult(id);
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe("FAIL");
+    expect(result!.conformanceVerdict).toBe("SKIPPED");
+    expect(result!.compatibilityVerdict).toBe("FAIL");
+    expect(result!.strict).toBe(true);
+  });
+
+  it("a scenario definition with strictCompatibility: true applies the strict mode default", async () => {
+    const svc = newService();
+    const scenario = completingScenario("with-strict-def", [
+      {
+        id: "boot-warning",
+        type: "ocpp_sent",
+        action: "BootNotification",
+        severity: "warning",
+      },
+    ]);
+    scenario.strictCompatibility = true;
+    const id = svc.loadScenario(1, scenario);
+    // Run without explicit options -- should use the definition's strictCompatibility default.
+    svc.runScenario(1, id);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const result = svc.getScenarioRunResult(id);
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe("FAIL");
+    expect(result!.compatibilityVerdict).toBe("FAIL");
+    expect(result!.strict).toBe(true);
+  });
+
+  it("per-run strict option overrides the scenario definition's strictCompatibility", async () => {
+    const svc = newService();
+    const scenario = completingScenario("override-def-strict", [
+      {
+        id: "boot-warning",
+        type: "ocpp_sent",
+        action: "BootNotification",
+        severity: "warning",
+      },
+    ]);
+    scenario.strictCompatibility = true;
+    const id = svc.loadScenario(1, scenario);
+    // Run with explicit strict: false, overriding the definition's strictCompatibility: true.
+    svc.runScenario(1, id, { strict: false });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const result = svc.getScenarioRunResult(id);
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe("PASS");
+    expect(result!.compatibilityVerdict).toBe("WARNING");
+    expect(result!.strict).toBe(false);
+  });
+
+  it("existing tests still include the new verdict fields in the result shape", async () => {
+    const svc = newService();
+    const id = svc.loadScenario(1, completingScenario("include-verdicts"));
+    svc.runScenario(1, id);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const result = svc.getScenarioRunResult(id);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("verdict");
+    expect(result).toHaveProperty("conformanceVerdict");
+    expect(result).toHaveProperty("compatibilityVerdict");
+    expect(result).toHaveProperty("strict");
+  });
+});

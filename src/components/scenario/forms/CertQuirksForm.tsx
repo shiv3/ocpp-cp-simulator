@@ -3,8 +3,10 @@ import type { NodeFormComponentProps, NodeFormData } from "./types";
 import { CERT_SIGNATURE_ALGORITHMS } from "../../../cp/application/scenario/ScenarioTypes";
 
 const DEFAULT_MODE = "set";
-const DEFAULT_CSR_KEY_ALGORITHM = "RSA";
-const DEFAULT_CSR_LINE_ENDINGS = "lf";
+// Unset quirks must render as "(none)": defaulting the selects to a real
+// value would display quirks the node does not persist or apply.
+const DEFAULT_CSR_KEY_ALGORITHM = "";
+const DEFAULT_CSR_LINE_ENDINGS = "";
 
 export default function CertQuirksForm({
   value,
@@ -21,11 +23,13 @@ export default function CertQuirksForm({
   ];
 
   const csrKeyOptions = [
+    { value: "", label: "(none)" },
     { value: "ECDSA", label: "ECDSA" },
     { value: "RSA", label: "RSA" },
   ];
 
   const lineEndingsOptions = [
+    { value: "", label: "(none)" },
     { value: "lf", label: "LF (Unix)" },
     { value: "crlf", label: "CRLF (Windows)" },
   ];

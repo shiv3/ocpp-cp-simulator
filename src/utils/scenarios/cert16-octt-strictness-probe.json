@@ -100,15 +100,17 @@
   "assertions": [
     {
       "id": "no-auto-get-configuration",
-      "type": "no_unexpected",
-      "description": "OCTT fails when the CSMS sends an automatic GetConfiguration after connect (steve-community/steve#2093)",
-      "actions": ["GetConfiguration"]
+      "type": "ocpp_absent",
+      "action": "GetConfiguration",
+      "direction": "received",
+      "description": "OCTT fails when the CSMS sends an automatic GetConfiguration after connect (steve-community/steve#2093)"
     },
     {
       "id": "no-get-diagnostics",
-      "type": "no_unexpected",
-      "description": "OCTT does not expect GetDiagnostics during this sequence",
-      "actions": ["GetDiagnostics"]
+      "type": "ocpp_absent",
+      "action": "GetDiagnostics",
+      "direction": "received",
+      "description": "OCTT does not expect GetDiagnostics during this sequence"
     }
   ]
 }

@@ -1,6 +1,7 @@
 import {
   type BaseNodeData,
   type CancelReservationNodeData,
+  CERT_SIGNATURE_ALGORITHMS,
   type CertQuirksNodeData,
   type ConfigSetNodeData,
   type ConnectorPlugNodeData,
@@ -137,6 +138,9 @@ function asResponseOverrideStatus(
 }
 
 const INBOUND_POLICY_ACTIONS_SET = new Set<string>(INBOUND_POLICY_ACTIONS);
+const CERT_SIGNATURE_ALGORITHMS_SET = new Set<string>(
+  CERT_SIGNATURE_ALGORITHMS,
+);
 const INBOUND_POLICY_ERROR_CODES_SET = new Set<string>(
   INBOUND_POLICY_ERROR_CODES,
 );
@@ -705,9 +709,18 @@ function asCertLineEndings(value: unknown): "lf" | "crlf" | undefined {
   return value === "lf" || value === "crlf" ? value : undefined;
 }
 
+/** Free-text entries reach this parser, and the CertificateSigned handler
+ *  compares them verbatim against the leaf certificate's algorithm name —
+ *  a typo would silently make the acceptance policy reject everything.
+ *  Only the advertised algorithm names survive; an all-invalid list drops
+ *  to undefined (no policy) rather than persisting as reject-everything. */
 function parseCertAlgorithmArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value.filter((v) => typeof v === "string");
+  const valid = value.filter(
+    (v): v is string =>
+      typeof v === "string" && CERT_SIGNATURE_ALGORITHMS_SET.has(v),
+  );
+  return valid.length > 0 ? valid : undefined;
 }
 
 function parseStringArray(value: unknown): string[] | undefined {

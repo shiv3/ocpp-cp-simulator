@@ -17,7 +17,7 @@ that schema, not a replacement for it.
 ## Status & scope
 
 - **Version `1.0`** (`schemaVersion`).
-- Covers the full 20-node discriminated union the scenario engine supports
+- Covers the full 22-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
 - **Validation against this schema is advisory in this version**: the
   simulator warns (`console.warn` in the browser, stderr / server log on the
@@ -72,7 +72,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 ```
 
 Every node has `id` (string), `type` (the discriminator — a closed
-enum of the 20 values below), `position` (`{ x: number, y: number }`), and
+enum of the 22 values below), `position` (`{ x: number, y: number }`), and
 `data` (an object requiring at least `label: string`; the rest of `data`'s
 shape depends on `type`).
 

@@ -31,6 +31,7 @@ import {
 
 interface PendingCall {
   action: string;
+  messageId: string;
   sentAtMs: number;
   entry: TranscriptEntry;
   resolve: (payload: Record<string, unknown>) => void;
@@ -144,13 +145,22 @@ export class OcppChargePoint implements ScenarioHost {
 
   call(c: WireCall): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
+      if (this.closed) {
+        reject(new Error("connection closed"));
+        return;
+      }
       this.queue.push({ call: c, resolve, reject });
       this.flush();
     });
   }
 
   private flush(): void {
-    if (this.pending !== null || this.queue.length === 0 || this.ws === null) {
+    if (
+      this.closed ||
+      this.pending !== null ||
+      this.queue.length === 0 ||
+      this.ws === null
+    ) {
       return;
     }
     const { call, resolve, reject } = this.queue.shift() as QueuedCall;
@@ -176,13 +186,22 @@ export class OcppChargePoint implements ScenarioHost {
     }, timeoutMs);
     this.pending = {
       action: call.action,
+      messageId,
       sentAtMs: Date.now(),
       entry,
       resolve,
       reject,
       timeoutId,
     };
-    this.ws.send(encodeCall(messageId, call.action, call.payload));
+    try {
+      this.ws.send(encodeCall(messageId, call.action, call.payload));
+    } catch (err) {
+      clearTimeout(timeoutId);
+      this.pending = null;
+      ocppErrors.add(1, { action: call.action, kind: "send_failed" });
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
   }
 
   private onFrame(raw: string): void {
@@ -190,7 +209,10 @@ export class OcppChargePoint implements ScenarioHost {
     if (frame === null) return;
     if (frame.kind === "result" || frame.kind === "error") {
       const p = this.pending;
-      if (p === null) return;
+      if (p === null || p.messageId !== frame.messageId) {
+        ocppErrors.add(1, { action: "unknown", kind: "stale_response" });
+        return;
+      }
       this.pending = null;
       clearTimeout(p.timeoutId);
       if (frame.kind === "result") {
@@ -335,11 +357,14 @@ export class OcppChargePoint implements ScenarioHost {
   close(): void {
     this.closed = true;
     if (this.heartbeatId !== null) clearInterval(this.heartbeatId);
+    this.heartbeatId = null;
     this.ws?.close();
   }
 
   private failAll(err: Error): void {
     this.closed = true;
+    if (this.heartbeatId !== null) clearInterval(this.heartbeatId);
+    this.heartbeatId = null;
     const p = this.pending;
     this.pending = null;
     if (p !== null) {

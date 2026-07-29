@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { SUPPORTED_ASSERTION_TYPES } from "./runtime/assertions";
-import type { ScenarioJson } from "./runtime/types";
+import type { ScenarioJson, ScenarioNodeJson } from "./runtime/types";
 import { RUNTIME_FILES } from "./runtimeManifest";
 import {
   renderEntryScript,
@@ -88,14 +88,15 @@ export async function runExportK6(args: ExportK6Args): Promise<number> {
   }
 
   const outDir = args.outDir;
-  if (
-    fs.existsSync(outDir) &&
-    fs.readdirSync(outDir).length > 0 &&
-    !args.force
-  ) {
-    return fail(
-      `output directory ${outDir} is not empty (use --force to overwrite)`,
-    );
+  if (fs.existsSync(outDir)) {
+    if (!fs.statSync(outDir).isDirectory()) {
+      return fail(`${outDir} exists and is not a directory`);
+    }
+    if (fs.readdirSync(outDir).length > 0 && !args.force) {
+      return fail(
+        `output directory ${outDir} is not empty (use --force to overwrite)`,
+      );
+    }
   }
 
   const runtimeSrc = path.dirname(
@@ -137,11 +138,26 @@ export async function runExportK6(args: ExportK6Args): Promise<number> {
   return 0;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function validateExportability(scenario: ScenarioJson): string[] {
   const problems: string[] = [];
   // Runs before schema validation (see call site), so `scenario.nodes` /
-  // `scenario.assertions` are not yet guaranteed to be arrays here.
-  const nodes = Array.isArray(scenario.nodes) ? scenario.nodes : [];
+  // `scenario.assertions` are not yet guaranteed to be arrays, and each of
+  // their elements is not yet guaranteed to be an object, at this point.
+  const rawNodes: unknown[] = Array.isArray(scenario.nodes)
+    ? scenario.nodes
+    : [];
+  const nodes: ScenarioNodeJson[] = [];
+  rawNodes.forEach((n, i) => {
+    if (!isPlainObject(n)) {
+      problems.push(`node at index ${i} is not an object`);
+      return;
+    }
+    nodes.push(n as unknown as ScenarioNodeJson);
+  });
   if (!nodes.some((n) => n.type === "start")) {
     problems.push("scenario has no start node");
   }
@@ -150,16 +166,20 @@ function validateExportability(scenario: ScenarioJson): string[] {
       problems.push(`unsupported node type "${node.type}" (node ${node.id})`);
     }
   }
-  const assertions = Array.isArray(scenario.assertions)
+  const rawAssertions: unknown[] = Array.isArray(scenario.assertions)
     ? scenario.assertions
     : [];
-  for (const spec of assertions) {
-    if (!SUPPORTED_ASSERTION_TYPES.has(spec.type)) {
+  rawAssertions.forEach((spec, i) => {
+    if (!isPlainObject(spec)) {
+      problems.push(`assertion at index ${i} is not an object`);
+      return;
+    }
+    if (!SUPPORTED_ASSERTION_TYPES.has(spec.type as string)) {
       problems.push(
         `unsupported assertion type "${spec.type}" (assertion ${spec.id})`,
       );
     }
-  }
+  });
   return problems;
 }
 

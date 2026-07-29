@@ -164,4 +164,34 @@ describe("runExportK6", () => {
     expect(stderr.join("")).toMatch(/--force/);
     expect(await runExportK6({ ...okArgs, force: true })).toBe(0);
   });
+
+  it("fails cleanly when --out points at an existing regular file", async () => {
+    const outFile = join(dir, "not-a-dir");
+    writeFileSync(outFile, "I am a file, not a directory");
+    const code = await runExportK6({
+      scenarioFile: writeScenario(VALID),
+      outDir: outFile,
+      ocppVersion: "1.6",
+      force: false,
+    });
+    expect(code).toBe(1);
+    expect(stderr.join("")).toContain(
+      `${outFile} exists and is not a directory`,
+    );
+  });
+
+  it("fails cleanly when nodes contains a null element", async () => {
+    const bad = {
+      ...VALID,
+      nodes: [...VALID.nodes, null],
+    };
+    const code = await runExportK6({
+      scenarioFile: writeScenario(bad),
+      outDir: join(dir, "out"),
+      ocppVersion: "1.6",
+      force: false,
+    });
+    expect(code).toBe(1);
+    expect(stderr.join("")).toMatch(/node at index 3 is not an object/);
+  });
 });

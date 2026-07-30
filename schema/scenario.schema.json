@@ -16,6 +16,10 @@
       "description": "Promote warning-severity assertion failures to run failures (default false). A per-run strict option overrides this."
     },
     "id": { "type": "string" },
+    "templateId": {
+      "type": "string",
+      "description": "The built-in template this scenario was instantiated from. Set automatically when a template is loaded; absent on hand-authored scenarios. The daemon uses it to replace an earlier instance of the same template on the same connector instead of accumulating one per boot."
+    },
     "name": { "type": "string" },
     "description": { "type": "string" },
     "targetType": { "type": "string", "enum": ["chargePoint", "connector"] },

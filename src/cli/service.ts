@@ -70,17 +70,7 @@ import {
   assertLoadableScenario,
   validateLoadableScenario,
 } from "../scenario/loadableScenario";
-
-/**
- * #179 Phase 3: `ScenarioRunResult.simulatorVersion`. The CLI/daemon runs
- * outside Vite (no `__APP_VERSION__` build-time define -- see
- * src/vite-env.d.ts, which only covers the browser bundle), and
- * package.json's own `version` field is unmaintained (pinned "0.0.0"), so
- * there's no existing source of truth to thread through. A literal here
- * matches package.json exactly and avoids adding new file-read plumbing
- * for a field no consumer currently depends on.
- */
-const SIMULATOR_VERSION = "0.0.0";
+import { appVersion } from "./appVersion";
 
 export type CLIEvent =
   | { readonly event: "connected"; readonly data: Record<string, never> }
@@ -836,7 +826,41 @@ export class CLIChargePointService {
         ...evSettingsOverride,
       };
     }
+    // Instantiating a template is idempotent per (template, connector): drop
+    // any earlier instance of THIS template on THIS connector first. Instance
+    // ids embed Date.now(), so without this every boot and every re-run added
+    // one more copy — the field report found three weeks-old Essential CP
+    // Behavior entries stacked on one connector with nothing cleaning them up.
+    this.removePriorTemplateInstances(templateId, connectorId);
     return this.loadScenario(connectorId, definition);
+  }
+
+  /**
+   * Remove scenarios on `connectorId` that are earlier instances of
+   * `templateId`, from memory and the DB both.
+   *
+   * Matches on the `templateId` field going forward. Instances persisted by
+   * builds before that field existed are matched on the exact id format
+   * `createScenario` produces, so an existing state.db self-cleans on the next
+   * boot. Deliberately NOT a bare `id.startsWith(templateId)`: that would also
+   * match a different template whose id happens to start with this one.
+   */
+  private removePriorTemplateInstances(
+    templateId: string,
+    connectorId: number,
+  ): void {
+    const legacyInstanceId = new RegExp(
+      `^${escapeRegExp(templateId)}-${escapeRegExp(this._chargePoint.id)}-c${connectorId}-\\d+-[0-9a-z]+$`,
+    );
+    for (const [scenarioId, entry] of [...this._scenarios]) {
+      if (entry.connectorId !== connectorId) continue;
+      const definitionTemplateId = entry.definition.templateId;
+      const matches =
+        definitionTemplateId !== undefined
+          ? definitionTemplateId === templateId
+          : legacyInstanceId.test(scenarioId);
+      if (matches) this.removeScenario(connectorId, scenarioId);
+    }
   }
 
   loadScenario(connectorId: number, definition: ScenarioDefinition): string {
@@ -1457,7 +1481,9 @@ export class CLIChargePointService {
       scenarioName: definition?.name,
       cpId: this._chargePoint.id,
       connectorId,
-      simulatorVersion: SIMULATOR_VERSION,
+      // #179 Phase 3: was a hard-coded "0.0.0", so a report from a GHCR
+      // release looked exactly like one off a dev checkout.
+      simulatorVersion: appVersion(),
       ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
       startedAt,
       endedAt,
@@ -2244,6 +2270,12 @@ export class CLIChargePointService {
       });
     });
   }
+}
+
+/** Escape a literal for embedding in a RegExp. Charge point ids and template
+ *  ids are operator-supplied strings that can contain `.`, `+`, `(`, … */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

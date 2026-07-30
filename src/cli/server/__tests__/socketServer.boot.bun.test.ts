@@ -26,7 +26,7 @@ describe("socket.io server boot", () => {
       const res = await fetch(`${server.url}/v1/healthz`);
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body).toEqual({ ok: true });
+      expect(body).toMatchObject({ ok: true });
       expect(Object.prototype.hasOwnProperty.call(body, "cps")).toBe(false);
     } finally {
       socket.disconnect();

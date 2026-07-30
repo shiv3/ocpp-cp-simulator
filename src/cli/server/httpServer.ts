@@ -16,6 +16,7 @@ import {
   normalizeSoapPath,
 } from "../soapPath";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "../../protocol/limits";
+import { appVersion } from "../appVersion";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -558,8 +559,11 @@ export function createHttpHandlers(deps: {
     const url = new URL(req.url);
 
     // GET <healthPath>  (default /v1/healthz; configurable via --health-path)
+    // `version` is additive: `ok` stays the field probes assert on. It makes
+    // the endpoint answer "which build is actually running here?" without
+    // needing an authenticated RPC round-trip.
     if (req.method === "GET" && url.pathname === healthPath) {
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, version: appVersion() });
     }
 
     const soapRoute = matchSoapChargePointService(url.pathname, deps.registry);

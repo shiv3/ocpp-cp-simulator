@@ -43,23 +43,24 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 ## Top-level fields
 
-| Field                   | Type                                                                            | Required | Notes                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.0"`. Absent on files predating issue #214 — still valid.                                                  |
-| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                        |
-| `name`                  | string                                                                          | Yes      |                                                                                                                    |
-| `description`           | string                                                                          | No       |                                                                                                                    |
-| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                    |
-| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                     |
-| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                    |
-| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                    |
-| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                          |
-| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                          |
-| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                |
-| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                   |
-| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`.                                |
-| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides. |
-| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                    |
+| Field                   | Type                                                                            | Required | Notes                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.0"`. Absent on files predating issue #214 — still valid.                                                                             |
+| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                   |
+| `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances). |
+| `name`                  | string                                                                          | Yes      |                                                                                                                                               |
+| `description`           | string                                                                          | No       |                                                                                                                                               |
+| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                                               |
+| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                                                |
+| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                                               |
+| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                                               |
+| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                                                     |
+| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                                                     |
+| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                                           |
+| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                                              |
+| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`.                                                           |
+| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides.                            |
+| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                                               |
 
 ## Node shape
 
@@ -222,8 +223,27 @@ The simulator itself calls this at every import point (browser upload,
 `run_scenario_file` Socket.IO methods) and only ever warns — see [Status &
 scope](#status--scope).
 
+## Template instances
+
+Loading a built-in template does not hand you the template file: it produces an
+_instance_ with its own `id`
+(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`) and a `templateId`
+field naming what it came from. Two loads of the same template are independent
+scenarios, so editing one never touches the other.
+
+On the **daemon**, instantiating a template is idempotent per
+(template, connector): the earlier instance of that template on that connector
+is replaced rather than added to. Without that, every pod restart and every
+`run_scenario_template` left one more copy behind in `--state-db` forever. A
+different template on the same connector, or the same template on another
+connector, is untouched. Instances persisted before `templateId` existed are
+recognised by their id format, so an existing state DB tidies itself on the
+next boot.
+
 ## Changelog
 
 - **v1.0**: Initial published schema (issue #214). Adds the optional
   `schemaVersion` field; documents the existing on-file shape used since the
-  scenario editor's introduction.
+  scenario editor's introduction. Later additive optional fields
+  (`strictCompatibility`, `templateId`) were folded into this version — every
+  one is optional, and consumers must ignore unknown fields.

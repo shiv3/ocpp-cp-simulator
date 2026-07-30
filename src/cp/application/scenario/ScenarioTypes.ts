@@ -607,6 +607,10 @@ export interface ScenarioExecutionContext {
   /** #179: stable identifier for this execution, set by the service layer so
    *  a poller can tie status to a specific run. */
   runId?: string;
+  /** #240: epoch ms when the current node began executing; null when no
+   *  node is active. Lets a client compute time-on-step and, with
+   *  expectation.timeoutMs, the remaining wait. */
+  currentNodeStartedAt?: number | null;
 }
 
 /**

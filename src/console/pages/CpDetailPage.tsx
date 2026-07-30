@@ -35,6 +35,7 @@ import StatusPill from "../components/StatusPill";
 import NetworkSimBadge from "../components/network-sim/NetworkSimBadge";
 import ManualDisconnectButtons from "../components/network-sim/ManualDisconnectButtons";
 import { consolePath } from "../routes";
+import ActiveScenarioPanel from "./cp/ActiveScenarioPanel";
 import ConnectorCard from "./cp/ConnectorCard";
 import ConfigTab from "./cp/ConfigTab";
 import CpTabs from "./cp/CpTabs";
@@ -398,6 +399,11 @@ const CpDetailPage: React.FC = () => {
           ))}
         </div>
       )}
+
+      <ActiveScenarioPanel
+        cpId={cpId}
+        connectorIds={connectorList.map((c) => c.id)}
+      />
 
       <CpTabs
         value={activeTab}

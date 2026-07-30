@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
@@ -6,8 +6,10 @@ import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 import { useChargePointView } from "../../../data/hooks/useChargePointView";
 import { useDataContext } from "../../../data/providers/DataProvider";
+import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import StatusPill from "../../components/StatusPill";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
+import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
 import { consolePath } from "../../routes";
 
 export interface CpCardProps {
@@ -52,6 +54,21 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
     (a, b) => a.id - b.id,
   );
 
+  const connectorIds = useMemo(
+    () => connectorList.map((c) => c.id),
+    [connectorList],
+  );
+  const { runs } = useActiveScenarioRuns(cp.id, connectorIds);
+
+  const firstWaitingExpectation = runs
+    .filter((r) => r.state === "waiting" && r.expectation)
+    .map(
+      (r) =>
+        r.expectation?.action ??
+        r.expectation?.targetStatus ??
+        r.expectation?.type,
+    )[0];
+
   const handleToggleConnect = async () => {
     setIsPending(true);
     try {
@@ -85,6 +102,10 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
         <div className="flex items-center gap-2">
           <StatusPill status={isConnected ? status : "Disconnected"} />
           <NetworkSimBadge summary={cp.networkSim} />
+          <ActiveScenarioBadge
+            isActive={runs.length > 0}
+            waitingExpectation={firstWaitingExpectation}
+          />
         </div>
       </div>
 

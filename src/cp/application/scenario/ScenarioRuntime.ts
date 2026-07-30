@@ -21,11 +21,24 @@ interface ScenarioRuntimeParams {
   hooks?: ScenarioRuntimeHooks;
 }
 
+/**
+ * Scenario log lines are prefixed with the bound connector so a CP running the
+ * same scenario on every connector stays readable. The executor's own prefix is
+ * the scenario NAME, and a template instantiated per connector shares it, so a
+ * disconnect used to emit N byte-identical "Scenario execution failed:
+ * Disconnected while waiting for remote start" lines with nothing to say which
+ * connector each came from.
+ *
+ * The prefix goes on before `hooks.log` too, so the CLI event stream and the
+ * web console see the same disambiguated text as the CP log.
+ */
 const buildLogger = (
   chargePoint: ChargePoint,
+  connector: Connector,
   hooks?: ScenarioRuntimeHooks,
 ): ScenarioExecutorCallbacks["log"] => {
-  return (message, level = "info") => {
+  return (rawMessage, level = "info") => {
+    const message = `[connector ${connector.id}] ${rawMessage}`;
     switch (level) {
       case "debug":
         chargePoint.logger.debug(message, LogType.SCENARIO);
@@ -608,7 +621,7 @@ export const createScenarioExecutorCallbacks = (
     onNodeExecute: hooks?.onNodeExecute,
     onNodeProgress: hooks?.onNodeProgress,
     onError: hooks?.onError,
-    log: buildLogger(chargePoint, hooks),
+    log: buildLogger(chargePoint, connector, hooks),
     // §4.9: connectorId === -1 sentinel means "use the scenario's bound
     // connector"; otherwise the node specified an explicit target (0 for
     // CP main controller, >0 for another connector).

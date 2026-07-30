@@ -14,6 +14,7 @@ import type {
   ParsedSoapEnvelope,
   SoapDialect,
   SoapOperation,
+  SoapOperationMetadata,
   SoapPayload,
 } from "../../../cp/infrastructure/transport/soap";
 import { CPRegistry } from "../CPRegistry";
@@ -933,6 +934,160 @@ describe("httpServer OCPP 1.6 SOAP ChargePointService", () => {
       expect(["Unlocked", "UnlockFailed", "NotSupported"]).not.toContain(
         status,
       );
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression corpus (issues #256, #257): every CS→CP operation each dialect
+// declares must actually be dispatched, not answered with a not-implemented
+// Fault. Driven off the dialects' own operationMetadata so the matrix can't
+// silently drift when a dialect gains/loses an operation. This is the
+// systematic form of the spot tests above — it would have caught "1.5 = 1/15"
+// across the whole surface, not just the two ops probed by hand.
+// ---------------------------------------------------------------------------
+
+const NOT_IMPLEMENTED_FAULT =
+  "is not implemented by the SOAP ChargePointService";
+
+/** Minimal payloads so a routed op runs its handler cleanly instead of a
+ *  payload-validation fault. Ops absent here send an empty body — the corpus
+ *  only asserts the route was reached (not the not-implemented Fault), which
+ *  is exactly how #257 measured coverage. */
+const MINIMAL_CS_TO_CP_PAYLOAD: Partial<Record<SoapOperation, SoapPayload>> = {
+  ChangeAvailability: { connectorId: 0, type: "Operative" },
+  ChangeConfiguration: { key: "HeartbeatInterval", value: "60" },
+  ClearCache: {},
+  GetConfiguration: {},
+  GetDiagnostics: { location: "ftp://example.test/diag" },
+  GetLocalListVersion: {},
+  RemoteStartTransaction: { idTag: "TAG" },
+  RemoteStopTransaction: { transactionId: 1 },
+  Reset: { type: "Hard" },
+  UnlockConnector: { connectorId: 1 },
+  UpdateFirmware: {
+    location: "ftp://example.test/fw",
+    retrieveDate: "2026-01-01T00:00:00Z",
+  },
+  CancelReservation: { reservationId: 1 },
+  ReserveNow: {
+    connectorId: 1,
+    expiryDate: "2026-01-01T00:00:00Z",
+    idTag: "TAG",
+    reservationId: 1,
+  },
+  SendLocalList: { listVersion: 1, updateType: "Full" },
+  TriggerMessage: { requestedMessage: "StatusNotification" },
+  ClearChargingProfile: {},
+  GetCompositeSchedule: { connectorId: 1, duration: 60 },
+  SetChargingProfile: { connectorId: 1 },
+  DataTransfer: { vendorId: "V", messageId: "m", data: "d" },
+};
+
+const DISPATCH_COVERAGE_DIALECTS = [
+  { name: "1.2", version: "OCPP-1.2", dialect: OCPP12_DIALECT },
+  { name: "1.5", version: "OCPP-1.5", dialect: OCPP15_DIALECT },
+  { name: "1.6S", version: "OCPP-1.6S", dialect: OCPP16_DIALECT },
+] as const;
+
+for (const { name, version, dialect } of DISPATCH_COVERAGE_DIALECTS) {
+  const csToCpOps = (
+    Object.entries(dialect.operationMetadata) as [
+      SoapOperation,
+      SoapOperationMetadata,
+    ][]
+  )
+    .filter(([, meta]) => meta.target === "cp" || meta.bidirectional)
+    .map(([op]) => op);
+
+  describe(`httpServer SOAP CS→CP dispatch corpus — OCPP ${name} (${csToCpOps.length} ops, #257)`, () => {
+    for (const op of csToCpOps) {
+      it(`dispatches ${op} (not the not-implemented Fault)`, async () => {
+        await withGlobalFetch(async () => {
+          const registry = createRegistry();
+          const handlers = createHandlers(registry);
+          // A fake CSMS absorbs any CP→CS callback an op triggers
+          // (TriggerMessage, RemoteStart, Reset reboot, …).
+          const restoreFetch = installFakeCentralSystemFetch([], dialect);
+          const id = `CP-${name}-${op}`;
+          registry.create(
+            { ...soapCpInit(id), ocppVersion: version },
+            { seedDefault: false },
+          );
+
+          try {
+            const meta = dialect.operationMetadata[op];
+            const res = await postSoap(
+              handlers,
+              `/ocpp/soap/${id}/ChargePointService`,
+              buildSoapEnvelope({
+                operation: op,
+                chargeBoxIdentity: id,
+                messageId: `uuid:${name}-${op}`,
+                from: centralSystemUrl,
+                to: `http://127.0.0.1:9700/ocpp/soap/${id}/ChargePointService`,
+                payload: MINIMAL_CS_TO_CP_PAYLOAD[op] ?? {},
+                dialect,
+                ...(meta.bidirectional ? { service: "cp" as const } : {}),
+              }),
+            );
+            const body = await res.text();
+            expect(
+              body.includes(NOT_IMPLEMENTED_FAULT),
+              `OCPP ${name} ${op} should be routed, got: ${body.slice(0, 200)}`,
+            ).toBe(false);
+          } finally {
+            registry.shutdownAll();
+            restoreFetch();
+          }
+        });
+      });
+    }
+  });
+}
+
+describe("httpServer SOAP no-From leniency reaches dispatched ops too (#256)", () => {
+  // The other no-From test covers Reset (the legacy-registry path). This one
+  // proves From-less requests also flow through the v16 dispatch path.
+  it("dispatches a 1.6S GetConfiguration with no From/ReplyTo header", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    const id = "CP16-NOFROM";
+    registry.create(
+      { ...soapCpInit(id), ocppVersion: "OCPP-1.6S" },
+      { seedDefault: false },
+    );
+
+    try {
+      const ns = OCPP16_SOAP_NAMESPACES.CP;
+      const envelope = [
+        '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">',
+        "<soap:Header>",
+        '<Action xmlns="http://www.w3.org/2005/08/addressing">/GetConfiguration</Action>',
+        '<MessageID xmlns="http://www.w3.org/2005/08/addressing">uuid:getcfg-nofrom</MessageID>',
+        `<To xmlns="http://www.w3.org/2005/08/addressing">http://127.0.0.1:9700/ocpp/soap/${id}/ChargePointService</To>`,
+        `<chargeBoxIdentity xmlns="${ns}">${id}</chargeBoxIdentity>`,
+        "</soap:Header>",
+        `<soap:Body><getConfigurationRequest xmlns="${ns}"/></soap:Body>`,
+        "</soap:Envelope>",
+      ].join("");
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${id}/ChargePointService`,
+        envelope,
+      );
+      const body = await res.text();
+
+      expect(res.status).toBe(200);
+      expect(body).not.toContain("<s:Fault>");
+      const parsed = parseSoapEnvelope(body, OCPP16_DIALECT);
+      expect(parsed).toMatchObject({
+        operation: "GetConfiguration",
+        kind: "response",
+        relatesTo: "uuid:getcfg-nofrom",
+      });
     } finally {
       registry.shutdownAll();
     }

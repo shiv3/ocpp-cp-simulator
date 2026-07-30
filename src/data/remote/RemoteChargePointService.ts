@@ -1146,7 +1146,11 @@ export class RemoteChargePointService implements ChargePointService {
   ): Promise<{ scenarioId: string }> {
     const data = await this.runCpRpc(id, "load_scenario", {
       connector: connectorId,
-      scenario: definition as unknown as Record<string, unknown>,
+      // ScenarioDefinition structurally satisfies the method's required fields
+      // (id / name / targetType / nodes / edges); the cast is only needed
+      // because an interface has no index signature to match the bounded
+      // record half of the param type.
+      scenario: definition as unknown as Params<"load_scenario">["scenario"],
     });
     return (data as { scenarioId: string }) ?? { scenarioId: "" };
   }

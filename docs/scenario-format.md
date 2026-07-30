@@ -108,6 +108,24 @@ shape depends on `type`).
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
 `Reserved`, `Unavailable`, `Faulted`.
 
+### `start` notes: `triggerOn: "connect"` fires on _every_ connect
+
+A manual-trigger scenario whose start node uses `triggerOn: "connect"` (the
+default) auto-starts once the charge point reaches `Available` after
+BootNotification is accepted. It is armed **per connection**: losing the
+WebSocket disarms it, so the scenario starts again on the next connect — even
+if the previous run had already finished.
+
+This matters for a long-lived simulator whose scenario answers CSMS-initiated
+calls (a `remoteStartTrigger` responder, say). The run dies with
+`Disconnected while waiting for remote start` when the socket drops, and
+re-arming is what makes the simulator answer again after it reconnects rather
+than going quietly unresponsive.
+
+If a scenario must run only once per process, drive it with an explicit
+`run_scenario` instead of `triggerOn: "connect"`. A status oscillation on a
+still-connected charge point does **not** re-fire the scenario.
+
 ### `responseOverride` notes
 
 Which `status` values are valid depends on `action` (e.g. `action:

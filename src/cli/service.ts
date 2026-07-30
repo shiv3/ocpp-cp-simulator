@@ -1621,6 +1621,18 @@ export class CLIChargePointService {
     this._unsubscribes.push(
       this._chargePoint.events.on("disconnected", ({ code, reason }) => {
         this.emit({ event: "disconnected", data: { code, reason } });
+        // ChargePoint.teardownAfterClose (which has already run by the time
+        // this fires) clears every connector's lastAutoStartedScenarioKey so a
+        // `triggerOn: "connect"` scenario re-arms on the next connect. Getting
+        // that into the DB normally rides on the connector statusChange that
+        // teardown's Unavailable cascade emits — but the cascade deliberately
+        // SKIPS a connector mid-transaction, so precisely the connectors that
+        // were charging when the socket dropped never persisted the clear, and
+        // a restart rehydrated the stale arm. Snapshot every connector here
+        // instead of relying on which ones happened to emit.
+        for (const [connectorId, connector] of this._chargePoint.connectors) {
+          this.persistConnectorRuntime(connector, connectorId);
+        }
       }),
     );
 

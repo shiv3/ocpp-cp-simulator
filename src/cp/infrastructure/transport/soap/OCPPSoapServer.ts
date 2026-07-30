@@ -17,7 +17,11 @@ import {
 } from "./soapEnvelope";
 import type { SoapDialect } from "./dialect";
 import { OCPP15_DIALECT } from "./dialect";
-import { OCPP_1_6_SOAP, OCPP_1_2 } from "../../../domain/types/OcppVersion";
+import {
+  OCPP_1_6_SOAP,
+  OCPP_1_5,
+  OCPP_1_2,
+} from "../../../domain/types/OcppVersion";
 import {
   dispatchSoapCallViaV16Registry,
   transformResponseForOcpp12,
@@ -90,7 +94,8 @@ export class OCPPSoapServer {
 
       // Dispatch order:
       // (1) Legacy inbound registry (Reset) — unchanged for all dialects
-      // (2) If 1.6S or 1.2 with v16 registry support — dispatch CS→CP through handlers
+      // (2) 1.2 / 1.5 / 1.6S with v16 registry support — dispatch CS→CP
+      //     through the shared handlers (filtered by each dialect's metadata)
       // (3) Else not-implemented Fault
 
       let responsePayload: SoapPayload;
@@ -99,7 +104,15 @@ export class OCPPSoapServer {
       const operationMetadata =
         this.dialect.operationMetadata[envelope.operation];
       const isV16Supported = this.dialect.version === OCPP_1_6_SOAP;
+      const isV15Supported = this.dialect.version === OCPP_1_5;
       const isV12Supported = this.dialect.version === OCPP_1_2;
+
+      // A bidirectional op (DataTransfer) arriving at the ChargePointService is
+      // a CS→CP call, so it is dispatchable here even though its metadata
+      // target is "cs" (issue #257).
+      const isDispatchable =
+        !!operationMetadata &&
+        (operationMetadata.target === "cp" || operationMetadata.bidirectional);
 
       // First try legacy registry (Reset for all dialects)
       const legacyHandler = this.registry.get(envelope.operation);
@@ -111,13 +124,13 @@ export class OCPPSoapServer {
         responsePayload = result.payload;
         afterResponse = result.afterResponse;
       } else if (
-        (isV16Supported || isV12Supported) &&
-        operationMetadata &&
-        operationMetadata.target === "cp" &&
+        (isV16Supported || isV15Supported || isV12Supported) &&
+        isDispatchable &&
         this.target.chargePoint &&
         this.target.logger
       ) {
-        // Dispatch through v16 registry for full 1.6S or filtered 1.2
+        // Dispatch through the shared v16 registry. 1.2 narrows a few enum
+        // tokens afterwards; 1.5 shares 1.6's enums so needs no transform.
         try {
           responsePayload = await dispatchSoapCallViaV16Registry({
             operation: envelope.operation,
@@ -156,6 +169,10 @@ export class OCPPSoapServer {
         relatesTo: envelope.messageId,
         payload: responsePayload,
         dialect: this.dialect,
+        // A bidirectional op answered here is a CS→CP call, so its response
+        // serializes in the ChargePointService (CP) namespace, not the CS one
+        // that metadata.target would otherwise select.
+        service: operationMetadata?.bidirectional ? "cp" : undefined,
       });
       afterResponse?.();
       return new Response(responseXml, {

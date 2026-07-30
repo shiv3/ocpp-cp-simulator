@@ -4,6 +4,8 @@ import {
   buildSoapEnvelope,
   OCPP12_DIALECT,
   OCPP12_SOAP_NAMESPACES,
+  OCPP15_DIALECT,
+  OCPP15_SOAP_NAMESPACES,
   OCPP16_DIALECT,
   OCPP16_SOAP_NAMESPACES,
   parseSoapEnvelope,
@@ -414,6 +416,28 @@ function resetEnvelope(
   });
 }
 
+/** A 1.5 Reset request envelope with NO wsa:From and NO wsa:ReplyTo — the
+ *  shape Apache CXF / SteVe put on the wire (issue #256). Hand-built because
+ *  buildSoapEnvelope always emits From. */
+function noFromResetEnvelope(
+  chargeBoxIdentity: string,
+  messageId: string,
+  to: string,
+): string {
+  const ns = OCPP15_SOAP_NAMESPACES.CP;
+  return [
+    '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">',
+    "<soap:Header>",
+    '<Action xmlns="http://www.w3.org/2005/08/addressing">/Reset</Action>',
+    `<MessageID xmlns="http://www.w3.org/2005/08/addressing">${messageId}</MessageID>`,
+    `<To xmlns="http://www.w3.org/2005/08/addressing">${to}</To>`,
+    `<chargeBoxIdentity xmlns="${ns}">${chargeBoxIdentity}</chargeBoxIdentity>`,
+    "</soap:Header>",
+    `<soap:Body><resetRequest xmlns="${ns}"><type>Hard</type></resetRequest></soap:Body>`,
+    "</soap:Envelope>",
+  ].join("");
+}
+
 function installFakeCentralSystemFetch(
   received: ParsedSoapEnvelope[],
   dialect?: SoapDialect,
@@ -516,6 +540,169 @@ describe("httpServer OCPP 1.6-SOAP + 1.2 CS→CP dispatch (v16 registry)", () =>
         kind: "response",
         relatesTo: "uuid:ca-12-1",
         chargeBoxIdentity: cp12Id,
+        payload: { status: "Accepted" },
+      });
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+describe("httpServer OCPP 1.5 CS→CP dispatch (issue #257)", () => {
+  const cp15Id = "CP15";
+
+  // Before #257 a 1.5 CP dispatched only Reset (the legacy registry); every
+  // other CS→CP op fell through to a not-implemented Fault. It now reaches the
+  // shared v16 registry like 1.2/1.6, answering in the 1.5 CP namespace.
+  it("accepts GetConfiguration for a 1.5 CP and answers in the 1.5 namespace", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    registry.create(
+      { ...soapCpInit(cp15Id), ocppVersion: "OCPP-1.5" },
+      { seedDefault: false },
+    );
+
+    try {
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${cp15Id}/ChargePointService`,
+        buildSoapEnvelope({
+          operation: "GetConfiguration",
+          chargeBoxIdentity: cp15Id,
+          messageId: "uuid:getcfg-15-1",
+          from: centralSystemUrl,
+          to: `http://127.0.0.1:9700/ocpp/soap/${cp15Id}/ChargePointService`,
+          payload: {},
+          dialect: OCPP15_DIALECT,
+        }),
+      );
+      const body = await res.text();
+
+      expect(res.status).toBe(200);
+      expect(body).toContain(OCPP15_SOAP_NAMESPACES.CP);
+      const parsed = parseSoapEnvelope(body, OCPP15_DIALECT);
+      expect(parsed).toMatchObject({
+        operation: "GetConfiguration",
+        kind: "response",
+        relatesTo: "uuid:getcfg-15-1",
+        chargeBoxIdentity: cp15Id,
+        namespace: OCPP15_SOAP_NAMESPACES.CP,
+      });
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
+  it("accepts ChangeAvailability for a 1.5 CP", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    registry.create(
+      { ...soapCpInit(cp15Id), ocppVersion: "OCPP-1.5" },
+      { seedDefault: false },
+    );
+
+    try {
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${cp15Id}/ChargePointService`,
+        buildSoapEnvelope({
+          operation: "ChangeAvailability",
+          chargeBoxIdentity: cp15Id,
+          messageId: "uuid:ca-15-1",
+          from: centralSystemUrl,
+          to: `http://127.0.0.1:9700/ocpp/soap/${cp15Id}/ChargePointService`,
+          payload: { connectorId: "1", type: "Operative" },
+          dialect: OCPP15_DIALECT,
+        }),
+      );
+      const parsed = parseSoapEnvelope(await res.text(), OCPP15_DIALECT);
+
+      expect(res.status).toBe(200);
+      expect(parsed).toMatchObject({
+        operation: "ChangeAvailability",
+        kind: "response",
+        relatesTo: "uuid:ca-15-1",
+        payload: { status: "Accepted" },
+      });
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+describe("httpServer SOAP DataTransfer CS→CP (issue #257)", () => {
+  // DataTransfer's metadata target is "cs" (bidirectional), so it used to be
+  // rejected as not-implemented even though its handler exists. It now
+  // dispatches, and its response serializes in the CP-service namespace.
+  it("accepts DataTransfer from the CSMS on a 1.6S CP", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    const dtId = "CP16-DT";
+    registry.create(
+      { ...soapCpInit(dtId), ocppVersion: "OCPP-1.6S" },
+      { seedDefault: false },
+    );
+
+    try {
+      const res = await postSoap(
+        handlers,
+        `/ocpp/soap/${dtId}/ChargePointService`,
+        buildSoapEnvelope({
+          operation: "DataTransfer",
+          chargeBoxIdentity: dtId,
+          messageId: "uuid:dt-1",
+          from: centralSystemUrl,
+          to: `http://127.0.0.1:9700/ocpp/soap/${dtId}/ChargePointService`,
+          payload: { vendorId: "TestVendor", messageId: "ping", data: "x" },
+          dialect: OCPP16_DIALECT,
+          service: "cp",
+        }),
+      );
+      const body = await res.text();
+
+      expect(res.status).toBe(200);
+      expect(body).toContain(OCPP16_SOAP_NAMESPACES.CP);
+      const parsed = parseSoapEnvelope(body, OCPP16_DIALECT);
+      expect(parsed).toMatchObject({
+        operation: "DataTransfer",
+        kind: "response",
+        relatesTo: "uuid:dt-1",
+        chargeBoxIdentity: dtId,
+      });
+      expect(parsed.payload).toHaveProperty("status");
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+describe("httpServer SOAP accepts CS→CP without wsa:From / ReplyTo (issue #256)", () => {
+  // Apache CXF (and therefore SteVe) omit wsa:From and wsa:ReplyTo on CS→CP
+  // calls. The server used to Fault with "missing From"; it now accepts them.
+  it("dispatches a Reset whose envelope carries no From or ReplyTo header", async () => {
+    const registry = createRegistry();
+    const handlers = createHandlers(registry);
+    registry.create(soapCpInit(cpId), { seedDefault: false });
+
+    try {
+      const res = await postSoap(
+        handlers,
+        "/ocpp/soap/CP/ChargePointService",
+        noFromResetEnvelope(
+          "CP",
+          "uuid:reset-nofrom",
+          "http://127.0.0.1:9700/ocpp/soap/CP/ChargePointService",
+        ),
+      );
+      const body = await res.text();
+
+      expect(res.status).toBe(200);
+      expect(body).not.toContain("<s:Fault>");
+      const parsed = parseSoapEnvelope(body, OCPP15_DIALECT);
+      expect(parsed).toMatchObject({
+        operation: "Reset",
+        kind: "response",
+        relatesTo: "uuid:reset-nofrom",
         payload: { status: "Accepted" },
       });
     } finally {

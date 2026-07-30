@@ -4,6 +4,8 @@ import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
+  ScenarioExecutionMode,
+  ScenarioExecutionState,
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
@@ -207,6 +209,18 @@ export interface ScenarioListItem {
   scenarioId: string;
   name: string;
   active: boolean;
+  /**
+   * Execution state, from the same source as `scenario_status`. Null for a
+   * scenario that has never run.
+   *
+   * The daemon also reports the TERMINAL state of a finished run here (that is
+   * what makes a listing useful for "which of these have run, and how did they
+   * end?"). Local/browser mode only tracks live executors, so it reports a
+   * state while a run is in flight and null once it ends.
+   */
+  state?: ScenarioExecutionState | null;
+  /** Execution mode of the run `state` describes; null when there is none. */
+  mode?: ScenarioExecutionMode | null;
 }
 
 /** Shape of one persisted log row as returned by `listStoredLogs` and

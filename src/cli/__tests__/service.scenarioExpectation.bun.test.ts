@@ -106,7 +106,7 @@ describe("#179 Phase 1: scenario expectation + runId", () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
-  it("clears the expectation and reports null status after the run is stopped", async () => {
+  it("clears the expectation and reports a terminal status after the run is stopped", async () => {
     const svc = newService();
     const id = svc.loadScenario(1, parkingScenario(1));
     svc.runScenario(1, id);
@@ -117,7 +117,17 @@ describe("#179 Phase 1: scenario expectation + runId", () => {
     svc.stopScenario(1, id);
     await new Promise((r) => setTimeout(r, 50));
 
-    // Executor removed → status is null (no stale waiting/expectation).
+    // The executor is gone, but status must not disappear with it: a poller
+    // waiting for the run to end has to be able to observe that it did. What
+    // must NOT survive is the stale "waiting" state and its expectation.
+    const status = svc.getScenarioStatus(1, id);
+    expect(status).not.toBeNull();
+    expect(status!.state).not.toBe("waiting");
+    expect(status!.expectation ?? null).toBeNull();
+    expect(status!.runId).toBeTruthy();
+
+    // Removing the scenario is what finally clears it.
+    expect(svc.removeScenario(1, id)).toBe(true);
     expect(svc.getScenarioStatus(1, id)).toBeNull();
   });
 });

@@ -688,11 +688,19 @@ export class LocalChargePointService implements ChargePointService {
     const manager = connector.scenarioManager;
     if (!manager) return [];
     const active = new Set(manager.getActiveScenarioIds());
-    return manager.getScenarios().map((s) => ({
-      scenarioId: s.id,
-      name: s.name,
-      active: active.has(s.id),
-    }));
+    return manager.getScenarios().map((s) => {
+      // Live executors only: unlike the daemon, the browser-side manager keeps
+      // no terminal context once a run ends, so `state`/`mode` go back to null
+      // rather than reporting how the last run finished.
+      const context = manager.getScenarioExecutionContext(s.id);
+      return {
+        scenarioId: s.id,
+        name: s.name,
+        active: active.has(s.id),
+        state: context?.state ?? null,
+        mode: context?.mode ?? null,
+      };
+    });
   }
 
   async runScenario(

@@ -33,6 +33,31 @@ const ANY = z.unknown();
 const OBJ = () => boundedObject(OBJ_MAX_BYTES);
 /** A bounded scenario-definition object param: ≤ 256 KB. */
 const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
+/**
+ * A scenario definition that is actually loadable: bounded, plus the fields the
+ * runtime keys on. `load_scenario` used to take a free-form bounded object, so a
+ * payload with no `id` was accepted and stored under the key `undefined` —
+ * reported back as `{}` instead of `{ scenarioId }`, and left in
+ * `list_scenarios` as an entry that could be neither run nor removed.
+ *
+ * Failing here is what turns that into a proper `invalid_params` for both
+ * Socket.IO and MCP (see dispatchRpc's params.safeParse). An intersection keeps
+ * the byte bound and stays permissive about unknown keys — real editor exports
+ * carry xyflow UI fields. `CLIChargePointService.loadScenario` re-checks the
+ * same invariants for the paths that never see this schema (`file`, the startup
+ * loaders). Full schema conformance remains advisory (issue #214).
+ */
+const LOADABLE_SCENARIO_OBJ = () =>
+  z.intersection(
+    SCENARIO_OBJ(),
+    z.object({
+      id: STR_64K.min(1),
+      name: STR_64K,
+      targetType: z.enum(["chargePoint", "connector"]),
+      nodes: z.array(z.unknown()),
+      edges: z.array(z.unknown()),
+    }),
+  );
 
 const cpParamsBaseSchema = z.object({
   cpId: STR_64K,
@@ -204,7 +229,7 @@ export const METHODS = {
     params: z.object({
       connector: CONN_POS,
       file: STR_64K.optional(),
-      scenario: SCENARIO_OBJ().optional(),
+      scenario: LOADABLE_SCENARIO_OBJ().optional(),
     }),
     result: ANY,
   },
@@ -307,10 +332,16 @@ export const METHODS = {
   "cp.create": { params: createParamsSchema, result: ANY },
   "cp.update": { params: updateParamsSchema, result: ANY },
   "cp.delete": { params: z.object({ cpId: STR_64K }), result: ANY },
+  // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
+  // be the oldest, which made the parameter useless on a charge point that had
+  // been up for days. `offset` pages backwards from the newest; `order`
+  // controls the direction of the returned window ("asc" = oldest first).
   "logs.get": {
     params: z.object({
       cpId: STR_64K,
       limit: z.number().int().positive().optional(),
+      offset: z.number().int().min(0).optional(),
+      order: z.enum(["asc", "desc"]).optional(),
     }),
     result: ANY,
   },

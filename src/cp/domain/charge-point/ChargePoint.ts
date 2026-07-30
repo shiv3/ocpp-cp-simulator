@@ -1255,6 +1255,25 @@ export class ChargePoint {
    * a dead socket.
    */
   private teardownAfterClose(): void {
+    // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
+    // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
+    // restart something already running. That arm must not survive the socket
+    // dying: both auto-start engines (CLIChargePointService.
+    // tryAutoStartForConnector for the daemon, the useEffect in
+    // src/components/Connector.tsx for browser local mode) gate on the key, so
+    // a stale arm means the scenario never re-fires after a reconnect. In the
+    // daemon that silently kills a CLI-bootstrapped RemoteStart responder --
+    // the CP reconnects and boots, but nothing answers RemoteStartTransaction
+    // until an operator re-fires the template by hand.
+    //
+    // Cleared BEFORE the `status` assignment below: that setter cascades
+    // Unavailable onto every connector, whose statusChange event is what
+    // drives persistConnectorRuntime. Clearing afterwards would persist the
+    // stale key into `connector_runtime.last_auto_started_scenario_key` and
+    // outlive a process restart too.
+    this._connectors.forEach((connector) => {
+      connector.lastAutoStartedScenarioKey = null;
+    });
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._connectors.forEach((connector) => connector.cleanup());

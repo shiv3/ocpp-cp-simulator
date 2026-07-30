@@ -31,6 +31,8 @@ import { EventEmitter } from "../cp/shared/EventEmitter";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
+  ScenarioExecutionMode,
+  ScenarioExecutionState,
   ScenarioMode,
   StartNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
@@ -64,6 +66,10 @@ import {
   type ScenarioStateSnapshot,
 } from "../cp/application/verification/ScenarioAssertions";
 import { redactSensitiveText } from "../cp/shared/redaction";
+import {
+  assertLoadableScenario,
+  validateLoadableScenario,
+} from "../scenario/loadableScenario";
 import { appVersion } from "./appVersion";
 
 export type CLIEvent =
@@ -284,6 +290,23 @@ export class CLIChargePointService {
   // Latest runId recorded per scenarioId, so getScenarioRunResult can
   // resolve "the latest run" without scanning _runResults.
   private readonly _latestRunIdByScenario: Map<string, string> = new Map();
+  /**
+   * Terminal execution context of the last finished run, per scenarioId.
+   *
+   * `getScenarioStatus` used to read only `_executors`, which runScenario's
+   * finally() deletes from — so status went null the instant a run ended. A
+   * client polling for `state === "completed"` never succeeded, and could not
+   * distinguish "unknown scenarioId" (still null) from "already finished",
+   * even though the run was sitting in `_runResults` the whole time.
+   *
+   * Entries live until the scenario is removed or its run discarded, and are
+   * overwritten by the next run. Bounded by the number of loaded scenarios, so
+   * unlike `_runResults` this needs no eviction cap.
+   */
+  private readonly _lastRunStatusByScenario: Map<
+    string,
+    ScenarioExecutionContext
+  > = new Map();
   private readonly _scenarioRepo: SqliteScenarioRepository;
   private readonly _runtimeRepo: ConnectorRuntimeRepository;
   /**
@@ -841,6 +864,13 @@ export class CLIChargePointService {
   }
 
   loadScenario(connectorId: number, definition: ScenarioDefinition): string {
+    // Hard gate on the fields the runtime map and every scenario RPC key on.
+    // Without it a definition with no `id` was stored under the key
+    // `undefined`, returned as `{}` instead of `{ scenarioId }`, and left an
+    // entry in list_scenarios that could be neither run nor removed. Full
+    // schema conformance stays advisory (issue #214) -- only this minimal set
+    // is a gate.
+    assertLoadableScenario(definition);
     const connector = this._chargePoint.connectors.get(connectorId);
     if (!connector) {
       throw new Error(`Connector ${connectorId} not found`);
@@ -936,6 +966,12 @@ export class CLIChargePointService {
    * definition replaced). A no-op when nothing is running for the id.
    */
   private discardScenarioRun(scenarioId: string): void {
+    // The run is being thrown away, so its terminal status must go too --
+    // otherwise scenario_status would keep reporting a "completed" run for a
+    // scenario whose definition was replaced underneath it. Done outside the
+    // executor guard: a scenario can have a recorded terminal status with no
+    // live executor, which is the whole point of that map.
+    this._lastRunStatusByScenario.delete(scenarioId);
     const executor = this._executors.get(scenarioId);
     if (!executor) return;
     executor.stop();
@@ -982,7 +1018,19 @@ export class CLIChargePointService {
       if (!keepIds.has(scenarioId)) this._scenarios.delete(scenarioId);
     }
     // Load the provided definitions into runtime (already persisted upstream).
+    // Definitions arriving here were persisted by the console-upload path,
+    // which does not go through loadScenario's gate — so skip anything that
+    // would land in the runtime map unaddressable (no usable `id`, no nodes
+    // array). Skipped rather than thrown: this reconciles a whole set that is
+    // already the DB's truth, and one bad entry must not fail the others.
     for (const def of definitions) {
+      const check = validateLoadableScenario(def);
+      if (!check.valid) {
+        process.stderr.write(
+          `[CLI] syncConnectorRuntimeScenarios: skipping unloadable definition on connector ${connectorId}: ${check.errors.join("; ")}\n`,
+        );
+        continue;
+      }
       this._scenarios.set(def.id, { definition: def, connectorId });
     }
     // The replaced set may drop whatever auto-started last, so clear the dedup
@@ -996,22 +1044,38 @@ export class CLIChargePointService {
     }
   }
 
+  /**
+   * Every scenario loaded on `connectorId`.
+   *
+   * `state` and `mode` come from the same source as `scenario_status` — the
+   * live executor while a run is in flight, otherwise the last finished run —
+   * so a caller can see at a glance which scenarios have run and how they
+   * ended, without a status round-trip per id. Both are null for a scenario
+   * that has never run.
+   */
   listScenarios(connectorId: number): ReadonlyArray<{
     readonly scenarioId: string;
     readonly name: string;
     readonly active: boolean;
+    readonly state: ScenarioExecutionState | null;
+    readonly mode: ScenarioExecutionMode | null;
   }> {
     const result: Array<{
       readonly scenarioId: string;
       readonly name: string;
       readonly active: boolean;
+      readonly state: ScenarioExecutionState | null;
+      readonly mode: ScenarioExecutionMode | null;
     }> = [];
     for (const [scenarioId, entry] of this._scenarios) {
       if (entry.connectorId === connectorId) {
+        const status = this.getScenarioStatus(connectorId, scenarioId);
         result.push({
           scenarioId,
           name: entry.definition.name,
           active: this._executors.has(scenarioId),
+          state: status?.state ?? null,
+          mode: status?.mode ?? null,
         });
       }
     }
@@ -1178,6 +1242,16 @@ export class CLIChargePointService {
     });
 
     executor.start(resumeOpts).finally(() => {
+      // Freeze the terminal status BEFORE dropping the executor, so
+      // scenario_status keeps answering once this map entry is gone. A manual
+      // stop takes the same snapshot in stopScenario, ahead of executor.stop().
+      this.recordTerminalScenarioStatus(
+        scenarioId,
+        runId,
+        hadError ? "error" : "completed",
+        executor.getContext(),
+        errorMessages,
+      );
       this._executors.delete(scenarioId);
       this._executorConnectorIds.delete(scenarioId);
       this._runIdByScenario.delete(scenarioId);
@@ -1250,17 +1324,52 @@ export class CLIChargePointService {
     return entry.definition;
   }
 
+  /**
+   * Live status while a run is in flight, otherwise the terminal status of the
+   * last finished run — so a poller waiting for `state === "completed"` can
+   * actually observe it. Still null for a scenarioId with no run on record,
+   * which is what lets a caller tell "unknown scenario" from "already
+   * finished".
+   */
   getScenarioStatus(
     _connectorId: number,
     scenarioId: string,
   ): ScenarioExecutionContext | null {
     const executor = this._executors.get(scenarioId);
     if (!executor) {
-      return null;
+      return this._lastRunStatusByScenario.get(scenarioId) ?? null;
     }
     // #179: echo the run id so a poller can tie this status to a specific run.
     const runId = this._runIdByScenario.get(scenarioId);
     return { ...executor.getContext(), runId };
+  }
+
+  /**
+   * Freeze a finished run's context so `getScenarioStatus` keeps answering
+   * after the executor is gone.
+   *
+   * `state` is taken from the run's `executionState` rather than whatever the
+   * executor's machine settled on, so status and `scenario_report` can never
+   * disagree about whether a run passed — a manual stop reports "completed"
+   * on both surfaces, exactly as finalizeScenarioRun records it.
+   */
+  private recordTerminalScenarioStatus(
+    scenarioId: string,
+    runId: string,
+    executionState: "completed" | "error",
+    context: ScenarioExecutionContext,
+    errors: ReadonlyArray<string>,
+  ): void {
+    this._lastRunStatusByScenario.set(scenarioId, {
+      ...context,
+      scenarioId,
+      state: executionState === "error" ? "error" : "completed",
+      // The run is over: nothing is parked and no node is mid-execution.
+      expectation: null,
+      currentNodeStartedAt: null,
+      ...(errors.length > 0 ? { error: errors[0] } : {}),
+      runId,
+    });
   }
 
   /**
@@ -1434,6 +1543,17 @@ export class CLIChargePointService {
             expectation: ctxBeforeStop.expectation,
           }
         : null;
+    // Same terminal-status freeze as runScenario's finally(), taken from the
+    // pre-stop context so currentNodeId/executedNodes describe where the run
+    // actually was. finalizeScenarioRun below records this stop as "completed";
+    // keep the two surfaces in step.
+    this.recordTerminalScenarioStatus(
+      scenarioId,
+      runId,
+      "completed",
+      ctxBeforeStop,
+      [],
+    );
     executor.stop();
     this._executors.delete(scenarioId);
     this._runIdByScenario.delete(scenarioId);
@@ -1574,6 +1694,8 @@ export class CLIChargePointService {
     }
     this._transcriptByScenario.clear();
     this._runStartByScenario.clear();
+    // The scenario map is gone, so no id can be asked about any more.
+    this._lastRunStatusByScenario.clear();
     // Permanent deletion uses dispose() to cancel controller timers;
     // non-permanent (update, shutdown) uses disconnect().
     if (permanent) {
@@ -1647,6 +1769,18 @@ export class CLIChargePointService {
     this._unsubscribes.push(
       this._chargePoint.events.on("disconnected", ({ code, reason }) => {
         this.emit({ event: "disconnected", data: { code, reason } });
+        // ChargePoint.teardownAfterClose (which has already run by the time
+        // this fires) clears every connector's lastAutoStartedScenarioKey so a
+        // `triggerOn: "connect"` scenario re-arms on the next connect. Getting
+        // that into the DB normally rides on the connector statusChange that
+        // teardown's Unavailable cascade emits — but the cascade deliberately
+        // SKIPS a connector mid-transaction, so precisely the connectors that
+        // were charging when the socket dropped never persisted the clear, and
+        // a restart rehydrated the stale arm. Snapshot every connector here
+        // instead of relying on which ones happened to emit.
+        for (const [connectorId, connector] of this._chargePoint.connectors) {
+          this.persistConnectorRuntime(connector, connectorId);
+        }
       }),
     );
 

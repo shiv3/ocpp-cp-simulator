@@ -87,3 +87,24 @@ export function resolveSoapCallbackUrl(
   }
   return null;
 }
+
+/**
+ * Advisory check (issue #178): the daemon routes inbound CS→CP calls on
+ * `<soapPath>/<cpId>/ChargePointService`, and the callback URL is advertised
+ * verbatim as the `wsa:From` the CSMS calls back on. An explicit callback URL
+ * that doesn't end in `/ChargePointService` is accepted but matches no route,
+ * so the CSMS gets 404s. Returns a warning string when the suffix is missing,
+ * or null when the URL is fine (a trailing slash is tolerated). `buildSoapCallbackUrl`
+ * always appends the suffix, so only an operator-supplied URL can trip this.
+ */
+export function soapCallbackUrlSuffixWarning(
+  callbackUrl: string,
+): string | null {
+  const trimmed = callbackUrl.replace(/\/+$/, "");
+  if (trimmed.endsWith(`/${SOAP_SERVICE_SUFFIX}`)) return null;
+  return (
+    `SOAP callback URL '${callbackUrl}' does not end in '/${SOAP_SERVICE_SUFFIX}'. ` +
+    `The daemon routes inbound CS→CP calls on '<soapPath>/<cpId>/${SOAP_SERVICE_SUFFIX}', ` +
+    `so the CSMS will get 404s calling back on this address.`
+  );
+}

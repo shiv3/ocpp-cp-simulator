@@ -3,6 +3,7 @@ import {
   buildSoapCallbackUrl,
   isHttpUrl,
   resolveSoapCallbackUrl,
+  soapCallbackUrlSuffixWarning,
 } from "../soapCallbackUrl";
 
 describe("isHttpUrl", () => {
@@ -143,5 +144,46 @@ describe("resolveSoapCallbackUrl precedence", () => {
         soapPath: "/ocpp/soap",
       }),
     ).toBe("https://abcd.ngrok-free.app/ocpp/soap/CP-1/ChargePointService");
+  });
+});
+
+describe("soapCallbackUrlSuffixWarning", () => {
+  it("returns null when the URL ends in /ChargePointService", () => {
+    expect(
+      soapCallbackUrlSuffixWarning(
+        "http://simulator-ocpp:9700/ocpp/soap/TEST_16S/ChargePointService",
+      ),
+    ).toBeNull();
+  });
+
+  it("tolerates a trailing slash", () => {
+    expect(
+      soapCallbackUrlSuffixWarning(
+        "http://simulator-ocpp:9700/ocpp/soap/TEST_16S/ChargePointService/",
+      ),
+    ).toBeNull();
+  });
+
+  it("warns when the /ChargePointService suffix is missing", () => {
+    const warning = soapCallbackUrlSuffixWarning(
+      "http://simulator-ocpp:9700/ocpp/soap/TEST_16S",
+    );
+    expect(warning).not.toBeNull();
+    expect(warning).toContain("does not end in '/ChargePointService'");
+    expect(warning).toContain("404");
+  });
+
+  it("does not match a bare 'ChargePointService' that isn't a final path segment", () => {
+    expect(
+      soapCallbackUrlSuffixWarning("http://host/ChargePointService/TEST_16S"),
+    ).not.toBeNull();
+  });
+
+  it("URLs the derived builder emits always pass", () => {
+    expect(
+      soapCallbackUrlSuffixWarning(
+        buildSoapCallbackUrl("https://pub.example", "CP-1", "/ocpp/soap"),
+      ),
+    ).toBeNull();
   });
 });

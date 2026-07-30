@@ -62,6 +62,8 @@ import {
   type StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "../../cp/shared/redaction";
+import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
+import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
@@ -484,6 +486,12 @@ async function createCp(
   rawParams: unknown,
 ): Promise<{ cpId: string }> {
   const init = parseCreateInput(rawParams);
+  if (isSoapVersion(init.ocppVersion) && init.soapCallbackUrl) {
+    const suffixWarning = soapCallbackUrlSuffixWarning(init.soapCallbackUrl);
+    if (suffixWarning) {
+      process.stderr.write(`[server] Warning: ${suffixWarning}\n`);
+    }
+  }
   await runFacadeOperation(() =>
     deps.chargePointService.createChargePoint(
       init as unknown as CreateChargePointParams,

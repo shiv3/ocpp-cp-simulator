@@ -104,6 +104,10 @@ export class ScenarioExecutor {
   private remoteStopReason: string | null = null;
   private remoteStopOptions: StopTransactionOptions | null = null;
   private currentNodeId: string | null = null;
+  // #240: epoch ms when the current node began executing; null when no
+  // node is active. Lets a client compute time-on-step and, with
+  // expectation.timeoutMs, the remaining wait.
+  private currentNodeStartedAt: number | null = null;
   // #179: the normalized condition the currently-parked node is waiting on
   // (null when no node is parked). The robot3 machine stays "running" while a
   // node awaits an external event (the "waiting" state is never entered), so
@@ -179,6 +183,7 @@ export class ScenarioExecutor {
     // Fresh abort gate for this run.
     this.aborted = false;
     this.currentNodeId = null;
+    this.currentNodeStartedAt = null;
     this.currentExpectation = null;
     this.executedNodes = [];
     this.stepResolve = null;
@@ -322,6 +327,7 @@ export class ScenarioExecutor {
             : [resumeFromNodeId];
         this.executedNodes = seededNodes;
         this.currentNodeId = originNode.id;
+        this.currentNodeStartedAt = Date.now();
         resumed = true;
         this.callbacks.log?.(
           `[${this.scenario.name}] Resuming scenario from node "${
@@ -386,6 +392,7 @@ export class ScenarioExecutor {
 
     // Clear current node
     this.currentNodeId = null;
+    this.currentNodeStartedAt = null;
     this.currentExpectation = null;
   }
 
@@ -499,6 +506,7 @@ export class ScenarioExecutor {
 
     // Update context with current node
     this.currentNodeId = node.id;
+    this.currentNodeStartedAt = Date.now();
     this.executedNodes.push(node.id);
 
     this.notifyStateChange();
@@ -1535,6 +1543,7 @@ export class ScenarioExecutor {
     // walker bails before executing the next node.
     this.aborted = true;
     this.currentNodeId = null;
+    this.currentNodeStartedAt = null;
     this.currentExpectation = null;
     this.abortResolve?.();
     // Stop the connector's auto-meter now; otherwise a pending maxTime/maxValue
@@ -1617,6 +1626,7 @@ export class ScenarioExecutor {
       loopCount: context.loopCount,
       error: context.error,
       expectation: parked ?? null,
+      currentNodeStartedAt: this.currentNodeStartedAt,
     };
   }
 

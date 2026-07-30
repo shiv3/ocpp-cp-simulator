@@ -388,7 +388,11 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   mcp.tool("get_logs", {
-    description: "Retrieve logs for a charge point",
+    description:
+      "Retrieve logs for a charge point. Returns the MOST RECENT entries: " +
+      "`limit` takes the newest N, and `offset` pages backwards from the " +
+      "newest, so {limit:100} is the last 100 and {limit:100, offset:100} the " +
+      "100 before those. Entries come back oldest-first unless order is 'desc'.",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
       limit: z
@@ -396,7 +400,19 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .int()
         .positive()
         .optional()
-        .describe("Maximum number of log entries to return"),
+        .describe("Number of most-recent log entries to return"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Skip this many of the newest entries before taking `limit`"),
+      order: z
+        .enum(["asc", "desc"])
+        .optional()
+        .describe(
+          "Order of the returned window: 'asc' (oldest first, default) or 'desc' (newest first)",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -405,6 +421,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           params: {
             cpId: args.cpId,
             limit: args.limit,
+            offset: args.offset,
+            order: args.order,
           },
         });
         return successResult(result);

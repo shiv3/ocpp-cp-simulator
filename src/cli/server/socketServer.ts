@@ -67,6 +67,7 @@ import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/ne
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
+import { selectLogWindow } from "./logWindow";
 import {
   parseCreateBody,
   parseBasicAuthHeader,
@@ -542,8 +543,14 @@ async function getLogs(
   const entries = await runFacadeOperation(() =>
     deps.chargePointService.listStoredLogs(cpId),
   );
-  const limit = params.limit;
-  return typeof limit === "number" ? entries.slice(0, limit) : entries;
+  // `limit` selects the NEWEST n (see selectLogWindow). It used to take the
+  // oldest n, which made the parameter useless on a long-running charge point:
+  // no limit could reach recent activity.
+  return selectLogWindow(entries, {
+    limit: typeof params.limit === "number" ? params.limit : undefined,
+    offset: typeof params.offset === "number" ? params.offset : undefined,
+    order: params.order === "desc" ? "desc" : "asc",
+  });
 }
 
 async function clearLogs(

@@ -7,8 +7,9 @@ interface ActiveScenarioBadgeProps {
    */
   isActive: boolean;
   /**
-   * When provided and the first run's state is "waiting", show an amber
-   * badge with the expectation description instead of blue "Scenario".
+   * Expectation description of the first run in "waiting" state among the
+   * active runs (regardless of its position in the array). When provided,
+   * show an amber waiting badge instead of the blue "Scenario" one.
    */
   waitingExpectation?: string | null;
 }

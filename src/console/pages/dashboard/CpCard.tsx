@@ -50,8 +50,9 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
   // is re-Accepted, so fall back to a non-Unavailable status.
   const isConnected = connected || status !== OCPPStatus.Unavailable;
   const resolvedOcppVersion = cp.config?.ocppVersion ?? ocppVersion;
-  const connectorList = Array.from(connectors.values()).sort(
-    (a, b) => a.id - b.id,
+  const connectorList = useMemo(
+    () => Array.from(connectors.values()).sort((a, b) => a.id - b.id),
+    [connectors],
   );
 
   const connectorIds = useMemo(

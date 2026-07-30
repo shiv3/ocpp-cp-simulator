@@ -76,7 +76,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
 
       <div className="space-y-2">
         {runs.map((run) => {
-          const nodeStartedAt = run.currentNodeStartedAt || now;
+          const nodeStartedAt = run.currentNodeStartedAt ?? now;
           const elapsedMs = now - nodeStartedAt;
           const elapsed = formatElapsed(elapsedMs);
 

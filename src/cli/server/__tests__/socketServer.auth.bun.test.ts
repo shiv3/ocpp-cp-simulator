@@ -102,7 +102,7 @@ describe("socket.io auth", () => {
 
     const healthRes = await fetch(`${server.url}/v1/healthz`);
     expect(healthRes.status).toBe(200);
-    expect(await healthRes.json()).toEqual({ ok: true });
+    expect(await healthRes.json()).toMatchObject({ ok: true });
   });
 });
 

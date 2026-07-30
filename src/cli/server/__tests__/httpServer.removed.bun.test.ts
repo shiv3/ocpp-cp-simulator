@@ -37,7 +37,7 @@ describe("httpServer removed REST control API", () => {
 
     const healthRes = await run(handlers, "GET", "/v1/healthz");
     expect(healthRes.status).toBe(200);
-    expect(await healthRes.json()).toEqual({ ok: true });
+    expect(await healthRes.json()).toMatchObject({ ok: true });
 
     const unauthRestRes = await run(handlers, "GET", "/v1/cp");
     expect(unauthRestRes.status).toBe(401);

@@ -114,6 +114,11 @@ function templateFromJson(json: ScenarioDefinition): ScenarioTemplate {
       return {
         ...json,
         id: `${json.id}-${chargePointId}-c${connectorId ?? "cp"}-${Date.now()}-${suffix}`,
+        // Which template this came from. The instance id embeds Date.now(), so
+        // without this the daemon can't tell "another instance of the same
+        // template" from "a different scenario" and every boot stacked up one
+        // more copy per connector.
+        templateId: json.id,
         targetType: json.targetType,
         targetId: connectorId ?? undefined,
         nodes: structuredClone(json.nodes),

@@ -447,6 +447,17 @@ export interface ScenarioDefinition {
    *  conformance is advisory, never a hard gate). */
   schemaVersion?: string;
   id: string;
+  /**
+   * The built-in template this scenario was instantiated from, when it was.
+   * Set by `templateFromJson`'s `createScenario`; absent on hand-authored
+   * scenarios and on instances persisted by builds before this field existed.
+   *
+   * Lets the daemon recognise "the same template on the same connector" and
+   * replace the earlier instance instead of stacking a new one up on every
+   * boot. Instance ids embed `Date.now()`, so they can't answer that question
+   * themselves without parsing.
+   */
+  templateId?: string;
   name: string;
   description?: string;
   targetType: "chargePoint" | "connector";

@@ -197,16 +197,28 @@ describe("the cleared connect-trigger arm is persisted for a charging connector"
       );
 
       await emitRpc(socket, { cpId: CP_ID, method: "disconnect", params: {} });
-      await new Promise((r) => setTimeout(r, 200));
 
-      const rows = db.all<{
-        status: string;
-        transaction_json: string | null;
-        last_auto_started_scenario_key: string | null;
-      }>(
-        "SELECT status, transaction_json, last_auto_started_scenario_key FROM connector_runtime WHERE cp_id = ? AND connector_id = ?",
-        [CP_ID, CONNECTOR],
-      );
+      // The disconnect path is asynchronous, so wait on the condition rather
+      // than a fixed sleep — a slow runner would otherwise read the row before
+      // the write lands and fail for the wrong reason. Bounded, so a genuine
+      // regression still fails instead of hanging.
+      const readRow = () =>
+        db.all<{
+          status: string;
+          transaction_json: string | null;
+          last_auto_started_scenario_key: string | null;
+        }>(
+          "SELECT status, transaction_json, last_auto_started_scenario_key FROM connector_runtime WHERE cp_id = ? AND connector_id = ?",
+          [CP_ID, CONNECTOR],
+        );
+
+      const persistDeadline = Date.now() + 10_000;
+      while (Date.now() < persistDeadline) {
+        if (readRow()[0]?.last_auto_started_scenario_key === null) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      const rows = readRow();
       expect(rows).toHaveLength(1);
 
       // Pin the branch under test: the connector kept its charging status and

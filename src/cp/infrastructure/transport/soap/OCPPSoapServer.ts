@@ -92,15 +92,6 @@ export class OCPPSoapServer {
       envelope = parseSoapEnvelope(xml, this.dialect);
       this.assertRequestForTarget(pathCpId, envelope);
 
-      // Issue #110/#257: surface every inbound CS→CP call to the scenario
-      // layer (csmsCallTrigger), mirroring the JSON path — regardless of which
-      // dispatch tier below handles it. Without this a csmsCallTrigger node on
-      // a SOAP charge point would wait forever even though the call arrived.
-      this.target.chargePoint?.notifyIncomingCall(
-        envelope.operation,
-        envelope.payload,
-      );
-
       // Dispatch order:
       // (1) Legacy inbound registry (Reset) — unchanged for all dialects
       // (2) 1.2 / 1.5 / 1.6S with v16 registry support — dispatch CS→CP
@@ -123,9 +114,20 @@ export class OCPPSoapServer {
         !!operationMetadata &&
         (operationMetadata.target === "cp" || operationMetadata.bidirectional);
 
+      // #110/#257: surface the inbound call to the scenario layer
+      // (csmsCallTrigger), but ONLY once we know it has a dispatch path —
+      // emitting for a not-implemented op would wrongly resolve a waiting
+      // trigger. Mirrors the JSON path, which notifies for calls it handles.
+      const notifyIncomingCall = () =>
+        this.target.chargePoint?.notifyIncomingCall(
+          envelope.operation,
+          envelope.payload,
+        );
+
       // First try legacy registry (Reset for all dialects)
       const legacyHandler = this.registry.get(envelope.operation);
       if (legacyHandler) {
+        notifyIncomingCall();
         const result = legacyHandler.handle(envelope.payload, {
           target: this.target,
           envelope,
@@ -138,6 +140,7 @@ export class OCPPSoapServer {
         this.target.chargePoint &&
         this.target.logger
       ) {
+        notifyIncomingCall();
         // Dispatch through the shared v16 registry. 1.2 narrows a few enum
         // tokens afterwards; 1.5 shares 1.6's enums so needs no transform.
         try {

@@ -585,16 +585,6 @@ function optionalTextElement(
   return { key, value, text: textValue(value, name) };
 }
 
-function requireAddressHeader(
-  header: Record<string, unknown>,
-  name: string,
-): { readonly key: string; readonly value: unknown; readonly address: string } {
-  const [key, value] = requireElement(header, name);
-  const addressParent = requireRecord(value, name);
-  const [, addressValue] = requireElement(addressParent, "Address");
-  return { key, value, address: textValue(addressValue, `${name}.Address`) };
-}
-
 function optionalAddressHeader(
   header: Record<string, unknown>,
   name: string,
@@ -706,8 +696,21 @@ function findMetadataByWrapper(
       expectedNamespaceForWrapper = metadata.namespace;
     }
     if (metadata.responseWrapper === wrapper) {
-      // Responses should use the metadata's namespace; bidirectional doesn't affect responses.
-      if (!namespace || namespace === metadata.namespace) {
+      // For bidirectional operations, a response can arrive in either service's
+      // namespace depending on the call direction: a CS→CP DataTransfer answers
+      // in the CP (ChargePointService) namespace, a CP→CS one in the CS
+      // namespace. Mirror the request allowance above (issue #257).
+      if (metadata.bidirectional && namespace) {
+        const isCorrectNamespace = namespace === metadata.namespace;
+        const isOppositeNamespace =
+          namespace ===
+          (metadata.target === "cs"
+            ? dialect.namespaces.CP
+            : dialect.namespaces.CS);
+        if (isCorrectNamespace || isOppositeNamespace) {
+          return { operation, kind: "response", metadata, namespace };
+        }
+      } else if (!namespace || namespace === metadata.namespace) {
         return {
           operation,
           kind: "response",
@@ -811,14 +814,13 @@ export function parseSoapEnvelope(
   }
 
   const messageId = requireTextElement(header, "MessageID");
-  const from =
-    kind === "request"
-      ? requireAddressHeader(header, "From")
-      : optionalAddressHeader(header, "From");
-  const replyTo =
-    kind === "request"
-      ? requireAddressHeader(header, "ReplyTo")
-      : optionalAddressHeader(header, "ReplyTo");
+  // OCPP-S marks wsa:From "Required: Yes", but Apache CXF — and therefore
+  // SteVe, the reference CSMS — omits From (and ReplyTo) on CS→CP calls. Both
+  // are only used here for response routing (responseToAddress falls back
+  // From → ReplyTo → wsa:anonymous), so accept their absence rather than
+  // rejecting every real CSMS→CP request (issue #256).
+  const from = optionalAddressHeader(header, "From");
+  const replyTo = optionalAddressHeader(header, "ReplyTo");
   const to = requireTextElement(header, "To");
   const relatesTo = findElement(header, "RelatesTo");
   const relatesToText = relatesTo

@@ -6,7 +6,12 @@ import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
 import { resolveClientLocation } from "./clientLocation";
-import { isHttpUrl, resolveSoapCallbackUrl } from "./soapCallbackUrl";
+import {
+  isHttpUrl,
+  resolveSoapCallbackUrl,
+  soapCallbackUrlSuffixWarning,
+} from "./soapCallbackUrl";
+import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
@@ -629,6 +634,12 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.stderr.write(
       `SOAP callback URL resolved from --soap-public-base-url: ${resolvedSoapCallbackUrl}\n`,
     );
+  }
+  if (isSoapVersion(ocppVersion) && resolvedSoapCallbackUrl) {
+    const suffixWarning = soapCallbackUrlSuffixWarning(resolvedSoapCallbackUrl);
+    if (suffixWarning) {
+      process.stderr.write(`Warning: ${suffixWarning}\n`);
+    }
   }
 
   return {

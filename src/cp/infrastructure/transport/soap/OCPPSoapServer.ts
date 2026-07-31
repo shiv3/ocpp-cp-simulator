@@ -92,6 +92,15 @@ export class OCPPSoapServer {
       envelope = parseSoapEnvelope(xml, this.dialect);
       this.assertRequestForTarget(pathCpId, envelope);
 
+      // Issue #110/#257: surface every inbound CS→CP call to the scenario
+      // layer (csmsCallTrigger), mirroring the JSON path — regardless of which
+      // dispatch tier below handles it. Without this a csmsCallTrigger node on
+      // a SOAP charge point would wait forever even though the call arrived.
+      this.target.chargePoint?.notifyIncomingCall(
+        envelope.operation,
+        envelope.payload,
+      );
+
       // Dispatch order:
       // (1) Legacy inbound registry (Reset) — unchanged for all dialects
       // (2) 1.2 / 1.5 / 1.6S with v16 registry support — dispatch CS→CP

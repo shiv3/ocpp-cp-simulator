@@ -76,6 +76,45 @@ export function buildOcppWebSocketUrl(params: {
   return url.toString();
 }
 
+/**
+ * Derive the HTTP Basic Auth password from a configured `AuthorizationKey`
+ * (OCPP 1.6 Security Whitepaper / OCTT TC_085_CS). The whitepaper stores the
+ * key in one of two shapes, and the value that goes on the wire is the
+ * **non-hex** form:
+ *
+ * - **32–40 chars** ⇒ hex representation of a 16–20 byte password. Decode the
+ *   hex to those bytes before base64-ing `cpId:password`.
+ * - **16–20 chars** ⇒ already plaintext UTF-8; use as-is.
+ *
+ * Any other shape is returned unchanged — best effort. The CLI enforces
+ * hex-ness (but not length), while daemon/browser configs are not
+ * length-validated, so a value outside both ranges is passed through rather
+ * than guessed at. Only the AuthorizationKey copy served over OCPP
+ * (Get/ChangeConfiguration) keeps the hex form; this transform applies solely
+ * to the Basic credential.
+ */
+export function authorizationKeyToBasicPassword(
+  authorizationKey: string,
+): string {
+  const isEvenLengthHex =
+    /^[0-9a-fA-F]+$/.test(authorizationKey) &&
+    authorizationKey.length % 2 === 0;
+  if (
+    isEvenLengthHex &&
+    authorizationKey.length >= 32 &&
+    authorizationKey.length <= 40
+  ) {
+    let decoded = "";
+    for (let i = 0; i < authorizationKey.length; i += 2) {
+      decoded += String.fromCharCode(
+        parseInt(authorizationKey.slice(i, i + 2), 16),
+      );
+    }
+    return decoded;
+  }
+  return authorizationKey;
+}
+
 export function buildOcppBasicAuthorization(
   basicAuth: BasicAuthSettings,
 ): string {
@@ -210,7 +249,9 @@ function resolveBasicAuth(params: {
     }
     return {
       username: params.chargePointId,
-      password: params.authorizationKey,
+      // #260: the AuthorizationKey is stored hex; the Basic header carries its
+      // decoded (non-hex) form per TC_085_CS.
+      password: authorizationKeyToBasicPassword(params.authorizationKey),
     };
   }
   return params.basicAuth; // "legacy"

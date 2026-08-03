@@ -1,22 +1,32 @@
+/**
+ * Contract tests for the OCPP DebugKit toolkit's rule 14
+ * (`METER_VALUE_ANOMALY`), pinned against the real installed
+ * `@ocpp-debugkit/toolkit@0.4.2` -- deliberately not mocked, same convention
+ * as runAnalyze.test.ts.
+ *
+ * History (issue #188 Track 3): rule 14 used to flatten every
+ * `sampledValue.value` in a session into one `readings[]` array with no
+ * regard for `measurand`, `phase`, `unit`, `location`, or `connectorId`, and
+ * then assert that flat sequence never decreases. `analyze` carried a
+ * post-processing layer (`meterAnomaly.ts`) that stripped those findings and
+ * re-derived them correctly. 0.4.2 fixes the rule upstream -- readings are
+ * now bucketed by `(connectorId, measurand, phase, unit, location)` and only
+ * the cumulative `Energy.*.Register` measurands are checked -- so that layer
+ * was removed as redundant.
+ *
+ * These fixtures stay: they are exactly the "re-verify the test matrix in
+ * `src/cli/analyze/__tests__/`" gate that docs/cli.md requires on a toolkit
+ * upgrade. If a future version regresses rule 14 back to the flat-series
+ * behavior, the false-positive cases below fail and `analyze` does not
+ * silently start reporting noise again.
+ */
 import { describe, expect, it } from "vitest";
-// Real @ocpp-debugkit/toolkit@0.4.0 -- deliberately not mocked, same
-// convention as runAnalyze.test.ts: these tests pin `correctMeterValueAnomalies`
-// against the toolkit's actual, verified `detectMeterValueAnomaly` (rule 14)
-// bug (probed by reading the installed dist/core/detection.js directly, not
-// inferred): it flattens every sampledValue.value in a session into one
-// `readings[]` array with no regard for `measurand`, `phase`, `unit`,
-// `location`, or `connectorId`, then asserts the flat sequence never
-// decreases.
 import {
   buildSessionTimeline,
   detectFailures,
   parseOpenOcppTrace,
 } from "@ocpp-debugkit/toolkit/core";
 import type { Failure, Session } from "@ocpp-debugkit/toolkit/core";
-import {
-  correctMeterValueAnomalies,
-  detectCorrectedMeterValueAnomalies,
-} from "../meterAnomaly";
 
 function rec(o: Record<string, unknown>): string {
   return JSON.stringify({
@@ -54,7 +64,7 @@ function meterValuesRecord(o: {
 
 /** Parses a joined-lines JSONL trace through the real toolkit pipeline up to
  *  (but not including) `summarizeSessions`, exactly the slice `runAnalyze.ts`
- *  hands to `correctMeterValueAnomalies`. */
+ *  assembles. */
 function runToolkitPipeline(lines: string[]): {
   sessions: Session[];
   failures: Failure[];
@@ -69,12 +79,13 @@ function meterAnomalyFindings(failures: Failure[]): Failure[] {
   return failures.filter((f) => f.code === "METER_VALUE_ANOMALY");
 }
 
-describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
-  it("real-world case: a strictly-monotonic Energy.Active.Import.Register series interleaved with a constant Power.Active.Import -- toolkit alone reports many METER_VALUE_ANOMALY findings, the corrected pipeline reports zero", () => {
+describe("toolkit rule 14 (METER_VALUE_ANOMALY) contract", () => {
+  it("real-world case: a strictly-monotonic Energy.Active.Import.Register series interleaved with a constant Power.Active.Import reports nothing", () => {
     // 12 MeterValues, connector 1, transaction 1001: Energy register rises
     // +25 Wh every 30s (a healthy 3 kW session over 6 minutes), interleaved
     // with a constant Power.Active.Import = 3000 W in the *same* message --
-    // exactly the real observed shape from the task brief.
+    // exactly the real observed shape from issue #188. Pre-0.4.2 this
+    // produced 22 false "value decreased from 3000 to 625" warnings.
     const lines: string[] = [
       rec({
         timestamp: "2026-01-01T00:00:00.000Z",
@@ -141,30 +152,20 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
       }),
     );
 
-    const { sessions, failures } = runToolkitPipeline(lines);
-
-    // Baseline: the unmodified toolkit, proving the bug is real on this
-    // exact fixture, not assumed.
-    const toolkitOnly = meterAnomalyFindings(failures);
-    expect(toolkitOnly.length).toBeGreaterThan(10);
-    expect(
-      toolkitOnly.some((f) => f.description.includes("decreased from 3000")),
-    ).toBe(true);
-
-    // Fixed: the same sessions/failures, corrected.
-    const corrected = correctMeterValueAnomalies(sessions, failures);
-    expect(meterAnomalyFindings(corrected)).toEqual([]);
+    const { failures } = runToolkitPipeline(lines);
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 
-  it("real-world case: a 4-connector-station-shaped trace with no StartTransaction correlation collapses into one toolkit session, interleaving two connectors' independent (each individually monotonic) Energy registers -- toolkit alone reports findings, corrected reports zero", () => {
+  it("real-world case: a 4-connector-station-shaped trace with no StartTransaction correlation collapses into one toolkit session, and the two connectors' independent Energy registers still do not cross-contaminate", () => {
     // No StartTransaction/StopTransaction at all: buildSessionTimeline's
     // `startTxCalls.length === 0` fallback lumps every event into a single
     // `session-0`, with `session.transactionId` taken from whichever event
     // is scanned first that carries one -- here, connector 1's first
     // MeterValues. Every other connector's MeterValues still lands in that
     // same session (buildSessionTimeline groups by chargePointId only when
-    // there is no transaction to key on), reproducing the "connectorId
-    // appears nowhere in detection.js" defect for real.
+    // there is no transaction to key on), so rule 14 has to separate them by
+    // `connectorId` itself. Pre-0.4.2 it did not, and this shape produced 80
+    // false warnings on a real 4-connector trace.
     const lines: string[] = [];
     let e1 = 600;
     let e2 = 9000;
@@ -199,12 +200,7 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
 
     const { sessions, failures } = runToolkitPipeline(lines);
     expect(sessions).toHaveLength(1); // confirms the fallback single-session shape
-
-    const toolkitOnly = meterAnomalyFindings(failures);
-    expect(toolkitOnly.length).toBeGreaterThan(0);
-
-    const corrected = correctMeterValueAnomalies(sessions, failures);
-    expect(meterAnomalyFindings(corrected)).toEqual([]);
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 
   it("still flags a genuinely non-monotonic cumulative register (true positive preserved)", () => {
@@ -231,11 +227,17 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
     ];
 
     const { sessions, failures } = runToolkitPipeline(lines);
-    const corrected = meterAnomalyFindings(
-      correctMeterValueAnomalies(sessions, failures),
+    const findings = meterAnomalyFindings(failures);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.description).toContain("decreased from 1000 to 500");
+    // eventIds must reference real events in the session: summarizeSessions'
+    // per-session failureCount intersects them against session.events.
+    const sessionEventIds = new Set(
+      sessions.flatMap((s) => s.events.map((e) => e.id)),
     );
-    expect(corrected).toHaveLength(1);
-    expect(corrected[0]?.description).toContain("decreased from 1000 to 500");
+    for (const id of findings[0]?.eventIds ?? []) {
+      expect(sessionEventIds.has(id)).toBe(true);
+    }
   });
 
   it("flags a negative cumulative register value", () => {
@@ -250,12 +252,10 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         ],
       }),
     ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    const corrected = meterAnomalyFindings(
-      correctMeterValueAnomalies(sessions, failures),
-    );
-    expect(corrected).toHaveLength(1);
-    expect(corrected[0]?.description).toContain("Negative meter value");
+    const { failures } = runToolkitPipeline(lines);
+    const findings = meterAnomalyFindings(failures);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.description).toContain("Negative meter value");
   });
 
   it("does NOT flag a negative Power.Active.Import value (legitimate on a bidirectional/V2G charger)", () => {
@@ -272,10 +272,8 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         ],
       }),
     ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    expect(
-      meterAnomalyFindings(correctMeterValueAnomalies(sessions, failures)),
-    ).toEqual([]);
+    const { failures } = runToolkitPipeline(lines);
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 
   it("does NOT flag a negative Current.Import value either", () => {
@@ -288,10 +286,8 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         sampledValue: [{ value: "-16", measurand: "Current.Import" }],
       }),
     ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    expect(
-      meterAnomalyFindings(correctMeterValueAnomalies(sessions, failures)),
-    ).toEqual([]);
+    const { failures } = runToolkitPipeline(lines);
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 
   it("treats a missing measurand as Energy.Active.Import.Register (OCPP 1.6 default) and still flags it if non-monotonic", () => {
@@ -311,11 +307,8 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         sampledValue: [{ value: "900" }],
       }),
     ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    const corrected = meterAnomalyFindings(
-      correctMeterValueAnomalies(sessions, failures),
-    );
-    expect(corrected).toHaveLength(1);
+    const { failures } = runToolkitPipeline(lines);
+    expect(meterAnomalyFindings(failures)).toHaveLength(1);
   });
 
   it("does not flag non-cumulative measurands even when they legitimately fall and rise (SoC, Power, Current, Voltage, Temperature)", () => {
@@ -347,13 +340,8 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         ],
       }),
     ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    // Sanity: the unfixed toolkit *does* misfire on this fixture (proves the
-    // fixture actually exercises the bug).
-    expect(meterAnomalyFindings(failures).length).toBeGreaterThan(0);
-    expect(
-      meterAnomalyFindings(correctMeterValueAnomalies(sessions, failures)),
-    ).toEqual([]);
+    const { failures } = runToolkitPipeline(lines);
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 
   it("keeps separate phases of the same cumulative measurand from cross-contaminating", () => {
@@ -395,52 +383,20 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         ],
       }),
     ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    // Without phase-awareness the toolkit sees 100, 9000, 125, 9025 and
-    // flags 9000 -> 125 as a decrease.
-    expect(meterAnomalyFindings(failures).length).toBeGreaterThan(0);
-    expect(
-      meterAnomalyFindings(correctMeterValueAnomalies(sessions, failures)),
-    ).toEqual([]);
+    const { failures } = runToolkitPipeline(lines);
+    // Without phase-awareness the rule would see 100, 9000, 125, 9025 and
+    // flag 9000 -> 125 as a decrease.
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 
-  it("does not touch failures of other codes", () => {
-    const lines: string[] = [
-      rec({
-        timestamp: "2026-01-01T00:00:00.000Z",
-        direction: "cp-to-csms",
-        messageType: "CALL",
-        messageId: "1",
-        action: "Authorize",
-        payload: { idTag: "TAG1" },
-      }),
-      rec({
-        timestamp: "2026-01-01T00:00:01.000Z",
-        direction: "csms-to-cp",
-        messageType: "CALLRESULT",
-        messageId: "1",
-        payload: { idTagInfo: { status: "Invalid" } },
-      }),
-    ];
-    const { sessions, failures } = runToolkitPipeline(lines);
-    expect(failures.some((f) => f.code === "FAILED_AUTHORIZATION")).toBe(true);
-
-    const corrected = correctMeterValueAnomalies(sessions, failures);
-    expect(corrected.some((f) => f.code === "FAILED_AUTHORIZATION")).toBe(true);
-    expect(corrected.length).toBe(failures.length); // no METER_VALUE_ANOMALY in or out
-  });
-
-  it("emits findings in exactly the shape the toolkit produces (code/severity/suggestedSteps), verified against the toolkit's own single-measurand (bug-free) output for the same failure kind", () => {
-    // Single-measurand case: the toolkit's own detector is correct here (no
-    // interleaving to confuse it), so its own output is a reliable oracle
-    // for severity/suggestedSteps wording, decoupled from hardcoding it and
-    // therefore resistant to upstream wording drift within 0.4.0.
+  it("skips sessions with no transactionId (rule 14's own documented scope)", () => {
+    // No StartTransaction anywhere and only one connector -> a single
+    // no-transaction session, which rule 14 skips outright.
     const lines: string[] = [
       meterValuesRecord({
         messageId: "mv-0",
         timestamp: "2026-01-01T00:00:00.000Z",
         connectorId: 1,
-        transactionId: 1001,
         sampledValue: [
           { value: "1000", measurand: "Energy.Active.Import.Register" },
         ],
@@ -449,58 +405,14 @@ describe("correctMeterValueAnomalies (Task B end-to-end proof)", () => {
         messageId: "mv-1",
         timestamp: "2026-01-01T00:00:30.000Z",
         connectorId: 1,
-        transactionId: 1001,
         sampledValue: [
+          // Would be a real anomaly if the session had a transactionId.
           { value: "500", measurand: "Energy.Active.Import.Register" },
         ],
       }),
     ];
     const { sessions, failures } = runToolkitPipeline(lines);
-    const oracle = meterAnomalyFindings(failures);
-    expect(oracle).toHaveLength(1); // toolkit alone already gets this one right
-
-    const corrected = meterAnomalyFindings(
-      correctMeterValueAnomalies(sessions, failures),
-    );
-    expect(corrected).toHaveLength(1);
-    expect(corrected[0]?.code).toBe(oracle[0]?.code);
-    expect(corrected[0]?.severity).toBe(oracle[0]?.severity);
-    expect(corrected[0]?.suggestedSteps).toEqual(oracle[0]?.suggestedSteps);
-    // eventIds must reference real events in the session so
-    // summarizeSessions' per-session failureCount (eventIds intersection)
-    // keeps working.
-    const sessionEventIds = new Set(
-      sessions.flatMap((s) => s.events.map((e) => e.id)),
-    );
-    for (const id of corrected[0]?.eventIds ?? []) {
-      expect(sessionEventIds.has(id)).toBe(true);
-    }
-  });
-
-  it("skips sessions with no transactionId, matching the toolkit's own rule-14 scope", () => {
-    // No StartTransaction anywhere and only one connector -> single
-    // no-transaction session; the (buggy) toolkit already skips it, so the
-    // corrected version must too (same scope, just correct within it).
-    const lines: string[] = [
-      rec({
-        timestamp: "2026-01-01T00:00:00.000Z",
-        direction: "cp-to-csms",
-        messageType: "CALL",
-        messageId: "1",
-        action: "Heartbeat",
-        payload: {},
-      }),
-      rec({
-        timestamp: "2026-01-01T00:00:01.000Z",
-        direction: "csms-to-cp",
-        messageType: "CALLRESULT",
-        messageId: "1",
-        payload: { currentTime: "2026-01-01T00:00:01.000Z" },
-      }),
-    ];
-    const { sessions, failures } = runToolkitPipeline(lines);
     expect(sessions[0]?.transactionId).toBeNull();
-    expect(detectCorrectedMeterValueAnomalies(sessions)).toEqual([]);
-    expect(correctMeterValueAnomalies(sessions, failures)).toEqual(failures);
+    expect(meterAnomalyFindings(failures)).toEqual([]);
   });
 });

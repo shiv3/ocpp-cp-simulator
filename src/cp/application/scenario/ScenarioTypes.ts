@@ -563,6 +563,15 @@ export interface AssertionResult {
   detail?: string;
   /** How this assertion failure affects the verdict. */
   severity: AssertionSeverity;
+  /**
+   * #240: transcript frames this result is about — the `seq` (capture-order
+   * index) of each frame that satisfied the check (on pass) or triggered the
+   * failure (e.g. the unexpected CALL for `ocpp_absent`). Join against
+   * {@link ScenarioRunResult.transcript}'s `seq` to point a failed assertion
+   * at the relevant messages. Absent when no frame is relevant (e.g. a
+   * "never sent" miss, or a malformed spec).
+   */
+  frameRefs?: number[];
 }
 
 /** Overall pass/fail verdict for one scenario run, rolled up from its

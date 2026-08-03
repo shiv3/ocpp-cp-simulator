@@ -91,6 +91,7 @@ import StatusNotificationNode from "./nodes/StatusNotificationNode";
 import UnlockOutcomeNode from "./nodes/UnlockOutcomeNode";
 import ConfigSetNode from "./nodes/ConfigSetNode";
 import DataTransferNode from "./nodes/DataTransferNode";
+import ConnectionTriggerNode from "./nodes/ConnectionTriggerNode";
 
 import {
   exportScenarioToJSON,
@@ -209,6 +210,7 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.UNLOCK_OUTCOME]: UnlockOutcomeNode,
   [ScenarioNodeType.CONFIG_SET]: ConfigSetNode,
   [ScenarioNodeType.DATA_TRANSFER]: DataTransferNode,
+  [ScenarioNodeType.CONNECTION_TRIGGER]: ConnectionTriggerNode,
   [ScenarioNodeType.START]: StartScenarioNode,
   [ScenarioNodeType.END]: EndScenarioNode,
 };
@@ -1985,6 +1987,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 icon="📥"
               />
               <NodePaletteItem
+                type={ScenarioNodeType.CONNECTION_TRIGGER}
+                label="Connection"
+                icon="🔗"
+              />
+              <NodePaletteItem
                 type={ScenarioNodeType.RESPONSE_OVERRIDE}
                 label="Override"
                 icon="🚫"
@@ -2239,6 +2246,17 @@ function createNodeByType(
         type,
         position,
         data: { label: "Wait for CSMS Call", action: "Reset", timeout: 0 },
+      };
+    case ScenarioNodeType.CONNECTION_TRIGGER:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Wait for Disconnect",
+          event: "disconnected",
+          timeout: 0,
+        },
       };
     case ScenarioNodeType.RESPONSE_OVERRIDE:
       return {

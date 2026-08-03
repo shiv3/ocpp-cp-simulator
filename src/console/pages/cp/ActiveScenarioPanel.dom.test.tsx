@@ -354,6 +354,102 @@ describe("ActiveScenarioPanel", () => {
     expect(container.textContent).toContain("No timeout");
   });
 
+  it("shows connection expectation with its event name", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      status: OCPPStatus.Available,
+      connectors: [connector({ id: 1 })],
+    });
+
+    const listScenarios = vi.fn(async () => [
+      { scenarioId: "s1", name: "Test scenario", active: true },
+    ]);
+
+    const getScenarioStatus = vi.fn(
+      async (): Promise<ScenarioExecutionContext | null> => ({
+        scenarioId: "s1",
+        state: "waiting" as const,
+        mode: "oneshot" as const,
+        currentNodeId: "n2",
+        executedNodes: ["n1"],
+        loopCount: 0,
+        runId: "run-1",
+        expectation: {
+          type: "connection" as const,
+          event: "disconnected" as const,
+          nodeId: "wait-conn",
+        },
+        currentNodeStartedAt: Date.now(),
+      }),
+    );
+
+    const getScenario = vi.fn(async () => scenarioDefinitionFixture);
+
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      listScenarios,
+      getScenarioStatus,
+      getScenario,
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(container.textContent).toContain("Waiting for");
+    expect(container.textContent).toContain("disconnected");
+  });
+
+  it("shows a payload marker for payload-conditioned call waits", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      status: OCPPStatus.Available,
+      connectors: [connector({ id: 1 })],
+    });
+
+    const listScenarios = vi.fn(async () => [
+      { scenarioId: "s1", name: "Test scenario", active: true },
+    ]);
+
+    const getScenarioStatus = vi.fn(
+      async (): Promise<ScenarioExecutionContext | null> => ({
+        scenarioId: "s1",
+        state: "waiting" as const,
+        mode: "oneshot" as const,
+        currentNodeId: "n2",
+        executedNodes: ["n1"],
+        loopCount: 0,
+        runId: "run-1",
+        expectation: {
+          type: "ocpp_call" as const,
+          direction: "CSMS_TO_CP" as const,
+          action: "ChangeConfiguration",
+          constraints: { payload: { key: "HeartbeatInterval" } },
+          nodeId: "wait-cfg",
+        },
+        currentNodeStartedAt: Date.now(),
+      }),
+    );
+
+    const getScenario = vi.fn(async () => scenarioDefinitionFixture);
+
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      listScenarios,
+      getScenarioStatus,
+      getScenario,
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(container.textContent).toContain("ChangeConfiguration");
+    expect(container.textContent).toContain("payload");
+  });
+
   it("parent re-renders do not retrigger scenario fetches; scenario events do (fetch-loop regression)", async () => {
     const cp = snapshot({
       id: "CP-1",

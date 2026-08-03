@@ -87,10 +87,16 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
           const remaining =
             remainingMs !== null ? formatElapsed(remainingMs) : null;
 
-          const expectationDescription =
+          const payloadConditioned = Boolean(
+            run.expectation?.constraints &&
+            (run.expectation.constraints as Record<string, unknown>).payload,
+          );
+          const expectationDescription = `${
             run.expectation?.action ??
             run.expectation?.targetStatus ??
-            run.expectation?.type;
+            run.expectation?.event ??
+            run.expectation?.type
+          }${payloadConditioned ? " (payload condition)" : ""}`;
 
           return (
             <div

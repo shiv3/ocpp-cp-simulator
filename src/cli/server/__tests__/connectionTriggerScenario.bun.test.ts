@@ -31,6 +31,18 @@ import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mo
  * A short `delay` node after "wait connected" keeps the executor in
  * `_executors` across that window, which is what actually exercises the
  * one-scenario-at-a-time gate. See task-8-report.md.
+ *
+ * Fix round 1: a lone scenario A can't tell the cross-scenario active-check
+ * (service.ts:2161-2171) apart from `runScenario`'s own same-scenarioId
+ * reentrancy guard (service.ts:1099-1101, thrown and silently swallowed by
+ * the auto-start try/catch) — both inspect the same `_executors` entry for
+ * A, so either alone would keep `completed.runId` pinned to the original
+ * run. `scenarioB` is a second, distinct connect-triggered scenario loaded
+ * on the same connector (after A, so A remains the auto-start candidate
+ * that actually runs) purely as a bystander: it must never get a
+ * `scenario_status` while A is still live, which is the part of this test
+ * that actually depends on the connector-wide active-check rather than A's
+ * own single-scenario reentrancy path. See task-8-report.md fix round 1.
  */
 const CONNECTOR = 1;
 
@@ -78,6 +90,48 @@ const scenario = {
     { id: "e2", source: "wait-down", target: "wait-up" },
     { id: "e3", source: "wait-up", target: "hold-1" },
     { id: "e4", source: "hold-1", target: "end-1" },
+  ],
+  createdAt: "2026-08-03T00:00:00Z",
+  updatedAt: "2026-08-03T00:00:00Z",
+};
+
+/**
+ * A second, unrelated connect-triggered scenario on the same connector.
+ * Loaded after `scenario` so `scenario` remains the auto-start candidate
+ * that actually runs; this one exists purely to prove nothing else on the
+ * connector starts while `scenario`'s run is live — see fix round 1 in the
+ * header comment above.
+ */
+const scenarioB = {
+  id: "connection-trigger-bystander",
+  name: "Bystander connect-triggered scenario",
+  targetType: "connector",
+  targetId: CONNECTOR,
+  trigger: { type: "manual" },
+  enabled: true,
+  nodes: [
+    {
+      id: "b-start-1",
+      type: "start",
+      position: { x: 400, y: 0 },
+      data: { label: "Start", triggerOn: "connect" },
+    },
+    {
+      id: "b-sc-1",
+      type: "statusChange",
+      position: { x: 400, y: 1 },
+      data: { label: "Preparing", status: "Preparing" },
+    },
+    {
+      id: "b-end-1",
+      type: "end",
+      position: { x: 400, y: 2 },
+      data: { label: "End" },
+    },
+  ],
+  edges: [
+    { id: "be1", source: "b-start-1", target: "b-sc-1" },
+    { id: "be2", source: "b-sc-1", target: "b-end-1" },
   ],
   createdAt: "2026-08-03T00:00:00Z",
   updatedAt: "2026-08-03T00:00:00Z",
@@ -150,6 +204,22 @@ async function waitForScenarioState(
   throw new Error("timed out waiting for scenario state");
 }
 
+/** Single, non-polling `scenario_status` snapshot — null means the
+ *  scenario has never run (no live executor, no recorded terminal run). */
+async function getScenarioStatusOnce(
+  socket: Socket,
+  cpId: string,
+  scenarioId: string,
+): Promise<any> {
+  return (
+    await emitRpc(socket, {
+      cpId,
+      method: "scenario_status",
+      params: { connector: CONNECTOR, scenarioId },
+    })
+  ).result;
+}
+
 describe("connectionTrigger scenario over a real socket (#240)", () => {
   it("survives a disconnect/reconnect as one run and blocks the auto-start re-arm", async () => {
     const csms = startMockCsms();
@@ -181,6 +251,17 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
           })
         ).ok,
       ).toBe(true);
+      // Loaded after `scenario` so `scenario` stays the auto-start
+      // candidate that actually runs (see the header comment).
+      expect(
+        (
+          await emitRpc(socket, {
+            cpId,
+            method: "load_scenario",
+            params: { connector: CONNECTOR, scenario: scenarioB },
+          })
+        ).ok,
+      ).toBe(true);
 
       // Connect → auto-start → park on "wait disconnected" (CP is
       // connected, so the level check does not pass it through).
@@ -196,6 +277,11 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
       });
       const runId = parkedDown.runId;
       expect(runId).toBeTruthy();
+      // The bystander never got a look-in on the first connect either —
+      // "one scenario per connector per trigger" picked `scenario`, not it.
+      expect(
+        await getScenarioStatusOnce(socket, cpId, scenarioB.id),
+      ).toBeNull();
 
       // Drop the socket: wait-down resolves, wait-up parks — same run.
       expect(
@@ -221,6 +307,12 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
         (s) => s.state === "completed",
       );
       expect(completed.runId).toBe(runId);
+      // Across the whole disconnect/reconnect cycle — including the
+      // reconnect's connect-auto-start re-check while `scenario` was still
+      // live — the bystander never ran either.
+      expect(
+        await getScenarioStatusOnce(socket, cpId, scenarioB.id),
+      ).toBeNull();
     } finally {
       socket.disconnect();
     }

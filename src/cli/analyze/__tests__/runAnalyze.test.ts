@@ -4,7 +4,7 @@ import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ANALYZE_DISCLAIMER, runAnalyze } from "../runAnalyze";
 
-// Real @ocpp-debugkit/toolkit@0.4.0 — deliberately not mocked. These tests
+// Real @ocpp-debugkit/toolkit@0.4.2 — deliberately not mocked. These tests
 // pin the pre-splitting guarantee (3a) against the toolkit's actual,
 // verified behavior: it has no concept of chargePointId, so without
 // splitTrace first, two charge points reusing a messageId can have their

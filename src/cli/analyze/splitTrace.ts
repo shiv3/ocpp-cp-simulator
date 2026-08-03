@@ -4,7 +4,7 @@
  * further into one blob per connector.
  *
  * Exists to compensate for a real limitation of the OCPP DebugKit toolkit
- * (probed against the real 0.4.0 install, not inferred): its analysis
+ * (probed against the real 0.4.2 install, not inferred): its analysis
  * pipeline has no concept of `chargePointId` at all — every record in a
  * trace is folded into one implicit station, so two charge points that
  * happen to reuse the same OCPP messageId (routine, since messageIds are
@@ -29,19 +29,18 @@
  * follow-up)
  * ---------------------------------------------------------------------------
  *
- * The toolkit's rules operate over a whole station's events at once, same
- * root defect as the chargePointId problem above: `connectorId` appears
- * exactly once in the installed `dist/core/detection.js` — inside a comment
- * — and no rule groups by it. `STATUS_TRANSITION_VIOLATION` in particular
- * treats connector A going `Available` while connector B (on the same
- * station) goes `Finishing` as one, invalid, transition (observed: 24
- * findings on a real 4-connector trace; hand-filtering that trace down to a
- * single connector reduced it to 1 real one). Unlike the measurand defect
- * fixed in `meterAnomaly.ts`, this cannot be corrected by re-deriving
- * findings after the fact — `STATUS_TRANSITION_VIOLATION` needs to never see
- * another connector's `StatusNotification`s in the first place, which means
- * the split has to happen here, before `parseOpenOcppTrace`, exactly like
- * the chargePointId split above.
+ * Most of the toolkit's rules operate over a whole station's events at once,
+ * same root defect as the chargePointId problem above. In 0.4.2 exactly two
+ * of them group by `connectorId` — `STATUS_TRANSITION_VIOLATION` (per-
+ * connector status machine) and `METER_VALUE_ANOMALY` (per-series meter
+ * buckets), both fixed upstream off the back of issue #188, which is why
+ * `analyze` no longer post-processes either. Every other rule still folds
+ * all connectors into one series, so a multi-connector station's findings
+ * are still read against a timeline that interleaves connectors that have
+ * nothing to do with each other. Splitting has to happen here, before
+ * `parseOpenOcppTrace`, exactly like the chargePointId split above: a rule
+ * that has already conflated two connectors' events cannot be un-conflated
+ * afterwards from its findings alone.
  *
  * This is opt-in (`--split-by connector`, default `"charge-point"`) rather
  * than the always-on chargePointId split: chargePointId cross-talk is a pure

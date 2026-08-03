@@ -4,7 +4,7 @@ import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runAnalyze } from "../runAnalyze";
 
-// Real @ocpp-debugkit/toolkit@0.4.0 -- deliberately not mocked, same
+// Real @ocpp-debugkit/toolkit@0.4.2 -- deliberately not mocked, same
 // convention as runAnalyze.test.ts. These pin `--split-by connector`'s
 // end-to-end behavior (splitTrace.ts's connector grouping, wired through
 // runAnalyze.ts) against the real toolkit pipeline.
@@ -200,9 +200,10 @@ describe("runAnalyze --split-by connector (integration, real @ocpp-debugkit/tool
     expect(conn1).toContain("1001");
     expect(conn2).toContain("2002");
     // ...and NOT in the other connector's report -- the whole point of the
-    // split (mirrors STATUS_TRANSITION_VIOLATION cross-connector noise from
-    // the task brief: connector 1 and connector 2's StatusNotifications no
-    // longer land in the same timeline).
+    // split: connector 1 and connector 2's events no longer land in the same
+    // timeline for the station-wide rules (every rule except
+    // STATUS_TRANSITION_VIOLATION and METER_VALUE_ANOMALY, the two the
+    // toolkit itself groups by connectorId as of 0.4.2).
     expect(conn1).not.toContain("2002");
     expect(conn2).not.toContain("1001");
     expect(conn1).toContain("s1");

@@ -438,14 +438,13 @@ independently:
 
 ### Splitting by connector (`--split-by connector`)
 
-Same root cause as the chargePointId problem above, one level down: the
-toolkit's rules operate over a whole station's events at once, and
-`connectorId` appears exactly once in the installed `dist/core/detection.js`
-— inside a comment. No rule groups by it. `STATUS_TRANSITION_VIOLATION` in
-particular treats connector A going `Available` while connector B (on the
-same station) goes `Finishing` as one invalid transition; on a real
-4-connector trace this produced 24 findings, and hand-filtering that trace
-down to a single connector reduced it to the 1 that was real.
+Same root cause as the chargePointId problem above, one level down: most of
+the toolkit's rules operate over a whole station's events at once. Since
+0.4.2 exactly two of them group by `connectorId` —
+`STATUS_TRANSITION_VIOLATION` and `METER_VALUE_ANOMALY`, both fixed upstream
+off the back of issue #188. Every other rule still folds all connectors into
+one series, so a multi-connector station's findings are read against a
+timeline that interleaves connectors with nothing to do with each other.
 
 `--split-by connector` (default `--split-by charge-point`, i.e. today's
 behavior, unchanged) further splits each charge point's records by
@@ -531,7 +530,7 @@ transaction-focused, not as a complete blow-by-blow of every wire message
 ### Dependency
 
 `analyze` requires `@ocpp-debugkit/toolkit`, pinned to an exact version
-(currently `0.4.0`, no `^` range) in `package.json` — this is a third-party
+(currently `0.4.2`, no `^` range) in `package.json` — this is a third-party
 analysis engine whose detection rules can change behavior between versions,
 so upgrades are a deliberate, coordinated change (re-verify the test matrix
 in `src/cli/analyze/__tests__/`), not an automatic dependency bump. The

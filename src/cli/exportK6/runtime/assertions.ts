@@ -55,8 +55,10 @@ function done(id: string, ok: boolean, detail: string): AssertionOutcome {
  * (extra keys in `actual` are ignored); arrays must be the same length and
  * are compared element-by-element -- pinning an array generally means the
  * whole array, not just a prefix.
+ *
+ * Kept in sync by src/scenario/__tests__/deepPartialMatch.test.ts.
  */
-function deepPartialMatch(subset: unknown, actual: unknown): boolean {
+export function deepPartialMatch(subset: unknown, actual: unknown): boolean {
   if (subset === actual) return true;
   if (
     typeof subset !== "object" ||

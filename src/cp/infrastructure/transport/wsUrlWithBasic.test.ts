@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  authorizationKeyToBasicPassword,
   buildOcppBasicAuthorization,
   buildOcppWebSocketConnectOptions,
   buildOcppWebSocketUrl,
@@ -79,6 +80,65 @@ describe("OCPP WebSocket Basic auth", () => {
     expect(opts.headers.Authorization).toBe(
       `Basic ${Buffer.from("CP001:001122").toString("base64")}`,
     );
+  });
+
+  it("decodes a 32–40 char hex AuthorizationKey before the Basic header (#260)", () => {
+    // 40 hex chars = 20 bytes -> "ABCDEFGHIJKLMNOPQRST"
+    const opts = buildOcppWebSocketConnectOptions({
+      baseUrl: "wss://csms.example.com/ocpp/",
+      chargePointId: "CP001",
+      basicAuth: null,
+      securityProfile: 2,
+      authorizationKey: "4142434445464748494a4b4c4d4e4f5051525354",
+      tls: { ca: "CA PEM" },
+    });
+
+    expect(opts.headers.Authorization).toBe(
+      `Basic ${Buffer.from("CP001:ABCDEFGHIJKLMNOPQRST").toString("base64")}`,
+    );
+    // The browser query-param path decodes identically (same resolved value).
+    expect(
+      buildOcppWebSocketUrl({
+        baseUrl: "wss://csms.example.com/ocpp/",
+        chargePointId: "CP001",
+        basicAuth: { username: "CP001", password: "ABCDEFGHIJKLMNOPQRST" },
+        securityProfile: 2,
+      }),
+    ).toBe("wss://csms.example.com/ocpp/CP001");
+  });
+
+  describe("authorizationKeyToBasicPassword (#260 / OCTT TC_085_CS)", () => {
+    it("decodes 32-char hex to 16 bytes", () => {
+      expect(
+        authorizationKeyToBasicPassword("4142434445464748494a4b4c4d4e4f50"),
+      ).toBe("ABCDEFGHIJKLMNOP");
+    });
+
+    it("decodes 40-char hex to 20 bytes", () => {
+      expect(
+        authorizationKeyToBasicPassword(
+          "4142434445464748494a4b4c4d4e4f5051525354",
+        ),
+      ).toBe("ABCDEFGHIJKLMNOPQRST");
+    });
+
+    it("passes a 16–20 char plaintext key through unchanged", () => {
+      expect(authorizationKeyToBasicPassword("plain-text-secret")).toBe(
+        "plain-text-secret",
+      );
+    });
+
+    it("passes a short hex key (< 32 chars) through unchanged", () => {
+      expect(authorizationKeyToBasicPassword("AABB")).toBe("AABB");
+      expect(authorizationKeyToBasicPassword("001122AABB")).toBe("001122AABB");
+    });
+
+    it("passes an out-of-range (30-char) or odd-length hex key through unchanged", () => {
+      const hex30 = "0".repeat(30);
+      expect(authorizationKeyToBasicPassword(hex30)).toBe(hex30);
+      const hex33 = "0".repeat(33);
+      expect(authorizationKeyToBasicPassword(hex33)).toBe(hex33);
+    });
   });
 
   it("derives profile 3 as wss mTLS and strips every Authorization header", () => {

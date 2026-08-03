@@ -362,6 +362,49 @@ describe("runScenario", () => {
     expect(sent?.payload).toEqual({});
   });
 
+  it("csmsCallTrigger with a payload condition skips non-matching calls (#240)", async () => {
+    const host = new FakeHost();
+    const events: Array<{ action: string; payload: Record<string, unknown> }> =
+      [
+        {
+          action: "ChangeConfiguration",
+          payload: { key: "Other", value: "1" },
+        },
+        {
+          action: "ChangeConfiguration",
+          payload: { key: "HeartbeatInterval", value: "30" },
+        },
+      ];
+    // host.waitForCsmsCall hands back the next queued event each call.
+    host.waitForCsmsCall = async () => {
+      const evt = events.shift();
+      if (!evt) throw new Error("no more queued CSMS calls");
+      return evt;
+    };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "csmsCallTrigger",
+          data: {
+            action: "ChangeConfiguration",
+            payload: { key: "HeartbeatInterval" },
+            timeout: 0,
+          },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(true);
+    expect(events.length).toBe(0); // both calls were consumed by the re-arm loop
+  });
+
   it("errors when the scenario has no start node", async () => {
     const host = new FakeHost();
     const result = await runScenario(

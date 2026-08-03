@@ -451,18 +451,24 @@ function evaluateOne(
         );
       }
       const description = `no unexpected: ${spec.actions.join(", ")}`;
-      const foundFrames = spec.actions
-        .map((action) => findCall(frames, "sent", action))
-        .filter((call): call is CallFrame => call !== undefined);
+      // Every sent CALL for a forbidden action, not just the first per action —
+      // a repeated offender must reference all of its frames (#240).
+      const forbidden = new Set(spec.actions);
+      const foundFrames = frames.filter(
+        (frame): frame is CallFrame =>
+          frame.kind === "call" &&
+          frame.direction === "sent" &&
+          forbidden.has(frame.action),
+      );
       return foundFrames.length === 0
         ? makeResult(spec, "passed", description)
         : makeResult(
             spec,
             "failed",
             description,
-            `unexpected sent CALL(s) found: ${foundFrames
-              .map((call) => call.action)
-              .join(", ")}`,
+            `unexpected sent CALL(s) found: ${[
+              ...new Set(foundFrames.map((call) => call.action)),
+            ].join(", ")}`,
             frameIndices(frames, ...foundFrames),
           );
     }

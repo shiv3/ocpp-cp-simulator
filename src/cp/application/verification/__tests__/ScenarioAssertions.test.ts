@@ -424,14 +424,15 @@ describe("frameRefs (#240)", () => {
     expect(r.frameRefs).toEqual([2, 6]);
   });
 
-  it("no_unexpected failure references each unexpected frame", () => {
+  it("no_unexpected failure references EVERY unexpected frame, incl. repeats", () => {
+    // buildTranscript sends StatusNotification twice (seq 2 and 5).
     const r = evalOne({
       id: "g",
       type: "no_unexpected",
       actions: ["Reset", "StatusNotification"],
     });
     expect(r.status).toBe("failed");
-    expect(r.frameRefs).toEqual([2]);
+    expect(r.frameRefs).toEqual([2, 5]);
   });
 });
 

@@ -405,6 +405,33 @@ describe("runScenario", () => {
     expect(events.length).toBe(0); // both calls were consumed by the re-arm loop
   });
 
+  it("csmsCallTrigger rejects a malformed payload condition like the CP runtime", async () => {
+    const host = new FakeHost();
+    host.waitForCsmsCall = async () => {
+      throw new Error("must not wait — the malformed condition fails first");
+    };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "csmsCallTrigger",
+          data: { action: "Reset", payload: "Hard", timeout: 0 },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(
+      /csmsCallTrigger\(Reset\): payload condition must be a JSON object/,
+    );
+  });
+
   it("errors when the scenario has no start node", async () => {
     const host = new FakeHost();
     const result = await runScenario(

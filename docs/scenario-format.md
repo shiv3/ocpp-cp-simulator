@@ -193,10 +193,11 @@ point's WebSocket reaches `event` (`"connected"` or `"disconnected"`).
   waiting for a future transition.
 - **Survives disconnect**: unlike every other wait node, `connectionTrigger`
   does **not** fail when the WebSocket drops — outlasting a disconnected span
-  is the point. A node with `event: "connected"` that starts while connected,
-  then sees the socket drop and reconnect, resolves on the reconnect rather
-  than erroring on the drop. Only the optional `timeout` (seconds; `0` /
-  absent = wait forever) can end the wait early, with a timeout error.
+  is the point. A node with `event: "connected"` that starts while
+  disconnected — say, right after a `"disconnected"` wait resolved — parks
+  across the disconnected span and resolves on the reconnect rather than
+  erroring. Only the optional `timeout` (seconds; `0` / absent = wait
+  forever) can end the wait early, with a timeout error.
 - This node only _observes_ the connection state — it never causes a
   disconnect itself. Simulating network drops is out of scope here (see
   issue #239).

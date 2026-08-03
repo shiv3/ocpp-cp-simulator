@@ -216,6 +216,11 @@ export interface CsmsCallTriggerNodeData extends BaseNodeData {
   action: string;
   /** Optional timeout in seconds. 0 (default) = wait forever. */
   timeout?: number;
+  /** #240: optional payload condition. The wait only releases on an
+   *  incoming CALL of `action` whose payload deep-partially matches this
+   *  subset (see src/scenario/deepPartialMatch.ts). Non-matching frames
+   *  are not consumed — the node keeps waiting. Absent = any payload. */
+  payload?: Record<string, unknown>;
 }
 
 /**
@@ -730,6 +735,7 @@ export interface ScenarioExecutorCallbacks {
   onWaitForCsmsCall?: (
     action: string,
     timeout?: number,
+    payload?: Record<string, unknown>,
   ) => Promise<{ action: string; payload: unknown }>;
   onWaitForStatus?: (
     targetStatus: OCPPStatus,

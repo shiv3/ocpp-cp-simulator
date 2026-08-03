@@ -2,6 +2,7 @@ import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Connector } from "../../domain/connector/Connector";
 import { OCPPStatus, ReservationStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../shared/Logger";
+import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 import type {
   ScenarioExecutionContext,
   ScenarioExecutorCallbacks,
@@ -291,6 +292,7 @@ const waitForCsmsCall = (
   chargePoint: ChargePoint,
   action: string,
   timeout?: number,
+  payload?: Record<string, unknown>,
 ): CancellableWait<{ action: string; payload: unknown }> => {
   // Fail-fast if this transport can never receive CSMS-initiated calls.
   if (!chargePoint.canReceiveCsmsCall(action)) {
@@ -323,6 +325,9 @@ const waitForCsmsCall = (
 
       const handler = (data: { action: string; payload: unknown }) => {
         if (data.action !== action) return;
+        // #240: a right-action frame whose payload doesn't match the
+        // condition is NOT consumed — keep listening.
+        if (payload && !deepPartialMatch(payload, data.payload)) return;
         cleanup();
         resolve(data);
       };
@@ -339,7 +344,11 @@ const waitForCsmsCall = (
         timeoutId = setTimeout(() => {
           cleanup();
           reject(
-            new Error(`Timeout waiting for CSMS call ${action} (${timeout}s)`),
+            new Error(
+              `Timeout waiting for CSMS call ${action}${
+                payload ? " matching payload" : ""
+              } (${timeout}s)`,
+            ),
           );
         }, timeout * 1000);
       }
@@ -575,8 +584,10 @@ export const createScenarioExecutorCallbacks = (
         waitForRemoteStop(chargePoint, connector, timeout),
       );
     },
-    onWaitForCsmsCall: (action, timeout) => {
-      return cancellablePromise(waitForCsmsCall(chargePoint, action, timeout));
+    onWaitForCsmsCall: (action, timeout, payload) => {
+      return cancellablePromise(
+        waitForCsmsCall(chargePoint, action, timeout, payload),
+      );
     },
     onWaitForStatus: async (targetStatus, timeout) =>
       waitForStatus(connector, targetStatus, timeout),

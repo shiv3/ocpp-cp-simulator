@@ -1722,11 +1722,25 @@ export class ScenarioExecutor {
   ): Promise<void> {
     if (!this.callbacks.onWaitForCsmsCall) return;
 
+    // #240: fail fast on a malformed hand-authored payload condition
+    // (same convention as the csmsCallTrigger transport fail-fast).
+    if (
+      data.payload !== undefined &&
+      (typeof data.payload !== "object" ||
+        data.payload === null ||
+        Array.isArray(data.payload))
+    ) {
+      throw new Error(
+        `csmsCallTrigger(${data.action}): payload condition must be a JSON object`,
+      );
+    }
+
     const timeout = Math.max(0, data.timeout || 0);
     if (!timeout || timeout === 0) {
       const waitPromise = this.callbacks.onWaitForCsmsCall(
         data.action,
         timeout,
+        data.payload,
       );
       try {
         await this.waitWithOptionalForceSkip(
@@ -1761,6 +1775,7 @@ export class ScenarioExecutor {
       const waitPromise = this.callbacks.onWaitForCsmsCall(
         data.action,
         timeout,
+        data.payload,
       );
       try {
         await this.waitWithOptionalForceSkip(

@@ -143,6 +143,21 @@ describe("deriveExpectation (#179)", () => {
     expect(exp?.constraints).toBeUndefined();
   });
 
+  it("derives a connection expectation for connectionTrigger (#240)", () => {
+    const node = {
+      id: "n-conn",
+      type: ScenarioNodeType.CONNECTION_TRIGGER,
+      position: { x: 0, y: 0 },
+      data: { label: "wait", event: "disconnected", timeout: 10 },
+    } as ScenarioNode;
+    expect(deriveExpectation(node, 1)).toEqual({
+      type: "connection",
+      event: "disconnected",
+      timeoutMs: 10000,
+      nodeId: "n-conn",
+    });
+  });
+
   it.each([
     ScenarioNodeType.STATUS_CHANGE,
     ScenarioNodeType.TRANSACTION,

@@ -1,5 +1,6 @@
 import {
   ScenarioNodeType,
+  type ConnectionTriggerNodeData,
   type CsmsCallTriggerNodeData,
   type ScenarioExpectation,
   type ScenarioNode,
@@ -101,6 +102,17 @@ export function deriveExpectation(
         timeoutMs: timeoutMs((node.data as { timeout?: number }).timeout),
         nodeId: node.id,
       };
+
+    case ScenarioNodeType.CONNECTION_TRIGGER: {
+      const data = node.data as ConnectionTriggerNodeData;
+      // Connection state is CP-scoped: no connectorId constraints.
+      return {
+        type: "connection",
+        event: data.event === "connected" ? "connected" : "disconnected",
+        timeoutMs: timeoutMs(data.timeout),
+        nodeId: node.id,
+      };
+    }
 
     default:
       return null;

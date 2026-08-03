@@ -77,6 +77,10 @@ export enum ScenarioNodeType {
   // signature algorithm requirements, hidden configuration keys). Used to
   // emulate certification-tool behaviors (e.g., OCTT strictness).
   CERT_QUIRKS = "certQuirks",
+  // Issue #240: park until the WebSocket connects or disconnects.
+  // Level-triggered (already in the target state → resolve immediately)
+  // and observe-only — causing disconnects is network simulation (#239).
+  CONNECTION_TRIGGER = "connectionTrigger",
 }
 
 /**
@@ -390,6 +394,20 @@ export interface DataTransferNodeData extends BaseNodeData {
 }
 
 /**
+ * Connection Trigger Node Data — waits for the charge point's WebSocket to
+ * reach `event`. Level-triggered like statusTrigger: if the connection is
+ * already in the target state the node resolves immediately. Unlike every
+ * other wait, this node does NOT fail on disconnect — surviving the
+ * disconnected span is its purpose (a "connected" wait spanning a reconnect
+ * is the canonical use). Issue #240.
+ */
+export interface ConnectionTriggerNodeData extends BaseNodeData {
+  event: "connected" | "disconnected";
+  /** Optional timeout in seconds. 0 (default) = wait forever. */
+  timeout?: number;
+}
+
+/**
  * Union type for all node data
  */
 export type ScenarioNodeData =
@@ -414,6 +432,7 @@ export type ScenarioNodeData =
   | ConfigSetNodeData
   | DataTransferNodeData
   | StartNodeData
+  | ConnectionTriggerNodeData
   | BaseNodeData;
 
 /**
@@ -619,13 +638,15 @@ export function isScenarioDefinitionShape(
  */
 export interface ScenarioExpectation {
   /** What kind of condition the parked node awaits. */
-  type: "ocpp_call" | "connector_status" | "reservation";
+  type: "ocpp_call" | "connector_status" | "reservation" | "connection";
   /** For ocpp_call / reservation: who must send the awaited CALL. */
   direction?: "CSMS_TO_CP" | "CP_TO_CSMS";
   /** For ocpp_call / reservation: the OCPP action awaited. */
   action?: string;
   /** For connector_status: the status the connector must reach. */
   targetStatus?: string;
+  /** For connection: the WebSocket state transition awaited (#240). */
+  event?: "connected" | "disconnected";
   /** Partial-match constraints on the awaited event (e.g. connectorId).
    *  Superset-matched, never exhaustive. */
   constraints?: Record<string, unknown>;
@@ -737,6 +758,12 @@ export interface ScenarioExecutorCallbacks {
     timeout?: number,
     payload?: Record<string, unknown>,
   ) => Promise<{ action: string; payload: unknown }>;
+  /** Issue #240: park until the WebSocket reaches `event`. Level-triggered;
+   *  never rejects on disconnect (only on timeout). */
+  onWaitForConnection?: (
+    event: "connected" | "disconnected",
+    timeout?: number,
+  ) => Promise<void>;
   onWaitForStatus?: (
     targetStatus: OCPPStatus,
     timeout?: number,

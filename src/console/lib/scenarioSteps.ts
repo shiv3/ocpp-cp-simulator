@@ -4,6 +4,7 @@ import {
   type CancelReservationNodeData,
   type CertQuirksNodeData,
   type ConfigSetNodeData,
+  type ConnectionTriggerNodeData,
   type ConnectorPlugNodeData,
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
@@ -467,6 +468,17 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           mode: "set",
         } satisfies CertQuirksNodeData,
       };
+    case ScenarioNodeType.CONNECTION_TRIGGER:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Wait for Disconnect",
+          event: "disconnected",
+          timeout: 0,
+        } satisfies ConnectionTriggerNodeData,
+      };
     case ScenarioNodeType.START:
       return {
         id,
@@ -575,6 +587,10 @@ export function stepSummary(node: ScenarioNode): string {
       const d = node.data as ReservationTriggerNodeData;
       return `wait ReserveNow${d.timeout ? ` · ${d.timeout}s` : ""}`;
     }
+    case ScenarioNodeType.CONNECTION_TRIGGER: {
+      const d = node.data as ConnectionTriggerNodeData;
+      return `wait ${d.event}${d.timeout ? ` · ${d.timeout}s` : ""}`;
+    }
     case ScenarioNodeType.RESERVE_NOW: {
       const d = node.data as ReserveNowNodeData;
       return `${d.idTag} · ${d.expiryMinutes}min`;
@@ -660,6 +676,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
       ScenarioNodeType.STATUS_TRIGGER,
       ScenarioNodeType.CSMS_CALL_TRIGGER,
       ScenarioNodeType.RESERVATION_TRIGGER,
+      ScenarioNodeType.CONNECTION_TRIGGER,
     ],
   },
   {

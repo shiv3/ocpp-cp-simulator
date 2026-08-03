@@ -27,6 +27,7 @@ import {
   CertQuirksNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
+  ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
   ScenarioExpectation,
@@ -677,6 +678,13 @@ export class ScenarioExecutor {
 
       case ScenarioNodeType.DATA_TRANSFER:
         await this.executeDataTransfer(node.data as DataTransferNodeData);
+        break;
+
+      case ScenarioNodeType.CONNECTION_TRIGGER:
+        await this.executeConnectionTrigger(
+          node.id,
+          node.data as ConnectionTriggerNodeData,
+        );
         break;
 
       default:
@@ -1712,45 +1720,32 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Issue #110: park the scenario until the CSMS sends `data.action`.
-   * Mirror of executeRemoteStopTrigger; the CP core handler still runs,
-   * we only synchronize on arrival and log the payload.
+   * Run a trigger wait with the 100ms remaining-time progress events that
+   * timeout-bearing waiting nodes surface. Extracted from
+   * executeCsmsCallTrigger (#240) so connectionTrigger shares it instead of
+   * copying the interval bookkeeping a third time.
    */
-  private async executeCsmsCallTrigger(
+  private async runTriggerWait(
     nodeId: string,
-    data: CsmsCallTriggerNodeData,
+    timeoutSeconds: number,
+    startWait: () => Promise<unknown>,
+    onResolved?: (value: unknown) => void,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForCsmsCall) return;
+    const timeout = Math.max(0, timeoutSeconds || 0);
 
-    // #240: fail fast on a malformed hand-authored payload condition
-    // (same convention as the csmsCallTrigger transport fail-fast).
-    if (
-      data.payload !== undefined &&
-      (typeof data.payload !== "object" ||
-        data.payload === null ||
-        Array.isArray(data.payload))
-    ) {
-      throw new Error(
-        `csmsCallTrigger(${data.action}): payload condition must be a JSON object`,
-      );
-    }
-
-    const timeout = Math.max(0, data.timeout || 0);
-    if (!timeout || timeout === 0) {
-      const waitPromise = this.callbacks.onWaitForCsmsCall(
-        data.action,
-        timeout,
-        data.payload,
-      );
+    const awaitOnce = async () => {
+      const waitPromise = startWait();
       try {
         await this.waitWithOptionalForceSkip(
-          waitPromise.then((res) => {
-            this.callbacks.log?.(`CSMS call received: ${res.action}`, "info");
-          }),
+          onResolved ? waitPromise.then(onResolved) : waitPromise,
         );
       } finally {
         cancelIfCancellable(waitPromise);
       }
+    };
+
+    if (!timeout) {
+      await awaitOnce();
       return;
     }
 
@@ -1772,20 +1767,7 @@ export class ScenarioExecutor {
     }, 100);
 
     try {
-      const waitPromise = this.callbacks.onWaitForCsmsCall(
-        data.action,
-        timeout,
-        data.payload,
-      );
-      try {
-        await this.waitWithOptionalForceSkip(
-          waitPromise.then((res) => {
-            this.callbacks.log?.(`CSMS call received: ${res.action}`, "info");
-          }),
-        );
-      } finally {
-        cancelIfCancellable(waitPromise);
-      }
+      await awaitOnce();
     } finally {
       clearInterval(progressInterval);
       this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
@@ -1796,5 +1778,54 @@ export class ScenarioExecutor {
         total: timeout,
       });
     }
+  }
+
+  /**
+   * Issue #110: park the scenario until the CSMS sends `data.action`.
+   * Mirror of executeRemoteStopTrigger; the CP core handler still runs,
+   * we only synchronize on arrival and log the payload.
+   */
+  private async executeCsmsCallTrigger(
+    nodeId: string,
+    data: CsmsCallTriggerNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onWaitForCsmsCall) return;
+    if (
+      data.payload !== undefined &&
+      (typeof data.payload !== "object" ||
+        data.payload === null ||
+        Array.isArray(data.payload))
+    ) {
+      throw new Error(
+        `csmsCallTrigger(${data.action}): payload condition must be a JSON object`,
+      );
+    }
+    const timeout = Math.max(0, data.timeout || 0);
+    await this.runTriggerWait(
+      nodeId,
+      timeout,
+      () =>
+        this.callbacks.onWaitForCsmsCall!(data.action, timeout, data.payload),
+      (res) =>
+        this.callbacks.log?.(
+          `CSMS call received: ${(res as { action: string }).action}`,
+          "info",
+        ),
+    );
+  }
+
+  /** Issue #240: park until the WebSocket reaches data.event. */
+  private async executeConnectionTrigger(
+    nodeId: string,
+    data: ConnectionTriggerNodeData,
+  ): Promise<void> {
+    if (!this.callbacks.onWaitForConnection) return;
+    const timeout = Math.max(0, data.timeout || 0);
+    await this.runTriggerWait(
+      nodeId,
+      timeout,
+      () => this.callbacks.onWaitForConnection!(data.event, timeout),
+      () => this.callbacks.log?.(`Connection event: ${data.event}`, "info"),
+    );
   }
 }

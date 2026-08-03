@@ -362,6 +362,80 @@ describe("evaluateAssertions", () => {
   });
 });
 
+// #240: each result points at the transcript frames (capture-order `seq`) it
+// matched, so a failed assertion links to the relevant messages. Indices below
+// follow buildTranscript()'s documented order (0=BootNotification sent, ...,
+// 8=MeterValues sent).
+describe("frameRefs (#240)", () => {
+  it("ocpp_sent pass references the matched sent frame", () => {
+    const r = evalOne({
+      id: "a",
+      type: "ocpp_sent",
+      action: "BootNotification",
+    });
+    expect(r.status).toBe("passed");
+    expect(r.frameRefs).toEqual([0]);
+  });
+
+  it("ocpp_received pass references the received frame", () => {
+    const r = evalOne({
+      id: "b",
+      type: "ocpp_received",
+      action: "RemoteStartTransaction",
+    });
+    expect(r.frameRefs).toEqual([3]);
+  });
+
+  it("a 'never sent' miss carries no frameRefs", () => {
+    const r = evalOne({ id: "c", type: "ocpp_sent", action: "Reset" });
+    expect(r.status).toBe("failed");
+    expect(r.frameRefs).toBeUndefined();
+  });
+
+  it("ocpp_absent failure references the offending frame", () => {
+    const r = evalOne({
+      id: "d",
+      type: "ocpp_absent",
+      action: "StatusNotification",
+    });
+    expect(r.status).toBe("failed");
+    expect(r.frameRefs).toEqual([2]);
+  });
+
+  it("response_status references both the call and its response", () => {
+    const r = evalOne({
+      id: "e",
+      type: "response_status",
+      action: "RemoteStartTransaction",
+      status: "Accepted",
+    });
+    expect(r.status).toBe("passed");
+    expect(r.frameRefs).toEqual([3, 4]);
+  });
+
+  it("message_order references the before and after frames", () => {
+    const r = evalOne({
+      id: "f",
+      type: "message_order",
+      before: { action: "StatusNotification" },
+      after: { action: "StartTransaction" },
+    });
+    expect(r.status).toBe("passed");
+    expect(r.frameRefs).toEqual([2, 6]);
+  });
+
+  it("no_unexpected failure references EVERY unexpected frame, incl. repeats", () => {
+    // buildTranscript sends StatusNotification twice (seq 2 and 5).
+    const r = evalOne({
+      id: "g",
+      type: "no_unexpected",
+      actions: ["Reset", "StatusNotification"],
+    });
+    expect(r.status).toBe("failed");
+    expect(r.frameRefs).toEqual([2, 5]);
+  });
+});
+
 describe("computeVerdictSummary", () => {
   const makePassed = (
     severity: AssertionSeverity = "failure",

@@ -16,6 +16,7 @@ import {
   findAllCalls,
   findCall,
   findResponseFor,
+  type CallFrame,
   type Direction,
   type Frame,
 } from "./ocpp";
@@ -80,6 +81,7 @@ function makeResult(
   status: AssertionStatus,
   defaultDescription: string,
   detail?: string,
+  frameRefs?: number[],
 ): AssertionResult {
   return {
     id: spec.id,
@@ -88,7 +90,26 @@ function makeResult(
     description: spec.description ?? defaultDescription,
     detail,
     severity: spec.severity ?? "failure",
+    // #240: only attach when a frame is actually relevant, so a "never sent"
+    // miss or a malformed spec stays free of an empty array.
+    ...(frameRefs && frameRefs.length > 0 ? { frameRefs } : {}),
   };
+}
+
+/** Capture-order indices (transcript `seq`) of the given frames, skipping any
+ *  that aren't present. #240: lets an assertion result point at the exact
+ *  transcript entries it matched. */
+function frameIndices(
+  frames: readonly Frame[],
+  ...found: ReadonlyArray<Frame | null | undefined>
+): number[] {
+  const out: number[] = [];
+  for (const frame of found) {
+    if (!frame) continue;
+    const i = frames.indexOf(frame);
+    if (i >= 0) out.push(i);
+  }
+  return out;
 }
 
 /** Shared implementation for `response_status` / `idtag_info_status`:
@@ -124,14 +145,17 @@ function evaluateResponseStatus(
       "failed",
       description,
       `no response frame found for uniqueId=${call.uniqueId} (${action})`,
+      frameIndices(frames, call),
     );
   }
+  const refs = frameIndices(frames, call, response);
   if (response.kind === "callerror") {
     return makeResult(
       spec,
       "failed",
       description,
       `expected CALLRESULT, got CALLERROR ${response.errorCode}: ${response.errorDescription}`,
+      refs,
     );
   }
 
@@ -141,13 +165,14 @@ function evaluateResponseStatus(
       : (response.payload as { idTagInfo?: { status?: unknown } } | null)
           ?.idTagInfo?.status;
   if (actualStatus === expectedStatus) {
-    return makeResult(spec, "passed", description);
+    return makeResult(spec, "passed", description, undefined, refs);
   }
   return makeResult(
     spec,
     "failed",
     description,
     `expected ${statusPath}=${expectedStatus}, got ${statusPath}=${String(actualStatus)} (uniqueId=${call.uniqueId})`,
+    refs,
   );
 }
 
@@ -174,7 +199,13 @@ function evaluateOne(
       const description = `${spec.action}.req sent`;
       const call = findCall(frames, "sent", spec.action);
       return call
-        ? makeResult(spec, "passed", description)
+        ? makeResult(
+            spec,
+            "passed",
+            description,
+            undefined,
+            frameIndices(frames, call),
+          )
         : makeResult(
             spec,
             "failed",
@@ -195,7 +226,13 @@ function evaluateOne(
       const description = `${spec.action}.req received`;
       const call = findCall(frames, "received", spec.action);
       return call
-        ? makeResult(spec, "passed", description)
+        ? makeResult(
+            spec,
+            "passed",
+            description,
+            undefined,
+            frameIndices(frames, call),
+          )
         : makeResult(
             spec,
             "failed",
@@ -222,6 +259,7 @@ function evaluateOne(
             "failed",
             description,
             `unexpected ${direction} CALL found: ${call.raw}`,
+            frameIndices(frames, call),
           )
         : makeResult(spec, "passed", description);
     }
@@ -287,13 +325,15 @@ function evaluateOne(
           `no ${direction} CALL found for action=${spec.action} (occurrence ${occurrence})`,
         );
       }
+      const payloadRefs = frameIndices(frames, call);
       return deepPartialMatch(spec.payload, call.payload)
-        ? makeResult(spec, "passed", description)
+        ? makeResult(spec, "passed", description, undefined, payloadRefs)
         : makeResult(
             spec,
             "failed",
             description,
             `payload for ${spec.action} (uniqueId=${call.uniqueId}) did not match expected subset`,
+            payloadRefs,
           );
     }
 
@@ -318,13 +358,15 @@ function evaluateOne(
           `one or both frames not found (before=${before.action} found=${beforeIndex !== -1}, after=${after.action} found=${afterIndex !== -1})`,
         );
       }
+      const orderRefs = [beforeIndex, afterIndex];
       return beforeIndex < afterIndex
-        ? makeResult(spec, "passed", description)
+        ? makeResult(spec, "passed", description, undefined, orderRefs)
         : makeResult(
             spec,
             "failed",
             description,
             `before (frame ${beforeIndex}) did not precede after (frame ${afterIndex})`,
+            orderRefs,
           );
     }
 
@@ -351,16 +393,20 @@ function evaluateOne(
           `reference frame not found: ${before.action}`,
         );
       }
-      const found = frames
+      const afterRelative = frames
         .slice(lastBeforeIndex + 1)
-        .some((f) => matchesFrameRef(f, after));
-      return found
-        ? makeResult(spec, "passed", description)
+        .findIndex((f) => matchesFrameRef(f, after));
+      return afterRelative !== -1
+        ? makeResult(spec, "passed", description, undefined, [
+            lastBeforeIndex,
+            lastBeforeIndex + 1 + afterRelative,
+          ])
         : makeResult(
             spec,
             "failed",
             description,
             `${after.action} not found after frame ${lastBeforeIndex} (${before.action})`,
+            [lastBeforeIndex],
           );
     }
 
@@ -374,13 +420,19 @@ function evaluateOne(
         );
       }
       const description = `StatusNotification -> ${spec.targetStatus}`;
-      const matched = findAllCalls(frames, "sent", "StatusNotification").some(
+      const matched = findAllCalls(frames, "sent", "StatusNotification").find(
         (f) =>
           (f.payload as { status?: unknown } | null)?.status ===
           spec.targetStatus,
       );
       return matched
-        ? makeResult(spec, "passed", description)
+        ? makeResult(
+            spec,
+            "passed",
+            description,
+            undefined,
+            frameIndices(frames, matched),
+          )
         : makeResult(
             spec,
             "failed",
@@ -399,16 +451,25 @@ function evaluateOne(
         );
       }
       const description = `no unexpected: ${spec.actions.join(", ")}`;
-      const found = spec.actions.filter((action) =>
-        findCall(frames, "sent", action),
+      // Every sent CALL for a forbidden action, not just the first per action —
+      // a repeated offender must reference all of its frames (#240).
+      const forbidden = new Set(spec.actions);
+      const foundFrames = frames.filter(
+        (frame): frame is CallFrame =>
+          frame.kind === "call" &&
+          frame.direction === "sent" &&
+          forbidden.has(frame.action),
       );
-      return found.length === 0
+      return foundFrames.length === 0
         ? makeResult(spec, "passed", description)
         : makeResult(
             spec,
             "failed",
             description,
-            `unexpected sent CALL(s) found: ${found.join(", ")}`,
+            `unexpected sent CALL(s) found: ${[
+              ...new Set(foundFrames.map((call) => call.action)),
+            ].join(", ")}`,
+            frameIndices(frames, ...foundFrames),
           );
     }
 

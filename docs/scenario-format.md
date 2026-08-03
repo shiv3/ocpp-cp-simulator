@@ -190,6 +190,8 @@ Each assertion optionally carries a `severity` field (`"failure"` or `"warning"`
 
 The run report carries both axes alongside the overall `verdict`: `conformanceVerdict` (`PASS`/`FAIL`/`BLOCKED`/`SKIPPED`, from failure-severity assertions only) and `compatibilityVerdict` (`PASS`/`WARNING`/`FAIL`/`SKIPPED`, from warning-severity assertions only), plus the effective `strict` flag.
 
+Each entry in the report's `assertions` array also carries `frameRefs` (#240): the `seq` (capture-order index) of the transcript frame(s) the assertion is about — the frame that satisfied it on pass, or the offending frame on failure (e.g. the unexpected CALL for `ocpp_absent`, the call and its response for `response_status`). Join `frameRefs` against the report's `transcript` entries (which share the same `seq`) to point a failed assertion straight at the relevant messages. It is omitted when no frame is relevant (a "never sent" miss, or a malformed spec).
+
 **Example run report**:
 
 ```json

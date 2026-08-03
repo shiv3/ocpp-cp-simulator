@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.0)",
-  "$comment": "Scenario file format v1.0 (issue #214). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.1)",
+  "$comment": "Scenario file format v1.1 (issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Scenario schema version, e.g. \"1.0\". Optional: absent on files predating issue #214."
+      "description": "Scenario schema version, e.g. \"1.0\" or \"1.1\". Optional: absent on files predating issue #214. Not constrained to a single value — older schemaVersion strings (e.g. \"1.0\") remain valid since 1.x is purely additive."
     },
     "strictCompatibility": {
       "type": "boolean",
@@ -213,7 +213,8 @@
             "csmsCallTrigger",
             "responseOverride",
             "inboundPolicy",
-            "certQuirks"
+            "certQuirks",
+            "connectionTrigger"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -351,6 +352,24 @@
                 "required": ["action"],
                 "properties": {
                   "action": { "type": "string" },
+                  "timeout": { "type": "number" },
+                  "payload": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "connectionTrigger" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "required": ["event"],
+                "properties": {
+                  "event": {
+                    "type": "string",
+                    "enum": ["connected", "disconnected"]
+                  },
                   "timeout": { "type": "number" }
                 }
               }

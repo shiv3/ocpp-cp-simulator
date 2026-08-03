@@ -1,6 +1,36 @@
 import { describe, it, expect } from "vitest";
 import { validateScenarioSchema } from "../scenarioSchemaValidator";
 
+/** Minimal valid scenario wrapper for #240 wait-node cases; if the file
+ *  already has an equivalent builder, reuse that instead. */
+function waitNodeScenario(nodes: unknown[]): unknown {
+  return {
+    schemaVersion: "1.1",
+    id: "schema-240",
+    name: "schema 240",
+    targetType: "connector",
+    targetId: 1,
+    nodes: [
+      {
+        id: "start-1",
+        type: "start",
+        position: { x: 0, y: 0 },
+        data: { label: "S" },
+      },
+      ...nodes,
+      {
+        id: "end-1",
+        type: "end",
+        position: { x: 0, y: 9 },
+        data: { label: "E" },
+      },
+    ],
+    edges: [],
+    createdAt: "2026-08-03T00:00:00Z",
+    updatedAt: "2026-08-03T00:00:00Z",
+  };
+}
+
 function minimalScenario(): Record<string, unknown> {
   return {
     id: "s1",
@@ -120,5 +150,54 @@ describe("validateScenarioSchema", () => {
     const result = validateScenarioSchema(scenario);
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it("accepts a connectionTrigger node and a csmsCallTrigger payload condition (schema 1.1)", () => {
+    const result = validateScenarioSchema(
+      waitNodeScenario([
+        {
+          id: "n1",
+          type: "connectionTrigger",
+          position: { x: 0, y: 1 },
+          data: { label: "w", event: "disconnected", timeout: 0 },
+        },
+        {
+          id: "n2",
+          type: "csmsCallTrigger",
+          position: { x: 0, y: 2 },
+          data: { label: "w2", action: "Reset", payload: { type: "Hard" } },
+        },
+      ]),
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects a connectionTrigger with an unknown event", () => {
+    const result = validateScenarioSchema(
+      waitNodeScenario([
+        {
+          id: "n1",
+          type: "connectionTrigger",
+          position: { x: 0, y: 1 },
+          data: { label: "w", event: "rebooted" },
+        },
+      ]),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects a non-object csmsCallTrigger payload condition", () => {
+    const result = validateScenarioSchema(
+      waitNodeScenario([
+        {
+          id: "n1",
+          type: "csmsCallTrigger",
+          position: { x: 0, y: 1 },
+          data: { label: "w", action: "Reset", payload: "Hard" },
+        },
+      ]),
+    );
+    expect(result.valid).toBe(false);
   });
 });

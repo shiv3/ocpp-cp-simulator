@@ -460,7 +460,7 @@ export interface ScenarioTrigger {
  * See `schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.0";
+export const SCENARIO_SCHEMA_VERSION = "1.1";
 
 /**
  * Scenario definition

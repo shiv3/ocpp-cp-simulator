@@ -22,7 +22,7 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { isSoapVersion, OCPP_1_5 } from "../types/OcppVersion";
+import { isSoapVersion } from "../types/OcppVersion";
 import {
   SOAP_OPERATION_NAMES,
   soapDialectForVersion,
@@ -531,9 +531,11 @@ export class ChargePoint {
    *
    * WebSocket versions can receive all CSMS calls. SOAP versions depend on:
    * - Send-only (no soapCallbackUrl): cannot receive any calls (no server).
-   * - Server-hosted (with callback): depends on the version's dialect:
-   *   - OCPP-1.5: only Reset can be received (its server registry is Reset-only).
-   *   - OCPP-1.2 / 1.6S: check if the action exists in the dialect with target "cp".
+   * - Server-hosted (with callback): the action must be dispatchable in the
+   *   version's dialect — declared with target "cp", or a bidirectional op
+   *   (DataTransfer). Mirrors OCPPSoapServer's dispatch rule so the guard
+   *   matches what the server actually answers (issue #257: 1.5 now dispatches
+   *   its full CS→CP surface, not just Reset).
    */
   canReceiveCsmsCall(action: string): boolean {
     // WebSocket versions can receive all CSMS calls
@@ -547,19 +549,14 @@ export class ChargePoint {
       return false;
     }
 
-    // SOAP with callback: consult the dialect's operationMetadata.
-    // Special case: OCPP-1.5 server registry is Reset-only.
-    if (this._ocppVersion === OCPP_1_5) {
-      return action === "Reset";
-    }
-
-    // For OCPP-1.2 / 1.6S: check if the action exists in the dialect with target "cp".
+    // SOAP with callback: the action must be dispatchable in this dialect —
+    // target "cp" or a bidirectional op — matching OCPPSoapServer dispatch.
     if (!(SOAP_OPERATION_NAMES as readonly string[]).includes(action)) {
       return false;
     }
     const dialect = soapDialectForVersion(this._ocppVersion);
     const metadata = dialect.operationMetadata[action as SoapOperation];
-    return metadata?.target === "cp";
+    return metadata?.target === "cp" || metadata?.bidirectional === true;
   }
 
   get connectorNumber(): number {

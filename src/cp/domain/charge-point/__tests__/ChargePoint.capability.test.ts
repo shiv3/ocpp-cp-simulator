@@ -88,7 +88,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
       expect(cp.canReceiveCsmsCall("ChangeAvailability")).toBe(false);
     });
 
-    it("OCPP-1.5 with callback can only receive Reset", () => {
+    it("OCPP-1.5 with callback can receive the full 1.5 CS→CP surface (#257)", () => {
       const cp = new ChargePoint(
         "test-cp-1.5-callback",
         bootNotification,
@@ -106,14 +106,20 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
         },
       );
 
-      // OCPP-1.5 server registry is Reset-only
+      // After #258 the 1.5 SOAP server dispatches its whole CS→CP surface,
+      // not just Reset — so the scenario triggers are no longer capped.
       expect(cp.canReceiveCsmsCall("Reset")).toBe(true);
+      expect(cp.canReceiveCsmsCall("RemoteStartTransaction")).toBe(true);
+      expect(cp.canReceiveCsmsCall("RemoteStopTransaction")).toBe(true);
+      expect(cp.canReceiveCsmsCall("ReserveNow")).toBe(true);
+      expect(cp.canReceiveCsmsCall("CancelReservation")).toBe(true);
+      expect(cp.canReceiveCsmsCall("ChangeAvailability")).toBe(true);
+      expect(cp.canReceiveCsmsCall("GetConfiguration")).toBe(true);
+      // DataTransfer is bidirectional but dispatchable inbound in 1.5.
+      expect(cp.canReceiveCsmsCall("DataTransfer")).toBe(true);
 
-      // Other CS→CP operations are NOT available in 1.5's server
-      expect(cp.canReceiveCsmsCall("RemoteStartTransaction")).toBe(false);
-      expect(cp.canReceiveCsmsCall("RemoteStopTransaction")).toBe(false);
-      expect(cp.canReceiveCsmsCall("ReserveNow")).toBe(false);
-      expect(cp.canReceiveCsmsCall("ChangeAvailability")).toBe(false);
+      // An action outside the 1.5 dialect stays false (1.6-only op).
+      expect(cp.canReceiveCsmsCall("TriggerMessage")).toBe(false);
     });
   });
 
@@ -225,6 +231,8 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
       expect(cp.canReceiveCsmsCall("ClearChargingProfile")).toBe(true);
       expect(cp.canReceiveCsmsCall("TriggerMessage")).toBe(true);
       expect(cp.canReceiveCsmsCall("GetCompositeSchedule")).toBe(true);
+      // DataTransfer is bidirectional but dispatchable inbound (#257).
+      expect(cp.canReceiveCsmsCall("DataTransfer")).toBe(true);
     });
   });
 

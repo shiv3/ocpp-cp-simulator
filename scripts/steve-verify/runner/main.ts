@@ -23,6 +23,7 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { AssertRecorder } from "./assert";
+import { BOOT_ACCEPTED_PATTERN } from "./boot-gate";
 import { printCapabilityProbe } from "./capability-probe";
 import { parseLog } from "./ocpp";
 import { defaultSimConfig, startSim } from "./sim";
@@ -147,10 +148,8 @@ async function runScenario<D>(
     // timeout like every other soft wait here), THEN apply the spec's
     // bootWaitSecs settle on top, preserving each spec's tuned timing.
     try {
-      await sim.waitForLine(
-        /Received: \[3,.*"status":"Accepted","currentTime"/,
-        30_000,
-      );
+      // Any-key-order BootNotification.conf gate (issue #262 — see boot-gate.ts).
+      await sim.waitForLine(BOOT_ACCEPTED_PATTERN, 30_000);
     } catch (err) {
       process.stderr.write(
         `[runner] WARN: did not see BootNotification.conf within 30s -- continuing anyway (${

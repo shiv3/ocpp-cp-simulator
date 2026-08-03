@@ -10,43 +10,49 @@ import {
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
- * #240 connectionTrigger over a real socket: a connect-started run parks on
- * "wait disconnected", survives the drop, parks on "wait connected", and
- * finishes after the reconnect — as ONE run. The same test pins the
- * reconnect auto-start skip (service.ts one-scenario-at-a-time): if the
- * re-arm restarted the scenario, the runId would change.
+ * #240 connectionTrigger over a real socket: a run started via run_scenario
+ * parks on "wait disconnected", survives a disconnect/reconnect cycle,
+ * parks on "wait connected", and finishes after the reconnect — as ONE run
+ * (runId constant throughout). The same test pins the connector-wide
+ * one-scenario-at-a-time gate in tryAutoStartForConnector
+ * (service.ts:2161-2171): while scenario A's run is still live, the
+ * reconnect's connect-auto-start must NOT re-run bystander scenario B.
  *
- * Deviation from the task-8 brief: a bare `wait-up -> end` graph raced the
- * reconnect auto-start check and lost every time, deterministically, not
- * flakily. `ChargePoint.connect()` fires the "connected" event synchronously
- * off the raw WebSocket open, before BootNotification.req is even answered
- * (see ChargePoint.ts connect()) — so "wait connected" always resolves and
- * the run always reaches "end" (dropping out of `_executors`) well before
- * BootNotification.conf comes back and `handleConnectAutoStart` re-checks
- * the connector. By then `lastAutoStartedScenarioKey` has already been
- * cleared by the mid-run disconnect's `teardownAfterClose`, so nothing
- * blocks a second auto-start — this is the "reconnect auto-start SKIPPING
- * the still-live run" property the test exists to pin, and the literal
- * brief graph never lets the run still be live at the moment that matters.
- * A short `delay` node after "wait connected" keeps the executor in
- * `_executors` across that window, which is what actually exercises the
- * one-scenario-at-a-time gate. See task-8-report.md.
+ * Why B has to be a real, separate connect-triggered scenario, loaded
+ * FIRST: tryAutoStartForConnector iterates loaded scenarios in Map
+ * insertion order, and once a candidate passes its trigger-shape filters
+ * every outcome (start / blocked-by-active / blocked-by-dedup / caught
+ * exception from runScenario) ends in an unconditional `return` — it never
+ * falls through to try a later scenario. So whichever connect-triggered
+ * scenario is loaded FIRST permanently shadows every later one for
+ * auto-start purposes. B is loaded before A specifically so B — not A — is
+ * that first (and only) auto-start candidate; A is started manually via
+ * run_scenario and is otherwise inert as far as tryAutoStartForConnector is
+ * concerned (Map-order shadowed, it's never even examined).
  *
- * Fix round 1: a lone scenario A can't tell the cross-scenario active-check
- * (service.ts:2161-2171) apart from `runScenario`'s own same-scenarioId
- * reentrancy guard (service.ts:1099-1101, thrown and silently swallowed by
- * the auto-start try/catch) — both inspect the same `_executors` entry for
- * A, so either alone would keep `completed.runId` pinned to the original
- * run. `scenarioB` is a second, distinct connect-triggered scenario loaded
- * on the same connector (after A, so A remains the auto-start candidate
- * that actually runs) purely as a bystander: it must never get a
- * `scenario_status` while A is still live, which is the part of this test
- * that actually depends on the connector-wide active-check rather than A's
- * own single-scenario reentrancy path. See task-8-report.md fix round 1.
+ * That shadowing is what makes the final assertion discriminating: on the
+ * reconnect's boot-accept, B is the candidate examined, its dedup key has
+ * just been cleared by the disconnect's teardownAfterClose (so the dedup
+ * `return` doesn't block it), and B itself isn't running (so runScenario's
+ * own same-scenarioId reentrancy guard doesn't apply to B either) — the
+ * ONLY thing standing between B and a second run is the active-loop at
+ * 2161-2171 seeing A's still-live executor. A is deliberately held in a
+ * `delay` node for ~300ms past the socket reopening, well past the
+ * ~20-30ms BootNotification round trip, so it is still "active" at the
+ * exact moment that check runs. Delete that loop and B gets a second runId
+ * right here — a loud, specific failure, not a silently-swallowed one.
+ *
+ * This is the complement of scenarioRearmOnReconnect.bun.test.ts (#253):
+ * that test proves a connect-triggered scenario DOES re-arm after a
+ * reconnect when nothing else on the connector is running; this one proves
+ * it does NOT when something else still is.
+ *
+ * Test history: see task-8-report.md (original task-8 brief, plus two
+ * review fix rounds) for how this test's shape evolved and why.
  */
 const CONNECTOR = 1;
 
-const scenario = {
+const scenarioA = {
   id: "connection-trigger-scenario",
   name: "Survive a reconnect via connection waits",
   targetType: "connector",
@@ -58,6 +64,11 @@ const scenario = {
       id: "start-1",
       type: "start",
       position: { x: 0, y: 0 },
+      // triggerOn is irrelevant to how A itself gets started here (it's
+      // always started manually, via run_scenario) — spelled out anyway
+      // since Map-order shadowing depends on A having the same trigger
+      // shape B does, so A really would be a "connect" auto-start
+      // candidate if B didn't shadow it.
       data: { label: "Start", triggerOn: "connect" },
     },
     {
@@ -96,11 +107,10 @@ const scenario = {
 };
 
 /**
- * A second, unrelated connect-triggered scenario on the same connector.
- * Loaded after `scenario` so `scenario` remains the auto-start candidate
- * that actually runs; this one exists purely to prove nothing else on the
- * connector starts while `scenario`'s run is live — see fix round 1 in the
- * header comment above.
+ * A quick connect-triggered scenario, loaded BEFORE A so it — not A — is
+ * the Map-insertion-order auto-start candidate (see header comment). Node
+ * shape mirrors scenarioRearmOnReconnect.bun.test.ts's own scenario:
+ * start -> statusChange "Preparing" -> end, nothing that waits.
  */
 const scenarioB = {
   id: "connection-trigger-bystander",
@@ -195,7 +205,7 @@ async function waitForScenarioState(
       await emitRpc(socket, {
         cpId,
         method: "scenario_status",
-        params: { connector: CONNECTOR, scenarioId: scenario.id },
+        params: { connector: CONNECTOR, scenarioId: scenarioA.id },
       })
     ).result;
     if (status && predicate(status)) return status;
@@ -204,24 +214,35 @@ async function waitForScenarioState(
   throw new Error("timed out waiting for scenario state");
 }
 
-/** Single, non-polling `scenario_status` snapshot — null means the
- *  scenario has never run (no live executor, no recorded terminal run). */
-async function getScenarioStatusOnce(
+/** Poll scenario_report for `scenarioId` until a run whose id isn't
+ *  `previousRunId` shows up (adapted from scenarioRearmOnReconnect's
+ *  version, generalized to take the scenarioId explicitly since this file
+ *  tracks two scenarios' runs). */
+async function waitForRunAfter(
   socket: Socket,
   cpId: string,
   scenarioId: string,
-): Promise<any> {
-  return (
-    await emitRpc(socket, {
-      cpId,
-      method: "scenario_status",
-      params: { connector: CONNECTOR, scenarioId },
-    })
-  ).result;
+  previousRunId: string | null,
+  timeoutMs = 5_000,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const report = (
+      await emitRpc(socket, {
+        cpId,
+        method: "scenario_report",
+        params: { connector: CONNECTOR, scenarioId },
+      })
+    ).result;
+    const runId = report?.runId ?? null;
+    if (runId && runId !== previousRunId) return runId;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
 }
 
 describe("connectionTrigger scenario over a real socket (#240)", () => {
-  it("survives a disconnect/reconnect as one run and blocks the auto-start re-arm", async () => {
+  it("survives a disconnect/reconnect as one run and blocks the cross-scenario auto-start re-arm", async () => {
     const csms = startMockCsms();
     csmsList.push(csms);
     const server = await startTestServer();
@@ -242,17 +263,8 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
         { seedDefault: false },
       );
 
-      expect(
-        (
-          await emitRpc(socket, {
-            cpId,
-            method: "load_scenario",
-            params: { connector: CONNECTOR, scenario },
-          })
-        ).ok,
-      ).toBe(true);
-      // Loaded after `scenario` so `scenario` stays the auto-start
-      // candidate that actually runs (see the header comment).
+      // B loaded FIRST: Map insertion order makes it the sole connect-
+      // auto-start candidate (see header comment).
       expect(
         (
           await emitRpc(socket, {
@@ -262,10 +274,41 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
           })
         ).ok,
       ).toBe(true);
+      // A loaded SECOND: Map-order shadowed, so it never auto-starts even
+      // though its own Start node also opts into triggerOn "connect". A is
+      // started manually below.
+      expect(
+        (
+          await emitRpc(socket, {
+            cpId,
+            method: "load_scenario",
+            params: { connector: CONNECTOR, scenario: scenarioA },
+          })
+        ).ok,
+      ).toBe(true);
 
-      // Connect → auto-start → park on "wait disconnected" (CP is
-      // connected, so the level check does not pass it through).
+      // Connect → B is the only auto-start candidate → it runs to
+      // completion immediately (no waits in its graph).
       await connectAndBoot(socket, cpId, csms);
+      const bystanderRunId1 = await waitForRunAfter(
+        socket,
+        cpId,
+        scenarioB.id,
+        null,
+      );
+      expect(bystanderRunId1).not.toBeNull();
+
+      // Start A manually — it would never get picked by auto-start while
+      // B is loaded first.
+      expect(
+        (
+          await emitRpc(socket, {
+            cpId,
+            method: "run_scenario",
+            params: { connector: CONNECTOR, scenarioId: scenarioA.id },
+          })
+        ).ok,
+      ).toBe(true);
       const parkedDown = await waitForScenarioState(
         socket,
         cpId,
@@ -277,13 +320,12 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
       });
       const runId = parkedDown.runId;
       expect(runId).toBeTruthy();
-      // The bystander never got a look-in on the first connect either —
-      // "one scenario per connector per trigger" picked `scenario`, not it.
-      expect(
-        await getScenarioStatusOnce(socket, cpId, scenarioB.id),
-      ).toBeNull();
 
       // Drop the socket: wait-down resolves, wait-up parks — same run.
+      // teardownAfterClose also clears connector.lastAutoStartedScenarioKey
+      // here, re-arming B's dedup key exactly as the #253 rearm test
+      // expects for the idle case — this test complements it for the case
+      // where something else (A) is still live.
       expect(
         (await emitRpc(socket, { cpId, method: "disconnect", params: {} })).ok,
       ).toBe(true);
@@ -298,8 +340,11 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
       });
       expect(parkedUp.runId).toBe(runId);
 
-      // Reconnect: the run completes; the auto-start re-arm must NOT have
-      // started a second run (runId unchanged all the way to completed).
+      // Reconnect: the boot-accept re-fires connect-auto-start with B (not
+      // A) as the sole Map-order candidate. B's dedup key was just
+      // cleared, and B itself isn't running — the active-loop seeing A's
+      // still-live executor (parked in the delay node) is the only thing
+      // that can stop B from re-running here.
       await connectAndBoot(socket, cpId, csms);
       const completed = await waitForScenarioState(
         socket,
@@ -307,12 +352,19 @@ describe("connectionTrigger scenario over a real socket (#240)", () => {
         (s) => s.state === "completed",
       );
       expect(completed.runId).toBe(runId);
-      // Across the whole disconnect/reconnect cycle — including the
-      // reconnect's connect-auto-start re-check while `scenario` was still
-      // live — the bystander never ran either.
-      expect(
-        await getScenarioStatusOnce(socket, cpId, scenarioB.id),
-      ).toBeNull();
+
+      // Discriminating assertion: B is still on its first run. If
+      // service.ts:2161-2171's active-loop were deleted, B would have
+      // re-started on the reconnect's boot-accept and this would observe a
+      // new runId.
+      const bystanderReport = (
+        await emitRpc(socket, {
+          cpId,
+          method: "scenario_report",
+          params: { connector: CONNECTOR, scenarioId: scenarioB.id },
+        })
+      ).result;
+      expect(bystanderReport?.runId).toBe(bystanderRunId1);
     } finally {
       socket.disconnect();
     }

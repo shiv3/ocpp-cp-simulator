@@ -94,6 +94,45 @@ describe("deriveExpectation (#179)", () => {
     });
   });
 
+  it("includes the payload subset in csmsCallTrigger constraints (#240)", () => {
+    const exp = deriveExpectation(
+      node(ScenarioNodeType.CSMS_CALL_TRIGGER, {
+        label: "wait",
+        action: "ChangeConfiguration",
+        payload: { key: "HeartbeatInterval" },
+        timeout: 5,
+      } as ScenarioNodeData),
+      1,
+    );
+    expect(exp).toEqual({
+      type: "ocpp_call",
+      direction: "CSMS_TO_CP",
+      action: "ChangeConfiguration",
+      constraints: { connectorId: 1, payload: { key: "HeartbeatInterval" } },
+      timeoutMs: 5000,
+      nodeId: "csmsCallTrigger-1",
+    });
+  });
+
+  it("keeps csmsCallTrigger constraints payload-only when no connector is bound", () => {
+    const exp = deriveExpectation(
+      node(ScenarioNodeType.CSMS_CALL_TRIGGER, {
+        label: "wait",
+        action: "Reset",
+        payload: { type: "Hard" },
+      } as ScenarioNodeData),
+      undefined,
+    );
+    expect(exp).toEqual({
+      type: "ocpp_call",
+      direction: "CSMS_TO_CP",
+      action: "Reset",
+      constraints: { payload: { type: "Hard" } },
+      timeoutMs: undefined,
+      nodeId: "csmsCallTrigger-1",
+    });
+  });
+
   it("omits constraints when the connectorId is undefined", () => {
     const exp = deriveExpectation(
       node(ScenarioNodeType.REMOTE_START_TRIGGER, {

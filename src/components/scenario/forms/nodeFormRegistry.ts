@@ -115,6 +115,16 @@ function asCsmsCallTriggerAction(
     : "Reset";
 }
 
+/** #240: keep only a plain-object payload condition; anything else
+ *  (unparsed textarea string, array) is dropped on save. */
+function asPayloadCondition(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 const RESPONSE_OVERRIDE_ACTIONS_SET = new Set<string>(
   RESPONSE_OVERRIDE_ACTIONS,
 );
@@ -625,6 +635,7 @@ function csmsCallTriggerNodeDataToForm(
     timeout: optionalNumber(
       (nodeData as Partial<CsmsCallTriggerNodeData>).timeout,
     ),
+    payload: (nodeData as Partial<CsmsCallTriggerNodeData>).payload,
   });
 }
 
@@ -635,6 +646,7 @@ function csmsCallTriggerFormToNodeData(
     ...baseFromForm(formData),
     action: asCsmsCallTriggerAction(formData.action),
     timeout: optionalNumber(formData.timeout),
+    payload: asPayloadCondition(formData.payload),
   }) as CsmsCallTriggerNodeData;
 }
 

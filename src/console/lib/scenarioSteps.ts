@@ -569,7 +569,7 @@ export function stepSummary(node: ScenarioNode): string {
     }
     case ScenarioNodeType.CSMS_CALL_TRIGGER: {
       const d = node.data as CsmsCallTriggerNodeData;
-      return `wait ${d.action}${d.timeout ? ` · ${d.timeout}s` : ""}`;
+      return `wait ${d.action}${d.payload ? " · payload" : ""}${d.timeout ? ` · ${d.timeout}s` : ""}`;
     }
     case ScenarioNodeType.RESERVATION_TRIGGER: {
       const d = node.data as ReservationTriggerNodeData;

@@ -2,6 +2,7 @@
 // Executes a ScenarioDefinition's node/edge graph against a ScenarioHost.
 // Semantics mirror src/cp/application/scenario/ScenarioExecutor.ts, reduced
 // to what a load-test CP needs (no pause/step/resume, no persistence).
+import { deepPartialMatch } from "./assertions";
 import {
   bool,
   num,
@@ -236,8 +237,31 @@ async function executeNode(
       const action = str(d.action);
       if (!action)
         throw new Error(`csmsCallTrigger node ${node.id} has no action`);
-      await host.waitForCsmsCall([action], timeoutMs());
-      return;
+      // #240: optional payload condition — re-arm the waiter until a call
+      // of the action arrives whose payload deep-partially matches. A
+      // malformed condition fails fast with the same message as the CP
+      // runtime (ScenarioExecutor.executeCsmsCallTrigger) so a hand-edited
+      // bundle scenario.json cannot silently run with a weaker condition
+      // than the author wrote.
+      if (
+        d.payload !== undefined &&
+        (typeof d.payload !== "object" ||
+          d.payload === null ||
+          Array.isArray(d.payload))
+      ) {
+        throw new Error(
+          `csmsCallTrigger(${action}): payload condition must be a JSON object`,
+        );
+      }
+      const subset = (d.payload as Record<string, unknown> | undefined) ?? null;
+      const tm = timeoutMs();
+      const deadline = tm === null ? null : Date.now() + tm;
+      for (;;) {
+        const remaining =
+          deadline === null ? null : Math.max(0, deadline - Date.now());
+        const evt = await host.waitForCsmsCall([action], remaining);
+        if (!subset || deepPartialMatch(subset, evt.payload)) return;
+      }
     }
     case "reserveNow":
       await notifyStatus("Reserved");

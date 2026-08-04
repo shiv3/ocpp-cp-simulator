@@ -136,6 +136,31 @@ describe("runExportK6", () => {
     expect(stderr.join("")).toMatch(/teleport/);
   });
 
+  it("fails on a connectionTrigger node (#240, not yet supported by export)", async () => {
+    const bad = {
+      ...VALID,
+      nodes: [
+        ...VALID.nodes,
+        {
+          id: "y",
+          type: "connectionTrigger",
+          position: { x: 0, y: 0 },
+          data: { label: "Y" },
+        },
+      ],
+    };
+    const code = await runExportK6({
+      scenarioFile: writeScenario(bad),
+      outDir: join(dir, "out"),
+      ocppVersion: "1.6",
+      force: false,
+    });
+    expect(code).toBe(1);
+    expect(stderr.join("")).toContain(
+      'unsupported node type "connectionTrigger"',
+    );
+  });
+
   it("fails on a missing start node", async () => {
     const bad = {
       ...VALID,

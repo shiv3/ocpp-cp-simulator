@@ -1,5 +1,6 @@
 import {
   ScenarioNodeType,
+  type ConnectionTriggerNodeData,
   type CsmsCallTriggerNodeData,
   type ScenarioExpectation,
   type ScenarioNode,
@@ -59,11 +60,23 @@ export function deriveExpectation(
 
     case ScenarioNodeType.CSMS_CALL_TRIGGER: {
       const data = node.data as CsmsCallTriggerNodeData;
+      // #240: surface the payload condition so scenario_status / the UI can
+      // show WHAT the wait is filtering on, not just the action.
+      const payloadConstraint =
+        data.payload &&
+        typeof data.payload === "object" &&
+        !Array.isArray(data.payload)
+          ? { payload: data.payload }
+          : undefined;
+      const merged =
+        constraints || payloadConstraint
+          ? { ...(constraints ?? {}), ...(payloadConstraint ?? {}) }
+          : undefined;
       return {
         type: "ocpp_call",
         direction: "CSMS_TO_CP",
         action: data.action,
-        constraints,
+        constraints: merged,
         timeoutMs: timeoutMs(data.timeout),
         nodeId: node.id,
       };
@@ -89,6 +102,17 @@ export function deriveExpectation(
         timeoutMs: timeoutMs((node.data as { timeout?: number }).timeout),
         nodeId: node.id,
       };
+
+    case ScenarioNodeType.CONNECTION_TRIGGER: {
+      const data = node.data as ConnectionTriggerNodeData;
+      // Connection state is CP-scoped: no connectorId constraints.
+      return {
+        type: "connection",
+        event: data.event === "connected" ? "connected" : "disconnected",
+        timeoutMs: timeoutMs(data.timeout),
+        nodeId: node.id,
+      };
+    }
 
     default:
       return null;

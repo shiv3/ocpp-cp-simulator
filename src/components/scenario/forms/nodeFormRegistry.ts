@@ -4,6 +4,7 @@ import {
   CERT_SIGNATURE_ALGORITHMS,
   type CertQuirksNodeData,
   type ConfigSetNodeData,
+  type ConnectionTriggerNodeData,
   type ConnectorPlugNodeData,
   CSMS_CALL_TRIGGER_ACTIONS,
   type CsmsCallTriggerNodeData,
@@ -35,6 +36,7 @@ import type { CurvePoint } from "../../../cp/domain/connector/MeterValueCurve";
 import CancelReservationForm from "./CancelReservationForm";
 import CertQuirksForm from "./CertQuirksForm";
 import ConfigSetForm from "./ConfigSetForm";
+import ConnectionTriggerForm from "./ConnectionTriggerForm";
 import ConnectorPlugForm from "./ConnectorPlugForm";
 import CsmsCallTriggerForm from "./CsmsCallTriggerForm";
 import DataTransferForm from "./DataTransferForm";
@@ -113,6 +115,16 @@ function asCsmsCallTriggerAction(
   return typeof value === "string" && CSMS_CALL_TRIGGER_ACTIONS_SET.has(value)
     ? (value as (typeof CSMS_CALL_TRIGGER_ACTIONS)[number])
     : "Reset";
+}
+
+/** #240: keep only a plain-object payload condition; anything else
+ *  (unparsed textarea string, array) is dropped on save. */
+function asPayloadCondition(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 const RESPONSE_OVERRIDE_ACTIONS_SET = new Set<string>(
@@ -625,6 +637,7 @@ function csmsCallTriggerNodeDataToForm(
     timeout: optionalNumber(
       (nodeData as Partial<CsmsCallTriggerNodeData>).timeout,
     ),
+    payload: (nodeData as Partial<CsmsCallTriggerNodeData>).payload,
   });
 }
 
@@ -635,6 +648,7 @@ function csmsCallTriggerFormToNodeData(
     ...baseFromForm(formData),
     action: asCsmsCallTriggerAction(formData.action),
     timeout: optionalNumber(formData.timeout),
+    payload: asPayloadCondition(formData.payload),
   }) as CsmsCallTriggerNodeData;
 }
 
@@ -761,6 +775,36 @@ function certQuirksFormToNodeData(formData: NodeFormData): CertQuirksNodeData {
         }
       : {}),
   }) as CertQuirksNodeData;
+}
+
+function asConnectionTriggerEvent(
+  value: unknown,
+): ConnectionTriggerNodeData["event"] {
+  return value === "connected" ? "connected" : "disconnected";
+}
+
+function connectionTriggerNodeDataToForm(
+  nodeData: ScenarioNodeData,
+): NodeFormData {
+  return compactDefined({
+    ...baseToForm(nodeData),
+    event: asConnectionTriggerEvent(
+      (nodeData as Partial<ConnectionTriggerNodeData>).event,
+    ),
+    timeout: optionalNumber(
+      (nodeData as Partial<ConnectionTriggerNodeData>).timeout,
+    ),
+  });
+}
+
+function connectionTriggerFormToNodeData(
+  formData: NodeFormData,
+): ConnectionTriggerNodeData {
+  return compactDefined({
+    ...baseFromForm(formData),
+    event: asConnectionTriggerEvent(formData.event),
+    timeout: optionalNumber(formData.timeout),
+  }) as ConnectionTriggerNodeData;
 }
 
 export const NODE_FORM_REGISTRY = {
@@ -895,6 +939,12 @@ export const NODE_FORM_REGISTRY = {
     Component: DataTransferForm,
     nodeDataToForm: dataTransferNodeDataToForm,
     formToNodeData: dataTransferFormToNodeData,
+  },
+  [ScenarioNodeType.CONNECTION_TRIGGER]: {
+    title: "Connection Trigger",
+    Component: ConnectionTriggerForm,
+    nodeDataToForm: connectionTriggerNodeDataToForm,
+    formToNodeData: connectionTriggerFormToNodeData,
   },
 } satisfies Record<ScenarioNodeType, NodeFormEntry>;
 

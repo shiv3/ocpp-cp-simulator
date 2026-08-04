@@ -20,6 +20,7 @@ import {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { Edge } from "@xyflow/react";
+import { NODE_FORM_REGISTRY } from "../../components/scenario/forms/nodeFormRegistry";
 
 // --- fixtures ---------------------------------------------------------
 
@@ -619,6 +620,12 @@ describe("stepSummary", () => {
     expect(stepSummary(withoutTimeout)).toBe("wait Reset");
   });
 
+  it("marks a payload-conditioned csmsCallTrigger in the step summary", () => {
+    const n = createDefaultNode(ScenarioNodeType.CSMS_CALL_TRIGGER);
+    n.data = { ...n.data, action: "Reset", payload: { type: "Hard" } };
+    expect(stepSummary(n)).toBe("wait Reset · payload");
+  });
+
   it("falls back to the node label for unmodeled node types", () => {
     const n = node("a", ScenarioNodeType.START, { label: "My Start Label" });
     expect(stepSummary(n)).toBe("My Start Label");
@@ -647,5 +654,29 @@ describe("STEP_CATEGORIES", () => {
     expect(totalListed).toBe(allTypes.length);
     expect(counts.has(ScenarioNodeType.START)).toBe(false);
     expect(counts.has(ScenarioNodeType.END)).toBe(false);
+  });
+});
+
+// --- NODE_FORM_REGISTRY (csmsCallTrigger payload) -----------------------
+
+describe("NODE_FORM_REGISTRY csmsCallTrigger payload condition (#240)", () => {
+  it("csmsCallTrigger form converters round-trip a payload condition and drop junk", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.CSMS_CALL_TRIGGER];
+    const nodeData = entry.formToNodeData({
+      label: "w",
+      action: "Reset",
+      timeout: 0,
+      payload: { type: "Hard" },
+    });
+    expect((nodeData as { payload?: unknown }).payload).toEqual({
+      type: "Hard",
+    });
+    // Unparsable textarea leftovers must not be persisted.
+    const dropped = entry.formToNodeData({
+      label: "w",
+      action: "Reset",
+      payload: "{not json",
+    });
+    expect((dropped as { payload?: unknown }).payload).toBeUndefined();
   });
 });

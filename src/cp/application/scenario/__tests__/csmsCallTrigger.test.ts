@@ -140,3 +140,103 @@ describe("csmsCallTrigger node (issue #110)", () => {
     ).toBe(true);
   });
 });
+
+function payloadTriggerScenario(
+  action: string,
+  payload: Record<string, unknown> | unknown,
+  timeoutSec = 0,
+): ScenarioDefinition {
+  const base = triggerScenario(action, timeoutSec);
+  return {
+    ...base,
+    id: `${base.id}-payload`,
+    nodes: base.nodes.map((n) =>
+      n.id === "wait-call" ? { ...n, data: { ...n.data, payload } } : n,
+    ),
+  };
+}
+
+describe("csmsCallTrigger payload condition (issue #240)", () => {
+  it("ignores right-action calls whose payload does not match, releases on match", async () => {
+    const cp = newChargePoint("CP-TRIG-PAYLOAD");
+    const connector = cp.getConnector(1)!;
+    const executor = new ScenarioExecutor(
+      payloadTriggerScenario("ChangeConfiguration", {
+        key: "HeartbeatInterval",
+      }),
+      createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
+    );
+    const execution = executor.start();
+    try {
+      await waitUntil(
+        () => cp.events.listenerCount("incomingCallReceived") > 0,
+      );
+
+      // Right action, wrong payload: must NOT release (and must keep listening).
+      cp.notifyIncomingCall("ChangeConfiguration", {
+        key: "MeterValueSampleInterval",
+        value: "5",
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      let done = false;
+      void execution.then(() => (done = true));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(done).toBe(false);
+
+      // Matching subset (extra keys ignored) releases the wait.
+      cp.notifyIncomingCall("ChangeConfiguration", {
+        key: "HeartbeatInterval",
+        value: "30",
+      });
+      await timeout(execution, 1000);
+    } finally {
+      executor.stop();
+      await timeout(
+        execution.catch(() => undefined),
+        500,
+      ).catch(() => undefined);
+    }
+  });
+
+  it("mentions the payload condition in the timeout error", async () => {
+    const cp = newChargePoint("CP-TRIG-PAYLOAD-TO");
+    const connector = cp.getConnector(1)!;
+    const errors: Error[] = [];
+    const callbacks = {
+      ...createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
+      onError: (e: Error) => errors.push(e),
+    };
+    const executor = new ScenarioExecutor(
+      payloadTriggerScenario("ClearCache", { x: 1 }, 1),
+      callbacks,
+    );
+    await timeout(executor.start(), 3000);
+    expect(
+      errors.some((e) =>
+        /Timeout waiting for CSMS call ClearCache matching payload \(1s\)/.test(
+          e.message,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("fails fast when the payload condition is not a plain object", async () => {
+    const cp = newChargePoint("CP-TRIG-PAYLOAD-BAD");
+    const connector = cp.getConnector(1)!;
+    const errors: Error[] = [];
+    const callbacks = {
+      ...createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
+      onError: (e: Error) => errors.push(e),
+    };
+    const executor = new ScenarioExecutor(
+      payloadTriggerScenario("Reset", ["not", "an", "object"]),
+      callbacks,
+    );
+    await timeout(executor.start(), 2000);
+    expect(
+      errors.some((e) =>
+        /payload condition must be a JSON object/.test(e.message),
+      ),
+    ).toBe(true);
+  });
+});

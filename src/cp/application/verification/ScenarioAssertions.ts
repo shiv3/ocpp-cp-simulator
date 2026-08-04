@@ -31,37 +31,7 @@ import {
   redactSensitiveText,
   redactSensitiveValue,
 } from "../../shared/redaction";
-
-/**
- * Deep partial match used by `payload_match`: every key in `subset` must be
- * present in `actual` with a deep-equal value. Objects are matched as a
- * subset (extra keys in `actual` are ignored); arrays are compared
- * element-by-element and must be the same length -- an assertion author
- * pinning an array generally means the whole array, not just a prefix.
- */
-function deepPartialMatch(subset: unknown, actual: unknown): boolean {
-  if (subset === actual) return true;
-  if (
-    typeof subset !== "object" ||
-    subset === null ||
-    typeof actual !== "object" ||
-    actual === null
-  ) {
-    return false;
-  }
-  if (Array.isArray(subset)) {
-    if (!Array.isArray(actual) || subset.length !== actual.length) {
-      return false;
-    }
-    return subset.every((item, i) => deepPartialMatch(item, actual[i]));
-  }
-  if (Array.isArray(actual)) return false;
-  const subsetObj = subset as Record<string, unknown>;
-  const actualObj = actual as Record<string, unknown>;
-  return Object.keys(subsetObj).every((key) =>
-    deepPartialMatch(subsetObj[key], actualObj[key]),
-  );
-}
+import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 
 /** A frame "matches" a message_order/message_after reference when it's a
  *  CALL for the given action in the given direction (default "sent"). */

@@ -1,4 +1,4 @@
-# Scenario File Format (v1.0)
+# Scenario File Format (v1.1)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -16,8 +16,9 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.0`** (`schemaVersion`).
-- Covers the full 22-node discriminated union the scenario engine supports
+- **Version `1.1`** (`schemaVersion`). Files stamped `1.0` remain valid — 1.x
+  is purely additive (see [Versioning](#versioning)).
+- Covers the full 23-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
 - **Validation against this schema is advisory in this version**: the
   simulator warns (`console.warn` in the browser, stderr / server log on the
@@ -45,7 +46,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.0"`. Absent on files predating issue #214 — still valid.                                                                             |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.1"` (current) or `"1.0"` (still valid — additive). Absent on files predating issue #214 — still valid.                               |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                   |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances). |
 | `name`                  | string                                                                          | Yes      |                                                                                                                                               |
@@ -74,7 +75,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 ```
 
 Every node has `id` (string), `type` (the discriminator — a closed
-enum of the 22 values below), `position` (`{ x: number, y: number }`), and
+enum of the 23 values below), `position` (`{ x: number, y: number }`), and
 `data` (an object requiring at least `label: string`; the rest of `data`'s
 shape depends on `type`).
 
@@ -100,10 +101,11 @@ shape depends on `type`).
 | `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                                       |
 | `configSet`          | `key`, `value`                                                   |                                                                                                                                                                                       |
 | `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                                   |
-| `csmsCallTrigger`    | `action`                                                         | `timeout`                                                                                                                                                                             |
+| `csmsCallTrigger`    | `action`                                                         | `timeout`, `payload`. See [note](#csmscalltrigger-payload-condition) below.                                                                                                           |
 | `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                            |
 | `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                       |
 | `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below. |
+| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -156,6 +158,49 @@ Explicit fields override preset values. Together with `inboundPolicy` and
 declarative `assertions` (e.g., `ocpp_absent`, `no_unexpected`), certificate
 quirks let you emulate certification-tool strictness to verify a CP's
 conformance.
+
+### `csmsCallTrigger` payload condition
+
+**Issue #240**: `csmsCallTrigger` accepts an optional `payload` object — a
+deep-partial subset the incoming CALL's payload must match (see
+`src/scenario/deepPartialMatch.ts`) for the wait to release. Only nested keys
+present in `payload` are checked; extra keys on the actual CALL are ignored.
+A CALL of the awaited `action` whose payload does **not** match keeps the
+wait parked — the non-matching frame is not consumed, so a later matching
+CALL of the same action can still resolve it. Omitting `payload` (the
+pre-#240 behavior) matches any payload.
+
+```json
+{
+  "id": "wait-hard-reset",
+  "type": "csmsCallTrigger",
+  "position": { "x": 0, "y": 0 },
+  "data": {
+    "label": "Wait for hard Reset",
+    "action": "Reset",
+    "payload": { "type": "Hard" }
+  }
+}
+```
+
+### `connectionTrigger` notes
+
+**Issue #240**: `connectionTrigger` parks the scenario until the charge
+point's WebSocket reaches `event` (`"connected"` or `"disconnected"`).
+
+- **Level-triggered**, like `statusTrigger`: if the connection is already in
+  the target state when the node starts, it resolves immediately rather than
+  waiting for a future transition.
+- **Survives disconnect**: unlike every other wait node, `connectionTrigger`
+  does **not** fail when the WebSocket drops — outlasting a disconnected span
+  is the point. A node with `event: "connected"` that starts while
+  disconnected — say, right after a `"disconnected"` wait resolved — parks
+  across the disconnected span and resolves on the reconnect rather than
+  erroring. Only the optional `timeout` (seconds; `0` / absent = wait
+  forever) can end the wait early, with a timeout error.
+- This node only _observes_ the connection state — it never causes a
+  disconnect itself. Simulating network drops is out of scope here (see
+  issue #239).
 
 ## Edge shape
 
@@ -244,6 +289,10 @@ next boot.
 
 ## Changelog
 
+- **v1.1**: Issue #240. Adds the `connectionTrigger` node type (waits for the
+  WebSocket to connect/disconnect) and an optional `payload` deep-partial
+  match condition on `csmsCallTrigger`. Both purely additive — files stamped
+  `schemaVersion: "1.0"`, or no `schemaVersion` at all, remain valid.
 - **v1.0**: Initial published schema (issue #214). Adds the optional
   `schemaVersion` field; documents the existing on-file shape used since the
   scenario editor's introduction. Later additive optional fields

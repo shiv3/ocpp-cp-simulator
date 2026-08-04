@@ -94,6 +94,45 @@ describe("deriveExpectation (#179)", () => {
     });
   });
 
+  it("includes the payload subset in csmsCallTrigger constraints (#240)", () => {
+    const exp = deriveExpectation(
+      node(ScenarioNodeType.CSMS_CALL_TRIGGER, {
+        label: "wait",
+        action: "ChangeConfiguration",
+        payload: { key: "HeartbeatInterval" },
+        timeout: 5,
+      } as ScenarioNodeData),
+      1,
+    );
+    expect(exp).toEqual({
+      type: "ocpp_call",
+      direction: "CSMS_TO_CP",
+      action: "ChangeConfiguration",
+      constraints: { connectorId: 1, payload: { key: "HeartbeatInterval" } },
+      timeoutMs: 5000,
+      nodeId: "csmsCallTrigger-1",
+    });
+  });
+
+  it("keeps csmsCallTrigger constraints payload-only when no connector is bound", () => {
+    const exp = deriveExpectation(
+      node(ScenarioNodeType.CSMS_CALL_TRIGGER, {
+        label: "wait",
+        action: "Reset",
+        payload: { type: "Hard" },
+      } as ScenarioNodeData),
+      undefined,
+    );
+    expect(exp).toEqual({
+      type: "ocpp_call",
+      direction: "CSMS_TO_CP",
+      action: "Reset",
+      constraints: { payload: { type: "Hard" } },
+      timeoutMs: undefined,
+      nodeId: "csmsCallTrigger-1",
+    });
+  });
+
   it("omits constraints when the connectorId is undefined", () => {
     const exp = deriveExpectation(
       node(ScenarioNodeType.REMOTE_START_TRIGGER, {
@@ -102,6 +141,21 @@ describe("deriveExpectation (#179)", () => {
       undefined,
     );
     expect(exp?.constraints).toBeUndefined();
+  });
+
+  it("derives a connection expectation for connectionTrigger (#240)", () => {
+    const node = {
+      id: "n-conn",
+      type: ScenarioNodeType.CONNECTION_TRIGGER,
+      position: { x: 0, y: 0 },
+      data: { label: "wait", event: "disconnected", timeout: 10 },
+    } as ScenarioNode;
+    expect(deriveExpectation(node, 1)).toEqual({
+      type: "connection",
+      event: "disconnected",
+      timeoutMs: 10000,
+      nodeId: "n-conn",
+    });
   });
 
   it.each([

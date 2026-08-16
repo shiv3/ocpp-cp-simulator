@@ -261,6 +261,12 @@ export class CLIChargePointService {
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
+  // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
+  // Populated only when a caller actually opts in (run_scenario's
+  // awaitArmed); resolved and cleared by the onStateChange hook in
+  // runScenario the moment the run reaches "waiting" or a terminal state.
+  private readonly _armedWaitersByScenario: Map<string, Array<() => void>> =
+    new Map();
   // #179: stable per-run id for the currently-executing scenario, so status
   // and lifecycle events can be correlated to a specific run. Keyed like
   // _executors (by scenarioId) and cleared alongside it.
@@ -1149,6 +1155,21 @@ export class CLIChargePointService {
               data: { connectorId, scenarioId, runId },
             });
           }
+          // Resolve any pending waitForScenarioArmed() caller once the run
+          // either parks on its first expectation ("waiting" — e.g. a
+          // RemoteStartTransaction trigger has armed) or ends without ever
+          // parking ("completed"/"error", or "idle" via a manual stop). A
+          // caller that opted in (run_scenario's awaitArmed) is unblocked
+          // the instant the scenario is actually listening, closing the
+          // race with a CSMS command sent right after run_scenario returns.
+          if (
+            context.state === "waiting" ||
+            context.state === "completed" ||
+            context.state === "error" ||
+            context.state === "idle"
+          ) {
+            this.resolveScenarioArmedWaiters(scenarioId);
+          }
         },
         onNodeExecute: (nodeId) => {
           this.emit({
@@ -1290,6 +1311,60 @@ export class CLIChargePointService {
         // clears it, which is the case that can be non-null.
         null,
       );
+    });
+  }
+
+  /** Resolve (and clear) any pending waitForScenarioArmed() callers for
+   *  `scenarioId`. Called from runScenario's onStateChange hook. */
+  private resolveScenarioArmedWaiters(scenarioId: string): void {
+    const waiters = this._armedWaitersByScenario.get(scenarioId);
+    if (!waiters) return;
+    this._armedWaitersByScenario.delete(scenarioId);
+    waiters.forEach((resolve) => resolve());
+  }
+
+  /**
+   * Opt-in companion to runScenario (see run_scenario's `awaitArmed` param):
+   * resolves once the named run has either parked on its first expectation
+   * ("waiting" — e.g. a RemoteStartTrigger node armed
+   * registerScenarioHandler) or ended without ever parking. Without this, a
+   * caller that fires the CSMS-initiated command a scenario is meant to
+   * intercept immediately after run_scenario returns can race the trigger
+   * node's arming and have the command silently handled outside the
+   * scenario (see ScenarioRuntime.waitForRemoteStart/waitForRemoteStop).
+   *
+   * Resolves immediately if the run has already reached such a state by the
+   * time this is called (e.g. an already-armed trigger, or a scenario with
+   * no waiting nodes that finished before this was awaited), and is bounded
+   * by `maxWaitMs` so a scenario whose first node is a long delay can't hang
+   * the caller — it just resolves at the bound, same as not having awaited
+   * at all. Never rejects.
+   */
+  waitForScenarioArmed(scenarioId: string, maxWaitMs = 15_000): Promise<void> {
+    const executor = this._executors.get(scenarioId);
+    const state = executor?.getContext().state;
+    if (
+      !executor ||
+      state === "waiting" ||
+      state === "completed" ||
+      state === "error" ||
+      state === "idle"
+    ) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const waiters = this._armedWaitersByScenario.get(scenarioId) ?? [];
+      waiters.push(done);
+      this._armedWaitersByScenario.set(scenarioId, waiters);
+      const timer = setTimeout(done, maxWaitMs);
     });
   }
 

@@ -37,7 +37,7 @@ const buildLogger = (
   chargePoint: ChargePoint,
   connector: Connector,
   hooks?: ScenarioRuntimeHooks,
-): ScenarioExecutorCallbacks["log"] => {
+): NonNullable<ScenarioExecutorCallbacks["log"]> => {
   return (rawMessage, level = "info") => {
     const message = `[connector ${connector.id}] ${rawMessage}`;
     switch (level) {
@@ -115,7 +115,9 @@ const cancellablePromise = <T>({
 const waitForRemoteStart = (
   chargePoint: ChargePoint,
   connector: Connector,
-  timeout?: number,
+  timeout: number | undefined,
+  log: NonNullable<ScenarioExecutorCallbacks["log"]>,
+  runStartedAt: number,
 ): CancellableWait<{ tagId: string; remoteStartId?: number }> => {
   // §4.9 S3: fail-fast if the charge point cannot receive RemoteStartTransaction
   if (!chargePoint.canReceiveCsmsCall("RemoteStartTransaction")) {
@@ -136,6 +138,29 @@ const waitForRemoteStart = (
 
   // Register so the handler emits remoteStartReceived instead of starting a transaction
   chargePoint.registerScenarioHandler(connector.id);
+
+  // Make the run_scenario / RemoteStartTransaction race visible: if this
+  // exact call already arrived (during this run) and was handled OUTSIDE
+  // the scenario before this trigger node could arm — see
+  // RemoteStartTransactionHandler / handleRequestStartTransactionV201's
+  // isScenarioHandled branches — it already started a real transaction
+  // directly and will not be redelivered. Without this warning the node
+  // just parks silently until its timeout (or forever), which is exactly
+  // what made the original bypass take hours to trace.
+  const missedAt = chargePoint.takeDefaultHandledRemoteStart(
+    connector.id,
+    runStartedAt,
+  );
+  if (missedAt !== null) {
+    log(
+      `RemoteStartTransaction arrived ${Math.max(0, Date.now() - missedAt)}ms ` +
+        "before this node armed and was handled OUTSIDE this scenario (a " +
+        "transaction was started directly). This node is now waiting for a " +
+        "RemoteStartTransaction that will likely never come — probably a " +
+        "race between run_scenario and the command that triggered this run.",
+      "warn",
+    );
+  }
 
   let cleanupFn: (() => void) | null = null;
 
@@ -203,7 +228,9 @@ const waitForRemoteStart = (
 const waitForRemoteStop = (
   chargePoint: ChargePoint,
   connector: Connector,
-  timeout?: number,
+  timeout: number | undefined,
+  log: NonNullable<ScenarioExecutorCallbacks["log"]>,
+  runStartedAt: number,
 ): CancellableWait<{
   transactionId: number;
   reason: string;
@@ -227,6 +254,22 @@ const waitForRemoteStop = (
   }
 
   chargePoint.registerScenarioStopHandler(connector.id);
+
+  // Mirror of waitForRemoteStart's bypass check, for the stop side.
+  const missedAt = chargePoint.takeDefaultHandledRemoteStop(
+    connector.id,
+    runStartedAt,
+  );
+  if (missedAt !== null) {
+    log(
+      `RemoteStopTransaction arrived ${Math.max(0, Date.now() - missedAt)}ms ` +
+        "before this node armed and was handled OUTSIDE this scenario (the " +
+        "transaction was stopped directly). This node is now waiting for a " +
+        "RemoteStopTransaction that will likely never come — probably a " +
+        "race between run_scenario and the command that triggered this run.",
+      "warn",
+    );
+  }
 
   let cleanupFn: (() => void) | null = null;
 
@@ -529,6 +572,12 @@ export const createScenarioExecutorCallbacks = (
   params: ScenarioRuntimeParams,
 ): ScenarioExecutorCallbacks => {
   const { chargePoint, connector, hooks } = params;
+  const log = buildLogger(chargePoint, connector, hooks);
+  // Anchors the "did a CSMS call bypass this scenario before it could arm?"
+  // check in waitForRemoteStart/waitForRemoteStop: only a bypass that
+  // happened during THIS run is worth warning about, not a stale one from
+  // an earlier, unrelated run on the same connector.
+  const runStartedAt = Date.now();
 
   const callbacks: ScenarioExecutorCallbacks & {
     onGetTransactionMeterStart: () => number | null;
@@ -626,12 +675,12 @@ export const createScenarioExecutorCallbacks = (
     },
     onWaitForRemoteStart: (timeout) => {
       return cancellablePromise(
-        waitForRemoteStart(chargePoint, connector, timeout),
+        waitForRemoteStart(chargePoint, connector, timeout, log, runStartedAt),
       );
     },
     onWaitForRemoteStop: (timeout) => {
       return cancellablePromise(
-        waitForRemoteStop(chargePoint, connector, timeout),
+        waitForRemoteStop(chargePoint, connector, timeout, log, runStartedAt),
       );
     },
     onWaitForCsmsCall: (action, timeout, payload) => {
@@ -685,7 +734,7 @@ export const createScenarioExecutorCallbacks = (
     onNodeExecute: hooks?.onNodeExecute,
     onNodeProgress: hooks?.onNodeProgress,
     onError: hooks?.onError,
-    log: buildLogger(chargePoint, connector, hooks),
+    log,
     // §4.9: connectorId === -1 sentinel means "use the scenario's bound
     // connector"; otherwise the node specified an explicit target (0 for
     // CP main controller, >0 for another connector).

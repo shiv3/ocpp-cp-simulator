@@ -161,6 +161,22 @@ export class ChargePoint {
   // itself — the scenario is parked on a RemoteStopTrigger node and will
   // resume into its own Transaction Stop step.
   private readonly _scenarioStopHandledConnectors: Set<number> = new Set();
+  // Diagnostic-only, paired with _scenarioHandledConnectors: whenever
+  // RemoteStartTransaction lands via the DEFAULT path (no scenario armed on
+  // this connector yet), the timestamp is recorded here. A scenario that
+  // arms afterwards (registerScenarioHandler) consults this to detect that
+  // it just missed a call that arrived while it was still walking toward
+  // the trigger node — the "run_scenario raced RemoteStartTransaction"
+  // footgun: the CSMS command silently starts a real transaction outside
+  // the scenario, and the scenario then parks forever waiting for a call
+  // that already happened. Consumed (deleted) on read via
+  // takeDefaultHandledRemoteStart, so a warning never fires twice and a
+  // stale/unrelated bypass can't leak into a later, unconnected run.
+  private readonly _lastDefaultHandledRemoteStart: Map<number, number> =
+    new Map();
+  // Mirror of the above for the RemoteStopTransaction / stop-side bypass.
+  private readonly _lastDefaultHandledRemoteStop: Map<number, number> =
+    new Map();
   /** One-shot canned `{ status }` responses per incoming action,
    *  armed by a scenario responseOverride node (issue #110). */
   private readonly _responseOverrides = new Map<string, string>();
@@ -664,6 +680,28 @@ export class ChargePoint {
     });
   }
 
+  /** Record that RemoteStartTransaction for `connectorId` was just handled
+   *  by the default (non-scenario) path — i.e. isScenarioHandled(connectorId)
+   *  was false at delivery time. See _lastDefaultHandledRemoteStart. */
+  noteDefaultHandledRemoteStart(connectorId: number): void {
+    this._lastDefaultHandledRemoteStart.set(connectorId, Date.now());
+  }
+
+  /** Consume (and remove) the timestamp recorded by
+   *  noteDefaultHandledRemoteStart for `connectorId`, if any exists at or
+   *  after `sinceMs`. Returns that epoch-ms timestamp, or null if there is
+   *  none — or it predates `sinceMs`, i.e. it's a stale bypass from before
+   *  the caller's own run started and therefore unrelated to it. Always
+   *  deletes the entry so a stale record can't linger indefinitely. */
+  takeDefaultHandledRemoteStart(
+    connectorId: number,
+    sinceMs: number,
+  ): number | null {
+    const ts = this._lastDefaultHandledRemoteStart.get(connectorId);
+    this._lastDefaultHandledRemoteStart.delete(connectorId);
+    return ts !== undefined && ts >= sinceMs ? ts : null;
+  }
+
   /**
    * Counterpart of registerScenarioHandler for the stop side: a
    * RemoteStopTrigger scenario node registers here so the next
@@ -685,6 +723,21 @@ export class ChargePoint {
 
   notifyRemoteStopReceived(connectorId: number, transactionId: number): void {
     this._events.emit("remoteStopReceived", { connectorId, transactionId });
+  }
+
+  /** Mirror of noteDefaultHandledRemoteStart for the stop side. */
+  noteDefaultHandledRemoteStop(connectorId: number): void {
+    this._lastDefaultHandledRemoteStop.set(connectorId, Date.now());
+  }
+
+  /** Mirror of takeDefaultHandledRemoteStart for the stop side. */
+  takeDefaultHandledRemoteStop(
+    connectorId: number,
+    sinceMs: number,
+  ): number | null {
+    const ts = this._lastDefaultHandledRemoteStop.get(connectorId);
+    this._lastDefaultHandledRemoteStop.delete(connectorId);
+    return ts !== undefined && ts >= sinceMs ? ts : null;
   }
 
   notifyIncomingCall(action: string, payload: unknown): void {
@@ -1288,6 +1341,8 @@ export class ChargePoint {
     this._signedFirmwareUpdateInFlight = false;
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
+    this._lastDefaultHandledRemoteStart.clear();
+    this._lastDefaultHandledRemoteStop.clear();
     // Issue #110: stale response overrides must not survive a
     // disconnect — they would silently answer the next real CSMS call.
     this._responseOverrides.clear();

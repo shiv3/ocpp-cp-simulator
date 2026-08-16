@@ -43,6 +43,11 @@ export function handleRequestStartTransactionV201(
           req.remoteStartId,
         );
       } else {
+        // Not scenario-handled: note it so a scenario that arms on this
+        // connector shortly after can tell it raced this exact call and
+        // warn instead of silently parking forever (see
+        // ScenarioRuntime.waitForRemoteStart).
+        ctx.chargePoint.noteDefaultHandledRemoteStart(connectorId);
         ctx.chargePoint.startTransaction(
           idTag,
           connectorId,
@@ -84,6 +89,11 @@ export function handleRequestStopTransactionV201(
       if (ctx.chargePoint.isScenarioStopHandled(connector.id)) {
         ctx.chargePoint.notifyRemoteStopReceived(connector.id, txId);
       } else {
+        // Not scenario-handled: note it so a scenario that arms
+        // registerScenarioStopHandler on this connector shortly after can
+        // tell it raced this exact call and warn instead of silently
+        // parking forever (see ScenarioRuntime.waitForRemoteStop).
+        ctx.chargePoint.noteDefaultHandledRemoteStop(connector.id);
         ctx.chargePoint.stopTransaction(connector.id, "Remote", {
           triggerReason: "RemoteStop",
         });

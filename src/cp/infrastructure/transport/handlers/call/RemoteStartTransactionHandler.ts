@@ -47,6 +47,11 @@ export class RemoteStartTransactionHandler implements CallHandler<
       // Scenario is waiting for RemoteStart - let it handle the transaction flow
       context.chargePoint.notifyRemoteStartReceived(resolvedConnectorId, idTag);
     } else {
+      // Not scenario-handled: note it so a scenario that arms on this
+      // connector shortly after can tell it raced this exact call and warn
+      // instead of silently parking forever (see
+      // ScenarioRuntime.waitForRemoteStart).
+      context.chargePoint.noteDefaultHandledRemoteStart(resolvedConnectorId);
       // triggerReason: "RemoteStart" marks this as CSMS-initiated so
       // ChargePoint.startTransaction's #181 local-authorize gate doesn't
       // double-authorize on top of the AuthorizeRemoteTxRequests handling

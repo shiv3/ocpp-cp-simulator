@@ -25,6 +25,11 @@ export class RemoteStopTransactionHandler implements CallHandler<
       context.chargePoint.notifyRemoteStopReceived(connector.id, transactionId);
       return { status: "Accepted" };
     }
+    // Not scenario-handled: note it so a scenario that arms
+    // registerScenarioStopHandler on this connector shortly after can tell
+    // it raced this exact call and warn instead of silently parking forever
+    // (see ScenarioRuntime.waitForRemoteStop).
+    context.chargePoint.noteDefaultHandledRemoteStop(connector.id);
     context.chargePoint.updateConnectorStatus(
       connector.id,
       OCPPStatus.SuspendedEVSE,

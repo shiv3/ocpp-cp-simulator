@@ -1359,6 +1359,19 @@ export class CLIChargePointService {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        // Drop this resolver from the map so a timed-out waiter doesn't
+        // linger for the scenario's whole lifetime. resolveScenarioArmedWaiters
+        // clears the entry wholesale on arming, but a long-running scenario
+        // that never arms would otherwise accumulate one stale closure per
+        // timed-out call.
+        const waiters = this._armedWaitersByScenario.get(scenarioId);
+        if (waiters) {
+          const index = waiters.indexOf(done);
+          if (index !== -1) waiters.splice(index, 1);
+          if (waiters.length === 0) {
+            this._armedWaitersByScenario.delete(scenarioId);
+          }
+        }
         resolve();
       };
       const waiters = this._armedWaitersByScenario.get(scenarioId) ?? [];

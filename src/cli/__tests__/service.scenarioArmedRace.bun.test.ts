@@ -187,4 +187,26 @@ describe("CLIChargePointService.waitForScenarioArmed", () => {
       svc.waitForScenarioArmed("no-such-scenario", 50),
     ).resolves.toBeUndefined();
   });
+
+  it("removes a timed-out waiter from the map instead of leaking it", async () => {
+    const svc = newService();
+    // Long delay, no waiting node: every waiter below settles via timeout,
+    // never via resolveScenarioArmedWaiters. Before the cleanup fix each
+    // timed-out closure stayed in _armedWaitersByScenario for the scenario's
+    // whole lifetime.
+    const id = svc.loadScenario(1, longDelayNoTriggerScenario(1, 5));
+    svc.runScenario(1, id);
+
+    await svc.waitForScenarioArmed(id, 50);
+    await svc.waitForScenarioArmed(id, 50);
+
+    const waiters = (
+      svc as unknown as {
+        _armedWaitersByScenario: Map<string, Array<() => void>>;
+      }
+    )._armedWaitersByScenario;
+    expect(waiters.has(id)).toBe(false);
+
+    svc.stopScenario(1, id);
+  });
 });

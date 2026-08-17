@@ -623,6 +623,47 @@ describe("RegistryChargePointService", () => {
     await expect(service.getScenarioTemplates()).resolves.not.toHaveLength(0);
     await expect(service.resetAllState()).resolves.toBeUndefined();
   });
+
+  it("run_scenario's awaitArmed option blocks the RPC response until the trigger node arms", async () => {
+    const { registry, service } = createFacade();
+    registry.create(
+      {
+        cpId: "cp-await-armed",
+        wsUrl: "ws://example.test/ocpp",
+        connectors: 1,
+        vendor: "FacadeVendor",
+        model: "FacadeModel",
+        basicAuth: null,
+      },
+      { seedDefault: false },
+    );
+
+    const scenarioId = await service.loadScenario(
+      "cp-await-armed",
+      1,
+      delayedRemoteStartScenario("scenario-await-armed", 1, 0.2),
+    );
+
+    const before = Date.now();
+    await service.runScenario("cp-await-armed", 1, scenarioId.scenarioId, {
+      awaitArmed: true,
+    });
+    const elapsed = Date.now() - before;
+
+    // Must have actually waited for the delay node to let the executor
+    // reach the trigger — not returned the instant runScenario fired
+    // (the race this closes: a caller sending the CSMS-initiated call
+    // right after this resolves can no longer beat the scenario to it).
+    expect(elapsed).toBeGreaterThanOrEqual(180);
+    const status = await service.getScenarioStatus(
+      "cp-await-armed",
+      1,
+      scenarioId.scenarioId,
+    );
+    expect(status!.state).toBe("waiting");
+
+    await service.stopScenario("cp-await-armed", 1, scenarioId.scenarioId);
+  });
 });
 
 function createFacade(): {
@@ -758,6 +799,55 @@ function parkedScenario(
     trigger: { type: "manual" },
     defaultExecutionMode: "oneshot",
     evSettings,
+  };
+}
+
+/**
+ * Start -> Delay(delaySeconds) -> RemoteStartTrigger -> End. Mirrors the
+ * run_scenario / RemoteStartTransaction race's graph shape: the trigger
+ * only arms after the preceding node(s) run, so runScenario's fire-and-
+ * forget return does not mean the scenario is listening yet.
+ */
+function delayedRemoteStartScenario(
+  id: string,
+  connectorId: number,
+  delaySeconds: number,
+): ScenarioDefinition {
+  return {
+    ...scenarioDefinition(id, connectorId),
+    nodes: [
+      {
+        id: "start",
+        type: ScenarioNodeType.START,
+        position: { x: 0, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "delay",
+        type: ScenarioNodeType.DELAY,
+        position: { x: 0, y: 100 },
+        data: { label: "Delay", delaySeconds },
+      },
+      {
+        id: "trigger",
+        type: ScenarioNodeType.REMOTE_START_TRIGGER,
+        position: { x: 0, y: 200 },
+        data: { label: "Wait RemoteStart", timeout: 0 },
+      },
+      {
+        id: "end",
+        type: ScenarioNodeType.END,
+        position: { x: 0, y: 300 },
+        data: { label: "End" },
+      },
+    ],
+    edges: [
+      { id: "e-start", source: "start", target: "delay" },
+      { id: "e-delay", source: "delay", target: "trigger" },
+      { id: "e-trigger", source: "trigger", target: "end" },
+    ],
+    trigger: { type: "manual" },
+    defaultExecutionMode: "oneshot",
   };
 }
 

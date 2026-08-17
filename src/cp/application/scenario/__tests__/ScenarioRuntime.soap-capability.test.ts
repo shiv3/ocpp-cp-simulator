@@ -42,6 +42,8 @@ function createMockChargePoint(overrides?: Partial<ChargePoint>): ChargePoint {
     unregisterScenarioHandler: vi.fn(),
     registerScenarioStopHandler: vi.fn(),
     unregisterScenarioStopHandler: vi.fn(),
+    takeDefaultHandledRemoteStart: vi.fn().mockReturnValue(null),
+    takeDefaultHandledRemoteStop: vi.fn().mockReturnValue(null),
     events: {
       on: vi.fn(),
       off: vi.fn(),

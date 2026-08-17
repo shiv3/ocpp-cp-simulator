@@ -521,9 +521,17 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     scenarioId: string,
-    options?: { strict?: boolean },
+    options?: { strict?: boolean; awaitArmed?: boolean },
   ): Promise<void> {
-    this.requireService(id).runScenario(connectorId, scenarioId, options);
+    const service = this.requireService(id);
+    service.runScenario(connectorId, scenarioId, options);
+    // Opt-in (see run_scenario's `awaitArmed` param / methods.ts): don't
+    // answer the RPC until the run has armed or ended. See
+    // CLIChargePointService.waitForScenarioArmed for why this closes the
+    // run_scenario / CSMS-command race.
+    if (options?.awaitArmed) {
+      await service.waitForScenarioArmed(scenarioId);
+    }
   }
 
   async runScenarioFile(

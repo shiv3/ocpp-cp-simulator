@@ -1337,12 +1337,18 @@ async function dispatchFacadeCpCommand(
         params.strict === undefined
           ? undefined
           : requireBoolean(params, "strict");
+      const awaitArmed =
+        params.awaitArmed === undefined
+          ? undefined
+          : requireBoolean(params, "awaitArmed");
       await runFacadeOperation(() =>
         chargePointService.runScenario(
           id,
           requirePositiveInt(params, "connector"),
           requireString(params, "scenarioId"),
-          strict !== undefined ? { strict } : undefined,
+          strict !== undefined || awaitArmed !== undefined
+            ? { strict, awaitArmed }
+            : undefined,
         ),
       );
       return handled(undefined);

@@ -239,6 +239,14 @@ export const METHODS = {
       connector: CONN_POS,
       scenarioId: STR_64K,
       strict: z.boolean().optional(),
+      // Opt-in: block the RPC response until the run has either parked on
+      // its first expectation (armed — e.g. a RemoteStartTransaction
+      // trigger) or ended without ever parking, instead of returning the
+      // instant the run is kicked off. Closes the run_scenario /
+      // CSMS-command race for a caller that fires the CSMS-initiated call
+      // right after run_scenario returns and needs to know the scenario is
+      // actually listening first — see CLIChargePointService.waitForScenarioArmed.
+      awaitArmed: z.boolean().optional(),
     }),
     result: ANY,
   },

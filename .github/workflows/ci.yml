@@ -30,6 +30,18 @@ jobs:
       - name: Format check
         run: bun run format:check
 
+      # The desktop release compiles the CLI into a Tauri sidecar with
+      # `bun build --compile`, and that is the ONLY thing here that resolves
+      # every import: the runtime elides type-only ones, so a wrong path in
+      # an `import type` (or in a value import used only as a type) is
+      # invisible to lint and to both test runners. Three such imports in
+      # MessageHandlerRegistry.ts broke the v0.7.6 and v0.7.7 desktop builds
+      # and were noticed only after the releases were out (#281). Compiling
+      # for the host target takes seconds and fails the same way the release
+      # would, on the pull request instead of on the tag.
+      - name: CLI sidecar compiles (release smoke)
+        run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke src/cli/main.ts
+
       - name: Unit tests (vitest)
         run: bun run test:vitest
 

@@ -40,8 +40,9 @@ overridden.
 - Feature parity differs by mode: SOAP versions are send-only in Local mode,
   security profiles 2/3 and TLS files are daemon-only
   ([OCPP versions & transports](ocpp-versions-and-transports.md),
-  [Security profiles](security-profiles.md)); network simulation is a daemon
-  feature ([Network simulation](network-simulation.md)).
+  [Security profiles](security-profiles.md)); [network simulation](network-simulation.md)
+  works in both modes from `/v3/settings`, but its RPC / MCP methods exist
+  only on the daemon.
 - The **Reset all simulator data** button calls `state.reset` in Remote mode
   and clears the local DB in Local mode.
 - In Remote mode the browser's log download and the daemon's `logs.get` return

@@ -23,7 +23,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Legacy v1 UI](entities/legacy-v1-ui.md)                      | Original single-page UI at `/v1`; URL-hash presets; experimental multi-charger mode                                                 |
 | [Docker image](entities/docker-image.md)                      | `ghcr.io/shiv3/ocpp-cp-simulator`: tags, `/data` volume, compose variables, structured logs, custom health path                     |
 | [MCP endpoint](entities/mcp-endpoint.md)                      | `POST /mcp` tools-only MCP server: 16 curated + 3 network-sim tools, `list_methods` / `call_method`, limits                         |
-| [Built-in scenario templates](entities/scenario-templates.md) | Six general templates + 44 `cert16-*` certification templates + OCTT probe; where they are used; instance semantics                 |
+| [Built-in scenario templates](entities/scenario-templates.md) | Six general templates + 47 `cert16-*` certification templates + OCTT probe; where they are used; instance semantics                 |
 | [CSMS peers](entities/csms-peers.md)                          | SteVe (SOAP, security profiles, steve-verify) and gocpp (e2e) — URL conventions and known quirks                                    |
 | [OCPP DebugKit](entities/ocpp-debugkit.md)                    | The pinned third-party analysis engine behind `analyze`; version policy; limits                                                     |
 
@@ -51,7 +51,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [docs/examples/scenarios](sources/example-scenarios.md)                         | `demo-charging.json` (lifecycle demo) and `all-cases.json` (node-type catalogue, cross-version e2e)   |
 | [Reverse-proxy + SSO example](sources/reverse-proxy-sso-example.md)             | nginx + Authelia compose showing `--trust-forwarded-headers` behind a proxy                           |
 | [e2e/README.md](sources/e2e-readme.md)                                          | Local-only gocpp CSMS e2e suite across 1.6 / 2.0.1 / 2.1                                              |
-| [scripts/steve-verify/README.md](sources/steve-verify-readme.md)                | Runner verifying all 44 cert16 templates against real SteVe via REST, with capability probe           |
+| [scripts/steve-verify/README.md](sources/steve-verify-readme.md)                | Runner verifying all 47 cert16 templates against real SteVe via REST, with capability probe           |
 | [examples/testcontainers-java/README.md](sources/testcontainers-java-readme.md) | JVM Testcontainers prototype driving the control plane and asserting a verdict                        |
 | [scripts/poc/README.md](sources/socketio-bun-poc.md)                            | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |
 | [src/utils/scenarios/README.md](sources/cert16-templates-readme.md)             | Authoritative cert16 ↔ test-case mapping, side effects, responseOverride matrix, out-of-scope list    |

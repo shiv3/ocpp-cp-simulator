@@ -26,7 +26,7 @@ updated: 2026-09-03
 | Host many charge points and drive them programmatically    | [Daemon](../entities/daemon.md) + [Control plane](../concepts/control-plane.md) | One Socket.IO connection per client, rooms/events, `--state-db`, scenarios injected at runtime     |
 | Ship it into a Kubernetes / compose / Testcontainers setup | [Docker image](../entities/docker-image.md)                                     | Daemon + web console on one port, `/data` volume, healthcheck, semver tags                         |
 | Let an LLM agent operate it as a tool                      | [MCP endpoint](../entities/mcp-endpoint.md) (on the daemon)                     | Curated tools + generic `call_method`; see [Driving from an AI agent](driving-from-an-ai-agent.md) |
-| Verify a CSMS against OCPP 1.6 certification flows         | Daemon / console + [`cert16-*` templates](../entities/scenario-templates.md)    | 44 CP-side test cases; [steve-verify](../sources/steve-verify-readme.md) shows the full automation |
+| Verify a CSMS against OCPP 1.6 certification flows         | Daemon / console + [`cert16-*` templates](../entities/scenario-templates.md)    | 47 CP-side test cases; [steve-verify](../sources/steve-verify-readme.md) shows the full automation |
 | Diagnose a captured session                                | [`analyze`](../entities/analyze.md)                                             | DebugKit reports from a trace file or a live daemon                                                |
 | Load-test a CSMS                                           | [`export-k6`](../entities/cli.md#export-k6)                                     | Scenario → k6 bundle (OCPP 1.6J)                                                                   |
 
@@ -39,7 +39,7 @@ updated: 2026-09-03
 | Security profiles 2/3 (TLS files)   | ❌                  | ✅                                        | ✅               |
 | Scenario editor (node graph)        | ✅                  | ✅                                        | files only       |
 | Multiple charge points per process  | ✅ (per tab)        | ✅                                        | ❌ (one CP)      |
-| Network simulation                  | ❌                  | ✅                                        | ❌               |
+| Network simulation                  | ✅ (`/v3/settings`) | ✅ (+ RPC / MCP)                          | ❌               |
 | Persistence                         | IndexedDB           | SQLite `--state-db`                       | ❌               |
 | External control (Socket.IO / MCP)  | ❌                  | ✅                                        | ❌               |
 | Trace output / analyze              | log download        | `--trace-output`, `analyze --from-daemon` | `--trace-output` |

@@ -48,7 +48,7 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
 - **Scenarios** — scripted CP behavior is a node-graph JSON
   ([Scenario format](concepts/scenario-format.md), JSON Schema in `schema/`),
   authored in the editor or loaded from files / [built-in templates](entities/scenario-templates.md)
-  (including 44 OCPP 1.6 certification test cases). Runs produce a
+  (including 47 OCPP 1.6 certification test cases). Runs produce a
   machine-readable verdict with conformance and compatibility axes.
 - **Observability** — one [log line shape](concepts/log-format.md) everywhere;
   wire frames can be streamed as a versioned [trace](concepts/trace-format.md)

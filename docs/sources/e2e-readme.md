@@ -21,11 +21,13 @@ independent implementation ([gocpp](../entities/csms-peers.md#gocpp)) and its
 inbound handling via CSMS-initiated commands. Everything is real: WebSocket,
 CP, CSMS.
 
-**Run.** `bun run test:e2e` builds the Go CSMS fixture once, then runs
-`e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts` and
-`e2e/ocpp21.gocpp.e2e.ts`; run a single suite with
-`bun test ./e2e/ocpp201.gocpp.e2e.ts`. `e2e/comprehensive.gocpp.e2e.ts` runs
-`docs/examples/scenarios/all-cases.json` under every version.
+**Run.** `bun run test:e2e` builds the Go CSMS fixture once, then runs five
+suites: `e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`,
+`e2e/ocpp21.gocpp.e2e.ts`, `e2e/scenario.gocpp.e2e.ts` and
+`e2e/comprehensive.gocpp.e2e.ts` (the last runs
+`docs/examples/scenarios/all-cases.json` under every version). The README's
+"three suites" wording predates the scenario / comprehensive suites. Run a
+single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 **Requirements (local-only).** Go 1.26+ on PATH; the gocpp repo checked out as
 a sibling (`../gocpp`, wired via a `replace` directive); Bun. CI does not

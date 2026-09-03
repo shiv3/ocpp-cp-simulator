@@ -1,7 +1,7 @@
 ---
 title: Built-in scenario templates
 type: entity
-summary: The scenario JSON files shipped inside the package — six general-purpose flows plus the 44 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
+summary: The scenario JSON files shipped inside the package — six general-purpose flows plus the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
 sources:
   - src/utils/scenarioTemplates.ts
   - src/utils/scenarios/*.json
@@ -49,7 +49,8 @@ All six target a single connector (`targetType: "connector"`).
 
 ## Certification templates (`cert16-*`)
 
-44 templates implement the **Charge Point side** of OCPP 1.6 certification
+47 templates (46 `cert16-tcNNN-*` files plus `cert16-reservation-basic` for
+TC_046) implement the **Charge Point side** of OCPP 1.6 certification
 test cases (OCPPSC numbering: `cert16-tc001-cold-boot` ↔ TC_001, …). They
 synchronize on incoming CSMS calls and drive CP-side behavior; they do not
 validate CSMS payloads — verifying wire content is up to the operator or the
@@ -69,7 +70,7 @@ warning-severity `ocpp_absent` assertions to flag CSMS behaviors that are
 legal in OCPP 1.6 but known to break OCTT certification runs — see
 [Scenario format → OCTT strictness probe](../concepts/scenario-format.md#octt-strictness-probe).
 
-The [steve-verify](../sources/steve-verify-readme.md) harness drives all 44
+The [steve-verify](../sources/steve-verify-readme.md) harness drives all 47
 `cert16-*` templates against a real SteVe CSMS.
 
 ## Template instances

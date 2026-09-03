@@ -29,6 +29,14 @@ semantics. The same seed always produces the same fault sequence
 **no `--network-sim-*` startup flags** in Phase 1 — configuration is applied at
 runtime or persisted to the state database.
 
+**Where it runs** — the rule engine is part of the charge-point domain, so it
+works both in the daemon (Remote mode, Docker, desktop app) and in the
+browser's Local mode (`LocalChargePointService` re-applies the layers live
+from the settings store). The RPC / MCP methods and `--state-db` persistence
+are daemon-only; Local mode keeps the layers in its own IndexedDB-backed
+store. The single-CP CLI REPL / `--json` modes have no configuration surface
+for it.
+
 **Layering & null semantics** — global and per-CP layers merge with per-CP
 overrides winning. Setting per-CP config to `null` deletes the override and
 reverts to the global layer. A `null` global and `null` per-CP means the

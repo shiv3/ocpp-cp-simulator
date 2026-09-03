@@ -1,7 +1,7 @@
 ---
 title: "Source: scripts/steve-verify/README.md"
 type: source
-summary: TypeScript runner + bash environment scripts that verify all 44 `cert16-*` certification templates against a real local SteVe CSMS, driving CSMS-side actions over SteVe's REST API with UI/DB fallbacks and a capability probe.
+summary: TypeScript runner + bash environment scripts that verify all 47 `cert16-*` certification templates against a real local SteVe CSMS, driving CSMS-side actions over SteVe's REST API with UI/DB fallbacks and a capability probe.
 sources:
   - scripts/steve-verify/README.md
   - scripts/steve-verify/runner/
@@ -30,13 +30,18 @@ assertions.
 cd scripts/steve-verify
 ./01-setup-steve.sh          # clone + bring up local SteVe (idempotent; seeds REST API password)
 ./02-provision.sh            # register charge boxes / tags / profiles (idempotent)
-bun runner/main.ts run-all   # all 44 scenarios via the REST driver
+bun runner/main.ts run-all   # every cert16-* scenario via the REST driver
 bun runner/main.ts run-all --parallel   # up to 3 lanes (CERTCP1..3)
 bun runner/main.ts run cert16-tc010-remote-start --cp CERTCP2 --timeout 60
 bun runner/main.ts run --group core          # also: authlist-reservation,
                                              #   remotetrigger-smartcharging, firmware
 ./99-teardown.sh [--volumes]
 ```
+
+> **Stale count in the raw README.** The README still says "44 `cert16-*`
+> templates"; `src/utils/scenarios/` now holds 47 test-case templates (the
+> TC_023.x Authorize-outcome cases were added later) plus the OCTT probe, and
+> the runner's `specs/` reference all 47.
 
 **Driver model (issue #184).** REST (`/api/v1/operations/*`,
 `/api/v1/transactions`, `/api/v1/ocppTags`; Basic auth, JSON, stateless) is

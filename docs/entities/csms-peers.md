@@ -34,7 +34,7 @@ Central System (Java).
   ([OCPP versions & transports](../concepts/ocpp-versions-and-transports.md#soap-versions-12-15-16s)).
 - **Certification verification**: [`scripts/steve-verify`](../sources/steve-verify-readme.md)
   brings up a local SteVe in Docker, provisions charge boxes / tags / profiles,
-  and drives all 44 [`cert16-*` templates](scenario-templates.md) through
+  and drives all 47 [`cert16-*` templates](scenario-templates.md) through
   SteVe's REST API (`STEVE_DRIVER=api`, default) with a manager-UI fallback.
 - **Known SteVe quirks** the simulator accommodates: missing REST endpoints
   for reservations / charge-point provisioning / charging profiles

@@ -94,7 +94,7 @@ Also browsable at https://deepwiki.com/shiv3/ocpp-cp-simulator.
 - **SOAP versions (1.2, 1.5, 1.6S)** — full bidirectional OCPP-S in CLI / server mode, send-only in the browser: [OCPP versions & transports](docs/concepts/ocpp-versions-and-transports.md).
 - **OCPP 1.6 security profiles 1–3** — Basic Auth with `AuthorizationKey`, server-certificate verification, mutual TLS: [Security profiles](docs/concepts/security-profiles.md).
 - **Network simulation** — seeded latency / jitter, forced and periodic disconnects, delayed reconnect, configured at runtime: [Network simulation](docs/concepts/network-simulation.md).
-- **Certification scenarios** — 44 `cert16-*` templates covering the OCPP 1.6 test cases, verified against SteVe: [Scenario templates](docs/entities/scenario-templates.md).
+- **Certification scenarios** — 47 `cert16-*` templates covering the OCPP 1.6 test cases, verified against SteVe: [Scenario templates](docs/entities/scenario-templates.md).
 - **Diagnostics** — versioned OCPP trace files and DebugKit reports via `ocpp-cp-sim analyze`: [analyze](docs/entities/analyze.md).
 - **Persistence** — the browser (sql.js + IndexedDB) and the daemon (`--state-db`) share one SQLite schema: [State persistence](docs/concepts/state-persistence.md).
 - **Local vs Remote mode** — the browser decides once per load by probing `/v1/healthz`: [Local vs Remote mode](docs/concepts/local-vs-remote-mode.md).

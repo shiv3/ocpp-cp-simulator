@@ -27,7 +27,7 @@ CLI/server mode supports the OCPP 1.6 Security Whitepaper transport profiles:
 Profiles 2/3 and TLS certificate files are available in CLI/server mode only,
 not browser local mode.
 
-### Transport scheme rule
+## Transport scheme rule
 
 A security profile only ever **upgrades** the transport; it never downgrades
 it (#277):
@@ -58,7 +58,7 @@ withdrawn by its author in #277.
 > path. Use `ws://` only on a trusted local network (e.g. a SteVe on the
 > same host, as in the example below); for anything reachable from an
 > untrusted network use `wss://`, with Profile 1 behind a TLS-terminating
-> proxy or Profile 2 / 3 end to end.
+> proxy, or Profiles 2/3 for end-to-end TLS.
 
 ## Flags
 

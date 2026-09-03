@@ -56,18 +56,19 @@ export function adaptCentralSystemUrlScheme(
  * Adapt a Central System URL's scheme to match a WebSocket security profile
  * (#178 item G), preserving the transport.
  *
- * OCPP 1.6 security profiles fix the transport security at connect time —
- * profile 1 uses an unsecured socket (`ws`), profiles 2 and 3 require TLS
- * (`wss`) — and `buildOcppWebSocketUrl` overwrites `url.protocol` accordingly.
+ * OCPP 1.6 security profiles 2 and 3 require TLS (`wss`), and
+ * `buildOcppWebSocketUrl` upgrades a `ws` URL accordingly at connect time.
  * Without this, the scheme the operator typed in the form silently diverges
- * from what actually goes on the wire once a profile is chosen. Flip only the
- * secure/insecure half of the scheme (`ws` <-> `wss`, `http` <-> `https`) so
- * the displayed URL stays honest; host, port and path are untouched, and a URL
- * whose scheme already matches (or is unrecognized) is returned unchanged.
+ * from what actually goes on the wire once such a profile is chosen. Flip only
+ * the secure/insecure half of the scheme (`ws` <-> `wss`, `http` <-> `https`)
+ * so the displayed URL stays honest; host, port and path are untouched, and a
+ * URL whose scheme already matches (or is unrecognized) is returned unchanged.
  *
- * `secure` should be true for profiles 2/3 and false for profile 1; profile 0
- * enforces nothing, so callers should leave the URL alone rather than calling
- * this.
+ * `secure` should be true for profiles 2/3. Profile 1 does not constrain the
+ * transport (#277) and profile 0 enforces nothing, so callers should leave the
+ * URL alone for those rather than calling this. The `secure: false` direction
+ * is kept for the OCPP-version switch (#164) and for callers that explicitly
+ * want a downgrade.
  */
 export function adaptOcppUrlSecurity(url: string, secure: boolean): string {
   if (secure) {

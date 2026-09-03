@@ -209,21 +209,22 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     }));
   };
 
-  // #178 item G: OCPP 1.6 security profiles force the transport security at
-  // connect time (profile 1 → ws, profiles 2/3 → wss), so mirror that into the
+  // #178 item G / #277: OCPP 1.6 security profiles only ever *upgrade* the
+  // transport at connect time (profiles 2/3 → wss), so mirror that into the
   // displayed URL scheme when the profile changes rather than letting the form
-  // silently diverge from the wire. Profile 0 enforces nothing, so the
-  // operator's typed scheme is left untouched.
+  // silently diverge from the wire. Profile 1 says nothing about the transport
+  // (A00.FR.206 even recommends an independently secured channel) and profile
+  // 0 enforces nothing, so both leave the operator's typed scheme untouched.
   const changeSecurityProfile = (value: string) => {
     const profile = Number(value) as OcppSecurityProfile;
     setConfig((prev) =>
-      profile === 0
-        ? { ...prev, securityProfile: profile }
-        : {
+      profile >= 2
+        ? {
             ...prev,
             securityProfile: profile,
-            wsURL: adaptOcppUrlSecurity(prev.wsURL, profile >= 2),
-          },
+            wsURL: adaptOcppUrlSecurity(prev.wsURL, true),
+          }
+        : { ...prev, securityProfile: profile },
     );
   };
 

@@ -76,10 +76,94 @@ describe("OCPP WebSocket Basic auth", () => {
       authorizationKey: "001122",
     });
 
-    expect(opts.url).toBe("ws://csms.example.com/ocpp/CP001");
+    expect(opts.url).toBe("wss://csms.example.com/ocpp/CP001");
     expect(opts.headers.Authorization).toBe(
       `Basic ${Buffer.from("CP001:001122").toString("base64")}`,
     );
+  });
+
+  describe("transport scheme vs security profile (#277)", () => {
+    it("profile 1 keeps a configured wss:// URL (never downgrades to ws://)", () => {
+      const warnings: string[] = [];
+      const opts = buildOcppWebSocketConnectOptions({
+        baseUrl: "wss://csms.example.com:443/ocpp/",
+        chargePointId: "CP001",
+        basicAuth: null,
+        securityProfile: 1,
+        authorizationKey: "0123456789abcdef0123",
+        warn: (m) => warnings.push(m),
+      });
+      expect(opts.url).toBe("wss://csms.example.com/ocpp/CP001");
+      expect(opts.headers.Authorization).toBe(
+        `Basic ${Buffer.from("CP001:0123456789abcdef0123").toString("base64")}`,
+      );
+      expect(warnings).toEqual([]);
+    });
+
+    it("profile 1 keeps a configured ws:// URL and warns that it is cleartext", () => {
+      const warnings: string[] = [];
+      const opts = buildOcppWebSocketConnectOptions({
+        baseUrl: "ws://localhost:8080/steve/websocket/CentralSystemService/",
+        chargePointId: "CP001",
+        basicAuth: null,
+        securityProfile: 1,
+        authorizationKey: "0123456789abcdef0123",
+        warn: (m) => warnings.push(m),
+      });
+      expect(opts.url).toBe(
+        "ws://localhost:8080/steve/websocket/CentralSystemService/CP001",
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/profile 1 over ws:\/\/.*cleartext/);
+    });
+
+    it.each([2, 3] as const)(
+      "profile %i upgrades ws:// to wss:// with a warning",
+      (securityProfile) => {
+        const warnings: string[] = [];
+        const url = buildOcppWebSocketUrl({
+          baseUrl: "ws://csms.example.com/ocpp/",
+          chargePointId: "CP001",
+          basicAuth: null,
+          securityProfile,
+          warn: (m) => warnings.push(m),
+        });
+        expect(url).toBe("wss://csms.example.com/ocpp/CP001");
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain(
+          `profile ${securityProfile} requires TLS`,
+        );
+      },
+    );
+
+    it.each([2, 3] as const)(
+      "profile %i leaves an already-wss:// URL alone without warning",
+      (securityProfile) => {
+        const warnings: string[] = [];
+        const url = buildOcppWebSocketUrl({
+          baseUrl: "wss://csms.example.com/ocpp/",
+          chargePointId: "CP001",
+          basicAuth: null,
+          securityProfile,
+          warn: (m) => warnings.push(m),
+        });
+        expect(url).toBe("wss://csms.example.com/ocpp/CP001");
+        expect(warnings).toEqual([]);
+      },
+    );
+
+    it("profile 0 / unset never touches the scheme", () => {
+      for (const securityProfile of [0, undefined] as const) {
+        expect(
+          buildOcppWebSocketUrl({
+            baseUrl: "ws://csms.example.com/ocpp/",
+            chargePointId: "CP001",
+            basicAuth: null,
+            securityProfile,
+          }),
+        ).toBe("ws://csms.example.com/ocpp/CP001");
+      }
+    });
   });
 
   it("decodes a 32–40 char hex AuthorizationKey before the Basic header (#260)", () => {

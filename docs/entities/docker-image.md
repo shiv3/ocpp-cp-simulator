@@ -1,10 +1,34 @@
-# Docker
+---
+title: Docker image
+type: entity
+summary: "`ghcr.io/shiv3/ocpp-cp-simulator` — a Bun-based container bundling the daemon and the web console, with a `/data` state volume, semver / sha tags, compose recipe and structured-log piping."
+sources:
+  - Dockerfile
+  - docker-compose.yml
+  - .github/workflows/docker-publish.yml
+  - docker/
+related:
+  - daemon.md
+  - web-console.md
+  - ../concepts/state-persistence.md
+  - ../concepts/log-format.md
+  - ../concepts/access-control.md
+  - ../sources/reverse-proxy-sso-example.md
+updated: 2026-09-03
+---
 
-The image bundles **both** the daemon and the React browser UI in a single Bun-based container. `--web-console` is enabled by default, so opening the published port in a browser gives you the full UI talking to the Socket.IO control plane on the same origin.
+# Docker image
 
-Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) on push to `main` and on `v*` / `cli-v*` tags).
+The image bundles **both** the [daemon](daemon.md) and the React
+[web console](web-console.md) in a single Bun-based container. `--web-console`
+is enabled by default, so opening the published port in a browser gives you the
+full UI talking to the Socket.IO control plane on the same origin.
 
-### Image tags
+Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by
+[`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml)
+on push to `main` and on `v*` / `cli-v*` tags).
+
+## Image tags
 
 | Tag                      | Moves?    | Use it for                                                                                                  |
 | ------------------------ | --------- | ----------------------------------------------------------------------------------------------------------- |
@@ -14,7 +38,9 @@ Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by [`.github/
 | `X.Y.Z` (e.g. `1.2.3`)   | immutable | **Reproducible release pin** — recommended for IaC / production.                                            |
 | `X.Y` (e.g. `1.2`) / `X` | mutable   | Auto-track patch / minor releases within a version line.                                                    |
 
-Semver tags are published when a `vX.Y.Z` git tag is pushed (the same tag that cuts the desktop-app [release](../.github/workflows/release.yml)). For production, pin to a full `X.Y.Z` (or a digest) rather than `latest`/`main`:
+Semver tags are published when a `vX.Y.Z` git tag is pushed (the same tag that
+cuts the [desktop-app release](../../.github/workflows/release.yml)). For
+production, pin to a full `X.Y.Z` (or a digest) rather than `latest`/`main`:
 
 ```sh
 docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
@@ -46,7 +72,9 @@ open http://localhost:9700/
 
 ## Persistent state
 
-The image declares `/data` as a managed volume and the entrypoint bakes in `--state-db ${STATE_DB}` (default `/data/state.db`). To survive container restart/recreate, mount a host directory or named volume there:
+The image declares `/data` as a managed volume and the entrypoint bakes in
+`--state-db ${STATE_DB}` (default `/data/state.db`). To survive container
+restart/recreate, mount a host directory or named volume there:
 
 ```sh
 # Host bind mount — easy to inspect with sqlite3
@@ -77,11 +105,13 @@ To opt out of persistence entirely:
 docker run -e STATE_DB=:memory: ghcr.io/shiv3/ocpp-cp-simulator:latest …
 ```
 
-See [server.md → State persistence](server.md#state-persistence) for the table catalog and the `state.reset` RPC used by the Reset action.
+See [State persistence](../concepts/state-persistence.md) for the table catalog
+and the `state.reset` RPC used by the Reset action.
 
 ## docker-compose
 
-`docker-compose.yml` at the repo root wires the persistent volume + sensible defaults:
+[`docker-compose.yml`](../../docker-compose.yml) at the repo root wires the
+persistent volume + sensible defaults:
 
 ```sh
 # Bring it up (binds ./.state on the host)
@@ -107,7 +137,7 @@ Variables read by the compose file (all optional):
 The compose file also includes a commented `--cors-origin ${CORS_ORIGIN}` block.
 Uncomment it when the console is reached from another origin or behind a
 reverse proxy; otherwise the image's `0.0.0.0` bind uses the safe `same-origin`
-policy. See [server.md → CORS](server.md#cors).
+policy. See [Access control → CORS](../concepts/access-control.md#cors).
 
 ## Mounting a scenario template
 
@@ -121,9 +151,16 @@ docker run --rm -p 9700:9700 \
   --scenario-connector all
 ```
 
+The bundled example files are described in
+[Example scenarios](../sources/example-scenarios.md).
+
 ## Structured logs
 
-Pass `--log-format json` (or set `STATE_DB=...` plus the flag) to switch every line on stderr — including `[server] xxx` setup chatter — to JSON Lines. Lines out of the daemon, rows in the `logs` table, and the JSON-Lines file produced by the browser's **Download Logs** button all share the same shape, so one `jq` pipeline consumes all three:
+Pass `--log-format json` (or set `STATE_DB=...` plus the flag) to switch every
+line on stderr — including `[server] xxx` setup chatter — to JSON Lines. Lines
+out of the daemon, rows in the `logs` table, and the JSON-Lines file produced
+by the browser's **Download Logs** button all share the same shape, so one
+`jq` pipeline consumes all three:
 
 ```sh
 docker run --rm -p 9700:9700 \
@@ -134,7 +171,8 @@ docker run --rm -p 9700:9700 \
   2>&1 | jq -r 'select(.type=="WebSocket") | "\(.timestamp) \(.message)"'
 ```
 
-See [server.md → Log format](server.md#log-format) for the schema and the related `logs.get` / `logs.clear` RPC methods.
+See [Log format](../concepts/log-format.md) for the schema and the related
+`logs.get` / `logs.clear` RPC methods.
 
 ## Image details
 
@@ -154,7 +192,18 @@ override is required because the container intentionally binds a non-loopback
 address; exposure is controlled by Docker port mapping, CORS, optional
 web-console Basic Auth, and any surrounding network policy.
 
-The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the browser UI in a separate stage and only `dist/` ships in the runtime layer.
+Notes:
+
+- After `docker run …` open `http://localhost:9700/` to use the browser UI. It
+  talks to the daemon over Socket.IO on the same origin, so CORS / dev-server
+  routing is a non-issue.
+- The image's `HEALTHCHECK` hits `$HEALTH_PATH` (default `/v1/healthz`), so
+  `docker ps` shows `healthy` / `unhealthy` once the daemon is up.
+- Override the bound port by setting the `HTTP_PORT` env var (for example
+  `-e HTTP_PORT=8080`). The published host port via `-p` is independent.
+
+The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the
+browser UI in a separate stage and only `dist/` ships in the runtime layer.
 
 ## Building locally
 
@@ -164,11 +213,17 @@ docker run --rm -p 9700:9700 -v "$PWD/.state:/data" ocpp-cp-sim:dev \
   --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
 ```
 
-The build is fully self-contained (no host node_modules required); first build ≈ 60 s, subsequent rebuilds hit the Bun install cache for ≈ 10 s.
+The build is fully self-contained (no host node_modules required); first build
+≈ 60 s, subsequent rebuilds hit the Bun install cache for ≈ 10 s.
 
 ## Custom health-check path
 
-The daemon's health endpoint defaults to `/v1/healthz`. Override the path when deploying behind a reverse proxy that reserves the default — e.g. Google Front End in front of Cloud Run returning 404 directly on certain paths before the request reaches the container. The same value must be set both at build time (it's inlined into the UI bundle for the browser's Remote-mode auto-detect probe) and at runtime (forwarded to the daemon's `--health-path`):
+The daemon's health endpoint defaults to `/v1/healthz`. Override the path when
+deploying behind a reverse proxy that reserves the default — e.g. Google Front
+End in front of Cloud Run returning 404 directly on certain paths before the
+request reaches the container. The same value must be set both at build time
+(it's inlined into the UI bundle for the browser's Remote-mode auto-detect
+probe) and at runtime (forwarded to the daemon's `--health-path`):
 
 ```sh
 # 1) Build with the custom path baked into the UI bundle.
@@ -184,4 +239,14 @@ docker run --rm -p 9700:9700 \
   --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
 ```
 
-With compose, the same `HEALTH_PATH` env on the host machine flows to both the build args and the container env (see [`docker-compose.yml`](../docker-compose.yml)).
+With compose, the same `HEALTH_PATH` env on the host machine flows to both the
+build args and the container env (see [`docker-compose.yml`](../../docker-compose.yml)).
+
+## Behind a reverse proxy
+
+Bound to `0.0.0.0`, the daemon applies same-origin CORS, so a console published
+at a public HTTPS URL 403s its own assets until the public origin is named with
+`--cors-origin` or derived via `--trust-forwarded-headers`. The reasoning and
+a worked nginx + Authelia compose are in
+[Access control → Behind a reverse proxy](../concepts/access-control.md#behind-a-reverse-proxy-traefik-nginx-caddy-)
+and [Reverse-proxy SSO example](../sources/reverse-proxy-sso-example.md).

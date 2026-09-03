@@ -1,17 +1,35 @@
+---
+title: OCPP trace format (v1.1)
+type: concept
+summary: Implementation-independent JSON/JSONL record for one OCPP message exchange — the contract between traffic producers (this simulator, via `--trace-output` or the log adapter) and analyzers (OCPP DebugKit).
+sources:
+  - src/trace/OcppTraceRecord.ts
+  - src/trace/logEntryToTrace.ts
+  - src/cli/trace/TraceWriter.ts
+  - "issue #188"
+related:
+  - ../entities/analyze.md
+  - ../entities/ocpp-debugkit.md
+  - log-format.md
+  - scenario-format.md
+  - ../entities/cli.md
+updated: 2026-09-03
+---
+
 # OCPP Trace Format (v1.1)
 
 A small, **implementation-independent** JSON/JSONL format for one OCPP message
 exchange. It is intended as a shared contract between tools that _produce_ OCPP
 traffic (this simulator) and tools that _analyze_ it (e.g.
-[OCPP DebugKit](https://github.com/ocpp-debugkit/toolkit)), without coupling
+[OCPP DebugKit](../entities/ocpp-debugkit.md)), without coupling
 either side to the other's internal models — see
 [issue #188](https://github.com/shiv3/ocpp-cp-simulator/issues/188).
 
 This is a **proof of concept**: it defines and versions the record shape and
 ships an adapter from the simulator's own logs. The simulator now writes trace
-files at runtime via `--trace-output <path>` (see [docs/cli.md](./cli.md)); an
-`analyze` subcommand and any DebugKit integration remain deliberately later
-steps.
+files at runtime via `--trace-output <path>` (see [CLI](../entities/cli.md)); the
+[`analyze` subcommand](../entities/analyze.md) consumes it (the DebugKit
+integration that was originally deferred).
 
 ## Status & scope
 
@@ -79,12 +97,12 @@ steps.
 
 ## Producing records
 
-The adapter in [`src/trace/`](../src/trace/) maps this simulator's JSONL log
+The adapter in [`src/trace/`](../../src/trace/) maps this simulator's JSONL log
 lines (`--log-format json`, the `logs.get` RPC, or the browser log-viewer
 download) into trace records:
 
 ```ts
-import { logLinesToTrace } from "../src/trace/logEntryToTrace";
+import { logLinesToTrace } from "../../src/trace/logEntryToTrace";
 
 const records = logLinesToTrace(jsonlLogLines, { ocppVersion: "1.6" });
 ```
@@ -97,6 +115,10 @@ line (returning `null` for non-wire lines). The type lives in
 version string.
 
 ## JSON Schema
+
+> The `$id` below is the stable identifier of the published v1.1 schema and
+> is kept verbatim even though this page now lives at
+> `docs/concepts/trace-format.md`; a published version is immutable.
 
 ```json
 {

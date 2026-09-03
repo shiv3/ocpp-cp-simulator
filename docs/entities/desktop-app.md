@@ -1,23 +1,25 @@
-# Browser UI
+---
+title: Desktop app (Tauri)
+type: entity
+summary: Tauri desktop bundle that boots the simulator daemon as a sidecar on an ephemeral loopback port and opens the full web console in Remote mode; macOS / Windows / Linux installers on the Releases page.
+sources:
+  - src-tauri/
+  - scripts/build-tauri-sidecar.sh
+  - .github/workflows/release.yml
+related:
+  - web-console.md
+  - daemon.md
+  - ../concepts/local-vs-remote-mode.md
+updated: 2026-09-03
+---
 
-React + TypeScript web application with Flowbite/Tailwind UI. Also available as a Tauri desktop application.
+# Desktop app (Tauri)
 
-## Web Version
-
-https://shiv3.github.io/ocpp-cp-simulator/
-
-The hosted web version runs in **Local mode** — every charge point lives in the browser tab, persisting to IndexedDB via sql.js. Closing the tab keeps the data; clearing site data drops it.
-
-When the same React UI is served by `ocpp-cp-sim --web-console`, the Docker
-image, or the desktop app, it runs in **Remote mode**. The page first probes
-`/v1/healthz` at its own origin; a `200` response with `{ "ok": true }` means a
-daemon is present. After that detection, all simulator control uses the same
-Socket.IO connection documented in [server.md](server.md): `rpc` acks for
-commands and `event` push envelopes for CP / registry updates.
-
-## Desktop Application
-
-The desktop app is **not** a wrapper around the static Local-mode build. On launch it spins up the bundled simulator daemon as a sidecar, waits for `/v1/healthz`, then opens the full web console served by that daemon — so you get the same Remote-mode UX as `ocpp-cp-sim --web-console`, without having to install anything else.
+The desktop app is **not** a wrapper around the static Local-mode build. On
+launch it spins up the bundled simulator [daemon](daemon.md) as a sidecar, waits
+for `/v1/healthz`, then opens the full [web console](web-console.md) served by
+that daemon — so you get the same Remote-mode UX as `ocpp-cp-sim --web-console`,
+without having to install anything else.
 
 - State (`state.db`) is written to the OS-standard app data dir:
   - macOS: `~/Library/Application Support/com.ocpp.cp-simulator/state.db`
@@ -29,9 +31,11 @@ The desktop app is **not** a wrapper around the static Local-mode build. On laun
 - Closing the window terminates the daemon (SIGTERM) so the next launch starts from a clean process.
 - Multiple-launch is squashed by `tauri-plugin-single-instance`: the second invocation focuses the existing window instead of starting a second daemon.
 
-### Download
+## Download
 
 Download the latest desktop version from the [Releases](https://github.com/shiv3/ocpp-cp-simulator/releases) page.
+Desktop releases are cut from `vX.Y.Z` git tags (the same tag that publishes
+semver [Docker image](docker-image.md#image-tags) tags).
 
 Available for:
 
@@ -43,9 +47,9 @@ Available for:
   - Debian/Ubuntu: `OCPP.CP.Simulator_*_amd64.deb`
   - Fedora/RHEL: `OCPP.CP.Simulator-*.x86_64.rpm`
 
-### Installation
+## Installation
 
-#### macOS
+### macOS
 
 1. Download the appropriate `.dmg` file for your processor
 2. Open the downloaded file
@@ -53,14 +57,14 @@ Available for:
 4. First time opening: Right-click and select "Open" to bypass Gatekeeper
    - Alternatively: `xattr -c "/Applications/OCPP CP Simulator.app"`
 
-#### Windows
+### Windows
 
 1. Download the `.exe` or `.msi` installer
 2. Run the installer
 3. Follow the installation wizard
 4. The app will be available in your Start Menu
 
-#### Linux
+### Linux
 
 **Debian/Ubuntu**
 
@@ -76,9 +80,6 @@ Available for:
 
 ```bash
 npm install
-
-# Web dev server
-npm run dev
 
 # Desktop dev mode (requires Rust + Bun)
 #   In debug builds the desktop shell spawns `bun src/cli/main.ts ...`

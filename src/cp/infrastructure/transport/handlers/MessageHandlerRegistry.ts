@@ -50,9 +50,9 @@ import type {
   UpdateFirmwareRequestV16,
   UpdateFirmwareResponseV16,
 } from "../../../../ocpp";
-import { OCPPAction } from "../../../../domain/types/OcppTypes";
-import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
-import { Logger } from "../../../../shared/Logger";
+import { OCPPAction } from "../../../domain/types/OcppTypes";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { Logger } from "../../../shared/Logger";
 import type { HandlerOutcome } from "../network-sim/ResponseEffectQueue";
 
 /**

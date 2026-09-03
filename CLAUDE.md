@@ -116,6 +116,7 @@ Run when asked, after a batch of ingests, or when something looks stale:
               if not os.path.exists(t) or (frag and t.endswith(".md") and frag not in heads[t]):
                   print("BROKEN", f, "->", link); bad += 1
   print("link problems:", bad)
+  raise SystemExit(1 if bad else 0)
   PY
   ````
 

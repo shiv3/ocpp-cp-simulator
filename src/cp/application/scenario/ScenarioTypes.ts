@@ -458,7 +458,7 @@ export interface ScenarioTrigger {
  * optional fields bump the minor version, consumers MUST ignore unknown
  * fields, and a semantic change to an existing field is a new major version.
  * See `schema/scenario.schema.json` (Draft 2020-12) and
- * `docs/scenario-format.md`.
+ * `docs/concepts/scenario-format.md`.
  */
 export const SCENARIO_SCHEMA_VERSION = "1.1";
 

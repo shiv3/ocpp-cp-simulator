@@ -1,6 +1,19 @@
-# Legacy Version (v1)
+---
+title: Legacy v1 UI
+type: entity
+summary: The original single-page web UI, kept in maintenance mode at the `/v1` route; supports URL-hash presets and an experimental multi-charger mode.
+sources:
+  - public/ (v1 bundle)
+related:
+  - web-console.md
+updated: 2026-09-03
+---
 
-The original single-page web UI. Available at the `/v1` path.
+# Legacy v1 UI
+
+The original single-page web UI. Available at the `/v1` path of the
+[web console](web-console.md) origin (maintenance only — new features land in
+the classic and `/v3` consoles).
 
 ## Web Version
 

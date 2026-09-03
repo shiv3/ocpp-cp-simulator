@@ -1,15 +1,36 @@
+---
+title: Scenario file format (v1.1)
+type: concept
+summary: The node-graph JSON format for scripted charge-point behavior — 23 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+sources:
+  - schema/scenario.schema.json
+  - src/cp/application/scenario/ScenarioTypes.ts
+  - src/cp/application/verification/ScenarioAssertions.ts
+  - src/scenario/scenarioSchemaValidator.ts
+  - src/scenario/deepPartialMatch.ts
+  - "issues #214, #240, #247, #239"
+related:
+  - ../sources/scenario-json-schema.md
+  - ../entities/scenario-templates.md
+  - ../sources/example-scenarios.md
+  - trace-format.md
+  - control-plane.md
+  - ../entities/cli.md
+updated: 2026-09-03
+---
+
 # Scenario File Format (v1.1)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
 CSMS-call waits, ...) connected by edges, executed by the scenario engine.
-This is the format the browser Scenario Editor exports/imports, the shape
+This is the format the browser [Scenario Editor](../entities/web-console.md) exports/imports, the shape
 `--scenario` / `--scenario-template-file` expect on the CLI, and what
-`load_scenario` / `run_scenario_file` accept over the Socket.IO control API
+`load_scenario` / `run_scenario_file` accept over the [Socket.IO control API](control-plane.md)
 — see [issue #214](https://github.com/shiv3/ocpp-cp-simulator/issues/214).
 
 A published **JSON Schema** (Draft 2020-12) lives at
-[`schema/scenario.schema.json`](../schema/scenario.schema.json) and is the
+[`schema/scenario.schema.json`](../../schema/scenario.schema.json) and is the
 source of truth for field names, types, and the closed vocabularies (node
 `type`, `OCPPStatus`, etc.). This document is a human-readable overview of
 that schema, not a replacement for it.
@@ -134,7 +155,7 @@ still-connected charge point does **not** re-fire the scenario.
 Which `status` values are valid depends on `action` (e.g. `action:
 "RemoteStartTransaction"` only accepts `status: "Accepted" | "Rejected"`; see
 `RESPONSE_OVERRIDE_STATUSES` in
-[`ScenarioTypes.ts`](../src/cp/application/scenario/ScenarioTypes.ts)). The
+[`ScenarioTypes.ts`](../../src/cp/application/scenario/ScenarioTypes.ts)). The
 schema types both fields as plain strings and does **not** enforce this
 action → status constraint — encoding the full per-action status matrix
 into JSON Schema would make the schema harder to read for little benefit
@@ -200,7 +221,7 @@ point's WebSocket reaches `event` (`"connected"` or `"disconnected"`).
   forever) can end the wait early, with a timeout error.
 - This node only _observes_ the connection state — it never causes a
   disconnect itself. Simulating network drops is out of scope here (see
-  issue #239).
+  issue #239) — that is what [Network simulation](network-simulation.md) does.
 
 ## Edge shape
 
@@ -217,7 +238,7 @@ allows but does not require.
 An optional array of declarative pass/fail checks evaluated against the
 run's captured OCPP transcript once a scenario finishes (see
 `evaluateAssertions` in
-[`ScenarioAssertions.ts`](../src/cp/application/verification/ScenarioAssertions.ts)).
+[`ScenarioAssertions.ts`](../../src/cp/application/verification/ScenarioAssertions.ts)).
 Each entry has `id` and `type` (one of `ocpp_sent`, `ocpp_received`,
 `ocpp_absent`, `response_status`, `idtag_info_status`, `payload_match`,
 `message_order`, `message_after`, `state_transition`, `no_unexpected`), plus
@@ -252,12 +273,12 @@ A scenario with no `assertions` produces a `SKIPPED` verdict and runs exactly as
 
 ### OCTT strictness probe
 
-The bundled `cert16-octt-strictness-probe.json` scenario uses warning-severity `ocpp_absent` assertions for two CSMS behaviors that are valid per OCPP 1.6 but have been observed to break OCTT certification scenarios: an automatic `GetConfiguration` right after connect, and a `GetDiagnostics` during the sequence. By default such a run reports `OCPP conformance: PASS / compatibility: WARNING`; enable strict mode (`strictCompatibility: true` or per-run `strict: true`) to promote those warnings to failures when rehearsing for an official certification run.
+The bundled `cert16-octt-strictness-probe` [template](../entities/scenario-templates.md) uses warning-severity `ocpp_absent` assertions for two CSMS behaviors that are valid per OCPP 1.6 but have been observed to break OCTT certification scenarios: an automatic `GetConfiguration` right after connect, and a `GetDiagnostics` during the sequence. By default such a run reports `OCPP conformance: PASS / compatibility: WARNING`; enable strict mode (`strictCompatibility: true` or per-run `strict: true`) to promote those warnings to failures when rehearsing for an official certification run.
 
 ## Validating a scenario file
 
 ```ts
-import { validateScenarioSchema } from "../src/scenario/scenarioSchemaValidator";
+import { validateScenarioSchema } from "../../src/scenario/scenarioSchemaValidator";
 
 const result = validateScenarioSchema(JSON.parse(fileContents));
 if (!result.valid) {

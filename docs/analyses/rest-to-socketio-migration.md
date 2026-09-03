@@ -1,3 +1,18 @@
+---
+title: Migrating from REST/Unix control to Socket.IO
+type: analysis
+summary: Before/after mapping of every removed REST endpoint, WebSocket event stream and the Unix-domain socket onto the Socket.IO `rpc` / `event` contract, plus the auth change for clients.
+sources:
+  - git history (commit 492c9c8, 2026-06-26 — "socket.io control-plane contract + REST/Unix migration guide")
+  - scripts/poc/README.md
+related:
+  - ../concepts/control-plane.md
+  - ../concepts/access-control.md
+  - ../entities/cli.md
+  - ../sources/socketio-bun-poc.md
+updated: 2026-09-03
+---
+
 # Migrating from REST/Unix Control to Socket.IO
 
 The daemon control plane is now one Socket.IO connection per client. Browser
@@ -69,7 +84,7 @@ example:
 Common command IDs include `connect`, `disconnect`, `status`,
 `start_transaction`, `stop_transaction`, `set_meter_value`,
 `send_meter_value`, `run_scenario`, `set_soc_meter_sync`, and
-`get_state_history`. The full table is in [server.md](server.md#cp-command-methods).
+`get_state_history`. The full table is in [Control plane → CP command methods](../concepts/control-plane.md#cp-command-methods).
 
 ## Subscriptions
 
@@ -103,6 +118,8 @@ The subscribe ack is atomic and includes:
 Apply the snapshot first, then process later `event` pushes.
 
 ## Auth Change
+
+(Current rules: [Access control](../concepts/access-control.md).)
 
 `--web-console-basic-auth-user` and `--web-console-basic-auth-pass` still gate
 static web-console assets with HTTP Basic Auth. They now also gate the

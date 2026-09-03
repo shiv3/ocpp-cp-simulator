@@ -15,7 +15,7 @@
  * was removed as redundant.
  *
  * These fixtures stay: they are exactly the "re-verify the test matrix in
- * `src/cli/analyze/__tests__/`" gate that docs/cli.md requires on a toolkit
+ * `src/cli/analyze/__tests__/`" gate that docs/entities/analyze.md requires on a toolkit
  * upgrade. If a future version regresses rule 14 back to the flat-series
  * behavior, the false-positive cases below fail and `analyze` does not
  * silently start reporting noise again.

@@ -717,10 +717,12 @@ Options:
   --connectors <n>         Number of connectors (default: 1)
   --security-profile <0|1|2|3>
                            OCPP 1.6 security profile. 0 leaves transport/auth
-                           as configured; 1 forces ws:// + AuthorizationKey
-                           Basic Auth; 2 forces wss:// + AuthorizationKey
-                           Basic Auth + verified server cert; 3 forces
-                           wss:// mTLS and suppresses Basic Auth.
+                           as configured; 1 adds AuthorizationKey Basic Auth
+                           and keeps the configured ws:// or wss:// scheme;
+                           2 forces wss:// + AuthorizationKey Basic Auth +
+                           verified server cert; 3 forces wss:// mTLS and
+                           suppresses Basic Auth. Profiles never downgrade
+                           wss:// to ws://.
   --authorization-key <hex> AuthorizationKey used as Basic Auth password for
                            security profiles 1 and 2 (username is CP ID).
   --tls-ca <path>          PEM CA bundle used to verify the CSMS server cert.

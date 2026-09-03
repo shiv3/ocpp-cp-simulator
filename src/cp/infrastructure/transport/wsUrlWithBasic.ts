@@ -52,15 +52,35 @@ export function buildOcppWebSocketUrl(params: {
   chargePointId: string;
   basicAuth: BasicAuthSettings | null;
   securityProfile?: OcppSecurityProfile;
+  warn?: (message: string) => void;
 }): string {
   const url = new URL(params.baseUrl);
+  // #277: a security profile only ever *upgrades* the transport. Profiles 2/3
+  // mandate TLS (A00.FR.301+), so a `ws://` URL is promoted to `wss://` and
+  // the operator is told. Profile 1 (A00.FR.201–207) says nothing about the
+  // transport — A00.FR.206 even recommends carrying Basic Auth over a channel
+  // secured by other means — so the configured scheme is authoritative. Before
+  // #277 profile 1 silently rewrote `wss://` to `ws://`, which sent the
+  // AuthorizationKey in cleartext to a TLS-terminating edge listening on :443.
   switch (params.securityProfile) {
-    case 1:
-      url.protocol = "ws:";
-      break;
     case 2:
     case 3:
-      url.protocol = "wss:";
+      if (url.protocol === "ws:") {
+        url.protocol = "wss:";
+        params.warn?.(
+          `Security profile ${params.securityProfile} requires TLS: ` +
+            `connecting with wss:// instead of the configured ws:// URL.`,
+        );
+      }
+      break;
+    case 1:
+      if (url.protocol === "ws:") {
+        params.warn?.(
+          "Security profile 1 over ws://: the AuthorizationKey is sent as " +
+            "cleartext HTTP Basic credentials. Use wss:// on any network " +
+            "you do not fully trust.",
+        );
+      }
       break;
     case 0:
     case undefined:
@@ -303,6 +323,7 @@ export function buildOcppWebSocketConnectOptions(params: {
     chargePointId: params.chargePointId,
     basicAuth,
     securityProfile: params.securityProfile,
+    warn: params.warn,
   });
   const versionProtocol = ocppVersionToSubprotocol(params.ocppVersion ?? "");
   const protocols = [

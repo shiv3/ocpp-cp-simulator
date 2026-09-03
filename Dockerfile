@@ -42,7 +42,25 @@ WORKDIR /app
 # Need every dep (including devDependencies: vite, plugins, tailwind).
 # --ignore-scripts skips husky/postinstall hooks.
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --ignore-scripts
+# `bun install` reaches the network for every package, and a transient
+# tarball-extraction failure there fails the whole build:
+#
+#   error: Fail extracting tarball for "@swc/core-linux-arm64-gnu"
+#
+# That is what left v0.7.6 without a published image (#281) — the tag build
+# is a one-shot, so a hiccup that a re-run would have survived becomes a
+# release whose notes promise an image the registry does not have. Retry a
+# few times with a short backoff, and clear bun's cache between attempts so
+# a half-extracted entry is not reused. A genuine failure (a lockfile that
+# does not match, a package that does not exist) still fails, three times
+# and roughly 20 seconds slower.
+RUN for attempt in 1 2 3; do \
+      bun install --frozen-lockfile --ignore-scripts && break; \
+      [ "$attempt" = 3 ] && { echo "bun install failed 3 times; giving up"; exit 1; }; \
+      echo "bun install failed (attempt $attempt/3); retrying"; \
+      rm -rf /root/.bun/install/cache node_modules; \
+      sleep $((attempt * 5)); \
+    done
 
 # Source for the UI build: index.html + src/ + Vite/Tailwind/TS configs.
 COPY index.html ./
@@ -73,7 +91,14 @@ RUN bun run build
 FROM oven/bun:${BUN_VERSION}-alpine AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production --ignore-scripts
+# Same retry as the ui stage, and for the same reason (#281).
+RUN for attempt in 1 2 3; do \
+      bun install --frozen-lockfile --production --ignore-scripts && break; \
+      [ "$attempt" = 3 ] && { echo "bun install failed 3 times; giving up"; exit 1; }; \
+      echo "bun install failed (attempt $attempt/3); retrying"; \
+      rm -rf /root/.bun/install/cache node_modules; \
+      sleep $((attempt * 5)); \
+    done
 
 
 # ----- Stage 3: the runtime image -------------------------------------

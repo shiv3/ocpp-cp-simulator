@@ -69,7 +69,9 @@ await rpc({
 
 ## Three client options, ranked by effort
 
-1. **MCP** — `claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp`;
+1. **MCP** — `claude mcp add --transport http ocpp-sim http://127.0.0.1:5172/mcp`
+   (the port is whatever the daemon listens on — `5172` in the setup above,
+   `9700` for a bare `--daemon`);
    the agent gets 16 curated tools, 3 network-sim tools and `list_methods` /
    `call_method` for everything else. Best for LLM agents; no code to write.
 2. **Bundled CLI as client** — `ocpp-cp-sim --cp-id CP001 --send '{"command":"status"}'`,

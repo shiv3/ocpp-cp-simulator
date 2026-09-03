@@ -22,7 +22,8 @@ inbound handling via CSMS-initiated commands. Everything is real: WebSocket,
 CP, CSMS.
 
 **Run.** `bun run test:e2e` builds the Go CSMS fixture once, then runs
-`e2e/ocpp16.gocpp.e2e.ts`, `ocpp201…`, `ocpp21…`; single suite with
+`e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts` and
+`e2e/ocpp21.gocpp.e2e.ts`; run a single suite with
 `bun test ./e2e/ocpp201.gocpp.e2e.ts`. `e2e/comprehensive.gocpp.e2e.ts` runs
 `docs/examples/scenarios/all-cases.json` under every version.
 

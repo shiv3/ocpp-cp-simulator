@@ -37,10 +37,14 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
   [MCP endpoint](entities/mcp-endpoint.md), [Docker image](entities/docker-image.md),
   [Legacy v1 UI](entities/legacy-v1-ui.md). Pick one with
   [Choosing an interface](analyses/choosing-an-interface.md).
-- **Control plane** — every client of the daemon speaks the same
-  [Socket.IO contract](concepts/control-plane.md): `rpc` acks and `event`
-  pushes, zod-validated, closed error codes. REST and the Unix socket were
-  removed ([migration](analyses/rest-to-socketio-migration.md)).
+- **Control plane** — every Socket.IO client of the daemon (web console in
+  Remote mode, CLI client modes, external agents) speaks the same
+  [contract](concepts/control-plane.md): `rpc` acks and `event` pushes,
+  zod-validated, closed error codes. REST and the Unix socket were removed
+  ([migration](analyses/rest-to-socketio-migration.md)).
+- **MCP** — a separate transport for LLM agents: stateless JSON-RPC over
+  `POST /mcp`, exposing the same daemon methods as tools
+  ([MCP endpoint](entities/mcp-endpoint.md)); it has no event push.
 - **Scenarios** — scripted CP behavior is a node-graph JSON
   ([Scenario format](concepts/scenario-format.md), JSON Schema in `schema/`),
   authored in the editor or loaded from files / [built-in templates](entities/scenario-templates.md)

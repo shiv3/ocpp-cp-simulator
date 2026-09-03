@@ -199,8 +199,10 @@ Notes:
   routing is a non-issue.
 - The image's `HEALTHCHECK` hits `$HEALTH_PATH` (default `/v1/healthz`), so
   `docker ps` shows `healthy` / `unhealthy` once the daemon is up.
-- Override the bound port by setting the `HTTP_PORT` env var (for example
-  `-e HTTP_PORT=8080`). The published host port via `-p` is independent.
+- Override the port the daemon listens on inside the container with the
+  `HTTP_PORT` env var. The container-side half of `-p` must match it:
+  `-e HTTP_PORT=8080 -p 9700:8080` keeps the console at
+  `http://localhost:9700/` while the daemon listens on 8080 internally.
 
 The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the
 browser UI in a separate stage and only `dist/` ships in the runtime layer.

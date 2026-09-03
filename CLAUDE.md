@@ -87,11 +87,37 @@ Run when asked, after a batch of ingests, or when something looks stale:
   `src/utils/scenarios/`, node types against `schema/scenario.schema.json`.
 - **Broken links / anchors** — relative links must resolve; run a quick check:
 
-  ```bash
-  # relative links in docs/ that do not resolve to a file
-  grep -rnoE '\]\((\.\.?/[^)#]+)' docs --include='*.md' | while IFS=: read -r f _ l; do
-    p="${l#](}"; [ -e "$(dirname "$f")/$p" ] || echo "$f -> $p"; done
-  ```
+  ````bash
+  # every relative link in docs/, README.md and CLAUDE.md (bare, ./ and ../
+  # forms) must resolve to a file, and a #fragment must match a heading slug
+  python3 - <<'PY'
+  import re, os, glob
+  files = glob.glob("docs/**/*.md", recursive=True) + ["README.md", "CLAUDE.md"]
+  def slug(h):
+      h = re.sub(r"[^\w\- ]", "", h.strip().lower().replace("`", ""))
+      return h.replace(" ", "-")
+  heads, bad = {}, 0
+  for f in files:
+      code, hs = False, []
+      for line in open(f):
+          if line.startswith("```"): code = not code
+          elif not code and (m := re.match(r"#{1,6}\s+(.*)", line)): hs.append(slug(m.group(1)))
+      heads[f] = hs
+  for f in files:
+      code = False
+      for line in open(f):
+          if line.startswith("```"): code = not code; continue
+          if code: continue
+          for m in re.finditer(r"\]\(([^)\s]+)\)", line):
+              link = m.group(1)
+              if link.startswith(("http", "mailto")): continue
+              path, _, frag = link.partition("#")
+              t = f if not path else os.path.normpath(os.path.join(os.path.dirname(f), path))
+              if not os.path.exists(t) or (frag and t.endswith(".md") and frag not in heads[t]):
+                  print("BROKEN", f, "->", link); bad += 1
+  print("link problems:", bad)
+  PY
+  ````
 
 - **Orphans** — every page listed in `index.md`; every page has an inbound
   link from a page other than `index.md`.

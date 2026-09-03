@@ -57,7 +57,10 @@ CSMS-initiated calls.
 
 - Point `--ws-url` (or `cp.create`'s `wsUrl`) at the CSMS OCPP-J endpoint;
   add `--basic-auth-user/pass`, `--header`, `--ws-subprotocol` as required by
-  the peer.
+  the peer. Use `wss://` whenever `--basic-auth-user/pass` (or a credential
+  in `--header`) is configured — over `ws://` the credentials travel in
+  cleartext; reserve `ws://` for unauthenticated local testing
+  ([Security profiles](../concepts/security-profiles.md)).
 - The Java [Testcontainers harness](../sources/testcontainers-java-readme.md)
   shows how a CSMS project can embed the simulator container in its own test
   suite.

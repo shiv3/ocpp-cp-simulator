@@ -31,9 +31,17 @@ page's own `/assets/*` 403. nginx sets `X-Forwarded-Proto/Host` and the
 Full reasoning: [Access control → Behind a reverse proxy](../concepts/access-control.md#behind-a-reverse-proxy-traefik-nginx-caddy-).
 
 **Security property.** The simulator port is **not** published to the host —
-only nginx reaches it on the internal network (`expose:` not `ports:`), so a
-client cannot bypass the proxy and spoof `X-Forwarded-*` headers. This is the
-precondition for `--trust-forwarded-headers` being safe.
+only containers on the compose `internal` network reach it (`expose:` not
+`ports:`), so an external client cannot bypass the proxy and spoof
+`X-Forwarded-*` headers. This is the precondition for
+`--trust-forwarded-headers` being safe.
+
+**Remaining trust boundary.** `expose:` is not network isolation: nginx,
+Authelia and the simulator all share the single `internal` network, so a
+compromised sibling container could reach the daemon directly and forge
+`X-Forwarded-Host`. For a stricter setup, place the simulator on a network
+that only nginx joins, or drop `--trust-forwarded-headers` in favour of a
+fixed `--cors-origin https://ocpp.example.com`, which has no such caveat.
 
 **Status.** Illustrative, not turnkey: supply TLS certs under `./certs`, an
 Authelia config under `./authelia`, and replace the example hostnames.

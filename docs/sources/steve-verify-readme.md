@@ -33,7 +33,8 @@ cd scripts/steve-verify
 bun runner/main.ts run-all   # all 44 scenarios via the REST driver
 bun runner/main.ts run-all --parallel   # up to 3 lanes (CERTCP1..3)
 bun runner/main.ts run cert16-tc010-remote-start --cp CERTCP2 --timeout 60
-bun runner/main.ts run --group core|authlist-reservation|remotetrigger-smartcharging|firmware
+bun runner/main.ts run --group core          # also: authlist-reservation,
+                                             #   remotetrigger-smartcharging, firmware
 ./99-teardown.sh [--volumes]
 ```
 

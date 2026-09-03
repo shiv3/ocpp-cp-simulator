@@ -26,6 +26,12 @@ CLI/server mode supports the OCPP 1.6 Security Whitepaper transport profiles:
 Profiles 2/3 and TLS certificate files are available in CLI/server mode only,
 not browser local mode.
 
+> **Profile 1 is cleartext.** Over `ws://` the Basic Auth header — and with it
+> the `AuthorizationKey` — is visible to, and replayable by, anyone on the
+> path. Use Profile 1 only on a trusted local network (e.g. a SteVe on the
+> same host, as in the example below); for anything reachable from an
+> untrusted network use Profile 2 or 3 (`wss://`).
+
 ## Flags
 
 - `--security-profile <0|1|2|3>` selects transport security enforcement; `0` leaves transport/auth as configured.

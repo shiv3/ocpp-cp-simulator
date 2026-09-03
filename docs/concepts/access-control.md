@@ -33,6 +33,15 @@ a tight `--cors-origin` allowlist when browsers can reach the daemon. CORS is
 not authentication; it only limits which browser origins can make cross-site
 requests.
 
+> **Basic Auth needs TLS.** The daemon itself only speaks plain HTTP, and
+> Basic Auth does not encrypt the `Authorization` header or the Socket.IO
+> handshake. When a non-loopback daemon relies on
+> `--web-console-basic-auth-*`, put it behind a TLS-terminating reverse proxy
+> (see [Behind a reverse proxy](#behind-a-reverse-proxy-traefik-nginx-caddy-)
+> and the [SSO example](../sources/reverse-proxy-sso-example.md)) and do not
+> expose the plain-HTTP port beyond the proxy's network. Cleartext Basic Auth
+> is acceptable only on loopback or a trusted, isolated test network.
+
 ## Basic Auth gate
 
 `--web-console-basic-auth-user` / `--web-console-basic-auth-pass` (always

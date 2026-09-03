@@ -50,7 +50,15 @@ calls work; CSMS-initiated commands like RemoteStart and Reset are unavailable
 since the browser can't host the callback endpoint). Full bidirectional SOAP
 remains **CLI / server-mode only**. Point `--ws-url` at the CSMS
 _CentralSystemService_ URL and give the callback URL the CSMS should reach the
-charge point on:
+charge point on.
+
+> The `http://` examples below are for a **local / trusted-network** CSMS
+> such as a SteVe checkout on the same machine. OCPP-S carries no per-message
+> authentication and the callback endpoint is gated only by the daemon's
+> Basic Auth or the network boundary, so for a remote CSMS or a tunnel use
+> `https://` on both sides (`--ws-url https://…`, an HTTPS
+> `--soap-public-base-url` / `--soap-callback-url` terminated by a proxy in
+> front of the daemon).
 
 **OCPP 1.2:**
 

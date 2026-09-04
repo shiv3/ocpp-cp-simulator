@@ -556,6 +556,63 @@ describe("inbound request validation (#285)", () => {
     ).not.toThrow();
   });
 
+  // AJV checks `multipleOf` exactly, and OCPP 1.6 puts `multipleOf: 0.1` on
+  // charging limits -- 0.3 / 0.1 is 2.9999999999999996 in binary floating
+  // point. Warning about that was harmless; faulting on it would reject legal
+  // smart-charging requests, so the validator carries a tolerance.
+  it("accepts the decimal charging limits OCPP allows", async () => {
+    const profile = (limit: number) => ({
+      chargingProfileId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: "TxProfile",
+      chargingProfileKind: "Absolute",
+      chargingSchedule: {
+        chargingRateUnit: "A",
+        chargingSchedulePeriod: [{ startPeriod: 0, limit }],
+      },
+    });
+
+    for (const limit of [0.1, 0.3, 6.6, 16]) {
+      const response = await dispatchSoapCallViaV16Registry({
+        operation: "RemoteStartTransaction" as never,
+        payload: {
+          connectorId: "1",
+          idTag: "TAG123",
+          chargingProfile: profile(limit),
+        } as never,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+      expect(response).toHaveProperty("status");
+    }
+  });
+
+  it("still refuses a limit that is genuinely not a multiple of 0.1", async () => {
+    const attempt = dispatchSoapCallViaV16Registry({
+      operation: "RemoteStartTransaction" as never,
+      payload: {
+        connectorId: "1",
+        idTag: "TAG123",
+        chargingProfile: {
+          chargingProfileId: 1,
+          stackLevel: 0,
+          chargingProfilePurpose: "TxProfile",
+          chargingProfileKind: "Absolute",
+          chargingSchedule: {
+            chargingRateUnit: "A",
+            chargingSchedulePeriod: [{ startPeriod: 0, limit: 0.05 }],
+          },
+        },
+      } as never,
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    await expect(attempt).rejects.toThrow("multiple of 0.1");
+  });
+
   it("accepts a complete request unchanged", async () => {
     const response = await dispatchSoapCallViaV16Registry({
       operation: "RemoteStartTransaction" as never,

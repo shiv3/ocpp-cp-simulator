@@ -14,6 +14,12 @@ const ajvOptions = {
   strict: false,
   strictSchema: false,
   validateFormats: false,
+  // OCPP 1.6 declares multipleOf 0.1 on charging limits, and AJV's exact
+  // check reads 0.3 as not a multiple of 0.1 because 0.3 / 0.1 is
+  // 2.9999999999999996 in binary floating point. Without a tolerance a legal
+  // SetChargingProfile is rejected -- which mattered the moment #285 turned
+  // these results into SOAP Faults rather than warnings.
+  multipleOfPrecision: 6,
 };
 
 const draft04Ajv = new Ajv04(ajvOptions) as SchemaCompiler;

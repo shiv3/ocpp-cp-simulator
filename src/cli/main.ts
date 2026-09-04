@@ -191,6 +191,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       case "--cp-id-pattern":
         cpIdPattern = next ?? null;
         i++;
+        break;
       case "--metrics":
         metrics = true;
         break;

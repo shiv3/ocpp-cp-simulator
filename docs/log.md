@@ -97,3 +97,9 @@ knowledge first entered the documentation, not wiki operations.
 
 - [Docker image](entities/docker-image.md): the release-tag build now asks the registry for every tag it pushed and fails when one is missing, so a release note's image line cannot outlive the image. Context: `0.7.6` published notes for an image whose build had failed, and `0.7.1` was never republished.
 - [GitHub issues](sources/github-issues.md): #281 / #287 row.
+
+## [2026-09-04] ingest | The MCP charge-point tool stops being narrower than the method (#284)
+
+- [Control plane](concepts/control-plane.md#cpcreate-parameters): the full `cp.create` parameter set is now a table of its own — the SOAP and security-profile fields were working, documented nowhere, and effectively undocumented public API. Records that unknown properties are stripped rather than rejected.
+- [MCP endpoint](entities/mcp-endpoint.md): `cp_create` accepts every `cp.create` parameter, and its row says the schema is derived rather than restated.
+- [GitHub issues](sources/github-issues.md): #284 row.

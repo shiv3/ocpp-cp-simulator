@@ -258,6 +258,32 @@ describe("MCP server", () => {
     }
   });
 
+  // #279 follow-up: `call_method` refuses both socket-bound methods, but only
+  // `events.subscribe` was covered here; the unsubscribe test exercised
+  // Socket.IO, not MCP. A rejection nobody tests is a rejection that can be
+  // removed by accident.
+  it("call_method with events.unsubscribe returns error", async () => {
+    const response = await callMcp(handler, {
+      jsonrpc: "2.0",
+      id: 61,
+      method: "tools/call",
+      params: {
+        name: "call_method",
+        arguments: {
+          method: "events.unsubscribe",
+          params: { scope: "*" },
+        },
+      },
+    });
+
+    expect(isToolError(response)).toBe(true);
+    const text = getToolContent(response);
+    expect(text).toBeDefined();
+    if (text) {
+      expect(text).toMatch(/socket/);
+    }
+  });
+
   it("call_method with events.subscribe returns error", async () => {
     const response = await callMcp(handler, {
       jsonrpc: "2.0",

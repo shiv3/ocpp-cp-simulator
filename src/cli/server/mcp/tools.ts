@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { McpServer, ToolCallResult } from "mcp-lite";
-import { EXPLICIT_METHODS, METHODS, RpcFailure } from "../../../protocol";
+import {
+  createParamsSchema,
+  EXPLICIT_METHODS,
+  METHODS,
+  RpcFailure,
+} from "../../../protocol";
 import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
 import type { RuntimeSocketIoDeps } from "../socketServer";
 
@@ -54,33 +59,19 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  // #284: derived from `cp.create`'s own schema rather than restating a
+  // subset of it. The hand-written copy declared eight of the eighteen
+  // fields, and because unknown properties are stripped rather than refused,
+  // the two failure modes were both silent-ish: a SOAP charge point could not
+  // be created at all (its companions vanished and the create then failed
+  // `invalid_params`), and `securityProfile` / `authorizationKey` were
+  // dropped while the tool answered success -- the station came up
+  // authenticating differently from what the agent asked for. `autoConnect`
+  // is the one field that is genuinely the tool's own.
   mcp.tool("cp_create", {
     description:
-      "Create and register a new charge point. It stays disconnected until cp_connect is called (or pass autoConnect: true).",
-    inputSchema: z.object({
-      cpId: z.string().describe("Charge point identifier"),
-      wsUrl: z.string().describe("WebSocket URL for OCPP connection"),
-      ocppVersion: z
-        .string()
-        .optional()
-        .describe(
-          'OCPP version: "OCPP-1.6J" (default), "OCPP-2.0.1", "OCPP-2.1", "OCPP-1.2", "OCPP-1.5", or "OCPP-1.6S"',
-        ),
-      connectors: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe("Number of connectors"),
-      vendor: z.string().optional().describe("Vendor name"),
-      model: z.string().optional().describe("Model name"),
-      basicAuth: z
-        .object({
-          username: z.string().describe("Basic auth username"),
-          password: z.string().describe("Basic auth password"),
-        })
-        .optional()
-        .describe("Optional basic authentication credentials"),
+      "Create and register a new charge point. Accepts every parameter the cp.create RPC method does, including the SOAP fields (centralSystemUrl, soapPath, soapCallbackUrl) and the OCPP 1.6 security profile fields (securityProfile, authorizationKey, tls*). It stays disconnected until cp_connect is called (or pass autoConnect: true).",
+    inputSchema: createParamsSchema.extend({
       autoConnect: z
         .boolean()
         .optional()

@@ -221,7 +221,12 @@ is nothing on disk to re-read. `--watch` serves the human editing a file.
 
 The watcher lives in the daemon, so `--watch` **is refused outside a server
 mode** (`--daemon`, `--http-port`, `--web-console`) rather than parsed and then
-ignored — the same rule `--cp-count` follows (#295).
+ignored — the same rule `--cp-count` follows (#295). It is also **refused
+alongside a client mode** (`--send`, `--stop`, `--events`), even with a server
+flag present: those return through the client path before any server starts,
+and `--http-port` in their company names the daemon to talk to rather than a
+port to listen on, so `--events --http-port 9000 --watch` would otherwise pass a
+server-flag-only check and still be ignored.
 
 What is watched — and only these, because these are the only paths the daemon
 reads and then keeps a copy of:
@@ -293,7 +298,11 @@ otherwise keep showing the graph the daemon had stopped executing. Those
 definitions are the connector's live runtime set, not a read-back of the
 scenario repository — a daemon without `--state-db` has no repository content,
 and the persist behind a reload is a background write. The daemon also logs each
-reload to stderr with a `[watch]` prefix.
+reload to stderr with a `[watch]` prefix. A rejected reload reports **which
+file** failed and never what was in it — the runtime's own parser message
+quotes the offending bytes, and the control plane is not a place to echo an
+operator's file. See
+[Access control → Event scopes are not an authorization boundary](../concepts/access-control.md#event-scopes-are-not-an-authorization-boundary).
 
 Under `--state-db` the `idTagPool.file` path is persisted alongside the resolved
 tags (`charge_points.id_tag_file`, schema v11), so a daemon restarted with

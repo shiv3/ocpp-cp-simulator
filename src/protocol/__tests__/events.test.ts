@@ -305,6 +305,45 @@ describe("envelopes", () => {
     ).toBe(false);
   });
 
+  it("file-reload envelopes accept a path as long as the input side does (#314)", () => {
+    // The bound used to be STR_1K while `load_scenario`'s and
+    // `run_scenario_file`'s `file` params are STR_64K. A path over 1024
+    // characters is legal under Linux's PATH_MAX, so the reload was applied and
+    // then the envelope failed validation — the manager caught the throw and
+    // subscribers silently got nothing for a change that had happened. `--watch`
+    // emits the *resolved absolute* path, which is longer still.
+    const longPath = `/srv/${"d".repeat(2_000)}/tags.json`;
+    expect(longPath.length).toBeGreaterThan(1_024);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "id-tags",
+        path: longPath,
+        cpId: "CP1",
+        connectorId: null,
+        scenarioId: null,
+        outcome: "applied",
+        error: null,
+      }).success,
+    ).toBe(true);
+    // The rejection messages quote the path, so the error field has to hold one
+    // too or the same event goes missing on the outcome that matters most.
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "id-tags",
+        path: longPath,
+        cpId: "CP1",
+        connectorId: null,
+        scenarioId: null,
+        outcome: "rejected",
+        error: `idTagPool.file "${longPath}" is not valid JSON`,
+      }).success,
+    ).toBe(true);
+  });
+
   it("file-reload envelopes carry the outcome the consumer branches on (#314)", () => {
     // The three outcomes are the contract: applied means the new copy is live,
     // deferred means it is held until the session ends, rejected means the

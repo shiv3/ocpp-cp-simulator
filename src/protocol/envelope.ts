@@ -12,7 +12,6 @@ import { z } from "zod";
 import {
   ARRAY_1000,
   SCENARIO_MAX_BYTES,
-  STR_1K,
   STR_64K,
   boundedObject,
 } from "./limits";
@@ -52,12 +51,24 @@ const fileReloadEnvelopeSchema = z.object({
   kind: z.literal("file-reload"),
   event: z.literal("file-reloaded"),
   target: z.enum(["id-tags", "scenario"]),
-  path: STR_1K,
+  // Bounded to match the input side, not tighter. `load_scenario`'s `file` and
+  // `run_scenario_file`'s `file` are `STR_64K`, and a path over 1024 characters
+  // is legal under Linux's `PATH_MAX`, so a shorter bound here failed
+  // validation on a reload that had already been applied: the envelope threw,
+  // the manager caught it, and subscribers silently got no event for a change
+  // that had happened. `--watch` now emits the *resolved absolute* path (#314),
+  // which is longer than whatever the caller supplied, so the gap was wider
+  // than the input contract alone suggests.
+  path: STR_64K,
   cpId: STR_64K,
   connectorId: z.number().int().min(1).nullable(),
   scenarioId: STR_64K.nullable(),
   outcome: z.enum(["applied", "deferred", "rejected"]),
-  error: STR_1K.nullable(),
+  // The rejection messages embed the path they are about
+  // (`idTagPool.file "<path>" is not valid JSON`), so bounding this tighter
+  // than `path` reintroduces exactly the same silent loss on the one outcome
+  // an operator most needs to see.
+  error: STR_64K.nullable(),
 });
 
 /** Server → client push. Distinguished by `kind`. */

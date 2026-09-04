@@ -660,3 +660,52 @@ Sixth review pass on PR #325.
   old order collapsed the daemon's per-charge-point restore syncs into one, and
   hid the bug where only the first charge point sharing an idTag file was
   reconciled.
+
+## [2026-09-04] ingest | `--watch`: a guard with a hole, and an envelope narrower than its input (#314, PR #317)
+
+- [Daemon](entities/daemon.md) and [CLI](entities/cli.md) — the `--watch`
+  refusal is stated in full: outside a server mode **and** alongside a client
+  mode (`--send`, `--stop`, `--events`), because there `--http-port` names the
+  daemon to talk to rather than a port to listen on, and the process returns
+  through the client path before any server starts. `--events --http-port 9000
+--watch` used to satisfy a server-flag-only check and then ignore the flag.
+- [Control plane](concepts/control-plane.md) — the `file-reload` envelope's
+  `path` is the resolved absolute path, and `path` / `error` are bounded like
+  the `file` params that produce them (64 KiB). At 1 KiB a legal Linux path
+  made the reload apply and the envelope fail validation, so subscribers got
+  nothing for a change that had happened; the rejection messages quote the path,
+  so `error` needed the same bound or the same loss returned on the one outcome
+  an operator most needs.
+- Reported, not fixed: `--cp-count`'s guard (#295) has the identical hole —
+  `--events --all --http-port 9000 --cp-count 20 --cp-id CP{n} --ws-url …`
+  parses cleanly and the flag is then ignored. Left alone deliberately, because
+  changing a shipped flag's failure mode is its own decision, the same call this
+  wiki already records for `--metrics`.
+
+## [2026-09-04] ingest | `--watch`: two wrong sentences, a swallowed retry, a lost write, and what the event stream may carry (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — the reload-event paragraph records that a
+  rejection names the file and never its contents.
+- [Access control](concepts/access-control.md) — **new section**: event scopes
+  are not an authorization boundary. `events.subscribe` accepts any scope from
+  any connected client, so redacting a field for `"*"` subscribers alone would
+  only mean asking for it by name; the boundary is the bind gate. Two rules
+  follow — absolute filesystem paths _are_ on the wire and that is deliberate
+  (the `path` is what identifies a `file-reload` event), and file _contents_ are
+  not and must not become so, which is why both reload paths raise their own
+  parse-failure message instead of the runtime's.
+- `--help` and `ChargePointOptions.watch` had conflated the two reload
+  behaviours into "held until the transaction ends". Only a **scenario** reload
+  defers, and it defers for an in-flight run as well as an open transaction; an
+  **idTag pool applies live**, because it is drawn once per session. The wiki
+  was checked for the same conflation and did not have it — `daemon.md` has
+  stated the split correctly since the feature landed. `types.ts` also still
+  said `--watch` was "ignored outside server mode", which stopped being true
+  when the parser began refusing it.
+- Two correctness fixes behind no doc change: a scenario save that
+  `loadScenario` **rejected** no longer becomes the duplicate-suppression
+  baseline (re-saving the same content was silently swallowed, contradicting the
+  invariant the idTag path states explicitly), and a write landing between the
+  caller reading a file and the watch starting is no longer lost permanently —
+  the caller hands over the text it loaded, and the registration reconciles
+  against the file once the watch exists.

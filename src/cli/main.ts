@@ -652,6 +652,21 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  if (watch && isClientMode) {
+    // Checked BEFORE the server-mode test, and separately from it, because
+    // `isServerMode` is not the whole question (#314). `--send`, `--stop` and
+    // `--events` return through the client path before any server is started,
+    // and `--http-port` in their company names the daemon to talk to rather
+    // than a port to listen on — so `--events --http-port 9000 --watch`
+    // satisfied a guard that looks only at server flags and then ignored the
+    // flag anyway, which is worse than no guard: it advertises a protection it
+    // does not provide.
+    process.stderr.write(
+      "Error: --watch cannot be combined with a client mode (--send, --stop or --events); " +
+        "it configures the daemon being talked to, not the client talking to it\n",
+    );
+    process.exit(1);
+  }
   if (watch && !isServerMode) {
     // Same reasoning as --cp-count above: the file watcher lives in the
     // daemon, so outside a server mode the flag would be accepted and then do
@@ -1027,9 +1042,14 @@ Options:
   --watch                  Server mode: re-read the idTag and scenario files
                            this daemon loaded when they change on disk,
                            debounced. A parse failure keeps the previous good
-                           copy. A reload never mutates a charge point with an
-                           open transaction -- it is held and applied when the
-                           transaction ends. Off by default.
+                           copy. An idTag pool applies live -- it is drawn once
+                           per session, so an open transaction keeps the tag it
+                           presented and the next draw sees the new list. A
+                           scenario reload is held while that connector has an
+                           open transaction or a run of it is in flight, and
+                           applied when that session ends. Off by default;
+                           refused outside a server mode and alongside
+                           --send/--stop/--events.
   --soap-callback-url <url>
                            SOAP ChargePointService callback URL for OCPP 1.2, 1.5,
                            or 1.6S. Required for SOAP versions unless

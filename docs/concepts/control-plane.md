@@ -506,7 +506,10 @@ assume a reload took effect:
 | `rejected` | The file could not be read or did not parse. The previous good copy is untouched, and `error` says why.                                                                                                                                                                                                                                                                                             |
 
 `target` is `"id-tags"` or `"scenario"`. `connectorId` and `scenarioId` are
-non-null only for `"scenario"`; an idTag reload is charge-point wide.
+non-null only for `"scenario"`; an idTag reload is charge-point wide. `path` is
+always the **resolved absolute** path, and both it and `error` are bounded the
+same way the `file` params that produce them are (64 KiB), so a legal Linux path
+longer than 1 KiB cannot make a reload that already happened arrive as silence.
 
 Subscribe with `events.subscribe`:
 

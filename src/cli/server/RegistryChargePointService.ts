@@ -579,10 +579,14 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     path: string,
     opts: ScenarioRunOptions = {},
-  ): Promise<{ scenarioId: string }> {
+    // `sourceText` is the exact text this call read. `--watch` needs it as the
+    // reload baseline (#314); the RPC layer strips it before answering, because
+    // a file's contents are not something the control plane should echo.
+  ): Promise<{ scenarioId: string; sourceText: string }> {
     const service = this.requireService(id);
     const connectorId = opts.connectorId ?? 1;
-    const parsed: unknown = JSON.parse(fs.readFileSync(path, "utf-8"));
+    const sourceText = fs.readFileSync(path, "utf-8");
+    const parsed: unknown = JSON.parse(sourceText);
     if (!isScenarioDefinitionShape(parsed)) {
       throw new Error(`file does not contain a scenario definition: ${path}`);
     }
@@ -611,7 +615,7 @@ export class RegistryChargePointService implements ChargePointService {
     } else {
       service.runScenario(connectorId, scenarioId, { strict: opts.strict });
     }
-    return { scenarioId };
+    return { scenarioId, sourceText };
   }
 
   async runScenarioTemplate(

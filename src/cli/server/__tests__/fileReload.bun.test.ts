@@ -34,7 +34,12 @@ class TestWatchBackend {
     Set<(eventType: string, filename: string | null) => void>
   >();
 
+  /** Called as a directory watch is established. Lets a test write to a file
+   *  in the window between the caller loading it and the watch starting. */
+  onWatch: ((directory: string) => void) | null = null;
+
   readonly factory: WatchFactory = (directory, listener) => {
+    this.onWatch?.(directory);
     let set = this.listeners.get(directory);
     if (!set) {
       set = new Set();
@@ -1188,6 +1193,215 @@ describe("a reload reaches the scenario editor (#314)", () => {
       (reloaded?.nodes?.[0]?.data as { duration?: number } | undefined)
         ?.duration,
     ).toBe(22);
+  });
+});
+
+describe("a rejected save never becomes the baseline (#314)", () => {
+  it("retries the same bytes after loadScenario refused them", async () => {
+    // `loadScenario` can refuse a definition the file parsed fine (here: no
+    // `id`, which its gate requires). Recording that text as already-seen made
+    // the operator's next save of the *same* content an early return — no
+    // retry, no event, and the connector left on the old graph until the bytes
+    // changed again. The idTag path has always avoided this; the two must
+    // agree.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("baseline-keep", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-BASELINE",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-BASELINE");
+
+    // Structurally a scenario (id/nodes/edges) so it clears the watcher's own
+    // shape check, but with a `targetType` `assertLoadableScenario` refuses —
+    // so `loadScenario` throws and the reload is rejected after parsing.
+    const unloadable = JSON.stringify({
+      ...JSON.parse(scenario("baseline-keep", 22)),
+      targetType: "galaxy",
+    });
+    backend.save(file, unloadable);
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+    expect(loadedDelay(server, "CP-BASELINE", "baseline-keep")).toBe(11);
+
+    // Saving the very same bytes again must be judged afresh, not written off.
+    backend.save(file, unloadable);
+    await waitFor(
+      () => events.length > 1,
+      "a second rejection for the same bytes",
+    );
+    expect(events[1]?.outcome).toBe("rejected");
+
+    // …and the next good save still lands.
+    backend.save(file, scenario("baseline-keep", 33));
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the recovery to land",
+    );
+    expect(loadedDelay(server, "CP-BASELINE", "baseline-keep")).toBe(33);
+  });
+
+  it("never puts the file's own contents in the reload event", async () => {
+    // A scenario file that does not parse used to be reported with the
+    // runtime's message, which quotes the offending bytes — so a half-saved
+    // file put a fragment of itself on the control plane, where any subscriber
+    // can read it.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("no-echo", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-NOECHO",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-NOECHO");
+
+    backend.save(file, "hunter2-topsecret-value not json at all");
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+    expect(events[0]?.error).toContain("not valid JSON");
+    expect(events[0]?.error).not.toContain("hunter2-topsecret-value");
+    expect(events[0]?.error).not.toContain("hunter2");
+  });
+});
+
+describe("a write between the load and the watch is not lost (#314)", () => {
+  it("picks up a write that lands while the watch is being established", async () => {
+    // `load_scenario` reads the file, loads it, and only then registers a
+    // watch. Nothing is looking in between: the write produces no event, and
+    // the baseline ends up holding those very bytes, so the connector stays on
+    // the old graph permanently rather than until the next edit.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("raced", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-RACE",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    // The window, reproduced at its narrowest: the file changes as the watch is
+    // opened — after the definition was loaded, before anything can observe it.
+    backend.onWatch = (watched) => {
+      if (watched !== dir) return;
+      backend.onWatch = null;
+      fs.writeFileSync(file, scenario("raced", 22));
+    };
+
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-RACE");
+
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the missed write to be reconciled at registration",
+    );
+    expect(loadedDelay(server, "CP-RACE", "raced")).toBe(22);
+  });
+
+  it("keeps the loaded text as the baseline, not whatever is on disk later", async () => {
+    // The wider half of the same window is between the *caller's* read and the
+    // registration, which the caller closes by handing over the text it loaded.
+    // Re-reading the file here instead would record the newer bytes as
+    // already-seen and the edit would never be applied.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("handover", 11));
+    const loadedText = fs.readFileSync(file, "utf-8");
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-HANDOVER",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      socket,
+      "load_scenario",
+      { connector: 1, scenario: JSON.parse(loadedText) },
+      "CP-HANDOVER",
+    );
+    // The file has moved on since the caller read it.
+    fs.writeFileSync(file, scenario("handover", 22));
+
+    server.fileReload?.registerScenarioFile({
+      filePath: file,
+      cpId: "CP-HANDOVER",
+      connectorId: 1,
+      scenarioId: "handover",
+      loadedText,
+    });
+
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the newer file to be applied at registration",
+    );
+    expect(loadedDelay(server, "CP-HANDOVER", "handover")).toBe(22);
+  });
+});
+
+describe("the RPCs hand the watcher the text they loaded (#314)", () => {
+  it("passes loadedText from load_scenario and run_scenario_file, and keeps it off the wire", async () => {
+    // The window between the handler's read and the registration has no
+    // injection point, so this pins the plumbing directly: whatever the handler
+    // parsed is what the watcher's baseline must be. Re-reading the file inside
+    // `registerScenarioFile` is what made a write in that window permanent.
+    const dir = tempDir();
+    const loadFile = writeFile(dir, "load.json", scenario("plumb-load", 11));
+    const runFile = writeFile(dir, "run.json", scenario("plumb-run", 12));
+    const loadText = fs.readFileSync(loadFile, "utf-8");
+    const runText = fs.readFileSync(runFile, "utf-8");
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-PLUMB",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+
+    const manager = server.fileReload;
+    if (!manager) throw new Error("expected a --watch server");
+    const seen: Array<{ scenarioId: string; loadedText?: string }> = [];
+    const real = manager.registerScenarioFile.bind(manager);
+    manager.registerScenarioFile = (registration) => {
+      seen.push(registration);
+      real(registration);
+    };
+
+    await rpc(
+      socket,
+      "load_scenario",
+      { connector: 1, file: loadFile },
+      "CP-PLUMB",
+    );
+    expect(seen.at(-1)?.scenarioId).toBe("plumb-load");
+    expect(seen.at(-1)?.loadedText).toBe(loadText);
+
+    const started = await rpc(
+      socket,
+      "run_scenario_file",
+      { connector: 1, file: runFile },
+      "CP-PLUMB",
+    );
+    expect(seen.at(-1)?.scenarioId).toBe("plumb-run");
+    expect(seen.at(-1)?.loadedText).toBe(runText);
+    // The facade hands the text back for the baseline only. A file's contents
+    // are not something the control plane should echo to its subscribers.
+    expect(started).toEqual({ scenarioId: "plumb-run" });
   });
 });
 

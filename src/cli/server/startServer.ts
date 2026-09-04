@@ -675,10 +675,10 @@ export async function runStartupScenario(
   // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
   if (opt.scenarioTemplateFile) {
     let template: ScenarioDefinition;
+    let templateText: string;
     try {
-      template = JSON.parse(
-        fs.readFileSync(opt.scenarioTemplateFile, "utf-8"),
-      ) as ScenarioDefinition;
+      templateText = fs.readFileSync(opt.scenarioTemplateFile, "utf-8");
+      template = JSON.parse(templateText) as ScenarioDefinition;
     } catch (err) {
       process.stderr.write(
         `[server] Failed to read scenario template file: ${
@@ -701,6 +701,7 @@ export async function runStartupScenario(
           connectorId,
           scenarioId,
           prepare: (definition) => instantiateTemplate(definition, connectorId),
+          loadedText: templateText,
         });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
@@ -721,10 +722,10 @@ export async function runStartupScenario(
   // ids per connector); for single-connector, behave as before.
   if (opt.scenario) {
     let definition: ScenarioDefinition;
+    let scenarioText: string;
     try {
-      definition = JSON.parse(
-        fs.readFileSync(opt.scenario, "utf-8"),
-      ) as ScenarioDefinition;
+      scenarioText = fs.readFileSync(opt.scenario, "utf-8");
+      definition = JSON.parse(scenarioText) as ScenarioDefinition;
     } catch (err) {
       process.stderr.write(
         `[server] Failed to read scenario file: ${
@@ -751,6 +752,7 @@ export async function runStartupScenario(
           prepare: fanOut
             ? (next) => instantiateTemplate(next, connectorId)
             : undefined,
+          loadedText: scenarioText,
         });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(

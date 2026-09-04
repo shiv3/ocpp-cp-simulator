@@ -130,8 +130,9 @@ rather than copy that.
 **Failover semantics — state it, do not imply it.** `round-robin` and `random`
 move to another URL on every reconnect attempt. `cp-affinity` hashes the `cpId`
 to a **primary** and is sticky: it retries that primary and only falls over
-after a configured number of consecutive failures, returning to it as soon as it
-is reachable again. "Sticky" and "always rotates" are contradictory, and
+after **three** consecutive failures — a fixed implementation constant
+(`DEFAULT_AFFINITY_FAILOVER_THRESHOLD`), not a per-charge-point field — and
+returns to the primary as soon as it is reachable again. "Sticky" and "always rotates" are contradictory, and
 choosing between them silently is how an acceptance test ends up asserting the
 opposite of the implementation.
 
@@ -143,9 +144,14 @@ So:
 
 - The list is an **OCPP-J** concept. SOAP takes `centralSystemUrl` and has no
   reconnect loop to rotate; reject an array there rather than half-supporting it.
-- Keep the list in the CP's config and resolve one URL at connect time. What is
-  persisted and reported in the snapshot stays a single string, so neither the
-  DB schema nor the restore path changes.
+- Resolve one URL at connect time, so the status snapshot and every log line
+  keep reporting a single string.
+- **Persist the list.** `charge_points` holds only `ws_url`, and
+  `CPRegistry.restoreFromDatabase` restores only that, so a charge point
+  created with a list would come back from `--state-db` with failover silently
+  disabled — the one thing the list exists to provide. The list and the policy
+  need columns of their own and a schema bump; `ws_url` keeps its meaning, so
+  no existing reader changes.
 
 **Touches.** `cpParamsBaseSchema` in `src/protocol/methods.ts`, the resolution
 step in `src/cli/service.ts`, and URL selection in
@@ -155,8 +161,8 @@ exponential-backoff logic (~L820).
 **Acceptance.** After a forced disconnect (reusing
 [network simulation](../concepts/network-simulation.md)) `round-robin` lands on
 the next URL while `cp-affinity` retries its primary; after the configured
-number of consecutive failures `cp-affinity` moves on, and returns to the
-primary once it is reachable. A SOAP CP rejects an array `wsUrl` with a clear
+three consecutive failures `cp-affinity` moves on, and returns to the primary
+once it is reachable. A SOAP CP rejects an array `wsUrl` with a clear
 error. The persisted `ws_url` and the status snapshot are unchanged in shape.
 
 ### 1c. CP blueprints
@@ -223,7 +229,8 @@ Series to start with:
 | `ocppcp_rpc_requests_total`         | counter   | `method`, `outcome`              |
 | `ocppcp_ws_reconnects_total`        | counter   | —                                |
 
-**Cardinality.** Label by `action` and `direction`; **do not** label by `cpId` —
+**Cardinality.** Use only the bounded labels in the table above — `action`,
+`direction`, `state`, `status`, `method`, `outcome` — and **never** `cpId` —
 that is unbounded by construction once phase 1 lands. Per-CP numbers stay in
 `cp.list` and the event stream.
 
@@ -311,16 +318,22 @@ replayable — deriving each connector's stream from `seed:cpId:connectorId` so
 CPs do not correlate.
 
 **Counters.** Expose per-connector attempted / started / rejected / skipped
-authorize, start and stop counts on connector status; they are also what phase
-2 scrapes.
+authorize, start and stop counts on connector status — that is the assertion
+surface. Phase 2 scrapes them **aggregated**, as
+`ocppcp_auto_traffic_sessions_total{outcome}` and
+`ocppcp_auto_traffic_skipped_total{reason}`: per-connector series would need a
+`cpId` label, which the cardinality rule forbids.
 
 **Interaction with scenarios — state the rule.** A scenario taking control of a
 connector suspends auto-traffic for that connector and resumes it on scenario
 end. A run's verdict must never depend on background traffic.
 
-**Acceptance.** Two runs with the same seed produce identical transaction start
-times and idTags; an e2e against gocpp runs 3 CPs for 60 s and asserts the
-session count falls in the expected band.
+**Acceptance.** Two runs with the same seed produce the identical _sequence_ of
+drawn gaps, durations and idTags. The seed fixes the draws, not the clock — the
+timer path is `setTimeout` / `Date.now()`, so wall-clock timestamps still vary
+between runs. Assert on the logical offsets the generator computed, or on
+observed times within a stated tolerance; never on exact timestamps. Plus an
+e2e against gocpp: 3 CPs for 60 s, session count within the expected band.
 
 ## Phase 4 — Meter realism
 
@@ -344,9 +357,11 @@ powerFactor?: number        // AC only
 ```
 
 `MeterValueBuilder` then derives `Power.Active.Import` from the curve at the
-current SoC, `Current.Import` from `P / (V × phases × powerFactor)`, and emits
-per-phase values when `phases: 3` — so `P`, `I`, `V`, `SoC` and the energy
-register finally agree with each other.
+current SoC and current from the type-appropriate relation — DC has no
+reactive component, so `I = P / V`; AC is `I = P / (V × phases × powerFactor)`
+with `voltageV` read as **phase-to-neutral** — and emits per-phase values when
+`phases: 3`. `P`, `I`, `V`, `SoC` and the energy register then agree with each
+other rather than being independently plausible.
 
 **Composition rule — state it in code and docs.** Effective power is
 **`min(curve-derived power, ChargingScheduleResolver limit)`**. The smart

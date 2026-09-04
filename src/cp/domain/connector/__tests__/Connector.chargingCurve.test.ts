@@ -383,3 +383,109 @@ describe("a malformed chargingCurve is discarded at every boundary (#301)", () =
     }
   });
 });
+
+describe("the curve trajectory is offset by the register it starts from (#301)", () => {
+  /**
+   * `Energy.Active.Import.Register` is cumulative for the life of the
+   * connector — OCPP never resets it, and `StartTransaction` records
+   * `meterStart` as whatever it already reads — while the bezier curve
+   * describes energy delivered in one session, starting at zero. Every
+   * session after the first therefore has a non-zero starting register, and a
+   * curve read as an absolute value would run the register backwards
+   * (uncapped) or freeze it until the curve caught up, forever once the
+   * register passed the curve's maximum (capped).
+   *
+   * Both tests run a real first transaction so the register is non-zero
+   * before the curve strategy starts; one that only ever starts at 0 passes
+   * with the bug present.
+   */
+  function runFirstTransaction(connector: Connector): number {
+    connector.socMeterSyncEnabled = false;
+    connector.soc = 50;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 10_000,
+    });
+    vi.advanceTimersByTime(5_000);
+    connector.stopAutoMeterValue();
+    connector.stopTransaction();
+    return connector.meterValue;
+  }
+
+  it("keeps advancing on a second, capped session that starts from 50 kWh", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    const startWh = runFirstTransaction(connector);
+    expect(startWh).toBe(50_000);
+
+    // Now a tapering curve: 10 kW ceiling × 0.1 = 1000 W, i.e. 0.28 Wh a
+    // tick — under the 0.5 Wh the register can represent, so the carry and
+    // the baseline have to work together.
+    connector.evSettings = {
+      ...connector.evSettings,
+      maxChargingPowerKw: 10,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 0.1 },
+        { socPercent: 100, powerFraction: 0.1 },
+      ],
+    };
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(startWh));
+    connector.startManualMeterStrategy({
+      kind: "curve",
+      config: {
+        enabled: true,
+        curvePoints: [
+          { time: 0, value: 0 },
+          { time: 3600, value: 50 },
+        ],
+        intervalSeconds: 1,
+        autoCalculateInterval: false,
+      },
+    });
+
+    vi.advanceTimersByTime(36_000);
+    expect(connector.meterValue).toBe(startWh + 10);
+    vi.advanceTimersByTime(36_000);
+    expect(connector.meterValue).toBe(startWh + 20);
+  });
+
+  it("never runs the register backwards on a second, uncapped session", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    const startWh = runFirstTransaction(connector);
+
+    // No curve and no charging profile: the cap is Infinity, so this is the
+    // trajectory-following branch. It used to assign the curve's absolute
+    // value, putting the register below `meterStart`.
+    const seen: number[] = [];
+    connector.events.on("meterValueChange", ({ meterValue }) =>
+      seen.push(meterValue),
+    );
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(startWh));
+    connector.startManualMeterStrategy({
+      kind: "curve",
+      config: {
+        enabled: true,
+        curvePoints: [
+          { time: 0, value: 0 },
+          { time: 3600, value: 50 },
+        ],
+        intervalSeconds: 1,
+        autoCalculateInterval: false,
+      },
+    });
+
+    vi.advanceTimersByTime(10_000);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]).toBeGreaterThanOrEqual(startWh);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]!);
+    }
+    expect(connector.meterValue).toBeGreaterThan(startWh);
+  });
+});

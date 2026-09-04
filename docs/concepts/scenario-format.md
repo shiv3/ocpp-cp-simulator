@@ -346,9 +346,11 @@ because such a value really does arrive: `src/protocol/methods.ts` types
 `set_ev_settings` accepts anything, and schema validation of a scenario file
 is [advisory](#status--scope) — the file loads past the warning. The guard
 runs on the connector's `evSettings` setter (and so on the scenario/RPC
-override path), on the stored browser default that a fresh connector reads
-before that setter ever runs, and at the editor's import/hydration points, so
-neither a meter tick nor the settings dialog can be handed a curve it cannot
+override path), where the stored browser default is read out of `localStorage`
+— which both seeds the connector-domain override a fresh connector reads
+before that setter ever runs _and_ fills the Settings page's own editor state,
+so one guarded load serves both — and at the editor's import/hydration points.
+Neither a meter tick nor either settings panel can be handed a curve it cannot
 walk.
 
 **Current is derived by type, not by one shared formula.** DC is `I = P / V`;
@@ -420,7 +422,13 @@ stops delivery outright rather than only zeroing the reported number.
 Without a curve, accumulation is unchanged from before v1.2: the
 increment/bezier trajectory a scenario configures is its own contract,
 independent of `maxChargingPowerKw`, and only the charging-profile limit caps
-it.
+it. That trajectory describes the energy delivered **in the session**, added
+to whatever the register already reads when the session starts —
+`Energy.Active.Import.Register` is cumulative for the life of the connector,
+`StartTransaction` records `meterStart` as whatever it already reads, and
+nothing ever resets it. So the register never moves backwards between
+sessions, and a curve whose maximum is below the current register still
+delivers.
 
 **A tapering curve slows the energy register; it never freezes it.** The
 register is integer watt-hours — a fractional `meterStop` is rejected by a
@@ -433,6 +441,16 @@ interval delivers 0.28 Wh a tick, so the register and the SoC derived from it
 would sit at their starting value forever while `Power.Active.Import` kept
 reporting 1000 W. The carry is reset whenever the auto-meter starts or stops,
 so a session always begins on a whole watt-hour.
+
+The guarantee holds **across transactions**, not only within the first one. A
+connector's second session starts from its cumulative register, not from zero,
+so a bezier trajectory read as an absolute value would have been behind that
+register from its first tick: uncapped it assigned a value below `meterStart`,
+and capped it saw a negative delta, clamped it away and delivered nothing
+until the trajectory climbed back past the old register — or forever, once the
+register had passed the curve's maximum. Offsetting the trajectory by the
+register at session start is what makes the second session behave like the
+first.
 
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
 `min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the

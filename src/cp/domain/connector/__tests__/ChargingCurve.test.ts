@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   currentAmpsFor,
+  electricalModelOf,
+  powerWattsForCurrent,
   DEFAULT_VOLTAGE_V,
   effectiveChargingPowerW,
   effectivePowerFactor,
@@ -260,5 +262,104 @@ describe("resolveSocForCurve (#301)", () => {
     // 0 is falsy but a legitimate SoC — `??` (not `||`) must be used so an
     // empty battery isn't mistaken for "no reading yet".
     expect(resolveSocForCurve(0, 55, 20)).toBe(0);
+  });
+});
+
+describe("powerWattsForCurrent (#301)", () => {
+  it("is the exact inverse of currentAmpsFor for the same settings", () => {
+    const cases = [
+      { currentType: "AC" as const, phases: 3 as const, powerFactor: 0.5 },
+      { currentType: "AC" as const, phases: 1 as const, voltageV: 240 },
+      { currentType: "DC" as const, voltageV: 400 },
+      {},
+    ];
+    for (const settings of cases) {
+      const watts = powerWattsForCurrent(16, settings);
+      expect(currentAmpsFor(watts, settings)).toBeCloseTo(16, 9);
+    }
+  });
+
+  it("ignores the profile's numberPhases on DC, which has no phases", () => {
+    expect(
+      powerWattsForCurrent(200, { currentType: "DC", voltageV: 400 }, 3),
+    ).toBe(200 * 400);
+  });
+
+  it("takes the lower of the connector's phases and the profile's", () => {
+    const threePhase = { currentType: "AC" as const, phases: 3 as const };
+    const onePhase = { currentType: "AC" as const, phases: 1 as const };
+    // A profile cannot give a 1-phase connector three phases to draw on.
+    expect(powerWattsForCurrent(16, onePhase, 3)).toBe(16 * 230);
+    // A profile restricting a 3-phase connector to one phase lowers the cap.
+    expect(powerWattsForCurrent(16, threePhase, 1)).toBe(16 * 230);
+    expect(powerWattsForCurrent(16, threePhase, 3)).toBe(16 * 230 * 3);
+    // Absent numberPhases leaves the connector's own count in charge.
+    expect(powerWattsForCurrent(16, threePhase)).toBe(16 * 230 * 3);
+  });
+
+  it("honours a numberPhases of 2, which OCPP allows", () => {
+    // Restricting this to {1, 3} would make the two halves of the same
+    // conversion disagree: the no-model path in ChargingScheduleResolver has
+    // always used `numberPhases ?? 3` verbatim, so a legal 2-phase profile
+    // was capped at x2 there and silently x3 here.
+    const threePhase = { currentType: "AC" as const, phases: 3 as const };
+    expect(powerWattsForCurrent(16, threePhase, 2)).toBe(16 * 230 * 2);
+  });
+
+  it("falls back to the connector's own count for a phase value it cannot use", () => {
+    // Fractional, negative or otherwise smuggled past the types by raw RPC.
+    const threePhase = { currentType: "AC" as const, phases: 3 as const };
+    for (const bogus of [1.5, -1, NaN, Infinity]) {
+      expect(powerWattsForCurrent(16, threePhase, bogus)).toBe(16 * 230 * 3);
+    }
+  });
+
+  it("never derives a current above the amperage it was given", () => {
+    const settings = { currentType: "AC" as const, phases: 3 as const };
+    for (const limitPhases of [undefined, 0, 1, 2, 3, 1.5, -1]) {
+      const watts = powerWattsForCurrent(16, settings, limitPhases);
+      expect(currentAmpsFor(watts, settings)).toBeLessThanOrEqual(16);
+    }
+  });
+
+  it("returns 0 for a non-positive current", () => {
+    expect(powerWattsForCurrent(0, { currentType: "DC" })).toBe(0);
+    expect(powerWattsForCurrent(-5, {})).toBe(0);
+  });
+});
+
+describe("electricalModelOf (#301)", () => {
+  it("returns undefined when no electrical field is declared", () => {
+    expect(
+      electricalModelOf({
+        modelName: "Generic EV",
+        batteryCapacityKwh: 75,
+        maxChargingPowerKw: 150,
+        initialSoc: 20,
+        targetSoc: 80,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns the model as soon as one field is declared", () => {
+    expect(
+      electricalModelOf({
+        modelName: "Generic EV",
+        batteryCapacityKwh: 75,
+        maxChargingPowerKw: 150,
+        initialSoc: 20,
+        targetSoc: 80,
+        phases: 3,
+      }),
+    ).toEqual({
+      currentType: undefined,
+      phases: 3,
+      voltageV: undefined,
+      powerFactor: undefined,
+    });
+  });
+
+  it("returns undefined for absent settings", () => {
+    expect(electricalModelOf(undefined)).toBeUndefined();
   });
 });

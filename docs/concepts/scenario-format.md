@@ -11,6 +11,8 @@ sources:
   - src/cp/domain/connector/ChargingCurve.ts
   - src/cp/domain/connector/MeterValueBuilder.ts
   - src/cp/domain/connector/Connector.ts
+  - src/cp/domain/connector/ChargingScheduleResolver.ts
+  - src/cp/domain/connector/MeterValueScheduler.ts
   - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
   - "issues #214, #240, #247, #239, #301"
@@ -341,6 +343,30 @@ a current the hardware could not draw — `Power.Factor` itself always reports
 the configured value on AC (default `1`), so it never disagrees with the
 current derived from it in the same MeterValue.
 
+**An amp-based charging profile is not violated by the report.** A
+`ChargingRateUnit=A` period limit is converted to watts to cap the session,
+and that wattage is converted back to the reported `Current.Import`. When the
+connector declares an electrical model — any of `currentType`, `phases`,
+`voltageV`, `powerFactor` — both halves use the same numbers, so the reported
+current is at most the amperage the CSMS set. Without that, the two halves
+disagreed: a 3-phase 10 A profile on a `powerFactor: 0.5` connector resolved
+to `10 × 230 × 3 = 6900 W` and reported `6900 / (230 × 3 × 0.5) = 20 A`, twice
+the limit. The phase count used is `min(connector phases, the period's
+numberPhases)` — a profile cannot give a single-phase connector three phases
+to draw on, and a CSMS restricting a 3-phase connector to one phase lowers the
+cap. Any non-negative integer `numberPhases` counts, not only 1 and 3: OCPP
+permits 2, and the no-model conversion below has always used the value
+verbatim, so treating 2 as "absent" here would cap the same profile at ×2 in
+one half and ×3 in the other. A value that is not a non-negative integer —
+fractional or negative, smuggled past the types by raw RPC — falls back to the
+connector's own phase count. A connector declaring **none** of the four keeps the pre-1.2 conversion,
+`A × 230 V × numberPhases` with OCPP §7.21's default of 3 phases, and with it
+the pre-1.2 mismatch — this guarantee is about connectors that describe their
+electrics, and every scenario written before v1.2 is byte-identical.
+`GetCompositeSchedule` is deliberately outside it too: that response restates
+the CSMS's own profiles rather than metering a connector, so both directions
+there stay on the 230 V reference and remain each other's inverse.
+
 **A `Power.Factor` sample is never rounded.** It names the exact number that
 produced `Current.Import` in the same message, so `powerFactor: 0.004` reports
 `0.004`, not `0.00`. Rounding the sample to two decimals while deriving the
@@ -371,6 +397,18 @@ Without a curve, accumulation is unchanged from before v1.2: the
 increment/bezier trajectory a scenario configures is its own contract,
 independent of `maxChargingPowerKw`, and only the charging-profile limit caps
 it.
+
+**A tapering curve slows the energy register; it never freezes it.** The
+register is integer watt-hours — a fractional `meterStop` is rejected by a
+strict CSMS with a `FormationViolation` that leaves the transaction stranded
+in Charging — so the auto-meter rounds what it reports and carries the
+sub-watt-hour remainder into the next tick instead of re-rounding an
+already-rounded value. Without that carry, any per-tick delta under 0.5 Wh is
+destroyed rather than deferred: a curve tapering to 1000 W with a 1-second
+interval delivers 0.28 Wh a tick, so the register and the SoC derived from it
+would sit at their starting value forever while `Power.Active.Import` kept
+reporting 1000 W. The carry is reset whenever the auto-meter starts or stops,
+so a session always begins on a whole watt-hour.
 
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
 `min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the

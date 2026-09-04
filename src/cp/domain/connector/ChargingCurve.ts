@@ -4,6 +4,16 @@ import type { ChargingCurvePoint, EVSettings } from "./EVSettings";
 export const DEFAULT_VOLTAGE_V = 230;
 
 /**
+ * The electrical side of {@link EVSettings} — everything needed to convert
+ * between watts and amperes in either direction. Both directions live in this
+ * module and take this same shape, so they cannot drift apart (#301).
+ */
+export type ElectricalSettings = Pick<
+  EVSettings,
+  "currentType" | "phases" | "voltageV" | "powerFactor"
+>;
+
+/**
  * Sort a curve by SoC and drop points that cannot be interpolated.
  *
  * Done once, at the boundary, so every evaluation can assume a monotone x-axis
@@ -177,16 +187,97 @@ export function effectivePowerFactor(
  */
 export function currentAmpsFor(
   powerW: number,
-  settings: Pick<
-    EVSettings,
-    "currentType" | "phases" | "voltageV" | "powerFactor"
-  >,
+  settings: ElectricalSettings,
 ): number {
   const voltage = positiveOr(settings.voltageV, DEFAULT_VOLTAGE_V);
   if (powerW <= 0) return 0;
   if (settings.currentType === "DC") return powerW / voltage;
-  const phases = settings.phases === 3 ? 3 : 1;
-  return powerW / (voltage * phases * effectivePowerFactor(settings));
+  return (
+    powerW / (voltage * acPhases(settings) * effectivePowerFactor(settings))
+  );
+}
+
+/**
+ * Real power drawn at a given current — the exact inverse of
+ * {@link currentAmpsFor} for the same settings, and the reason an amp-based
+ * `SetChargingProfile` limit is not violated by the MeterValues that report
+ * it (#301).
+ *
+ * `ChargingScheduleResolver` turns a `ChargingRateUnit=A` period limit into
+ * the watt cap the meter accumulates against, and `MeterValueBuilder` turns
+ * that wattage back into the reported `Current.Import`. When the two halves
+ * do not share an electrical model the round trip is lossy: a 3-phase 10 A
+ * profile on a `powerFactor: 0.5` connector used to resolve to
+ * `10 × 230 × 3 = 6900 W` and then report `6900 / (230 × 3 × 0.5) = 20 A`,
+ * twice the limit the CSMS set. Routing the A → W half through this function
+ * makes the trip exact.
+ *
+ * `limitPhases` is the profile period's `numberPhases` (OCPP 1.6 §7.21). The
+ * conversion uses `min(connector phases, limitPhases)`: a CSMS restricting a
+ * 3-phase connector to one phase must lower the cap, and a profile naming
+ * more phases than the connector is wired for cannot raise it. Because
+ * {@link currentAmpsFor} always divides by the connector's own phase count,
+ * that `min` is what guarantees the reported current stays at or below the
+ * limit in both mismatch directions. DC ignores `limitPhases` entirely —
+ * there are no phases to restrict.
+ */
+export function powerWattsForCurrent(
+  amps: number,
+  settings: ElectricalSettings,
+  limitPhases?: number,
+): number {
+  if (amps <= 0) return 0;
+  const voltage = positiveOr(settings.voltageV, DEFAULT_VOLTAGE_V);
+  if (settings.currentType === "DC") return amps * voltage;
+  const connectorPhases = acPhases(settings);
+  // Any non-negative integer, not just 1 or 3: OCPP allows `numberPhases: 2`,
+  // and the no-model path below this one has always honoured whatever the
+  // profile named (`numberPhases ?? 3`). Restricting to {1, 3} here would
+  // make the two halves of the same conversion disagree for a legal profile,
+  // and would contradict the `min(connector phases, limitPhases)` rule stated
+  // above. Anything else -- absent, fractional, negative, smuggled past the
+  // types by raw RPC -- falls back to the connector's own count.
+  const phases =
+    typeof limitPhases === "number" &&
+    Number.isInteger(limitPhases) &&
+    limitPhases >= 0
+      ? Math.min(limitPhases, connectorPhases)
+      : connectorPhases;
+  return amps * voltage * phases * effectivePowerFactor(settings);
+}
+
+/** AC phase count for the derivations above. `phases` is `1 | 3`; anything
+ *  else (absent, or a value smuggled past the types by raw RPC) is 1. */
+function acPhases(settings: Pick<EVSettings, "phases">): number {
+  return settings.phases === 3 ? 3 : 1;
+}
+
+/**
+ * The electrical model a connector actually declares, or `undefined` when it
+ * declares none.
+ *
+ * `defaultEVSettings` leaves all four fields absent, so "no model" is the
+ * state of every connector that predates #301 and of every scenario that does
+ * not mention them. Callers that would otherwise change behaviour for those
+ * connectors — {@link powerWattsForCurrent} implies single-phase where OCPP
+ * §7.21 defaults `numberPhases` to 3 — use this to tell "the operator
+ * configured single-phase" apart from "the operator configured nothing", and
+ * keep the pre-#301 conversion for the latter.
+ */
+export function electricalModelOf(
+  settings: EVSettings | undefined,
+): ElectricalSettings | undefined {
+  if (!settings) return undefined;
+  const { currentType, phases, voltageV, powerFactor } = settings;
+  if (
+    currentType === undefined &&
+    phases === undefined &&
+    voltageV === undefined &&
+    powerFactor === undefined
+  ) {
+    return undefined;
+  }
+  return { currentType, phases, voltageV, powerFactor };
 }
 
 function positiveOr(value: number | undefined, fallback: number): number {

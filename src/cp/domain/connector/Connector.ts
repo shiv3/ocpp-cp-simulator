@@ -27,6 +27,7 @@ import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
 import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
 import {
   effectiveChargingPowerW,
+  electricalModelOf,
   normalizeChargingCurve,
   resolveSocForCurve,
 } from "./ChargingCurve";
@@ -286,6 +287,10 @@ export class Connector {
    * start time. Returns `Infinity` when uncapped — i.e. no profile, or no
    * transaction context to anchor a Relative schedule on.
    *
+   * A profile expressed in amperes is converted through this connector's
+   * declared electrical model, so an amp limit survives the trip through
+   * watts and back into the reported `Current.Import` (#301).
+   *
    * Side-effect: if the paused/active state flipped since the last call,
    * emits `scheduleLimitChange` so the ChargePoint can move the connector
    * between Charging and SuspendedEVSE. Mid-tick crossings of a period
@@ -299,7 +304,19 @@ export class Connector {
         ChargingProfilePurposeType.ChargePointMaxProfile,
       ) ?? null;
     const start = this.transactionValue?.startTime ?? null;
-    const resolved = resolveEffectiveLimitWatts(txProfile, stationMax, start);
+    const resolved = resolveEffectiveLimitWatts(
+      txProfile,
+      stationMax,
+      start,
+      new Date(),
+      // A `ChargingRateUnit=A` limit is converted with this connector's own
+      // volts/phases/cos φ when it declares them, so that the current
+      // `MeterValueBuilder` derives back from the resulting cap never exceeds
+      // the amperage the CSMS set (#301). `undefined` for a connector that
+      // declares no electrical model — that is the pre-#301 conversion and it
+      // stays exactly where it was.
+      electricalModelOf(this._evSettings),
+    );
     const paused = resolved.watts === 0;
     const isCapped = resolved.watts !== Infinity;
     if (

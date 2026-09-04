@@ -190,3 +190,121 @@ describe("evSettings normalizes the curve at the setter boundary (#301, finding 
     ).toEqual([0, 100]);
   });
 });
+
+describe("a tapering curve still advances the register (#301)", () => {
+  /**
+   * A curve-derived cap below 1800 W delivers under 0.5 Wh in a 1-second
+   * tick. `Connector.applyMeterValue` rounds the register to an integer watt-
+   * hour, so without carrying the remainder between ticks that energy is
+   * destroyed rather than deferred and the meter — and the SoC derived from
+   * it — never move again, while `Power.Active.Import` keeps reporting real
+   * power. These tests watch the register over many ticks; a single-tick
+   * assertion would pass with the bug present.
+   */
+  function taperingConnector(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      // 10 kW ceiling × 0.1 acceptance at 50% = 1000 W, well under the
+      // 1800 W where a 1-second tick still reaches 0.5 Wh.
+      maxChargingPowerKw: 10,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 0.1 },
+        { socPercent: 100, powerFraction: 0.1 },
+      ],
+    };
+    connector.socMeterSyncEnabled = false;
+    connector.soc = 50;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    return connector;
+  }
+
+  it("advances under an increment strategy at 1000 W (0.28 Wh per tick)", () => {
+    vi.useFakeTimers();
+    const connector = taperingConnector();
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 10_000, // the curve, not the scenario, is the cap
+    });
+
+    // 1000 W for 36 s = 10 Wh, delivered 0.2778 Wh at a time.
+    vi.advanceTimersByTime(36_000);
+    expect(connector.meterValue).toBe(10);
+
+    // Half as long, half the energy — it climbs steadily rather than
+    // jumping once and sticking.
+    vi.advanceTimersByTime(36_000);
+    expect(connector.meterValue).toBe(20);
+
+    // And the power the same tick reports is the power that produced it.
+    const samples = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    );
+    expect(
+      samples.find((s) => s.measurand === "Power.Active.Import")?.value,
+    ).toBe("1000");
+  });
+
+  it("advances under a curve strategy whose per-tick delta the cap clamps below 0.5 Wh", () => {
+    vi.useFakeTimers();
+    const connector = taperingConnector();
+    connector.startManualMeterStrategy({
+      kind: "curve",
+      config: {
+        enabled: true,
+        // 50 kWh over an hour — an ideal trajectory far above what the
+        // battery accepts, so the curve-derived cap clamps every tick.
+        curvePoints: [
+          { time: 0, value: 0 },
+          { time: 3600, value: 50 },
+        ],
+        intervalSeconds: 1,
+        autoCalculateInterval: false,
+      },
+    });
+
+    vi.advanceTimersByTime(36_000);
+    expect(connector.meterValue).toBe(10);
+    vi.advanceTimersByTime(36_000);
+    expect(connector.meterValue).toBe(20);
+  });
+
+  it("advances for a sub-0.5 Wh increment with no curve or profile involved", () => {
+    // Same rounding trap, reachable from a scenario alone: 0.3 Wh a second.
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 0.3,
+    });
+
+    vi.advanceTimersByTime(10_000);
+    expect(connector.meterValue).toBe(3);
+  });
+
+  it("keeps the register integral, so meterStop never carries a fraction", () => {
+    vi.useFakeTimers();
+    const connector = taperingConnector();
+    const seen: number[] = [];
+    connector.events.on("meterValueChange", ({ meterValue }) =>
+      seen.push(meterValue),
+    );
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 10_000,
+    });
+    vi.advanceTimersByTime(10_000);
+
+    expect(seen.length).toBeGreaterThan(0);
+    for (const value of seen) expect(Number.isInteger(value)).toBe(true);
+  });
+});

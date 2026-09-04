@@ -375,6 +375,18 @@ charging cap already works
 `Connector.resolveEffectiveLimitWatts`) and must keep winning; the curve only
 lowers demand, never raises it above a profile.
 
+(As shipped: a profile in `ChargingRateUnit=A` also has to survive the trip
+into watts and back into the reported `Current.Import`. For a connector that
+declares an electrical model, both directions now use its own volts, phases
+and cos φ — with the phase count `min(connector phases, the period's
+numberPhases)` — so the reported current never exceeds the amperage the CSMS
+set; a connector that declares none keeps the 230 V reference conversion. And
+because the curve newly supplies a small finite cap, the auto-meter carries
+the sub-watt-hour remainder between ticks: a curve tapering below 1800 W at a
+1-second interval delivers under 0.5 Wh a tick, which integer-watt-hour
+rounding used to discard outright. Both in the [Charging curve
+section](../concepts/scenario-format.md#charging-curve-v12).)
+
 **This is the fan-out item.** It reaches `EVSettings.ts`,
 `MeterValueBuilder.ts`, the `evSettings` block in the
 [scenario format](../concepts/scenario-format.md) — which needs a **schema

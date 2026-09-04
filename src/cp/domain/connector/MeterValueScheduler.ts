@@ -40,6 +40,27 @@ export class MeterValueScheduler {
   private startTimestamp: number | null = null;
   private strategy: MeterValueStrategy | null = null;
 
+  /**
+   * Sub-watt-hour energy delivered but not yet representable in the register,
+   * carried from one tick to the next (#301).
+   *
+   * `Connector.applyMeterValue` rounds every value it is handed to an integer
+   * watt-hour, because a fractional `meterStop` is rejected by a strict CSMS
+   * with a FormationViolation, and it is that rounded value the next tick
+   * reads back as "current". Without a carry the fraction is not deferred, it
+   * is destroyed: a per-tick delta below 0.5 Wh rounds away every time and the
+   * register never moves again. A charging curve tapering below 1800 W with a
+   * 1-second interval delivers under 0.5 Wh per tick, so this is reachable
+   * with ordinary settings — the meter and the SoC would freeze while
+   * `Power.Active.Import` still reported real power.
+   *
+   * Always in `[-0.5, 0.5)`, being `raw − round(raw)`, so the register it
+   * feeds tracks the true delivered energy to within half a watt-hour no
+   * matter how many ticks pass. Reset whenever the scheduler starts or stops:
+   * a new session starts from a whole watt-hour.
+   */
+  private carryWh = 0;
+
   constructor(
     private readonly connectorId: number,
     private readonly callbacks: MeterValueSchedulerCallbacks,
@@ -49,6 +70,7 @@ export class MeterValueScheduler {
   start(strategy: MeterValueStrategy): void {
     this.stop();
     this.strategy = strategy;
+    this.carryWh = 0;
 
     if (strategy.kind === "curve") {
       const { config } = strategy;
@@ -134,13 +156,20 @@ export class MeterValueScheduler {
       if (effectiveIncrement < 0) effectiveIncrement = 0;
     }
 
-    const next = current + effectiveIncrement;
+    // `current` is the rounded register; `carryWh` is the fraction the last
+    // rounding could not represent. Adding it back before rounding again is
+    // what lets an increment smaller than 0.5 Wh — a curve-throttled tick on a
+    // 1-second interval — still move the register, every other tick or every
+    // fourth, instead of never (#301).
+    const raw = current + this.carryWh + effectiveIncrement;
 
     // Cap at maxValue if specified
-    const finalValue =
+    const cappedRaw =
       strategy.maxValue && strategy.maxValue > 0
-        ? Math.min(next, strategy.maxValue)
-        : next;
+        ? Math.min(raw, strategy.maxValue)
+        : raw;
+    const finalValue = Math.round(cappedRaw);
+    this.carryWh = cappedRaw - finalValue;
 
     this.callbacks.updateValue(finalValue);
     if (strategy.sendMeterValues !== false) {
@@ -166,6 +195,7 @@ export class MeterValueScheduler {
     }
     this.startTimestamp = null;
     this.strategy = null;
+    this.carryWh = 0;
   }
 
   isActive(): boolean {
@@ -181,8 +211,8 @@ export class MeterValueScheduler {
 
     const elapsedMs = Date.now() - this.startTimestamp;
     const elapsedSeconds = elapsedMs / 1000;
-    const newValueKWh = getMeterValueAtTime(elapsedSeconds, config);
-    let newValueWh = Math.round(newValueKWh * 1000);
+    const idealWh = getMeterValueAtTime(elapsedSeconds, config) * 1000;
+    let rawNext = idealWh;
 
     // Apply the OCPP charging profile cap by clamping the per-tick delta. The
     // bezier curve dictates an "ideal" trajectory; if the schedule says we
@@ -193,12 +223,18 @@ export class MeterValueScheduler {
       const intervalSec = config.autoCalculateInterval
         ? this.calculateAutoInterval(config) / 1000
         : Math.max(1, config.intervalSeconds);
-      const current = this.callbacks.getCurrentValue();
+      // The register plus the fraction the last rounding dropped: the energy
+      // actually delivered so far. Clamping against the rounded register alone
+      // would discard every capped delta below 0.5 Wh instead of deferring it,
+      // freezing the meter under a low cap (#301).
+      const delivered = this.callbacks.getCurrentValue() + this.carryWh;
       const maxIncrement = Math.max(0, (cap * intervalSec) / 3600);
-      const clampedNext =
-        current + Math.min(newValueWh - current, maxIncrement);
-      newValueWh = Math.max(current, Math.round(clampedNext));
+      rawNext = delivered + Math.min(idealWh - delivered, maxIncrement);
+      rawNext = Math.max(delivered, rawNext);
     }
+
+    const newValueWh = Math.round(rawNext);
+    this.carryWh = rawNext - newValueWh;
 
     this.callbacks.updateValue(newValueWh);
     this.callbacks.onSend(this.connectorId);

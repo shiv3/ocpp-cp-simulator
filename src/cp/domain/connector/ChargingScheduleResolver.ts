@@ -4,11 +4,20 @@ import {
   ChargingRateUnitType,
   RecurrencyKindType,
 } from "../types/OcppTypes";
+import { type ElectricalSettings, powerWattsForCurrent } from "./ChargingCurve";
 
 /**
- * Reference voltage used to convert ChargingRateUnit=A to watts. OCPP 1.6 §7.5
- * does not pin down a value (real CPs report the AC line voltage). 230 V
- * matches IEC single-phase; for 3-phase systems we multiply by numberPhases.
+ * Reference voltage used to convert ChargingRateUnit=A to watts when the
+ * connector declares no electrical model of its own. OCPP 1.6 §7.5 does not
+ * pin down a value (real CPs report the AC line voltage). 230 V matches IEC
+ * single-phase; for 3-phase systems we multiply by numberPhases.
+ *
+ * A connector that *does* declare a model (`currentType` / `phases` /
+ * `voltageV` / `powerFactor`, #301) converts through
+ * {@link powerWattsForCurrent} instead, so the watt cap and the
+ * `Current.Import` derived back from it agree. This constant remains the
+ * fallback for the connectors that declare nothing, and it is still what
+ * `GetCompositeSchedule` reports with.
  */
 const REFERENCE_PHASE_VOLTAGE = 230;
 
@@ -117,10 +126,17 @@ function limitToWatts(
   rawLimit: number,
   unit: ChargingRateUnitType,
   numberPhases: number | undefined,
+  electrical: ElectricalSettings | undefined,
 ): number {
   if (unit === ChargingRateUnitType.W) return rawLimit;
-  // A → W: amperes × volts × phases. OCPP §7.21: numberPhases defaults to 3
-  // when absent. Single-phase profiles must set numberPhases=1 explicitly.
+  // A → W through the connector's own model when it has one, so that the
+  // W → A conversion `MeterValueBuilder` applies to the resulting cap lands
+  // back on `rawLimit` rather than above it (#301).
+  if (electrical)
+    return powerWattsForCurrent(rawLimit, electrical, numberPhases);
+  // No model declared: the pre-#301 conversion, unchanged. amperes × volts ×
+  // phases, with OCPP §7.21's default of 3 when numberPhases is absent.
+  // Single-phase profiles must set numberPhases=1 explicitly.
   const phases = numberPhases ?? 3;
   return rawLimit * REFERENCE_PHASE_VOLTAGE * phases;
 }
@@ -129,11 +145,18 @@ function limitToWatts(
  * Resolve the effective wattage cap for a connector at this instant. Returns
  * `Infinity` when there's no active profile (i.e. the auto-meter is free to
  * use its scenario-configured rate).
+ *
+ * `electrical` is the connector's declared electrical model, when it has one.
+ * It only affects a `ChargingRateUnit=A` profile, where it makes the A → W
+ * conversion the exact inverse of the W → A one `MeterValueBuilder` uses to
+ * report `Current.Import` (#301). Omit it — as `buildCompositeWattsSchedule`
+ * does — for the pre-#301 conversion against a 230 V reference.
  */
 export function resolveScheduleLimitWatts(
   profile: ActiveChargingProfile | null,
   transactionStart: Date | null,
   now: Date = new Date(),
+  electrical?: ElectricalSettings,
 ): ResolvedScheduleLimit {
   if (!profile || !transactionStart) return UNCAPPED;
 
@@ -146,6 +169,7 @@ export function resolveScheduleLimitWatts(
     period.limit,
     profile.chargingRateUnit,
     period.numberPhases,
+    electrical,
   );
 
   return {
@@ -174,12 +198,19 @@ export function resolveEffectiveLimitWatts(
   chargePointMaxProfile: ActiveChargingProfile | null,
   transactionStart: Date | null,
   now: Date = new Date(),
+  electrical?: ElectricalSettings,
 ): ResolvedScheduleLimit {
-  const tx = resolveScheduleLimitWatts(txProfile, transactionStart, now);
+  const tx = resolveScheduleLimitWatts(
+    txProfile,
+    transactionStart,
+    now,
+    electrical,
+  );
   const cap = resolveScheduleLimitWatts(
     chargePointMaxProfile,
     transactionStart,
     now,
+    electrical,
   );
   if (tx.watts === Infinity && cap.watts === Infinity) return UNCAPPED;
   // The tighter side wins. Equal watts → prefer the tx side (more
@@ -229,6 +260,12 @@ export interface CompositeInput {
  * `watts === Infinity` is emitted; the SmartCharging handler decides
  * whether to skip those when serializing to ChargingSchedulePeriod[] (the
  * OCPP type has no "uncapped" encoding).
+ *
+ * Deliberately converts `ChargingRateUnit=A` against the 230 V reference
+ * rather than the connector's electrical model: the handler converts the
+ * watts straight back to amperes for a CSMS that asked for `A`, and the two
+ * halves of *that* round trip have to agree with each other. A composite is
+ * a restatement of the CSMS's own profiles, not a metering claim.
  */
 export function buildCompositeWattsSchedule(
   inputs: CompositeInput,

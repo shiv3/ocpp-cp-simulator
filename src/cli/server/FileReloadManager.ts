@@ -34,6 +34,27 @@ export interface FileReloadEvent {
 
 export type FileReloadSink = (event: FileReloadEvent) => void;
 
+/**
+ * "This connector's scenario definitions changed" (#314).
+ *
+ * A reload updates the runtime and the persisted definition, but the
+ * `file-reload` envelope goes to the `file-reload` scope. A console that
+ * subscribed through `subscribeScenarioDefinitions` listens on
+ * `scenario-definitions` and would go on displaying the old graph while the
+ * daemon executed the new one, so the standard update is pushed as well.
+ *
+ * The definitions come from the connector's *runtime* set rather than from the
+ * scenario repository, deliberately: the repository is empty on a daemon
+ * running without `--state-db`, and `loadScenario` persists in the background,
+ * so reading it back would push either nothing or the graph that was just
+ * replaced. What an editor needs to show is what the daemon is executing.
+ */
+export type ScenarioDefinitionsChangedSink = (
+  cpId: string,
+  connectorId: number,
+  definitions: readonly ScenarioDefinition[],
+) => void;
+
 export interface ScenarioFileRegistration {
   readonly filePath: string;
   readonly cpId: string;
@@ -93,8 +114,12 @@ export class FileReloadManager {
   private readonly watcher: FileWatcher;
   private readonly idTagWatches = new Map<string, () => void>();
   private readonly idTagText = new Map<string, string>();
+  /** Charge points already checked against the file they were loaded from.
+   *  Reconciliation is a once-per-charge-point step, not a once-per-file one. */
+  private readonly reconciledCps = new Set<string>();
   private readonly scenarios = new Map<string, ScenarioEntry>();
   private sink: FileReloadSink | null = null;
+  private definitionsSink: ScenarioDefinitionsChangedSink | null = null;
   private unsubscribeBus: (() => void) | null = null;
   private unsubscribeRunSettled: (() => void) | null = null;
   private closed = false;
@@ -132,6 +157,15 @@ export class FileReloadManager {
     this.sink = sink;
   }
 
+  /** Where "this connector's definitions changed" goes after a scenario
+   *  reload. Wired alongside {@link setSink}, once the socket.io bridge and
+   *  the facade that can list the definitions both exist. */
+  setScenarioDefinitionsSink(
+    sink: ScenarioDefinitionsChangedSink | null,
+  ): void {
+    this.definitionsSink = sink;
+  }
+
   /** Whether `fs.watch` failed at least once and reloads are inert. */
   get degraded(): boolean {
     return this.watcher.degraded;
@@ -162,20 +196,28 @@ export class FileReloadManager {
       this.idTagText.delete(watched);
     }
     for (const absolute of wanted) {
-      if (this.idTagWatches.has(absolute)) continue;
-      this.idTagText.set(absolute, readTextOrEmpty(absolute));
-      this.idTagWatches.set(
-        absolute,
-        this.watcher.watch(absolute, () => this.reloadIdTags(absolute)),
-      );
-      // Once per watch, never on a later sync for an unrelated charge point.
+      if (!this.idTagWatches.has(absolute)) {
+        this.idTagText.set(absolute, readTextOrEmpty(absolute));
+        this.idTagWatches.set(
+          absolute,
+          this.watcher.watch(absolute, () => this.reloadIdTags(absolute)),
+        );
+      }
+      // Per charge point, not per watch. `restoreFromDatabase` re-creates the
+      // fleet one charge point at a time, each firing its own sync, so a second
+      // charge point sharing an already-watched file would never be looked at.
       this.reconcileIdTags(absolute);
     }
-    // A charge point that is gone takes its scenario registrations with it.
+    // A charge point that is gone takes its scenario registrations with it, and
+    // stops being one this reloader has reconciled — recreating it under the
+    // same id is a new charge point and gets looked at again.
     for (const [key, entry] of [...this.scenarios]) {
       if (this.registry.has(entry.cpId)) continue;
       entry.unwatch();
       this.scenarios.delete(key);
+    }
+    for (const cpId of [...this.reconciledCps]) {
+      if (!this.registry.has(cpId)) this.reconciledCps.delete(cpId);
     }
     // A `cp.update` tears the charge point down and builds a replacement. That
     // ends whatever session was holding a reload back, but the old service's
@@ -254,6 +296,7 @@ export class FileReloadManager {
 
   close(): void {
     this.closed = true;
+    this.definitionsSink = null;
     this.unsubscribeBus?.();
     this.unsubscribeBus = null;
     this.unsubscribeRunSettled?.();
@@ -261,6 +304,7 @@ export class FileReloadManager {
     this.watcher.close();
     this.idTagWatches.clear();
     this.idTagText.clear();
+    this.reconciledCps.clear();
     this.scenarios.clear();
   }
 
@@ -321,10 +365,16 @@ export class FileReloadManager {
    */
   private reconcileIdTags(absolutePath: string): void {
     if (this.closed) return;
-    const text = this.idTagText.get(absolutePath);
-    if (text === undefined) return;
-    const affected = this.affectedByIdTagFile(absolutePath);
+    const affected = this.affectedByIdTagFile(absolutePath).filter(
+      (cpId) => !this.reconciledCps.has(cpId),
+    );
     if (affected.length === 0) return;
+    // Marked before anything can fail: a file that has been broken on disk all
+    // along is reported once, not once per registry sync for the rest of the
+    // daemon's life.
+    for (const cpId of affected) this.reconciledCps.add(cpId);
+    const text =
+      this.idTagText.get(absolutePath) ?? readTextOrEmpty(absolutePath);
 
     let tags: string[];
     try {
@@ -492,6 +542,22 @@ export class FileReloadManager {
     this.log(
       `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reloaded from ${entry.absolutePath}`,
     );
+    // Last, and outside the try: the definition is live either way, and a
+    // console that cannot be told must not be able to fail the reload.
+    try {
+      this.definitionsSink?.(
+        entry.cpId,
+        entry.connectorId,
+        service
+          .snapshotScenarios()
+          .filter((loaded) => loaded.connectorId === entry.connectorId)
+          .map((loaded) => loaded.definition),
+      );
+    } catch (err) {
+      this.log(
+        `[watch] scenario-definitions sink error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** Whether the charge point still holds the scenario this registration was

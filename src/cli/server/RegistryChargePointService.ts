@@ -593,20 +593,23 @@ export class RegistryChargePointService implements ChargePointService {
         `[RegistryChargePointService] "${path}" does not match schema/scenario.schema.json (loading anyway): ${schemaResult.errors.slice(0, 5).join("; ")}`,
       );
     }
-    const scenarioId = service.loadScenario(connectorId, parsed);
-    // `loadScenario` runs the auto-start gate, so a file with the usual
-    // connect-triggered start node is already running by the time we get here
-    // whenever the charge point is Available — the common case. Starting it a
-    // second time throws "already running", which used to fail the whole RPC
-    // and, with it, skip the `--watch` registration for a file that had in fact
-    // been loaded and started (#314). The per-run `strict` override is lost in
-    // that case; it belongs to a run this call did not begin.
-    if (!service.isScenarioRunning(scenarioId)) {
-      if (opts.strict === undefined) {
-        service.runScenario(connectorId, scenarioId);
-      } else {
-        service.runScenario(connectorId, scenarioId, { strict: opts.strict });
-      }
+    // The auto-start gate is suppressed here on purpose (#314). Left on, a file
+    // with the usual connect-triggered start node is already running by the time
+    // the load returns whenever the charge point is Available — the common case
+    // — and the explicit start below then either threw "already running",
+    // failing an RPC whose scenario was in fact loaded and running, or (once
+    // that throw was skipped) silently dropped the caller's `strict` override
+    // and reported success for a run this call never began. Neither is
+    // distinguishable by the caller. Starting it here instead keeps the
+    // requested options, and leaves "this id was already running before the
+    // call" the honest error it has always been.
+    const scenarioId = service.loadScenario(connectorId, parsed, {
+      autoStart: false,
+    });
+    if (opts.strict === undefined) {
+      service.runScenario(connectorId, scenarioId);
+    } else {
+      service.runScenario(connectorId, scenarioId, { strict: opts.strict });
     }
     return { scenarioId };
   }

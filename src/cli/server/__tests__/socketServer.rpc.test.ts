@@ -674,9 +674,6 @@ describe("socket.io rpc dispatch", () => {
       loadScenario: vi.fn().mockReturnValue("file-scenario"),
       loadScenarioTemplate: vi.fn().mockReturnValue("template-scenario"),
       runScenario: vi.fn(),
-      // #314: runScenarioFile asks before starting, because loadScenario's
-      // auto-start gate may already have started the scenario.
-      isScenarioRunning: vi.fn().mockReturnValue(false),
     };
     const registry = {
       get: vi.fn((cpId: string) => (cpId === "cp-alpha" ? service : undefined)),
@@ -759,9 +756,12 @@ describe("socket.io rpc dispatch", () => {
           params: { connector: 1, file: scenarioFile },
         }),
       ).toMatchObject({ ok: true, result: { scenarioId: "file-scenario" } });
+      // #314: `run_scenario_file` suppresses the connector's auto-start gate so
+      // the run it starts itself is the one the caller's options apply to.
       expect(service.loadScenario).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ id: "from-file" }),
+        { autoStart: false },
       );
       expect(service.runScenario).toHaveBeenCalledWith(1, "file-scenario");
 
@@ -795,7 +795,6 @@ describe("socket.io rpc dispatch", () => {
     const service = {
       loadScenario: vi.fn(),
       runScenario: vi.fn(),
-      isScenarioRunning: vi.fn().mockReturnValue(false),
     };
     const registry = {
       get: vi.fn((cpId: string) => (cpId === "cp-alpha" ? service : undefined)),
@@ -842,7 +841,6 @@ describe("socket.io rpc dispatch", () => {
     const service = {
       loadScenario: vi.fn().mockReturnValue("schema-warn-scenario"),
       runScenario: vi.fn(),
-      isScenarioRunning: vi.fn().mockReturnValue(false),
     };
     const registry = {
       get: vi.fn((cpId: string) => (cpId === "cp-alpha" ? service : undefined)),

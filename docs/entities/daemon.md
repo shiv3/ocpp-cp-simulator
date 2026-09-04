@@ -286,7 +286,14 @@ Every reload pushes a `file-reload` event on the control plane carrying
 `target`, `path`, `cpId`, `connectorId`, `scenarioId` and an `outcome` of
 `applied`, `deferred` or `rejected` — see
 [Control plane → Event push and rooms](../concepts/control-plane.md#event-push-and-rooms).
-The daemon also logs each reload to stderr with a `[watch]` prefix.
+A **scenario** reload additionally pushes the ordinary
+`scenario-definitions-changed` update for that connector, because the console's
+scenario editor subscribes to the `scenario-definitions` scope and would
+otherwise keep showing the graph the daemon had stopped executing. Those
+definitions are the connector's live runtime set, not a read-back of the
+scenario repository — a daemon without `--state-db` has no repository content,
+and the persist behind a reload is a background write. The daemon also logs each
+reload to stderr with a `[watch]` prefix.
 
 Under `--state-db` the `idTagPool.file` path is persisted alongside the resolved
 tags (`charge_points.id_tag_file`, schema v11), so a daemon restarted with
@@ -299,7 +306,9 @@ operator meant. See [State persistence](../concepts/state-persistence.md).
 A file edited **while the daemon was stopped** is reconciled at startup rather
 than merely watched from then on: the restore brings back the tags as of the
 last time the daemon saw the file, so the daemon compares the file against what
-each restored charge point actually holds and applies it if they differ. Without
+each restored charge point actually holds and applies it if they differ. The
+comparison is made **once per charge point**, not once per file — several charge
+points can share one pool, and the restore re-creates them one at a time. Without
 that step the current bytes would be recorded as already-seen, and the
 operator's next save of that same content would be dismissed as a duplicate —
 the pool would stay stale until the file happened to change again.

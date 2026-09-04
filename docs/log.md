@@ -635,3 +635,28 @@ Sixth review pass on PR #325.
   `cp.update` rebuild; and `run_scenario_file`'s explicit start is idempotent,
   so a connect-triggered file the load already auto-started is registered as a
   watch source instead of failing the RPC.
+
+## [2026-09-04] ingest | `--watch` review round three: a regression from round two, and two half-delivered updates (#314, PR #317)
+
+- [Control plane](concepts/control-plane.md) — `run_scenario_file`'s row now
+  states the contract the code keeps: the file runs **with the options given**,
+  the auto-start gate is suppressed for that load, and an id already running is
+  an error rather than a silent success. The `scenario-definitions` scope row
+  notes that a `--watch` reload pushes into it too.
+- [Daemon](entities/daemon.md) — the reload-event paragraph records the second
+  push and why its definitions come from the runtime rather than the scenario
+  repository; the restart paragraph says the reconcile is once per **charge
+  point**, not once per file.
+- [Scenario file format](concepts/scenario-format.md) — the `strict` bullet
+  names the auto-start suppression that makes the flag reach the run.
+- The `isScenarioRunning` guard added in round two was a regression: it could
+  not tell "this load auto-started it" from "it was already running", so a
+  second `run_scenario_file` for a busy id reported success without ever
+  executing the file, and a `strict` override was dropped whenever the gate had
+  started the scenario. `loadScenario` now takes `{ autoStart: false }` and the
+  explicit start carries the caller's options.
+- `src/cli/server/__tests__/socketHarness.ts` now builds the reloader and
+  subscribes it **before** `restoreFromDatabase`, as `startServer` does. The
+  old order collapsed the daemon's per-charge-point restore syncs into one, and
+  hid the bug where only the first charge point sharing an idTag file was
+  reconciled.

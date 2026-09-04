@@ -5,11 +5,19 @@ import { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
 /**
- * Regression for #301 finding 1 on OCPP 1.5 SOAP: unlike 1.6-J/1.6-S and
- * 2.0.1/2.1, OCPP 1.5's SampledValue has no `phase` attribute at all. A
- * 3-phase AC connector's per-phase L1/L2/L3 samples must therefore be
- * dropped rather than sent as indistinguishable duplicates of the
- * aggregate — only the aggregate (unphased) sample should reach the wire.
+ * Regressions for #301 on OCPP 1.5 SOAP. Both cover the same rule: OCPP 1.5's
+ * SampledValue cannot express something the builder produced, so the sample is
+ * dropped rather than emitted as a value a CSMS cannot tell apart from another
+ * one in the same MeterValue.
+ *
+ * 1. Unlike 1.6-J/1.6-S and 2.0.1/2.1, OCPP 1.5's SampledValue has no `phase`
+ *    attribute at all, so a 3-phase AC connector's L1/L2/L3 samples are
+ *    dropped and only the aggregate (unphased) sample reaches the wire.
+ * 2. OCPP 1.5 has no `Power.Offered` / `Current.Offered` measurand. They used
+ *    to be aliased onto `Power.Active.Import` / `Current.Import`, which was
+ *    harmless only while offered and accepted power were the same number.
+ *    Under a charging curve they differ, so the alias would have put two
+ *    identically labelled samples with contradictory values into one message.
  */
 
 const CSMS_URL = "http://csms.example/CentralSystemService";
@@ -35,7 +43,10 @@ function threePhaseConnectorStub(): unknown {
   };
 }
 
-function createMockChargePoint(connector: unknown): ChargePoint {
+function createMockChargePoint(
+  connector: unknown,
+  measurands: string[] = ["Current.Import"],
+): ChargePoint {
   return {
     id: "test-cp",
     getConnector: () => connector,
@@ -43,7 +54,7 @@ function createMockChargePoint(connector: unknown): ChargePoint {
     error: undefined,
     events: { emit: () => {} },
     configuration: {
-      meterValuesSampledData: () => ["Current.Import"],
+      meterValuesSampledData: () => measurands,
     },
   } as unknown as ChargePoint;
 }
@@ -108,6 +119,84 @@ describe("OCPPSoapHandler.sendMeterValue on OCPP 1.5 (#301)", () => {
       // four indistinguishable copies.
       const matches = body.match(/measurand="Current\.Import"/g) ?? [];
       expect(matches.length).toBe(1);
+    } finally {
+      fetchMock.restore();
+    }
+  });
+});
+
+/**
+ * A connector whose battery accepts only a tenth of what the EVSE offers, so
+ * `Power.Offered` / `Current.Offered` and `Power.Active.Import` /
+ * `Current.Import` carry genuinely different numbers. Without the taper the
+ * two pairs would be equal and an aliasing bug would look correct.
+ */
+function taperedConnectorStub(): unknown {
+  return {
+    status: "Charging",
+    soc: 90,
+    meterValue: 1000,
+    transaction: null,
+    evSettings: {
+      modelName: "Test EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 100,
+      initialSoc: 20,
+      targetSoc: 100,
+      currentType: "DC",
+      voltageV: 400,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0.1 },
+      ],
+    },
+    currentScheduleLimitWatts: () => Infinity,
+  };
+}
+
+describe("OCPPSoapHandler.sendMeterValue on OCPP 1.5 measurands (#301)", () => {
+  it("never emits two samples carrying the same measurand", async () => {
+    const fetchMock = mockFetchCapturingBody();
+    try {
+      const chargePoint = createMockChargePoint(taperedConnectorStub(), [
+        "Energy.Active.Import.Register",
+        "Power.Active.Import",
+        "Power.Offered",
+        "Current.Import",
+        "Current.Offered",
+        "Voltage",
+      ]);
+      const handler = new OCPPSoapHandler(chargePoint, createMockLogger(), {
+        centralSystemUrl: CSMS_URL,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      handler.sendMeterValue(1, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(fetchMock.bodies.length).toBe(1);
+      const body = fetchMock.bodies[0]!;
+      const measurands = Array.from(
+        body.matchAll(/measurand="([^"]+)"/g),
+        (m) => m[1]!,
+      );
+      // The property itself: no measurand may appear twice in one MeterValue.
+      // Aliasing Offered onto Import produced exactly that — two
+      // `Power.Active.Import` samples, 100000 and 10000, in the same message.
+      expect(measurands.length).toBeGreaterThan(0);
+      expect(new Set(measurands).size).toBe(measurands.length);
+      // The unsupported Offered samples are dropped, not relabelled: the
+      // supported measurands still go out, and only once each.
+      expect(measurands).toContain("Power.Active.Import");
+      expect(measurands).toContain("Current.Import");
+      expect(measurands).not.toContain("Power.Offered");
+      expect(measurands).not.toContain("Current.Offered");
+      // And the surviving samples are the accepted (curve-limited) numbers,
+      // not the EVSE's offer: 100 kW x 0.1 = 10 kW, 10000 W / 400 V = 25 A.
+      expect(body).toContain(">10000<");
+      expect(body).not.toContain(">100000<");
     } finally {
       fetchMock.restore();
     }

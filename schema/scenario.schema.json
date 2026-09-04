@@ -127,7 +127,12 @@
         "currentType": { "type": "string", "enum": ["AC", "DC"] },
         "phases": { "type": "number", "enum": [1, 3] },
         "voltageV": { "type": "number", "exclusiveMinimum": 0 },
-        "powerFactor": { "type": "number", "minimum": 0, "maximum": 1 }
+        "powerFactor": {
+          "description": "cos phi, AC only (v1.2, issue #301). A power factor of 0 means no real power flows, so I = P / (V x phases x cos phi) would be infinite; 0 is rejected rather than silently treated as unity.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
       }
     },
     "assertion": {

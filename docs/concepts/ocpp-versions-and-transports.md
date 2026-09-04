@@ -15,6 +15,7 @@ related:
   - ../entities/daemon.md
   - security-profiles.md
   - trace-format.md
+  - scenario-format.md
 updated: 2026-09-04
 ---
 
@@ -127,6 +128,14 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 - `--trace-output` does not capture SOAP frames yet; the
   [trace format](trace-format.md) already reserves `transport: "soap"`.
 - [`analyze`](../entities/analyze.md) excludes SOAP records.
+- **OCPP 1.5 MeterValues carry fewer measurands than every other version, and
+  never two samples with the same one.** 1.5's `SampledValue` has no
+  `Power.Offered`, `Current.Offered`, `Power.Factor`, `SoC`, `Frequency` or
+  `RPM` measurand, and no `phase` attribute; each unsupported sample is
+  dropped rather than relabelled onto a measurand 1.5 does have. 1.6-S carries
+  all of them through unchanged. The canonical statement, with the reasoning
+  and the tradeoff, is in
+  [Scenario format → Charging curve](scenario-format.md#charging-curve-v12).
 
 ## Inbound CS→CP request validation
 

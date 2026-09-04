@@ -388,7 +388,11 @@ rather than porting the model into the k6 runtime.
 `src/components/Settings.tsx`'s "Default EV Settings" panel and
 `src/components/scenario/ScenarioEditor.tsx`'s "Scenario EV Settings" panel
 both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
-editable `chargingCurve` point list, not just the five pre-1.2 fields.)
+editable `chargingCurve` point list, not just the five pre-1.2 fields.
+`powerFactor` shipped as `(0, 1]`, not `[0, 1]`: cos φ = 0 makes the AC
+current derivation infinite, so 0 is invalid per the schema — which warns,
+being advisory — and unreachable from both panels, rather than accepted and
+replaced with 1.)
 
 **Acceptance.** Old scenarios without a curve produce byte-identical
 MeterValues (the curve is opt-in); a curved DC session shows power tapering

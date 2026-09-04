@@ -39,6 +39,19 @@ function setInputValue(input: HTMLInputElement, next: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+/** The number input whose sibling <label> reads `text`. */
+function findLabeledInput(
+  container: HTMLElement,
+  text: string,
+): HTMLInputElement {
+  const label = Array.from(container.querySelectorAll("label")).find(
+    (l) => l.textContent?.trim() === text,
+  );
+  const input = label?.parentElement?.querySelector("input");
+  if (!input) throw new Error(`No input labeled "${text}"`);
+  return input as HTMLInputElement;
+}
+
 function findButton(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll("button")).find((b) =>
     b.textContent?.includes(text),
@@ -124,5 +137,37 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
       { socPercent: 0, powerFraction: 1 },
       { socPercent: 80, powerFraction: 0.5 },
     ]);
+  });
+
+  it("never stores a power factor of 0", async () => {
+    // A cos phi of 0 means no real power flows, so the derived current would
+    // be infinite. The panel used to clamp with Math.max(0, ...) and store the
+    // 0 the domain then quietly replaced with 1 (#301).
+    setDefaultEvSettings = vi.fn();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Settings />
+        </MemoryRouter>,
+      );
+    });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const powerFactor = findLabeledInput(container, "Power Factor");
+    expect(powerFactor.min).toBe("0.01");
+
+    await act(async () => setInputValue(powerFactor, "0"));
+    await flush();
+    await act(async () => findButton(container, "Apply").click());
+    await flush();
+
+    expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect(applied.powerFactor).toBe(0.01);
   });
 });

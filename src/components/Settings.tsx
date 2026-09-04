@@ -13,7 +13,10 @@ import {
   EV_PRESETS,
   defaultEVSettings,
 } from "../cp/domain/connector/EVSettings";
-import { normalizeChargingCurve } from "../cp/domain/connector/ChargingCurve";
+import {
+  MIN_UI_POWER_FACTOR,
+  normalizeChargingCurve,
+} from "../cp/domain/connector/ChargingCurve";
 
 const Settings: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
@@ -470,20 +473,24 @@ const Settings: React.FC = () => {
                 </label>
                 <input
                   type="number"
-                  min={0}
+                  min={MIN_UI_POWER_FACTOR}
                   max={1}
                   step={0.01}
                   value={draftEv.powerFactor ?? 1}
                   disabled={draftEv.currentType === "DC"}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    // Clamped to MIN_UI_POWER_FACTOR, never 0: a cos phi of 0
+                    // means no real power flows, so the derived current would
+                    // be infinite. The domain would fall back to unity, which
+                    // is not what someone typing 0 asked for (#301).
+                    const parsed = parseFloat(e.target.value);
                     setDraftEv({
                       ...draftEv,
-                      powerFactor: Math.min(
-                        1,
-                        Math.max(0, parseFloat(e.target.value) || 0),
-                      ),
-                    })
-                  }
+                      powerFactor: Number.isFinite(parsed)
+                        ? Math.min(1, Math.max(MIN_UI_POWER_FACTOR, parsed))
+                        : 1,
+                    });
+                  }}
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-50"
                 />
               </div>

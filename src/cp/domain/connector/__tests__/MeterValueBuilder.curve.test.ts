@@ -181,13 +181,18 @@ describe("Power.Factor (#301)", () => {
   });
 
   it("is consistent with the current it implies in the same sample set", () => {
+    // 0.875 is deliberately a value two-decimal rounding would mangle (to
+    // 0.88): the sample must name the number the current was actually derived
+    // from, not a prettier one. Reporting `toFixed(2)` here while
+    // `currentAmpsFor` used the full value made one MeterValue contradict
+    // itself (#301).
     const ac = connectorStub({
       soc: 0,
       evSettings: {
         maxChargingPowerKw: 22,
         currentType: "AC",
         voltageV: 230,
-        powerFactor: 0.9,
+        powerFactor: 0.875,
       },
     });
     const samples = buildSampledValues(
@@ -201,8 +206,64 @@ describe("Power.Factor (#301)", () => {
     const pf = Number(
       samples.find((s) => s.measurand === "Power.Factor")?.value,
     );
-    expect(pf).toBeCloseTo(0.9);
+    expect(pf).toBe(0.875);
     expect(currentA).toBeCloseTo(22_000 / (230 * pf), 1);
+  });
+
+  it("reports a value finer than two decimals verbatim", () => {
+    // The reviewer's case: `Power.Factor = 0.00` next to a `Current.Import`
+    // derived from 0.004. Rounding the derivation to match instead would
+    // divide by zero, so the sample is the thing that has to stop rounding.
+    const ac = connectorStub({
+      soc: 0,
+      evSettings: {
+        maxChargingPowerKw: 22,
+        currentType: "AC",
+        voltageV: 230,
+        powerFactor: 0.004,
+      },
+    });
+    const samples = buildSampledValues(
+      ac,
+      ["Current.Import", "Power.Factor"],
+      "Sample.Periodic",
+    );
+    const pf = samples.find((s) => s.measurand === "Power.Factor")!.value;
+    expect(pf).toBe("0.004");
+    const currentA = Number(
+      samples.find((s) => s.measurand === "Current.Import")!.value,
+    );
+    expect(currentA).toBeCloseTo(22_000 / (230 * Number(pf)), 1);
+  });
+
+  it("reports the unity fallback it actually used for an out-of-contract value", () => {
+    // `powerFactor: 0` is rejected by schema/scenario.schema.json and by both
+    // browser panels, so it can only arrive through raw RPC. The domain falls
+    // back to unity rather than dividing by zero — and the sample says so, so
+    // the substitution is visible on the wire instead of silent (#301).
+    const ac = connectorStub({
+      soc: 0,
+      evSettings: {
+        maxChargingPowerKw: 22,
+        currentType: "AC",
+        voltageV: 230,
+        powerFactor: 0,
+      },
+    });
+    const samples = buildSampledValues(
+      ac,
+      ["Current.Import", "Power.Factor"],
+      "Sample.Periodic",
+    );
+    const pf = Number(
+      samples.find((s) => s.measurand === "Power.Factor")?.value,
+    );
+    expect(pf).toBe(1);
+    const currentA = Number(
+      samples.find((s) => s.measurand === "Current.Import")?.value,
+    );
+    expect(Number.isFinite(currentA)).toBe(true);
+    expect(currentA).toBeCloseTo(22_000 / 230, 1);
   });
 
   it("is always 1 on DC, regardless of a configured value", () => {

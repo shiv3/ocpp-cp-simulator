@@ -65,6 +65,7 @@ import {
   type EVSettings,
   EV_PRESETS,
 } from "../../cp/domain/connector/EVSettings";
+import { MIN_UI_POWER_FACTOR } from "../../cp/domain/connector/ChargingCurve";
 
 // Dynamic import for heavy component (bundle-dynamic-imports)
 const MeterValueCurveModal = lazy(() => import("../MeterValueCurveModal"));
@@ -1981,15 +1982,24 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                           disabled={scenarioEvSettings.currentType === "DC"}
                           onChange={(e) => {
                             const v = e.target.value;
+                            // Clamped to MIN_UI_POWER_FACTOR, never 0: a
+                            // cos phi of 0 means no real power flows, so the
+                            // derived current would be infinite (#301).
+                            // Empty stays undefined — that is "inherit the
+                            // default", not "zero".
+                            const parsed = parseFloat(v);
                             setScenarioEvSettings({
                               ...scenarioEvSettings,
                               powerFactor:
-                                v === ""
+                                v === "" || !Number.isFinite(parsed)
                                   ? undefined
-                                  : Math.min(1, Math.max(0, parseFloat(v))),
+                                  : Math.min(
+                                      1,
+                                      Math.max(MIN_UI_POWER_FACTOR, parsed),
+                                    ),
                             });
                           }}
-                          min={0}
+                          min={MIN_UI_POWER_FACTOR}
                           max={1}
                           step={0.01}
                         />

@@ -325,7 +325,7 @@ acceptance at `maxChargingPowerKw`, 230 V, single phase.
 | `currentType`   | `AC` or `DC`. DC has no reactive component.                                        |
 | `phases`        | `1` (default) or `3`, AC only.                                                     |
 | `voltageV`      | **Phase-to-neutral** volts. Default 230.                                           |
-| `powerFactor`   | cos φ, AC only. Default 1.                                                         |
+| `powerFactor`   | cos φ, AC only. Range `(0, 1]`; default 1.                                         |
 
 `chargingCurve` is normalized when it reaches a connector (sorted by
 `socPercent`, points outside `0-100` / `0-1` dropped) — a scenario file may
@@ -340,6 +340,25 @@ a current the hardware could not draw — `Power.Factor` itself always reports
 `1` on DC for the same reason, regardless of a configured `powerFactor`, and
 the configured value on AC (default `1`), so it never disagrees with the
 current derived from it in the same MeterValue.
+
+**A `Power.Factor` sample is never rounded.** It names the exact number that
+produced `Current.Import` in the same message, so `powerFactor: 0.004` reports
+`0.004`, not `0.00`. Rounding the sample to two decimals while deriving the
+current from the full value made a single MeterValue contradict itself, and
+rounding the derivation to match would divide by zero.
+
+**`powerFactor: 0` is out of range, and the substitution for it is visible.**
+cos φ = 0 means no real power flows, so `I = P / (V × phases × cos φ)` has no
+finite answer. `schema/scenario.schema.json` gives `powerFactor` an
+`exclusiveMinimum` of 0, so every load path warns about a 0 — schema
+validation here is [advisory](#status--scope), so the file still loads — and
+neither browser panel can produce one: both clamp to `0.01`, the smallest
+value their `step` expresses. A value outside `(0, 1]` therefore still
+reaches the domain, from a file loaded past the warning or from raw RPC,
+which validates no `evSettings` field at all. There it is treated as unity,
+and the reported `Power.Factor` sample names that `1` — so the substitution
+is on the wire rather than silent. What changed is that it is no longer
+_accepted_ anywhere and then quietly reinterpreted.
 
 **The curve lowers demand and never raises it, for both the reported sample
 and the register it feeds.** Effective power is `min(curve-derived power,
@@ -371,6 +390,20 @@ samples there would produce three extra values indistinguishable from the
 aggregate (same measurand, context and unit), so the 1.5 mapper drops them
 and sends only the aggregate.
 
+**OCPP 1.5 drops `Power.Offered` and `Current.Offered` entirely, and a 1.5
+MeterValues.req never carries two samples with the same measurand.** OCPP 1.5
+has no Offered measurand. Both used to be relabelled onto
+`Power.Active.Import` / `Current.Import`, which was indistinguishable from
+correct while offered and accepted power were always the same number. Under a
+curve they differ, so a 1.5 connector sampling both would have sent
+`Power.Active.Import = 100000` and `Power.Active.Import = 10000` in one
+message — identically labelled, contradictory, with nothing on the wire to
+tell a CSMS which was which. The 1.5 mapper drops the unsupported sample
+instead, exactly as it already did for `Power.Factor`, `SoC`, `Frequency` and
+`RPM`. The tradeoff is deliberate: a 1.5 connector configured to sample _only_
+the Offered measurands gets no power sample at all, which is a smaller loss
+than two answers to the same question. Every other version keeps both.
+
 **The curve is evaluated at the transaction's (or EV settings') `initialSoc`
 before the first synced SoC, not 0%.** `connector.soc` is `null` until the
 first synced meter tick — the normal state for a `Transaction.Begin` sample,
@@ -383,13 +416,15 @@ resort.
 The Settings page's "Default EV Settings" panel and the scenario editor's
 "Scenario EV Settings" panel both expose `currentType`, `phases`, `voltageV`,
 `powerFactor` and an editable `chargingCurve` point list, alongside the five
-pre-1.2 fields — the v1.2 fields are not JSON/RPC-only.
+pre-1.2 fields — the v1.2 fields are not JSON/RPC-only. Both clamp
+`powerFactor` to `[0.01, 1]`; the scenario editor's field left empty means
+"inherit the default", not zero.
 
 ## Changelog
 
 - **v1.2**: Issue #301. Adds the charging-curve and electrical fields to
   `evSettings` — `chargingCurve`, `currentType`, `phases`, `voltageV`,
-  `powerFactor`. All optional: settings without a `chargingCurve` keep flat
+  `powerFactor` (`(0, 1]`). All optional: settings without a `chargingCurve` keep flat
   acceptance at `maxChargingPowerKw`, which is what every file written before
   this produced. Purely additive, so `1.1` and `1.0` files remain valid. (A
   `rampShape` field — a ramp from session start to full acceptance — was

@@ -174,8 +174,14 @@ function buildSingleSample(
         unit: "W",
       };
     case "Power.Factor":
+      // Reported verbatim, not rounded. `Current.Import` in this same sample
+      // set is derived from `effectivePowerFactor`'s exact return value, so
+      // rounding here would let one MeterValue name a cos φ that did not
+      // produce its own current — `powerFactor: 0.004` used to report
+      // `Power.Factor = 0.00` next to a current computed from 0.004, and
+      // rounding the derivation to match instead would divide by zero (#301).
       return {
-        value: inputs.powerFactor.toFixed(2),
+        value: String(inputs.powerFactor),
         context,
         measurand,
       };

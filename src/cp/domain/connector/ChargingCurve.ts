@@ -122,17 +122,49 @@ export function resolveSocForCurve(
 }
 
 /**
+ * The smallest `powerFactor` the browser panels can express.
+ *
+ * Their number inputs step by `0.01`, so this is the smallest value a user can
+ * dial in there, and both clamp to it rather than to `0`: a cos φ of 0 means
+ * no real power flows at all, so `I = P / (V × phases × cos φ)` would be an
+ * infinite current for any `P > 0` (#301). It is a UI floor, not the domain
+ * contract — `schema/scenario.schema.json` allows any `powerFactor` in
+ * `(0, 1]`, and so does {@link effectivePowerFactor}.
+ */
+export const MIN_UI_POWER_FACTOR = 0.01;
+
+/**
  * The power factor (cos φ) actually used for the current derivation below —
  * 1 for DC, which has no reactive component, else the configured value
- * (default 1, unity). Exported so a reported `Power.Factor` sample can never
- * name a different value than the one that produced `Current.Import` in the
- * same message.
+ * (default 1, unity).
+ *
+ * This is the single source of truth for both the derivation and the reported
+ * `Power.Factor` sample, and `MeterValueBuilder` reports the returned number
+ * verbatim rather than rounding it, so a `Power.Factor` sample can never name
+ * a different value than the one that produced `Current.Import` in the same
+ * message.
+ *
+ * A value outside `(0, 1]` is out of contract. `schema/scenario.schema.json`
+ * marks it invalid, so every scenario load path warns about it — but that
+ * validation is advisory by design and the file still loads — and neither
+ * browser panel can produce one. It therefore still reaches here, from a
+ * scenario file loaded past the warning or from raw RPC, which validates no
+ * `evSettings` field at all. Such a value — `0`, negative, `NaN`, above 1 —
+ * is treated as unity rather than producing an infinite or negative current.
+ * That substitution is never silent: because the sample reports what this
+ * function returned, a session configured with `powerFactor: 0` puts
+ * `Power.Factor = 1` on the wire, where a CSMS and the operator can both see
+ * that 1, not 0, is what the simulator used.
  */
 export function effectivePowerFactor(
   settings: Pick<EVSettings, "currentType" | "powerFactor">,
 ): number {
   if (settings.currentType === "DC") return 1;
-  return clamp01(settings.powerFactor ?? 1) || 1;
+  const configured = settings.powerFactor;
+  if (configured === undefined) return 1;
+  if (!Number.isFinite(configured)) return 1;
+  if (configured <= 0 || configured > 1) return 1;
+  return configured;
 }
 
 /**
@@ -161,9 +193,4 @@ function positiveOr(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : fallback;
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(1, Math.max(0, value));
 }

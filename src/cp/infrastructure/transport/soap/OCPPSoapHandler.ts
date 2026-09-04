@@ -456,13 +456,19 @@ function toOcpp15Measurand(
     case "Voltage":
     case "Temperature":
       return measurand;
-    case "Power.Offered":
-      return "Power.Active.Import";
-    case "Current.Offered":
-      return "Current.Import";
     default:
-      // OCPP 1.5 has no Power.Factor, SoC, Frequency, RPM, phase-aware, or
-      // custom measurand equivalent; drop the sample instead of mislabeling it.
+      // OCPP 1.5 has no Power.Offered, Current.Offered, Power.Factor, SoC,
+      // Frequency, RPM, phase-aware, or custom measurand equivalent; drop the
+      // sample instead of mislabeling it.
+      //
+      // The two Offered measurands used to be aliased onto
+      // Power.Active.Import / Current.Import, which was harmless only while
+      // Offered and Import always carried the same number. #301 makes them
+      // differ (Offered is the EVSE's offer, Import is what the curve says
+      // the battery accepts), so a connector sampling both would have put two
+      // identically labelled samples with contradictory values into one
+      // MeterValue. Dropping the unsupported sample is the lesser loss: a 1.5
+      // CSMS sees fewer measurands, never two answers to the same question.
       return null;
   }
 }

@@ -5,6 +5,7 @@ import {
   DEFAULT_VOLTAGE_V,
   effectiveChargingPowerW,
   effectivePowerFactor,
+  MIN_UI_POWER_FACTOR,
   normalizeChargingCurve,
   powerFractionAtSoc,
   resolveSocForCurve,
@@ -123,9 +124,12 @@ describe("currentAmpsFor (#301)", () => {
     expect(currentAmpsFor(0, { currentType: "DC", voltageV: 400 })).toBe(0);
   });
 
-  it("falls back rather than dividing by a nonsense voltage", () => {
+  it("falls back rather than dividing by a nonsense voltage or power factor", () => {
     expect(currentAmpsFor(2_300, { voltageV: 0 })).toBeCloseTo(10);
     expect(currentAmpsFor(2_300, { voltageV: NaN })).toBeCloseTo(10);
+    // powerFactor 0 is out of contract; effectivePowerFactor substitutes
+    // unity, and the reported Power.Factor sample names that same 1 — see the
+    // effectivePowerFactor block below and MeterValueBuilder.curve.test.ts.
     expect(currentAmpsFor(2_300, { powerFactor: 0 })).toBeCloseTo(10);
   });
 });
@@ -197,6 +201,38 @@ describe("effectivePowerFactor (#301)", () => {
 
   it("defaults to unity for AC when unconfigured", () => {
     expect(effectivePowerFactor({ currentType: "AC" })).toBe(1);
+  });
+
+  it("keeps a value finer than two decimals exactly", () => {
+    // MeterValueBuilder reports this number verbatim, so anything that loses
+    // precision here would make Power.Factor disagree with the Current.Import
+    // derived from it in the same message (#301).
+    expect(
+      effectivePowerFactor({ currentType: "AC", powerFactor: 0.004 }),
+    ).toBe(0.004);
+    expect(MIN_UI_POWER_FACTOR).toBe(0.01);
+  });
+
+  it("substitutes unity for a power factor outside (0, 1]", () => {
+    // 0 is the case the review caught: schema/scenario.schema.json now has
+    // exclusiveMinimum 0 and both browser panels clamp to MIN_UI_POWER_FACTOR,
+    // so it can only arrive through raw RPC. cos phi = 0 means no real power
+    // flows, so I = P / (V x phases x cos phi) would be infinite — unity is
+    // the substitute, and the reported sample names it rather than the 0 the
+    // caller asked for (#301).
+    expect(effectivePowerFactor({ currentType: "AC", powerFactor: 0 })).toBe(1);
+    expect(effectivePowerFactor({ currentType: "AC", powerFactor: -0.5 })).toBe(
+      1,
+    );
+    expect(effectivePowerFactor({ currentType: "AC", powerFactor: 1.5 })).toBe(
+      1,
+    );
+    expect(effectivePowerFactor({ currentType: "AC", powerFactor: NaN })).toBe(
+      1,
+    );
+    expect(
+      effectivePowerFactor({ currentType: "AC", powerFactor: Infinity }),
+    ).toBe(1);
   });
 });
 

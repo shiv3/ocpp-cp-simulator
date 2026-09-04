@@ -14,6 +14,7 @@ import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/diale
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
+import { getGlobalMetricsRecorder } from "./server/metrics/MetricsRecorder";
 import {
   waitForBootAccepted,
   type WaitForBootAcceptedOptions,
@@ -453,6 +454,19 @@ export class CLIChargePointService {
     if (traceWriter) {
       this._unsubscribes.push(
         traceWriter.attach({
+          cpId: init.cpId,
+          ocppVersion: init.ocppVersion,
+          logger: this._chargePoint.logger,
+        }),
+      );
+    }
+    // Same wiring point, same reason (#298): every charge point in every mode
+    // passes through here, so one attach covers standalone, daemon create,
+    // daemon restore and daemon update re-create.
+    const metricsRecorder = getGlobalMetricsRecorder();
+    if (metricsRecorder) {
+      this._unsubscribes.push(
+        metricsRecorder.attach({
           cpId: init.cpId,
           ocppVersion: init.ocppVersion,
           logger: this._chargePoint.logger,

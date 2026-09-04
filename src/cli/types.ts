@@ -25,6 +25,14 @@ export interface CLIOptions {
    */
   readonly soapCallbackUrlExplicit: string | null;
   readonly soapPublicBaseUrl: string | null;
+  /** Serve `GET /metrics` (Prometheus text exposition) in server mode. */
+  readonly metrics: boolean;
+  /**
+   * Serve `/metrics` outside the Basic Auth gate. Implies `metrics`. Opt-in:
+   * unlike the health path, the gate covers `/metrics` by default because it
+   * exposes fleet size and traffic shape.
+   */
+  readonly metricsNoAuth: boolean;
   readonly connectors: number;
   readonly jsonMode: boolean;
   readonly daemon: boolean;

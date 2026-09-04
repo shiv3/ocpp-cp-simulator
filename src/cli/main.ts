@@ -109,6 +109,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpId: string | null = null;
   let cpCount = 1;
   let cpIdPattern: string | null = null;
+  let metrics = false;
+  let metricsNoAuth = false;
   let connectors = 1;
   let jsonMode = false;
   let daemon = false;
@@ -189,6 +191,12 @@ export function parseArgs(argv: string[]): CLIOptions {
       case "--cp-id-pattern":
         cpIdPattern = next ?? null;
         i++;
+      case "--metrics":
+        metrics = true;
+        break;
+      case "--metrics-no-auth":
+        metrics = true;
+        metricsNoAuth = true;
         break;
       case "--json":
         jsonMode = true;
@@ -708,6 +716,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    metrics,
+    metricsNoAuth,
     connectors,
     jsonMode,
     daemon,
@@ -1129,6 +1139,8 @@ async function main(): Promise<void> {
       bootstrapIdPattern: options.cpIdPattern ?? undefined,
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
+      metrics: options.metrics,
+      metricsNoAuth: options.metricsNoAuth,
       autoConnect: !!options.cpId,
       startupScenario: options.cpId
         ? {

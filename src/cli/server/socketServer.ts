@@ -74,6 +74,7 @@ import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConne
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { selectLogWindow } from "./logWindow";
+import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
 import {
   parseCreateBody,
   parseBasicAuthHeader,
@@ -342,6 +343,29 @@ async function dispatchRpc(
 // Socket-free RPC dispatch for use by non-socket transports (e.g., MCP HTTP endpoint).
 // Throws RpcFailure for events.subscribe/unsubscribe (socket-only operations).
 export async function dispatchRpcCore(
+  deps: RuntimeSocketIoDeps,
+  method: RpcMethod,
+  cpId: string | undefined,
+  rawParams: unknown,
+): Promise<unknown> {
+  // Counted here rather than in `runRpc`: socket.io — the primary control
+  // plane — goes handleRpc -> dispatchRpc -> dispatchRpcCore and never touches
+  // `runRpc`, which only the MCP tools and the CLI client use. This is the one
+  // function both paths share, so it is the only place that sees every call
+  // exactly once.
+  const recorder = getGlobalMetricsRecorder();
+  if (!recorder) return dispatchRpcCoreInner(deps, method, cpId, rawParams);
+  try {
+    const result = await dispatchRpcCoreInner(deps, method, cpId, rawParams);
+    recorder.countRpc(method, "ok");
+    return result;
+  } catch (err) {
+    recorder.countRpc(method, "error");
+    throw err;
+  }
+}
+
+async function dispatchRpcCoreInner(
   deps: RuntimeSocketIoDeps,
   method: RpcMethod,
   cpId: string | undefined,

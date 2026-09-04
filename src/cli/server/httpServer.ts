@@ -466,6 +466,11 @@ export function createHttpHandlers(deps: {
    *  Socket.IO transport requests are authenticated by the socket handshake.
    *  Null = no auth (default; backward compatible). */
   webConsoleBasicAuth?: { username: string; password: string } | null;
+  /**
+   * When set, `GET /metrics` renders the Prometheus exposition. Absent, the
+   * path 404s like any other — the endpoint is opt-in.
+   */
+  metrics?: { render: () => string; exemptFromBasicAuth: boolean } | null;
   /** Optional socket.io/Engine.IO route mounted on the same Bun listener. */
   socketIo?: SocketIoRoute | null;
   /** Optional MCP handler for POST /mcp. Rate limiting and body cap are
@@ -484,6 +489,8 @@ export function createHttpHandlers(deps: {
   const webConsoleBasicAuth = deps.webConsoleBasicAuth ?? null;
   const socketIo = deps.socketIo ?? null;
   const mcpConfig = deps.mcp ?? null;
+  const metrics = deps.metrics ?? null;
+  const METRICS_PATH = "/metrics";
 
   // Rate limiting state for MCP handler (token bucket per invocation).
   interface McpRateLimiterState {
@@ -506,7 +513,15 @@ export function createHttpHandlers(deps: {
       // load balancers / browser auto-detect can keep working unprompted.
       if (webConsoleBasicAuth !== null) {
         const socketIoRequest = socketIo?.matches(url.pathname) ?? false;
-        if (url.pathname !== healthPath && !socketIoRequest) {
+        // `/metrics` is behind the gate by default, unlike the health path.
+        // Health says almost nothing and container probes need it unprompted;
+        // metrics expose fleet size and traffic shape. The exemption is opt-in
+        // for a trusted network, never the default.
+        const metricsExempt =
+          url.pathname === METRICS_PATH &&
+          metrics !== null &&
+          metrics.exemptFromBasicAuth;
+        if (url.pathname !== healthPath && !socketIoRequest && !metricsExempt) {
           const auth = parseBasicAuthHeader(req.headers.get("authorization"));
           if (!auth || !credentialsMatch(auth, webConsoleBasicAuth)) {
             // 401 with WWW-Authenticate so browsers prompt for credentials
@@ -564,6 +579,23 @@ export function createHttpHandlers(deps: {
     // needing an authenticated RPC round-trip.
     if (req.method === "GET" && url.pathname === healthPath) {
       return Response.json({ ok: true, version: appVersion() });
+    }
+
+    if (metrics !== null && url.pathname === METRICS_PATH) {
+      if (req.method !== "GET") {
+        return new Response("method not allowed", {
+          status: 405,
+          headers: { allow: "GET" },
+        });
+      }
+      return new Response(metrics.render(), {
+        headers: {
+          // The version parameter is what makes a scraper parse this as the
+          // text exposition rather than guessing from the body.
+          "content-type": "text/plain; version=0.0.4; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      });
     }
 
     const soapRoute = matchSoapChargePointService(url.pathname, deps.registry);

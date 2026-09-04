@@ -93,6 +93,7 @@ in [CLI → CLI Options](cli.md#cli-options).
 | POST   | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling transport. Not a REST control endpoint.                                                             |
 | POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP SOAP (1.2 / 1.5 / 1.6S) CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.                        |
 | POST   | `/mcp`                                | HTTP Basic Auth if enabled                    | MCP Streamable HTTP endpoint (tools-only, stateless JSON-RPC). See [MCP endpoint](mcp-endpoint.md).                   |
+| GET    | `/metrics`                            | HTTP Basic Auth if enabled (see below)        | Prometheus text exposition, when `--metrics` is passed. 404 otherwise. See [Metrics](#metrics).                       |
 | GET    | static asset URL                      | HTTP Basic Auth if enabled                    | Web console assets when `--web-console` is enabled. Unknown page paths fall back to `index.html`.                     |
 
 Every other `/v1/*` path returns `404`.
@@ -125,6 +126,51 @@ The browser UI's Remote-mode auto-detect probe targets the path inlined at UI
 build time via `VITE_HEALTH_PATH` (same default). The UI build value and daemon
 `--health-path` must match (see [Local vs Remote mode](../concepts/local-vs-remote-mode.md)
 and [Docker image → Custom health-check path](docker-image.md#custom-health-check-path)).
+
+## Metrics
+
+`--metrics` serves `GET /metrics` as Prometheus text exposition (`text/plain;
+version=0.0.4`). It is **opt-in**: without the flag the path 404s like any
+other.
+
+| Metric                              | Type      | Labels                | Meaning                                     |
+| ----------------------------------- | --------- | --------------------- | ------------------------------------------- |
+| `ocppcp_charge_points`              | gauge     | `state`               | Registered charge points by current status. |
+| `ocppcp_connectors`                 | gauge     | `status`              | Connectors across all charge points.        |
+| `ocppcp_transactions_active`        | gauge     | —                     | Connectors currently in a transaction.      |
+| `ocppcp_ocpp_messages_total`        | counter   | `action`, `direction` | OCPP messages observed.                     |
+| `ocppcp_ocpp_call_errors_total`     | counter   | `action`              | CALLERROR frames.                           |
+| `ocppcp_ocpp_call_duration_seconds` | histogram | `action`              | CALL to CALLRESULT/CALLERROR round trip.    |
+| `ocppcp_rpc_requests_total`         | counter   | `method`, `outcome`   | Control-plane rpc calls.                    |
+| `ocppcp_ws_reconnects_total`        | counter   | —                     | WebSocket reconnect attempts.               |
+
+**No `cpId` label, deliberately.** It is unbounded by construction once a
+daemon holds a fleet, and a Prometheus server pays for every series it has ever
+seen. Per-charge-point detail stays in `cp.list` and the event stream.
+
+**`/metrics` is behind the Basic Auth gate by default**, unlike
+[`/v1/healthz`](#health). The health probe is exempt because container probes
+need it unprompted and it says almost nothing; `/metrics` exposes fleet size
+and traffic shape. `--metrics-no-auth` (which implies `--metrics`) serves it
+outside the gate for a trusted network — and exempts nothing else.
+
+Gauges are read from the live registry at scrape time rather than tracked
+incrementally: a charge point's state changes through many paths (RPC,
+scenario, CSMS command, reconnect), and a counter that had to be decremented on
+every one of them would drift. `ocppcp_transactions_active` counts connectors
+with a transaction start time rather than a transaction id — the numeric id is
+`0` until the CSMS answers `StartTransaction` on 1.6 and is never set at all on
+2.x.
+
+Message counters come from the same log-stream seam `--trace-output` uses, so
+they cover OCPP-J and SOAP alike. `ocppcp_ocpp_call_duration_seconds` is
+**OCPP-J only**: a SOAP log line carries no message id, so there is nothing to
+correlate a response back to its request with.
+
+`--metrics` must be passed at startup. Charge points restored from
+`--state-db` subscribe as they are constructed, so a recorder created later
+would leave every persisted charge point visible in the gauges and silent in
+every counter.
 
 ## Controlling a Running Daemon
 

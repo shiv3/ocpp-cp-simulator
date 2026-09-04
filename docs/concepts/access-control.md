@@ -12,7 +12,7 @@ related:
   - ../entities/cli.md
   - control-plane.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # Access control
@@ -50,9 +50,14 @@ paired) enable HTTP Basic Auth on:
 - static web-console assets,
 - the Socket.IO handshake (`socket.handshake.auth`),
 - the [MCP endpoint](../entities/mcp-endpoint.md) `POST /mcp`,
-- the SOAP `ChargePointService` callback endpoint.
+- the SOAP `ChargePointService` callback endpoint,
+- `GET /metrics` when `--metrics` is on ([Daemon → Metrics](../entities/daemon.md#metrics)).
 
 The configured health path (`/v1/healthz` by default) is always exempt.
+`/metrics` is **not**: health says almost nothing and container probes need it
+unprompted, while `/metrics` exposes fleet size and traffic shape.
+`--metrics-no-auth` lifts the gate for that one path on a trusted network, and
+for nothing else.
 
 ### Authenticating to a protected daemon
 

@@ -23,6 +23,9 @@ import {
   AUTHORIZE_WAIT_SEC,
   benchCpId,
   cyclePeriodSec,
+  daemonIsLocal,
+  droppedDuringWindow,
+  firstCycleDelayMs,
   diffHistogram,
   fleetGauge,
   formatSeconds,
@@ -31,6 +34,7 @@ import {
   mergeHistogramDeltas,
   parseArgv,
   holdSec,
+  machineReport,
   maxSustainableFleet,
   minSustainableTxIntervalSec,
   parseExposition,
@@ -1016,7 +1020,8 @@ describe("a step's reported row (#302)", () => {
     return {
       requested: 10,
       fleet: 10,
-      connected: 10,
+      connectedAtSettle: 10,
+      connectedAtEnd: 10,
       notSettled: 0,
       aggregate: emptyAggregate,
       heartbeat: null,
@@ -1039,7 +1044,13 @@ describe("a step's reported row (#302)", () => {
   it("labels a partial fleet with the size it actually has", () => {
     // 10 requested, 8 created, 8 connected used to print "N=10, connected=8,
     // unsettled=0" — attributing the latency to a fleet that never existed.
-    const r = step({ requested: 10, fleet: 8, connected: 8, notSettled: 0 });
+    const r = step({
+      requested: 10,
+      fleet: 8,
+      connectedAtSettle: 8,
+      connectedAtEnd: 8,
+      notSettled: 0,
+    });
     expect(col(r, "N")).toBe("8");
     expect(col(r, "uncreated")).toBe("2");
     expect(col(r, "connected")).toBe("8");
@@ -1173,5 +1184,153 @@ describe("transaction-start tracking (#302)", () => {
     starts.lose("second");
     await expect(starts.lost(sleep(5_000))).rejects.toThrow(/first/);
     await expect(starts.lost(sleep(5_000))).rejects.not.toThrow(/second/);
+  });
+});
+
+describe("anchoring the stagger to a run-wide epoch (#302)", () => {
+  const PERIOD = 60_000;
+
+  it("puts a phase on the run-wide grid however late its cohort arrives", () => {
+    // The finding: global indices fix *which* fraction of the period a charge
+    // point gets, not what that fraction is measured from. A cohort armed
+    // 25s into the run used to start its phase-0 charge point 25s off the
+    // grid every other cohort was on.
+    expect(firstCycleDelayMs(0, 0, PERIOD)).toBe(0);
+    expect(firstCycleDelayMs(0, 25_000, PERIOD)).toBe(35_000);
+    expect(firstCycleDelayMs(30_000, 25_000, PERIOD)).toBe(5_000);
+    // Already past this period's slot: take the next one, never a negative
+    // delay (which `setTimeout` would fire immediately, back into the burst).
+    expect(firstCycleDelayMs(10_000, 25_000, PERIOD)).toBe(45_000);
+  });
+
+  it("lands every cohort on the same grid, whenever each was armed", () => {
+    // Two charge points at the same index must fire at the same wall-clock
+    // instants no matter which step created them, and two at different
+    // indices must stay apart. Arming delays are arbitrary on purpose.
+    for (const elapsed of [0, 137, 25_000, 60_000, 143_991]) {
+      for (const index of [0, 1, 2, 5, 17]) {
+        const phase = staggerOffsetsMs(index, 1, 60)[0]!;
+        const fireAt =
+          (elapsed + firstCycleDelayMs(phase, elapsed, PERIOD)) % PERIOD;
+        // The absolute instant is the charge point's phase, every time.
+        expect(fireAt).toBeCloseTo(phase % PERIOD, 6);
+      }
+    }
+  });
+
+  it("always returns a delay inside one period", () => {
+    for (const elapsed of [0, 1, 59_999, 60_000, 1_000_000]) {
+      for (const phase of [0, 1, 30_000, 59_999]) {
+        const d = firstCycleDelayMs(phase, elapsed, PERIOD);
+        expect(d).toBeGreaterThanOrEqual(0);
+        expect(d).toBeLessThan(PERIOD);
+      }
+    }
+  });
+
+  it("degenerates safely when there is no cycle", () => {
+    expect(firstCycleDelayMs(0, 1_234, 0)).toBe(0);
+  });
+});
+
+describe("end-of-window connectivity (#302)", () => {
+  const base = {
+    requested: 10,
+    fleet: 10,
+    notSettled: 0,
+    aggregate: mergeHistogramDeltas(new Map()),
+    heartbeat: null,
+    timeouts: 0,
+    evictions: 0,
+    errors: 0,
+    reconnects: 0,
+    unconfirmedStarts: 0,
+  };
+
+  it("reports the fleet that generated the histogram, not the one that settled", () => {
+    // The finding: a charge point lost during the warmup or the window still
+    // counted as connected, so the row claimed N connected while the histogram
+    // covered only the survivors.
+    const r: StepResult = { ...base, connectedAtSettle: 10, connectedAtEnd: 7 };
+    const cells = row(r);
+    expect(cells[STEP_COLUMNS.indexOf("connected")]).toBe("7");
+    expect(cells[STEP_COLUMNS.indexOf("dropped")]).toBe("3");
+    expect(droppedDuringWindow(r)).toBe(3);
+  });
+
+  it("shows nothing dropped when the fleet held up", () => {
+    const r: StepResult = {
+      ...base,
+      connectedAtSettle: 10,
+      connectedAtEnd: 10,
+    };
+    expect(row(r)[STEP_COLUMNS.indexOf("dropped")]).toBe("0");
+  });
+
+  it("never reports a negative drop when the fleet grew back", () => {
+    // A charge point that reconnected inside the window can leave the end
+    // count above the settle count; that is not "-2 dropped".
+    const r: StepResult = { ...base, connectedAtSettle: 8, connectedAtEnd: 10 };
+    expect(droppedDuringWindow(r)).toBe(0);
+    expect(row(r)[STEP_COLUMNS.indexOf("connected")]).toBe("10");
+  });
+});
+
+describe("machine attribution (#302)", () => {
+  const facts = {
+    cpuModel: "Test CPU",
+    cores: 8,
+    memGb: "16.0",
+    platform: "linux",
+    arch: "x64",
+    bunVersion: "1.4.0",
+    daemonVersion: "9.9.9",
+  };
+
+  it("recognises a daemon on this machine", () => {
+    for (const url of [
+      "http://localhost:9700",
+      "http://127.0.0.1:9700",
+      "https://127.5.5.5:9700",
+      "http://[::1]:9700",
+    ]) {
+      expect(daemonIsLocal(url)).toBe(true);
+    }
+  });
+
+  it("treats anything else — including an unparseable URL — as remote", () => {
+    // Over-claiming that this runner's hardware is the daemon's is the failure
+    // worth avoiding, so anything not provably local is remote.
+    for (const url of [
+      "http://bench-host.internal:9700",
+      "http://10.0.0.5:9700",
+      "http://127x.evil.test:9700",
+      "not a url",
+    ]) {
+      expect(daemonIsLocal(url)).toBe(false);
+    }
+  });
+
+  it("claims the hardware as the daemon host only when the daemon is local", () => {
+    const local = machineReport({
+      ...facts,
+      daemonUrl: "http://127.0.0.1:9700",
+    });
+    expect(local).toContain("machine (daemon host, and this runner): Test CPU");
+    expect(local).not.toContain("UNKNOWN");
+  });
+
+  it("refuses to pass the runner off as the machine under test", () => {
+    // The README's contract is that a published ceiling names the machine it
+    // was measured on, so a wrong attribution is quotable and false — worse
+    // than a missing one.
+    const remote = machineReport({
+      ...facts,
+      daemonUrl: "http://bench-host.internal:9700",
+    });
+    expect(remote).toContain("NOT the daemon host");
+    expect(remote).toContain("daemon host: UNKNOWN");
+    expect(remote).toContain("bench-host.internal:9700");
+    expect(remote).not.toContain("machine (daemon host");
   });
 });

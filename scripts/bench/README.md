@@ -50,16 +50,17 @@ for the record, and **not the #302 result**; see "Recording a result"
 below):
 
 ```
-N    uncreated  connected  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx
----  ---------  ---------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------
-50   0          50         0          150    6ms  21ms  6ms     21ms    0         0         0       0           0
-250  0          250        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0
-450  0          450        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0
+N    uncreated  connected  dropped  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx
+---  ---------  ---------  -------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------
+50   0          50         0        0          150    6ms  21ms  6ms     21ms    0         0         0       0           0
+250  0          250        0        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0
+450  0          450        0        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0
 ```
 
-(The header has changed twice since that run — `timeouts` / `late>30s` replaced
-a single `>30s` column, and `uncreated` / `unconf.tx` were added. Every added
-column was zero in this run, so the numbers above are still the run's own.)
+(The header has changed since that run — `timeouts` / `late>30s` replaced a
+single `>30s` column, and `uncreated`, `unconf.tx` and `dropped` were added.
+Every added column was zero in this run, so the numbers above are still the
+run's own.)
 
 Flat, as expected: a trivial mock CSMS answering on loopback never saturates,
 so this run shows no knee at all — the point of this example is to show the
@@ -132,6 +133,17 @@ script measures one axis per invocation:
   cycle period, not the raw `--tx-interval`: a hold is floored at 1s, so at
   `--tx-interval 1` the period is 2s and spreading over 1s would bunch the
   fleet into half the phase space.
+
+  **The offsets are anchored to a run-wide epoch, not to each cohort's own
+  start.** Global indices fix _which_ fraction of the period a charge point
+  gets; they say nothing about what that fraction is measured from. Creation,
+  settling and heartbeat arming all take variable time, so scheduling each
+  cohort's offsets from the moment its own arming finished rotated every cohort
+  by an arbitrary amount — and two charge points with well-separated indices
+  could still collide in wall-clock phase, reaching the artificial-knee failure
+  by another route. Each first cycle is therefore rebased modulo the period
+  against one epoch fixed before the first charge point exists, so index `i`
+  means the same instant whichever step created it.
 
 Run both and compare:
 
@@ -221,6 +233,18 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    Attribution is what the warmup below is for: the watchdog fires 30s _after_
    the CALL, so which calls a step's `timeouts` delta covers is a property of
    when the step's load started, not of `--duration`.
+
+   **`connected`/`dropped`.** `connected` is read from the **final** scrape —
+   the fleet that actually generated this row's histogram — not from the settle
+   poll that ran before the warmup. `dropped` is how many had settled and were
+   gone by the end. Reporting the settle-time count attributed a window's
+   latency to a fleet larger than the one producing it; a disconnect during the
+   _warmup_ is the worst case, because its reconnect attempts land before the
+   `before` scrape, so `reconnects` stays 0 and nothing else in the row hints at
+   it. A charge point that reconnects inside the window can leave `connected`
+   above the settle count, which is reported as `dropped 0` rather than a
+   negative number. The script also warns on stderr whenever `dropped` is
+   non-zero.
 
    **`N`/`uncreated`.** `N` is the fleet the row's numbers actually describe,
    **not** the `--counts` entry it was aiming for; `uncreated` is the
@@ -381,8 +405,16 @@ Per the acceptance criteria on #302, a real run's result belongs in
 [`docs/entities/daemon.md` → Limits & Roadmap](../../docs/entities/daemon.md#limits--roadmap),
 recorded as:
 
-- the **machine** (this script prints CPU model/cores, RAM, `bun --version`,
-  the daemon's own version — copy that line verbatim),
+- the **machine** — but read the label the script prints before copying it.
+  `os.cpus()`, `os.totalmem()` and `Bun.version` describe the process running
+  _this script_, which is the machine under test only when the daemon is local.
+  With a local `--daemon-url` the block says `machine (daemon host, and this
+runner):` and can be copied verbatim. With a remote one it says
+  `benchmark client, NOT the daemon host:` and `daemon host: UNKNOWN`, and you
+  must record the daemon host's CPU/RAM/OS by hand — a ceiling published against
+  the wrong hardware is quotable and false, which is worse than one published
+  with the hardware missing. `--out` carries the same distinction as a boolean,
+  `daemonHostIsRunner`,
 - the **CSMS** used (gocpp / SteVe / other, and whether it was local or
   remote — a remote CSMS's own latency will dominate long before the daemon's
   does, which is a different, also worth-recording, knee),

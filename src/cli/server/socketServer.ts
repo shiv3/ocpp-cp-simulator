@@ -26,6 +26,7 @@ import {
   RPC_TIMEOUT_MS,
   RpcFailure,
   blueprintSchema,
+  type Blueprint,
   createManyFromBlueprintSchema,
   createManyParamsSchema,
   expandIdPattern,
@@ -127,6 +128,13 @@ export interface SocketIoDeps {
   readonly configRepository?: SocketConfigRepository;
   readonly scenarioRepository?: ScenarioRepository;
   readonly connectorSettingsRepository?: ConnectorSettingsRepository;
+  /**
+   * Injected so socket.io and the MCP endpoint share one instance. Without
+   * `--state-db` — the daemon's default — the repository holds blueprints in
+   * memory, so a per-transport instance would make a blueprint saved over one
+   * transport `not_found` over the other.
+   */
+  readonly blueprints?: BlueprintRepository;
   readonly chargePointService?: RegistryChargePointService;
   readonly registryEvents?: RegistryEventBridge | null;
 }
@@ -288,7 +296,7 @@ export function createRuntimeDeps(
     database,
     configRepository,
     registryEvents,
-    blueprints: new BlueprintRepository(database),
+    blueprints: deps.blueprints ?? new BlueprintRepository(database),
     chargePointService:
       deps.chargePointService ??
       new RegistryChargePointService(deps.registry, {
@@ -737,6 +745,7 @@ async function createManyCps(
     blueprintId?: string;
   };
   let merged = requested;
+  let defaults: Pick<Blueprint, "evSettings" | "scenarioTemplateId"> = {};
   if (blueprintId !== undefined) {
     const blueprint =
       BUILT_IN_BLUEPRINTS.find((b) => b.id === blueprintId) ??
@@ -745,6 +754,14 @@ async function createManyCps(
       throw new RpcFailure("not_found", `no blueprint "${blueprintId}"`);
     }
     merged = { ...blueprint.params, ...stripUndefined(requested) };
+    // A blueprint is more than its `cp.create` block: the schema also promises
+    // default EV settings and a startup scenario. Copying only `params` left
+    // both silently unapplied — including for every built-in, which is where
+    // the EV settings are the whole point of picking a 150 kW profile.
+    defaults = {
+      evSettings: blueprint.evSettings,
+      scenarioTemplateId: blueprint.scenarioTemplateId,
+    };
   }
   const validated = createManyParamsSchema.safeParse(merged);
   if (!validated.success) {
@@ -809,24 +826,63 @@ async function createManyCps(
     plan.push({ cpId, soapCallbackUrl: expanded });
   }
 
+  const connectors = validated.data.connectors ?? 1;
   const created: string[] = [];
   const failed: Array<{ cpId: string; reason: string }> = [];
   for (const entry of plan) {
     try {
-      created.push(
-        await createOneCp(deps, {
-          ...shared,
-          cpId: entry.cpId,
-          ...(entry.soapCallbackUrl
-            ? { soapCallbackUrl: entry.soapCallbackUrl }
-            : {}),
-        }),
-      );
+      const cpId = await createOneCp(deps, {
+        ...shared,
+        cpId: entry.cpId,
+        ...(entry.soapCallbackUrl
+          ? { soapCallbackUrl: entry.soapCallbackUrl }
+          : {}),
+      });
+      await applyBlueprintDefaults(deps, cpId, connectors, defaults);
+      created.push(cpId);
     } catch (err) {
       failed.push({ cpId: entry.cpId, reason: createFailureReason(err) });
     }
   }
   return { created, failed };
+}
+
+/**
+ * Apply a blueprint's EV settings and startup scenario to a created charge
+ * point, one connector at a time.
+ *
+ * A failure here fails the charge point: it is reported in `failed` rather
+ * than left half-configured in `created`, since a station that came up with
+ * generic EV settings while the caller asked for a 150 kW profile is the kind
+ * of wrong that only shows up in the meter readings.
+ */
+async function applyBlueprintDefaults(
+  deps: RuntimeSocketIoDeps,
+  cpId: string,
+  connectors: number,
+  defaults: Pick<Blueprint, "evSettings" | "scenarioTemplateId">,
+): Promise<void> {
+  if (!defaults.evSettings && !defaults.scenarioTemplateId) return;
+  for (let connectorId = 1; connectorId <= connectors; connectorId++) {
+    if (defaults.evSettings) {
+      await runFacadeOperation(() =>
+        deps.chargePointService.setEVSettings(
+          cpId,
+          connectorId,
+          defaults.evSettings as never,
+        ),
+      );
+    }
+    if (defaults.scenarioTemplateId) {
+      await runFacadeOperation(() =>
+        deps.chargePointService.loadScenarioTemplate(
+          cpId,
+          defaults.scenarioTemplateId as string,
+          connectorId,
+        ),
+      );
+    }
+  }
 }
 
 async function updateCp(

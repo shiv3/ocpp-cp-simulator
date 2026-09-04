@@ -222,6 +222,13 @@ parameter given alongside `blueprintId` **overrides** the blueprint's, so a
 fleet can share hardware and differ in one field. A `blueprintId` that names
 nothing is `not_found` before anything is created.
 
+A blueprint is more than its `cp.create` block: `evSettings` are applied to
+**every** connector of each created charge point, and `scenarioTemplateId` is
+loaded onto each. A charge point whose defaults could not be applied is
+reported in `failed` rather than left half-configured in `created` — a station
+that came up with generic EV settings while the caller asked for a 150 kW
+profile is the kind of wrong that only shows up in the meter readings.
+
 Five read-only built-ins ship with the daemon (`ac-22kw`, `ac-22kw-x2`,
 `dc-50kw`, `dc-150kw`, `dc-350kw`) — the authoritative mapping is
 `src/utils/blueprints/README.md`. Saving or deleting a built-in id is refused:

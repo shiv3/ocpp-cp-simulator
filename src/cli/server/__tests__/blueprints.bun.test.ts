@@ -32,6 +32,18 @@ function rpc(socket: Socket, method: string, params: unknown): Promise<any> {
   );
 }
 
+/** A CP-scoped method, which needs the `cpId` outside `params`. */
+function cpRpc(
+  socket: Socket,
+  cpId: string,
+  method: string,
+  params: unknown,
+): Promise<any> {
+  return new Promise((resolve) =>
+    socket.emit("rpc", { cpId, method, params }, resolve),
+  );
+}
+
 const BLUEPRINT = {
   id: "site-a",
   name: "Site A wallbox",
@@ -284,5 +296,77 @@ describe("built-in blueprints (#297)", () => {
     for (const blueprint of BUILT_IN_BLUEPRINTS) {
       expect(blueprint.params.wsUrl).toBeUndefined();
     }
+  });
+});
+
+describe("blueprint defaults reach the charge points (#297)", () => {
+  it("applies the blueprint's EV settings to every connector", async () => {
+    // The schema promises `evSettings` and `scenarioTemplateId`; copying only
+    // `params` left both silently unapplied — including for every built-in,
+    // where the EV settings are the point of picking a 150 kW profile.
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      await rpc(socket, "blueprint.save", {
+        blueprint: {
+          ...BLUEPRINT,
+          id: "with-ev",
+          evSettings: { maxChargingPowerKw: 111, batteryCapacityKwh: 42 },
+        },
+      });
+      const ack = await rpc(socket, "cp.create_many", {
+        blueprintId: "with-ev",
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 1,
+        idPattern: "EV{n}",
+      });
+      expect(ack.ok).toBe(true);
+
+      // Every connector, not just the first: a blueprint describes the
+      // station, and half-configured connectors show up only in the meter.
+      for (const connector of [1, 2]) {
+        const got = await cpRpc(socket, "EV1", "get_ev_settings", {
+          connector,
+        });
+        expect(got.ok).toBe(true);
+        expect(got.result.maxChargingPowerKw).toBe(111);
+        expect(got.result.batteryCapacityKwh).toBe(42);
+      }
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("applies a built-in's EV settings, which is why the profile is chosen", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await rpc(socket, "cp.create_many", {
+        blueprintId: "dc-150kw",
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 1,
+        idPattern: "HP{n}",
+      });
+      expect(ack.ok).toBe(true);
+
+      const settings = await cpRpc(socket, "HP1", "get_ev_settings", {
+        connector: 1,
+      });
+      expect(settings.ok).toBe(true);
+      expect(settings.result.maxChargingPowerKw).toBe(150);
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("blueprint ids are non-empty (#297)", () => {
+  it("refuses an empty id, which delete could never remove", () => {
+    expect(blueprintSchema.safeParse({ ...BLUEPRINT, id: "" }).success).toBe(
+      false,
+    );
+    expect(blueprintSchema.safeParse({ ...BLUEPRINT, name: "" }).success).toBe(
+      false,
+    );
   });
 });

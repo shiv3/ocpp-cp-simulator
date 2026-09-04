@@ -32,6 +32,7 @@ import {
   setGlobalMetricsRecorder,
 } from "./metrics/MetricsRecorder";
 import { renderMetrics } from "./metrics/render";
+import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -144,6 +145,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   const metricsRecorder = opts.metrics ? new MetricsRecorder() : null;
   setGlobalMetricsRecorder(metricsRecorder);
 
+  // One instance for both transports: without --state-db the repository holds
+  // blueprints in memory, so a per-transport instance would make a blueprint
+  // saved over socket.io `not_found` over MCP, and vice versa.
+  const blueprints = new BlueprintRepository(database);
+
   const bus = new EventBus();
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms,
@@ -196,6 +202,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,
+    blueprints,
     chargePointService,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
     requestShutdown: () => {
@@ -224,6 +231,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,
+    blueprints,
     chargePointService,
   });
   const mcpHandler = createMcpHandler(runtimeDeps);

@@ -279,8 +279,10 @@ const updateParamsSchema = cpParamsBaseSchema.extend({
  * how many of them to make.
  */
 export const blueprintSchema = z.object({
-  id: STR_256.describe("Blueprint identifier, unique within the daemon"),
-  name: STR_256.describe("Human-readable name"),
+  // `.min(1)`: an empty id would store a blueprint that `blueprint.delete`
+  // refuses to accept, leaving it undeletable through the API.
+  id: STR_256.min(1).describe("Blueprint identifier, unique within the daemon"),
+  name: STR_256.min(1).describe("Human-readable name"),
   description: STR_1K.optional().describe("What this hardware profile is"),
   params: createManyParamsSchema
     .omit({ count: true, idPattern: true, startIndex: true })

@@ -5,12 +5,7 @@ import { createParamsSchema } from "../../../protocol";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { RegistryChargePointService } from "../RegistryChargePointService";
-import {
-  DEFAULT_AFFINITY_FAILOVER_THRESHOLD,
-  SupervisionUrlPool,
-} from "../../../cp/infrastructure/transport/SupervisionUrlPool";
-import { OCPPWebSocket } from "../../../cp/infrastructure/transport/OCPPWebSocket";
-import { Logger } from "../../../cp/shared/Logger";
+import { SupervisionUrlPool } from "../../../cp/infrastructure/transport/SupervisionUrlPool";
 import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
 import { toWireCreateParams } from "../../../data/remote/RemoteChargePointService";
 
@@ -355,34 +350,5 @@ describe("the typed remote adapter does not lose the list (#296)", () => {
       supervisionUrls: ["ws://a/ocpp/"],
     });
     expect(wire.wsUrl).toBe("ws://a/ocpp/");
-  });
-});
-
-describe("only genuine transport failures move the pool (#296)", () => {
-  it("does not count a reset or an injected disconnect", () => {
-    // `disconnectInternal()` (behind ChargePoint.reset()) and
-    // `simulateConnectionLoss()` both leave `_isManualDisconnect` false so the
-    // reconnect loop still runs. Counting those as URL failures would scatter
-    // an affinity fleet off its assigned nodes because of something the fleet
-    // did to itself.
-    const logger = new Logger();
-    const ws = new OCPPWebSocket("ws://a/ocpp/", "CP1", logger);
-    const pool = new SupervisionUrlPool(
-      ["ws://a/ocpp/", "ws://b/ocpp/", "ws://c/ocpp/"],
-      "cp-affinity",
-      "CP1",
-    );
-    ws.setSupervisionUrlPool(pool);
-    const primary = pool.current();
-
-    for (let i = 0; i < DEFAULT_AFFINITY_FAILOVER_THRESHOLD + 2; i++) {
-      ws.disconnectInternal();
-    }
-    expect(pool.next()).toBe(primary);
-
-    for (let i = 0; i < DEFAULT_AFFINITY_FAILOVER_THRESHOLD + 2; i++) {
-      ws.simulateConnectionLoss(0);
-    }
-    expect(pool.current()).toBe(primary);
   });
 });

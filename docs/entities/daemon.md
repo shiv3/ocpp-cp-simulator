@@ -267,11 +267,19 @@ The rules, in the order they bite:
   A held definition is applied when the transaction stops **or when the run's
   cleanup completes**, whichever released the gate — whether the run reached the
   end of its graph, errored, or was stopped by hand with `stop_scenario`. The
-  A held definition is never installed from inside a teardown, even one whose
-  own gate has already opened: the settle is announced on a later microtask, so
-  the enclosing synchronous cleanup always finishes first. "The gate is clear"
-  is not a sufficient condition, because installing a definition can auto-start
-  a run that snapshots connector state the gate says nothing about.
+  A held definition is never installed from inside the call that released it —
+  not from a teardown whose own gate has already opened, and not from a registry
+  mutation. Both drain triggers defer to a later microtask, so the enclosing
+  synchronous work always finishes first. "The gate is clear" is not a
+  sufficient condition, because installing a definition can auto-start a run
+  that snapshots connector state the gate says nothing about. There are exactly
+  two triggers: the settled hook, which fires where a gate actually opens, and
+  the registry sync, which fires on any change to a charge point's init options
+  because a `cp.update` rebuild takes the old service's lifecycle handlers with
+  it and nothing else would retry. The registry ping itself stays synchronous —
+  its subscriber must see the registry as the mutation left it, and the file
+  watches it establishes must not be delayed — so only the drain at the end of
+  it is deferred.
   The daemon waits for the blocking state to actually clear, never for the
   lifecycle event that announces it: every such event on the control plane is
   published from inside the code that is ending the thing, while the state it

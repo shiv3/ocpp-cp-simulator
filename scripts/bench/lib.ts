@@ -998,3 +998,115 @@ export const STEP_COLUMNS = [
   "reconnects",
   "unconf.tx",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Transaction-start confirmation, minus the socket.
+//
+// The socket wiring lives in fleet-bench.ts (this file stays dependency-free so
+// it can be unit-tested without a daemon). What lives here is the part with the
+// invariants: which cycle is waiting for which charge point, what happens when
+// the event stream goes away, and how a run learns to stop.
+// ---------------------------------------------------------------------------
+
+/** Thrown when a run cannot go on. Distinct from `BenchValidationError`, which
+ *  is a flag problem caught before anything is created. */
+export class BenchAbortError extends Error {}
+
+/**
+ * Tracks which charge points are waiting for their transaction to start.
+ *
+ * Two things it must get right, both of them ways a benchmark can quietly stop
+ * measuring what it says it measures:
+ *
+ * 1. A waiter is armed **before** the `start_transaction` RPC is emitted. The
+ *    confirmation and the RPC ack travel on different sockets and nothing
+ *    orders them, so arming afterwards would drop the event of every fast CSMS.
+ * 2. Once the event stream is **lost** the tracker goes unavailable, and every
+ *    later `arm` resolves `false` at once instead of burning its full timeout.
+ *    Waiting it out doubled a transaction's occupancy — one hold spent waiting
+ *    for a confirmation that could never arrive, then the real hold — and
+ *    collapsed the rest period, so later rows carried roughly twice the
+ *    intended load under the label of the configured one.
+ *
+ * {@link lost} is the run's own abort signal; a caller races its long waits
+ * against it so the sweep stops and says why rather than printing rows whose
+ * load is no longer the row's.
+ */
+export class TransactionStarts {
+  private readonly waiters = new Map<string, (started: boolean) => void>();
+  private available = true;
+  private readonly lostSignal: Promise<never>;
+  private failLost: (err: Error) => void = () => {};
+
+  constructor() {
+    this.lostSignal = new Promise<never>((_resolve, reject) => {
+      this.failLost = reject;
+    });
+    // Nothing may be racing the signal at the instant it rejects — a drop
+    // between two of the caller's waits — and an unobserved rejection is an
+    // unhandled-rejection crash whose message is not the one the operator
+    // needs to read.
+    this.lostSignal.catch(() => {});
+  }
+
+  /** Whether confirmations can still arrive. */
+  get isAvailable(): boolean {
+    return this.available;
+  }
+
+  /** Arm a waiter for `cpId`, to be settled by {@link confirm}. Resolves
+   *  `false` on timeout, and immediately when the stream is already lost. */
+  arm(cpId: string, timeoutMs: number): Promise<boolean> {
+    if (!this.available) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.waiters.get(cpId) === settle) this.waiters.delete(cpId);
+        resolve(false);
+      }, timeoutMs);
+      const settle = (started: boolean): void => {
+        clearTimeout(timer);
+        resolve(started);
+      };
+      // One connector per benchmarked charge point and one cycle at a time, so
+      // a second armed waiter for the same id can only be a bug; drop the older
+      // one rather than leaking it.
+      this.waiters.get(cpId)?.(false);
+      this.waiters.set(cpId, settle);
+    });
+  }
+
+  /** One charge point's transaction has started. Unknown ids are ignored —
+   *  a confirmation with no waiter is a normal race, not an error. */
+  confirm(cpId: string): void {
+    const settle = this.waiters.get(cpId);
+    if (!settle) return;
+    this.waiters.delete(cpId);
+    settle(true);
+  }
+
+  /** The event stream is gone and cannot come back. Idempotent. */
+  lose(reason: string): void {
+    if (!this.available) return;
+    this.available = false;
+    this.failAll();
+    this.failLost(new BenchAbortError(reason));
+  }
+
+  /** Shut down deliberately, at the end of a run. Never signals {@link lost}:
+   *  a run that finished is not a run that was aborted. */
+  close(): void {
+    this.available = false;
+    this.failAll();
+  }
+
+  /** `promise`, but rejecting with {@link BenchAbortError} the moment the
+   *  event stream is lost. */
+  lost<T>(promise: Promise<T>): Promise<T> {
+    return Promise.race([promise, this.lostSignal]);
+  }
+
+  private failAll(): void {
+    for (const settle of this.waiters.values()) settle(false);
+    this.waiters.clear();
+  }
+}

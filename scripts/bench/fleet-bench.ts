@@ -16,6 +16,7 @@ import { CP_CREATE_MANY_MAX } from "../../src/protocol/limits.ts";
 import {
   BENCH_ID_PATTERN,
   BENCH_OCPP_VERSIONS,
+  BenchAbortError,
   BenchValidationError,
   CALL_WATCHDOG_SEC,
   RPC_RATE_PER_SOCKET,
@@ -41,6 +42,7 @@ import {
   sleep,
   socketPoolSize,
   staggerOffsetsMs,
+  TransactionStarts,
   STEP_COLUMNS,
   sustainableRpcPerSec,
   validateOptions,
@@ -218,8 +220,9 @@ class SocketPool {
  *  `subscribeResultSchema`'s `ARRAY_1000` cap on the snapshot it returns. The
  *  subscribe therefore happens once, before the first charge point exists. */
 class TransactionWatcher {
-  private readonly waiters = new Map<string, (started: boolean) => void>();
-  private closed = false;
+  /** The invariants — arm/confirm, and what a lost stream does to a run — live
+   *  in `lib.ts` so they can be unit-tested; this class is the socket. */
+  private readonly starts = new TransactionStarts();
 
   private constructor(private readonly socket: Socket) {}
 
@@ -272,17 +275,27 @@ class TransactionWatcher {
     }
     const watcher = new TransactionWatcher(socket);
     socket.on("event", (envelope: unknown) => watcher.onEvent(envelope));
-    // Without `reconnection` there is no recovery, so say so once rather than
-    // letting every later cycle silently report an unconfirmed start.
+    // `reconnection` is off, so a drop is terminal: room membership is
+    // per-connection server-side and a re-subscribe past 1000 charge points
+    // would fail the ack's `ARRAY_1000` snapshot anyway. Carrying on would
+    // have meant every later cycle burning a full hold on a confirmation that
+    // can never arrive — doubling transaction occupancy and collapsing the
+    // rest period — so the run aborts instead of printing rows whose load is
+    // no longer the load the row claims.
     socket.on("disconnect", () => {
-      if (watcher.closed) return;
-      process.stderr.write(
-        `[bench] WARNING: the event socket dropped; transaction starts can no ` +
-          `longer be confirmed and every remaining cycle counts as unconfirmed.\n`,
+      watcher.starts.lose(
+        "the event socket dropped, so transaction starts can no longer be " +
+          "confirmed and the remaining rows would not carry the configured " +
+          "load. No table was printed. Re-run against a daemon that stays up.",
       );
-      watcher.failAll();
     });
     return watcher;
+  }
+
+  /** The run's abort signal: `promise`, rejecting with a `BenchAbortError` the
+   *  moment the event stream is lost. Long waits are raced against it. */
+  lost<T>(promise: Promise<T>): Promise<T> {
+    return this.starts.lost(promise);
   }
 
   /** Arm a waiter for `cpId` **before** its `start_transaction` is emitted.
@@ -290,22 +303,7 @@ class TransactionWatcher {
    *  and nothing orders the two — arming after the ack would drop the event
    *  of every fast CSMS and skip every stop. Resolves `false` on timeout. */
   arm(cpId: string, timeoutMs: number): Promise<boolean> {
-    if (this.closed) return Promise.resolve(false);
-    return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        if (this.waiters.get(cpId) === settle) this.waiters.delete(cpId);
-        resolve(false);
-      }, timeoutMs);
-      const settle = (started: boolean): void => {
-        clearTimeout(timer);
-        resolve(started);
-      };
-      // One connector per benchmarked charge point and one cycle at a time,
-      // so a second armed waiter for the same id can only be a bug; drop the
-      // older one rather than leaking it.
-      this.waiters.get(cpId)?.(false);
-      this.waiters.set(cpId, settle);
-    });
+    return this.starts.arm(cpId, timeoutMs);
   }
 
   private onEvent(envelope: unknown): void {
@@ -327,20 +325,13 @@ class TransactionWatcher {
     if (env.evt.data?.transactionId !== 0) return;
     const cpId = env.cpId;
     if (cpId === undefined) return;
-    const settle = this.waiters.get(cpId);
-    if (!settle) return;
-    this.waiters.delete(cpId);
-    settle(true);
-  }
-
-  private failAll(): void {
-    for (const settle of this.waiters.values()) settle(false);
-    this.waiters.clear();
+    this.starts.confirm(cpId);
   }
 
   close(): void {
-    this.closed = true;
-    this.failAll();
+    // Before `disconnect()`, so the handler above sees a tracker that is
+    // already closed and does not turn a deliberate teardown into an abort.
+    this.starts.close();
     this.socket.removeAllListeners();
     this.socket.disconnect();
   }
@@ -820,13 +811,12 @@ async function main(): Promise<void> {
     opts.daemonBasicAuth,
   );
 
-  // Opened before the first charge point exists, on purpose: the subscribe ack
-  // carries a snapshot of the whole fleet through an `ARRAY_1000` schema, so
-  // subscribing once the sweep is past 1000 charge points would fail.
-  const watcher =
-    opts.txIntervalSec > 0
-      ? await TransactionWatcher.open(opts.daemonUrl, opts.daemonBasicAuth)
-      : null;
+  // Opened inside the cleanup scope below, never before it. The pooled sockets
+  // set `reconnection: true`, so anything that throws between their connect and
+  // the `try`'s `finally` leaves them open and retrying: the top-level catch
+  // prints the error and the process never exits. Every await from here on is
+  // therefore covered by `cleanup()`.
+  let watcher: TransactionWatcher | null = null;
 
   const allCpIds: string[] = [];
   // A superset of `allCpIds`: every id offered to `cp.create_many`, including
@@ -861,6 +851,22 @@ async function main(): Promise<void> {
   });
 
   try {
+    // Before the first charge point exists, on purpose: the `events.subscribe`
+    // ack carries a snapshot of the whole fleet through an `ARRAY_1000`
+    // schema, so subscribing once the sweep is past 1000 charge points would
+    // fail. A failure here reaches the `finally` and closes the pool.
+    if (opts.txIntervalSec > 0) {
+      watcher = await TransactionWatcher.open(
+        opts.daemonUrl,
+        opts.daemonBasicAuth,
+      );
+    }
+    // Every long wait below is raced against the event socket's loss, so a run
+    // that can no longer confirm transaction starts stops and says why instead
+    // of printing rows whose load is no longer the load they claim.
+    const untilLost = <T>(p: Promise<T>): Promise<T> =>
+      watcher ? watcher.lost(p) : p;
+
     const cursor: IdCursor = { nextIndex: 1 };
     // Cumulative across steps, like the daemon's counters: each row reports
     // its own delta.
@@ -868,7 +874,9 @@ async function main(): Promise<void> {
     for (const n of opts.counts) {
       const toCreate = n - allCpIds.length;
       process.stderr.write(`[bench] N=${n}: creating ${toCreate} more CP(s)\n`);
-      const created = await growFleet(pool, opts, cursor, toCreate, cleanupIds);
+      const created = await untilLost(
+        growFleet(pool, opts, cursor, toCreate, cleanupIds),
+      );
       allCpIds.push(...created);
       const notCreated = n - allCpIds.length;
       if (notCreated > 0) {
@@ -880,10 +888,12 @@ async function main(): Promise<void> {
 
       // Relative to the preflight baseline, so `--allow-existing` measures
       // this run's fleet settling rather than the daemon's whole population.
-      const { connected, notSettled } = await waitForSettle(
-        opts,
-        baseline.connected + allCpIds.length,
-        opts.settleTimeoutSec,
+      const { connected, notSettled } = await untilLost(
+        waitForSettle(
+          opts,
+          baseline.connected + allCpIds.length,
+          opts.settleTimeoutSec,
+        ),
       );
       if (notSettled > 0) {
         process.stderr.write(
@@ -894,7 +904,7 @@ async function main(): Promise<void> {
       const load = armLoad(pool, created, opts, watcher);
       stopLoads.push(load.stop);
       loads.push(load);
-      await load.ready;
+      await untilLost(load.ready);
 
       // Warm up *before* the `before` scrape, not after it. Every counter
       // below is a delta between the two scrapes, and a watchdog timeout
@@ -908,15 +918,19 @@ async function main(): Promise<void> {
         process.stderr.write(
           `[bench] N=${n}: warming up for ${opts.warmupSec}s before the first scrape\n`,
         );
-        await sleep(opts.warmupSec * 1000);
+        await untilLost(sleep(opts.warmupSec * 1000));
       }
 
       process.stderr.write(
         `[bench] N=${n}: measuring for ${opts.durationSec}s\n`,
       );
-      const before = await fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth);
-      await sleep(opts.durationSec * 1000);
-      const after = await fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth);
+      const before = await untilLost(
+        fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth),
+      );
+      await untilLost(sleep(opts.durationSec * 1000));
+      const after = await untilLost(
+        fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth),
+      );
 
       const deltas = diffHistogram(before, after, CALL_DURATION_METRIC);
       const aggregate = mergeHistogramDeltas(deltas);
@@ -1076,8 +1090,19 @@ See scripts/bench/README.md for a worked example and what to record.
 }
 
 main().catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err);
+  // An abort is a run that stopped on purpose, not a crash — say so, because
+  // the difference decides whether the operator looks for a bug or for a
+  // daemon that went away.
   process.stderr.write(
-    `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+    `${err instanceof BenchAbortError ? "Aborted" : "Error"}: ${message}\n`,
   );
-  process.exitCode = 1;
+  // `process.exit`, not `exitCode`, and for the same reason the SIGINT handler
+  // uses it. `Promise.race` does not cancel the loser, so an abort that
+  // interrupted the measurement sleep leaves that timer armed — up to
+  // `--duration` or `--warmup`, an hour each at their caps — and an in-flight
+  // `pool.rpc` leaves its own. The message would print at once and the process
+  // would then sit there, which is not a stop. `main`'s `finally` has already
+  // awaited `cleanup()` by the time this runs, so nothing is cut short.
+  process.exit(1);
 });

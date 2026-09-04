@@ -212,9 +212,10 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    script waits for the daemon's `transaction_started` event before timing the
    hold. A non-zero value means authorization is taking longer than a hold — a
    knee signal in its own right, and a warning that those cycles applied less
-   load than the flags asked for. Unlike every other column it is counted in
-   this process, not scraped, so its window is step-end to step-end and
-   includes the warmup rather than only `--duration`.
+   load than the flags asked for — a slow CSMS, not a broken one, since a lost
+   event stream aborts the run rather than filling this column. Unlike every
+   other column it is counted in this process, not scraped, so its window is
+   step-end to step-end and includes the warmup rather than only `--duration`.
 
 8. **Cleanup.** Every charge point id the run _offered_ to `cp.create_many` is
    `cp.delete`d at the end (or on Ctrl-C), 32 at a time and **within a 60s
@@ -313,8 +314,21 @@ started. It spends none of the pool's rate budget, and it is opened _before the
 first charge point exists_ — the subscribe ack carries a whole-fleet snapshot
 through an `ARRAY_1000` schema, so subscribing later in a 2000-CP sweep would
 fail. It does not reconnect: room membership is per-connection server-side, so
-a re-subscribe would hit that same cap. If it drops, the script says so and
-every remaining cycle is counted in `unconf.tx`.
+a re-subscribe would hit that same cap.
+
+**A drop therefore aborts the run**, and deliberately so. With no way to
+confirm a start, every later cycle would spend a full hold waiting for a
+confirmation that can never arrive and _then_ the real hold — roughly doubling
+each transaction's occupancy and collapsing the rest period, so the remaining
+rows would carry about twice the configured load while still being labelled
+with it. That is the same failure as running past the pool's rate ceiling, and
+it gets the same answer: the sweep stops, prints `Aborted:` with the reason,
+writes no table and no `--out` file, and **exits** — the timers it was racing
+(a measurement sleep runs up to an hour) are not waited out, because a stop
+that does not stop is not a stop. Rows already completed are discarded
+with it — a truncated sweep invites a wrong knee, and re-running is cheap next
+to recording one. The daemon going away is the only thing that causes this;
+the script's own teardown closes the socket without triggering it.
 
 ## Recording a result
 

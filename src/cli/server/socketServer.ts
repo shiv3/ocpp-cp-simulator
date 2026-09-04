@@ -1184,6 +1184,15 @@ async function replaceConnectorScenarioDefinitions(
       definitions,
     ),
   );
+  // #314: the console has just become the source of truth for this connector's
+  // whole definition set. A file still watched behind one of these ids would
+  // overwrite the upload at its next edit.
+  if (params.data.connectorId !== null) {
+    deps.fileReload?.unregisterConnectorScenarios(
+      params.data.cpId,
+      params.data.connectorId,
+    );
+  }
   deps.registryEvents?.emitScenarioDefinitionsChanged(
     params.data.cpId,
     params.data.connectorId,
@@ -1809,15 +1818,19 @@ async function dispatchFacadeCpCommand(
           "load_scenario params.scenario",
           params.scenario,
         );
-        return handled(
-          await runFacadeOperation(() =>
-            chargePointService.loadScenario(
-              id,
-              connectorId,
-              params.scenario as ScenarioDefinition,
-            ),
+        const loaded = await runFacadeOperation(() =>
+          chargePointService.loadScenario(
+            id,
+            connectorId,
+            params.scenario as ScenarioDefinition,
           ),
         );
+        // #314: an inline definition replaces whatever was under this id, file
+        // or not. Leaving an earlier `load_scenario { file }` watch in place
+        // would let the next edit of that file overwrite the definition the
+        // operator just installed by hand.
+        fileReload?.unregisterScenario(id, connectorId, loaded.scenarioId);
+        return handled(loaded);
       }
       throw new Error("Either 'file' or 'scenario' parameter is required");
     }
@@ -1948,6 +1961,9 @@ async function dispatchFacadeCpCommand(
         chargePointService.removeScenario(id, connectorId, scenarioId),
       );
       const after = await chargePointService.listScenarios(id, connectorId);
+      // #314: the file behind a removed scenario stops being watched, or the
+      // next edit would re-create the scenario that was just deleted.
+      fileReload?.unregisterScenario(id, connectorId, scenarioId);
       return handled({
         removed:
           before.some((scenario) => scenario.scenarioId === scenarioId) &&

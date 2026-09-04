@@ -239,6 +239,14 @@ export type CLIEvent =
 
 type EventHandler = (evt: CLIEvent) => void;
 
+/** Which run has finished settling. See {@link CLIChargePointService.onScenarioRunSettled}. */
+export interface ScenarioRunSettledInfo {
+  readonly connectorId: number;
+  readonly scenarioId: string;
+}
+
+type ScenarioRunSettledHandler = (info: ScenarioRunSettledInfo) => void;
+
 /**
  * #179: mint a stable, human-legible run id for one scenario execution.
  * `scenarioId#<epochMs>-<rand>` — the scenarioId anchors it to the scenario,
@@ -266,6 +274,18 @@ export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _soapServer: OCPPSoapServer | null;
   private readonly _handlers: Set<EventHandler> = new Set();
+  /**
+   * #314: notified once a scenario run has finished *and been cleaned up*.
+   *
+   * Deliberately not a `CLIEvent`: `scenario_completed` / `scenario_error` are
+   * emitted from the executor's state hooks, which run while the executor is
+   * still in `_executors` and the run is still being finalized. A listener that
+   * needs to know the run is really over — `--watch`'s held-reload drain — has
+   * to be told after that cleanup, or it re-checks a gate that is still closed
+   * and waits forever for a second notification that never comes.
+   */
+  private readonly _runSettledHandlers: Set<ScenarioRunSettledHandler> =
+    new Set();
   private _unsubscribes: Array<() => void> = [];
   private _connectorUnsubscribes: Array<() => void> = [];
   private readonly _scenarios: Map<
@@ -533,6 +553,21 @@ export class CLIChargePointService {
     this._handlers.add(handler);
     return () => {
       this._handlers.delete(handler);
+    };
+  }
+
+  /**
+   * Subscribe to "a scenario run has ended and its cleanup is complete" (#314).
+   *
+   * Fires last in {@link runScenario}'s `finally`, after the executor has been
+   * dropped from `_executors` and the run finalized, so a handler that asks
+   * {@link isScenarioRunning} gets `false` — which is the whole point. Fires
+   * for every run that started, whether it completed, errored or was stopped.
+   */
+  onScenarioRunSettled(handler: ScenarioRunSettledHandler): () => void {
+    this._runSettledHandlers.add(handler);
+    return () => {
+      this._runSettledHandlers.delete(handler);
     };
   }
 
@@ -1456,7 +1491,26 @@ export class CLIChargePointService {
         // clears it, which is the case that can be non-null.
         null,
       );
+      // Last, deliberately: #314's held-reload drain calls loadScenario, which
+      // can auto-start a fresh run of the same scenario. Announcing the settle
+      // any earlier would let that new run install its transcript and run id
+      // and then have this cleanup tear them down again.
+      this.notifyScenarioRunSettled({ connectorId, scenarioId });
     });
+  }
+
+  /** Tell {@link onScenarioRunSettled} subscribers a run is fully wound up.
+   *  A throwing handler is logged and never breaks the cleanup path. */
+  private notifyScenarioRunSettled(info: ScenarioRunSettledInfo): void {
+    for (const handler of this._runSettledHandlers) {
+      try {
+        handler(info);
+      } catch (err) {
+        process.stderr.write(
+          `[CLI] Scenario run settled handler error: ${err}\n`,
+        );
+      }
+    }
   }
 
   /** Resolve (and clear) any pending waitForScenarioArmed() callers for
@@ -1949,6 +2003,7 @@ export class CLIChargePointService {
     }
     this._unsubscribes = [];
     this._handlers.clear();
+    this._runSettledHandlers.clear();
   }
 
   private emit(evt: CLIEvent): void {

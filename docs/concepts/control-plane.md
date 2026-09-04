@@ -184,8 +184,10 @@ never configured one.
 
 **`file` is resolved at creation.** What the charge point stores and persists is
 the list itself, so a bad path fails the create rather than the first
-transaction. By default a file edited later does not change a running charge
-point; a daemon started with
+transaction. A relative path is resolved against the daemon's working directory
+at that moment and stored **absolute**, so a restart from another directory
+still names the same file. By default a file edited later does not change a
+running charge point; a daemon started with
 [`--watch`](../entities/daemon.md#file-hot-reload) (#314) re-reads it and
 replaces the pool live, which is safe because the pool is drawn from once per
 session. The pool holds at most 1000 tags and is persisted in
@@ -497,11 +499,11 @@ File-reload event envelope, pushed only by a daemon started with `--watch`
 `outcome` is the whole contract, and a consumer should branch on it rather than
 assume a reload took effect:
 
-| `outcome`  | Meaning                                                                                                                         |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `applied`  | The re-read copy is live.                                                                                                       |
-| `deferred` | The file parsed, but the charge point is mid-session; the new copy is held and installed when that session ends. Never dropped. |
-| `rejected` | The file could not be read or did not parse. The previous good copy is untouched, and `error` says why.                         |
+| `outcome`  | Meaning                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `applied`  | The re-read copy is live.                                                                                                                                                                                                                                                                                                                                                                           |
+| `deferred` | The file parsed, but the charge point is mid-session; the new copy is held and installed when that session ends — when the transaction stops, when the in-flight run's cleanup completes, or when a `cp.update` rebuilds the charge point. Never dropped: a `deferred` is always followed by an `applied` or a `rejected` for that path unless the scenario, or its charge point, is removed first. |
+| `rejected` | The file could not be read or did not parse. The previous good copy is untouched, and `error` says why.                                                                                                                                                                                                                                                                                             |
 
 `target` is `"id-tags"` or `"scenario"`. `connectorId` and `scenarioId` are
 non-null only for `"scenario"`; an idTag reload is charge-point wide.

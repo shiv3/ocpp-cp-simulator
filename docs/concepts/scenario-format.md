@@ -298,7 +298,7 @@ authoritative from then on. A daemon started with
 [`--watch`](../entities/daemon.md#file-hot-reload) (#314) also re-reads the file
 a scenario was loaded from — via `--scenario`, `--scenario-template-file`,
 `load_scenario { file }` or `run_scenario_file` — when it changes on disk, so
-editing a graph by hand does not mean recreating the charge point. Four rules,
+editing a graph by hand does not mean recreating the charge point. Five rules,
 all of them contracts:
 
 - The reload is **debounced** and a file whose bytes did not change is not a
@@ -308,10 +308,19 @@ all of them contracts:
 - The reload **never mutates a connector mid-session**. With an open
   transaction, or with a run of that scenario in flight, the new definition is
   _held_ and installed when the session ends — an in-flight run always finishes
-  on the graph it started with.
+  on the graph it started with. Held, never dropped: the definition lands when
+  the transaction stops, when the run's cleanup completes (including a run
+  that simply reaches the end of its graph), or when a `cp.update` rebuilds the
+  charge point out from under the session.
 - The reloaded definition keeps **the scenario id it was loaded under**, even if
   the file's own `id` was edited. Honouring a changed id would load a second
   scenario and leave the first one running on the old graph.
+- A scenario that is **removed, or replaced** — by an inline `load_scenario`
+  under the same id, or by a `scenario.definitions.replace` upload from the
+  console — stops being watched, and an edit to the abandoned file never
+  re-creates it or overwrites the replacement. The file is only authoritative
+  for as long as the scenario it was loaded as is still the one on the
+  connector.
 
 Reloading replaces the definition; it does not itself start a run. It does go
 through the ordinary auto-start gate, though, so a reloaded scenario whose

@@ -3,6 +3,7 @@ title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
 updated: 2026-09-05
+updated: 2026-09-04
 ---
 
 # Log
@@ -588,3 +589,49 @@ Sixth review pass on PR #325.
 - `--watch` was missing from `--help`'s `Options:` section — caught by #316's
   new property test ("every flag the parser accepts has an `Options:` entry"),
   which is the first time that guard fired on a flag added after it landed.
+
+## [2026-09-04] ingest | `--watch` review fixes: the held reload, removed scenarios, absolute idTag paths (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — the "held, never dropped" rule now says _when_
+  a held reload lands (transaction stop, or the run's cleanup completing,
+  including a run that reaches the end of its graph); new contract bullet for
+  removal and inline replacement dropping a scenario's watch; the persisted
+  `idTagPool.file` is stated to be absolute.
+- [Scenario file format](concepts/scenario-format.md) — the `--watch` rule list
+  grows from four to five: held-never-dropped is spelled out, and a removed or
+  inline-replaced scenario is never re-created by an edit to the abandoned file.
+- [Control plane](concepts/control-plane.md) — the `deferred` outcome row now
+  states the follow-up guarantee; the `idTagPool.file` paragraph records that a
+  relative path is resolved and stored absolute.
+- [State persistence](concepts/state-persistence.md) — `charge_points.id_tag_file`
+  holds a create-time-resolved absolute path, so a restart from another working
+  directory re-watches the same file.
+- Behind the doc changes: `CLIChargePointService.onScenarioRunSettled` (fanned in
+  by `CPRegistry`) replaces `scenario_completed` / `scenario_error` as the drain
+  trigger — those are emitted from inside the run, while the executor is still
+  registered, so every reload held behind a normally-finishing run was deferred
+  a second time and then silently dropped. Both terminal states are pinned by a
+  test: a run that reaches the end of its graph, and one stopped by hand with
+  `stop_scenario`.
+
+## [2026-09-04] ingest | `--watch` review round two: reconcile on restart, four contract sentences the code did not keep (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — three contract sentences corrected against the
+  code: a `cp.update` rebuild is now named as a releaser of a held reload; the
+  removal/replacement rule covers `scenario.definitions.replace` as well as an
+  inline `load_scenario`; and a new paragraph in the restart section states that
+  a file edited while the daemon was stopped is **reconciled** at startup, not
+  merely watched from then on.
+- [Scenario file format](concepts/scenario-format.md) — the held-never-dropped
+  and removed-or-replaced rules restate the same two corrections.
+- [Control plane](concepts/control-plane.md) — the `deferred` outcome row names
+  the rebuild releaser.
+- All four were code fixes, not overclaiming docs: `FileReloadManager`
+  reconciles a newly watched idTag file against what the restored charge point
+  holds (comparing tags, not bytes, so the next identical save is not written
+  off as a duplicate); `scenario.definitions.replace` drops the connector's file
+  watches; a held reload is retried after a registry sync and `applyOrDefer`
+  holds rather than unregisters when a scenario is transiently absent during a
+  `cp.update` rebuild; and `run_scenario_file`'s explicit start is idempotent,
+  so a connect-triggered file the load already auto-started is registered as a
+  watch source instead of failing the RPC.

@@ -355,15 +355,37 @@ const DATE_TIME_SHAPE =
 function isRealCalendarInstant(value: string): boolean {
   const match = DATE_TIME_SHAPE.exec(value);
   if (!match) return false;
-  const [, y, mo, d, h, mi, sec] = match.map(Number);
+  const [, ys, mos, ds, hs, mis, secs] = match;
+  const offset = match[8];
+  const y = Number(ys);
+  const mo = Number(mos);
+  const d = Number(ds);
+  const h = Number(hs);
+  const mi = Number(mis);
+  const sec = Number(secs);
   if (mo < 1 || mo > 12) return false;
   const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   // Deliberately not Date.parse: it NORMALISES, so 2026-02-30 becomes March 2
   // and reports success, and it rejects the leap second RFC 3339 allows.
   if (d < 1 || d > days[mo - 1]) return false;
-  if (h > 23 || mi > 59) return false;
-  return sec <= 60;
+  if (h > 23 || mi > 59 || sec > 60) return false;
+
+  // The offset is part of the grammar, so +24:00 and +09:60 have to go too.
+  let offsetMinutes = 0;
+  if (offset && offset !== "Z" && offset !== "z") {
+    const oh = Number(offset.slice(1, 3));
+    const om = Number(offset.slice(4, 6));
+    if (oh > 23 || om > 59) return false;
+    offsetMinutes = (oh * 60 + om) * (offset[0] === "-" ? -1 : 1);
+  }
+
+  // A leap second exists only at 23:59:60 UTC, so a local 12:00:60 is not one.
+  if (sec === 60) {
+    const utcMinutes = (((h * 60 + mi - offsetMinutes) % 1440) + 1440) % 1440;
+    return utcMinutes === 23 * 60 + 59;
+  }
+  return true;
 }
 
 const OCPP_FORMATS: Record<string, FormatCheck> = {
@@ -374,6 +396,9 @@ const OCPP_FORMATS: Record<string, FormatCheck> = {
   // permissive -- it accepts a space and a dangling percent by normalising
   // them -- so the RFC 3986 character rules are checked first.
   uri: (value) => {
+    // RFC 3986 is ASCII: anything outside it has to arrive percent-encoded,
+    // and \`new URL()\` would silently encode it for us instead of objecting.
+    if (/[^\\u0021-\\u007e]/.test(value)) return false;
     if (/[\\s<>"{}|\\\\^\`]/.test(value)) return false;
     if (/%(?![0-9A-Fa-f]{2})/.test(value)) return false;
     try {

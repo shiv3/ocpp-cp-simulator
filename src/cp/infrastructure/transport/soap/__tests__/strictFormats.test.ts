@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { strictValidationErrors, validationErrors } from "../validate";
+import {
+  strictValidationErrors,
+  validationErrors,
+} from "../../../../../ocpp/validate";
 
 /**
  * #285 — the formats the refusal gate depends on.
+ *
+ * It lives here, beside the gate, rather than under `src/ocpp/`: the schema
+ * generator does `rm -r` on that whole directory, so a hand-written test
+ * there survives exactly until the next `bun run gen:ocpp`.
  *
  * `validationErrors` leaves formats unchecked on purpose: a CSMS with a
  * sloppy timestamp is still worth simulating against. `strictValidationErrors`
@@ -31,6 +38,8 @@ describe("strictValidationErrors date-time", () => {
     // RFC 3339 allows it and Date.parse does not, which is one reason this
     // check does not defer to Date.parse.
     ["a leap second", "2016-12-31T23:59:60Z"],
+    // The same instant written in +09:00, which is 23:59:60 UTC.
+    ["a leap second through an offset", "2017-01-01T08:59:60+09:00"],
   ])("accepts %s", (_label, d) => {
     expect(accepts({ d })).toBe(true);
   });
@@ -43,6 +52,10 @@ describe("strictValidationErrors date-time", () => {
     ["hour 24", "2026-01-01T24:00:00Z"],
     ["month 13", "2026-13-01T00:00:00Z"],
     ["no offset at all", "2026-01-01T00:00:00"],
+    ["an impossible offset", "2026-01-01T00:00:00+24:00"],
+    ["offset minutes past 59", "2026-01-01T00:00:00+09:60"],
+    // A leap second exists only at 23:59:60 UTC; midday is not one.
+    ["a second 60 that is not a leap second", "2026-01-01T12:00:60Z"],
     ["prose", "not-a-date"],
   ])("refuses %s", (_label, d) => {
     expect(accepts({ d })).toBe(false);
@@ -65,6 +78,9 @@ describe("strictValidationErrors uri", () => {
     ["a dangling percent", "ftp://host/%"],
     ["a bare word", "not a uri"],
     ["a relative path", "/dir/file.zip"],
+    // RFC 3986 is ASCII; `new URL()` would percent-encode this for us rather
+    // than object, which is not the same as it being valid.
+    ["a raw non-ASCII character", "https://host/é"],
   ])("refuses %s", (_label, u) => {
     expect(accepts({ u })).toBe(false);
   });

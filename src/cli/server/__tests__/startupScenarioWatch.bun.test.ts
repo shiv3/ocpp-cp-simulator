@@ -98,6 +98,18 @@ function loadedDelay(
   return node?.data?.delaySeconds ?? null;
 }
 
+/** A scenario already targeting connector 1, loaded as-is by a one-connector
+ *  `--scenario` run — the case where `fanOut` used to be false forever. */
+function targeted(targetId: number, delayMs: number): string {
+  const parsed = JSON.parse(template(delayMs)) as Record<string, unknown>;
+  return JSON.stringify({
+    ...parsed,
+    id: "targeted-scenario",
+    targetType: "connector",
+    targetId,
+  });
+}
+
 describe("--watch over a startup scenario file (#314)", () => {
   it("re-reads --scenario-template-file and reinstantiates it per connector", async () => {
     const csms = startMockCsms();
@@ -180,6 +192,92 @@ describe("--watch over a startup scenario file (#314)", () => {
         svc.listScenarios(1)[0]?.scenarioId,
         svc.listScenarios(2)[0]?.scenarioId,
       ]).toEqual(idsBefore);
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("re-evaluates the target when --scenario's own targetId is edited", async () => {
+    // A one-connector `--scenario` already pointed at that connector is loaded
+    // as-is — no per-connector rewrite. That decision used to be captured once,
+    // so editing `targetId` in the file left the definition registered on the
+    // original connector while its executor derived expectations from the new
+    // target: waiting on a connector it was not attached to, and never firing.
+    const csms = startMockCsms();
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314-target",
+      wsUrl: csms.url,
+      connectors: 2,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-target-"));
+    const scenarioFile = join(tmpDir, "scenario.json");
+    writeFileSync(scenarioFile, targeted(1, 11));
+
+    try {
+      await svc.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      const runPromise = runStartupScenario(
+        svc,
+        {
+          scenario: scenarioFile,
+          scenarioTemplate: null,
+          scenarioTemplateFile: null,
+          scenarioConnector: "1",
+        },
+        2,
+        fileReload,
+      );
+      csms.replyCallResult(boot.messageId, {
+        currentTime: new Date().toISOString(),
+        interval: 300,
+        status: "Accepted",
+      });
+      await runPromise;
+
+      // Loaded as-is: the file already targets connector 1, so the id is the
+      // file's own rather than an instantiated one.
+      const scenarioId = svc.listScenarios(1)[0]?.scenarioId;
+      expect(scenarioId).toBe("targeted-scenario");
+      expect(svc.getScenario(1, "targeted-scenario")?.targetId).toBe(1);
+
+      // The operator repoints the file at connector 2. The definition stays on
+      // connector 1 (a reload never moves a scenario), so it has to be rewritten
+      // back onto the connector it is registered for — otherwise the executor
+      // waits on connector 2 while attached to connector 1.
+      backend.save(scenarioFile, targeted(2, 22));
+      // Waits on the *graph*, not on targetId — targetId is already 1, so a
+      // predicate on it would be satisfied before the reload had even run.
+      await waitFor(
+        () => loadedDelay(svc, 1) === 22,
+        "the edited scenario file to be reloaded",
+      );
+      // Re-targeted back onto the connector it is registered for. Without the
+      // per-definition re-evaluation this reads 2, and the executor then waits
+      // on a connector the scenario is not attached to.
+      expect(svc.getScenario(1, "targeted-scenario")?.targetId).toBe(1);
+      expect(svc.getScenario(1, "targeted-scenario")?.targetType).toBe(
+        "connector",
+      );
+      // …and it is the edited graph, not the old one held in place.
+      expect(loadedDelay(svc, 1)).toBe(22);
     } finally {
       fileReload.close();
       svc.disconnect();

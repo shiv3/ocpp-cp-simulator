@@ -1399,8 +1399,9 @@ describe("the RPCs hand the watcher the text they loaded (#314)", () => {
     );
     expect(seen.at(-1)?.scenarioId).toBe("plumb-run");
     expect(seen.at(-1)?.loadedText).toBe(runText);
-    // The facade hands the text back for the baseline only. A file's contents
-    // are not something the control plane should echo to its subscribers.
+    // The result shape is exactly what the interface documents. `sourceText`
+    // is handed over through a callback and is never a field on it, so no
+    // dispatcher — socket.io or standalone JSON — can forget to strip it.
     expect(started).toEqual({ scenarioId: "plumb-run" });
   });
 });
@@ -1480,6 +1481,50 @@ describe("a held reload lands even with auto-reset-to-Available off (#314)", () 
       "the held reload to land after the reset",
     );
     expect(loadedDelay(server, "CP-RESET", "reset-drop")).toBe(22);
+  });
+});
+
+describe("a reload the control plane could not announce is refused (#314)", () => {
+  it("rejects a scenario too large for the definitions envelope", async () => {
+    // A scenario *file* has no size bound of its own, but the
+    // `scenario-definitions-changed` envelope caps one definition at 256 KiB.
+    // Applied first and validated second, the reload would land, be reported
+    // `applied`, and then the push telling subscribers about it would throw and
+    // be swallowed — an editor left drawing a graph the daemon had dropped.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("too-big", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-BIG",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-BIG");
+
+    const oversized = JSON.parse(scenario("too-big", 22)) as {
+      nodes: Array<Record<string, unknown>>;
+      description?: string;
+    };
+    oversized.description = "x".repeat(300_000);
+    backend.save(file, JSON.stringify(oversized));
+
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+    expect(events[0]?.error).toContain("the control plane can carry");
+    // The contract a malformed file gets: the previous definition stays.
+    expect(loadedDelay(server, "CP-BIG", "too-big")).toBe(11);
+
+    // …and a file back under the bound still lands.
+    backend.save(file, scenario("too-big", 33));
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the recovery to land",
+    );
+    expect(loadedDelay(server, "CP-BIG", "too-big")).toBe(33);
   });
 });
 

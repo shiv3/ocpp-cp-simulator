@@ -738,3 +738,23 @@ Sixth review pass on PR #325.
 - `--watch`'s startup summary is logged after the bootstrap loop rather than
   before it, so a daemon whose only watched file is its `--scenario` no longer
   reports "0 file(s)" and then watches one.
+
+## [2026-09-04] ingest | `--watch`: a result field only one transport stripped, a target fixed at first load, a reload nobody was told about (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — two contract sentences extended. A scenario
+  larger than the `scenario-definitions-changed` envelope's per-definition cap
+  (256 KiB serialized) is **rejected** like any other file the reload path
+  cannot accept, rather than applied and then silently un-announced. And a
+  reload re-applies the connector target on every read, so an edited
+  `targetType` / `targetId` cannot leave a definition registered on one
+  connector while its executor waits on another.
+- `runScenarioFile` no longer returns the file's text. It was added last round
+  for `--watch`'s reload baseline and stripped in the socket.io dispatcher; the
+  standalone JSON dispatcher forwards facade results unchanged, so
+  `run_scenario_file` printed the whole scenario file to stdout and broke the
+  documented `{ scenarioId }` shape. The text is handed over through an
+  `onSourceText` callback on `ScenarioRunOptions` instead — a value that is
+  never part of a result cannot be forgotten by a second transport. Audited the
+  rest: the socket.io dispatcher's only other `handled({…})` sites _construct_
+  results from void-returning calls (`remove_connector`, `remove_scenario`)
+  rather than sanitise a facade result, so no other field has this shape.

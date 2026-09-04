@@ -2061,6 +2061,48 @@ describe("a watch row does not depend on --watch to be cleaned up (#314)", () =>
   });
 });
 
+describe("a drain never runs in its caller's stack (#314)", () => {
+  it("does not apply a held reload from inside the registry mutation that released it", async () => {
+    // `syncFromRegistry` is the second drain trigger, and it is driven by
+    // `onInitChange`, which `CPRegistry` fires *synchronously* from
+    // `instantiate()`, the tail of `update()`, `remove()` and `shutdownAll()`.
+    // A drain calls `loadScenario`, which can auto-start a run that snapshots
+    // connector state — the same hazard the settled hook's microtask exists to
+    // prevent, reached through the other channel. So the release lands after
+    // the mutation returns, never inside it.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("stack", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-STACK");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-STACK");
+
+    const before = server.registry.get("CP-STACK");
+    if (!before) throw new Error("CP-STACK missing");
+    expect(await openSession(server, "CP-STACK", "TAG-ST")).toBe("TAG-ST");
+    backend.save(file, scenario("stack", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the edit to be held for the open session",
+    );
+
+    // The rebuild ends the session and pings `onInitChange` twice, the second
+    // time with the scenarios back — so this is the call that releases the
+    // held definition. It must not have released it by the time it returns.
+    const init = before.getInit();
+    server.registry.update(init);
+    expect(loadedDelay(server, "CP-STACK", "stack")).toBe(11);
+
+    await waitFor(
+      () => loadedDelay(server, "CP-STACK", "stack") === 22,
+      "the held reload to land on a later turn",
+    );
+  });
+});
+
 describe("the envelope bound is checked against the whole snapshot (#314)", () => {
   it("refuses an edit a sibling scenario would push over the size cap", async () => {
     // The reloaded file is well inside 256 KiB; the *push* is not.

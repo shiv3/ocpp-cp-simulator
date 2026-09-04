@@ -128,6 +128,13 @@ interface ScenarioEntry extends ScenarioFileRegistration {
  * where the two gate conditions actually clear — `runScenario`'s cleanup, the
  * connector's `transactionChange` to null, and `resetScenario`'s setter-based
  * drop — and always after they have cleared.
+ *
+ * It is not the only drain trigger, though it is the only *gate-opening* one.
+ * `syncFromRegistry` drains as well, because a `cp.update` rebuilds the charge
+ * point and takes the old service's lifecycle handlers with it, so nothing else
+ * would retry a definition held against the CP that no longer exists. Both go
+ * through {@link FileReloadManager.drainLater}, which is where the rule that a
+ * drain never runs in its caller's stack is written down.
  */
 
 /**
@@ -183,12 +190,13 @@ export class FileReloadManager {
     this.database = options.database ?? null;
     this.log = options.log ?? ((m) => process.stderr.write(`${m}\n`));
     this.watcher = options.watcher ?? new FileWatcher({ log: this.log });
-    // The only drain trigger, by design — see the note above `FileReloadManager`
-    // on why no bus event can serve. By the time this fires the executor is
-    // gone, or the transaction is cleared, so a held definition actually lands.
+    // One of the two drain triggers — see the note above `FileReloadManager`
+    // for why no bus event can serve as either, and {@link drainLater} for why
+    // both go through it. By the time this fires the executor is gone, or the
+    // transaction is cleared, so a held definition actually lands.
     this.unsubscribeRunSettled = this.registry.onSessionSettled((cpId) => {
       if (this.scenarios.size === 0) return;
-      this.drainPending(cpId);
+      this.drainLater(cpId);
     });
   }
 
@@ -277,7 +285,15 @@ export class FileReloadManager {
     // A `cp.update` tears the charge point down and builds a replacement. That
     // ends whatever session was holding a reload back, but the old service's
     // lifecycle handlers went with it, so nothing else would ever retry.
-    this.drainAllPending();
+    //
+    // Deferred, not called here: `onInitChange` fires synchronously from inside
+    // `instantiate`, `update`, `remove` and `shutdownAll`, so a drain run at
+    // this point would start work from inside a registry mutation — see
+    // {@link drainLater}. Everything above this line stays synchronous on
+    // purpose: it establishes watches and reconciles what is already loaded,
+    // and delaying that would widen the read-then-watch window the ordering
+    // above exists to close.
+    this.drainLater(null);
   }
 
   /**
@@ -774,6 +790,44 @@ export class FileReloadManager {
   /** Retry every held definition, whatever charge point it belongs to. Used
    *  after a registry sync, where the charge point that was blocking a reload
    *  may have been rebuilt out from under it. */
+  /**
+   * Run a drain on a later microtask, never in the caller's stack.
+   *
+   * Both drain triggers go through here, because a drain does not merely read a
+   * gate — it calls `loadScenario`, which can auto-start a run that snapshots
+   * connector state. Doing that from inside the code that is mutating the
+   * registry, or ending a session, is the defect this feature has now been
+   * bitten by four times, and enumerating the callers that happen to be safe is
+   * what failed the last three. So the requirement is expressed once, here:
+   *
+   * - `onSessionSettled` already announces on a microtask
+   *   (`CLIChargePointService.notifySessionSettled`), so a settle drain was
+   *   never in a teardown stack. It is routed through here anyway so that every
+   *   drain in this file obeys one visible rule rather than two invisible ones.
+   * - `onInitChange` is synchronous by contract and stays that way — its
+   *   subscriber has to see the registry as the mutation left it, and the watch
+   *   establishment it drives must not be delayed. `CPRegistry` pings it from
+   *   `instantiate()`, the tail of `update()`, `remove()` and `shutdownAll()`;
+   *   `remove()` is called in a loop by `resetAllState`, so a synchronous drain
+   *   there could load and auto-start a scenario on a charge point the next
+   *   iteration is about to tear down. `stillLoaded` covers the half-rebuilt
+   *   window inside `update()` and `shutdownAll` cannot reach a drain at all
+   *   (the lifecycle calls `close()` before it, and `closed` short-circuits the
+   *   sync) — but "the sites I checked are safe" is exactly the reasoning that
+   *   has been wrong here before.
+   *
+   * `closed` is re-checked when the microtask runs: the manager can be shut
+   * down between scheduling and draining.
+   */
+  private drainLater(cpId: string | null): void {
+    if (this.closed) return;
+    queueMicrotask(() => {
+      if (this.closed) return;
+      if (cpId === null) this.drainAllPending();
+      else this.drainPending(cpId);
+    });
+  }
+
   private drainAllPending(): void {
     for (const cpId of new Set(
       [...this.scenarios.values()]

@@ -869,3 +869,30 @@ Sixth review pass on PR #325.
   `resetSimulatorState` while [State persistence](concepts/state-persistence.md)
   lists them as simulator-owned. Pre-existing, unrelated to #314, and left for a
   maintainer to decide — the reset list may be pinned by a test.
+
+## [2026-09-05] ingest | `--watch`: the second drain trigger, deferred like the first (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — the invariant is restated to cover both drain
+  triggers rather than one. An architectural review pointed out that the code
+  claimed the settled hook was "the only drain trigger, by design" while
+  `syncFromRegistry` also drains, driven by `onInitChange` — which `CPRegistry`
+  fires **synchronously** from `instantiate()`, the tail of `update()`,
+  `remove()` and `shutdownAll()`. A drain calls `loadScenario`, which can
+  auto-start a run, so that is the same hazard the settled hook's microtask
+  exists to prevent, reached through the other channel; `remove()` is called in
+  a loop by `resetAllState`, where it is not merely theoretical.
+- Chosen fix, and why it is neither of the two obvious ones: the ping stays
+  synchronous and the **drain** defers itself. Deferring `onInitChange` would
+  also delay the watch establishment and reconcile that `syncFromRegistry` does
+  first — widening the read-then-watch window an earlier round closed — and its
+  subscriber has to see the registry as the mutation left it. Leaving the drain
+  synchronous and merely correcting the comment would preserve a hazard whose
+  safety rests on "the sites I checked", which is the reasoning that has been
+  wrong here three times. Both triggers now go through one `drainLater`, so the
+  rule is visible in one place rather than split across two mechanisms.
+- Recorded because it was nearly lost: routing the settled drain through
+  `drainLater` made the round-8 microtask in `notifySessionSettled`
+  **unpinned** — removing it failed no test in the whole suite, because its only
+  consumer was now deferring anyway. The guarantee is now tested at its source
+  in `src/cli/__tests__/service.sessionSettled.bun.test.ts`, independent of the
+  reloader.

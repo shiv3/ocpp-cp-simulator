@@ -159,3 +159,41 @@ describe("GET /metrics (#298)", () => {
     expect(body).toContain("ocppcp_ws_reconnects_total 1");
   });
 });
+
+describe("rpc counting sits at the request boundary (#298)", () => {
+  it("counts a request rejected before dispatch", async () => {
+    // Parameter validation, the deadline and result validation all live
+    // outside `dispatchRpcCore`, so counting there dropped every rejected
+    // request and recorded a failed result validation as `ok`.
+    const { registry, recorder } = makeHandlers({ metrics: true });
+    try {
+      const { runRpc } = await import("../socketServer");
+      const { setGlobalMetricsRecorder } =
+        await import("../metrics/MetricsRecorder");
+      const { createRuntimeDeps } = await import("../socketServer");
+      const { EventBus } = await import("../eventBus");
+      setGlobalMetricsRecorder(recorder);
+      const deps = createRuntimeDeps({ registry, eventBus: new EventBus() });
+
+      // Unknown method: never reaches dispatch at all.
+      await expect(
+        runRpc(deps, { method: "nope.nope", params: {} }),
+      ).rejects.toThrow();
+      expect(recorder.rpcRequests.get("unknown error")).toBe(1);
+
+      // Known method, invalid params: rejected by the schema before dispatch.
+      await expect(
+        runRpc(deps, { method: "cp.create", params: {} }),
+      ).rejects.toThrow();
+      expect(recorder.rpcRequests.get("cp.create error")).toBe(1);
+
+      await runRpc(deps, { method: "cp.list", params: {} });
+      expect(recorder.rpcRequests.get("cp.list ok")).toBe(1);
+    } finally {
+      const { setGlobalMetricsRecorder } =
+        await import("../metrics/MetricsRecorder");
+      setGlobalMetricsRecorder(null);
+      registry.shutdownAll();
+    }
+  });
+});

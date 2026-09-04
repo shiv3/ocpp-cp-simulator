@@ -91,8 +91,11 @@ export class OCPPSoapServer {
 
   async handleRequest(pathCpId: string, xml: string): Promise<Response> {
     let envelope: ParsedSoapEnvelope;
+    // Held so the fault path below can name the operation it is answering.
+    let faultOperation: string | undefined;
     try {
       envelope = parseSoapEnvelope(xml, this.dialect);
+      faultOperation = envelope.operation;
       this.assertRequestForTarget(pathCpId, envelope);
 
       // Dispatch order:
@@ -235,6 +238,17 @@ export class OCPPSoapServer {
         },
       });
     } catch (err) {
+      // A Fault is still an answer, and the JSON transport counts its
+      // CALLERROR equivalent. Logged with the same prefix as a normal reply so
+      // the log-derived observers (`--trace-output`, `/metrics`) see it; an
+      // envelope that never parsed has no operation to attribute, so it is the
+      // one case with nothing to log.
+      if (faultOperation) {
+        this.target.logger?.info(
+          `SOAP reply ${faultOperation}: Fault ${errorMessage(err)}`,
+          LogType.OCPP,
+        );
+      }
       if (err instanceof OCPPSoapFaultError) {
         return soapFaultResponse(errorMessage(err), err.status, err.code);
       }

@@ -444,3 +444,23 @@ describe("inbound SOAP callbacks are counted (#298)", () => {
     }
   });
 });
+
+describe("SOAP faults are counted as answers (#298)", () => {
+  it("counts a Fault reply, the way a CALLERROR is counted", () => {
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({
+      cpId: "CP-SOAP",
+      ocppVersion: "OCPP-1.6S",
+      logger,
+    });
+    try {
+      logger.info("SOAP request Reset: <s:Envelope/>", LogType.OCPP);
+      logger.info("SOAP reply Reset: Fault not implemented", LogType.OCPP);
+      expect(recorder.messages.get("Reset csms-to-cp")).toBe(1);
+      expect(recorder.messages.get("Reset cp-to-csms")).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+});

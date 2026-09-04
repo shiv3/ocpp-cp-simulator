@@ -1106,9 +1106,23 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     }
 
     const fault = this.parseFaultResponse(responseText, response.status);
-    if (fault) throw fault;
+    if (fault) {
+      // A Fault is the CSMS's answer, and the JSON transport counts its
+      // CALLERROR equivalent. Logged before the throw so the log-derived
+      // observers (`--trace-output`, `/metrics`) see the exchange complete
+      // rather than a request with no reply.
+      this._logger.info(
+        `SOAP response ${operation}: ${responseText}`,
+        LogType.OCPP,
+      );
+      throw fault;
+    }
 
     if (!response.ok) {
+      this._logger.info(
+        `SOAP response ${operation}: ${responseText}`,
+        LogType.OCPP,
+      );
       throw new Error(
         `HTTP ${response.status} ${response.statusText}: ${truncateForLog(responseText)}`,
       );

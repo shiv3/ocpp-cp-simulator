@@ -301,25 +301,47 @@ async function handleRpc(
   ack: RpcAckFn,
 ): Promise<void> {
   if (!consumeRpcToken(state)) {
+    getGlobalMetricsRecorder()?.countRpc(rpcMethodLabel(request), "error");
     ack(errorAck("invalid_params"));
     return;
   }
   if (state.inFlight >= INFLIGHT_CAP) {
+    getGlobalMetricsRecorder()?.countRpc(rpcMethodLabel(request), "error");
     ack(errorAck("invalid_params"));
     return;
   }
 
   state.inFlight += 1;
+  // Counted around the *whole* request, not around the dispatch it wraps.
+  // Parameter validation, the deadline and result validation all live out
+  // here: counting inside `dispatchRpcCore` dropped every rejected request
+  // and recorded a failed result validation as `ok`.
+  const recorder = getGlobalMetricsRecorder();
+  const method = rpcMethodLabel(request);
   try {
     const result = await withRpcDeadline(
       dispatchRpc(socket, state, deps, request),
     );
+    recorder?.countRpc(method, "ok");
     ack({ ok: true, result });
   } catch (err) {
+    recorder?.countRpc(method, "error");
     ack(errorAck(errorCodeFrom(err), rpcFailureMessage(err)));
   } finally {
     state.inFlight = Math.max(0, state.inFlight - 1);
   }
+}
+
+/**
+ * The `method` label for a request that may not have parsed.
+ *
+ * Bounded on purpose: an unparseable or unknown method is counted as
+ * `unknown` rather than minting a Prometheus series per garbage value, the
+ * same rule the wire `action` label follows.
+ */
+function rpcMethodLabel(request: unknown): string {
+  const method = rawParamsAsRecord(request).method;
+  return typeof method === "string" && isRpcMethod(method) ? method : "unknown";
 }
 
 async function dispatchRpc(
@@ -360,29 +382,10 @@ export async function dispatchRpcCore(
   cpId: string | undefined,
   rawParams: unknown,
 ): Promise<unknown> {
-  // Counted here rather than in `runRpc`: socket.io — the primary control
-  // plane — goes handleRpc -> dispatchRpc -> dispatchRpcCore and never touches
-  // `runRpc`, which only the MCP tools and the CLI client use. This is the one
-  // function both of those paths share. `events.subscribe` / `.unsubscribe`
-  // arrive as named socket.io events and are counted at their own handlers.
-  const recorder = getGlobalMetricsRecorder();
-  if (!recorder) return dispatchRpcCoreInner(deps, method, cpId, rawParams);
-  try {
-    const result = await dispatchRpcCoreInner(deps, method, cpId, rawParams);
-    recorder.countRpc(method, "ok");
-    return result;
-  } catch (err) {
-    recorder.countRpc(method, "error");
-    throw err;
-  }
-}
-
-async function dispatchRpcCoreInner(
-  deps: RuntimeSocketIoDeps,
-  method: RpcMethod,
-  cpId: string | undefined,
-  rawParams: unknown,
-): Promise<unknown> {
+  // Not counted here. The metric is recorded at the two boundaries that
+  // produce a final ack — `handleRpc` for socket.io and `runRpc` for the MCP
+  // tools and the CLI client — because parameter validation, the deadline and
+  // result validation all sit outside this function.
   switch (method) {
     case "cp.list":
       return listCps(deps.chargePointService);
@@ -503,17 +506,25 @@ export async function runRpc(
   const { method, cpId } = request;
   const rawParams = request.params ?? {};
 
-  if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
+  const recorder = getGlobalMetricsRecorder();
+  const label = isRpcMethod(method) ? method : "unknown";
+  try {
+    if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
 
-  const params = METHODS[method].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
+    const params = METHODS[method].params.safeParse(rawParams);
+    if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  const result = await withRpcDeadline(
-    dispatchRpcCore(deps, method, cpId, rawParams),
-  );
-  const parsedResult = METHODS[method].result.safeParse(result);
-  if (!parsedResult.success) throw new Error("RPC result failed validation");
-  return parsedResult.data;
+    const result = await withRpcDeadline(
+      dispatchRpcCore(deps, method, cpId, rawParams),
+    );
+    const parsedResult = METHODS[method].result.safeParse(result);
+    if (!parsedResult.success) throw new Error("RPC result failed validation");
+    recorder?.countRpc(label, "ok");
+    return parsedResult.data;
+  } catch (err) {
+    recorder?.countRpc(label, "error");
+    throw err;
+  }
 }
 
 async function listCps(

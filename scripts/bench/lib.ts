@@ -326,6 +326,21 @@ export const START_CONFIRM_MARGIN_SEC = 5;
 export const START_CONFIRM_TIMEOUT_MS =
   (AUTHORIZE_WAIT_SEC + START_CONFIRM_MARGIN_SEC) * 1000;
 
+/**
+ * How long a cycle waits for the **CSMS-assigned** transaction id, on the
+ * versions that supply one.
+ *
+ * Bounded by the same reasoning as {@link START_CONFIRM_TIMEOUT_MS}: past the
+ * point where the daemon itself has given up, no id is ever coming, so waiting
+ * longer buys nothing. Here that is the authorization wait plus the per-CALL
+ * watchdog — once `StartTransaction` has been abandoned
+ * ({@link CALL_WATCHDOG_SEC}) its conf will never arrive — plus slack. A CSMS
+ * that simply never answers therefore stalls one cycle by this much and then
+ * proceeds; it cannot hang the run.
+ */
+export const ASSIGNED_ID_TIMEOUT_MS =
+  (AUTHORIZE_WAIT_SEC + CALL_WATCHDOG_SEC + START_CONFIRM_MARGIN_SEC) * 1000;
+
 export interface DaemonBasicAuth {
   readonly username: string;
   readonly password: string;
@@ -1203,8 +1218,28 @@ export class BenchAbortError extends Error {}
  * against it so the sweep stops and says why rather than printing rows whose
  * load is no longer the row's.
  */
+export interface TransactionStartOutcome {
+  /** Whether the transaction was observed to start at all. */
+  readonly started: boolean;
+  /** The CSMS-assigned transaction id, when one was waited for and arrived.
+   *  `0` means the local start was seen but the id is still the placeholder;
+   *  `null` means nothing was confirmed. */
+  readonly transactionId: number | null;
+}
+
+interface StartWaiter {
+  settle(outcome: TransactionStartOutcome): void;
+  /** Whether this waiter has seen the local start (`transactionId` 0) of the
+   *  cycle that armed it. Until it has, a non-zero id can only belong to an
+   *  *earlier* cycle, and accepting it would confirm this cycle off the back
+   *  of the previous one's `StartTransaction.conf`. */
+  sawLocalStart: boolean;
+  /** Whether this cycle must wait for the assigned id before proceeding. */
+  readonly awaitAssignedId: boolean;
+}
+
 export class TransactionStarts {
-  private readonly waiters = new Map<string, (started: boolean) => void>();
+  private readonly waiters = new Map<string, StartWaiter>();
   private available = true;
   private readonly lostSignal: Promise<never>;
   private failLost: (err: Error) => void = () => {};
@@ -1225,34 +1260,90 @@ export class TransactionStarts {
     return this.available;
   }
 
-  /** Arm a waiter for `cpId`, to be settled by {@link confirm}. Resolves
-   *  `false` on timeout, and immediately when the stream is already lost. */
-  arm(cpId: string, timeoutMs: number): Promise<boolean> {
-    if (!this.available) return Promise.resolve(false);
-    return new Promise<boolean>((resolve) => {
+  /**
+   * Arm a waiter for `cpId`, to be settled by {@link confirm}.
+   *
+   * `awaitAssignedId` is what reconciles two requirements that pull against
+   * each other. OCPP 1.6 emits `transaction_started` **twice**: once when the
+   * transaction begins locally, carrying the placeholder id `0`, and again
+   * when `StartTransaction.conf` supplies the CSMS-assigned id.
+   *
+   * - A late conf from the *previous* cycle must not confirm this one. Taking
+   *   only the first emission satisfied that.
+   * - But the stop must not fire while the id is still `0`.
+   *   `OCPPMessageHandler.sendStopTransaction` snapshots the id immediately,
+   *   so stopping early sends the placeholder and produces CALLERRORs and
+   *   corrupted connector state — worst near the latency knee, where a conf
+   *   routinely outlasts a hold.
+   *
+   * Binding the waiter to its own cycle satisfies both. A non-zero id is
+   * accepted only once this waiter has seen its own local start, so a
+   * straggling conf from an earlier cycle is ignored rather than mistaken for
+   * this one's; and the wait then continues to the assigned id rather than
+   * stopping at the placeholder.
+   *
+   * `awaitAssignedId` is false where no assigned id is coming — OCPP 2.x never
+   * sets the numeric id, so waiting for one there would time out every cycle
+   * and stretch the cadence for nothing.
+   */
+  arm(
+    cpId: string,
+    timeoutMs: number,
+    awaitAssignedId: boolean,
+  ): Promise<TransactionStartOutcome> {
+    if (!this.available) {
+      return Promise.resolve({ started: false, transactionId: null });
+    }
+    return new Promise<TransactionStartOutcome>((resolve) => {
       const timer = setTimeout(() => {
-        if (this.waiters.get(cpId) === settle) this.waiters.delete(cpId);
-        resolve(false);
+        if (this.waiters.get(cpId) === waiter) this.waiters.delete(cpId);
+        // A local start seen but no id is still a start — report it, so the
+        // caller can tell "never started" from "started, id never assigned".
+        resolve(
+          waiter.sawLocalStart
+            ? { started: true, transactionId: 0 }
+            : { started: false, transactionId: null },
+        );
       }, timeoutMs);
-      const settle = (started: boolean): void => {
-        clearTimeout(timer);
-        resolve(started);
+      const waiter: StartWaiter = {
+        sawLocalStart: false,
+        awaitAssignedId,
+        settle: (outcome) => {
+          clearTimeout(timer);
+          resolve(outcome);
+        },
       };
       // One connector per benchmarked charge point and one cycle at a time, so
       // a second armed waiter for the same id can only be a bug; drop the older
       // one rather than leaking it.
-      this.waiters.get(cpId)?.(false);
-      this.waiters.set(cpId, settle);
+      this.waiters.get(cpId)?.settle({ started: false, transactionId: null });
+      this.waiters.set(cpId, waiter);
     });
   }
 
-  /** One charge point's transaction has started. Unknown ids are ignored —
-   *  a confirmation with no waiter is a normal race, not an error. */
-  confirm(cpId: string): void {
-    const settle = this.waiters.get(cpId);
-    if (!settle) return;
+  /**
+   * One `transaction_started` event for `cpId`, carrying whatever id it had.
+   *
+   * `transactionId === 0` is the local start; anything else is the assigned id
+   * arriving with `StartTransaction.conf`. An unknown charge point is ignored —
+   * a confirmation with no waiter is a normal race, not an error.
+   */
+  confirm(cpId: string, transactionId: number): void {
+    const waiter = this.waiters.get(cpId);
+    if (!waiter) return;
+    if (transactionId === 0) {
+      waiter.sawLocalStart = true;
+      if (waiter.awaitAssignedId) return; // keep waiting for the real id
+      this.waiters.delete(cpId);
+      waiter.settle({ started: true, transactionId: 0 });
+      return;
+    }
+    // A non-zero id before this cycle's own local start belongs to an earlier
+    // cycle whose conf is only now arriving. Ignoring it is what keeps a
+    // straggler from confirming a newer cycle.
+    if (!waiter.sawLocalStart) return;
     this.waiters.delete(cpId);
-    settle(true);
+    waiter.settle({ started: true, transactionId });
   }
 
   /** The event stream is gone and cannot come back. Idempotent. */
@@ -1277,7 +1368,9 @@ export class TransactionStarts {
   }
 
   private failAll(): void {
-    for (const settle of this.waiters.values()) settle(false);
+    for (const waiter of this.waiters.values()) {
+      waiter.settle({ started: false, transactionId: null });
+    }
     this.waiters.clear();
   }
 }

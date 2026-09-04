@@ -51,6 +51,7 @@ import {
   sleep,
   socketPoolSize,
   staggerOffsetsMs,
+  ASSIGNED_ID_TIMEOUT_MS,
   START_CONFIRM_TIMEOUT_MS,
   TransactionStarts,
   STEP_COLUMNS,
@@ -61,6 +62,7 @@ import {
   type FleetGauge,
   type Sample,
   type StepResult,
+  type TransactionStartOutcome,
 } from "./lib.ts";
 import { OCPP_1_6 } from "../../src/cp/domain/types/OcppVersion.ts";
 
@@ -401,8 +403,12 @@ class TransactionWatcher {
    *  The event arrives on this socket while the ack arrives on a pool socket,
    *  and nothing orders the two — arming after the ack would drop the event
    *  of every fast CSMS and skip every stop. Resolves `false` on timeout. */
-  arm(cpId: string, timeoutMs: number): Promise<boolean> {
-    return this.starts.arm(cpId, timeoutMs);
+  arm(
+    cpId: string,
+    timeoutMs: number,
+    awaitAssignedId: boolean,
+  ): Promise<TransactionStartOutcome> {
+    return this.starts.arm(cpId, timeoutMs, awaitAssignedId);
   }
 
   private onEvent(envelope: unknown): void {
@@ -414,17 +420,16 @@ class TransactionWatcher {
         }
       | undefined;
     if (env?.kind !== "cp" || env.evt?.event !== "transaction_started") return;
-    // `transaction_started` is emitted **twice** per 1.6 transaction: once by
-    // the domain when the transaction begins, carrying the placeholder id 0,
-    // and again by `CLIChargePointService` when `StartTransaction.conf`
-    // supplies the real id. Only the first one means "the transaction
-    // started". Accepting the second would let a slow conf from the previous
-    // cycle confirm the *next* cycle's start — reintroducing the early hold
-    // this class exists to prevent, and doing it only on a saturated CSMS.
-    if (env.evt.data?.transactionId !== 0) return;
     const cpId = env.cpId;
-    if (cpId === undefined) return;
-    this.starts.confirm(cpId);
+    const transactionId = env.evt.data?.transactionId;
+    if (cpId === undefined || typeof transactionId !== "number") return;
+    // Both emissions are forwarded, and `TransactionStarts` decides which one
+    // settles the cycle: 1.6 emits `transaction_started` once locally with the
+    // placeholder id 0 and again when `StartTransaction.conf` brings the real
+    // one. Dropping the second here — as this did — kept a straggling conf
+    // from confirming a newer cycle, but also threw away the assigned id, so a
+    // conf slower than the hold left the stop sending id 0.
+    this.starts.confirm(cpId, transactionId);
   }
 
   close(): void {
@@ -586,10 +591,14 @@ async function growFleet(
   cursor: IdCursor,
   count: number,
   cleanupIds: Set<string>,
+  abort: { requested: boolean },
 ): Promise<string[]> {
   const created: string[] = [];
   let remaining = count;
   while (remaining > 0) {
+    // Checked between batches, so an interrupt that lands mid-step stops
+    // offering new ids rather than racing the cleanup snapshot.
+    if (abort.requested) break;
     const chunk = Math.min(remaining, CP_CREATE_MANY_MAX);
     // Spend the ids *before* awaiting. Whether the call succeeds, partly
     // succeeds or rejects outright, this index range has been offered to the
@@ -687,9 +696,22 @@ function armLoad(
   epochMs: number,
   opts: BenchOptions,
   watcher: TransactionWatcher | null,
-): { stop: () => void; ready: Promise<void>; unconfirmedStarts: () => number } {
+): {
+  stop: () => void;
+  ready: Promise<void>;
+  unconfirmedStarts: () => number;
+  unassignedIds: () => number;
+} {
   let stopped = false;
   let unconfirmedStarts = 0;
+  let unassignedIds = 0;
+  // Only OCPP 1.6 assigns a numeric transaction id — 2.x never sets one, so
+  // waiting for it there would time out every cycle and stretch the cadence
+  // for an id that is not coming.
+  const awaitAssignedId = opts.ocppVersion === OCPP_1_6;
+  const confirmTimeoutMs = awaitAssignedId
+    ? ASSIGNED_ID_TIMEOUT_MS
+    : START_CONFIRM_TIMEOUT_MS;
   // Only *live* timers, and each one removes itself as it fires. A plain
   // array that every cycle appended to grew by two handles per transaction
   // per charge point and never shrank, so a long 2000-CP run retained
@@ -766,8 +788,12 @@ function armLoad(
     // Armed before the RPC is emitted, never after its ack: the
     // `transaction_started` event arrives on the watcher's socket while the
     // ack arrives on a pool socket, and nothing orders those two.
-    const started =
-      watcher?.arm(cpId, START_CONFIRM_TIMEOUT_MS) ?? Promise.resolve(true);
+    const started = watcher
+      ? watcher.arm(cpId, confirmTimeoutMs, awaitAssignedId)
+      : Promise.resolve<TransactionStartOutcome>({
+          started: true,
+          transactionId: null,
+        });
     try {
       await pool.rpc("start_transaction", { connector: 1 }, cpId);
     } catch (err) {
@@ -793,7 +819,18 @@ function armLoad(
     // is waiting for a definitive answer rather than giving up early. No
     // second cycle is scheduled until this one has been answered, held and
     // stopped.
-    if (!(await started)) unconfirmedStarts++;
+    const outcome = await started;
+    if (!outcome.started) unconfirmedStarts++;
+    else if (awaitAssignedId && !outcome.transactionId) {
+      // Started, but the CSMS never assigned an id inside the bound. The stop
+      // below will carry the placeholder, which the 1.6 handler rejects — say
+      // so rather than letting a CALLERROR be the only trace.
+      unassignedIds++;
+      process.stderr.write(
+        `[bench] ${cpId}: transaction started but no id was assigned within ` +
+          `${confirmTimeoutMs / 1000}s; the stop will carry the placeholder\n`,
+      );
+    }
     // The awaits above can span a `stop()`; without this check the callback
     // installs a timer after cleanup already cleared the set, keeping the
     // process alive for up to half a --tx-interval.
@@ -826,6 +863,7 @@ function armLoad(
   return {
     ready,
     unconfirmedStarts: () => unconfirmedStarts,
+    unassignedIds: () => unassignedIds,
     stop: () => {
       stopped = true;
       for (const t of live) clearTimeout(t);
@@ -1004,204 +1042,249 @@ async function main(): Promise<void> {
   // clear in-flight transaction timers and re-issue start_transaction on
   // connectors already mid-session).
   const stopLoads: Array<() => void> = [];
-  const loads: Array<{ unconfirmedStarts: () => number }> = [];
+  const loads: Array<{
+    unconfirmedStarts: () => number;
+    unassignedIds: () => number;
+  }> = [];
 
   // Runs once: the `finally` below and the SIGINT handler can both reach it,
   // and a second concurrent delete sweep would double the teardown budget for
   // charge points the first sweep is already deleting.
+  // Set by the SIGINT handler, read by the sweep between steps and by
+  // `growFleet` between batches. Creation must *stop* before cleanup reads the
+  // id list, or the list is read too early — see below.
+  const abort = { requested: false };
+  /** Resolves when the sweep loop has unwound. Assigned as soon as the loop
+   *  starts so the signal handler can await it. */
+  let sweepSettled: Promise<unknown> = Promise.resolve();
+
   let cleanupStarted: Promise<void> | null = null;
   const cleanup = async (): Promise<void> => {
     cleanupStarted ??= (async () => {
+      // Stop creating, then wait for creation to have stopped, and only then
+      // snapshot the ids. A SIGINT landing while `growFleet` awaited one batch
+      // of a multi-batch step used to snapshot `cleanupIds` immediately: the
+      // outstanding batch then finished and later batches were offered and
+      // created *after* the snapshot, so the handler exited having deleted
+      // only the earlier ids and left BENCH-* charge points registered.
+      abort.requested = true;
       for (const stop of stopLoads) stop();
+      await sweepSettled.catch(() => undefined);
       watcher?.close();
       await deleteFleet(pool, runId, [...cleanupIds]);
       await pool.closeAll();
     })();
     return cleanupStarted;
   };
+  let interrupted = false;
   process.on("SIGINT", () => {
+    if (interrupted) {
+      // A second Ctrl-C means the operator is no longer willing to wait for a
+      // graceful teardown. Say what that costs rather than appearing to hang.
+      process.stderr.write(
+        `[bench] second interrupt: exiting now. Charge points named ` +
+          `${BENCH_ID_ROOT}-${runId}-* may remain on the daemon.\n`,
+      );
+      process.exit(130);
+    }
+    interrupted = true;
+    process.stderr.write(
+      `[bench] interrupted: stopping creation and cleaning up. Ctrl-C again to ` +
+        `exit immediately (which may leave charge points behind).\n`,
+    );
     void cleanup().finally(() => process.exit(130));
   });
 
   try {
-    // Before the first charge point exists, on purpose: the `events.subscribe`
-    // ack carries a snapshot of the whole fleet through an `ARRAY_1000`
-    // schema, so subscribing once the sweep is past 1000 charge points would
-    // fail. A failure here reaches the `finally` and closes the pool.
-    if (opts.txIntervalSec > 0) {
-      watcher = await TransactionWatcher.open(
-        opts.daemonUrl,
-        opts.daemonBasicAuth,
-      );
-    }
-    // Every long wait below is raced against the event socket's loss, so a run
-    // that can no longer confirm transaction starts stops and says why instead
-    // of printing rows whose load is no longer the load they claim.
-    const untilLost = <T>(p: Promise<T>): Promise<T> =>
-      watcher ? watcher.lost(p) : p;
-
-    // One origin for every cohort's stagger, fixed before the first charge
-    // point exists. See `firstCycleDelayMs`.
-    const runEpochMs = Date.now();
-    const cursor: IdCursor = { nextIndex: 1 };
-    // Cumulative across steps, like the daemon's counters: each row reports
-    // its own delta.
-    let unconfirmedStartsBefore = 0;
-    for (const n of opts.counts) {
-      const toCreate = n - allCpIds.length;
-      process.stderr.write(`[bench] N=${n}: creating ${toCreate} more CP(s)\n`);
-      const created = await untilLost(
-        growFleet(pool, opts, runId, cursor, toCreate, cleanupIds),
-      );
-      allCpIds.push(...created);
-      const notCreated = n - allCpIds.length;
-      if (notCreated > 0) {
-        process.stderr.write(
-          `[bench] N=${n}: only ${allCpIds.length} charge point(s) exist; the row ` +
-            `below is labelled with that, not with ${n}\n`,
+    // The sweep runs as a promise so `cleanup()` can await its unwinding
+    // before reading the id list.
+    const sweep = (async (): Promise<void> => {
+      // Before the first charge point exists, on purpose: the `events.subscribe`
+      // ack carries a snapshot of the whole fleet through an `ARRAY_1000`
+      // schema, so subscribing once the sweep is past 1000 charge points would
+      // fail. A failure here reaches the `finally` and closes the pool.
+      if (opts.txIntervalSec > 0) {
+        watcher = await TransactionWatcher.open(
+          opts.daemonUrl,
+          opts.daemonBasicAuth,
         );
       }
+      // Every long wait below is raced against the event socket's loss, so a run
+      // that can no longer confirm transaction starts stops and says why instead
+      // of printing rows whose load is no longer the load they claim.
+      const untilLost = <T>(p: Promise<T>): Promise<T> =>
+        watcher ? watcher.lost(p) : p;
 
-      // Relative to the preflight baseline, so `--allow-existing` measures
-      // this run's fleet settling rather than the daemon's whole population.
-      const { connected, notSettled } = await untilLost(
-        waitForSettle(
+      // One origin for every cohort's stagger, fixed before the first charge
+      // point exists. See `firstCycleDelayMs`.
+      const runEpochMs = Date.now();
+      const cursor: IdCursor = { nextIndex: 1 };
+      // Cumulative across steps, like the daemon's counters: each row reports
+      // its own delta.
+      let unconfirmedStartsBefore = 0;
+      for (const n of opts.counts) {
+        if (abort.requested) return;
+        const toCreate = n - allCpIds.length;
+        process.stderr.write(
+          `[bench] N=${n}: creating ${toCreate} more CP(s)\n`,
+        );
+        const created = await untilLost(
+          growFleet(pool, opts, runId, cursor, toCreate, cleanupIds, abort),
+        );
+        allCpIds.push(...created);
+        const notCreated = n - allCpIds.length;
+        if (notCreated > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: only ${allCpIds.length} charge point(s) exist; the row ` +
+              `below is labelled with that, not with ${n}\n`,
+          );
+        }
+
+        // Relative to the preflight baseline, so `--allow-existing` measures
+        // this run's fleet settling rather than the daemon's whole population.
+        const { connected, notSettled } = await untilLost(
+          waitForSettle(
+            opts,
+            baseline.connected + allCpIds.length,
+            opts.settleTimeoutSec,
+          ),
+        );
+        if (notSettled > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: ${notSettled} CP(s) did not report connected within ${opts.settleTimeoutSec}s\n`,
+          );
+        }
+
+        // The cohort's first global fleet index: `created` was just appended, so
+        // the cohort occupies the tail of `allCpIds`. Phases are assigned from
+        // these stable indices and never revisited, so growing the fleet never
+        // re-phases a charge point that is already cycling.
+        const load = armLoad(
+          pool,
+          created,
+          allCpIds.length - created.length,
+          runEpochMs,
           opts,
-          baseline.connected + allCpIds.length,
-          opts.settleTimeoutSec,
-        ),
-      );
-      if (notSettled > 0) {
-        process.stderr.write(
-          `[bench] N=${n}: ${notSettled} CP(s) did not report connected within ${opts.settleTimeoutSec}s\n`,
+          watcher,
         );
-      }
+        stopLoads.push(load.stop);
+        loads.push(load);
+        await untilLost(load.ready);
 
-      // The cohort's first global fleet index: `created` was just appended, so
-      // the cohort occupies the tail of `allCpIds`. Phases are assigned from
-      // these stable indices and never revisited, so growing the fleet never
-      // re-phases a charge point that is already cycling.
-      const load = armLoad(
-        pool,
-        created,
-        allCpIds.length - created.length,
-        runEpochMs,
-        opts,
-        watcher,
-      );
-      stopLoads.push(load.stop);
-      loads.push(load);
-      await untilLost(load.ready);
+        // Warm up *before* the `before` scrape, not after it. Every counter
+        // below is a delta between the two scrapes, and a watchdog timeout
+        // increments 30s after the CALL it belongs to — so without holding this
+        // N and its load steady for the stagger ramp plus one watchdog
+        // interval, the delta would carry expirations for calls issued during
+        // the previous step, this step's boot, or its ramp, and the first
+        // non-zero timeout would be reported at a larger N than the one that
+        // produced it.
+        if (opts.warmupSec > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: warming up for ${opts.warmupSec}s before the first scrape\n`,
+          );
+          await untilLost(sleep(opts.warmupSec * 1000));
+        }
 
-      // Warm up *before* the `before` scrape, not after it. Every counter
-      // below is a delta between the two scrapes, and a watchdog timeout
-      // increments 30s after the CALL it belongs to — so without holding this
-      // N and its load steady for the stagger ramp plus one watchdog
-      // interval, the delta would carry expirations for calls issued during
-      // the previous step, this step's boot, or its ramp, and the first
-      // non-zero timeout would be reported at a larger N than the one that
-      // produced it.
-      if (opts.warmupSec > 0) {
         process.stderr.write(
-          `[bench] N=${n}: warming up for ${opts.warmupSec}s before the first scrape\n`,
+          `[bench] N=${n}: measuring for ${opts.durationSec}s\n`,
         );
-        await untilLost(sleep(opts.warmupSec * 1000));
-      }
-
-      process.stderr.write(
-        `[bench] N=${n}: measuring for ${opts.durationSec}s\n`,
-      );
-      const before = await untilLost(
-        fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth),
-      );
-      await untilLost(sleep(opts.durationSec * 1000));
-      const after = await untilLost(
-        fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth),
-      );
-
-      const deltas = diffHistogram(before, after, CALL_DURATION_METRIC);
-      const aggregate = mergeHistogramDeltas(deltas);
-      const hbDelta = deltas.get("Heartbeat");
-      const heartbeat = hbDelta
-        ? mergeHistogramDeltas(new Map([["Heartbeat", hbDelta]]))
-        : null;
-
-      const errorsAfter = after
-        .filter((s) => s.name === "ocppcp_ocpp_call_errors_total")
-        .reduce((sum, s) => sum + s.value, 0);
-      const errorsBefore = before
-        .filter((s) => s.name === "ocppcp_ocpp_call_errors_total")
-        .reduce((sum, s) => sum + s.value, 0);
-      const reconnectsAfter =
-        after.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ?? 0;
-      const reconnectsBefore =
-        before.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ?? 0;
-      const timeoutsAfter = after
-        .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
-        .reduce((sum, s) => sum + s.value, 0);
-      const timeoutsBefore = before
-        .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
-        .reduce((sum, s) => sum + s.value, 0);
-      const evictionsAfter =
-        after.find((s) => s.name === PENDING_EVICTIONS_METRIC)?.value ?? 0;
-      const evictionsBefore =
-        before.find((s) => s.name === PENDING_EVICTIONS_METRIC)?.value ?? 0;
-      const evictions = Math.max(0, evictionsAfter - evictionsBefore);
-      // The one case where p50/p95 are silently incomplete: an evicted CALL
-      // loses its duration sample, and 4096 concurrent pending CALLs is a
-      // condition this sweep is built to reach.
-      if (evictions > 0) {
-        process.stderr.write(
-          `[bench] N=${n}: WARNING: the daemon's correlation cache evicted ` +
-            `${evictions} in-flight CALL(s) during this window, so the latency ` +
-            `below is missing that many observations. Not timeouts — the calls ` +
-            `may well have been answered.\n`,
+        const before = await untilLost(
+          fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth),
         );
-      }
-      const unconfirmedStarts = loads.reduce(
-        (sum, l) => sum + l.unconfirmedStarts(),
-        0,
-      );
-
-      // Read from the *final* scrape, not from the settle poll: a charge point
-      // that dropped during the warmup or the window would otherwise still be
-      // counted, attributing this row's latency to a fleet larger than the one
-      // that produced it. A warmup disconnect is the worst case — its
-      // reconnect attempts land before the `before` scrape, so the
-      // `reconnects` column stays 0 and nothing else in the row hints at it.
-      const connectedAtEnd = fleetGauge(after).connected;
-      const dropped = Math.max(0, connected - connectedAtEnd);
-      if (dropped > 0) {
-        process.stderr.write(
-          `[bench] N=${n}: WARNING: ${dropped} charge point(s) that had settled ` +
-            `were no longer connected at the end of the window; the row's ` +
-            `latency comes from the ${Math.max(0, connectedAtEnd - baseline.connected)} ` +
-            `still connected, not from all ${Math.max(0, connected - baseline.connected)}.\n`,
+        await untilLost(sleep(opts.durationSec * 1000));
+        const after = await untilLost(
+          fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth),
         );
-      }
 
-      results.push({
-        requested: n,
-        fleet: allCpIds.length,
-        connectedAtSettle: Math.max(0, connected - baseline.connected),
-        connectedAtEnd: Math.max(0, connectedAtEnd - baseline.connected),
-        notSettled,
-        aggregate,
-        heartbeat,
-        // Only the OCPP-1.6J handler has the watchdog that feeds this counter,
-        // so on any other version it is structurally zero — and printing 0
-        // would read as "no calls were abandoned" rather than "not measured".
-        timeouts:
-          opts.ocppVersion === OCPP_1_6
-            ? Math.max(0, timeoutsAfter - timeoutsBefore)
-            : null,
-        evictions,
-        errors: Math.max(0, errorsAfter - errorsBefore),
-        reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
-        unconfirmedStarts: unconfirmedStarts - unconfirmedStartsBefore,
-      });
-      unconfirmedStartsBefore = unconfirmedStarts;
-    }
+        const deltas = diffHistogram(before, after, CALL_DURATION_METRIC);
+        const aggregate = mergeHistogramDeltas(deltas);
+        const hbDelta = deltas.get("Heartbeat");
+        const heartbeat = hbDelta
+          ? mergeHistogramDeltas(new Map([["Heartbeat", hbDelta]]))
+          : null;
+
+        const errorsAfter = after
+          .filter((s) => s.name === "ocppcp_ocpp_call_errors_total")
+          .reduce((sum, s) => sum + s.value, 0);
+        const errorsBefore = before
+          .filter((s) => s.name === "ocppcp_ocpp_call_errors_total")
+          .reduce((sum, s) => sum + s.value, 0);
+        const reconnectsAfter =
+          after.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ??
+          0;
+        const reconnectsBefore =
+          before.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ??
+          0;
+        const timeoutsAfter = after
+          .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
+          .reduce((sum, s) => sum + s.value, 0);
+        const timeoutsBefore = before
+          .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
+          .reduce((sum, s) => sum + s.value, 0);
+        const evictionsAfter =
+          after.find((s) => s.name === PENDING_EVICTIONS_METRIC)?.value ?? 0;
+        const evictionsBefore =
+          before.find((s) => s.name === PENDING_EVICTIONS_METRIC)?.value ?? 0;
+        const evictions = Math.max(0, evictionsAfter - evictionsBefore);
+        // The one case where p50/p95 are silently incomplete: an evicted CALL
+        // loses its duration sample, and 4096 concurrent pending CALLs is a
+        // condition this sweep is built to reach.
+        if (evictions > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: WARNING: the daemon's correlation cache evicted ` +
+              `${evictions} in-flight CALL(s) during this window, so the latency ` +
+              `below is missing that many observations. Not timeouts — the calls ` +
+              `may well have been answered.\n`,
+          );
+        }
+        const unconfirmedStarts = loads.reduce(
+          (sum, l) => sum + l.unconfirmedStarts(),
+          0,
+        );
+
+        // Read from the *final* scrape, not from the settle poll: a charge point
+        // that dropped during the warmup or the window would otherwise still be
+        // counted, attributing this row's latency to a fleet larger than the one
+        // that produced it. A warmup disconnect is the worst case — its
+        // reconnect attempts land before the `before` scrape, so the
+        // `reconnects` column stays 0 and nothing else in the row hints at it.
+        const connectedAtEnd = fleetGauge(after).connected;
+        const dropped = Math.max(0, connected - connectedAtEnd);
+        if (dropped > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: WARNING: ${dropped} charge point(s) that had settled ` +
+              `were no longer connected at the end of the window; the row's ` +
+              `latency comes from the ${Math.max(0, connectedAtEnd - baseline.connected)} ` +
+              `still connected, not from all ${Math.max(0, connected - baseline.connected)}.\n`,
+          );
+        }
+
+        results.push({
+          requested: n,
+          fleet: allCpIds.length,
+          connectedAtSettle: Math.max(0, connected - baseline.connected),
+          connectedAtEnd: Math.max(0, connectedAtEnd - baseline.connected),
+          notSettled,
+          aggregate,
+          heartbeat,
+          // Only the OCPP-1.6J handler has the watchdog that feeds this counter,
+          // so on any other version it is structurally zero — and printing 0
+          // would read as "no calls were abandoned" rather than "not measured".
+          timeouts:
+            opts.ocppVersion === OCPP_1_6
+              ? Math.max(0, timeoutsAfter - timeoutsBefore)
+              : null,
+          evictions,
+          errors: Math.max(0, errorsAfter - errorsBefore),
+          reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
+          unconfirmedStarts: unconfirmedStarts - unconfirmedStartsBefore,
+        });
+        unconfirmedStartsBefore = unconfirmedStarts;
+      }
+    })();
+    sweepSettled = sweep;
+    await sweep;
   } finally {
     await cleanup();
   }

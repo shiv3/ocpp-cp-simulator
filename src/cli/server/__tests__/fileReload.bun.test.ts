@@ -1528,6 +1528,115 @@ describe("a reload the control plane could not announce is refused (#314)", () =
   });
 });
 
+describe("an idTag file edited before the watch existed is still caught (#314)", () => {
+  it("reads the baseline after the watch, not before it", async () => {
+    // The scenario path closed this window in an earlier round; the idTag path
+    // had the same read-then-watch ordering. A save landing in between produces
+    // no event — nothing is looking — and the cached text is the pre-edit copy,
+    // so the reconcile compares the old file against the pool it came from,
+    // finds them equal, and leaves the charge point stale.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["BEFORE-WATCH"]));
+    const backend = new TestWatchBackend();
+    backend.onWatch = (watched) => {
+      if (watched !== dir) return;
+      backend.onWatch = null;
+      // Written as the watch is opened: after the create-time read that gave
+      // the charge point its pool, before anything can observe the change.
+      fs.writeFileSync(file, JSON.stringify(["AFTER-WATCH"]));
+    };
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-EARLY",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+
+    await waitFor(
+      () =>
+        server.registry.get("CP-EARLY")?.getInit().idTags?.[0] ===
+        "AFTER-WATCH",
+      "the edit made while the watch was being established to be reconciled",
+    );
+  });
+});
+
+describe("a run's cleanup only ever tears down its own run (#314)", () => {
+  it("does not let a stopped run delete the executor that replaced it", async () => {
+    // `stopScenario` drops the executor synchronously and leaves that run's
+    // `finally` queued. Anything that starts a replacement inside that window —
+    // a drained reload whose definition auto-starts, which is what
+    // `reset_scenario` used to do — would then have its executor, run id and
+    // transcript deleted by the run it replaced.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", runnableScenario("supersede", 30));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await createConnectedCp(server, socket, "CP-SUPERSEDE");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-SUPERSEDE");
+
+    const service = server.registry.get("CP-SUPERSEDE");
+    if (!service) throw new Error("CP-SUPERSEDE missing");
+    service.runScenario(1, "supersede");
+    expect(service.isScenarioRunning("supersede")).toBe(true);
+
+    // All in one tick, exactly as a synchronous drain would: stop, replace the
+    // definition, start again. The stopped run's `finally` lands afterwards.
+    service.stopScenario(1, "supersede");
+    service.loadScenario(1, JSON.parse(runnableScenario("supersede", 30)));
+    service.runScenario(1, "supersede");
+    expect(service.isScenarioRunning("supersede")).toBe(true);
+
+    // Let the superseded run's queued cleanup run.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(service.isScenarioRunning("supersede")).toBe(true);
+    // …and it did not record a terminal verdict over the live run either.
+    expect(service.getScenarioStatus(1, "supersede")?.state).not.toBe(
+      "completed",
+    );
+  });
+
+  it("reset_scenario leaves the drain to the run it stopped", async () => {
+    // The same hazard through the path that produced it: reset stops the run
+    // and used to announce the settle synchronously, inside that window.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", runnableScenario("reset-race", 30));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-RESET-RACE");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-RESET-RACE");
+
+    const service = server.registry.get("CP-RESET-RACE");
+    if (!service) throw new Error("CP-RESET-RACE missing");
+    service.runScenario(1, "reset-race");
+    backend.save(file, runnableScenario("reset-race", 7));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+
+    service.resetScenario(1, "reset-race");
+    // Observed synchronously, because that is the whole point: the drain must
+    // NOT have run inside `resetScenario`, where the stopped run's `finally` is
+    // still queued behind it. Announcing there is what let a reloaded
+    // definition auto-start into a window that then tore it down.
+    expect(loadedDelaySeconds(server, "CP-RESET-RACE", "reset-race")).toBe(30);
+
+    // Still drained — by the stopped run's own post-cleanup notification.
+    await waitFor(
+      () => loadedDelaySeconds(server, "CP-RESET-RACE", "reset-race") === 7,
+      "the held reload to land after the stopped run's cleanup",
+    );
+    expect(events.some((e) => e.outcome === "applied")).toBe(true);
+  });
+});
+
 /** The `delaySeconds` of the loaded definition's delay node. */
 function loadedDelaySeconds(
   server: TestServer,

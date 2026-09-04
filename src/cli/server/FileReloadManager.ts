@@ -198,11 +198,18 @@ export class FileReloadManager {
     }
     for (const absolute of wanted) {
       if (!this.idTagWatches.has(absolute)) {
-        this.idTagText.set(absolute, readTextOrEmpty(absolute));
+        // Watch established *before* the baseline is read, deliberately. Read
+        // first and a save landing in between produces no event — nothing is
+        // looking yet — while the cached text is already the pre-edit copy, so
+        // the reconcile below compares the old file against the pool it came
+        // from, finds them equal, and leaves the charge point stale until some
+        // unrelated later event. This is the window `registerScenarioFile`
+        // closes on the scenario path; the two are the only two watch sites.
         this.idTagWatches.set(
           absolute,
           this.watcher.watch(absolute, () => this.reloadIdTags(absolute)),
         );
+        this.idTagText.set(absolute, readTextOrEmpty(absolute));
       }
       // Per charge point, not per watch. `restoreFromDatabase` re-creates the
       // fleet one charge point at a time, each firing its own sync, so a second

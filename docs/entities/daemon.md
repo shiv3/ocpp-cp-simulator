@@ -71,7 +71,7 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--cp-id-pattern <tpl>`             | `<cp-id>{n:03}`              | Id template used with `--cp-count`. `{n}` is the index, `{n:03}` zero-pads it. The fleet registers before it dials, then connects 8 at a time.                                                                                                                                           |
 | `--metrics`                         | off                          | Serve `GET /metrics` (Prometheus text exposition). Off by default; the path 404s without it. See [Metrics](#metrics).                                                                                                                                                                    |
 | `--metrics-no-auth`                 | off                          | Implies `--metrics` and serves it outside the Basic Auth gate. Trusted networks only; exempts nothing else.                                                                                                                                                                              |
-| `--watch`                           | off                          | Re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. Off by default; **refused outside a server mode** (`--daemon`, `--http-port`, `--web-console`) rather than accepted and ignored. See [File hot-reload](#file-hot-reload) (#314). |
+| `--watch`                           | off                          | Re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. Off by default; **refused outside a server mode** (`--daemon`, `--http-port`, `--web-console`) rather than accepted and ignored. See [File hot-reload](#file-hot-reload) (#314).            |
 | `--unsafe-remote`                   | -                            | Allows a non-loopback daemon bind without web-console Basic Auth. Use only on trusted networks or when another boundary handles access.                                                                                                                                                  |
 | `--web-console [<port>]`            | -                            | Serve the bundled browser UI alongside health and Socket.IO. Without a port, shares `--http-port`; with a port, serves the UI on that listener.                                                                                                                                          |
 | `--web-console-dist <dir>`          | -                            | Serve the console from this directory instead of searching for a bundled `dist/`. Must contain `index.html`; a path that does not is a startup error, not a fallback. The [desktop app](desktop-app.md#how-the-sidecar-finds-the-web-console) passes its Tauri resource dir here (#319). |
@@ -243,9 +243,14 @@ The rules, in the order they bite:
   save and can read a truncated intermediate file. The watch waits 200 ms after
   the last event, then reads once. Identical bytes are not a reload and produce
   no event.
-- **A malformed file never lands.** The reload path applies exactly the checks
-  the load path applies. A file that fails them is logged, reported as
-  `rejected`, and the previous good copy stays in place — a half-saved file
+- **A malformed file never lands, and `rejected` is true of everything.** The
+  reload path applies exactly the checks the load path applies, and an idTag
+  pool is written to `--state-db` **before** the live pool is touched — so a
+  write that fails leaves the daemon exactly as it was, and the event, the
+  running daemon and the stored state cannot disagree. (Persist-first rather
+  than mutate-then-roll-back: a rollback would expose a window in which a
+  concurrent draw presents a tag that is not durable.) A file that fails them is
+  logged, reported as `rejected`, and the previous good copy stays in place — a half-saved file
   never leaves a charge point with half a configuration. A scenario larger than
   the control plane can carry (256 KiB serialized, the
   `scenario-definitions-changed` envelope's per-definition cap) is refused the

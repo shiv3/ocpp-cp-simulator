@@ -338,14 +338,24 @@ export class CPRegistry {
   applyIdTagReload(cpId: string, tags: readonly string[]): boolean {
     const svc = this.services.get(cpId);
     if (!svc) return false;
-    if (!svc.replaceIdTags(tags)) return false;
-    if (this.database) {
-      this.database.run(
-        "UPDATE charge_points SET id_tags = ? WHERE cp_id = ?",
-        [JSON.stringify(tags), cpId],
-      );
-    }
-    return true;
+    // Asked without mutating, so the write below can come first.
+    if (!svc.canReplaceIdTags(tags)) return false;
+    // Persisted *before* the live pool is touched, deliberately (#314). The
+    // caller reports the outcome of this call, so a write that throws
+    // (SQLITE_BUSY, a full disk) must leave the daemon exactly as it was —
+    // otherwise `rejected` is announced while the new tags are in force and a
+    // restart quietly reverts them: the event, the running daemon and the
+    // stored state would all disagree.
+    //
+    // Persist-first rather than mutate-then-roll-back on purpose. Both keep the
+    // two in step at rest, but a rollback exposes a window in which a
+    // concurrent draw can present a tag that is not durable; ordering it this
+    // way means no reader ever sees one.
+    this.database?.run("UPDATE charge_points SET id_tags = ? WHERE cp_id = ?", [
+      JSON.stringify(tags),
+      cpId,
+    ]);
+    return svc.replaceIdTags(tags);
   }
 
   /**

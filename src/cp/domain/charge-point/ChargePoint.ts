@@ -638,8 +638,15 @@ export class ChargePoint {
    * conjuring one here would make a `--watch` daemon behave differently from
    * the `cp.create` that produced the charge point.
    */
+  /** Whether a pool exists to replace — the same condition
+   *  {@link replaceIdTags} refuses on, asked without mutating anything, so a
+   *  caller can persist before it changes the live charge point (#314). */
+  canReplaceIdTags(tags: readonly string[]): boolean {
+    return this._idTagPool !== null && tags.length > 0;
+  }
+
   replaceIdTags(tags: readonly string[]): boolean {
-    if (!this._idTagPool || tags.length === 0) return false;
+    if (!this._idTagPool || !this.canReplaceIdTags(tags)) return false;
     this._idTagPool.replaceTags(tags);
     return true;
   }

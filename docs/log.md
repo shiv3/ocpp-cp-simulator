@@ -3,7 +3,6 @@ title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
 updated: 2026-09-05
-updated: 2026-09-04
 ---
 
 # Log
@@ -818,3 +817,23 @@ Sixth review pass on PR #325.
 - The `file-reload` envelope bounds `scenarioId` by the definition that carries
   it, so an id a file-backed scenario may legitimately have can no longer make
   the reload apply while the event is silently dropped.
+
+## [2026-09-05] ingest | `--watch`: the persistence surface, three defects in (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — `rejected` is now a claim about everything, not
+  just the parse: an idTag pool is persisted **before** the live pool is
+  touched, so a failed write leaves the daemon unchanged and the event, the
+  running daemon and the stored state cannot disagree. Persist-first rather than
+  mutate-then-roll-back is deliberate — a rollback exposes a window in which a
+  concurrent draw presents a tag that is not durable.
+- [State persistence](concepts/state-persistence.md) — `watched_scenario_files`
+  rows are invalidated **whether or not `--watch` is on**. A row is a fact about
+  stored state; cleaning it up only behind the flag let a daemon restarted
+  without `--watch` leave a stale row for a later watched restart to reattach,
+  over a definition the operator had replaced in between.
+- Two caches in `FileReloadManager` now carry a comment saying they follow
+  opposite rules on purpose. `reconciledCps` is set _before_ an attempt, so a
+  file broken on disk is reported once rather than at every sync; `idTagText`
+  records what actually landed, so a failed apply clears it and the operator's
+  next save of the same bytes is judged afresh. Making them consistent would
+  break one of them.

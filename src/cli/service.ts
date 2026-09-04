@@ -715,6 +715,11 @@ export class CLIChargePointService {
    * at StartTransaction and only the next draw sees the new list. Returns
    * `false` when this charge point has no pool to replace.
    */
+  /** See {@link ChargePoint.canReplaceIdTags}. */
+  canReplaceIdTags(tags: readonly string[]): boolean {
+    return this._chargePoint.canReplaceIdTags(tags);
+  }
+
   replaceIdTags(tags: readonly string[]): boolean {
     if (!this._chargePoint.replaceIdTags(tags)) return false;
     this._init = { ...this._init, idTags: [...tags] };

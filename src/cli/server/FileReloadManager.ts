@@ -6,6 +6,12 @@ import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { CPRegistry } from "./CPRegistry";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { FileWatcher } from "./FileWatcher";
+import {
+  forgetWatchedConnectorScenarioFiles,
+  forgetWatchedScenarioFile,
+  listWatchedScenarioFiles,
+  rememberWatchedScenarioFile,
+} from "./watchedScenarioFiles";
 import { parseIdTagsFile } from "./idTagFile";
 import { SCENARIO_MAX_BYTES } from "../../protocol/limits";
 
@@ -340,10 +346,7 @@ export class FileReloadManager {
       entry.unwatch();
       this.scenarios.delete(key);
     }
-    this.database?.run(
-      "DELETE FROM watched_scenario_files WHERE cp_id = ? AND connector_id = ?",
-      [cpId, connectorId],
-    );
+    forgetWatchedConnectorScenarioFiles(this.database, cpId, connectorId);
   }
 
   /**
@@ -358,14 +361,7 @@ export class FileReloadManager {
    */
   restoreScenarioWatches(): void {
     if (this.closed || !this.database) return;
-    const rows = this.database.all<{
-      cp_id: string;
-      connector_id: number;
-      scenario_id: string;
-      path: string;
-    }>(
-      "SELECT cp_id, connector_id, scenario_id, path FROM watched_scenario_files",
-    );
+    const rows = listWatchedScenarioFiles(this.database);
     for (const row of rows) {
       const loaded = this.registry
         .get(row.cp_id)
@@ -390,11 +386,12 @@ export class FileReloadManager {
   }
 
   private rememberScenarioFile(entry: ScenarioEntry): void {
-    this.database?.run(
-      "INSERT INTO watched_scenario_files (cp_id, connector_id, scenario_id, path) " +
-        "VALUES (?, ?, ?, ?) ON CONFLICT (cp_id, connector_id, scenario_id) " +
-        "DO UPDATE SET path = excluded.path",
-      [entry.cpId, entry.connectorId, entry.scenarioId, entry.absolutePath],
+    rememberWatchedScenarioFile(
+      this.database,
+      entry.cpId,
+      entry.connectorId,
+      entry.scenarioId,
+      entry.absolutePath,
     );
   }
 
@@ -403,11 +400,7 @@ export class FileReloadManager {
     connectorId: number,
     scenarioId: string,
   ): void {
-    this.database?.run(
-      "DELETE FROM watched_scenario_files " +
-        "WHERE cp_id = ? AND connector_id = ? AND scenario_id = ?",
-      [cpId, connectorId, scenarioId],
-    );
+    forgetWatchedScenarioFile(this.database, cpId, connectorId, scenarioId);
   }
 
   close(): void {
@@ -517,7 +510,17 @@ export class FileReloadManager {
     this.log(
       `[watch] ${absolutePath} no longer matches ${stale.length} charge point(s) it was loaded into; reconciling`,
     );
-    void this.applyIdTags(stale, absolutePath, tags);
+    if (!this.applyIdTags(stale, absolutePath, tags)) {
+      // Two caches here, and they follow opposite rules on purpose. The
+      // `reconciledCps` marker above is set *before* the attempt: it exists so
+      // a file that has been broken on disk all along is reported once rather
+      // than at every registry sync. `idTagText` is a record of what actually
+      // landed, so a failed apply must not leave the current bytes cached — the
+      // operator's next save of that same content would be discarded as
+      // unchanged and the database could never catch up. Do not "make these
+      // consistent": they answer different questions.
+      this.idTagText.delete(absolutePath);
+    }
   }
 
   /** Whether every charge point took the new pool without throwing. A charge

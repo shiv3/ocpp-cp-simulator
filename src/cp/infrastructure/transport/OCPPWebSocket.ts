@@ -746,9 +746,16 @@ export class OCPPWebSocket {
     const now = Date.now();
     if (now - this._lastRefusalProbeAt < 60_000) return;
     this._lastRefusalProbeAt = now;
+    // The probe is a round trip, and the reconnect loop may well win it. A
+    // refusal logged against a charge point that is connected again reads as
+    // a live problem, so the answer is dropped unless it still describes the
+    // connection that asked the question.
+    const probedGeneration = this._generationCounter;
     void probeUpgradeRefusal(options)
       .then((detail) => {
         if (this._disposed || !detail) return;
+        if (this._generationCounter !== probedGeneration) return;
+        if (this._ws?.readyState === WebSocket.OPEN) return;
         this._logger.error(
           `${this.describeRefusal(detail.status, detail.location)} (diagnostic GET after the handshake failed)`,
           LogType.WEBSOCKET,

@@ -52,7 +52,7 @@ Error codes are closed over:
 | `connect_failed` | The CSMS refused or dropped the connection (#286). The message carries the close code and reason; the daemon is fine and its reconnect loop is already running.                          |
 | `internal`       | The daemon itself failed. If you see this for a connection problem, it is a bug.                                                                                                         |
 | `unauthorized`   | The web-console Basic Auth gate rejected the caller ([Access control](access-control.md)).                                                                                               |
-| `timeout`        | No ack within the 30 s deadline — client-synthesised.                                                                                                                                    |
+| `timeout`        | The 30 s deadline elapsed. The server returns it when a handler exceeds the deadline (`withRpcDeadline`), and the Socket.IO client also synthesises it when no ack arrives at all.       |
 | `disconnected`   | The socket dropped before the ack — client-synthesised.                                                                                                                                  |
 
 The protocol schemas live in `src/protocol/` and are validated with `zod`.

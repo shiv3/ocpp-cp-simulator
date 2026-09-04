@@ -65,6 +65,15 @@ export interface ScenarioFileRegistration {
   /** Applied to the freshly-parsed definition before it is loaded — how the
    *  startup fan-out rewrites a template per connector. Identity by default. */
   readonly prepare?: (definition: ScenarioDefinition) => ScenarioDefinition;
+  /**
+   * The exact text the caller loaded, when it still has it.
+   *
+   * The duplicate-suppression baseline has to be the bytes the live definition
+   * came from, not whatever is on disk by the time this registration runs — a
+   * write between the caller's read and this call would otherwise be recorded
+   * as already-seen and never applied at all (#314).
+   */
+  readonly loadedText?: string;
 }
 
 interface ScenarioEntry extends ScenarioFileRegistration {
@@ -245,13 +254,20 @@ export class FileReloadManager {
       ...registration,
       absolutePath,
       unwatch: () => {},
-      lastText: readTextOrEmpty(absolutePath) || null,
+      lastText:
+        (registration.loadedText ?? readTextOrEmpty(absolutePath)) || null,
       pending: null,
     };
     entry.unwatch = this.watcher.watch(absolutePath, () =>
       this.reloadScenario(key),
     );
     this.scenarios.set(key, entry);
+    // Close the rest of the window. Between the caller reading the file and the
+    // watch starting, nothing is looking: a write in there produces no event,
+    // and with the baseline holding the loaded text it would sit unnoticed
+    // until the file changed again. One comparison now settles it — unchanged
+    // bytes early-out, so the ordinary registration emits nothing.
+    this.reloadScenario(key);
   }
 
   /**
@@ -449,8 +465,13 @@ export class FileReloadManager {
       this.rejectScenario(entry, err);
       return;
     }
-    entry.lastText = text;
-    this.applyOrDefer(entry, definition);
+    // Recorded only once the text has actually been accepted — applied, or held
+    // for later. `loadScenario` can still refuse it, and a rejected save that
+    // became the baseline would make the operator's next save of that same
+    // content an early-out: no retry, no event, and the connector left on the
+    // old definition until the bytes happened to change again. The idTag path
+    // has always worked this way; these two must not disagree.
+    if (this.applyOrDefer(entry, definition)) entry.lastText = text;
   }
 
   /**
@@ -465,7 +486,18 @@ export class FileReloadManager {
     entry: ScenarioEntry,
     text: string,
   ): ScenarioDefinition {
-    const parsed: unknown = JSON.parse(text);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // The runtime's own message quotes the offending bytes — Node's reads
+      // `Unexpected token 'o', "nope-secret-…" is not valid JSON`. That text
+      // becomes the `error` field of a `file-reload` push and a stderr line, so
+      // a half-saved scenario would put a fragment of its own contents on the
+      // control plane. Say which file, never what is in it — the same rule
+      // `parseIdTagsFile` already follows.
+      throw new Error("file is not valid JSON");
+    }
     if (!isScenarioShape(parsed)) {
       throw new Error("file does not contain a scenario definition");
     }
@@ -481,17 +513,20 @@ export class FileReloadManager {
     return { ...prepared, id: entry.scenarioId };
   }
 
+  /** Whether the definition was accepted — applied now, or held for a session
+   *  that has not ended yet. `false` means it was rejected outright and the
+   *  connector still holds the previous definition. */
   private applyOrDefer(
     entry: ScenarioEntry,
     definition: ScenarioDefinition,
-  ): void {
+  ): boolean {
     const service = this.registry.get(entry.cpId);
     // Held, not dropped, in both of the cases below — `drainPending` has
     // already cleared `entry.pending`, so returning without restoring it is
     // exactly how a validated edit goes missing.
     if (!service) {
       entry.pending = definition;
-      return;
+      return true;
     }
     // The scenario is not on the connector right now. Either it was removed —
     // and `loadScenario` would cheerfully re-create it, which is the bug — or
@@ -502,7 +537,7 @@ export class FileReloadManager {
     // `reloadScenario` drops a genuinely stale registration at the next edit.
     if (!this.stillLoaded(entry)) {
       entry.pending = definition;
-      return;
+      return true;
     }
     if (
       service.hasOpenTransaction(entry.connectorId) ||
@@ -521,13 +556,13 @@ export class FileReloadManager {
       this.log(
         `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reload held until the current session ends`,
       );
-      return;
+      return true;
     }
     try {
       service.loadScenario(entry.connectorId, definition);
     } catch (err) {
       this.rejectScenario(entry, err);
-      return;
+      return false;
     }
     entry.pending = null;
     this.emit({
@@ -558,6 +593,7 @@ export class FileReloadManager {
         `[watch] scenario-definitions sink error: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    return true;
   }
 
   /** Whether the charge point still holds the scenario this registration was

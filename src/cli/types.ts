@@ -38,8 +38,18 @@ export interface CLIOptions {
    * Server mode: re-read the idTag and scenario files this process loaded when
    * they change on disk (#314). Off by default — a daemon that silently
    * re-reads files under the operator is surprising, and the agent-driven
-   * workflows go through the control plane instead. Ignored outside server
-   * mode, where nothing outlives the command that loaded the file.
+   * workflows go through the control plane instead.
+   *
+   * **Refused**, not ignored, outside a server mode and alongside a client mode
+   * (`--send`, `--stop`, `--events`): the watcher lives in the daemon, so a
+   * flag that cannot take effect is an error.
+   *
+   * The two watched kinds behave differently on purpose. An **idTag pool
+   * applies live** — it is drawn once per session, so a transaction already
+   * under way keeps the tag it presented and only the next draw sees the new
+   * list. A **scenario reload is held** while the connector has an open
+   * transaction *or* a run of that scenario is in flight, and installed when
+   * that session ends.
    */
   readonly watch: boolean;
   readonly connectors: number;

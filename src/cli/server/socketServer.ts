@@ -1793,9 +1793,11 @@ async function dispatchFacadeCpCommand(
       const id = requireFacadeCpId(cpId, rawParams);
       const connectorId = requirePositiveInt(params, "connector");
       if (typeof params.file === "string") {
-        const parsed: unknown = JSON.parse(
-          fs.readFileSync(params.file, "utf-8"),
-        );
+        // Kept, not re-read: the reload baseline has to be the bytes this
+        // definition came from, or a write between here and the watch starting
+        // is recorded as already-seen and never applied (#314).
+        const loadedText = fs.readFileSync(params.file, "utf-8");
+        const parsed: unknown = JSON.parse(loadedText);
         if (!isScenarioDefinitionShape(parsed)) {
           throw new RpcFailure("invalid_params", "");
         }
@@ -1810,6 +1812,7 @@ async function dispatchFacadeCpCommand(
           cpId: id,
           connectorId,
           scenarioId: loaded.scenarioId,
+          loadedText,
         });
         return handled(loaded);
       }
@@ -1989,8 +1992,11 @@ async function dispatchFacadeCpCommand(
         cpId: id,
         connectorId,
         scenarioId: started.scenarioId,
+        loadedText: started.sourceText,
       });
-      return handled(started);
+      // `sourceText` is for the watcher's baseline only — the file's contents
+      // have no business on the wire.
+      return handled({ scenarioId: started.scenarioId });
     }
     case "run_scenario_template": {
       const id = requireFacadeCpId(cpId, rawParams);

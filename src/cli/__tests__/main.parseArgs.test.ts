@@ -100,6 +100,36 @@ describe("parseArgs --watch (#314)", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("--watch needs a server mode");
   });
+
+  it("refuses --watch alongside a client mode even when a server flag is present", () => {
+    // The hole in the first version of this guard: `--http-port` makes
+    // `isServerMode` true, but with `--events` the process returns through the
+    // client path before any server starts — and there `--http-port` names the
+    // daemon to talk to, not a port to listen on. The flag parsed, passed the
+    // guard, and was silently ignored, which is the exact failure the guard
+    // exists to prevent.
+    const result = runParseArgs([
+      "--events",
+      "--all",
+      "--http-port",
+      "9000",
+      "--watch",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "--watch cannot be combined with a client mode",
+    );
+  });
+
+  it("still refuses --watch with a client mode and no server flag", () => {
+    const result = runParseArgs(["--stop", "--watch"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "--watch cannot be combined with a client mode",
+    );
+  });
 });
 
 describe("parseArgs OCPP 1.6 security flags", () => {

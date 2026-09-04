@@ -4,16 +4,18 @@ type: analysis
 summary: Which test runner / harness covers what — Vitest for jsdom + unit, Bun test for runtime-bound code, gocpp e2e for multi-version wire output, steve-verify for certification templates, Testcontainers for the external control-plane contract — and how coverage is merged.
 sources:
   - package.json (test scripts)
+  - .github/workflows/ci.yml
   - codecov.yml
   - e2e/README.md
   - scripts/steve-verify/README.md
   - examples/testcontainers-java/README.md
 related:
+  - ../entities/desktop-app.md
   - ../sources/e2e-readme.md
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-09-03
+updated: 2026-09-05
 ---
 
 # Testing strategy
@@ -50,3 +52,32 @@ Bun-only-covered code, not a fully-representative number.
 The `analyze` test matrix (`src/cli/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes
 ([OCPP DebugKit](../entities/ocpp-debugkit.md)).
+
+## Does anything actually launch the desktop daemon?
+
+Yes, since #319 — and the answer used to be no, which is why the
+[desktop app](../entities/desktop-app.md) shipped a daemon that exited 1 on
+spawn for about 30 releases. CI compiled the sidecar (`bun build --compile`,
+the "release smoke" step added for #281) but never ran it, so a failure that
+only exists in the compiled binary was invisible.
+
+`src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` closes that class.
+It runs under `bun run test:bun` on every pull request, takes ~12 s
+(the compile dominates; the binary is built once in `beforeAll` and reused),
+and it:
+
+- compiles `src/cli/main.ts` the way `scripts/build-tauri-sidecar.sh` does;
+- **parses the arguments out of `src-tauri/src/lib.rs`'s `DAEMON_ARGS`**
+  rather than keeping its own copy, so the test cannot silently disagree with
+  what Tauri spawns;
+- reads `POLL_TIMEOUT_MS` and `HEALTH_PATH` from `public/splash.html` and
+  requires health inside the same budget the splash screen gives it — a
+  process that exits 1 and one that never becomes ready are the same failure
+  to the user, and both fail the test;
+- asserts `GET /` actually returns the console it was pointed at (a sentinel
+  in a fixture `index.html`, so no `vite build` is needed), across the
+  resource-dir, dist-beside-the-binary and macOS `.app` layouts;
+- asserts the failure path names every directory it searched.
+
+Not covered here: `tauri build` itself, and therefore the Rust side and the
+`bundle.resources` mapping. Those need a Rust toolchain and a real bundle.

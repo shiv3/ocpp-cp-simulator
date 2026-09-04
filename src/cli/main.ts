@@ -41,23 +41,78 @@ import {
 } from "../cp/domain/types/OcppVersion";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
-/**
- * Locate the bundled web console (Vite-built `dist/`) shipped alongside
- * the CLI. The published package layout is `<pkg>/src/cli/main.ts` +
- * `<pkg>/dist/`, so we walk up from this file's directory. Returns null
- * when the build isn't present — typical when running from a fresh
- * checkout where `bun run build` hasn't been invoked yet.
- */
-function resolveBundledDist(): string | null {
-  const candidate = path.resolve(import.meta.dir, "../../dist");
+/** Result of a `dist/` lookup: where it was found (if at all) and every
+ *  directory that was tried, so a failure can name the paths instead of
+ *  guessing at the caller's setup. */
+export interface BundledDistLookup {
+  /** Directory containing `index.html`, or null when nothing matched. */
+  readonly dir: string | null;
+  /** Absolute candidates tried, in order — verbatim material for the error. */
+  readonly searched: readonly string[];
+}
+
+function hasIndexHtml(dir: string): boolean {
   try {
-    if (fs.statSync(path.join(candidate, "index.html")).isFile()) {
-      return candidate;
-    }
+    return fs.statSync(path.join(dir, "index.html")).isFile();
   } catch {
     // not built / not present
+    return false;
   }
-  return null;
+}
+
+/**
+ * Locate the bundled web console (Vite-built `dist/`).
+ *
+ * Three shapes ship this CLI and each puts `dist/` somewhere different:
+ *
+ * 1. **Source checkout** — `bun src/cli/main.ts`. `dist/` is `<repo>/dist`
+ *    once `bun run build` has run. Two levels up from `src/cli/`.
+ * 2. **Installed package** — the release tarball's `files` field ships
+ *    `src/cli` and `dist`, so the layout is `<pkg>/src/cli/main.ts` +
+ *    `<pkg>/dist`. Same two levels up.
+ * 3. **`bun build --compile` binary** — the Tauri sidecar. Here the module
+ *    lives in the binary's virtual filesystem, so `import.meta.dir` is
+ *    `/$bunfs/root` (POSIX) or `B:\~BUN\root` (Windows) and walking up
+ *    from it yields `/dist`, which never exists. That was issue #319:
+ *    `src-tauri/src/lib.rs` spawns the sidecar with `--web-console`, so
+ *    every desktop release from v0.3.2 through v0.7.8 — about 30 of them —
+ *    exited 1 the moment it started. `process.execPath` is the real
+ *    on-disk path of a compiled binary, so the sidecar's neighbours are
+ *    searched from there instead.
+ *
+ * For the desktop bundle even that is a guess (Tauri puts resources in a
+ * different place on each platform), so the shell passes the directory
+ * outright via `--web-console-dist` — see `src-tauri/src/lib.rs`. An
+ * explicit path is authoritative: if it has no `index.html` the lookup
+ * fails rather than silently falling back to some other directory.
+ */
+export function resolveBundledDist(
+  explicit?: string | null,
+): BundledDistLookup {
+  if (explicit) {
+    const dir = path.resolve(explicit);
+    return { dir: hasIndexHtml(dir) ? dir : null, searched: [dir] };
+  }
+
+  const execDir = path.dirname(process.execPath);
+  const candidates = [
+    // Shapes 1 and 2 (interpreted): <repo|pkg>/src/cli -> <repo|pkg>/dist.
+    path.resolve(import.meta.dir, "../../dist"),
+    // Shape 3 (compiled): a `dist/` shipped beside or one level above the
+    // binary, and the macOS .app layout where the sidecar sits in
+    // Contents/MacOS/ and Tauri resources in Contents/Resources/.
+    path.join(execDir, "dist"),
+    path.resolve(execDir, "../dist"),
+    path.resolve(execDir, "../Resources/web-console"),
+  ];
+
+  const searched: string[] = [];
+  for (const candidate of candidates) {
+    if (searched.includes(candidate)) continue;
+    searched.push(candidate);
+    if (hasIndexHtml(candidate)) return { dir: candidate, searched };
+  }
+  return { dir: null, searched };
 }
 
 const OCPP_VERSION_VALUES = SUPPORTED_OCPP_VERSIONS.join(", ");
@@ -148,6 +203,10 @@ export function parseArgs(argv: string[]): CLIOptions {
   // omitted (`--web-console` alone), the UI shares the --http-port listener.
   let webConsoleEnabled = false;
   let webConsoleExplicitPort: number | null = null;
+  // Explicit location of the built web console, overriding the search in
+  // resolveBundledDist(). The desktop shell passes its Tauri resource dir
+  // here because a compiled binary cannot find `dist/` on its own (#319).
+  let webConsoleDist: string | null = null;
   let stateDb: string | null = null;
   let logFormat: "plain" | "json" = "plain";
   let healthPath = "/v1/healthz";
@@ -461,6 +520,10 @@ export function parseArgs(argv: string[]): CLIOptions {
           i++;
         }
         break;
+      case "--web-console-dist":
+        webConsoleDist = requireFlagValue("--web-console-dist", next);
+        i++;
+        break;
       case "--help":
       case "-h":
         printUsage();
@@ -502,16 +565,25 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    const bundled = resolveBundledDist();
-    if (!bundled) {
+    const bundled = resolveBundledDist(webConsoleDist);
+    if (!bundled.dir) {
+      // Name every path that was tried. The old message said only "run
+      // `bun run build` in the repo first", which is useless advice to
+      // someone who double-clicked a .dmg — and that is exactly who saw
+      // it for 30 desktop releases (#319).
       process.stderr.write(
-        "Error: --web-console requires the bundled UI to be built. " +
-          "Run `bun run build` in the repo first " +
-          "(or use an installed package which ships dist/).\n",
+        "Error: --web-console could not find the built web console " +
+          "(a directory containing index.html).\n" +
+          bundled.searched.map((dir) => `  searched: ${dir}\n`).join("") +
+          `  import.meta.dir: ${import.meta.dir}\n` +
+          `  process.execPath: ${process.execPath}\n` +
+          "Fixes: from a source checkout run `bun run build`; from a " +
+          "release install the prebuilt tarball, which ships dist/; " +
+          "otherwise pass --web-console-dist <dir>.\n",
       );
       process.exit(1);
     }
-    serveStatic = bundled;
+    serveStatic = bundled.dir;
     // --web-console alone is enough to put the daemon into server mode —
     // even without --http-port, the web-console port carries socket.io/health
     // alongside the UI on the same origin.
@@ -881,6 +953,11 @@ Options:
                            Without <port>: shares the --http-port listener.
                            Requires the UI to be built (run "bun run build",
                            or use an installed package which ships dist/).
+  --web-console-dist <dir>
+                           Serve the web console from this directory instead
+                           of searching for a bundled dist/. Must contain
+                           index.html. The desktop app passes its Tauri
+                           resource dir here (docs/entities/desktop-app.md).
   --state-db <path>        Persist Configuration overrides, charging-profile
                            state, scenarios, and pending transaction
                            messages to a SQLite file (or ":memory:").

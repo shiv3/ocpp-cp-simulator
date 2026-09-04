@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-03
+updated: 2026-09-05
 ---
 
 # Log
@@ -250,3 +250,11 @@ fixes:
 - [CLI](entities/cli.md): `--cp-count` / `--cp-id-pattern` (#295) and `--metrics` / `--metrics-no-auth` (#298) were listed in `docs/entities/cli.md`'s flag table and in `--help`'s terse "Server modes" summary, but had no entry in `--help`'s detailed `Options:` section like every other flag. Added.
 - [CLI](entities/cli.md): `--header` and `--ws-subprotocol` were in the flag table but appeared nowhere in `--help` at all, not even in a mode summary. Added, and the help test generalised from a list of four known-missing flags to the property itself: every flag `src/cli/main.ts` parses must have its own `Options:` entry, except the six mode selectors (`--daemon`, `--send`, `--stop`, `--events`, `--json`, `--help`), which choose what the process does and are asserted to appear in a mode summary instead. Three of these gaps had survived several releases precisely because the check was a hand-comparison.
 - Checked and left open (report only): `docs/concepts/control-plane.md`'s `update_connector_status` row lists only `connector`/`status`, omitting the same optional fields the RPC method (and now the MCP tool) accepts — pre-existing understatement, not something #299 or this pass changed.
+
+## [2026-09-05] ingest | Desktop sidecar could not find the web console (#319)
+
+- [Desktop app](entities/desktop-app.md): new section "How the sidecar finds the web console" — `frontendDist` is embedded in the Rust binary and serves only `splash.html`, so the bundle now ships `dist/` a second time as the `bundle.resources` entry `{"../dist/": "web-console/"}`, and `src-tauri/src/lib.rs` hands the sidecar `--web-console-dist <resource-dir>/web-console` resolved with Tauri's `resource_dir()`. Records why v0.3.2 through v0.7.8 (~30 releases) shipped a daemon that exited 1: `resolveBundledDist()` walked up from `import.meta.dir`, which inside a `bun build --compile` binary is `/$bunfs/root`, so it resolved to `/dist`.
+- [CLI](entities/cli.md), [Daemon](entities/daemon.md): new `--web-console-dist <dir>` row in both flag tables (kept in sync deliberately, per CLAUDE.md). `--web-console`'s row no longer says only "requires built `dist/`" — it lists the four places a console can come from and notes that the failure names every path searched.
+- [Testing strategy](analyses/testing-strategy.md): new section "Does anything actually launch the desktop daemon?". CI compiled the sidecar but never ran it, which is precisely why #319 survived 30 releases. `src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` now compiles and launches it on every PR under `test:bun`, parsing the arguments out of `lib.rs`'s `DAEMON_ARGS` and the readiness budget out of `splash.html` so neither copy can drift.
+- [GitHub issues](sources/github-issues.md): #319 indexed.
+- Left as-is, reported not fixed: `dist/` is now bundled twice on the desktop (embedded in the Rust binary for `splash.html`, and as a resource for the daemon). Deduplicating it would mean serving the console over `tauri://` instead of HTTP, which is a different architecture, not a doc fix.

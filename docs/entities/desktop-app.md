@@ -6,11 +6,14 @@ sources:
   - src-tauri/
   - scripts/build-tauri-sidecar.sh
   - .github/workflows/release.yml
+  - public/splash.html
 related:
   - web-console.md
   - daemon.md
+  - cli.md
   - ../concepts/local-vs-remote-mode.md
-updated: 2026-09-03
+  - ../analyses/testing-strategy.md
+updated: 2026-09-05
 ---
 
 # Desktop app (Tauri)
@@ -30,6 +33,54 @@ without having to install anything else.
   loopback port. REST control endpoints and the Unix-domain socket are not used.
 - Closing the window terminates the daemon (SIGTERM) so the next launch starts from a clean process.
 - Multiple-launch is squashed by `tauri-plugin-single-instance`: the second invocation focuses the existing window instead of starting a second daemon.
+
+## How the sidecar finds the web console
+
+The sidecar is a `bun build --compile` binary, and `dist/` is **not** inside
+it. `tauri.conf.json`'s `frontendDist` (`../dist`) is embedded in the _Rust_
+binary — the Tauri config schema says a relative `frontendDist` "is read
+recursively and all files are embedded in the application binary" — and that
+copy serves only `splash.html` over `tauri://`. The daemon serves the console
+over HTTP from a real directory on disk, so the bundle ships `dist/` a second
+time as a resource:
+
+| Piece                                   | Value                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------- |
+| `bundle.resources` in `tauri.conf.json` | `{"../dist/": "web-console/"}` — lands at `<resource-dir>/web-console` |
+| Resource dir, macOS                     | `OCPP CP Simulator.app/Contents/Resources`                             |
+| Resource dir, Windows                   | the install directory, beside the `.exe`                               |
+| Resource dir, Linux (deb / rpm)         | `/usr/lib/<product>`                                                   |
+| Flag passed to the sidecar              | `--web-console-dist <resource-dir>/web-console` (see [CLI](cli.md))    |
+
+`src-tauri/src/lib.rs` resolves that path with Tauri's `resource_dir()` and
+appends it to `DAEMON_ARGS`. It is the only platform-independent answer, so
+the desktop app never relies on the CLI's own search. When the directory has
+no `index.html` — a `tauri dev` build before `npm run build` — the flag is
+dropped and the daemon falls back to its search, which is correct for the
+debug path (`bun src/cli/main.ts`, where `dist/` is just `<repo>/dist`).
+
+### Why it was broken from v0.3.2 to v0.7.8 (#319)
+
+`lib.rs` has spawned the sidecar with `--web-console` since v0.3.2, and the
+CLI used to look for `dist/` relative to `import.meta.dir`. Inside a
+`bun build --compile` binary that is the in-binary virtual filesystem root
+(`/$bunfs/root`), so the lookup resolved to `/dist`, found nothing, and the
+daemon **exited 1 before binding a port**. `splash.html` then polled
+`/v1/healthz` for its full `POLL_TIMEOUT_MS` (30 s) and rendered "Daemon
+failed to start". About 30 desktop releases shipped that way, because CI
+built the sidecar but never ran it.
+
+Three things changed:
+
+1. The CLI anchors its search on `process.execPath` (the compiled binary's
+   real path) as well as `import.meta.dir`, and accepts `--web-console-dist`.
+2. `tauri.conf.json` ships `dist/` as the `web-console` resource and `lib.rs`
+   passes its path.
+3. `src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` compiles the
+   sidecar and **launches** it, with the arguments parsed out of `lib.rs`'s
+   `DAEMON_ARGS` and the readiness budget read from `splash.html`, so the
+   test cannot drift away from either. It runs on every pull request under
+   `bun run test:bun` — see [Testing strategy](../analyses/testing-strategy.md#does-anything-actually-launch-the-desktop-daemon).
 
 ## Download
 

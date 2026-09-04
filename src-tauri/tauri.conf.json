@@ -30,6 +30,9 @@
     "active": true,
     "targets": "all",
     "externalBin": ["binaries/ocpp-cp-sim"],
+    "resources": {
+      "../dist/": "web-console/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

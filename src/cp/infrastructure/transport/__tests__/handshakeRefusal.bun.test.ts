@@ -228,6 +228,22 @@ describe("OCPPWebSocket handshake refusal (#288)", () => {
     expect(refusal).toContain("wss://edge.example/ocpp/");
   });
 
+  it("redacts a credential the CSMS puts in its redirect target", async () => {
+    // The Location header is the CSMS's text, not ours, and it can carry
+    // userinfo or a secret query of its own.
+    const server = tracked(301, {
+      Location: "wss://CP001:s3cr3t@edge.example/ocpp/?ocpp_ws_secret=hunter2",
+    });
+    const lines: string[] = [];
+    connectTo(server.port, lines);
+
+    await waitFor(() => lines.some((l) => l.includes("upgrade refused")));
+    const refusal = lines.find((l) => l.includes("upgrade refused")) ?? "";
+    expect(refusal).not.toContain("s3cr3t");
+    expect(refusal).not.toContain("hunter2");
+    expect(refusal).toContain("edge.example");
+  });
+
   it("logs the client's own error message instead of the constant 'error'", async () => {
     const server = tracked(401);
     const lines: string[] = [];

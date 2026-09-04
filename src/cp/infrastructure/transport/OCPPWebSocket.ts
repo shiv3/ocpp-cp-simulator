@@ -718,7 +718,10 @@ export class OCPPWebSocket {
         : status === 404
           ? " — the CSMS does not know this charge point id"
           : status >= 300 && status < 400
-            ? ` — the endpoint redirects${location ? ` to ${location}` : ""}; a cleartext ws:// to a TLS-only edge looks like this`
+            ? // The Location comes from the CSMS and may carry userinfo or a
+              // secret query parameter of its own, so it is redacted like any
+              // other URL that reaches the log.
+              ` — the endpoint redirects${location ? ` to ${redactSensitiveText(location)}` : ""}; a cleartext ws:// to a TLS-only edge looks like this`
             : "";
     return `WebSocket upgrade refused: HTTP ${status}${hint}`;
   }

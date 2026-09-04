@@ -5,8 +5,10 @@
 //! Flow on startup:
 //!   1. Pick a free TCP port on 127.0.0.1.
 //!   2. Spawn `ocpp-cp-sim` (the Bun-compiled sidecar from
-//!      `src-tauri/binaries/`) with `--http-port <port> --web-console
-//!      --state-db <app-data-dir>/state.db --log-format json`.
+//!      `src-tauri/binaries/`) with the arguments in `DAEMON_ARGS`:
+//!      `--http-port <port> --web-console --state-db
+//!      <app-data-dir>/state.db --log-format json --web-console-dist
+//!      <resource-dir>/web-console`.
 //!      In `cargo run` / `tauri dev` builds the sidecar binary may not
 //!      exist yet; fall back to `bun src/cli/main.ts` so devs can
 //!      iterate without re-running the build script.
@@ -57,6 +59,83 @@ fn state_db_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("state.db"))
 }
 
+/// The daemon's argument list, as a template with `{...}` placeholders.
+///
+/// Deliberately a flat list of literals: `src/build/__tests__/
+/// tauriSidecarWebConsole.bun.test.ts` parses it straight out of this file
+/// and runs the compiled sidecar with exactly what we spawn here. Issue
+/// #319 shipped for ~30 desktop releases because nothing ever ran the
+/// binary with these arguments, and a test carrying its own copy of the
+/// list would go stale the same silent way. Keep it parseable: one string
+/// literal per line, placeholders substituted in `daemon_args` below.
+const DAEMON_ARGS: &[&str] = &[
+    "--http-host",
+    "127.0.0.1",
+    "--http-port",
+    "{port}",
+    "--web-console",
+    "--state-db",
+    "{state_db}",
+    "--log-format",
+    "json",
+    "--web-console-dist",
+    "{web_console_dist}",
+];
+
+/// Substitute the runtime values into `DAEMON_ARGS`.
+///
+/// `web_console_dist` is `None` only when no built web console could be
+/// located (dev builds before `npm run build`); the `--web-console-dist`
+/// flag and its value are then dropped and the CLI falls back to its own
+/// search, which works for the `bun src/cli/main.ts` dev path.
+fn daemon_args(port: u16, state_db: &str, web_console_dist: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = Vec::with_capacity(DAEMON_ARGS.len());
+    let mut i = 0;
+    while i < DAEMON_ARGS.len() {
+        let arg = DAEMON_ARGS[i];
+        if arg == "--web-console-dist" {
+            // Either both the flag and its value, or neither: skipping the
+            // flag alone would leave "{web_console_dist}" as a bare
+            // positional argument.
+            if let Some(dir) = web_console_dist {
+                args.push(arg.to_string());
+                args.push(dir.to_string());
+            }
+            i += 2;
+            continue;
+        }
+        args.push(match arg {
+            "{port}" => port.to_string(),
+            "{state_db}" => state_db.to_string(),
+            other => other.to_string(),
+        });
+        i += 1;
+    }
+    args
+}
+
+/// Where the bundled `dist/` lands at runtime.
+///
+/// `tauri.conf.json` copies `../dist/` into the bundle as the resource
+/// `web-console/`, and `resource_dir()` is the only platform-independent
+/// way to find it (`Contents/Resources` on macOS, next to the exe on
+/// Windows, `/usr/lib/<product>` on Linux). The compiled sidecar cannot
+/// work this out for itself: `import.meta.dir` inside a `bun --compile`
+/// binary is the in-binary VFS root, which is what broke #319.
+///
+/// Returns `None` when the directory has no `index.html` — a `tauri dev`
+/// build before `npm run build`, where the `bun src/cli/main.ts` path
+/// resolves `dist/` from the checkout anyway.
+fn web_console_dist(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().resource_dir().ok()?.join("web-console");
+    if dir.join("index.html").is_file() {
+        Some(dir)
+    } else {
+        eprintln!("[tauri] no web console at {dir:?}; letting the daemon search");
+        None
+    }
+}
+
 /// Spawn the daemon. Production builds invoke the bundled sidecar via
 /// `tauri-plugin-shell`; dev builds (`cargo run`, `tauri dev`) drop back
 /// to `bun src/cli/main.ts` so the loop stays tight without having to
@@ -66,17 +145,8 @@ fn spawn_daemon(
     port: u16,
     state_db: &str,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
-    let args = [
-        "--http-host",
-        "127.0.0.1",
-        "--http-port",
-        &port.to_string(),
-        "--web-console",
-        "--state-db",
-        state_db,
-        "--log-format",
-        "json",
-    ];
+    let dist = web_console_dist(app);
+    let args = daemon_args(port, state_db, dist.as_deref().and_then(|p| p.to_str()));
 
     // In debug builds, prefer `bun src/cli/main.ts` so contributors don't
     // need a sidecar binary to iterate. The path is resolved at compile
@@ -93,7 +163,7 @@ fn spawn_daemon(
         match app
             .shell()
             .command("bun")
-            .args(std::iter::once(main_ts.as_str()).chain(args.iter().copied()))
+            .args(std::iter::once(main_ts).chain(args.iter().cloned()))
             .spawn()
         {
             Ok(handle) => return Ok(handle),

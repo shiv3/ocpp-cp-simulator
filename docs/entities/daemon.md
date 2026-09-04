@@ -263,8 +263,12 @@ this page's [`/metrics`](#metrics) endpoint before and after each step to
 report N vs. p50/p95 OCPP CALL round-trip latency, plus abandoned calls
 (`ocppcp_ocpp_call_timeouts_total`), CALLERRORs and reconnects as sharper knee
 signals than latency alone. See the script's README for the exact method
-(settle-then-measure, delta between two cumulative scrapes, linear bucket
-interpolation) and its limitations. It refuses to run against a daemon that
+(settle, warm up for one CALL watchdog plus the stagger ramp, then delta
+between two cumulative scrapes, with linear bucket interpolation for the
+quantiles) and its limitations. `--ocpp-version` selects what the fleet
+speaks (`OCPP-1.6J` by default, or `OCPP-2.0.1` / `OCPP-2.1`); on 2.x the
+timeout counter moves only through the eviction path described under
+[Metrics](#metrics), since only the 1.6J handler has the per-CALL watchdog. It refuses to run against a daemon that
 already holds charge points, because `/metrics` has no `cpId` label and their
 traffic would land in the same histogram as the bench fleet's.
 

@@ -3,6 +3,12 @@
 // interpolation. Kept dependency-free (no socket.io, no fs, no network) so
 // it can be unit-tested without a daemon or CSMS running — see
 // lib.bun.test.ts.
+import {
+  OCPP_1_6,
+  SUPPORTED_OCPP_VERSIONS,
+  isSoapVersion,
+  type OcppVersion,
+} from "../../src/cp/domain/types/OcppVersion.ts";
 
 /** Fleet sizes above this are almost certainly a typo, not a plan — the
  *  daemon enforces no hard cap on registered charge points, but this script
@@ -25,6 +31,62 @@ export const MAX_SETTLE_TIMEOUT_SEC = 600;
  *  elsewhere in the control plane (`src/protocol/limits.ts`) — a URL is
  *  identifier-shaped, not a payload, so 2048 is generous. */
 export const MAX_URL_LENGTH = 2048;
+
+/** `OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS`, in seconds: how long after a
+ *  CALL its watchdog fires and `ocppcp_ocpp_call_timeouts_total` increments.
+ *  Every timeout in a scrape delta therefore belongs to a CALL sent one
+ *  watchdog interval earlier, which is what {@link recommendedWarmupSec}
+ *  exists to keep inside the step being measured. */
+export const CALL_WATCHDOG_SEC = 30;
+
+/** Upper bound on `--warmup`. One watchdog interval past the longest
+ *  transaction period, so the computed default is always expressible. */
+export const MAX_WARMUP_SEC = MAX_INTERVAL_SEC + CALL_WATCHDOG_SEC;
+
+/** The OCPP versions this benchmark can drive.
+ *
+ *  OCPP-J only, and for the same reason `--csms-url` takes only `ws(s)://`:
+ *  `ocppcp_ocpp_call_duration_seconds` is derived from the JSON frames the
+ *  WebSocket transport logs, and a SOAP exchange carries no message id to
+ *  correlate a response back with — a SOAP fleet would report an empty
+ *  latency table. Derived from `SUPPORTED_OCPP_VERSIONS` rather than
+ *  restated, so a version added to the simulator is not silently missing
+ *  here. */
+export const BENCH_OCPP_VERSIONS: readonly OcppVersion[] =
+  SUPPORTED_OCPP_VERSIONS.filter((v) => !isSoapVersion(v));
+
+/** How long a step should hold the new fleet size and its load before the
+ *  `before` scrape: the transaction stagger ramp (one `--tx-interval`, 0 on
+ *  the idle axis) plus one CALL watchdog interval.
+ *
+ *  Without it a step's `timeouts` delta is not the step's: the watchdog fires
+ *  {@link CALL_WATCHDOG_SEC} after the CALL, so the delta between the two
+ *  scrapes bracketing a window counts expirations for calls issued before the
+ *  window opened — during the previous step, or during this step's boot and
+ *  ramp. That moved the first non-zero timeout to a larger N than the one
+ *  that actually produced it, and finding that N is the whole point. */
+export function recommendedWarmupSec(txIntervalSec: number): number {
+  return Math.min(MAX_WARMUP_SEC, CALL_WATCHDOG_SEC + txIntervalSec);
+}
+
+/** Transaction-cycle start offsets for one step's charge points: evenly
+ *  spaced across one `--tx-interval`, never random.
+ *
+ *  `Math.random()` here made two identical invocations issue different traffic
+ *  patterns — bursts could cluster by chance and move the observed knee, and a
+ *  run could not be replayed from the options recorded in `--out`, against the
+ *  project's rule that every random behaviour is seeded and replayable. Even
+ *  spacing is both reproducible and a better stagger: the cycle period is one
+ *  `--tx-interval`, so `i/count` of an interval puts the fleet in exact steady
+ *  state rather than approximately. */
+export function staggerOffsetsMs(
+  count: number,
+  txIntervalSec: number,
+): number[] {
+  if (count <= 0) return [];
+  const spanMs = Math.max(0, txIntervalSec) * 1000;
+  return Array.from({ length: count }, (_, i) => (i * spanMs) / count);
+}
 
 export interface DaemonBasicAuth {
   readonly username: string;
@@ -50,6 +112,16 @@ export interface BenchOptions {
   /** How long to wait for a step's newly-created CPs to report connected
    *  before giving up on the stragglers and measuring anyway. */
   readonly settleTimeoutSec: number;
+  /** How long a step holds the new fleet size and its load *before* the
+   *  `before` scrape, so every timeout in the step's delta belongs to a CALL
+   *  this step issued at this N. Defaults to
+   *  {@link recommendedWarmupSec}. */
+  readonly warmupSec: number;
+  /** OCPP version every benchmarked charge point is created with. Passed to
+   *  `cp.create_many`, which otherwise defaults to `OCPP-1.6J` — against a
+   *  2.x-only CSMS that made every handshake fail and the run report an
+   *  unsettled fleet and no data. One of {@link BENCH_OCPP_VERSIONS}. */
+  readonly ocppVersion: OcppVersion;
   readonly healthPath: string;
   readonly daemonBasicAuth: DaemonBasicAuth | null;
   readonly outFile: string | null;
@@ -77,6 +149,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "heartbeat-interval",
   "tx-interval",
   "settle-timeout",
+  "warmup",
+  "ocpp-version",
   "health-path",
   "daemon-basic-auth-user",
   "daemon-basic-auth-pass",
@@ -242,6 +316,30 @@ export function validateOptions(raw: Map<string, RawArgValue>): BenchOptions {
     MIN_SETTLE_TIMEOUT_SEC,
     MAX_SETTLE_TIMEOUT_SEC,
   ]);
+  // Defaulted from `--tx-interval`, not fixed: on the active axis the stagger
+  // ramp is one interval long, so a fixed 30s warmup would still open the
+  // window while half the fleet had yet to issue its first StartTransaction.
+  const warmupSec = requireInt(
+    raw,
+    "warmup",
+    recommendedWarmupSec(txIntervalSec),
+    [0, MAX_WARMUP_SEC],
+  );
+
+  // Rejected rather than defaulted, the same way `--csms-url` rejects an
+  // `http(s)://` URL: a SOAP fleet produces no duration observations at all,
+  // so the run would report an empty latency table and call it a result.
+  const ocppVersionRaw = raw.get("ocpp-version")?.value ?? OCPP_1_6;
+  if (!(BENCH_OCPP_VERSIONS as readonly string[]).includes(ocppVersionRaw)) {
+    throw new BenchValidationError(
+      `--ocpp-version must be one of ${BENCH_OCPP_VERSIONS.join(", ")}, got "${ocppVersionRaw}"` +
+        (isSoapVersion(ocppVersionRaw)
+          ? ": the SOAP versions carry no message id to correlate a response " +
+            "with, so the CALL duration histogram would stay empty"
+          : ""),
+    );
+  }
+  const ocppVersion = ocppVersionRaw as OcppVersion;
   if (durationSec < 2 * heartbeatIntervalSec) {
     throw new BenchValidationError(
       `--duration (${durationSec}s) must be at least twice --heartbeat-interval ` +
@@ -285,6 +383,8 @@ export function validateOptions(raw: Map<string, RawArgValue>): BenchOptions {
     heartbeatIntervalSec,
     txIntervalSec,
     settleTimeoutSec,
+    warmupSec,
+    ocppVersion,
     healthPath: healthPathRaw,
     daemonBasicAuth,
     outFile,

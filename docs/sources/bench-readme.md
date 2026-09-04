@@ -28,11 +28,42 @@ ascending fleet sizes; see the README's flag table for the full set and
 defaults. An unknown flag is an error, not a silently ignored argument — a
 mistyped `--duraton 5` fails before the first charge point exists.
 
-**OCPP-J only.** `--csms-url` takes `ws://` or `wss://` and **rejects
-`http(s)://`**. `ocppcp_ocpp_call_duration_seconds` has no SOAP equivalent (a
-SOAP log line carries no message id to correlate a response with), so a SOAP
-fleet would produce an empty latency table; accepting an HTTP URL used to
-quietly run a 1.6J WebSocket fleet instead.
+**OCPP-J only, and the version is explicit.** `--csms-url` takes `ws://` or
+`wss://` and **rejects `http(s)://`**. `ocppcp_ocpp_call_duration_seconds` has
+no SOAP equivalent (a SOAP log line carries no message id to correlate a
+response with), so a SOAP fleet would produce an empty latency table; accepting
+an HTTP URL used to quietly run a 1.6J WebSocket fleet instead. `--ocpp-version`
+picks the version every benchmarked charge point is created with —
+`OCPP-1.6J` (default), `OCPP-2.0.1` or `OCPP-2.1`, with the three SOAP versions
+rejected for the same reason. It is passed through to `cp.create_many`, which
+defaults to `OCPP-1.6J` on its own: against a 2.x-only CSMS the omission made
+every handshake fail and the run report an unsettled fleet and no data. On 2.x
+the `timeouts` column is weaker — the 30s per-CALL watchdog exists only in the
+OCPP-1.6J handler (see [Daemon → Metrics](../entities/daemon.md#metrics)), so
+that counter then moves only on pending-call-map eviction; the script says so
+on stderr.
+
+**Warmup, so a step's timeouts are its own.** `ocppcp_ocpp_call_timeouts_total`
+increments 30s _after_ the CALL, when its watchdog fires, so the delta between
+the two scrapes bracketing a window covers calls issued 30s earlier — during
+the previous step, or this step's boot and stagger ramp, at a different `N`.
+Each step therefore holds the new `N` **and its load** for `--warmup` seconds
+before the `before` scrape; the default is `30 + --tx-interval` (one watchdog
+interval plus the stagger ramp, which is one interval long on the active axis).
+With it, a row's `timeouts` covers exactly the calls issued between 30s before
+the window opened and 30s before it closed, all at that step's `N`; calls issued
+in the window's last 30s expire during the next step's warmup and are counted in
+neither row — dropped, never misattributed. `--warmup 0` opts out for a smoke
+run, with a printed note. Latency, `late>30s`, `errors` and `reconnects` do not
+depend on it.
+
+**The transaction stagger is evenly spaced, not random.** Charge point `i` of a
+step's `count` starts its first cycle `i/count` of a `--tx-interval` in, so two
+runs with the same flags issue the same traffic pattern and a knee is
+reproducible from the options recorded in `--out` — the project's
+"every random behaviour is seeded and replayable" rule, met by having no
+randomness at all here. `Math.random()` offsets could also cluster by chance and
+move the observed knee.
 
 **Method.** Grows the fleet in place via `cp.create_many` (never
 `state.reset` — that is daemon-wide destructive), waits for each step's new
@@ -62,6 +93,15 @@ arrives, so a CALL the CSMS never answers contributes nothing to the histogram
 and a saturated CSMS used to report `>30s=0, errors=0`. The overflow bucket is
 still reported, as `late>30s` — calls the CSMS _did_ answer, after the charge
 point's 30s watchdog had given up.
+
+**Cleanup is best-effort and bounded.** Every created charge point is
+`cp.delete`d at the end and on Ctrl-C, 32 concurrently and within a 60s budget;
+if no control-plane socket is connected the sweep is skipped outright, since
+socket.io buffers an emit issued while disconnected rather than failing it.
+Sequential deletes at the full 35s RPC timeout each turned teardown of a
+2000-CP fleet against a dead daemon into hours of blocked failure handling and
+an unresponsive Ctrl-C. Whatever is left is named on stderr — the next run's
+preflight refuses a daemon that still holds it.
 
 **`--out` is redacted.** A result file is meant to be kept and shared, so the
 daemon Basic Auth password and any userinfo embedded in `--csms-url` /

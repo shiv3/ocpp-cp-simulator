@@ -24,7 +24,11 @@ for where a run's result gets recorded.
 --http-port 9700 --metrics`
 - A CSMS the daemon can reach — [gocpp](../../docs/entities/csms-peers.md#gocpp)
   is what this project's own e2e suite uses; any real OCPP-J CSMS works
-  ([SteVe](../steve-verify/README.md), a vendor CSMS staging environment, etc.)
+  ([SteVe](../steve-verify/README.md), a vendor CSMS staging environment, etc.).
+  Point `--ocpp-version` at whatever the CSMS speaks: the fleet is created as
+  `OCPP-1.6J` unless told otherwise, and a 2.x-only CSMS rejects every 1.6J
+  handshake — which shows up as an unsettled fleet and an empty table, not as
+  an error naming the cause.
 
 ## Quick start
 
@@ -65,19 +69,21 @@ diverge from this baseline as N grows.
 
 ## Flags
 
-| Flag                             | Required | Default         | Meaning                                                                                                                                                                                         |
-| -------------------------------- | -------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--csms-url <url>`               | Yes      | —               | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                           |
-| `--daemon-url <url>`             | Yes      | —               | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                 |
-| `--counts <n,n,...>`             | No       | `10,50,100,200` | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                    |
-| `--allow-existing`               | No       | off             | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                             |
-| `--duration <seconds>`           | No       | `60`            | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                |
-| `--heartbeat-interval <sec>`     | No       | `5`             | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. 1–3600.                              |
-| `--tx-interval <seconds>`        | No       | `0`             | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at roughly this period, staggered across CPs.                 |
-| `--settle-timeout <seconds>`     | No       | `60`            | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                             |
-| `--health-path <path>`           | No       | `/v1/healthz`   | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                  |
-| `--daemon-basic-auth-user/-pass` | No       | —               | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                               |
-| `--out <path>`                   | No       | —               | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`. |
+| Flag                             | Required | Default              | Meaning                                                                                                                                                                                            |
+| -------------------------------- | -------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                              |
+| `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                    |
+| `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                       |
+| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                |
+| `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                   |
+| `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. 1–3600.                                 |
+| `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at roughly this period, staggered across CPs.                    |
+| `--settle-timeout <seconds>`     | No       | `60`                 | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                                |
+| `--warmup <seconds>`             | No       | `30 + --tx-interval` | How long a step holds the new `N` **and its load** before the first scrape, so the step's `timeouts` are its own. 0–3630. See "Warmup: why a step waits before it measures".                       |
+| `--ocpp-version <version>`       | No       | `OCPP-1.6J`          | OCPP version every benchmarked charge point is created with: `OCPP-1.6J`, `OCPP-2.0.1` or `OCPP-2.1`. The three SOAP versions are rejected, for the same reason `--csms-url` rejects `http(s)://`. |
+| `--health-path <path>`           | No       | `/v1/healthz`        | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                     |
+| `--daemon-basic-auth-user/-pass` | No       | —                    | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                                  |
+| `--out <path>`                   | No       | —                    | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`.    |
 
 Every flag is bounds-checked before anything is created (`scripts/bench/lib.ts`'s
 `validateOptions`) — a bad flag fails before the first charge point exists.
@@ -96,6 +102,14 @@ script measures one axis per invocation:
   steady state instead of bursting in lockstep. This is the axis the issue
   calls "the one that matters" — it drives the daemon's actual OCPP call
   handling path, not just timers.
+
+  The stagger is **evenly spaced, not random**: charge point `i` of a step's
+  `count` starts its first cycle `i/count` of an interval in. Two runs with
+  the same flags therefore issue the same traffic pattern, so a knee is
+  reproducible and a run can be replayed from the options recorded in `--out`
+  — the same guarantee the rest of the project's randomness gives by being
+  seeded. `Math.random()` offsets could also cluster by chance and move the
+  observed knee, which even spacing cannot.
 
 Run both and compare:
 
@@ -130,11 +144,14 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    — which aborted the sweep at exactly the sizes this tool exists to reach.
    The gauge is one bounded number whatever the fleet size, so the documented
    2000-CP cap is a size the sweep can actually run.
-4. **Arm load**, then snapshot `/metrics`, sleep `--duration`, and snapshot
-   `/metrics` again. **Every reported number is a delta between those two
-   scrapes** — the histogram is a Prometheus cumulative counter that never
-   resets, so a single scrape can't isolate one step's traffic from the
-   whole daemon's lifetime. See `diffHistogram` in `lib.ts`.
+4. **Arm load, warm up, then measure.** After the step's new CPs are armed the
+   script holds the fleet at this `N` under this load for `--warmup` seconds
+   _before_ the first scrape (see "Warmup" below), then snapshots `/metrics`,
+   sleeps `--duration`, and snapshots `/metrics` again. **Every reported
+   number is a delta between those two scrapes** — the histogram is a
+   Prometheus cumulative counter that never resets, so a single scrape can't
+   isolate one step's traffic from the whole daemon's lifetime. See
+   `diffHistogram` in `lib.ts`.
 5. **p50/p95** are computed by linear interpolation within the bucket the
    target quantile falls in — the same approximation Prometheus's own
    `histogram_quantile()` uses. Resolution is bounded by the fixed bucket
@@ -167,15 +184,53 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    ambiguous on a loaded CSMS; abandoned calls, CALLERRORs and reconnects on
    the _daemon_ side are not.
 
-   One caveat on attribution: the watchdog fires 30s after the CALL, so a
-   timeout for a call sent in the last 30s of a measurement window is counted
-   in the **next** step's row. Keep `--duration` at 60s or more (the script
-   prints a note if it is not) so the knee lands on the right `N`.
+   Attribution is what the warmup below is for: the watchdog fires 30s _after_
+   the CALL, so which calls a step's `timeouts` delta covers is a property of
+   when the step's load started, not of `--duration`.
 
-8. **Cleanup.** Every created CP is `cp.delete`d at the end (or on Ctrl-C).
-   This script never calls `state.reset` (daemon-wide, drops CPs it didn't
-   create too) — run it against a dedicated bench daemon if you want a clean
-   slate.
+8. **Cleanup.** Every created CP is `cp.delete`d at the end (or on Ctrl-C),
+   32 at a time and **within a 60s budget**. It is best-effort, so it is
+   bounded: deleting sequentially with the full 35s RPC timeout each meant a
+   daemon that had died turned teardown of a 2000-CP fleet into ~19 hours of
+   blocked failure handling and an unresponsive Ctrl-C. If no control-plane
+   socket is connected the sweep is skipped outright — socket.io _buffers_ an
+   emit issued while disconnected rather than failing it, so those deletes
+   would each sit in the buffer until their timeout fired. Whatever is left is
+   named on stderr, because the next run's preflight refuses a daemon that
+   still holds it. This script never calls `state.reset` (daemon-wide, drops
+   CPs it didn't create too) — run it against a dedicated bench daemon if you
+   want a clean slate.
+
+### Warmup: why a step waits before it measures
+
+`ocppcp_ocpp_call_timeouts_total` increments when a CALL's 30s watchdog fires,
+which is 30s **after** the CALL was sent. A step's `timeouts` number is the
+delta between the two scrapes bracketing its window, so it counts watchdogs
+that fired in that window — that is, calls issued in the 30s-earlier interval.
+Without a warmup those calls were issued during the _previous_ step, or during
+this step's boot and stagger ramp, at a smaller `N` and a different load. The
+first non-zero `timeouts` then showed up one step late, and finding the `N`
+where it first goes non-zero is the entire point of the sweep.
+
+So each step holds the fleet at its new `N`, with its load already running, for
+`--warmup` seconds before taking the `before` scrape. The default is
+`30 + --tx-interval`: one CALL watchdog, plus the stagger ramp, because on the
+active axis the last charge point issues its first StartTransaction one
+`--tx-interval` after the first one does.
+
+**What a row's `timeouts` covers, precisely:** every watchdog expiry between
+the two scrapes — i.e. every CALL issued between 30s before the window opened
+and 30s before it closed. With the default warmup all of those calls were
+issued at this step's `N`, under this step's load. Calls issued in the last 30s
+of the window expire during the _next_ step's warmup, outside both windows, and
+are counted in neither row: dropped, never misattributed. `--warmup 0` opts out
+for a quick smoke run; the script prints a note saying the attribution
+guarantee no longer holds. The `p50`/`p95`, `late>30s`, `errors` and
+`reconnects` columns do not depend on the warmup — a duration is observed the
+moment the answer arrives.
+
+The warmup costs `--warmup` seconds per sweep point, on top of settling and
+`--duration`.
 
 ### Why a socket pool
 
@@ -218,7 +273,16 @@ a spare machine and a CSMS.
   `docs/entities/daemon.md#metrics`), so a SOAP fleet would produce an empty
   latency table. An `http(s)://` URL used to be accepted and then quietly run
   a 1.6J WebSocket fleet, because `cp.create_many` was only ever passed
-  `wsUrl` and the daemon defaults to `OCPP-1.6J`.
+  `wsUrl` and the daemon defaults to `OCPP-1.6J`. `--ocpp-version` rejects the
+  three SOAP versions (`OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`) for the same
+  reason, rather than accepting one and reporting a table of dashes.
+- **On OCPP 2.x the `timeouts` column is weaker.** The 30s per-CALL watchdog
+  lives only in the OCPP-1.6J message handler (`docs/entities/daemon.md#metrics`);
+  `OCPPMessageHandlerV201` has none, so on `--ocpp-version OCPP-2.0.1` /
+  `OCPP-2.1` that counter only moves when the pending-call map evicts. The
+  script prints a note when a 2.x version is chosen. Latency, `late>30s`,
+  `errors` and `reconnects` are unaffected, and the warmup above still applies
+  to the eviction path.
 - `/metrics` is scraped every 500ms during settle-wait. That is one bounded
   HTTP response whatever the fleet size, and it is HTTP rather than
   control-plane traffic, so it is not paced through the socket pool.

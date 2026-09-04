@@ -3,9 +3,12 @@
 // test` (picked up by `bun.test` name filter, see package.json's `test:bun`).
 import { describe, expect, it } from "bun:test";
 import {
+  BENCH_OCPP_VERSIONS,
   BenchValidationError,
+  CALL_WATCHDOG_SEC,
   MAX_FLEET_SIZE,
   MAX_SWEEP_POINTS,
+  MAX_WARMUP_SEC,
   Semaphore,
   TokenBucket,
   assertDaemonEmpty,
@@ -17,8 +20,10 @@ import {
   mergeHistogramDeltas,
   parseArgv,
   parseExposition,
+  recommendedWarmupSec,
   redactOptions,
   redactUrlUserinfo,
+  staggerOffsetsMs,
   validateOptions,
   type Sample,
 } from "./lib.ts";
@@ -76,6 +81,8 @@ describe("validateOptions — happy path and defaults", () => {
     expect(opts.durationSec).toBe(60);
     expect(opts.heartbeatIntervalSec).toBe(5);
     expect(opts.txIntervalSec).toBe(0);
+    expect(opts.ocppVersion).toBe("OCPP-1.6J");
+    expect(opts.warmupSec).toBe(CALL_WATCHDOG_SEC);
     expect(opts.daemonBasicAuth).toBeNull();
   });
 
@@ -121,9 +128,10 @@ describe("validateOptions — bounds and guards", () => {
   });
 
   it("rejects an http(s) --csms-url rather than silently running OCPP-J", () => {
-    // `growFleet` passes only `wsUrl`, so the daemon defaults to OCPP-1.6J:
-    // an http(s) URL used to produce a WebSocket fleet against an HTTP
-    // endpoint while the flag documentation promised SOAP.
+    // An http(s) URL used to produce a WebSocket fleet against an HTTP
+    // endpoint while the flag documentation promised SOAP — and SOAP has no
+    // CALL duration histogram to report either way, which is why
+    // `--ocpp-version` refuses the SOAP versions for the same reason.
     for (const url of ["http://localhost:8080/ocpp", "https://csms/ocpp"]) {
       expect(() =>
         validateOptions(
@@ -230,6 +238,113 @@ describe("validateOptions — bounds and guards", () => {
     expect(() =>
       validateOptions(argMap(["--daemon-basic-auth-user", "u"])),
     ).toThrow(BenchValidationError);
+  });
+});
+
+describe("--ocpp-version", () => {
+  it("defaults to OCPP-1.6J and is carried into the options block", () => {
+    // Not cosmetic: `cp.create_many` defaults to 1.6J on its own, so this is
+    // the value `growFleet` has to send for a 2.x CSMS to see 2.x stations.
+    expect(validateOptions(argMap()).ocppVersion).toBe("OCPP-1.6J");
+  });
+
+  it("accepts every OCPP-J version the simulator supports", () => {
+    for (const version of ["OCPP-1.6J", "OCPP-2.0.1", "OCPP-2.1"] as const) {
+      expect(
+        validateOptions(argMap(["--ocpp-version", version])).ocppVersion,
+      ).toBe(version);
+    }
+    expect([...BENCH_OCPP_VERSIONS].sort()).toEqual([
+      "OCPP-1.6J",
+      "OCPP-2.0.1",
+      "OCPP-2.1",
+    ]);
+  });
+
+  it("rejects the SOAP versions, which have no CALL duration histogram", () => {
+    // A SOAP log line carries no message id to correlate a response back
+    // with, so `ocppcp_ocpp_call_duration_seconds` stays empty and the run
+    // would print a latency table of dashes and call it a measurement.
+    for (const version of ["OCPP-1.2", "OCPP-1.5", "OCPP-1.6S"]) {
+      expect(() =>
+        validateOptions(argMap(["--ocpp-version", version])),
+      ).toThrow(/--ocpp-version must be one of/);
+    }
+  });
+
+  it("rejects a version the simulator does not know at all", () => {
+    expect(() =>
+      validateOptions(argMap(["--ocpp-version", "OCPP-3.0"])),
+    ).toThrow(BenchValidationError);
+    // A near-miss spelling is a typo, not a request for the default.
+    expect(() =>
+      validateOptions(argMap(["--ocpp-version", "ocpp-2.0.1"])),
+    ).toThrow(BenchValidationError);
+  });
+});
+
+describe("--warmup", () => {
+  it("defaults to one CALL watchdog on the idle axis", () => {
+    expect(validateOptions(argMap()).warmupSec).toBe(CALL_WATCHDOG_SEC);
+  });
+
+  it("defaults to the stagger ramp plus one watchdog on the active axis", () => {
+    // The active axis spreads first transactions across one --tx-interval, so
+    // a fixed 30s warmup would open the window while part of the fleet had
+    // still not issued its first StartTransaction.
+    const opts = validateOptions(argMap(["--tx-interval", "45"]));
+    expect(opts.warmupSec).toBe(CALL_WATCHDOG_SEC + 45);
+    expect(recommendedWarmupSec(45)).toBe(CALL_WATCHDOG_SEC + 45);
+  });
+
+  it("caps the computed default at MAX_WARMUP_SEC", () => {
+    expect(recommendedWarmupSec(3600)).toBe(MAX_WARMUP_SEC);
+    expect(
+      validateOptions(argMap(["--tx-interval", "3600"])).warmupSec,
+    ).toBeLessThanOrEqual(MAX_WARMUP_SEC);
+  });
+
+  it("accepts an explicit value, including 0", () => {
+    expect(validateOptions(argMap(["--warmup", "90"])).warmupSec).toBe(90);
+    // 0 is a deliberate opt-out for a smoke run; the script prints a note
+    // rather than refusing, since the cost is attribution, not correctness
+    // of the latency columns.
+    expect(validateOptions(argMap(["--warmup", "0"])).warmupSec).toBe(0);
+  });
+
+  it("rejects a negative --warmup and one past MAX_WARMUP_SEC", () => {
+    expect(() => validateOptions(argMap(["--warmup", "-1"]))).toThrow(
+      /--warmup must be between 0 and/,
+    );
+    expect(() =>
+      validateOptions(argMap(["--warmup", String(MAX_WARMUP_SEC + 1)])),
+    ).toThrow(/--warmup must be between 0 and/);
+  });
+});
+
+describe("staggerOffsetsMs", () => {
+  it("spreads offsets evenly across one --tx-interval", () => {
+    expect(staggerOffsetsMs(4, 60)).toEqual([0, 15_000, 30_000, 45_000]);
+    // Never reaches the full interval: offset `count` would collide with the
+    // first CP's second cycle rather than sit between the others.
+    expect(staggerOffsetsMs(4, 60).every((ms) => ms < 60_000)).toBe(true);
+  });
+
+  it("is deterministic, so two identical runs issue the same pattern", () => {
+    // The project's contract is that every random behaviour is seeded and
+    // replayable (docs/analyses/fleet-load-and-observability-roadmap.md).
+    // `Math.random()` here made the phase distribution — and so the observed
+    // knee — differ between two runs with identical flags.
+    const a = staggerOffsetsMs(50, 30);
+    const b = staggerOffsetsMs(50, 30);
+    expect(a).toEqual(b);
+    // Distinct offsets, not a lockstep burst: the whole point of staggering.
+    expect(new Set(a).size).toBe(50);
+  });
+
+  it("returns nothing for an empty step and zeros for the idle axis", () => {
+    expect(staggerOffsetsMs(0, 30)).toEqual([]);
+    expect(staggerOffsetsMs(3, 0)).toEqual([0, 0, 0]);
   });
 });
 

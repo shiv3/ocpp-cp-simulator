@@ -118,6 +118,36 @@ export function benchCpId(runId: string, index: number): string {
   return `${BENCH_ID_ROOT}-${runId}-${String(index).padStart(6, "0")}`;
 }
 
+/**
+ * The longest idTag this tool will mint. OCPP 1.6's `IdToken` is a
+ * `CiString20Type`, so 20 characters is the wire limit, not a style choice.
+ */
+export const MAX_ID_TAG_LENGTH = 20;
+
+/**
+ * A distinct, deterministic idTag for the charge point at global index
+ * `index`.
+ *
+ * **Every charge point presenting the same tag is a load bug, not a cosmetic
+ * one.** Without this they all fell back to `DEFAULT_ID_TAG` (`123456`), and a
+ * CSMS that enforces per-idTag concurrency — which is conforming behaviour —
+ * answers `ConcurrentTx` to every concurrent start after the first. The
+ * benchmark would then apply a fraction of the transaction load it reports,
+ * which is the same failure as the pool throttle and the stagger rotation
+ * arriving from outside the harness for once.
+ *
+ * The run-id fragment keeps two runs against one CSMS from colliding with each
+ * other; the index keeps the charge points within a run apart. Both are
+ * deterministic, so the traffic stays replayable.
+ */
+export function benchIdTag(runId: string, index: number): string {
+  const tail = runId.replace(/[^0-9a-z]/gi, "").slice(-6);
+  return `BT${tail}${String(index).padStart(6, "0")}`.slice(
+    0,
+    MAX_ID_TAG_LENGTH,
+  );
+}
+
 /** Control-plane RPC budget per pooled socket, per second.
  *
  *  Kept under the daemon's `RPC_RATE_PER_SEC` (100), which `socketServer`
@@ -518,7 +548,13 @@ function parseUrl(
   try {
     url = new URL(raw);
   } catch {
-    throw new BenchValidationError(`--${flag} is not a valid URL: ${raw}`);
+    // Redacted even though the URL did not parse — especially then. A value
+    // like `ws://user:secret@` is exactly what makes `new URL` throw, and this
+    // message goes to stderr, which commonly ends up in a CI log. The
+    // redaction is a regex over the raw text and needs no valid URL.
+    throw new BenchValidationError(
+      `--${flag} is not a valid URL: ${redactUrlUserinfo(raw)}`,
+    );
   }
   const scheme = url.protocol.replace(/:$/, "");
   if (!schemes.includes(scheme)) {

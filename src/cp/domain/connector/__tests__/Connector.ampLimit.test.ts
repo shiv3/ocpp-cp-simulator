@@ -336,3 +336,104 @@ describe("the phase restriction composes across both profiles (#301)", () => {
     expect(phasedSamples(connector)).toEqual(["L1", "L2", "L3"]);
   });
 });
+
+describe("an amp limit converts on the joint phase count, not its own (#301)", () => {
+  /**
+   * The watt cap and the phase restriction are independent constraints, but
+   * the A → W conversion depends on both, so it cannot run until both are
+   * known. Converting each profile on its own `numberPhases` first and only
+   * then taking the tighter wattage let a limit be exceeded on the phase
+   * actually in use.
+   */
+  function stationMax(
+    limitWatts: number,
+    numberPhases?: number,
+  ): ActiveChargingProfile {
+    return {
+      chargingProfileId: 303,
+      connectorId: 0,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [
+        {
+          startPeriod: 0,
+          limit: limitWatts,
+          ...(numberPhases ? { numberPhases } : {}),
+        },
+      ],
+    };
+  }
+
+  function threePhase(station: ActiveChargingProfile | null): Connector {
+    const store = new ChargingProfileStore();
+    if (station) store.add(station);
+    const connector = new Connector(1, new Logger(LogLevel.ERROR), () => store);
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+    };
+    armCharging(connector);
+    return connector;
+  }
+
+  it("holds a 10 A three-phase Tx limit when a station profile restricts to one phase", () => {
+    // The reported case: 10 A x 230 V x 3 = 6900 W beside a 3000 W station
+    // cap on one phase. 3000 W won, delivery was on that one phase, and
+    // 3000 / 230 is about 13 A — over the 10 A still in force.
+    const connector = threePhase(stationMax(3000, 1));
+    connector.addChargingProfile(ampProfile(10, 3));
+
+    expect(connector.activePhaseCount()).toBe(1);
+    const watts = connector.currentScheduleLimitWatts();
+    expect(watts).toBeCloseTo(10 * 230, 6);
+    // What the one active phase actually carries must not exceed the limit.
+    expect(watts / (230 * connector.activePhaseCount())).toBeCloseTo(10, 6);
+  });
+
+  it("holds the limit with a non-unity power factor too", () => {
+    const store = new ChargingProfileStore();
+    store.add(stationMax(3000, 1));
+    const connector = new Connector(1, new Logger(LogLevel.ERROR), () => store);
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+      powerFactor: 0.9,
+    };
+    armCharging(connector);
+    connector.addChargingProfile(ampProfile(10, 3));
+
+    const watts = connector.currentScheduleLimitWatts();
+    expect(watts).toBeCloseTo(10 * 230 * 0.9, 6);
+    expect(watts / (230 * 1 * 0.9)).toBeCloseTo(10, 6);
+  });
+
+  it("is unchanged when both profiles agree on three phases", () => {
+    const connector = threePhase(stationMax(50_000, 3));
+    connector.addChargingProfile(ampProfile(10, 3));
+    expect(connector.currentScheduleLimitWatts()).toBeCloseTo(10 * 230 * 3, 6);
+    expect(connector.activePhaseCount()).toBe(3);
+  });
+
+  it("is unchanged when no profile names a phase count", () => {
+    const connector = threePhase(stationMax(50_000));
+    connector.addChargingProfile(ampProfile(10));
+    expect(connector.currentScheduleLimitWatts()).toBeCloseTo(10 * 230 * 3, 6);
+  });
+
+  it("applies to a connector with no electrical model as well", () => {
+    // The legacy conversion narrows too. It can only ever lower the cap, and
+    // leaving it converting on phases another profile has excluded would keep
+    // the violation alive for the connectors that say least about their
+    // electrics.
+    const store = new ChargingProfileStore();
+    store.add(stationMax(3000, 1));
+    const connector = new Connector(1, new Logger(LogLevel.ERROR), () => store);
+    armCharging(connector);
+    connector.addChargingProfile(ampProfile(10, 3));
+    expect(connector.currentScheduleLimitWatts()).toBe(10 * 230);
+  });
+});

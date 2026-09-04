@@ -192,7 +192,7 @@ function buildSingleSample(
       // `Power.Factor = 0.00` next to a current computed from 0.004, and
       // rounding the derivation to match instead would divide by zero (#301).
       return {
-        value: String(inputs.powerFactor),
+        value: formatPowerFactor(inputs.powerFactor),
         context,
         measurand,
       };
@@ -237,6 +237,25 @@ function buildSingleSample(
       // Spec-unknown measurand. Emit a Raw zero so the request stays valid.
       return { value: "0", context, measurand };
   }
+}
+
+/**
+ * `Power.Factor`'s string form: unity as `"1.0"`, anything else verbatim.
+ *
+ * Before v1.2 this sample was the literal `"1.0"` for every connector, and
+ * this PR promises a scenario with no electrical fields produces byte-identical
+ * MeterValues. `effectivePowerFactor` returns the number `1` for all of those
+ * connectors — no `powerFactor` configured, or DC, or a value outside
+ * `(0, 1]` — so stringifying it moved the wire bytes from `"1.0"` to `"1"`.
+ * The two parse to the same number, but a raw-payload or snapshot consumer
+ * compares text (#301).
+ *
+ * Exact configured values are still reported exactly, which is what stopping
+ * the old `toFixed(2)` was for: `0.004` stays `"0.004"`, and never becomes a
+ * cos φ that did not produce the `Current.Import` beside it.
+ */
+function formatPowerFactor(value: number): string {
+  return value === 1 ? "1.0" : String(value);
 }
 
 /**

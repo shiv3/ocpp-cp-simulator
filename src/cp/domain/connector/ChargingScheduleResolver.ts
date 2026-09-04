@@ -136,18 +136,28 @@ function limitToWatts(
   unit: ChargingRateUnitType,
   numberPhases: number | undefined,
   electrical: ElectricalSettings | undefined,
+  jointPhases: number | null | undefined,
 ): number {
+  // The phase count every applicable profile agrees on, when the caller knows
+  // it. A profile's own `numberPhases` describes the phases *it* permits, but
+  // delivery happens on the phases every profile permits, and an amp limit is
+  // a per-phase current: converting 10 A on 3 phases while another profile
+  // holds the connector to 1 gives a cap that draws about 13 A on the phase
+  // actually in use, violating the 10 A limit still in force (#301).
+  const phases = jointPhases ?? numberPhases;
   if (unit === ChargingRateUnitType.W) return rawLimit;
   // A → W through the connector's own model when it has one, so that the
   // W → A conversion `MeterValueBuilder` applies to the resulting cap lands
   // back on `rawLimit` rather than above it (#301).
-  if (electrical)
-    return powerWattsForCurrent(rawLimit, electrical, numberPhases);
-  // No model declared: the pre-#301 conversion, unchanged. amperes × volts ×
-  // phases, with OCPP §7.21's default of 3 when numberPhases is absent.
-  // Single-phase profiles must set numberPhases=1 explicitly.
-  const phases = numberPhases ?? 3;
-  return rawLimit * REFERENCE_PHASE_VOLTAGE * phases;
+  if (electrical) return powerWattsForCurrent(rawLimit, electrical, phases);
+  // No model declared: the pre-#301 conversion. amperes × volts × phases,
+  // with OCPP §7.21's default of 3 when no phase count is known at all.
+  // Single-phase profiles must set numberPhases=1 explicitly. The joint count
+  // applies here too — it can only ever narrow the cap, and leaving this
+  // branch converting on phases another profile has excluded would keep the
+  // violation alive for exactly the connectors with the least to say about
+  // their own electrics.
+  return rawLimit * REFERENCE_PHASE_VOLTAGE * (phases ?? 3);
 }
 
 /**
@@ -166,6 +176,7 @@ export function resolveScheduleLimitWatts(
   transactionStart: Date | null,
   now: Date = new Date(),
   electrical?: ElectricalSettings,
+  jointPhases?: number | null,
 ): ResolvedScheduleLimit {
   if (!profile || !transactionStart) return UNCAPPED;
 
@@ -179,6 +190,7 @@ export function resolveScheduleLimitWatts(
     profile.chargingRateUnit,
     period.numberPhases,
     electrical,
+    jointPhases,
   );
 
   return {
@@ -202,6 +214,11 @@ export function resolveScheduleLimitWatts(
  *
  * The returned `profileId` / `periodIndex` come from whichever side is
  * tighter (so logs show which profile actually constrained the draw).
+ *
+ * Both sides are converted on the **joint** phase count
+ * ({@link resolveEffectivePhaseLimit}) rather than on their own
+ * `numberPhases`, because an ampere limit is a per-phase current and the
+ * station delivers only on the phases every applicable profile permits.
  */
 export function resolveEffectiveLimitWatts(
   txProfile: ActiveChargingProfile | null,
@@ -210,17 +227,33 @@ export function resolveEffectiveLimitWatts(
   now: Date = new Date(),
   electrical?: ElectricalSettings,
 ): ResolvedScheduleLimit {
+  // Phases first, then the conversion. The watt cap and the phase restriction
+  // are independent constraints, but turning an ampere limit into watts
+  // depends on both, so it cannot happen until both are known. Converting each
+  // profile on its own `numberPhases` and only then taking the tighter wattage
+  // let a 10 A / 3-phase TxProfile become 6900 W beside a 3000 W / 1-phase
+  // ChargePointMaxProfile: 3000 W won, delivery was on the one phase the
+  // station profile allowed, and that is roughly 13 A on it — over a 10 A
+  // limit still in force (#301).
+  const jointPhases = resolveEffectivePhaseLimit(
+    txProfile,
+    chargePointMaxProfile,
+    transactionStart,
+    now,
+  );
   const tx = resolveScheduleLimitWatts(
     txProfile,
     transactionStart,
     now,
     electrical,
+    jointPhases,
   );
   const cap = resolveScheduleLimitWatts(
     chargePointMaxProfile,
     transactionStart,
     now,
     electrical,
+    jointPhases,
   );
   if (tx.watts === Infinity && cap.watts === Infinity) return UNCAPPED;
   // The tighter side wins. Equal watts → prefer the tx side (more

@@ -498,3 +498,113 @@ describe("per-phase samples honour the profile's phase restriction (#301)", () =
     );
   });
 });
+
+describe("a connector with no electrical fields is byte-identical to pre-v1.2 (#301)", () => {
+  /**
+   * The contract sentence this PR states: settings without any of
+   * `chargingCurve`, `currentType`, `phases`, `voltageV` or `powerFactor`
+   * produce the same MeterValues as before the charging curve existed. That
+   * is a promise about the *strings* on the wire, not the parsed numbers — a
+   * raw-payload or snapshot consumer compares text — so it is pinned here once
+   * across every measurand rather than one at a time. `Power.Factor` is how
+   * this was found: it had silently moved from "1.0" to "1".
+   *
+   * The expected values are the pre-#301 builder's output for this connector:
+   * 22 kW at the default 230 V, one phase, unity cos φ.
+   */
+  const legacyConnector = () =>
+    connectorStub({
+      soc: 42,
+      meterValue: 1234,
+      evSettings: { maxChargingPowerKw: 22 },
+    });
+
+  const ALL_MEASURANDS = [
+    "Energy.Active.Import.Register",
+    "Voltage",
+    "Current.Import",
+    "Current.Offered",
+    "Power.Active.Import",
+    "Power.Offered",
+    "Power.Factor",
+    "SoC",
+    "Temperature",
+    "Frequency",
+    "Energy.Active.Import.Interval",
+    "Energy.Reactive.Import.Register",
+    "Current.Export",
+    "Power.Active.Export",
+    "RPM",
+    "Some.Vendor.Measurand",
+  ];
+
+  it("emits exactly the pre-v1.2 string for every measurand", () => {
+    const samples = buildSampledValues(
+      legacyConnector(),
+      ALL_MEASURANDS,
+      "Sample.Periodic",
+    );
+    const byMeasurand = Object.fromEntries(
+      samples.map((s) => [s.measurand, s.value]),
+    );
+    expect(byMeasurand).toEqual({
+      "Energy.Active.Import.Register": "1234",
+      Voltage: "230",
+      // 22000 W / 230 V, single phase, unity cos φ.
+      "Current.Import": "95.7",
+      "Current.Offered": "95.7",
+      "Power.Active.Import": "22000",
+      "Power.Offered": "22000",
+      // The literal the pre-v1.2 builder hardcoded, not "1".
+      "Power.Factor": "1.0",
+      SoC: "42.0",
+      Temperature: "25",
+      Frequency: "50",
+      "Energy.Active.Import.Interval": "0",
+      "Energy.Reactive.Import.Register": "0",
+      "Current.Export": "0",
+      "Power.Active.Export": "0",
+      RPM: "0",
+      "Some.Vendor.Measurand": "0",
+    });
+  });
+
+  it("emits no per-phase sample, as before v1.2", () => {
+    const samples = buildSampledValues(
+      legacyConnector(),
+      ALL_MEASURANDS,
+      "Sample.Periodic",
+    );
+    expect(samples.filter((s) => s.phase !== undefined)).toHaveLength(0);
+  });
+
+  it("still reports a configured power factor exactly, not as 1.0", () => {
+    const configured = connectorStub({
+      soc: 42,
+      evSettings: {
+        maxChargingPowerKw: 22,
+        currentType: "AC",
+        powerFactor: 0.004,
+      },
+    });
+    const sample = buildSampledValues(
+      configured,
+      ["Power.Factor"],
+      "Sample.Periodic",
+    )[0]!;
+    expect(sample.value).toBe("0.004");
+  });
+
+  it("reports an explicitly configured unity power factor as 1.0 too", () => {
+    // Same string either way: the wire form of unity does not depend on how
+    // the connector arrived at it.
+    const configured = connectorStub({
+      soc: 42,
+      evSettings: { maxChargingPowerKw: 22, currentType: "AC", powerFactor: 1 },
+    });
+    expect(
+      buildSampledValues(configured, ["Power.Factor"], "Sample.Periodic")[0]!
+        .value,
+    ).toBe("1.0");
+  });
+});

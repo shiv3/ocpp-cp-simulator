@@ -168,6 +168,26 @@ export class Connector {
   // (which bumps updatedAt) will legitimately re-trigger auto-start.
   private lastAutoStartedScenarioKeyValue: string | null = null;
   private meterValueWh = 0;
+
+  /**
+   * Whether the current `socPercent` was derived from the energy register
+   * rather than set explicitly.
+   *
+   * A derived SoC describes the battery of the transaction whose meter
+   * produced it, so it must not survive into the next one: `stopTransaction`
+   * deliberately leaves `socPercent` in place (disconnect/reconnect paths and
+   * post-boot StatusNotifications read it), and the next session's first
+   * scheduler interval then evaluated the charging curve against the previous
+   * battery's SoC — 82% on a car that just plugged in at 20% — until the first
+   * meter tick reset it. One interval, and it is the interval that sets the
+   * session's opening power (#301).
+   *
+   * An *explicitly* set SoC is kept across `beginTransaction`: a value typed
+   * into the side panel, reported in a MeterValue SoC sample, or handed to
+   * `startTransaction` as `initialSoc` is a statement about the car that is
+   * plugged in now, not a leftover.
+   */
+  private socIsMeterDerived = false;
   private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
 
@@ -519,6 +539,7 @@ export class Connector {
       const derived = this.socFromMeterValue(this.meterValueWh);
       if (derived !== null && this.socPercent !== derived) {
         this.socPercent = derived;
+        this.socIsMeterDerived = true;
         this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }
@@ -546,6 +567,9 @@ export class Connector {
 
   set soc(value: number | null) {
     this.socPercent = value;
+    // Explicit: a statement about the car plugged in now, so it survives the
+    // next `beginTransaction` (#301).
+    this.socIsMeterDerived = false;
     this.eventsEmitter.emit("socChange", { soc: value });
     this.checkAutoStop();
   }
@@ -839,8 +863,39 @@ export class Connector {
 
   beginTransaction(transaction: Transaction): void {
     this.transactionValue = transaction;
+    this.openSessionSoc(transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });
+  }
+
+  /**
+   * Replace a SoC left over from the previous session with this session's
+   * opening value, before the meter scheduler's first interval runs.
+   *
+   * `stopTransaction` intentionally leaves `socPercent` alone, so a connector
+   * that finished at 82% still reads 82% when the next car plugs in. Every
+   * other part of the domain already treats
+   * `transaction.initialSoc ?? evSettings.initialSoc` as the new session's
+   * starting point — `socFromMeterValue` computes exactly that on the first
+   * meter tick — so the curve was being evaluated against the wrong battery
+   * for precisely one interval, the one that sets the opening power (#301).
+   * This does the same reset one tick earlier, and does it whether or not
+   * meter/SoC sync is on: with sync off nothing would ever have corrected it.
+   *
+   * Only a **meter-derived** SoC is replaced. An explicit one — typed in the
+   * side panel, arrived in a MeterValue SoC sample, or passed to
+   * `startTransaction` as `initialSoc`, which the ChargePoint writes through
+   * the `soc` setter just before this runs — describes the car that is
+   * plugged in now and is left exactly as it is.
+   */
+  private openSessionSoc(transaction: Transaction): void {
+    if (!this.socIsMeterDerived) return;
+    const opening = transaction.initialSoc ?? this._evSettings.initialSoc;
+    if (opening === undefined) return;
+    this.socIsMeterDerived = false;
+    if (this.socPercent === opening) return;
+    this.socPercent = opening;
+    this.eventsEmitter.emit("socChange", { soc: opening });
   }
 
   stopTransaction(): void {
@@ -934,6 +989,7 @@ export class Connector {
       const derived = this.socFromMeterValue(meterValueWh);
       if (derived !== null && this.socPercent !== derived) {
         this.socPercent = derived;
+        this.socIsMeterDerived = true;
         this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }

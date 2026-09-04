@@ -400,6 +400,14 @@ which is the same defect the `Power.Factor` rule below fixes, and gets the
 same answer: report what was used, so the substitution is on the wire rather
 than silent.
 
+**A `Power.Factor` of unity is written `1.0`.** That is the literal every
+pre-1.2 connector put on the wire, and settings with no electrical fields must
+produce byte-identical MeterValues — a promise about the strings, since a
+raw-payload or snapshot consumer compares text, not parsed numbers. Every
+unconfigured connector resolves to unity (no `powerFactor`, or DC, or a value
+outside `(0, 1]`), so all of them keep `"1.0"`. A configured non-unity value is
+still reported exactly, which is what the rule below is for.
+
 **A `Power.Factor` sample is never rounded.** It names the exact number that
 produced `Current.Import` in the same message, so `powerFactor: 0.004` reports
 `0.004`, not `0.00`. Rounding the sample to two decimals while deriving the
@@ -486,7 +494,17 @@ use.** The phase count is the connector's wiring narrowed by the tightest
 cap, because they are independent constraints and the profile that supplies
 the lower wattage need not be the one that restricts the phases. A Tx profile
 holding a connector to one phase stays in force even when a three-phase
-station profile is what caps the watts. Under a profile restricting
+station profile is what caps the watts.
+
+**Every amp-based limit is converted on that joint phase count, not on its
+own `numberPhases`.** The two constraints are independent, but the A → W
+conversion depends on both, so it runs only once both are known. Converting
+each profile separately and taking the tighter wattage afterwards let a limit
+be exceeded on the phase actually in use: a 10 A three-phase `TxProfile`
+became 6900 W beside a 3000 W single-phase `ChargePointMaxProfile`, the 3000 W
+won, and delivery on the one permitted phase was about 13 A — over a 10 A
+limit still in force. The joint count applies to a connector with no
+electrical model too, where it can only ever narrow the cap. Under a profile restricting
 a 3-phase connector to one or two phases, only the aggregate is reported: the
 station must not claim consumption on phases the CSMS said it may not use, and
 because OCPP's `numberPhases` says how _many_ phases, never _which_, naming a
@@ -533,6 +551,20 @@ be worse: it is the aliasing that was removed above, and here it would report
 the EVSE's offer as the station's consumption with nothing to reveal the
 substitution. Nothing is lost that was not already unavailable — as soon as
 one supported measurand is configured, the request goes out with it.
+
+**A transaction opens on its own SoC, never the previous session's.** Stopping
+a transaction deliberately leaves `socPercent` in place — disconnect/reconnect
+paths and post-boot StatusNotifications describe the connector with it — so a
+connector that finished at 95% still reads 95% when the next car plugs in.
+Starting a transaction replaces a **meter-derived** SoC with this session's
+opening value, `transaction.initialSoc ?? evSettings.initialSoc`, which is
+what `socFromMeterValue` computes on the first meter tick anyway. Without that,
+the charging curve was evaluated against the previous battery for exactly one
+scheduler interval — the interval that sets the session's opening power — and
+for the whole session when meter/SoC sync is off, since nothing would correct
+it. An **explicitly** set SoC survives: a value typed into the side panel, one
+that arrived in a MeterValue SoC sample, or `initialSoc` handed to
+`StartTransaction` describes the car plugged in now, not a leftover.
 
 **The curve is evaluated at the transaction's (or EV settings') `initialSoc`
 before the first synced SoC, not 0%.** `connector.soc` is `null` until the

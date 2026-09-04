@@ -542,3 +542,127 @@ describe("a fractional maxValue still stops the auto-meter (#301)", () => {
     expect(connector.meterValue).toBe(10);
   });
 });
+
+describe("a new transaction opens on its own SoC, not the last one's (#301)", () => {
+  /**
+   * `stopTransaction` deliberately leaves `socPercent` in place, so a
+   * connector that finished at 95% still reads 95% when the next car plugs
+   * in. The curve was then evaluated against that leftover for the first
+   * scheduler interval of the new session — the interval that sets the
+   * opening power — until the first meter tick reset it.
+   */
+  function taperAbove90(connector: Connector): void {
+    connector.evSettings = {
+      ...connector.evSettings,
+      // A small battery against a large ceiling, so a handful of seconds of
+      // simulated charging really does carry it past the curve's cliff.
+      batteryCapacityKwh: 1,
+      maxChargingPowerKw: 100,
+      initialSoc: 20,
+      targetSoc: 100,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0 },
+        { socPercent: 100, powerFraction: 0 },
+      ],
+    };
+  }
+
+  function reportedPowerW(connector: Connector): number {
+    const samples = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    );
+    return Number(
+      samples.find((s) => s.measurand === "Power.Active.Import")?.value ?? "0",
+    );
+  }
+
+  it("does not taper the second session at the first session's SoC", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    taperAbove90(connector);
+    connector.status = OCPPStatus.Charging;
+
+    // First session runs the battery up past the curve's cliff.
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 20_000,
+    });
+    vi.advanceTimersByTime(40_000);
+    connector.stopAutoMeterValue();
+    const endWh = connector.meterValue;
+    connector.stopTransaction();
+    expect(connector.soc).toBeGreaterThan(90);
+    expect(reportedPowerW(connector)).toBe(0);
+
+    // Second session on the same connector, no explicit initialSoc — the
+    // normal UI and CLI path. The battery is a fresh one at 20%, so the very
+    // first sample must be full power, not the previous car's taper.
+    connector.beginTransaction(transaction(endWh));
+    expect(connector.soc).toBe(20);
+    expect(reportedPowerW(connector)).toBe(100_000);
+  });
+
+  it("keeps an explicit SoC set before the transaction starts", () => {
+    // A value typed in the side panel, or handed to startTransaction as
+    // initialSoc (which the ChargePoint writes through this same setter), is
+    // a statement about the car plugged in now — not a leftover.
+    const connector = makeConnector();
+    taperAbove90(connector);
+    connector.status = OCPPStatus.Charging;
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(95);
+    expect(reportedPowerW(connector)).toBe(0);
+  });
+
+  it("prefers the transaction's own initialSoc over the EV settings' one", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    taperAbove90(connector);
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 20_000,
+    });
+    vi.advanceTimersByTime(40_000);
+    connector.stopAutoMeterValue();
+    connector.stopTransaction();
+
+    connector.beginTransaction(transaction(connector.meterValue, 95));
+    expect(connector.soc).toBe(95);
+    expect(reportedPowerW(connector)).toBe(0);
+  });
+
+  it("resets the leftover even with meter/SoC sync off, where nothing else would", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    taperAbove90(connector);
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 20_000,
+    });
+    vi.advanceTimersByTime(40_000);
+    connector.stopAutoMeterValue();
+    const endWh = connector.meterValue;
+    connector.stopTransaction();
+    expect(connector.soc).toBeGreaterThan(90);
+
+    // With sync off the meter never corrects SoC, so a leftover would drive
+    // the whole session, not just its first interval.
+    connector.socMeterSyncEnabled = false;
+    connector.beginTransaction(transaction(endWh));
+    expect(connector.soc).toBe(20);
+    expect(reportedPowerW(connector)).toBe(100_000);
+  });
+});

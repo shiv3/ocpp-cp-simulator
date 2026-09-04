@@ -22,9 +22,20 @@ export const STR_1K = z.string().max(1_024);
 /** Scenario-definition payload string: ≤ 256 KB (scenarios can be large). */
 export const SCENARIO_STR_256K = z.string().max(262_144);
 
-/** Array field capped at 1000 items. */
+/**
+ * Max items in an `ARRAY_1000` field.
+ *
+ * Exported as a number, not just baked into the helper, because producers have
+ * to be able to check the bound *before* they build a payload: the file-reload
+ * path refuses an edit whose resulting `scenario-definitions-changed` snapshot
+ * would not fit rather than applying it and failing validation on the way out
+ * (#314). One constant, so the producer and the schema cannot drift apart.
+ */
+export const ARRAY_MAX_ITEMS = 1_000;
+
+/** Array field capped at {@link ARRAY_MAX_ITEMS} items. */
 export const ARRAY_1000 = <T extends z.ZodTypeAny>(schema: T) =>
-  z.array(schema).max(1_000);
+  z.array(schema).max(ARRAY_MAX_ITEMS);
 
 /**
  * Max charge points a single `cp.create_many` call may create.

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 import { CLIChargePointService } from "../../service";
 import { CPRegistry } from "../CPRegistry";
@@ -11,6 +12,7 @@ import { EventBus } from "../eventBus";
 import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import { runStartupScenario } from "../startServer";
+import { listWatchedScenarioFiles } from "../watchedScenarioFiles";
 
 /**
  * `--watch` over a `--scenario-template-file` fan-out (#314).
@@ -93,6 +95,17 @@ function loadedDelay(
 ): number | null {
   const scenarioId = svc.listScenarios(connectorId)[0]?.scenarioId;
   if (!scenarioId) return null;
+  const node = svc.getScenario(connectorId, scenarioId)?.nodes[0] as
+    { data?: { delaySeconds?: number } } | undefined;
+  return node?.data?.delaySeconds ?? null;
+}
+
+/** The `delaySeconds` of one named instance, when a connector holds several. */
+function delayOf(
+  svc: CLIChargePointService,
+  connectorId: number,
+  scenarioId: string,
+): number | null {
   const node = svc.getScenario(connectorId, scenarioId)?.nodes[0] as
     { data?: { delaySeconds?: number } } | undefined;
   return node?.data?.delaySeconds ?? null;
@@ -282,6 +295,126 @@ describe("--watch over a startup scenario file (#314)", () => {
       fileReload.close();
       svc.disconnect();
       registry.shutdownAll();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+  it("does not persist its registrations, because only the bootstrap can restore them", async () => {
+    // A `watched_scenario_files` row carries a path and an id — never the
+    // `prepare` callback that rewrites the template per connector. Persisted,
+    // the startup fan-out came back on the next `--state-db` boot as one
+    // prepare-less watch per connector, under the *previous* run's ids, each
+    // ready to reload the file's own targetId over the prepared copies while
+    // the bootstrap built fresh instances alongside them. The bootstrap runs on
+    // every boot and is the only thing that can restore these correctly, so
+    // they are deliberately not written down (#314).
+    const csms = startMockCsms();
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-startup-db-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+      database,
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314db",
+      wsUrl: csms.url,
+      connectors: 2,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+    const templateFile = join(tmpDir, "template.json");
+    writeFileSync(templateFile, template(11));
+
+    try {
+      await svc.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      const runPromise = runStartupScenario(
+        svc,
+        {
+          scenario: null,
+          scenarioTemplate: null,
+          scenarioTemplateFile: templateFile,
+          scenarioConnector: "all",
+        },
+        2,
+        fileReload,
+      );
+      csms.replyCallResult(boot.messageId, {
+        currentTime: new Date().toISOString(),
+        interval: 300,
+        status: "Accepted",
+      });
+      await runPromise;
+
+      // Watched right now — and nothing written down.
+      expect(fileReload.watchedPaths()).toEqual([templateFile]);
+      expect(listWatchedScenarioFiles(database)).toEqual([]);
+      expect(loadedDelay(svc, 1)).toBe(11);
+      expect(loadedDelay(svc, 2)).toBe(11);
+      const idsBefore = [
+        svc.listScenarios(1)[0]?.scenarioId as string,
+        svc.listScenarios(2)[0]?.scenarioId as string,
+      ];
+
+      // `--scenario` is the same story: its `prepare` decides per reload
+      // whether the file already targets the connector, and no row can say so.
+      const scenarioFile = join(tmpDir, "scenario.json");
+      writeFileSync(scenarioFile, targeted(1, 11));
+      await runStartupScenario(
+        svc,
+        {
+          scenario: scenarioFile,
+          scenarioTemplate: null,
+          scenarioTemplateFile: null,
+          scenarioConnector: "all",
+        },
+        2,
+        fileReload,
+      );
+      expect(fileReload.watchedPaths()).toContain(scenarioFile);
+      expect(listWatchedScenarioFiles(database)).toEqual([]);
+
+      // The reloader restarts (the bootstrap has not re-run yet) and restores
+      // whatever the database says it was watching.
+      fileReload.close();
+      const restored = new FileReloadManager(registry, {
+        watcher: new FileWatcher({
+          debounceMs: 5,
+          watchFactory: backend.factory,
+        }),
+        log: () => {},
+        database,
+      });
+      try {
+        restored.syncFromRegistry();
+        restored.restoreScenarioWatches();
+        expect(restored.watchedPaths()).toEqual([]);
+
+        // Nothing is watching the template, so an edit changes nothing. With
+        // the rows persisted, this reload would land prepare-less: both
+        // connectors rewritten to the file's own targetId, connector 2 driving
+        // connector 1.
+        backend.save(templateFile, template(22));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(delayOf(svc, 1, idsBefore[0])).toBe(11);
+        expect(delayOf(svc, 2, idsBefore[1])).toBe(11);
+        expect(svc.getScenario(2, idsBefore[1])?.targetId).toBe(2);
+      } finally {
+        restored.close();
+      }
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
       await csms.stop();
       rmSync(tmpDir, { recursive: true, force: true });
     }

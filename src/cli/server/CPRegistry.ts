@@ -13,6 +13,7 @@ import type {
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
+import { forgetWatchedChargePointFiles } from "./watchedScenarioFiles";
 
 export type RegistryMembershipChange = "added" | "removed";
 
@@ -681,6 +682,9 @@ export class CPRegistry {
     // schema, so the cleanup is explicit.
     this.database.run("DELETE FROM scenarios WHERE cp_id = ?", [cpId]);
     this.database.run("DELETE FROM connector_runtime WHERE cp_id = ?", [cpId]);
+    // #314: the watch rows are stored state like the rest, so they go with the
+    // charge point whether or not this daemon was started with `--watch`.
+    forgetWatchedChargePointFiles(this.database, cpId);
   }
 
   remove(cpId: string, opts: { notify?: boolean } = {}): boolean {

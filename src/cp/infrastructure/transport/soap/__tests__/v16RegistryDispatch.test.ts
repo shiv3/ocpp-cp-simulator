@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   coerceSoapPayloadWithSchema,
   dispatchSoapCallViaV16Registry,
+  SoapRequestValidationError,
   transformResponseForOcpp12,
 } from "../v16RegistryDispatch";
-import { OCPP16_DIALECT } from "../dialect";
+import { OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
 import { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
@@ -468,5 +469,82 @@ describe("dispatchSoapCallViaV16Registry", () => {
     });
 
     expect(response).toEqual({ status: "Accepted" });
+  });
+});
+
+/**
+ * #285 — an inbound request missing a mandatory element must not come back
+ * with a verdict.
+ *
+ * The measured behaviour before this: six of these seven answered `200` with
+ * a plausible OCPP status (`Rejected`, `NotSupported`, `VersionMismatch`,
+ * even `Accepted` with a full payload) and the seventh crashed with a
+ * TypeError naming an implementation variable. For a tool whose job is to
+ * judge a CSMS, the first is the dangerous one: a malformed request came back
+ * with a well-formed verdict, so the CSMS's defect was masked rather than
+ * merely undetected.
+ */
+describe("inbound request validation (#285)", () => {
+  const chargePoint = {
+    sendCurrentStatusNotification: () => {},
+    getConfiguration: () => [],
+    setConfiguration: () => "Accepted",
+    connectors: new Map(),
+    getConnector: () => undefined,
+    status: "Available",
+  } as unknown as ChargePoint;
+
+  // The table from the issue, one mandatory element removed per request.
+  const cases: Array<[string, Record<string, unknown>, string]> = [
+    ["SetChargingProfile", { connectorId: "1" }, "csChargingProfiles"],
+    ["GetCompositeSchedule", { connectorId: "1" }, "duration"],
+    ["ReserveNow", { connectorId: "1" }, "expiryDate"],
+    ["ChangeConfiguration", { key: "HeartbeatInterval" }, "value"],
+    ["RemoteStartTransaction", { connectorId: "1" }, "idTag"],
+    ["SendLocalList", { listVersion: "1" }, "updateType"],
+    ["UnlockConnector", {}, "connectorId"],
+  ];
+
+  for (const [operation, payload, missing] of cases) {
+    it(`refuses ${operation} without ${missing}, naming the element`, async () => {
+      const attempt = dispatchSoapCallViaV16Registry({
+        operation: operation as never,
+        payload,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+
+      await expect(attempt).rejects.toBeInstanceOf(SoapRequestValidationError);
+      await expect(attempt).rejects.toThrow(missing);
+      // The name of the operation, not of a variable inside the handler.
+      await expect(attempt).rejects.toThrow(operation);
+    });
+  }
+
+  it("accepts a complete request unchanged", async () => {
+    const response = await dispatchSoapCallViaV16Registry({
+      operation: "RemoteStartTransaction" as never,
+      payload: { connectorId: "1", idTag: "TAG123" },
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    expect(response).toHaveProperty("status");
+  });
+
+  it("leaves the 1.5 dialect alone, which has no schemas of its own", async () => {
+    // Validating a 1.2/1.5 request against a 1.6 schema would reject requests
+    // that are correct for their own version, so the check is 1.6-S only.
+    const response = await dispatchSoapCallViaV16Registry({
+      operation: "RemoteStartTransaction" as never,
+      payload: { connectorId: "1" },
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP15_DIALECT,
+    });
+
+    expect(response).toHaveProperty("status");
   });
 });

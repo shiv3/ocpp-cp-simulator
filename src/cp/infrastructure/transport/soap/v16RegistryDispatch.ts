@@ -11,6 +11,8 @@ import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegi
 import { DataTransferHandler } from "../handlers";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
 import { v16Schemas } from "../../../../ocpp/v16";
+import { validationErrors } from "../../../../ocpp/validate";
+import { OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 import {
   normalizeHandlerResult,
   type HandlerResult,
@@ -248,11 +250,31 @@ export function coerceSoapPayloadWithSchema(
 }
 
 /**
+ * A CS→CP request that does not satisfy its operation schema (#285).
+ *
+ * Its own class so {@link OCPPSoapServer} can render it as a Fault that names
+ * the offending element, instead of the generic "Dispatch error" wrapper --
+ * which is how a missing `csChargingProfiles` used to surface as a raw
+ * JavaScript `TypeError` naming an implementation variable.
+ */
+export class SoapRequestValidationError extends Error {
+  readonly operation: string;
+  readonly issues: ReadonlyArray<string>;
+
+  constructor(operation: string, issues: ReadonlyArray<string>) {
+    super(`Invalid ${operation} request: ${issues.join("; ")}`);
+    this.name = "SoapRequestValidationError";
+    this.operation = operation;
+    this.issues = issues;
+  }
+}
+
+/**
  * Dispatch a SOAP CS→CP request through the shared v16 CALL-handler registry.
  *
  * Steps:
  * 1. Coerce the SOAP payload to proper types using the v16 JSON schema
- * 2. Validate the coerced payload (warn-only on failure)
+ * 2. Validate the coerced payload against that schema (OCPP 1.6-S only)
  * 3. Look up and execute the CALL handler for the operation
  * 4. Return the response payload
  *
@@ -278,6 +300,27 @@ export async function dispatchSoapCallViaV16Registry(input: {
 
   // Coerce the SOAP payload to proper types
   const coercedPayload = coerceSoapPayloadWithSchema(payload, schema);
+
+  // #285: and then check it. Step 2 of the list above was a comment and
+  // nothing else, so a request missing a mandatory element reached the
+  // handler: six operations answered it with a plausible OCPP status --
+  // `Rejected`, `NotSupported`, even `Accepted` with a full payload -- and
+  // one crashed with a TypeError that surfaced as a Fault naming an
+  // implementation variable. The first is the dangerous one for a tool whose
+  // job is to judge a CSMS: a malformed request came back with a well-formed
+  // verdict, so the CSMS's bug was not merely undetected, it was masked.
+  //
+  // Scoped to the 1.6-S dialect deliberately. The schemas here are the
+  // vendored OCPP 1.6 ones, and 1.2/1.5 have none of their own; validating a
+  // 1.2 request against a 1.6 schema would reject requests that are correct
+  // for their own version. Coercion stays schema-guided for every dialect,
+  // because being lenient in that direction cannot reject anything.
+  if (schema && input.dialect.version === OCPP_1_6_SOAP) {
+    const issues = validationErrors(schema, coercedPayload);
+    if (issues.length > 0) {
+      throw new SoapRequestValidationError(operation, issues);
+    }
+  }
 
   // Build the handler registry (stateless handlers only; DataTransfer is special)
   const registry = buildV16CallHandlerRegistry();

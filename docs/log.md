@@ -110,3 +110,8 @@ knowledge first entered the documentation, not wiki operations.
 - [Control plane](concepts/control-plane.md#rpc): the error codes get a table, `connect_failed` joins the closed union, and `connect` documents its semantics — resolves on open, rejects on the first close, reconnect loop continues afterwards.
 - [MCP endpoint](entities/mcp-endpoint.md): error list points at the canonical table rather than restating a stale copy.
 - [GitHub issues](sources/github-issues.md): #286 and #288 rows.
+
+## [2026-09-04] ingest | Inbound SOAP requests are checked before they are answered (#285)
+
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#inbound-cscp-request-validation): new section. A CS→CP request on a 1.6-S charge point is validated against its vendored schema and a malformed one gets a Fault naming the missing element, where six operations previously answered a plausible OCPP status and one leaked a JavaScript TypeError. Records the 1.6-S scope and why coercion stays on every dialect.
+- [GitHub issues](sources/github-issues.md): #285 row.

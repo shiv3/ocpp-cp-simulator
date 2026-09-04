@@ -15,7 +15,7 @@ related:
   - ../entities/daemon.md
   - security-profiles.md
   - trace-format.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # OCPP versions and transports
@@ -127,3 +127,34 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 - `--trace-output` does not capture SOAP frames yet; the
   [trace format](trace-format.md) already reserves `transport: "soap"`.
 - [`analyze`](../entities/analyze.md) excludes SOAP records.
+
+## Inbound CS→CP request validation
+
+An inbound SOAP request on an **OCPP 1.6-S** charge point is validated
+against the vendored OCPP 1.6 schema for its operation before any handler
+runs. A request missing a mandatory element is answered with a SOAP Fault
+naming that element:
+
+```xml
+<s:Fault>
+  <s:Code><s:Value>s:Sender</s:Value></s:Code>
+  <s:Reason>
+    <s:Text>Invalid SetChargingProfile request: must have required property 'csChargingProfiles'</s:Text>
+  </s:Reason>
+</s:Fault>
+```
+
+Before #285 there was no such check, and the consequence was worse than an
+unhelpful error: six operations answered a malformed request with a plausible
+OCPP status — `Rejected`, `NotSupported`, `VersionMismatch`, one even
+`Accepted` with a full schedule payload — so a CSMS sending an invalid
+request got a well-formed verdict back and its own defect was masked. The
+seventh crashed and returned a Fault carrying a raw JavaScript `TypeError`
+that named an implementation variable.
+
+**Scope: 1.6-S only.** The schemas are the vendored 1.6 ones and OCPP 1.2 /
+1.5 have none of their own, so validating a 1.2 request against a 1.6 schema
+would reject requests that are correct for their version. Type coercion —
+XML gives strings, the schema wants integers and booleans — stays
+schema-guided on every dialect, because being lenient in that direction
+cannot reject anything.

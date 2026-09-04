@@ -24,6 +24,7 @@ import {
 } from "../../../domain/types/OcppVersion";
 import {
   dispatchSoapCallViaV16Registry,
+  SoapRequestValidationError,
   transformResponseForOcpp12,
 } from "./v16RegistryDispatch";
 
@@ -160,6 +161,13 @@ export class OCPPSoapServer {
             );
           }
         } catch (dispatchErr) {
+          // #285: a request that does not satisfy its schema is the caller's
+          // fault and says which element is wrong, so it is reported as
+          // itself. Wrapping it in "Dispatch error for X" would bury the one
+          // part of the message worth reading.
+          if (dispatchErr instanceof SoapRequestValidationError) {
+            throw new OCPPSoapFaultError(errorMessage(dispatchErr));
+          }
           // If dispatch fails, treat as not-implemented
           throw new OCPPSoapFaultError(
             `Dispatch error for ${envelope.operation}: ${errorMessage(dispatchErr)}`,

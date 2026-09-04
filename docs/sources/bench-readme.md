@@ -38,10 +38,10 @@ picks the version every benchmarked charge point is created with —
 rejected for the same reason. It is passed through to `cp.create_many`, which
 defaults to `OCPP-1.6J` on its own: against a 2.x-only CSMS the omission made
 every handshake fail and the run report an unsettled fleet and no data. On 2.x
-the `timeouts` column is weaker — the 30s per-CALL watchdog exists only in the
-OCPP-1.6J handler (see [Daemon → Metrics](../entities/daemon.md#metrics)), so
-that counter then moves only on pending-call-map eviction; the script says so
-on stderr.
+there is no `timeouts` column at all — the 30s per-CALL watchdog exists only in
+the OCPP-1.6J handler (see [Daemon → Metrics](../entities/daemon.md#metrics))
+and nothing else feeds that counter, so the column reads `n/a` rather than a
+`0` that would read as "none abandoned"; the script says so on stderr.
 
 **Warmup, so a step's timeouts are its own.** `ocppcp_ocpp_call_timeouts_total`
 increments 30s _after_ the CALL, when its watchdog fires, so the delta between
@@ -94,8 +94,46 @@ and a saturated CSMS used to report `>30s=0, errors=0`. The overflow bucket is
 still reported, as `late>30s` — calls the CSMS _did_ answer, after the charge
 point's 30s watchdog had given up.
 
-**Cleanup is best-effort and bounded.** Every created charge point is
-`cp.delete`d at the end and on Ctrl-C, 32 concurrently and within a 60s budget;
+**A correlation-cache eviction is not a timeout.** Only the transport giving up
+on a CALL increments `ocppcp_ocpp_call_timeouts_total`; the recorder dropping an
+in-flight CALL because it already tracks 4096 of them is a capacity event, now
+counted on its own as `ocppcp_ocpp_pending_calls_evicted_total` (see
+[Daemon → Metrics](../entities/daemon.md#metrics)). The bench diffs that counter
+per step and warns on stderr when it moves, because each eviction costs one
+duration sample — the row's `p50`/`p95` then rest on fewer observations than its
+`calls` column implies.
+
+**A row is labelled with the fleet it describes.** `cp.create_many` succeeds
+partially, so `N` is the number of charge points that actually exist and
+`uncreated` is how many the step's `--counts` entry asked for and did not get.
+Reporting the requested size attributed a row's latency to a fleet that never
+existed.
+
+**The hold starts when the transaction does.** `start_transaction`'s
+control-plane ack returns while `ChargePoint.startTransaction` is still awaiting
+`Authorize.conf` (`AuthorizeBeforeLocalStart` defaults to **true**), so timing
+the hold from the ack made the generated load a function of the CSMS latency
+being measured — and, past one hold of authorization delay, made the stop a
+no-op that left the transaction running into later cycles. The active axis
+therefore opens one dedicated event socket (`events.subscribe`, scope `"*"`,
+outside the RPC pool) and waits for `transaction_started` — specifically its
+first emission, the one carrying the placeholder id `0`, since 1.6 re-emits the
+event with the real id once `StartTransaction.conf` lands and a late conf would
+otherwise confirm the _next_ cycle's start. Starts it cannot confirm within one
+hold are counted in the `unconf.tx` column. The subscription is itself a small
+load on the daemon (every charge point's connector-status and transaction
+envelopes are encoded and sent to that socket); it is still cheaper than
+polling each charge point's `status`, which would add a third RPC per cycle to
+the rationed budget below. The idle axis opens no event socket.
+
+**Cleanup is best-effort and bounded.** Every charge point id the run _offered_
+to `cp.create_many` — not only those it was told were created — is `cp.delete`d
+at the end and on Ctrl-C, 32 concurrently and within a 60s budget. A batch whose
+RPC hit its deadline can still have created charge points server-side, and ids
+that never reached the client would otherwise be left registered for the next
+run's preflight to refuse; `not_found` on a delete counts as success, so
+over-listing is free.
+
 if no control-plane socket is connected the sweep is skipped outright, since
 socket.io buffers an emit issued while disconnected rather than failing it.
 Sequential deletes at the full 35s RPC timeout each turned teardown of a
@@ -113,14 +151,29 @@ per-CP timer/scheduling overhead); `--tx-interval N` measures active CPs
 (each cycles start/stop transaction roughly every N seconds), the axis the
 issue calls "the one that matters".
 
-**Why a socket pool.** The control plane rate-limits each socket.io
-connection (`RPC_RATE_PER_SEC` / `INFLIGHT_CAP`,
+**Why a socket pool, and the ceiling it imposes.** The control plane
+rate-limits each socket.io connection (`RPC_RATE_PER_SEC` / `INFLIGHT_CAP`,
 [`src/protocol/limits.ts`](../../src/protocol/limits.ts)) to protect against a
 misbehaving client — which would also throttle the benchmark's own
 control-plane traffic long before the daemon's OCPP-handling capacity became
-the bottleneck. `fleet-bench.ts` opens one socket per ~200 planned CPs
-(capped at 10), each paced under those server limits, so the script's own
-control traffic is not what shows up as the knee.
+the bottleneck. The limit is per connection, so `fleet-bench.ts` opens as many
+sockets as the run needs — one per ~200 planned CPs **and** enough for the
+transaction rate — capped at 10 and paced at 80 RPC/s each.
+
+The active axis issues two RPCs per charge point per cycle and awaits each
+before scheduling the next phase, so a rate above the pool's budget does not
+queue: it stretches the cycle, and the run then applies less load than
+configured while reporting that smaller load's latency as the configured one's.
+`validateOptions` refuses such a run outright, naming the required rate, the
+ceiling and the two ways out. Ten sockets at 80 RPC/s with 0.8 headroom is
+**640 RPC/s**, so the active axis sustains **N ≤ 320 × `--tx-interval`** for
+`--tx-interval ≥ 2` — 640 charge points at 2, the full 2000 at 7 or more; a
+`--tx-interval` of 1 really cycles every 2s, since a hold is floored at 1s, and
+so has the same 640 ceiling. The headroom is
+there because a token bucket at utilisation 1 never drains its jitter, and
+because arming and cleanup share the same buckets. The idle axis has no ceiling:
+heartbeats are the daemon's own timers and the script issues nothing after
+arming.
 
 **Layout.**
 

@@ -3,15 +3,23 @@
 // test` (picked up by `bun.test` name filter, see package.json's `test:bun`).
 import { describe, expect, it } from "bun:test";
 import {
+  BENCH_ID_PATTERN,
   BENCH_OCPP_VERSIONS,
+  STEP_COLUMNS,
   BenchValidationError,
   CALL_WATCHDOG_SEC,
   MAX_FLEET_SIZE,
+  MAX_SOCKETS,
   MAX_SWEEP_POINTS,
   MAX_WARMUP_SEC,
+  RPC_HEADROOM,
+  RPC_RATE_PER_SOCKET,
   Semaphore,
   TokenBucket,
+  answeredAfterWatchdog,
   assertDaemonEmpty,
+  benchCpId,
+  cyclePeriodSec,
   diffHistogram,
   fleetGauge,
   formatSeconds,
@@ -19,13 +27,21 @@ import {
   histogramQuantile,
   mergeHistogramDeltas,
   parseArgv,
+  holdSec,
+  maxSustainableFleet,
+  minSustainableTxIntervalSec,
   parseExposition,
   recommendedWarmupSec,
   redactOptions,
   redactUrlUserinfo,
+  requiredRpcPerSec,
+  row,
+  socketPoolSize,
   staggerOffsetsMs,
+  sustainableRpcPerSec,
   validateOptions,
   type Sample,
+  type StepResult,
 } from "./lib.ts";
 
 const BASE_ARGS = [
@@ -757,5 +773,189 @@ describe("assertDaemonEmpty", () => {
 
   it("returns the pre-existing count when --allow-existing waives the refusal", () => {
     expect(assertDaemonEmpty(withCps(4), true)).toBe(4);
+  });
+});
+
+describe("the socket pool's sustainable load ceiling (#302)", () => {
+  it("derives the required rate from the real cycle period, not the raw flag", () => {
+    // `holdMs` is floored at 1s, so --tx-interval 1 really cycles every 2s.
+    // Computing the requirement from the flag would have overstated it by 2x
+    // there and rejected runs the pool can actually drive.
+    expect(holdSec(1)).toBe(1);
+    expect(cyclePeriodSec(1)).toBe(2);
+    expect(cyclePeriodSec(4)).toBe(4);
+    // Two RPCs (start + stop) per charge point per cycle.
+    expect(requiredRpcPerSec(1000, 4)).toBe(500);
+    expect(requiredRpcPerSec(1000, 1)).toBe(1000);
+    // The idle axis issues nothing after arming.
+    expect(requiredRpcPerSec(2000, 0)).toBe(0);
+  });
+
+  it("sizes the pool by the transaction rate, not only by the fleet", () => {
+    // 200 CPs fit on one socket by count, but at --tx-interval 2 they need
+    // 200 RPC/s and one socket allows 64 — the throttle that made the bench
+    // apply a third of the configured load and report its latency as the
+    // configured load's.
+    expect(socketPoolSize(200, 0)).toBe(1);
+    expect(socketPoolSize(200, 2)).toBe(
+      Math.ceil(200 / (RPC_RATE_PER_SOCKET * RPC_HEADROOM)),
+    );
+    expect(socketPoolSize(200, 2)).toBeGreaterThan(1);
+    // Never past the cap; validateOptions is what refuses those runs.
+    expect(socketPoolSize(MAX_FLEET_SIZE, 2)).toBe(MAX_SOCKETS);
+  });
+
+  it("refuses a sweep the pool cannot sustain, with the numbers", () => {
+    // The finding verbatim: N=2000 at --tx-interval 2 needs ~2000 RPC/s and
+    // ten sockets allow 640.
+    expect(() =>
+      validateOptions(argMap(["--counts", "2000", "--tx-interval", "2"])),
+    ).toThrow(BenchValidationError);
+    let message = "";
+    try {
+      validateOptions(argMap(["--counts", "2000", "--tx-interval", "2"]));
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("2000 control-plane RPC/s");
+    expect(message).toContain(
+      `${sustainableRpcPerSec(MAX_SOCKETS).toFixed(0)} RPC/s`,
+    );
+    expect(message).toContain(
+      `--tx-interval to ${minSustainableTxIntervalSec(2000)}`,
+    );
+    expect(message).toContain(`--counts at ${maxSustainableFleet(2)}`);
+  });
+
+  it("accepts the same fleet once --tx-interval clears the ceiling", () => {
+    const tx = minSustainableTxIntervalSec(2000);
+    const opts = validateOptions(
+      argMap(["--counts", "2000", "--tx-interval", String(tx)]),
+    );
+    expect(opts.counts.at(-1)).toBe(2000);
+    expect(requiredRpcPerSec(2000, tx)).toBeLessThanOrEqual(
+      sustainableRpcPerSec(MAX_SOCKETS),
+    );
+    // And one below it does not.
+    expect(() =>
+      validateOptions(
+        argMap(["--counts", "2000", "--tx-interval", String(tx - 1)]),
+      ),
+    ).toThrow(BenchValidationError);
+  });
+
+  it("never rejects the idle axis, whatever the fleet size", () => {
+    // Heartbeats are daemon-side timers; the bench issues no recurring RPC.
+    expect(
+      validateOptions(argMap(["--counts", String(MAX_FLEET_SIZE)])).counts.at(
+        -1,
+      ),
+    ).toBe(MAX_FLEET_SIZE);
+  });
+
+  it("states a ceiling the two helpers agree on", () => {
+    for (const tx of [2, 3, 5, 10, 60]) {
+      const n = maxSustainableFleet(tx);
+      expect(requiredRpcPerSec(n, tx)).toBeLessThanOrEqual(
+        sustainableRpcPerSec(MAX_SOCKETS),
+      );
+      expect(requiredRpcPerSec(n + 1, tx)).toBeGreaterThan(
+        sustainableRpcPerSec(MAX_SOCKETS),
+      );
+    }
+  });
+});
+
+describe("predicted charge point ids (#302)", () => {
+  it("expands the pattern the daemon is asked for", () => {
+    // The ids a batch offers must be nameable before its RPC answers: a
+    // create that times out after the daemon created the charge points leaves
+    // them registered, and the next run's preflight refuses that daemon.
+    expect(BENCH_ID_PATTERN).toBe("BENCH{n:06}");
+    expect(benchCpId(1)).toBe("BENCH000001");
+    expect(benchCpId(42)).toBe("BENCH000042");
+    expect(benchCpId(1000)).toBe("BENCH001000");
+    expect(benchCpId(999_999)).toBe("BENCH999999");
+    // Past the pad width the index simply grows, exactly as padStart does in
+    // `expandIdPattern`.
+    expect(benchCpId(1_000_000)).toBe("BENCH1000000");
+  });
+});
+
+describe("a step's reported row (#302)", () => {
+  const emptyAggregate = mergeHistogramDeltas(new Map());
+
+  function step(over: Partial<StepResult> = {}): StepResult {
+    return {
+      requested: 10,
+      fleet: 10,
+      connected: 10,
+      notSettled: 0,
+      aggregate: emptyAggregate,
+      heartbeat: null,
+      timeouts: 0,
+      evictions: 0,
+      errors: 0,
+      reconnects: 0,
+      unconfirmedStarts: 0,
+      ...over,
+    };
+  }
+
+  const col = (r: StepResult, name: (typeof STEP_COLUMNS)[number]): string =>
+    row(r)[STEP_COLUMNS.indexOf(name)]!;
+
+  it("has one cell per column", () => {
+    expect(row(step())).toHaveLength(STEP_COLUMNS.length);
+  });
+
+  it("labels a partial fleet with the size it actually has", () => {
+    // 10 requested, 8 created, 8 connected used to print "N=10, connected=8,
+    // unsettled=0" — attributing the latency to a fleet that never existed.
+    const r = step({ requested: 10, fleet: 8, connected: 8, notSettled: 0 });
+    expect(col(r, "N")).toBe("8");
+    expect(col(r, "uncreated")).toBe("2");
+    expect(col(r, "connected")).toBe("8");
+    expect(col(r, "unsettled")).toBe("0");
+  });
+
+  it("reports no uncreated charge points when the whole fleet came up", () => {
+    expect(col(step(), "uncreated")).toBe("0");
+  });
+
+  it("prints n/a, not 0, where the watchdog does not exist", () => {
+    // OCPP 2.x has no per-CALL watchdog, so nothing feeds the timeout
+    // counter there. A 0 would read as "no calls were abandoned".
+    expect(col(step({ timeouts: null }), "timeouts")).toBe("n/a");
+    expect(col(step({ timeouts: 3 }), "timeouts")).toBe("3");
+  });
+
+  it("keeps late answers out of the timeout column", () => {
+    // A duration is only observed when an answer arrives, so a CALL that was
+    // never answered contributes nothing to the histogram at all.
+    const late = mergeHistogramDeltas(
+      new Map([
+        [
+          "Heartbeat",
+          {
+            action: "Heartbeat",
+            buckets: [
+              { le: 1, count: 1 },
+              { le: 30, count: 1 },
+            ],
+            count: 4,
+            sum: 100,
+          },
+        ],
+      ]),
+    );
+    const r = step({ aggregate: late, timeouts: 0 });
+    expect(answeredAfterWatchdog(r)).toBe(3);
+    expect(col(r, "late>30s")).toBe("3");
+    expect(col(r, "timeouts")).toBe("0");
+  });
+
+  it("surfaces unconfirmed transaction starts", () => {
+    expect(col(step({ unconfirmedStarts: 7 }), "unconf.tx")).toBe("7");
   });
 });

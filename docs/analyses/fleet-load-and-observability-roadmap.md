@@ -226,7 +226,11 @@ counter. The **shipped** set is the canonical table in
 this plan sketched: `outcome` turned out to be unnecessary on the message
 counter (a CALLERROR is its own `ocppcp_ocpp_call_errors_total` series), and
 #302 added `ocppcp_ocpp_call_timeouts_total` once it became clear the duration
-histogram cannot see a CALL that is never answered.
+histogram cannot see a CALL that is never answered, and then
+`ocppcp_ocpp_pending_calls_evicted_total` beside it, because folding the
+recorder's own correlation-cache overflows into the timeout counter made that
+counter report load rather than failure — worst at exactly the fleet sizes 5a
+below is trying to characterise.
 
 **Cardinality.** Use only the bounded labels in the table above — `action`,
 `direction`, `state`, `status`, `method`, `outcome` — and **never** `cpId` —
@@ -419,7 +423,10 @@ both axes (idle heartbeat-only and active start/stop-transaction, staggered),
 and diffs two `/metrics` scrapes to isolate one step's
 `ocppcp_ocpp_call_duration_seconds` histogram, reporting p50/p95 plus
 abandoned calls (`ocppcp_ocpp_call_timeouts_total`), errors and reconnects as
-sharper knee signals. What is **not** done: no
+sharper knee signals. Its active axis is bounded by the control plane's
+per-connection rate limit — ten pooled sockets sustain `N ≤ 320 ×
+--tx-interval`, and a sweep past that is refused rather than run at less load
+than configured. What is **not** done: no
 real CSMS is available in this repository's CI or review sandboxes to
 actually run it against, so
 [Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)

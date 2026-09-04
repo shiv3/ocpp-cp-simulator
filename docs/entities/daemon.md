@@ -142,17 +142,18 @@ scraper read HTML as a successful scrape. Setting `--health-path /metrics`
 alongside `--metrics` is refused at startup, since the health route matches
 first and would leave the metrics endpoint unreachable.
 
-| Metric                              | Type      | Labels                | Meaning                                     |
-| ----------------------------------- | --------- | --------------------- | ------------------------------------------- |
-| `ocppcp_charge_points`              | gauge     | `state`               | Registered charge points by current status. |
-| `ocppcp_connectors`                 | gauge     | `status`              | Connectors across all charge points.        |
-| `ocppcp_transactions_active`        | gauge     | —                     | Connectors currently in a transaction.      |
-| `ocppcp_ocpp_messages_total`        | counter   | `action`, `direction` | OCPP messages observed.                     |
-| `ocppcp_ocpp_call_errors_total`     | counter   | `action`              | CALLERROR frames.                           |
-| `ocppcp_ocpp_call_duration_seconds` | histogram | `action`              | CALL to CALLRESULT/CALLERROR round trip.    |
-| `ocppcp_ocpp_call_timeouts_total`   | counter   | `action`              | CALLs abandoned without an answer.          |
-| `ocppcp_rpc_requests_total`         | counter   | `method`, `outcome`   | Control-plane rpc calls.                    |
-| `ocppcp_ws_reconnects_total`        | counter   | —                     | WebSocket reconnect attempts.               |
+| Metric                                    | Type      | Labels                | Meaning                                     |
+| ----------------------------------------- | --------- | --------------------- | ------------------------------------------- |
+| `ocppcp_charge_points`                    | gauge     | `state`               | Registered charge points by current status. |
+| `ocppcp_connectors`                       | gauge     | `status`              | Connectors across all charge points.        |
+| `ocppcp_transactions_active`              | gauge     | —                     | Connectors currently in a transaction.      |
+| `ocppcp_ocpp_messages_total`              | counter   | `action`, `direction` | OCPP messages observed.                     |
+| `ocppcp_ocpp_call_errors_total`           | counter   | `action`              | CALLERROR frames.                           |
+| `ocppcp_ocpp_call_duration_seconds`       | histogram | `action`              | CALL to CALLRESULT/CALLERROR round trip.    |
+| `ocppcp_ocpp_call_timeouts_total`         | counter   | `action`              | CALLs the transport gave up on.             |
+| `ocppcp_ocpp_pending_calls_evicted_total` | counter   | —                     | Latency-correlation cache overflows.        |
+| `ocppcp_rpc_requests_total`               | counter   | `method`, `outcome`   | Control-plane rpc calls.                    |
+| `ocppcp_ws_reconnects_total`              | counter   | —                     | WebSocket reconnect attempts.               |
 
 **No `cpId` label, deliberately.** It is unbounded by construction once a
 daemon holds a fleet, and a Prometheus server pays for every series it has ever
@@ -181,20 +182,33 @@ correlate a response back to its request with.
 see an unanswered CALL: a duration is only observed when the CALLRESULT or
 CALLERROR arrives, so a CSMS that never answers contributes **no observation at
 all** — a saturated CSMS would otherwise report zero slow calls and zero
-errors, the opposite of the truth. It counts two things, both of which mean
-"this call was given up on":
+errors, the opposite of the truth. Exactly one thing increments it: the
+**OCPP-1.6J per-CALL watchdog** (`SERIAL_CALL_TIMEOUT_MS`, 30s, in
+`src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
+the log line it writes. It is therefore a protocol fact — the transport
+abandoned this CALL — and **never** a fact about the daemon's own bookkeeping.
 
-- the **OCPP-1.6J per-CALL watchdog** (`SERIAL_CALL_TIMEOUT_MS`, 30s, in
-  `src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
-  the log line it writes; and
-- a pending call **evicted** from the correlation map once it holds
-  `MAX_PENDING_CALLS` (4096) entries.
-
-Coverage is not symmetric: `OCPPMessageHandlerV201` has no such watchdog, so
-OCPP 2.x calls reach this counter only through the eviction path. A CALL the
-CSMS answers _after_ the watchdog fired is counted here **and** lands in the
+Coverage is not symmetric: `OCPPMessageHandlerV201` has no such watchdog, so an
+abandoned OCPP 2.x CALL is never counted here at all. "Zero" on 2.x means "not
+measured", not "none"; use `ocppcp_ocpp_call_errors_total`, the histogram's
+`+Inf` bucket and `ocppcp_ws_reconnects_total` there instead. A CALL the CSMS
+answers _after_ the watchdog fired is counted here **and** lands in the
 histogram's `+Inf` bucket — those are different facts (given up on / answered
 late), and neither is double-counted as the other.
+
+`ocppcp_ocpp_pending_calls_evicted_total` is the separate, unlabelled counter
+for the other thing that can happen to an in-flight CALL: the recorder
+remembers at most `MAX_PENDING_CALLS` (4096) of them for latency correlation
+and drops the oldest past that. That is a **capacity event in the recorder, not
+a timeout** — the transport still holds the CALL and the CSMS may answer it a
+millisecond later. Until #302 it incremented the timeout counter, which made
+that counter report load rather than failure, and did so worst at exactly the
+fleet sizes a scale run is trying to characterise, since 4096 concurrent
+pending CALLs is a big-fleet condition; it also double-counted any CALL whose
+watchdog fired after its eviction. What an eviction actually costs is one
+duration sample, so a non-zero value here means the histogram beside it is
+incomplete by that many observations — which is the reason to expose it rather
+than drop it silently.
 
 `--metrics` must be passed at startup. Charge points restored from
 `--state-db` subscribe as they are constructed, so a recorder created later
@@ -267,8 +281,8 @@ signals than latency alone. See the script's README for the exact method
 between two cumulative scrapes, with linear bucket interpolation for the
 quantiles) and its limitations. `--ocpp-version` selects what the fleet
 speaks (`OCPP-1.6J` by default, or `OCPP-2.0.1` / `OCPP-2.1`); on 2.x the
-timeout counter moves only through the eviction path described under
-[Metrics](#metrics), since only the 1.6J handler has the per-CALL watchdog. It refuses to run against a daemon that
+timeout column reads `n/a` rather than `0`, since only the 1.6J handler has the
+per-CALL watchdog that feeds it (see [Metrics](#metrics)). It refuses to run against a daemon that
 already holds charge points, because `/metrics` has no `cpId` label and their
 traffic would land in the same histogram as the bench fleet's.
 

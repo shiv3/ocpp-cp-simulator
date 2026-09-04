@@ -50,16 +50,16 @@ for the record, and **not the #302 result**; see "Recording a result"
 below):
 
 ```
-N    connected  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects
----  ---------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------
-50   50         0          150    6ms  21ms  6ms     21ms    0         0         0       0
-250  250        0          750    7ms  22ms  7ms     22ms    0         0         0       0
-450  450        0          1350   7ms  23ms  7ms     23ms    0         0         0       0
+N    uncreated  connected  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx
+---  ---------  ---------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------
+50   0          50         0          150    6ms  21ms  6ms     21ms    0         0         0       0           0
+250  0          250        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0
+450  0          450        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0
 ```
 
-(The `timeouts` / `late>30s` columns replaced a single `>30s` column after that
-run; both were zero in it, so the numbers above are the run's own — only the
-header changed.)
+(The header has changed twice since that run — `timeouts` / `late>30s` replaced
+a single `>30s` column, and `uncreated` / `unconf.tx` were added. Every added
+column was zero in this run, so the numbers above are still the run's own.)
 
 Flat, as expected: a trivial mock CSMS answering on loopback never saturates,
 so this run shows no knee at all — the point of this example is to show the
@@ -69,21 +69,21 @@ diverge from this baseline as N grows.
 
 ## Flags
 
-| Flag                             | Required | Default              | Meaning                                                                                                                                                                                            |
-| -------------------------------- | -------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                              |
-| `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                    |
-| `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                       |
-| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                |
-| `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                   |
-| `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. 1–3600.                                 |
-| `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at roughly this period, staggered across CPs.                    |
-| `--settle-timeout <seconds>`     | No       | `60`                 | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                                |
-| `--warmup <seconds>`             | No       | `30 + --tx-interval` | How long a step holds the new `N` **and its load** before the first scrape, so the step's `timeouts` are its own. 0–3630. See "Warmup: why a step waits before it measures".                       |
-| `--ocpp-version <version>`       | No       | `OCPP-1.6J`          | OCPP version every benchmarked charge point is created with: `OCPP-1.6J`, `OCPP-2.0.1` or `OCPP-2.1`. The three SOAP versions are rejected, for the same reason `--csms-url` rejects `http(s)://`. |
-| `--health-path <path>`           | No       | `/v1/healthz`        | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                     |
-| `--daemon-basic-auth-user/-pass` | No       | —                    | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                                  |
-| `--out <path>`                   | No       | —                    | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`.    |
+| Flag                             | Required | Default              | Meaning                                                                                                                                                                                                                                                       |
+| -------------------------------- | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                                                                                         |
+| `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                                                                               |
+| `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                                                                                  |
+| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                                                                           |
+| `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                                                                              |
+| `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. 1–3600.                                                                                            |
+| `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at this period, staggered across CPs. Bounded by the pool ceiling: **N ≤ 320 × `--tx-interval`** (see "Why a socket pool"). |
+| `--settle-timeout <seconds>`     | No       | `60`                 | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                                                                                           |
+| `--warmup <seconds>`             | No       | `30 + --tx-interval` | How long a step holds the new `N` **and its load** before the first scrape, so the step's `timeouts` are its own. 0–3630. See "Warmup: why a step waits before it measures".                                                                                  |
+| `--ocpp-version <version>`       | No       | `OCPP-1.6J`          | OCPP version every benchmarked charge point is created with: `OCPP-1.6J`, `OCPP-2.0.1` or `OCPP-2.1`. The three SOAP versions are rejected, for the same reason `--csms-url` rejects `http(s)://`.                                                            |
+| `--health-path <path>`           | No       | `/v1/healthz`        | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                                                                                |
+| `--daemon-basic-auth-user/-pass` | No       | —                    | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                                                                                             |
+| `--out <path>`                   | No       | —                    | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`.                                                               |
 
 Every flag is bounds-checked before anything is created (`scripts/bench/lib.ts`'s
 `validateOptions`) — a bad flag fails before the first charge point exists.
@@ -165,13 +165,25 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    the aggregate column (which, in active mode, is dominated by
    StartTransaction/StopTransaction).
 7. **`timeouts`** is the delta of `ocppcp_ocpp_call_timeouts_total` — CALLs
-   the charge point gave up on, either because the 30s per-CALL watchdog fired
-   or because the pending-call map evicted them. **This is the headline knee
-   signal.** It is a separate counter and not the histogram's overflow bucket
-   for a concrete reason: a duration is only observed when an answer arrives,
-   so a CALL the CSMS never answers produces no histogram observation at all —
-   a saturated CSMS used to report `>30s=0, errors=0`, the exact opposite of
-   the truth.
+   the charge point's transport gave up on, i.e. the 30s per-CALL watchdog
+   fired. Nothing else increments it. **This is the headline knee signal.** It
+   is a separate counter and not the histogram's overflow bucket for a concrete
+   reason: a duration is only observed when an answer arrives, so a CALL the
+   CSMS never answers produces no histogram observation at all — a saturated
+   CSMS used to report `>30s=0, errors=0`, the exact opposite of the truth.
+
+   The column reads **`n/a`, not `0`**, on `--ocpp-version OCPP-2.0.1` /
+   `OCPP-2.1`: there is no watchdog in the 2.x handler, so nothing there could
+   ever move the counter, and a `0` would read as "no calls were abandoned".
+
+   A **correlation-cache eviction is not a timeout** and no longer counts as
+   one (it did until #302). The recorder correlates at most 4096 in-flight
+   CALLs; past that it drops the oldest, which costs a _duration sample_ and
+   says nothing about the CSMS — the transport still holds the call. When
+   `ocppcp_ocpp_pending_calls_evicted_total` moves during a window the script
+   warns on stderr and records the count in `--out`, because it means that
+   row's `p50`/`p95` are computed from fewer observations than the `calls`
+   column implies.
 
    **`late>30s`** is the histogram overflow (`+Inf` minus the last finite
    bucket): calls the CSMS _did_ answer, later than the 30s watchdog. A
@@ -188,8 +200,30 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    the CALL, so which calls a step's `timeouts` delta covers is a property of
    when the step's load started, not of `--duration`.
 
-8. **Cleanup.** Every created CP is `cp.delete`d at the end (or on Ctrl-C),
-   32 at a time and **within a 60s budget**. It is best-effort, so it is
+   **`N`/`uncreated`.** `N` is the fleet the row's numbers actually describe,
+   **not** the `--counts` entry it was aiming for; `uncreated` is the
+   difference. `cp.create_many` succeeds partially, so a step that asked for 10
+   and got 8 used to print `N=10, connected=8, unsettled=0` — latency
+   attributed to a fleet that never existed. Now it prints `N=8, uncreated=2`.
+
+   **`unconf.tx`** counts transaction starts this step could not confirm within
+   one hold (`--tx-interval` ÷ 2, floored at 1s): the `start_transaction` ack
+   returns while the charge point is still waiting on `Authorize.conf`, so the
+   script waits for the daemon's `transaction_started` event before timing the
+   hold. A non-zero value means authorization is taking longer than a hold — a
+   knee signal in its own right, and a warning that those cycles applied less
+   load than the flags asked for. Unlike every other column it is counted in
+   this process, not scraped, so its window is step-end to step-end and
+   includes the warmup rather than only `--duration`.
+
+8. **Cleanup.** Every charge point id the run _offered_ to `cp.create_many` is
+   `cp.delete`d at the end (or on Ctrl-C), 32 at a time and **within a 60s
+   budget**. Offered, not created: a batch whose RPC hit its deadline or lost
+   its connection can still have created charge points server-side, and ids
+   that never reach this process are ids cleanup would otherwise miss — leaving
+   a daemon the next run's preflight refuses. The ids are recorded before the
+   call is awaited, and `cp.delete` answering `not_found` for one that was
+   never created counts as success, so over-listing costs nothing. It is best-effort, so it is
    bounded: deleting sequentially with the full 35s RPC timeout each meant a
    daemon that had died turned teardown of a 2000-CP fleet into ~19 hours of
    blocked failure handling and an unresponsive Ctrl-C. If no control-plane
@@ -239,11 +273,48 @@ The control plane rate-limits each socket.io connection
 protection against a single misbehaving client, but it would also throttle
 _this script's own_ control-plane traffic (arming N heartbeats, cycling
 transactions) long before the daemon's OCPP-handling capacity is the
-bottleneck. `fleet-bench.ts` opens one socket per ~200 planned CPs (capped at 10) and paces each below the server limits, so the script's own control
-traffic isn't what shows up as the knee. This pacing only affects how fast
-CPs get _armed_ — the OCPP wire traffic each triggers (a heartbeat timer, a
-StartTransaction/StopTransaction pair) runs asynchronously per CP once armed
-and isn't bounded by it.
+bottleneck. The limiter is **per connection** (`SocketRpcState` in
+`src/cli/server/socketServer.ts`), so the pool's budget grows with the socket
+count. `fleet-bench.ts` opens as many sockets as the run needs — one per ~200
+planned CPs **and** enough for the transaction rate — capped at 10, and paces
+each at 80 RPC/s, below the server's 100.
+
+**The sustainable ceiling, and why a run is refused rather than throttled.**
+On the idle axis the script issues nothing after arming: heartbeats are the
+daemon's own timers. On the active axis it issues two RPCs per charge point per
+cycle, and `cycle` awaits each RPC before scheduling the next phase — so a
+required rate above the pool's budget does not queue, it _stretches the cycle_.
+The fleet then runs at a longer interval than `--tx-interval` says, and the
+table reports the latency of that smaller load as if it were the configured
+one. Sizing the pool by CP count alone was enough to cause this: 200 CPs fit on
+one socket, but at `--tx-interval 2` they demand 200 RPC/s and one socket
+allows 64.
+
+So the pool is sized by rate too, and `validateOptions` **refuses** what ten
+sockets still cannot sustain, naming the numbers and the two ways out. Ten
+sockets × 80 RPC/s × 0.8 headroom = **640 RPC/s**, i.e.
+
+> **N ≤ 320 × `--tx-interval`**, for `--tx-interval ≥ 2` — 640 CPs at 2, 1600
+> at 5, the full 2000 at 7 or more. (`--tx-interval 1` really cycles every 2s,
+> because a hold is floored at 1s, so its ceiling is 640 as well.)
+
+The 0.8 is not a fudge factor: a token bucket driven at exactly its refill rate
+is a queue at utilisation 1, where jitter accumulates into a backlog that never
+drains. The remaining fifth also covers the step's own `start_heartbeat` arming
+and the end-of-run `cp.delete` sweep, which share the same buckets. A benchmark
+that refuses to run beats one that quietly measures something else.
+
+Beyond those RPCs, the OCPP wire traffic each triggers (a heartbeat timer, a
+StartTransaction/StopTransaction pair) runs asynchronously per CP and isn't
+bounded by this pacing. One further connection sits outside the pool: on the
+active axis the script opens a **single dedicated event socket**
+(`events.subscribe`, scope `"*"`) to learn when a transaction has actually
+started. It spends none of the pool's rate budget, and it is opened _before the
+first charge point exists_ — the subscribe ack carries a whole-fleet snapshot
+through an `ARRAY_1000` schema, so subscribing later in a 2000-CP sweep would
+fail. It does not reconnect: room membership is per-connection server-side, so
+a re-subscribe would hit that same cap. If it drops, the script says so and
+every remaining cycle is counted in `unconf.tx`.
 
 ## Recording a result
 
@@ -276,13 +347,26 @@ a spare machine and a CSMS.
   `wsUrl` and the daemon defaults to `OCPP-1.6J`. `--ocpp-version` rejects the
   three SOAP versions (`OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`) for the same
   reason, rather than accepting one and reporting a table of dashes.
-- **On OCPP 2.x the `timeouts` column is weaker.** The 30s per-CALL watchdog
-  lives only in the OCPP-1.6J message handler (`docs/entities/daemon.md#metrics`);
-  `OCPPMessageHandlerV201` has none, so on `--ocpp-version OCPP-2.0.1` /
-  `OCPP-2.1` that counter only moves when the pending-call map evicts. The
-  script prints a note when a 2.x version is chosen. Latency, `late>30s`,
-  `errors` and `reconnects` are unaffected, and the warmup above still applies
-  to the eviction path.
+- **On OCPP 2.x there is no `timeouts` column at all.** The 30s per-CALL
+  watchdog lives only in the OCPP-1.6J message handler
+  (`docs/entities/daemon.md#metrics`); `OCPPMessageHandlerV201` has none, and
+  nothing else feeds `ocppcp_ocpp_call_timeouts_total`. So on
+  `--ocpp-version OCPP-2.0.1` / `OCPP-2.1` the column reads `n/a` and the
+  script prints a note saying so. Use `late>30s`, `errors` and `reconnects` as
+  the knee signals there; they are unaffected, as is the warmup. (Before #302
+  the pending-call eviction path also incremented that counter, which made this
+  column look populated on 2.x while actually reporting how full the daemon's
+  correlation cache was.)
+- **The event socket is itself a small load on the daemon.** Confirming
+  transaction starts means subscribing to the `"*"` scope, so the daemon
+  encodes and sends every charge point's `connector_status`,
+  `transaction_started`/`transaction_stopped` and registry-`updated` envelope
+  to one extra socket — a few thousand events per second at the top of an
+  active sweep. That is a real perturbation of the thing being measured, and it
+  is still the cheaper option: the alternative, polling each charge point's
+  `status`, would add a third RPC per cycle to the very budget the ceiling
+  above rations, and each of those builds a full per-connector snapshot. The
+  idle axis opens no event socket at all.
 - `/metrics` is scraped every 500ms during settle-wait. That is one bounded
   HTTP response whatever the fleet size, and it is HTTP rather than
   control-plane traffic, so it is not paced through the socket pool.

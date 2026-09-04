@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download, Upload, Home } from "lucide-react";
+import { Download, Upload, Home, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,7 @@ import {
   EV_PRESETS,
   defaultEVSettings,
 } from "../cp/domain/connector/EVSettings";
+import { normalizeChargingCurve } from "../cp/domain/connector/ChargingCurve";
 
 const Settings: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
@@ -91,7 +92,15 @@ const Settings: React.FC = () => {
   }, [chargePointService]);
 
   const handleApplyDefaultEv = () => {
-    setDefaultEvSettings(draftEv);
+    // Normalized here rather than relied on downstream: a fresh Connector
+    // reads `getDefaultEVSettings()` straight into its field initializer,
+    // bypassing the `evSettings` setter's normalization (#301).
+    setDefaultEvSettings({
+      ...draftEv,
+      chargingCurve: draftEv.chargingCurve
+        ? normalizeChargingCurve(draftEv.chargingCurve)
+        : draftEv.chargingCurve,
+    });
     setSuccess(
       "Default EV settings saved. New connectors will start with these values.",
     );
@@ -388,6 +397,191 @@ const Settings: React.FC = () => {
                 }
                 className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
               />
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-2">
+              Electrical characteristics
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Current Type
+                </label>
+                <select
+                  value={draftEv.currentType ?? "AC"}
+                  onChange={(e) => {
+                    const currentType = e.target.value as "AC" | "DC";
+                    setDraftEv({
+                      ...draftEv,
+                      currentType,
+                      // DC has no phases; drop a stale 3-phase setting so it
+                      // doesn't linger unused if the user switches back.
+                      phases: currentType === "DC" ? undefined : draftEv.phases,
+                    });
+                  }}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="AC">AC</option>
+                  <option value="DC">DC</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Phases
+                </label>
+                <select
+                  value={String(draftEv.phases ?? 1)}
+                  disabled={draftEv.currentType === "DC"}
+                  onChange={(e) =>
+                    setDraftEv({
+                      ...draftEv,
+                      phases: (e.target.value === "3" ? 3 : 1) as 1 | 3,
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                >
+                  <option value="1">1 (single-phase)</option>
+                  <option value="3">3 (three-phase)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Voltage (V)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draftEv.voltageV ?? 230}
+                  onChange={(e) =>
+                    setDraftEv({
+                      ...draftEv,
+                      voltageV: Math.max(1, parseFloat(e.target.value) || 230),
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Power Factor
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={draftEv.powerFactor ?? 1}
+                  disabled={draftEv.currentType === "DC"}
+                  onChange={(e) =>
+                    setDraftEv({
+                      ...draftEv,
+                      powerFactor: Math.min(
+                        1,
+                        Math.max(0, parseFloat(e.target.value) || 0),
+                      ),
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">
+              Charging curve
+            </p>
+            <p className="text-muted-foreground text-xs mb-2">
+              Battery-acceptance fraction of Max Power at each SoC. Empty (no
+              points) means flat acceptance at Max Power for the whole session,
+              matching the pre-curve behaviour.
+            </p>
+            <div className="space-y-2">
+              {(draftEv.chargingCurve ?? []).map((point, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    aria-label={`Charging curve point ${index + 1} SoC percent`}
+                    value={point.socPercent}
+                    onChange={(e) => {
+                      const curve = [...(draftEv.chargingCurve ?? [])];
+                      curve[index] = {
+                        ...curve[index]!,
+                        socPercent: Math.min(
+                          100,
+                          Math.max(0, parseFloat(e.target.value) || 0),
+                        ),
+                      };
+                      setDraftEv({ ...draftEv, chargingCurve: curve });
+                    }}
+                    className="w-24 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                  <span className="text-xs text-muted-foreground">% SoC →</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    aria-label={`Charging curve point ${index + 1} power fraction`}
+                    value={point.powerFraction}
+                    onChange={(e) => {
+                      const curve = [...(draftEv.chargingCurve ?? [])];
+                      curve[index] = {
+                        ...curve[index]!,
+                        powerFraction: Math.min(
+                          1,
+                          Math.max(0, parseFloat(e.target.value) || 0),
+                        ),
+                      };
+                      setDraftEv({ ...draftEv, chargingCurve: curve });
+                    }}
+                    className="w-24 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    fraction of Max Power
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`Remove charging curve point ${index + 1}`}
+                    onClick={() => {
+                      const curve = (draftEv.chargingCurve ?? []).filter(
+                        (_, i) => i !== index,
+                      );
+                      setDraftEv({
+                        ...draftEv,
+                        chargingCurve: curve.length > 0 ? curve : undefined,
+                      });
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  setDraftEv({
+                    ...draftEv,
+                    chargingCurve: [
+                      ...(draftEv.chargingCurve ?? []),
+                      { socPercent: 0, powerFraction: 1 },
+                    ],
+                  })
+                }
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add point
+              </Button>
             </div>
           </div>
 

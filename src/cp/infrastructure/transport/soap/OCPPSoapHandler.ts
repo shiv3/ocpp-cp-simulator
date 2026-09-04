@@ -506,6 +506,14 @@ function toOcpp15Location(
 }
 
 function toOcpp15MeterSample(sample: SampledValue): Ocpp15MeterSample | null {
+  // OCPP 1.5's SampledValue has no phase attribute (no Errata-3-era additions
+  // like 1.6/2.0.1 have). Emitting the L1/L2/L3 samples anyway would produce
+  // duplicates indistinguishable from the aggregate — same measurand,
+  // context, unit and value shape, just missing the one field that told them
+  // apart — so drop the per-phase extras rather than confuse a CSMS with
+  // four identical-looking Current.Import/Power.Active.Import samples
+  // (#301). The aggregate sample (no `phase`) still goes through.
+  if (sample.phase) return null;
   const measurand = toOcpp15Measurand(sample.measurand);
   if (measurand === null) return null;
   const context = toOcpp15ReadingContext(sample.context);

@@ -9,7 +9,7 @@ function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
 }
 
-function transaction(meterStart: number): Transaction {
+function transaction(meterStart: number, initialSoc?: number): Transaction {
   return {
     id: 301,
     connectorId: 1,
@@ -19,6 +19,7 @@ function transaction(meterStart: number): Transaction {
     startTime: new Date("2026-06-28T00:00:00.000Z"),
     stopTime: null,
     meterSent: false,
+    ...(initialSoc !== undefined ? { initialSoc } : {}),
   };
 }
 
@@ -98,6 +99,40 @@ describe("charging curve controls accumulation, not just the report (#301, findi
 
     vi.advanceTimersByTime(2_000);
     expect(connector.meterValue).toBe(50);
+  });
+
+  it("accumulates against the transaction's initialSoc, not 0%, before the first synced SoC (#301, finding 2)", () => {
+    // `connector.soc` is null before the first synced meter tick — the
+    // normal state right after Transaction.Begin — so accumulation must not
+    // treat that as "battery at 0%" and taper (or not taper) for the wrong
+    // reason.
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      maxChargingPowerKw: 100,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0 },
+        { socPercent: 100, powerFraction: 0 },
+      ],
+    };
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    // Never synced — connector.soc stays null. Only the transaction's own
+    // initialSoc (95%, past the curve's zero-acceptance point) says the
+    // battery is nearly full.
+    connector.beginTransaction(transaction(0, 95));
+
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 10_000,
+    });
+
+    vi.advanceTimersByTime(5_000);
+
+    expect(connector.meterValue).toBe(0);
   });
 });
 

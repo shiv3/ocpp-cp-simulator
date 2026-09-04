@@ -11,6 +11,8 @@ sources:
   - src/cp/domain/connector/ChargingCurve.ts
   - src/cp/domain/connector/MeterValueBuilder.ts
   - src/cp/domain/connector/Connector.ts
+  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
+  - src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
   - "issues #214, #240, #247, #239, #301"
 related:
   - ../sources/scenario-json-schema.md
@@ -360,6 +362,28 @@ two would make a charger appear to shrink as a car fills up.
 On a 3-phase AC connector, `Current.Import` and `Power.Active.Import` are also
 reported per phase (`L1` / `L2` / `L3`), summing to the aggregate. Energy
 registers are not split — a meter has one.
+
+**`phase` on the wire is OCPP-version-dependent.** 1.6-J, 1.6-S SOAP, 2.0.1
+and 2.1 all carry a `phase` attribute on `SampledValue`, so the L1/L2/L3 tag
+survives onto the wire alongside the aggregate (untagged) sample. OCPP 1.5
+SOAP's `SampledValue` has no `phase` attribute at all — sending the per-phase
+samples there would produce three extra values indistinguishable from the
+aggregate (same measurand, context and unit), so the 1.5 mapper drops them
+and sends only the aggregate.
+
+**The curve is evaluated at the transaction's (or EV settings') `initialSoc`
+before the first synced SoC, not 0%.** `connector.soc` is `null` until the
+first synced meter tick — the normal state for a `Transaction.Begin` sample,
+and for the whole session when SoC sync is disabled — so evaluating the curve
+at 0 would taper (or not taper) power for the wrong reason. The fallback
+order is: the connector's own synced SoC, then the transaction's
+`initialSoc`, then the EV settings' `initialSoc`, then `0` as the last
+resort.
+
+The Settings page's "Default EV Settings" panel and the scenario editor's
+"Scenario EV Settings" panel both expose `currentType`, `phases`, `voltageV`,
+`powerFactor` and an editable `chargingCurve` point list, alongside the five
+pre-1.2 fields — the v1.2 fields are not JSON/RPC-only.
 
 ## Changelog
 

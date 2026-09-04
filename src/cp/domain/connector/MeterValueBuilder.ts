@@ -4,6 +4,7 @@ import {
   DEFAULT_VOLTAGE_V,
   effectiveChargingPowerW,
   effectivePowerFactor,
+  resolveSocForCurve,
 } from "./ChargingCurve";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
@@ -244,7 +245,11 @@ function derivedInstantaneousPowerW(connector: Connector): number {
   return effectiveChargingPowerW({
     evMaxW,
     curve: settings?.chargingCurve,
-    socPercent: connector.soc,
+    socPercent: resolveSocForCurve(
+      connector.soc,
+      connector.transaction?.initialSoc,
+      settings?.initialSoc,
+    ),
     scheduleLimitWatts: connector.currentScheduleLimitWatts(),
   });
 }

@@ -28,6 +28,7 @@ import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
 import {
   effectiveChargingPowerW,
   normalizeChargingCurve,
+  resolveSocForCurve,
 } from "./ChargingCurve";
 import type { ChargingProfileStore } from "../charge-point/ChargingProfileStore";
 
@@ -348,7 +349,11 @@ export class Connector {
     return effectiveChargingPowerW({
       evMaxW,
       curve,
-      socPercent: this.soc,
+      socPercent: resolveSocForCurve(
+        this.soc,
+        this.transactionValue?.initialSoc,
+        this._evSettings.initialSoc,
+      ),
       scheduleLimitWatts: scheduleW,
     });
   }

@@ -15,11 +15,16 @@ function connectorStub(options: {
   evSettings?: Partial<EVSettings>;
   scheduleLimitW?: number;
   meterValue?: number;
+  transactionInitialSoc?: number;
 }): Connector {
   return {
     status: options.status ?? "Charging",
     soc: options.soc ?? null,
     meterValue: options.meterValue ?? 0,
+    transaction:
+      options.transactionInitialSoc !== undefined
+        ? { initialSoc: options.transactionInitialSoc }
+        : null,
     evSettings: {
       modelName: "Test EV",
       batteryCapacityKwh: 75,
@@ -66,6 +71,26 @@ describe("MeterValueBuilder with a charging curve (#301)", () => {
     // Every charge point that predates this must report the same numbers.
     const flat = connectorStub({ soc: 90 });
     expect(valueOf(flat, "Power.Active.Import")).toBe(100_000);
+  });
+
+  it("evaluates at the transaction's initialSoc, not 0%, before the first synced SoC (#301)", () => {
+    // `soc: null` is the normal state for a Transaction.Begin sample, and
+    // for the whole session when SoC sync is disabled. Evaluating the curve
+    // at 0 would taper power for a battery that is actually nearly full.
+    const nullSoc = connectorStub({
+      soc: null,
+      transactionInitialSoc: 100,
+      evSettings: { chargingCurve: TAPER },
+    });
+    expect(valueOf(nullSoc, "Power.Active.Import")).toBe(10_000);
+  });
+
+  it("falls back to the EV settings' initialSoc when there is no transaction value", () => {
+    const nullSoc = connectorStub({
+      soc: null,
+      evSettings: { chargingCurve: TAPER, initialSoc: 80 },
+    });
+    expect(valueOf(nullSoc, "Power.Active.Import")).toBe(50_000);
   });
 
   it("lets an active charging profile win over the curve", () => {

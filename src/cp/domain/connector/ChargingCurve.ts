@@ -103,6 +103,25 @@ export function effectiveChargingPowerW(params: {
 }
 
 /**
+ * The SoC to evaluate the charging curve at when the connector hasn't
+ * reported one yet.
+ *
+ * `connector.soc` is `null` before the first synced meter tick — the normal
+ * state for a `Transaction.Begin` sample, and for the whole session when SoC
+ * sync is disabled — so falling back to 0 would evaluate the curve as if the
+ * battery were empty, tapering (or not tapering) power for the wrong reason.
+ * Prefer the transaction's own `initialSoc`, then the EV settings' default,
+ * then 0 as the last resort for a session with neither configured (#301).
+ */
+export function resolveSocForCurve(
+  soc: number | null,
+  transactionInitialSoc: number | undefined,
+  settingsInitialSoc: number | undefined,
+): number {
+  return soc ?? transactionInitialSoc ?? settingsInitialSoc ?? 0;
+}
+
+/**
  * The power factor (cos φ) actually used for the current derivation below —
  * 1 for DC, which has no reactive component, else the configured value
  * (default 1, unity). Exported so a reported `Power.Factor` sample can never

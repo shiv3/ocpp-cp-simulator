@@ -7,6 +7,7 @@ import {
   effectivePowerFactor,
   normalizeChargingCurve,
   powerFractionAtSoc,
+  resolveSocForCurve,
 } from "../ChargingCurve";
 
 const TAPER = [
@@ -196,5 +197,32 @@ describe("effectivePowerFactor (#301)", () => {
 
   it("defaults to unity for AC when unconfigured", () => {
     expect(effectivePowerFactor({ currentType: "AC" })).toBe(1);
+  });
+});
+
+describe("resolveSocForCurve (#301)", () => {
+  it("uses the connector's own SoC when it has synced one", () => {
+    expect(resolveSocForCurve(42, 10, 20)).toBe(42);
+  });
+
+  it("falls back to the transaction's initialSoc before the first sync", () => {
+    // `connector.soc` is null before the first synced meter tick — the
+    // normal state for a Transaction.Begin sample — so evaluating the curve
+    // at 0 would taper (or not taper) for the wrong reason.
+    expect(resolveSocForCurve(null, 55, 20)).toBe(55);
+  });
+
+  it("falls back to the EV settings' initialSoc when the transaction has none", () => {
+    expect(resolveSocForCurve(null, undefined, 30)).toBe(30);
+  });
+
+  it("falls back to 0 as a last resort when nothing is configured", () => {
+    expect(resolveSocForCurve(null, undefined, undefined)).toBe(0);
+  });
+
+  it("treats a synced SoC of exactly 0 as a real reading, not 'unset'", () => {
+    // 0 is falsy but a legitimate SoC — `??` (not `||`) must be used so an
+    // empty battery isn't mistaken for "no reading yet".
+    expect(resolveSocForCurve(0, 55, 20)).toBe(0);
   });
 });

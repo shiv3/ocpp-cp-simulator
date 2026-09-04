@@ -384,6 +384,12 @@ UI, and `EvSettingsJson` in `src/cli/exportK6/runtime/types.ts`. Decide up
 front: **the k6 export ignores the curve in v1** and keeps its flat rate,
 rather than porting the model into the k6 runtime.
 
+(As shipped: the browser EV settings UI landed too —
+`src/components/Settings.tsx`'s "Default EV Settings" panel and
+`src/components/scenario/ScenarioEditor.tsx`'s "Scenario EV Settings" panel
+both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
+editable `chargingCurve` point list, not just the five pre-1.2 fields.)
+
 **Acceptance.** Old scenarios without a curve produce byte-identical
 MeterValues (the curve is opt-in); a curved DC session shows power tapering
 above the knee SoC; a SetChargingProfile below the curve still caps.

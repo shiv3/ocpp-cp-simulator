@@ -15,8 +15,6 @@ import {
   STR_256,
   STR_1K,
   OBJ_MAX_BYTES,
-  STR_256,
-  STR_1K,
   SCENARIO_MAX_BYTES,
   STR_64K,
   boundedObject,

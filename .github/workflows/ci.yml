@@ -42,6 +42,56 @@ jobs:
       - name: CLI sidecar compiles (release smoke)
         run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke src/cli/main.ts
 
+      # No CI job used to touch the npm tarball at all — the only checks on it
+      # lived in cli-release.yml and ran on the `cli-v*` tag, so a PR that
+      # broke packaging stayed green and the breakage surfaced weeks later at
+      # release time. It did: package.json#files lost track of src/data,
+      # src/ocpp, src/trace and vendor/, and the published CLI could not run
+      # (#320). Pack it and boot it here, on the pull request.
+      #
+      # Packed with --ignore-scripts, so no vite build and no dist/ — the
+      # script skips its web-console stage for exactly that reason and does
+      # not fail on it. Do NOT add a vite build here to "fix" the skip; the
+      # release workflow builds dist/ and passes --expect-dist, which is where
+      # a missing "dist" entry is caught.
+      - name: CLI tarball installs and runs (packaging smoke)
+        run: ./scripts/verify-cli-tarball.sh
+
+      # The install command in README.md, docs/entities/cli.md and the release
+      # notes cli-release.yml generates must all be the same, working URL.
+      # `releases/latest/download/...` is banned outright: GitHub resolves
+      # "latest" across both tag trains in this repo (`v*` desktop and
+      # `cli-v*` CLI), so it points at a desktop release — which ships no
+      # `.tgz` — for roughly half of every release cycle, and the documented
+      # command 404s (#321). The rolling `cli-latest` pre-release that
+      # cli-release.yml maintains is scoped to the CLI train instead.
+      #
+      # This is a consistency check, not a liveness check: fetching the URL
+      # for real would make CI depend on the release history, so that lives in
+      # cli-release.yml's "Verify the documented install URL" step, right
+      # after the upload that creates it.
+      - name: Documented install URL is consistent
+        run: |
+          set -uo pipefail
+          URL="releases/download/cli-latest/ocpp-cp-simulator.tgz"
+          rc=0
+          for f in README.md docs/entities/cli.md .github/workflows/cli-release.yml; do
+            grep -q "$URL" "$f" || {
+              echo "::error file=$f::does not carry the canonical install URL ($URL)"
+              rc=1
+            }
+          done
+          # Ban the old form, but only where it is an actual advertised
+          # command — prose that explains why it was dropped (this comment
+          # included) must stay greppable without tripping the guard.
+          # `git grep` searches tracked files only, so a stray tarball or a
+          # node_modules copy cannot trip it either.
+          if git grep -nE 'install -g https://github\.com/[^ ]*/releases/latest/download' -- '*.md' .github; then
+            echo "::error::that URL resolves across both tag trains and 404s for half of every release cycle (#321); use $URL"
+            rc=1
+          fi
+          exit $rc
+
       - name: Unit tests (vitest)
         run: bun run test:vitest
 

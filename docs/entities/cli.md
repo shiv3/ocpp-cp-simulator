@@ -6,9 +6,14 @@ sources:
   - src/cli/main.ts
   - src/cli/types.ts
   - package.json (`bin`, `files`)
+  - scripts/verify-cli-tarball.sh
+  - .github/workflows/cli-release.yml
+  - "issue #320"
+  - "issue #321"
 related:
   - daemon.md
   - analyze.md
+  - docker-image.md
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
@@ -49,10 +54,10 @@ installed:
 
 ```bash
 # Prebuilt release tarball (recommended) — ships the web-console dist/
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # Or pin to a specific CLI release
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.3.1/ocpp-cp-simulator-0.3.1.tgz
 
 # From a local checkout (dev)
 bun link
@@ -68,6 +73,69 @@ ocpp-cp-sim --daemon
 > git), and bun does not install devDependencies for global packages so it
 > cannot run `vite build` on install. Use the prebuilt tarball URL above.
 > Release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags.
+
+### Why `cli-latest` and not `releases/latest`
+
+`cli-latest` is a **rolling pre-release** that the `Release CLI` workflow
+force-moves onto every CLI release and re-uploads the stable-named
+`ocpp-cp-simulator.tgz` to. It is the URL to publish, share and script
+against.
+
+GitHub's own `releases/latest/download/…` is **not usable in this repository**
+and must not be reintroduced (#321). The repo has two independent tag trains —
+`v*` for the [desktop app](desktop-app.md) and `cli-v*` for the CLI — and
+`releases/latest` resolves across both. Whenever the newest release is a
+desktop one, which is the case for roughly half of any release cycle, the URL
+redirects to a release that carries no `.tgz` and the install command fails
+with a 404. That is the steady state, not a transient. The rolling tag is
+scoped to the CLI train, so it is always right without anyone remembering to
+update a version number. `cli-latest` is kept a pre-release precisely so it
+can never itself become the repository's "Latest" release, which the desktop
+train owns.
+
+CI asserts that this page, [`README.md`](../../README.md) and the release
+notes `cli-release.yml` generates all carry the same URL, and that no
+`releases/latest/download` install command has crept back in; the release
+workflow then downloads that exact URL after publishing and installs from it.
+
+### What the package ships
+
+`package.json`'s `files` field is a list of **directories**, not individual
+files:
+
+| Entry          | Why it must ship                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------- |
+| `src/cli`      | `main.ts` (the `bin`), the daemon server, the client modes, `analyze`, `export-k6`                    |
+| `src/cp`       | The charge point domain, transports and message handlers                                              |
+| `src/data`     | SQLite repositories — `main.ts` imports `../data/sqlite/…` before it parses a single argument         |
+| `src/ocpp`     | Generated OCPP types and validators reached from the CP's message handlers                            |
+| `src/protocol` | The Socket.IO [control-plane](../concepts/control-plane.md) zod schemas                               |
+| `src/scenario` | Advisory [scenario](../concepts/scenario-format.md) schema validation                                 |
+| `src/trace`    | The [trace](../concepts/trace-format.md) analysis disclaimer, on `analyze`'s module graph             |
+| `src/utils`    | Scenario templates, blueprints and URL helpers (the whole subtree — `blueprints/` is imported too)    |
+| `schema`       | `scenario.schema.json`, imported by the validator above                                               |
+| `vendor`       | The [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md) the validators import at runtime |
+| `dist`         | The Vite-built web console served by `--web-console`; built by `prepack`, never committed             |
+
+Every one of these is load-bearing: removing any single entry makes the
+installed `ocpp-cp-sim` fail on its first import, before `--help` prints. This
+is the same set the [Docker image](docker-image.md)'s `COPY` list carries, and
+the two are meant to stay in step.
+
+Between 2026-07-01 and this page's `updated:` date the list named
+`src/utils/scenarioTemplates.ts` and `src/utils/scenarios` individually and
+omitted `src/data`, `src/ocpp`, `src/trace` and `vendor` entirely, so the
+tarball the release workflow produced could not start at all (#320). Nothing
+caught it because the only checks on the tarball were `tar -tf | grep`s for
+three filenames that happened to be present — a listing check cannot see a
+path nobody thought to name. `scripts/verify-cli-tarball.sh` replaces them: it
+installs the tarball into a throwaway global prefix and then boots it —
+`--help`, a `bun build --compile` over the installed tree (which resolves the
+whole import graph, type-only imports included), the daemon answering
+`GET /v1/healthz` with a charge point bootstrapped, and, when `dist/` is
+present, the web console serving its shell. It runs on every pull request
+(`ci.yml`) as well as at release time, so packaging breaks on the PR that
+breaks it.
 
 All flags described below apply whether you run the installed `ocpp-cp-sim`
 command or, from a source checkout, `bun src/cli/main.ts …`.

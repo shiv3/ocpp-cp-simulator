@@ -8,13 +8,14 @@ sources:
   - .github/workflows/docker-publish.yml
   - docker/
 related:
+  - cli.md
   - daemon.md
   - web-console.md
   - ../concepts/state-persistence.md
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # Docker image
@@ -219,6 +220,15 @@ Notes:
 
 The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the
 browser UI in a separate stage and only `dist/` ships in the runtime layer.
+
+The runtime stage's `COPY` list and `package.json`'s `files` field are the same
+set of directories and are meant to stay in step: both answer "what does the
+daemon need in order to boot?". The canonical table, with the reason each entry
+is load-bearing, is on the CLI page under
+[What the package ships](cli.md#what-the-package-ships) — the npm tarball once
+drifted from this list and could not start (#320). The image carries one extra
+directory the tarball does not, `docs/examples/scenarios/`, purely as a
+convenience mount point.
 
 ## Building locally
 

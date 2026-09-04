@@ -258,3 +258,47 @@ fixes:
 - [Testing strategy](analyses/testing-strategy.md): new section "Does anything actually launch the desktop daemon?". CI compiled the sidecar but never ran it, which is precisely why #319 survived 30 releases. `src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` now compiles and launches it on every PR under `test:bun`, parsing the arguments out of `lib.rs`'s `DAEMON_ARGS` and the readiness budget out of `splash.html` so neither copy can drift.
 - [GitHub issues](sources/github-issues.md): #319 indexed.
 - Left as-is, reported not fixed: `dist/` is now bundled twice on the desktop (embedded in the Rust binary for `splash.html`, and as a resource for the daemon). Deduplicating it would mean serving the console over `tauri://` instead of HTTP, which is a different architecture, not a doc fix.
+## [2026-09-05] ingest | The CLI distribution was broken twice over (#320, #321)
+
+Both defects are the same surface — how the CLI reaches a user — so they were
+fixed and ingested together.
+
+- [CLI → What the package ships](entities/cli.md#what-the-package-ships): new
+  section. `package.json#files` had drifted to a mix of directories and
+  individual files and was missing `src/data`, `src/ocpp`, `src/trace` and
+  `vendor/`; `src/cli/main.ts` statically imports `../data/sqlite/…`, so the
+  published tarball died on its first import and even `--help` exited 1
+  (#320). Broken since 8a0fda5 (2026-07-01); the last actual CLI release,
+  `cli-v0.3.1` (2026-06-02), predates it, so no published artifact was ever
+  affected — the next one would have been. `files` is now eleven directories,
+  each one mutation-proven load-bearing (drop any single entry and `--help`
+  fails), and the same set the `Dockerfile` COPY list carries.
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  new section. The documented install URL used `releases/latest/download/…`,
+  which GitHub resolves across both tag trains (`v*` desktop, `cli-v*` CLI);
+  with `v0.7.8` newest it redirected to a release carrying no `.tgz` and
+  404'd — the steady state for half of any release cycle, not a transient
+  (#321). Replaced everywhere by `releases/download/cli-latest/…`, a rolling
+  pre-release `cli-release.yml` re-points on every CLI release. Pre-release
+  status is deliberate: GitHub never resolves `releases/latest` to one, so the
+  pointer cannot hijack the desktop train's badge. Chosen over pinning the
+  docs to a `cli-v*` tag (needs a human to remember) and over attaching the
+  `.tgz` to desktop releases (couples the two trains and ships CLI tarballs
+  under desktop version numbers).
+- [Docker image → Image details](entities/docker-image.md#image-details): notes
+  that the runtime `COPY` list and `package.json#files` are the same set and
+  links to the CLI page's canonical table rather than repeating it.
+- [`README.md`](../README.md): the quick-start install commands (pnpm and bun)
+  and the pinned example (`cli-v0.1.0` → `cli-v0.3.1`) updated to match.
+- [GitHub issues](sources/github-issues.md): #320 and #321 added.
+- Raw sources changed in the same commit: `package.json#files`; new
+  `scripts/verify-cli-tarball.sh` (installs the tarball into a throwaway
+  global prefix and boots it — `--help`, `bun build --compile` over the
+  installed tree, daemon `/v1/healthz` with a CP bootstrapped, web-console
+  shell when `dist/` ships); `.github/workflows/cli-release.yml` (the three
+  `tar -tf | grep` verify steps replaced by that script, rolling `cli-latest`
+  pointer, post-publish install from the documented URL, release-notes body);
+  `.github/workflows/ci.yml` (the packaging smoke and an install-URL
+  consistency guard now run on every pull request — previously no CI job
+  touched the tarball at all, which is why a July regression would only have
+  surfaced at the next release).

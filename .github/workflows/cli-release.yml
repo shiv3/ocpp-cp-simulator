@@ -4,13 +4,21 @@ name: Release CLI
 # (`ocpp-cp-simulator-<version>.tgz`) to a GitHub Release. End users then
 # install with e.g.
 #
-#   bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+#   bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 #
-# The tarball respects the `files` field in package.json, so it ships
-# `src/cli`, `src/cp`, the scenario templates utility, and the freshly-built
-# `dist/` directory. `dist/` is deliberately kept out of git — devDependencies
-# aren't installed for global bin packages, so a postinstall build isn't
-# viable, which is why we ship a prebuilt tarball instead.
+# `cli-latest` is a rolling pre-release this workflow re-points at every CLI
+# release (see the "rolling cli-latest pointer" step). It exists because this
+# repository has two tag trains — `v*` (desktop) and `cli-v*` (CLI) — and
+# GitHub's `releases/latest` resolves across BOTH, so it lands on a desktop
+# release, which carries no `.tgz`, for roughly half of every release cycle
+# (#321). The rolling tag is scoped to the CLI train and so is always right.
+#
+# The tarball respects the `files` field in package.json, which lists every
+# top-level directory the CLI's import graph reaches plus the freshly-built
+# `dist/`. Keep it a list of DIRECTORIES: enumerating individual files is what
+# shipped a tarball that could not start (#320). `dist/` is deliberately kept
+# out of git — devDependencies aren't installed for global bin packages, so a
+# postinstall build isn't viable, which is why we ship a prebuilt tarball.
 
 on:
   push:
@@ -67,41 +75,33 @@ jobs:
       - name: Pack tarball
         id: pack
         run: |
-          # `npm pack` reads the `files` field of package.json which includes
-          # `dist`, `src/cli`, `src/cp`, and `src/utils/scenarioTemplates.ts`.
-          # --ignore-scripts skips the `prepack` hook (vite build) — we
+          # `npm pack` reads the `files` field of package.json, which lists
+          # `dist` plus every src/ directory (and `vendor/`, `schema/`) the
+          # CLI imports. --ignore-scripts skips the `prepack` hook (vite build) — we
           # already built dist/ in the previous step, and letting prepack
           # run again pollutes the captured stdout with vite's build log,
           # which breaks the $TARBALL capture below.
           TARBALL=$(npm pack --silent --ignore-scripts)
-          # Also publish under a stable filename so consumers can pin
-          # `releases/latest/download/ocpp-cp-simulator.tgz` and always get
-          # the newest CLI without knowing the version string.
+          # Also publish under a stable filename so consumers can fetch
+          # `releases/download/cli-latest/ocpp-cp-simulator.tgz` and always
+          # get the newest CLI without knowing the version string.
           cp "${TARBALL}" ocpp-cp-simulator.tgz
           echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
           ls -lh "${TARBALL}" ocpp-cp-simulator.tgz
 
-      - name: Verify the tarball ships the socket.io protocol module
-        run: |
-          # The daemon (src/cli/server/*) imports src/protocol; if it is missing
-          # from the npm `files` list the published CLI crashes on boot.
-          tar -tf "${{ steps.pack.outputs.tarball }}" \
-            | grep -q 'package/src/protocol/' \
-            || { echo "::error::src/protocol missing from the CLI tarball"; exit 1; }
-
-      - name: Verify the tarball ships the scenario schema (issue #214)
-        run: |
-          # The daemon (src/cli/server/startServer.ts, socketServer.ts,
-          # RegistryChargePointService.ts) imports src/scenario for advisory
-          # scenario-schema validation, which itself imports
-          # schema/scenario.schema.json; if either is missing from the npm
-          # `files` list the published CLI crashes on boot.
-          tar -tf "${{ steps.pack.outputs.tarball }}" \
-            | grep -q 'package/src/scenario/scenarioSchemaValidator.ts' \
-            || { echo "::error::src/scenario missing from the CLI tarball"; exit 1; }
-          tar -tf "${{ steps.pack.outputs.tarball }}" \
-            | grep -q 'package/schema/scenario.schema.json' \
-            || { echo "::error::schema/scenario.schema.json missing from the CLI tarball"; exit 1; }
+      # This used to be three `tar -tf | grep` steps asserting that named
+      # files (src/protocol/, src/scenario/scenarioSchemaValidator.ts,
+      # schema/scenario.schema.json) were in the listing. All three passed on
+      # a tarball that could not run at all, because `files` omitted src/data,
+      # src/ocpp, src/trace and vendor/ — paths no grep named (#320). A
+      # presence check can only ever catch the omissions someone already
+      # thought of. This installs the tarball into a throwaway global prefix
+      # and boots it instead: --help, the full import graph, the daemon's
+      # /v1/healthz, and the bundled web console. --expect-dist makes the
+      # web-console stage mandatory here (we ran `bun run build` above, so a
+      # tarball without dist/ means `files` lost it).
+      - name: Verify the tarball installs and runs
+        run: ./scripts/verify-cli-tarball.sh --expect-dist "${{ steps.pack.outputs.tarball }}"
 
       - name: Create / update release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -123,10 +123,13 @@ jobs:
             bun install -g https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/${{ steps.pack.outputs.tarball }}
             ```
 
-            Or always pull the latest CLI release:
+            Or always pull the latest CLI release (`cli-latest` is a rolling
+            pointer this workflow re-points at every CLI release; the repo's
+            `releases/latest` cannot be used because it resolves across the
+            desktop `v*` train too — see #321):
 
             ```sh
-            bun install -g https://github.com/${{ github.repository }}/releases/latest/download/ocpp-cp-simulator.tgz
+            bun install -g https://github.com/${{ github.repository }}/releases/download/cli-latest/ocpp-cp-simulator.tgz
             ```
 
             Then run e.g.
@@ -137,3 +140,65 @@ jobs:
                         --web-console \
                         --ws-url wss://example.com/chargepoint/
             ```
+
+      # ---------------------------------------------------------------------
+      # Rolling `cli-latest` pointer (#321).
+      #
+      # `releases/latest/download/...` is unusable here: GitHub resolves
+      # "latest" across every tag train in the repo, and this one has two
+      # (`v*` desktop, `cli-v*` CLI). Whenever the most recent release is a
+      # desktop one — which it is for roughly half of any release cycle — the
+      # documented install command 404s, because desktop releases carry no
+      # `.tgz`. That is the steady state, not a transient.
+      #
+      # So the project owns its own pointer instead: a `cli-latest` tag +
+      # release that this workflow force-moves to every CLI release and
+      # re-uploads the stable-named tarball to. Marked PRE-RELEASE on purpose
+      # — GitHub never resolves `releases/latest` to a pre-release, so this
+      # pointer cannot itself hijack the desktop train's "Latest" badge, while
+      # `releases/download/cli-latest/<asset>` keeps working normally.
+      #
+      # `cli-latest` matches neither the `v*` nor the `cli-v*` push trigger,
+      # so moving it starts no further workflow runs.
+      - name: Move the rolling `cli-latest` pointer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git tag -f cli-latest
+          git push -f origin refs/tags/cli-latest
+          NOTES="Rolling pointer to the newest CLI release (currently **${{ steps.version.outputs.tag }}**).
+
+          \`\`\`sh
+          bun install -g https://github.com/${{ github.repository }}/releases/download/cli-latest/ocpp-cp-simulator.tgz
+          \`\`\`
+
+          Release notes and per-version tarballs live on the \`cli-v*\` releases.
+          Kept as a pre-release so it never becomes the repository's \"Latest\"
+          release — the desktop \`v*\` train owns that badge (#321)."
+          if gh release view cli-latest >/dev/null 2>&1; then
+            gh release edit cli-latest --prerelease \
+              --title "CLI (rolling latest)" --notes "$NOTES"
+            gh release upload cli-latest ocpp-cp-simulator.tgz --clobber
+          else
+            gh release create cli-latest --prerelease \
+              --title "CLI (rolling latest)" --notes "$NOTES" \
+              ocpp-cp-simulator.tgz
+          fi
+
+      # The documented install command, executed. Everything above verifies a
+      # LOCAL tarball; this is the only step that proves the URL README.md and
+      # docs/entities/cli.md tell people to run actually resolves and installs
+      # — the defect in #321 was a URL, not an artifact.
+      - name: Verify the documented install URL
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${{ github.repository }}/releases/download/cli-latest/ocpp-cp-simulator.tgz"
+          # Asset propagation after upload is not instant; retry briefly.
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL "$URL" -o rolling.tgz; then break; fi
+            [ "$attempt" = 5 ] && { echo "::error::$URL never became downloadable"; exit 1; }
+            echo "download failed (attempt $attempt/5); retrying"
+            sleep 10
+          done
+          ./scripts/verify-cli-tarball.sh --expect-dist rolling.tgz

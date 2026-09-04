@@ -53,3 +53,6 @@ scripts/steve-verify/.runtime/
 # steve-verify: generated feeder/op helper scripts dropped at the repo root
 .steve-*.sh
 .steve-op.sh
+
+# `npm pack` output (scripts/verify-cli-tarball.sh, .github/workflows/cli-release.yml)
+*.tgz

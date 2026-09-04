@@ -33,19 +33,21 @@ ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 
 ```bash
 # pnpm (recommended)
-pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
+pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # bun
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # Or pin to a specific CLI release
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.3.1/ocpp-cp-simulator-0.3.1.tgz
 
 # From a local checkout
 bun link              # in this repo
 bun link ocpp-cp-simulator   # in any other project
 ```
 
+> `cli-latest` is a rolling pre-release the `Release CLI` workflow re-points at every CLI release. Use it, not `releases/latest` — this repo has two tag trains (`v*` desktop, `cli-v*` CLI) and GitHub's "latest" resolves across both, landing on a desktop release that carries no `.tgz`.
+>
 > The release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags. A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
 
 Then run from anywhere:

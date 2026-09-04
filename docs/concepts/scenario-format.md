@@ -372,7 +372,20 @@ current derived from it in the same MeterValue.
 and that wattage is converted back to the reported `Current.Import`. When the
 connector declares an electrical model — any of `currentType`, `phases`,
 `voltageV`, `powerFactor` — both halves use the same numbers, so a binding
-amp limit is reported back as **exactly** that amperage, never above it.
+amp limit is reported back as that amperage, and **never above it**. The
+printed value carries that guarantee too: `Current.Import` is reported to one
+decimal and `Power.Active.Import` to a whole watt, and rounding to nearest
+rounds _up_, so a binding 16.06 A limit derived 16.06 A and then sent
+`"16.1"`. A sample whose value a profile bounds is rounded **down** instead —
+but only when rounding to nearest would cross the bound, never as a blanket
+change of rounding mode, because flooring every sample would move
+`22000 / 230 = 95.652…` from `"95.7"` to `"95.6"` and break the byte-identity
+the pre-v1.2 path relies on. Under-reporting by less than one printed digit is
+a rounding artefact; over-reporting is a profile violation, so that is the
+half that holds. It applies to `Current.Import`, `Current.Offered`,
+`Power.Active.Import` and `Power.Offered`, and to a per-phase leg against its
+own third of the cap. `Voltage`, `Power.Factor`, `SoC` and the energy register
+are not bounded by a charging profile and are printed unchanged.
 Without that, the two halves disagreed: a 3-phase 10 A profile on a
 `powerFactor: 0.5` connector resolved to `10 × 230 × 3 = 6900 W` and reported
 `6900 / (230 × 3 × 0.5) = 20 A`, twice the limit. Both halves also divide by

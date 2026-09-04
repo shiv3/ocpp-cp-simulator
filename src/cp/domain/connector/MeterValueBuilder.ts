@@ -62,9 +62,14 @@ export function buildSampledValues(
   // available, independent of the battery's own acceptance (#301: a 100 kW
   // charger still *offers* 100 kW to a nearly-full battery that only draws
   // 10 kW of it).
-  const powerW = derivedInstantaneousPowerW(connector);
-  const offeredW = derivedOfferedPowerW(connector);
   const settings = connector.evSettings;
+  // Resolved once for the whole sample set rather than per derivation: every
+  // sample in one MeterValue should describe the same instant, and this is the
+  // one call that can emit `scheduleLimitChange` (see
+  // `Connector.currentScheduleLimitWatts`).
+  const scheduleLimitW = connector.currentScheduleLimitWatts();
+  const powerW = derivedInstantaneousPowerW(connector, scheduleLimitW);
+  const offeredW = derivedOfferedPowerW(connector, scheduleLimitW);
   // Both currents divide by the phases actually in use, the same count the
   // watt cap was converted on — not the connector's wiring. A 10 A
   // single-phase limit caps a 3-phase connector at 2300 W, and dividing that
@@ -77,6 +82,9 @@ export function buildSampledValues(
     settings ?? {},
     activePhases,
   );
+  // The same cap expressed in the units the bounded samples are printed in.
+  // `Infinity` when no profile is active, which makes the bound a no-op.
+  const limitA = currentAmpsFor(scheduleLimitW, settings ?? {}, activePhases);
   // The voltage that actually produced `currentA`, not the raw configured
   // value: a `voltageV` of 0, negative or non-finite falls back to 230 in the
   // derivation, and reporting the raw number here would put a `Voltage` sample
@@ -95,6 +103,8 @@ export function buildSampledValues(
       offeredCurrentA,
       voltageV,
       powerFactor,
+      limitW: scheduleLimitW,
+      limitA,
     });
     if (sample) samples.push(sample);
     // Per-phase samples, but only when all three phases are actually in use.
@@ -114,6 +124,12 @@ export function buildSampledValues(
           offeredCurrentA,
           voltageV,
           powerFactor,
+          // A leg carries a third of the whole-connector power, so the bound
+          // that applies to it is a third of the whole-connector cap. The
+          // current legs each carry the aggregate line current, so their bound
+          // is unchanged.
+          limitW: scheduleLimitW / 3,
+          limitA,
         });
         if (perPhase) samples.push({ ...perPhase, phase });
       }
@@ -132,6 +148,10 @@ interface MeasurandInputs {
   offeredCurrentA: number;
   voltageV: number;
   powerFactor: number;
+  /** Active charging-profile cap in watts, `Infinity` when uncapped. */
+  limitW: number;
+  /** The same cap in amperes, `Infinity` when uncapped. */
+  limitA: number;
 }
 
 /**
@@ -165,28 +185,28 @@ function buildSingleSample(
       };
     case "Current.Import":
       return {
-        value: inputs.currentA.toFixed(1),
+        value: formatBounded(inputs.currentA, inputs.limitA, 1),
         context,
         measurand,
         unit: "A",
       };
     case "Current.Offered":
       return {
-        value: inputs.offeredCurrentA.toFixed(1),
+        value: formatBounded(inputs.offeredCurrentA, inputs.limitA, 1),
         context,
         measurand,
         unit: "A",
       };
     case "Power.Active.Import":
       return {
-        value: String(Math.round(inputs.powerW)),
+        value: formatBounded(inputs.powerW, inputs.limitW, 0),
         context,
         measurand,
         unit: "W",
       };
     case "Power.Offered":
       return {
-        value: String(Math.round(inputs.offeredW)),
+        value: formatBounded(inputs.offeredW, inputs.limitW, 0),
         context,
         measurand,
         unit: "W",
@@ -247,6 +267,36 @@ function buildSingleSample(
 }
 
 /**
+ * Print a sample that an active charging profile can bound, without letting
+ * the rounding carry it above that bound.
+ *
+ * `Current.Import` is reported to one decimal and `Power.Active.Import` to a
+ * whole watt, and rounding to nearest can round *up*: a binding 16.06 A limit
+ * derives 16.06 A correctly and then sends `"16.1"`, so the station reports
+ * more than the CSMS allowed. That falsifies the guarantee stated one module
+ * away — that a binding amp limit comes back as exactly that amperage, never
+ * above it (#301).
+ *
+ * Rounding down is applied **only when rounding to nearest would cross the
+ * limit**, not as a blanket change of rounding mode. Flooring every sample
+ * would move `22000 / 230 = 95.652…` from `"95.7"` to `"95.6"` and break the
+ * byte-identity every pre-v1.2 scenario relies on; the two guarantees are
+ * compatible precisely because this only bites where the limit binds and the
+ * printed value would otherwise exceed it. "Never above" is the half that has
+ * to hold: a limit is a ceiling, so under-reporting by less than one printed
+ * digit is a rounding artefact, while over-reporting is a profile violation.
+ *
+ * `limit` is `Infinity` when no profile is active, which makes this exactly
+ * `toFixed`.
+ */
+function formatBounded(value: number, limit: number, decimals: number): string {
+  const rounded = value.toFixed(decimals);
+  if (!Number.isFinite(limit) || Number(rounded) <= limit) return rounded;
+  const scale = 10 ** decimals;
+  return (Math.floor(Math.min(value, limit) * scale) / scale).toFixed(decimals);
+}
+
+/**
  * `Power.Factor`'s string form: unity as `"1.0"`, anything else verbatim.
  *
  * Before v1.2 this sample was the literal `"1.0"` for every connector, and
@@ -278,7 +328,10 @@ function formatPowerFactor(value: number): string {
  * MeterValue built from this module and the register it reads therefore
  * always agree with each other.
  */
-function derivedInstantaneousPowerW(connector: Connector): number {
+function derivedInstantaneousPowerW(
+  connector: Connector,
+  scheduleLimitWatts: number,
+): number {
   // `OCPPStatus.Charging` import is avoided here to keep this module free
   // of cycles; check via the public string value.
   if (connector.status !== "Charging") return 0;
@@ -293,7 +346,7 @@ function derivedInstantaneousPowerW(connector: Connector): number {
       connector.transaction?.initialSoc,
       settings?.initialSoc,
     ),
-    scheduleLimitWatts: connector.currentScheduleLimitWatts(),
+    scheduleLimitWatts,
   });
 }
 
@@ -306,7 +359,10 @@ function derivedInstantaneousPowerW(connector: Connector): number {
  * Still capped by the active charging profile — that cap is the EVSE's own
  * limit, set by the CSMS, not a battery-acceptance concern.
  */
-function derivedOfferedPowerW(connector: Connector): number {
+function derivedOfferedPowerW(
+  connector: Connector,
+  scheduleLimitWatts: number,
+): number {
   if (connector.status !== "Charging") return 0;
   const settings = connector.evSettings;
   const maxKw = settings?.maxChargingPowerKw ?? 0;
@@ -315,6 +371,6 @@ function derivedOfferedPowerW(connector: Connector): number {
     evMaxW,
     curve: undefined,
     socPercent: connector.soc,
-    scheduleLimitWatts: connector.currentScheduleLimitWatts(),
+    scheduleLimitWatts,
   });
 }

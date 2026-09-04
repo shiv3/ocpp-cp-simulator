@@ -680,3 +680,114 @@ describe("scheduleLimitChange is emitted per crossing, not per sample (#301)", (
     expect(events).toHaveLength(0);
   });
 });
+
+describe("printing a sample never carries it above the limit (#301)", () => {
+  /**
+   * The derivation is exact, but `Current.Import` is printed to one decimal
+   * and `Power.Active.Import` to a whole watt, and rounding to nearest rounds
+   * up. A binding 16.06 A limit derived 16.06 A and sent "16.1" — the station
+   * reporting more than the CSMS allowed, which falsifies the guarantee that a
+   * binding amp limit comes back as exactly that amperage, never above it.
+   */
+  function wattProfileAt(limitWatts: number): ActiveChargingProfile {
+    return {
+      chargingProfileId: 306,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: limitWatts }],
+    };
+  }
+
+  function singlePhase(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 1,
+    };
+    armCharging(connector);
+    return connector;
+  }
+
+  function valueOfMeasurand(connector: Connector, measurand: string): number {
+    const samples = buildSampledValues(
+      connector,
+      [measurand],
+      "Sample.Periodic",
+    );
+    return Number(samples.find((s) => s.phase === undefined)!.value);
+  }
+
+  it("rounds a 16.06 A limit down, not up", () => {
+    const connector = singlePhase();
+    connector.addChargingProfile(ampProfile(16.06, 1));
+    expect(valueOfMeasurand(connector, "Current.Import")).toBe(16.0);
+    expect(valueOfMeasurand(connector, "Current.Offered")).toBe(16.0);
+  });
+
+  it("never reports above the limit for any fractional amperage", () => {
+    // The property, not one example: the printed value is a ceiling the CSMS
+    // set, so it may fall short of the derivation but must never exceed it.
+    for (const limit of [
+      6.04, 10.06, 13.99, 16.06, 16.049, 20.999, 31.96, 32.05,
+    ]) {
+      const connector = singlePhase();
+      connector.addChargingProfile(ampProfile(limit, 1));
+      const reported = valueOfMeasurand(connector, "Current.Import");
+      expect(reported).toBeLessThanOrEqual(limit);
+      // And it stays within one printed digit of the limit, so bounding it has
+      // not turned into silently reporting nothing.
+      expect(reported).toBeGreaterThan(limit - 0.1);
+    }
+  });
+
+  it("never reports above a fractional W limit either", () => {
+    for (const limit of [6900.6, 3450.5, 11039.9, 22000.4]) {
+      const connector = singlePhase();
+      connector.addChargingProfile(wattProfileAt(limit));
+      const power = valueOfMeasurand(connector, "Power.Active.Import");
+      const offered = valueOfMeasurand(connector, "Power.Offered");
+      expect(power).toBeLessThanOrEqual(limit);
+      expect(offered).toBeLessThanOrEqual(limit);
+      expect(power).toBeGreaterThan(limit - 1);
+    }
+  });
+
+  it("keeps per-phase legs under their share of the limit", () => {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+    };
+    armCharging(connector);
+    // 6901.5 / 3 = 2300.5, which rounds *up* to 2301 — so this only passes if
+    // each leg is bounded by its own third of the cap, not by the whole.
+    connector.addChargingProfile(wattProfileAt(6901.5));
+    const legs = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    ).filter((s) => s.phase !== undefined);
+    expect(legs).toHaveLength(3);
+    for (const leg of legs) {
+      expect(Number(leg.value)).toBeLessThanOrEqual(6901.5 / 3);
+    }
+  });
+
+  it("leaves an unbounded sample rounded to nearest, as before", () => {
+    // No profile: the bound is Infinity and this is exactly `toFixed`, so the
+    // pre-v1.2 strings are untouched. 350 kW / 230 V = 1521.739… → "1521.7".
+    const connector = singlePhase();
+    expect(valueOfMeasurand(connector, "Current.Import")).toBe(1521.7);
+  });
+
+  it("leaves a whole-number limit exact, not one digit short", () => {
+    const connector = singlePhase();
+    connector.addChargingProfile(ampProfile(16, 1));
+    expect(valueOfMeasurand(connector, "Current.Import")).toBe(16.0);
+  });
+});

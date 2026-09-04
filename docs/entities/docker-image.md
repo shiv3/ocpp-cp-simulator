@@ -14,7 +14,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # Docker image
@@ -52,6 +52,19 @@ docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
 > image. The stamped bytes make it a different image (different digest) from
 > the `main` build of the same commit — expected, not a packaging error.
 > `sha-<short>` always refers to the un-stamped branch build.
+
+A tag build ends by asking the registry for every tag it just pushed and
+comparing each one's manifest digest against the digest that build produced
+(#287). Publishing and _having published_ are different facts, and only the
+second is what a release note's `ghcr.io/shiv3/ocpp-cp-simulator:X.Y.Z` line
+promises: `0.7.6` shipped notes naming an image whose build had failed, and
+`0.7.1` was never republished at all.
+
+Existence alone would not have been enough. `X` and `X.Y` are moving tags
+that already point at the previous release, so a run that pushed nothing
+would still resolve them — and report success while the aliases served the
+old image. A missing tag, or one left behind on an earlier release, is now a
+red release job rather than something a registry query turns up later.
 
 ## Quick start
 

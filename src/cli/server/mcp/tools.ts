@@ -217,11 +217,17 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   mcp.tool("start_transaction", {
-    description: "Start a transaction on a connector",
+    description:
+      "Start a transaction on a connector. tagId is optional (#299): when omitted, the charge point draws one from its idTagPool, falling back to a default idTag if it has none.",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
       connector: z.number().int().min(1).describe("Connector identifier"),
-      tagId: z.string().describe("RFID tag or user ID for authorization"),
+      tagId: z
+        .string()
+        .optional()
+        .describe(
+          "RFID tag or user ID for authorization. Omit to draw from the charge point's idTagPool",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -263,10 +269,16 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   mcp.tool("authorize", {
-    description: "Authorize a tag or user",
+    description:
+      "Authorize a tag or user. tagId is optional (#299): when omitted, the charge point draws one from its idTagPool, falling back to a default idTag if it has none.",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
-      tagId: z.string().describe("RFID tag or user ID to authorize"),
+      tagId: z
+        .string()
+        .optional()
+        .describe(
+          "RFID tag or user ID to authorize. Omit to draw from the charge point's idTagPool",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -300,6 +312,25 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .string()
         .optional()
         .describe("Optional error code if status is Faulted"),
+      info: z.string().optional().describe("Optional free-form status info"),
+      vendorErrorCode: z
+        .string()
+        .optional()
+        .describe("Optional vendor-specific error code"),
+      vendorId: z
+        .string()
+        .optional()
+        .describe("Optional vendor id for vendorErrorCode"),
+      timestamp: z
+        .string()
+        .optional()
+        .describe("Optional ISO 8601 timestamp for the status change"),
+      suppressChargingStateTransactionEvent: z
+        .boolean()
+        .optional()
+        .describe(
+          "OCPP 2.x only: suppress the TransactionEvent a charging-state change would otherwise send",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -310,6 +341,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             connector: args.connector,
             status: args.status,
             errorCode: args.errorCode,
+            info: args.info,
+            vendorErrorCode: args.vendorErrorCode,
+            vendorId: args.vendorId,
+            timestamp: args.timestamp,
+            suppressChargingStateTransactionEvent:
+              args.suppressChargingStateTransactionEvent,
           },
         });
         return successResult(result);
@@ -387,6 +424,16 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       cpId: z.string().describe("Charge point identifier"),
       connector: z.number().int().min(1).describe("Connector identifier"),
       templateId: z.string().describe("Scenario template identifier"),
+      evSettings: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Overrides for the template's EV settings"),
+      strict: z
+        .boolean()
+        .optional()
+        .describe(
+          "Promote warning-severity assertions to failures (see docs/concepts/scenario-format.md#severity-conformance-vs-compatibility)",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -396,6 +443,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           params: {
             connector: args.connector,
             templateId: args.templateId,
+            evSettings: args.evSettings,
+            strict: args.strict,
           },
         });
         return successResult(result);

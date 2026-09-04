@@ -801,6 +801,12 @@ Options:
   --cp-id <id>             Charge Point ID
   --ws-url <url>           WebSocket URL of CSMS
   --connectors <n>         Number of connectors (default: 1)
+  --cp-count <n>           Server mode: bootstrap N charge points instead of
+                           one, sharing every option but the id. Requires
+                           --cp-id as the id stem and a server mode.
+  --cp-id-pattern <tpl>    Id template used with --cp-count (default:
+                           <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
+                           it.
   --security-profile <0|1|2|3>
                            OCPP 1.6 security profile. 0 leaves transport/auth
                            as configured; 1 adds AuthorizationKey Basic Auth
@@ -842,6 +848,10 @@ Options:
   --ocpp-version <OCPP-1.2|OCPP-1.5|OCPP-1.6J|OCPP-1.6S|OCPP-2.0.1|OCPP-2.1>
                            OCPP version for a directly-started CP
                            (default: OCPP-1.6J)
+  --header KEY:VALUE       Extra header on the outgoing CP -> CSMS WebSocket
+                           upgrade. Repeatable.
+  --ws-subprotocol <value> Extra subprotocol offered on the outgoing
+                           CP -> CSMS WebSocket upgrade. Repeatable.
   --scenario <file>            Run scenario from JSON file on startup
   --scenario-template <id>     Run built-in scenario template on startup
   --scenario-template-file <p> Load a cpId-independent template JSON and apply it
@@ -914,6 +924,13 @@ Options:
                            (e.g. Cloud Run / GFE). The browser UI build must
                            be given the matching VITE_HEALTH_PATH so its
                            remote-mode auto-detect probe lines up.
+  --metrics                Server mode: serve GET /metrics (Prometheus text
+                           exposition). Off by default; behind the same
+                           Basic Auth gate as the rest of the HTTP surface
+                           unless --metrics-no-auth is also passed. Refused
+                           together with --health-path /metrics.
+  --metrics-no-auth        Implies --metrics and serves it outside the
+                           Basic Auth gate. Trusted networks only.
   --soap-callback-url <url>
                            SOAP ChargePointService callback URL for OCPP 1.2, 1.5,
                            or 1.6S. Required for SOAP versions unless

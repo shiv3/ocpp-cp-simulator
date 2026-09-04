@@ -219,17 +219,14 @@ without parsing logs.
 **Shape.** `GET /metrics`, Prometheus text exposition, hand-rolled — the format
 is a few lines and this avoids a Bun-compatibility question on `prom-client`.
 
-Series to start with:
-
-| Metric                              | Type      | Labels                           |
-| ----------------------------------- | --------- | -------------------------------- |
-| `ocppcp_charge_points`              | gauge     | `state`                          |
-| `ocppcp_connectors`                 | gauge     | `status`                         |
-| `ocppcp_transactions_active`        | gauge     | —                                |
-| `ocppcp_ocpp_messages_total`        | counter   | `action`, `direction`, `outcome` |
-| `ocppcp_ocpp_call_duration_seconds` | histogram | `action`                         |
-| `ocppcp_rpc_requests_total`         | counter   | `method`, `outcome`              |
-| `ocppcp_ws_reconnects_total`        | counter   | —                                |
+Series to start with: charge-point and connector gauges, an active-transaction
+gauge, message and rpc counters, a CALL-duration histogram and a reconnect
+counter. The **shipped** set is the canonical table in
+[Daemon → Metrics](../entities/daemon.md#metrics) — it is not identical to what
+this plan sketched: `outcome` turned out to be unnecessary on the message
+counter (a CALLERROR is its own `ocppcp_ocpp_call_errors_total` series), and
+#302 added `ocppcp_ocpp_call_timeouts_total` once it became clear the duration
+histogram cannot see a CALL that is never answered.
 
 **Cardinality.** Use only the bounded labels in the table above — `action`,
 `direction`, `state`, `status`, `method`, `outcome` — and **never** `cpId` —
@@ -420,8 +417,9 @@ decision rather than a guess.
 implements the shape above — it grows a fleet via `cp.create_many`, drives
 both axes (idle heartbeat-only and active start/stop-transaction, staggered),
 and diffs two `/metrics` scrapes to isolate one step's
-`ocppcp_ocpp_call_duration_seconds` histogram, reporting p50/p95 plus watchdog
-timeouts/errors/reconnects as sharper knee signals. What is **not** done: no
+`ocppcp_ocpp_call_duration_seconds` histogram, reporting p50/p95 plus
+abandoned calls (`ocppcp_ocpp_call_timeouts_total`), errors and reconnects as
+sharper knee signals. What is **not** done: no
 real CSMS is available in this repository's CI or review sandboxes to
 actually run it against, so
 [Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)

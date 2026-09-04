@@ -3,6 +3,7 @@ title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
 updated: 2026-09-05
+updated: 2026-09-04
 ---
 
 # Log
@@ -549,3 +550,9 @@ Sixth review pass on PR #325.
 - [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): new section, replacing silence on "how many charge points can one daemon hold" with the benchmark and what to record once it is run (machine, CSMS, N vs. p50/p95 for both axes, the knee). No number is recorded — this repository's CI and review sandboxes have no real CSMS to run it against, so producing one is a manual follow-up.
 - [Fleet, load and observability roadmap → 5a](analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling): marked shipped. The benchmark tool is built per the agreed shape; the number that gates [5b, a worker model](analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional) is still pending an actual run.
 - [GitHub issues](sources/github-issues.md): #302 row.
+
+## [2026-09-04] ingest | Review fixes on the fleet scale benchmark (#302)
+
+- [Daemon → Metrics](entities/daemon.md#metrics): new `ocppcp_ocpp_call_timeouts_total{action}` counter in the canonical table, and the paragraph explaining why it cannot be read off the duration histogram — a duration is only observed when the CALLRESULT/CALLERROR arrives, so a CSMS that never answers produces no observation at all and a saturated CSMS reported zero slow calls and zero errors. Fed by the OCPP-1.6J per-CALL watchdog log line plus the `MAX_PENDING_CALLS` eviction path; `OCPPMessageHandlerV201` has no watchdog, so 2.x calls reach it only through eviction. A call answered _after_ the watchdog fired is counted here **and** in the histogram's `+Inf` bucket — two different facts, neither double-counted as the other.
+- [scripts/bench/README.md](sources/bench-readme.md): settling is now read off the `ocppcp_charge_points` gauge instead of polling `cp.list`, whose _result_ schema is `ARRAY_1000` — past 1000 charge points the response failed validation and the RPC answered `internal`, so the advertised 2000-CP sweep could never run. New `--allow-existing` flag and the preflight that refuses a daemon which already holds charge points (`/metrics` has no `cpId` label, so their traffic would sit inside the same histogram while `N` counted only the bench's own fleet). `--csms-url` now rejects `http(s)://` rather than silently running a 1.6J WebSocket fleet against it — SOAP has no duration histogram to benchmark. `--out` redacts the daemon Basic Auth password and any URL userinfo. The `>30s` column is split into `timeouts` (the new counter, the real knee signal) and `late>30s` (the histogram overflow: calls that _were_ answered, late).
+- [Fleet, load and observability roadmap → phase 2](analyses/fleet-load-and-observability-roadmap.md#phase-2--metrics-endpoint): the planned metric table is replaced by a pointer to the canonical one in [Daemon → Metrics](entities/daemon.md#metrics), which it had drifted from (`outcome` on the message counter was never needed; `ocppcp_ocpp_call_errors_total` and now `ocppcp_ocpp_call_timeouts_total` were added). Duplicate table removed rather than a second one added.

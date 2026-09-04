@@ -53,6 +53,12 @@ export interface BenchOptions {
   readonly healthPath: string;
   readonly daemonBasicAuth: DaemonBasicAuth | null;
   readonly outFile: string | null;
+  /** Run even though the daemon already holds charge points this script did
+   *  not create. `/metrics` carries no `cpId` label by design, so their
+   *  traffic lands in the same histogram as the bench fleet's while `N`
+   *  counts only the bench's own — the curve is then not what it says it is.
+   *  Off by default; the pre-existing count is recorded when it is on. */
+  readonly allowExisting: boolean;
 }
 
 export class BenchValidationError extends Error {}
@@ -61,9 +67,29 @@ interface RawArgValue {
   readonly value: string;
 }
 
+/** Flags taking a value. A name absent from both sets is a typo, not a flag —
+ *  `--duraton 5` used to parse fine, never be read, and run with the default. */
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "csms-url",
+  "daemon-url",
+  "counts",
+  "duration",
+  "heartbeat-interval",
+  "tx-interval",
+  "settle-timeout",
+  "health-path",
+  "daemon-basic-auth-user",
+  "daemon-basic-auth-pass",
+  "out",
+]);
+
+/** Flags that are present-or-absent and consume no following argument. */
+export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["allow-existing"]);
+
 /** argv (already stripped of `bun`/script path) to a `--flag value` map.
- *  Boolean-only flags are not needed here; every flag this script defines
- *  takes a value. */
+ *  Boolean flags map to the empty string. Every name is checked against
+ *  {@link VALUE_FLAGS}/{@link BOOLEAN_FLAGS} here, before any side effect:
+ *  an unknown flag is a failed run, never a silently ignored one. */
 export function parseArgv(argv: readonly string[]): Map<string, RawArgValue> {
   const out = new Map<string, RawArgValue>();
   for (let i = 0; i < argv.length; i++) {
@@ -72,6 +98,13 @@ export function parseArgv(argv: readonly string[]): Map<string, RawArgValue> {
       throw new BenchValidationError(`unrecognized argument: ${arg}`);
     }
     const name = arg.slice(2);
+    if (BOOLEAN_FLAGS.has(name)) {
+      out.set(name, { value: "" });
+      continue;
+    }
+    if (!VALUE_FLAGS.has(name)) {
+      throw new BenchValidationError(`unknown flag: --${name}`);
+    }
     const value = argv[i + 1];
     if (value === undefined || value.startsWith("--")) {
       throw new BenchValidationError(`--${name} requires a value`);
@@ -174,11 +207,14 @@ function parseUrl(
  *  until every flag has been validated (standing lesson: no side effect
  *  before validation). */
 export function validateOptions(raw: Map<string, RawArgValue>): BenchOptions {
+  // OCPP-J only, on purpose. `ocppcp_ocpp_call_duration_seconds` has no SOAP
+  // equivalent (a SOAP log line carries no message id to correlate a response
+  // back with), so a SOAP fleet would report an empty latency table. Accepting
+  // `http(s)://` used to silently produce a 1.6J WebSocket fleet against an
+  // HTTP URL — the flag said SOAP and the run measured something else.
   const csmsUrl = parseUrl(requireString(raw, "csms-url"), "csms-url", [
     "ws",
     "wss",
-    "http",
-    "https",
   ]);
   const daemonUrlRaw = parseUrl(
     requireString(raw, "daemon-url"),
@@ -252,6 +288,46 @@ export function validateOptions(raw: Map<string, RawArgValue>): BenchOptions {
     healthPath: healthPathRaw,
     daemonBasicAuth,
     outFile,
+    allowExisting: raw.has("allow-existing"),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Redaction. A `--out` file is meant to be kept, attached to an issue and
+// pasted into a doc, so nothing in it may carry a credential.
+// ---------------------------------------------------------------------------
+
+/** `https://user:pass@host/x` to `https://user:***@host/x`. A URL with no
+ *  password (or no userinfo at all) comes back unchanged — there is nothing
+ *  secret in it, and mangling it would make the record harder to read.
+ *
+ *  The userinfo class excludes `/?#` but **not** `@`, so the greedy match
+ *  backtracks to the LAST `@` before the path — which is the delimiter WHATWG
+ *  URL parsing uses. Stopping at the first `@` would leave the tail of a
+ *  password containing one (`user:p@ss@host`) in the output, and a partial
+ *  leak is still a leak. */
+export function redactUrlUserinfo(raw: string): string {
+  return raw.replace(
+    /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)@/,
+    (_all, scheme: string, userinfo: string) => {
+      const colon = userinfo.indexOf(":");
+      if (colon < 0) return `${scheme}${userinfo}@`;
+      return `${scheme}${userinfo.slice(0, colon)}:***@`;
+    },
+  );
+}
+
+/** The options block as it may be written to `--out`: the daemon Basic Auth
+ *  password replaced, and userinfo stripped out of both URLs. The username is
+ *  kept — it identifies the run, and it is not the secret. */
+export function redactOptions(opts: BenchOptions): Record<string, unknown> {
+  return {
+    ...opts,
+    csmsUrl: redactUrlUserinfo(opts.csmsUrl),
+    daemonUrl: redactUrlUserinfo(opts.daemonUrl),
+    daemonBasicAuth: opts.daemonBasicAuth
+      ? { username: opts.daemonBasicAuth.username, password: "***" }
+      : null,
   };
 }
 
@@ -328,6 +404,55 @@ export function counterValue(
     if (Object.entries(labels).every(([k, v]) => s.labels[k] === v)) {
       total += s.value;
     }
+  }
+  return total;
+}
+
+/** The registered-charge-point gauge, labelled by state. */
+export const CHARGE_POINTS_METRIC = "ocppcp_charge_points";
+/** The state `ChargePoint.status` takes while disconnected or pre-boot. */
+export const UNAVAILABLE_STATE = "Unavailable";
+
+export interface FleetGauge {
+  /** Every registered charge point, whatever its state. */
+  readonly total: number;
+  /** Those past boot — the settle criterion, and bounded/cheap where
+   *  `cp.list` is neither (its result schema caps at 1000 entries, so polling
+   *  it past that size fails validation and the RPC answers `internal`). */
+  readonly connected: number;
+}
+
+/** Read `ocppcp_charge_points` out of one scrape. */
+export function fleetGauge(samples: readonly Sample[]): FleetGauge {
+  let total = 0;
+  let connected = 0;
+  for (const s of samples) {
+    if (s.name !== CHARGE_POINTS_METRIC) continue;
+    total += s.value;
+    if (s.labels.state !== UNAVAILABLE_STATE) connected += s.value;
+  }
+  return { total, connected };
+}
+
+/** Preflight guard: refuse to measure a daemon that already holds charge
+ *  points, because `/metrics` carries no `cpId` label — their traffic would
+ *  land in the same histogram as the bench fleet's while the reported `N`
+ *  counts only the charge points this script created. Returns the
+ *  pre-existing count, which the report and the `--out` file record when
+ *  `--allow-existing` waives the refusal. */
+export function assertDaemonEmpty(
+  samples: readonly Sample[],
+  allowExisting: boolean,
+): number {
+  const { total } = fleetGauge(samples);
+  if (total > 0 && !allowExisting) {
+    throw new Error(
+      `the daemon already holds ${total} charge point(s). Their OCPP traffic ` +
+        `would be counted in this run's histogram while N counts only the ` +
+        `bench's own fleet, so the N-vs-latency curve would be wrong. Point ` +
+        `--daemon-url at a dedicated bench daemon, or pass --allow-existing ` +
+        `to run anyway (the count is then recorded in the report).`,
+    );
   }
   return total;
 }

@@ -8,13 +8,17 @@ import {
   MAX_SWEEP_POINTS,
   Semaphore,
   TokenBucket,
+  assertDaemonEmpty,
   diffHistogram,
+  fleetGauge,
   formatSeconds,
   formatTable,
   histogramQuantile,
   mergeHistogramDeltas,
   parseArgv,
   parseExposition,
+  redactOptions,
+  redactUrlUserinfo,
   validateOptions,
   type Sample,
 } from "./lib.ts";
@@ -32,17 +36,34 @@ function argMap(extra: readonly string[] = []) {
 
 describe("parseArgv", () => {
   it("parses --flag value pairs", () => {
-    const m = parseArgv(["--foo", "bar", "--baz", "1"]);
-    expect(m.get("foo")?.value).toBe("bar");
-    expect(m.get("baz")?.value).toBe("1");
+    const m = parseArgv(["--duration", "60", "--tx-interval", "1"]);
+    expect(m.get("duration")?.value).toBe("60");
+    expect(m.get("tx-interval")?.value).toBe("1");
   });
 
   it("rejects a flag missing its value", () => {
-    expect(() => parseArgv(["--foo"])).toThrow(BenchValidationError);
+    expect(() => parseArgv(["--duration"])).toThrow(BenchValidationError);
   });
 
   it("rejects a bare positional argument", () => {
     expect(() => parseArgv(["bar"])).toThrow(BenchValidationError);
+  });
+
+  it("rejects an unknown flag instead of silently ignoring it", () => {
+    // `--duraton 5` used to parse into the map, never be read, and let the
+    // run proceed on the default duration — a typo that silently produced a
+    // benchmark measuring something other than what was asked for.
+    expect(() => parseArgv(["--duraton", "5"])).toThrow(/unknown flag/);
+  });
+
+  it("takes a boolean flag without swallowing the next argument", () => {
+    const m = parseArgv(["--allow-existing", "--duration", "60"]);
+    expect(m.has("allow-existing")).toBe(true);
+    expect(m.get("duration")?.value).toBe("60");
+  });
+
+  it("takes a boolean flag as the last argument", () => {
+    expect(parseArgv(["--allow-existing"]).has("allow-existing")).toBe(true);
   });
 });
 
@@ -96,7 +117,25 @@ describe("validateOptions — bounds and guards", () => {
           "http://127.0.0.1:9700",
         ]),
       ),
-    ).toThrow(/ws.*wss.*http.*https|--csms-url/);
+    ).toThrow(/--csms-url/);
+  });
+
+  it("rejects an http(s) --csms-url rather than silently running OCPP-J", () => {
+    // `growFleet` passes only `wsUrl`, so the daemon defaults to OCPP-1.6J:
+    // an http(s) URL used to produce a WebSocket fleet against an HTTP
+    // endpoint while the flag documentation promised SOAP.
+    for (const url of ["http://localhost:8080/ocpp", "https://csms/ocpp"]) {
+      expect(() =>
+        validateOptions(
+          parseArgv([
+            "--csms-url",
+            url,
+            "--daemon-url",
+            "http://127.0.0.1:9700",
+          ]),
+        ),
+      ).toThrow(/--csms-url must use ws or wss/);
+    }
   });
 
   it("rejects a daemon-url with a ws scheme", () => {
@@ -468,5 +507,140 @@ describe("Semaphore", () => {
     }
     await Promise.all([work(), work(), work(), work(), work()]);
     expect(maxConcurrent).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("--allow-existing", () => {
+  it("defaults to false", () => {
+    expect(validateOptions(argMap()).allowExisting).toBe(false);
+  });
+
+  it("is set by the flag", () => {
+    expect(validateOptions(argMap(["--allow-existing"])).allowExisting).toBe(
+      true,
+    );
+  });
+});
+
+describe("redaction of a --out result file", () => {
+  it("replaces the daemon basic-auth password and keeps the username", () => {
+    // A result file is meant to be kept and shared; serialising the options
+    // verbatim wrote the daemon's Basic Auth password into it in plaintext.
+    const opts = validateOptions(
+      argMap([
+        "--daemon-basic-auth-user",
+        "ops",
+        "--daemon-basic-auth-pass",
+        "hunter2",
+      ]),
+    );
+    const redacted = redactOptions(opts);
+    expect(JSON.stringify(redacted)).not.toContain("hunter2");
+    expect(redacted.daemonBasicAuth).toEqual({
+      username: "ops",
+      password: "***",
+    });
+  });
+
+  it("leaves a null basic-auth block null", () => {
+    expect(redactOptions(validateOptions(argMap())).daemonBasicAuth).toBeNull();
+  });
+
+  it("strips userinfo embedded in a URL", () => {
+    expect(redactUrlUserinfo("wss://user:pass@csms.example/ocpp")).toBe(
+      "wss://user:***@csms.example/ocpp",
+    );
+    expect(redactUrlUserinfo("https://admin:s3cr3t@127.0.0.1:9700")).toBe(
+      "https://admin:***@127.0.0.1:9700",
+    );
+  });
+
+  it("redacts a password containing an @, to the last delimiter", () => {
+    // WHATWG URL parsing takes the LAST @ before the path as the userinfo
+    // delimiter, so `p@ss` is a legal password. Stopping at the first @ would
+    // have published its tail.
+    expect(redactUrlUserinfo("wss://user:p@ss@host/ocpp")).toBe(
+      "wss://user:***@host/ocpp",
+    );
+    expect(redactUrlUserinfo("https://ops:a@b@c@127.0.0.1:9700")).toBe(
+      "https://ops:***@127.0.0.1:9700",
+    );
+  });
+
+  it("leaves a URL with no password untouched", () => {
+    expect(redactUrlUserinfo("wss://user@csms.example/ocpp")).toBe(
+      "wss://user@csms.example/ocpp",
+    );
+    expect(redactUrlUserinfo("ws://localhost:8887/ocpp")).toBe(
+      "ws://localhost:8887/ocpp",
+    );
+  });
+
+  it("does not mistake a path or query for userinfo", () => {
+    expect(redactUrlUserinfo("http://127.0.0.1:9700/a@b?c=d@e")).toBe(
+      "http://127.0.0.1:9700/a@b?c=d@e",
+    );
+  });
+
+  it("redacts both URLs in the options block", () => {
+    const opts = validateOptions(
+      parseArgv([
+        "--csms-url",
+        "wss://cp:tok@csms.example/ocpp",
+        "--daemon-url",
+        "https://ops:pw@127.0.0.1:9700",
+      ]),
+    );
+    const redacted = redactOptions(opts);
+    expect(redacted.csmsUrl).toBe("wss://cp:***@csms.example/ocpp");
+    expect(redacted.daemonUrl).toBe("https://ops:***@127.0.0.1:9700");
+    expect(JSON.stringify(redacted)).not.toContain("tok");
+  });
+});
+
+describe("fleetGauge", () => {
+  const scrape = (text: string): Sample[] => parseExposition(text);
+
+  it("sums the gauge and excludes Unavailable from the connected count", () => {
+    const samples = scrape(
+      [
+        "# TYPE ocppcp_charge_points gauge",
+        'ocppcp_charge_points{state="Available"} 7',
+        'ocppcp_charge_points{state="Charging"} 2',
+        'ocppcp_charge_points{state="Unavailable"} 3',
+        "ocppcp_transactions_active 2",
+      ].join("\n"),
+    );
+    expect(fleetGauge(samples)).toEqual({ total: 12, connected: 9 });
+  });
+
+  it("reports zeroes for an empty daemon", () => {
+    expect(fleetGauge(scrape("ocppcp_transactions_active 0"))).toEqual({
+      total: 0,
+      connected: 0,
+    });
+  });
+});
+
+describe("assertDaemonEmpty", () => {
+  const withCps = (n: number): Sample[] =>
+    parseExposition(`ocppcp_charge_points{state="Available"} ${n}`);
+
+  it("refuses a daemon that already holds charge points", () => {
+    // /metrics has no cpId label by design, so pre-existing charge points'
+    // traffic lands in the same histogram as the bench fleet's while the
+    // reported N counts only the bench's own.
+    expect(() => assertDaemonEmpty(withCps(4), false)).toThrow(
+      /already holds 4 charge point/,
+    );
+  });
+
+  it("returns 0 for an empty daemon", () => {
+    expect(assertDaemonEmpty(withCps(0), false)).toBe(0);
+    expect(assertDaemonEmpty(parseExposition(""), false)).toBe(0);
+  });
+
+  it("returns the pre-existing count when --allow-existing waives the refusal", () => {
+    expect(assertDaemonEmpty(withCps(4), true)).toBe(4);
   });
 });

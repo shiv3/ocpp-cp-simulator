@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.bench.tsbuildinfo",
     "target": "ES2022",
     "lib": ["ES2022"],
     "module": "ESNext",
@@ -18,5 +20,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["**/*.ts"]
+  // `composite` (this project is referenced from the root tsconfig, so it is
+  // built rather than orphaned) requires every file in the program to be
+  // listed. `fleet-bench.ts` imports CP_CREATE_MANY_MAX from the protocol
+  // limits, which is the single file it borrows from src/.
+  "include": ["**/*.ts", "../../src/protocol/limits.ts"]
 }

@@ -119,6 +119,19 @@ export function renderMetrics(
     out.sample("ocppcp_ocpp_call_errors_total", { action }, count);
   }
 
+  // Deliberately separate from the duration histogram: a CALL that is never
+  // answered produces no duration observation at all, so a saturated CSMS
+  // would otherwise show up as "no slow calls, no errors". This counter is
+  // the only signal that says a call was given up on.
+  out.metric(
+    "ocppcp_ocpp_call_timeouts_total",
+    "CALLs abandoned without an answer (watchdog expiry or pending-map eviction), by action.",
+    "counter",
+  );
+  for (const [action, count] of sorted(recorder.callTimeouts)) {
+    out.sample("ocppcp_ocpp_call_timeouts_total", { action }, count);
+  }
+
   out.metric(
     "ocppcp_rpc_requests_total",
     "Control-plane rpc calls, by method and outcome.",

@@ -178,11 +178,26 @@ latency knee the tool exists to find. Bounded at the authorization wait plus the
 per-CALL watchdog, past which no id is ever coming; OCPP 2.x assigns no numeric
 id, so nothing is waited for there.
 
+**The hold runs from the local start, and a charge point whose id never
+arrives is retired.** Starting the hold timer once the assigned id had been
+confirmed added the whole `StartTransaction.conf` latency to each transaction's
+on-time, so the duty cycle stopped matching the configuration; the remaining
+hold is now measured from the local start, and a hold that has already elapsed
+stops at once and is counted in the `late hold` column. A charge point whose id
+does not arrive inside the bound stops cycling and is counted in `retired`,
+because its conf may still land during a later cycle and be taken for that
+cycle's id — the event carries no generation, so a stale conf cannot be told
+from a fresh one, and withdrawing the charge point is what makes the confusion
+impossible rather than unlikely.
+
 **SIGINT waits for creation to stop before deleting.** An interrupt landing
 while `growFleet` awaited one batch of a multi-batch step used to snapshot the
 cleanup id list at once; the outstanding batch then finished and later batches
 were created behind the snapshot. An abort flag is now set first, the sweep is
-awaited, and only then is the list read. A second Ctrl-C exits immediately and
+awaited, and only then is the list read. The flag alone was read only between
+steps and batches, so an interrupt during a settle, warmup or measurement wait
+delayed every deletion until that wait ended by itself; those waits are now
+raced against the interrupt as well. A second Ctrl-C exits immediately and
 names what may be left behind.
 
 **The hold starts when the transaction does.** `start_transaction`'s

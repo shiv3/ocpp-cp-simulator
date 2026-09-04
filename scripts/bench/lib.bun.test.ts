@@ -1060,6 +1060,8 @@ describe("a step's reported row (#302)", () => {
       errors: 0,
       reconnects: 0,
       unconfirmedStarts: 0,
+      lateHolds: 0,
+      retired: 0,
       ...over,
     };
   }
@@ -1133,12 +1135,12 @@ describe("transaction-start tracking (#302)", () => {
     const starts = new TransactionStarts();
     const armed = starts.arm("CP-A", 5_000, false);
     starts.confirm("CP-A", 0);
-    expect(await armed).toEqual({ started: true, transactionId: 0 });
+    expect(await armed).toMatchObject({ started: true, transactionId: 0 });
   });
 
   it("resolves unstarted when no confirmation arrives in time", async () => {
     const starts = new TransactionStarts();
-    expect(await starts.arm("CP-A", 10, false)).toEqual({
+    expect(await starts.arm("CP-A", 10, false)).toMatchObject({
       started: false,
       transactionId: null,
     });
@@ -1161,7 +1163,7 @@ describe("transaction-start tracking (#302)", () => {
     await sleep(20);
     expect(settled).toBe(false);
     starts.confirm("CP-A", 4242); // StartTransaction.conf
-    expect(await armed).toEqual({ started: true, transactionId: 4242 });
+    expect(await armed).toMatchObject({ started: true, transactionId: 4242 });
   });
 
   it("ignores a previous cycle's late conf instead of confirming this one", async () => {
@@ -1180,7 +1182,7 @@ describe("transaction-start tracking (#302)", () => {
     // This cycle's own pair still settles it, with its own id.
     starts.confirm("CP-A", 0);
     starts.confirm("CP-A", 7);
-    expect(await armed).toEqual({ started: true, transactionId: 7 });
+    expect(await armed).toMatchObject({ started: true, transactionId: 7 });
   });
 
   it("reports a start whose id never arrived, rather than calling it unstarted", async () => {
@@ -1190,7 +1192,7 @@ describe("transaction-start tracking (#302)", () => {
     const starts = new TransactionStarts();
     const armed = starts.arm("CP-A", 30, true);
     starts.confirm("CP-A", 0);
-    expect(await armed).toEqual({ started: true, transactionId: 0 });
+    expect(await armed).toMatchObject({ started: true, transactionId: 0 });
   });
 
   it("does not wait for an id on a version that never assigns one", async () => {
@@ -1199,7 +1201,7 @@ describe("transaction-start tracking (#302)", () => {
     const starts = new TransactionStarts();
     const armed = starts.arm("CP-A", 5_000, false);
     starts.confirm("CP-A", 0);
-    expect(await armed).toEqual({ started: true, transactionId: 0 });
+    expect(await armed).toMatchObject({ started: true, transactionId: 0 });
   });
 
   it("ignores a confirmation for a charge point nobody is waiting on", async () => {
@@ -1345,6 +1347,8 @@ describe("end-of-window connectivity (#302)", () => {
     errors: 0,
     reconnects: 0,
     unconfirmedStarts: 0,
+    lateHolds: 0,
+    retired: 0,
   };
 
   it("reports the fleet that generated the histogram, not the one that settled", () => {
@@ -1619,5 +1623,128 @@ describe("explaining a create failure (#302)", () => {
     for (const code of ["not_found", "internal", "timeout"]) {
       expect(createFailureHint(code)).not.toBe("");
     }
+  });
+});
+
+describe("the three interacting requirements on start confirmation (#302)", () => {
+  // Three properties now constrain the same handful of lines, and each was a
+  // separate review round. They are listed together because satisfying any two
+  // of them is what produced the previous two findings.
+  //
+  //   R1 (round 3) a straggling conf from the PREVIOUS cycle must not confirm
+  //                this one;
+  //   R2 (round 9) the stop must not fire while the id is the placeholder;
+  //   R3 (round 10) a conf that arrives after this cycle's timeout must not
+  //                confirm a LATER cycle.
+
+  it("R1: a previous cycle's conf does not confirm this one", async () => {
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 91); // straggler, before this cycle's own start
+    let settled = false;
+    void armed.then(() => {
+      settled = true;
+    });
+    await sleep(20);
+    expect(settled).toBe(false);
+    starts.confirm("CP-A", 0);
+    starts.confirm("CP-A", 92);
+    expect((await armed).transactionId).toBe(92);
+  });
+
+  it("R2: the wait runs to the assigned id, not the placeholder", async () => {
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 0);
+    let settled = false;
+    void armed.then(() => {
+      settled = true;
+    });
+    await sleep(20);
+    expect(settled).toBe(false);
+    starts.confirm("CP-A", 55);
+    expect((await armed).transactionId).toBe(55);
+  });
+
+  it("R3: a conf arriving after the timeout finds no waiter to confirm", async () => {
+    // The caller retires a charge point whose id timed out, so it is never
+    // armed again — which is what makes the stale conf harmless. Here that is
+    // shown at this layer: once the wait has timed out, a later confirmation
+    // has nothing to settle, and a *fresh* waiter armed afterwards is not
+    // confirmed by it either, because it has not seen its own local start.
+    const starts = new TransactionStarts();
+    const first = starts.arm("CP-A", 30, true);
+    starts.confirm("CP-A", 0);
+    expect(await first).toMatchObject({ started: true, transactionId: 0 });
+
+    // The stale conf, arriving long after its cycle ended.
+    const next = starts.arm("CP-A", 100, true);
+    starts.confirm("CP-A", 4242);
+    expect(await next).toMatchObject({ started: false, transactionId: null });
+  });
+
+  it("reports when the transaction actually began, for the hold to run from", async () => {
+    // The round-ten finding: starting the hold timer when the id was confirmed
+    // added the whole StartTransaction.conf latency to every transaction's
+    // on-time, so the duty cycle stopped matching the configuration.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 0, 1_000);
+    starts.confirm("CP-A", 77, 4_000);
+    const outcome = await armed;
+    expect(outcome.localStartAtMs).toBe(1_000);
+    // Three seconds of conf latency, which a one-second hold has already
+    // outlasted — the caller stops at once and records it rather than holding
+    // a further second on top.
+    expect(outcome.transactionId).toBe(77);
+  });
+
+  it("keeps the first local start's time when the placeholder repeats", async () => {
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 0, 1_000);
+    starts.confirm("CP-A", 0, 2_500);
+    starts.confirm("CP-A", 5, 3_000);
+    expect((await armed).localStartAtMs).toBe(1_000);
+  });
+
+  it("reports no local-start time when nothing started", async () => {
+    const starts = new TransactionStarts();
+    expect((await starts.arm("CP-A", 20, true)).localStartAtMs).toBe(null);
+  });
+});
+
+describe("a row discloses a duty cycle that slipped (#302)", () => {
+  const base: StepResult = {
+    requested: 2,
+    fleet: 2,
+    connectedAtSettle: 2,
+    connectedAtEnd: 2,
+    notSettled: 0,
+    aggregate: mergeHistogramDeltas(new Map()),
+    heartbeat: null,
+    timeouts: 0,
+    evictions: 0,
+    errors: 0,
+    reconnects: 0,
+    unconfirmedStarts: 0,
+    lateHolds: 0,
+    retired: 0,
+  };
+
+  it("has one cell per column", () => {
+    expect(row(base)).toHaveLength(STEP_COLUMNS.length);
+  });
+
+  it("shows transactions held longer than configured", () => {
+    const cells = row({ ...base, lateHolds: 4 });
+    expect(cells[STEP_COLUMNS.indexOf("late hold")]).toBe("4");
+  });
+
+  it("shows charge points withdrawn from the cycle", () => {
+    // Retiring one drops the fleet's offered load for the rest of the run, so
+    // the row has to say so rather than reporting a load it no longer applies.
+    const cells = row({ ...base, retired: 1 });
+    expect(cells[STEP_COLUMNS.indexOf("retired")]).toBe("1");
   });
 });

@@ -26,6 +26,7 @@ import {
   BENCH_ID_ROOT,
   benchCpId,
   benchIdPattern,
+  benchIdTag,
   cleanupIdsAfterBatch,
   createFailureHint,
   cyclePeriodSec,
@@ -694,6 +695,7 @@ function armLoad(
   cpIds: readonly string[],
   startIndex: number,
   epochMs: number,
+  runId: string,
   opts: BenchOptions,
   watcher: TransactionWatcher | null,
 ): {
@@ -702,11 +704,34 @@ function armLoad(
   unconfirmedStarts: () => number;
   lateHolds: () => number;
   retired: () => number;
+  /** Charge points believed to have a transaction open right now. Teardown
+   *  closes these before deleting anything — see {@link closeOpenTransactions}. */
+  openTransactions: () => string[];
+  /** Wait, up to `budgetMs`, for cycles already in flight when `stop()` landed
+   *  to finish what they were doing. Without it a start still travelling to
+   *  the CSMS lands *after* teardown's closing stop, and that transaction is
+   *  left open on a charge point that is about to be deleted. */
+  settle: (budgetMs: number) => Promise<void>;
 } {
   let stopped = false;
   let unconfirmedStarts = 0;
   let lateHolds = 0;
   let retired = 0;
+  /** Charge points whose transaction this handle has started and not yet
+   *  stopped. Populated before the start RPC rather than after it: a start
+   *  whose ack never came may still have opened a transaction at the CSMS, and
+   *  a redundant stop is a no-op while a missing one is a dangling session. */
+  const openTransactions = new Set<string>();
+  /** Global index per charge point, for its idTag. */
+  const idTagOf = new Map<string, string>(
+    cpIds.map((cpId, i) => [cpId, benchIdTag(runId, startIndex + i)]),
+  );
+  /** Cycle bodies currently running, so teardown can wait for them. */
+  const inFlight = new Set<Promise<unknown>>();
+  function track(work: Promise<unknown>): void {
+    inFlight.add(work);
+    void work.finally(() => inFlight.delete(work));
+  }
   // Only OCPP 1.6 assigns a numeric transaction id — 2.x never sets one, so
   // waiting for it there would time out every cycle and stretch the cadence
   // for an id that is not coming.
@@ -778,7 +803,7 @@ function armLoad(
     const elapsedMs = Date.now() - epochMs;
     cpIds.forEach((cpId, i) => {
       schedule(
-        () => void cycle(cpId),
+        () => track(cycle(cpId)),
         firstCycleDelayMs(offsets[i]!, elapsedMs, periodMs),
       );
     });
@@ -797,8 +822,19 @@ function armLoad(
           transactionId: null,
           localStartAtMs: null,
         });
+    // Marked open before the call, not after its ack: a start whose ack never
+    // arrived may still have opened a transaction at the CSMS.
+    openTransactions.add(cpId);
     try {
-      await pool.rpc("start_transaction", { connector: 1 }, cpId);
+      await pool.rpc(
+        "start_transaction",
+        // A distinct tag per charge point. Sharing one made a CSMS that
+        // enforces per-idTag concurrency answer ConcurrentTx to every
+        // concurrent start after the first, so the run applied a fraction of
+        // the load it reported.
+        { connector: 1, tagId: idTagOf.get(cpId) },
+        cpId,
+      );
     } catch (err) {
       process.stderr.write(
         `[bench] start_transaction failed for ${cpId}: ${String(err)}\n`,
@@ -886,7 +922,10 @@ function armLoad(
       // every later cycle for this charge point is refused as a duplicate.
       try {
         await pool.rpc("stop_transaction", { connector: 1 }, cpId);
+        openTransactions.delete(cpId);
       } catch (err) {
+        // Left in `openTransactions` on purpose: a stop that failed is a
+        // transaction still open, and teardown must try again.
         process.stderr.write(
           `[bench] stop_transaction failed for ${cpId}: ${String(err)}\n`,
         );
@@ -896,16 +935,16 @@ function armLoad(
       // after this one stopped: the cycle period stays exactly --tx-interval
       // while the CSMS keeps up, and stretches only when it genuinely cannot.
       schedule(
-        () => void cycle(cpId),
+        () => track(cycle(cpId)),
         Math.max(0, cycleStartedAtMs + periodMs - Date.now()),
       );
     };
 
     if (holdRemainingMs <= 0) {
-      void stopAndContinue();
+      track(stopAndContinue());
       return;
     }
-    schedule(() => void stopAndContinue(), holdRemainingMs);
+    schedule(() => track(stopAndContinue()), holdRemainingMs);
   }
 
   return {
@@ -913,12 +952,111 @@ function armLoad(
     unconfirmedStarts: () => unconfirmedStarts,
     lateHolds: () => lateHolds,
     retired: () => retired,
+    openTransactions: () => [...openTransactions],
+    settle: async (budgetMs: number): Promise<void> => {
+      // Bounded: a cycle blocked on a confirmation that will never arrive must
+      // not hold teardown open. Anything still running past the budget is
+      // reported by `closeOpenTransactions` as a transaction that may be left.
+      await Promise.race([
+        (async () => {
+          // Re-read the set each pass: finishing one cycle can start none, but
+          // a cycle settling may still be mid-await when the first pass reads.
+          for (let pass = 0; pass < 3 && inFlight.size > 0; pass++) {
+            await Promise.allSettled([...inFlight]);
+          }
+        })(),
+        sleep(budgetMs),
+      ]);
+    },
     stop: () => {
       stopped = true;
       for (const t of live) clearTimeout(t);
       live.clear();
     },
   };
+}
+
+/** Overall budget for closing transactions still open at teardown. Bounded
+ *  like the delete sweep and for the same reason: a daemon that has stopped
+ *  answering must not turn teardown into an unbounded wait. */
+const CLOSE_TX_BUDGET_MS = 30_000;
+
+/** How long teardown waits for cycles already in flight to finish before it
+ *  starts closing transactions. Short on purpose: it only has to cover a start
+ *  already travelling to the CSMS, not a confirmation that may never come. */
+const SETTLE_CYCLES_BUDGET_MS = 5_000;
+
+/**
+ * Close every transaction this run still has open, before anything is deleted.
+ *
+ * `stop()` only cancels timers. On the active axis roughly half the fleet is
+ * inside its hold at any moment, and those pending callbacks are exactly the
+ * ones that would have sent `stop_transaction` — so clearing them and then
+ * deleting the charge points left the **CSMS** holding transactions that never
+ * ended, contaminating every later run against it.
+ *
+ * The two invariants written down last round both concern the daemon: record
+ * ids before creation, and delete only what this run created. Neither covers
+ * this, because the resource is on a third-party system whose state the run
+ * cannot enumerate — there is no CSMS equivalent of `cp.list` to reconcile
+ * against. So it can only be satisfied by construction: close what you opened,
+ * before the charge point that could close it is gone.
+ */
+async function closeOpenTransactions(
+  pool: SocketPool,
+  cpIds: readonly string[],
+): Promise<void> {
+  if (cpIds.length === 0) return;
+  if (!pool.anyConnected()) {
+    process.stderr.write(
+      `[bench] cannot close ${cpIds.length} open transaction(s): no ` +
+        `control-plane socket is connected. The CSMS may be left holding ` +
+        `them.\n`,
+    );
+    return;
+  }
+  process.stderr.write(
+    `[bench] closing ${cpIds.length} open transaction(s) before deleting\n`,
+  );
+  const deadline = Date.now() + CLOSE_TX_BUDGET_MS;
+  let next = 0;
+  let closed = 0;
+  let unresponsive = false;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (unresponsive) return;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return;
+      const i = next++;
+      if (i >= cpIds.length) return;
+      try {
+        await pool.rpc(
+          "stop_transaction",
+          { connector: 1 },
+          cpIds[i]!,
+          remainingMs,
+        );
+        closed++;
+      } catch (err) {
+        if (err instanceof RpcFailedError && err.code === "timeout") {
+          unresponsive = true;
+        }
+        // Anything else: the connector may simply have had no transaction,
+        // which is the outcome wanted.
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(CLEANUP_CONCURRENCY, cpIds.length) }, worker),
+  );
+  const left = cpIds.length - closed;
+  if (left > 0) {
+    process.stderr.write(
+      `[bench] ${left} transaction(s) could not be closed` +
+        `${unresponsive ? " (the daemon stopped answering)" : ""}; the CSMS ` +
+        `may be left holding them.\n`,
+    );
+  }
 }
 
 /** Best-effort teardown of everything this run created, bounded by
@@ -1095,6 +1233,8 @@ async function main(): Promise<void> {
     unconfirmedStarts: () => number;
     lateHolds: () => number;
     retired: () => number;
+    openTransactions: () => string[];
+    settle: (budgetMs: number) => Promise<void>;
   }> = [];
 
   // Runs once: the `finally` below and the SIGINT handler can both reach it,
@@ -1140,6 +1280,16 @@ async function main(): Promise<void> {
       signalAbort();
       for (const stop of stopLoads) stop();
       await sweepSettled.catch(() => undefined);
+      // Let cycles already in flight finish first, so a start still on its way
+      // to the CSMS is not overtaken by the stop meant to close it.
+      await Promise.all(loads.map((l) => l.settle(SETTLE_CYCLES_BUDGET_MS)));
+      // Then close what is open. `stop()` cancelled the timers that would have
+      // sent these, and a deleted charge point can no longer end its session,
+      // so without this the CSMS is left holding them.
+      await closeOpenTransactions(
+        pool,
+        loads.flatMap((l) => l.openTransactions()),
+      );
       watcher?.close();
       await deleteFleet(pool, runId, [...cleanupIds]);
       await pool.closeAll();
@@ -1238,6 +1388,7 @@ async function main(): Promise<void> {
           created,
           allCpIds.length - created.length,
           runEpochMs,
+          runId,
           opts,
           watcher,
         );

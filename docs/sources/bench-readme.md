@@ -154,6 +154,28 @@ partially, so `N` is the number of charge points that actually exist and
 Reporting the requested size attributed a row's latency to a fleet that never
 existed.
 
+**Every charge point presents its own idTag.** Sharing `DEFAULT_ID_TAG`
+(`123456`) made a CSMS that enforces per-idTag concurrency answer
+`ConcurrentTx` to every concurrent start after the first, so the active axis
+applied a fraction of the load it reported — the fourth distinct route to "the
+generated load is not the configured load", and the first arriving from outside
+the harness. The tag is deterministic and fits OCPP 1.6's `CiString20`
+`IdToken`; it is passed per `start_transaction` rather than as an idTag pool set
+at creation, because `cp.create_many` shares every field across a batch except
+the id and the SOAP callback URL, so a pool would be identical for the whole
+batch.
+
+**Open transactions are closed before deletion, and that is a third
+invariant.** `stop()` only cancels timers, and roughly half an active fleet is
+inside its hold at any moment, so cancelling those callbacks and deleting the
+charge points left the CSMS holding transactions that could never be ended.
+Teardown waits briefly for in-flight cycles, then issues and awaits a stop for
+every transaction it believes open. Unlike the two daemon invariants — record
+ids before creation and read them after creation stops; delete only what this
+run created — this one concerns a third-party system with no listing to
+reconcile against, so it can only be met by construction and never repaired
+afterwards.
+
 **The stop waits for the assigned transaction id.** On OCPP 1.6
 `transaction_started` is emitted twice — locally with the placeholder id `0`,
 then again when `StartTransaction.conf` supplies the real one — and each waiter
@@ -280,8 +302,11 @@ preflight refuses a daemon that still holds it.
 **Credentials are redacted from stderr as well as `--out`.** A result file is
 meant to be kept and shared, so the daemon Basic Auth password and any userinfo
 embedded in `--csms-url` / `--daemon-url` are written as `***` — and the same
-redaction now applies to the progress lines, the hardware block and error
-messages, because stderr commonly ends up in a CI log.
+redaction applies to the progress lines, the hardware block and every error
+message, because stderr commonly ends up in a CI log. That includes a URL too
+malformed to parse: `ws://user:secret@` is the shape that makes `new URL`
+throw, and the redaction is a regex over the raw text rather than a URL
+rewrite, so it works without one.
 
 **Every HTTP request carries a 30s deadline.** `fetch` has none of its own, so a
 daemon that accepts the connection and then stalls while serving `/metrics` —

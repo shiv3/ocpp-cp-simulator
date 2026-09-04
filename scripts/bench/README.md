@@ -281,6 +281,17 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    merely unlikely. The fleet's offered load falls accordingly, which is why
    the column exists.
 
+   **Every charge point presents its own idTag.** They used to share
+   `DEFAULT_ID_TAG` (`123456`), and a CSMS that enforces per-idTag concurrency
+   — conforming behaviour — answers `ConcurrentTx` to every concurrent start
+   after the first, so the run applied a fraction of the transaction load it
+   reported. The tag is `BT<run-id fragment><global index>`, deterministic and
+   inside OCPP 1.6's `CiString20` `IdToken` limit. It is passed per
+   `start_transaction` call rather than configured as an idTag pool at
+   creation, because `cp.create_many` shares every field across a batch except
+   the id and the SOAP callback URL — a pool set at creation would be the same
+   pool for every charge point, which is the collision being removed.
+
    **`unconf.tx`** counts transaction starts this step could not confirm: the
    `start_transaction` ack returns while the charge point is still waiting on
    `Authorize.conf`, so the script waits for the daemon's `transaction_started`
@@ -328,6 +339,24 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    daemon did not register it: `createOneCp` throws before creating anything on
    an id collision, and the blueprint-defaults path rolls the charge point back
    before reporting it.
+
+   **Open transactions are closed before anything is deleted.** `stop()` only
+   cancels timers, and on the active axis roughly half the fleet is inside its
+   hold at any moment — those pending callbacks are exactly the ones that would
+   have sent `stop_transaction`. Cancelling them and then deleting the charge
+   points left the **CSMS** holding transactions that could never be ended,
+   contaminating every later run against it. Teardown now waits briefly for
+   cycles already in flight (so a start still travelling to the CSMS is not
+   overtaken by the stop meant to close it), then issues and awaits a stop for
+   every transaction it believes open, and only then deletes.
+
+   This is a different invariant from the two below, not a restatement. Those
+   are about the daemon, whose state the run can enumerate and reconcile with
+   `cp.list`. A CSMS is a third-party system with no such listing, so this one
+   can only be satisfied _by construction_ — close what you opened, before the
+   charge point that could close it is gone — never by reconciliation
+   afterwards. If it is violated, nothing can detect or repair it from here;
+   the run can only warn.
 
    **SIGINT is a third route to the same leak, and is handled the same way.**
    An interrupt landing while `growFleet` awaited one batch of a multi-batch
@@ -538,8 +567,11 @@ a spare machine and a CSMS.
   `finally` would never run. The deadline covers the response body, not just
   the headers.
 - **Credentials are redacted from stderr, not only from `--out`.** Userinfo in
-  `--daemon-url` is replaced with `***` in the progress lines, the hardware
-  block and error messages, because stderr commonly ends up in a CI log.
+  `--csms-url` and `--daemon-url` is replaced with `***` in the progress lines,
+  the hardware block and every error message, because stderr commonly ends up
+  in a CI log. That includes a URL too malformed to parse — `ws://user:secret@`
+  is exactly the shape that makes `new URL` throw, and the redaction is a regex
+  over the raw text so it does not need a valid URL to work.
 - `/metrics` is scraped every 500ms during settle-wait. That is one bounded
   HTTP response whatever the fleet size, and it is HTTP rather than
   control-plane traffic, so it is not paced through the socket pool.

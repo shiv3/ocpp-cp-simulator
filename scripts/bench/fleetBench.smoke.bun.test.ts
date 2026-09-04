@@ -72,6 +72,13 @@ const DAEMON_SCRIPT = join(
 
 interface MockCsms {
   readonly wsUrl: string;
+  /** StartTransaction minus StopTransaction. A run must leave this at zero:
+   *  the CSMS is a third-party system whose state the benchmark cannot
+   *  enumerate, so the only way to leave it as found is to close what was
+   *  opened, before the charge point that could close it is deleted. */
+  openTransactions(): number;
+  /** Distinct idTags seen in Authorize/StartTransaction. */
+  idTags(): string[];
   /** Stop answering entirely, while keeping the socket open — the "CSMS went
    *  black" case the run has to survive rather than hang on. */
   blackHole(): void;
@@ -81,6 +88,8 @@ interface MockCsms {
 function startMockCsms(): MockCsms {
   let blackHoled = false;
   let transactionId = 1;
+  let open = 0;
+  const seenIdTags = new Set<string>();
   const server = Bun.serve({
     port: 0,
     fetch(req, srv) {
@@ -97,7 +106,16 @@ function startMockCsms(): MockCsms {
           return;
         }
         if (!Array.isArray(frame) || frame[0] !== 2) return;
-        const [, messageId, action] = frame as [number, string, string];
+        const [, messageId, action, payload] = frame as [
+          number,
+          string,
+          string,
+          Record<string, unknown> | undefined,
+        ];
+        const idTag = payload?.idTag;
+        if (typeof idTag === "string") seenIdTags.add(idTag);
+        if (action === "StartTransaction") open++;
+        if (action === "StopTransaction") open--;
         ws.send(JSON.stringify([3, messageId, confFor(action)]));
       },
     },
@@ -127,6 +145,8 @@ function startMockCsms(): MockCsms {
 
   return {
     wsUrl: server.url.toString().replace(/^http/, "ws"),
+    openTransactions: () => open,
+    idTags: () => [...seenIdTags],
     blackHole: () => {
       blackHoled = true;
     },
@@ -445,6 +465,22 @@ describe("fleet-bench end to end (#302)", () => {
     expect(step.unconfirmedTransactionStarts).toBe(0);
     // The event socket was opened, and closed again with the rest of teardown.
     expect(await listCpIds(daemon.url)).toEqual([]);
+
+    // The run left the CSMS as it found it. Teardown used to cancel the very
+    // timers that would have sent stop_transaction — roughly half the fleet is
+    // inside its hold at any moment — and then delete the charge points, so
+    // the CSMS was left holding transactions that could never be ended. That
+    // is a third-party resource the run cannot enumerate or reconcile, so the
+    // only defence is closing what was opened before deleting.
+    expect(csms.openTransactions()).toBe(0);
+
+    // And each charge point presented its own idTag. Sharing one makes a CSMS
+    // that enforces per-idTag concurrency reject the concurrent starts, so the
+    // run would apply a fraction of the load it reports.
+    const tags = csms.idTags();
+    expect(tags.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tags).size).toBe(tags.length);
+    expect(tags).not.toContain("123456");
   }, 240_000);
 
   it("still terminates when the daemon dies underneath it", async () => {

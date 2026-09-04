@@ -13,6 +13,7 @@ import {
   BenchValidationError,
   CALL_WATCHDOG_SEC,
   MAX_FLEET_SIZE,
+  MAX_ID_TAG_LENGTH,
   MAX_SOCKETS,
   MAX_SWEEP_POINTS,
   MAX_WARMUP_SEC,
@@ -25,6 +26,7 @@ import {
   ASSIGNED_ID_TIMEOUT_MS,
   AUTHORIZE_WAIT_SEC,
   benchCpId,
+  benchIdTag,
   cleanupIdsAfterBatch,
   createFailureHint,
   cyclePeriodSec,
@@ -1746,5 +1748,82 @@ describe("a row discloses a duty cycle that slipped (#302)", () => {
     // the row has to say so rather than reporting a load it no longer applies.
     const cells = row({ ...base, retired: 1 });
     expect(cells[STEP_COLUMNS.indexOf("retired")]).toBe("1");
+  });
+});
+
+describe("per-charge-point idTags (#302)", () => {
+  const RUN_A = "m1a2b3c-9f2x";
+  const RUN_B = "m1a2b3c-7k4p";
+
+  it("gives every charge point in a run a different tag", () => {
+    // All of them presenting DEFAULT_ID_TAG made a CSMS that enforces
+    // per-idTag concurrency answer ConcurrentTx to every concurrent start
+    // after the first, so the run applied a fraction of the load it reported.
+    const tags = new Set(
+      Array.from({ length: 500 }, (_, i) => benchIdTag(RUN_A, i + 1)),
+    );
+    expect(tags.size).toBe(500);
+  });
+
+  it("keeps two runs against one CSMS out of each other's way", () => {
+    expect(benchIdTag(RUN_A, 1)).not.toBe(benchIdTag(RUN_B, 1));
+  });
+
+  it("is deterministic, so the traffic stays replayable", () => {
+    expect(benchIdTag(RUN_A, 42)).toBe(benchIdTag(RUN_A, 42));
+  });
+
+  it("fits OCPP 1.6's CiString20 IdToken", () => {
+    // 20 is the wire limit, not a style choice: a longer tag is invalid on the
+    // wire and a conforming CSMS may reject the Authorize outright.
+    for (const index of [1, 999, 999_999, MAX_FLEET_SIZE]) {
+      const tag = benchIdTag(newRunId(Date.now()), index);
+      expect(tag.length).toBeLessThanOrEqual(MAX_ID_TAG_LENGTH);
+      expect(tag.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("stays printable ASCII, whatever the run id looked like", () => {
+    expect(benchIdTag("weird/id:with@stuff", 7)).toMatch(/^[A-Za-z0-9]+$/);
+  });
+});
+
+describe("credentials never reach an error message (#302)", () => {
+  it("redacts userinfo from a URL too malformed to parse", () => {
+    // `ws://user:secret@` is exactly the shape that makes `new URL` throw, and
+    // the message goes to stderr, which commonly ends up in a CI log.
+    let message = "";
+    try {
+      validateOptions(
+        parseArgv([
+          "--csms-url",
+          "ws://user:secret@",
+          "--daemon-url",
+          "http://127.0.0.1:9700",
+        ]),
+      );
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("is not a valid URL");
+    expect(message).not.toContain("secret");
+    expect(message).toContain("***");
+  });
+
+  it("still redacts a well-formed URL that fails the scheme check", () => {
+    let message = "";
+    try {
+      validateOptions(
+        parseArgv([
+          "--csms-url",
+          "http://user:secret@example.test/ocpp",
+          "--daemon-url",
+          "http://127.0.0.1:9700",
+        ]),
+      );
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).not.toContain("secret");
   });
 });

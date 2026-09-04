@@ -31,6 +31,8 @@ export class AutoTrafficRunner {
   private planner: AutoTrafficPlanner;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** Whether a session this runner started is still open. */
+  private sessionOpen = false;
   private startedAtMs = 0;
   readonly counters: AutoTrafficCounters = emptyAutoTrafficCounters();
 
@@ -53,11 +55,22 @@ export class AutoTrafficRunner {
     this.scheduleNext();
   }
 
+  /**
+   * Stop generating, and end a session this runner started.
+   *
+   * Clearing the duration timer alone left that transaction charging for as
+   * long as the daemon lived — disabling traffic, reconfiguring it or deleting
+   * the charge point would each have leaked one.
+   */
   stop(): void {
     this.stopped = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+    if (this.sessionOpen) {
+      this.sessionOpen = false;
+      void this.hooks.stopTransaction(this.connectorId).catch(() => undefined);
     }
   }
 
@@ -111,6 +124,7 @@ export class AutoTrafficRunner {
     try {
       if (this.config.requireAuthorize) {
         const accepted = await this.hooks.authorize(this.connectorId);
+        if (this.stopped) return;
         if (!accepted) {
           this.counters.rejected++;
           this.scheduleNext();
@@ -118,6 +132,16 @@ export class AutoTrafficRunner {
         }
       }
       await this.hooks.startTransaction(this.connectorId);
+      // Re-checked after every await: `stop()` can land while the authorize or
+      // the start is in flight, and without this the runner would install a
+      // fresh timer after cancellation.
+      if (this.stopped) {
+        await this.hooks
+          .stopTransaction(this.connectorId)
+          .catch(() => undefined);
+        return;
+      }
+      this.sessionOpen = true;
       this.counters.started++;
     } catch (err) {
       // A failed start is not a reason to stop generating: the CSMS being
@@ -143,6 +167,7 @@ export class AutoTrafficRunner {
   private async endSession(): Promise<void> {
     if (this.stopped) return;
     try {
+      this.sessionOpen = false;
       await this.hooks.stopTransaction(this.connectorId);
       this.counters.completed++;
     } catch (err) {

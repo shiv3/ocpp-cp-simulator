@@ -130,6 +130,30 @@ export class AutoTrafficPlanner {
 export function validateAutoTrafficConfig(
   config: AutoTrafficConfig,
 ): string | null {
+  // Presence first. Every comparison below is false against a missing field,
+  // so `{ enabled: true, seed: 1 }` validated, the planner produced NaN gaps,
+  // and `setTimeout(NaN)` fires immediately — a non-starting step then
+  // rescheduled itself in a hot loop.
+  for (const key of [
+    "seed",
+    "minDurationSec",
+    "maxDurationSec",
+    "minGapSec",
+    "maxGapSec",
+    "probabilityOfStart",
+  ] as const) {
+    if (!Number.isFinite(config[key])) return `${key} must be a finite number`;
+  }
+  if (typeof config.enabled !== "boolean") return "enabled must be a boolean";
+  if (typeof config.requireAuthorize !== "boolean") {
+    return "requireAuthorize must be a boolean";
+  }
+  if (
+    config.stopAfterSec !== undefined &&
+    !Number.isFinite(config.stopAfterSec)
+  ) {
+    return "stopAfterSec must be a finite number";
+  }
   if (config.minDurationSec < 1) return "minDurationSec must be at least 1";
   if (config.maxDurationSec < config.minDurationSec) {
     return "maxDurationSec must be at least minDurationSec";
@@ -146,3 +170,11 @@ export function validateAutoTrafficConfig(
   }
   return null;
 }
+
+/**
+ * The idTag background traffic presents.
+ *
+ * A fixed literal for now: #299 adds a per-charge-point pool, and this is the
+ * single place that will draw from it once both have landed.
+ */
+export const AUTO_TRAFFIC_ID_TAG = "123456";

@@ -15,8 +15,10 @@ import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServ
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
+import { LogType } from "../cp/shared/Logger";
 import { AutoTrafficRunner } from "../cp/application/services/AutoTrafficRunner";
 import {
+  AUTO_TRAFFIC_ID_TAG,
   defaultAutoTrafficConfig,
   emptyAutoTrafficCounters,
   validateAutoTrafficConfig,
@@ -800,16 +802,22 @@ export class CLIChargePointService {
     if (!config.enabled) return;
 
     const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
-      authorize: async (id) => {
-        this.startTransactionAuthorize(id);
-        return true;
+      // Awaited: a CSMS that refuses the tag must be counted as a refusal, not
+      // reported as a started session.
+      authorize: async () => {
+        const status =
+          await this._chargePoint.authorizeAndWait(AUTO_TRAFFIC_ID_TAG);
+        return status === "Accepted";
       },
-      startTransaction: async (id) => this.startTransaction(id),
+      startTransaction: async (id) => {
+        this._chargePoint.startTransaction(AUTO_TRAFFIC_ID_TAG, id);
+      },
       stopTransaction: async (id) => this.stopTransaction(id),
       // A scenario owns the connector while any executor is running: a run's
       // verdict must never depend on whether background traffic fired.
       scenarioActive: () => this._executors.size > 0,
-      log: (message) => this._chargePoint.logger.info(message, LogType.CP),
+      log: (message) =>
+        this._chargePoint.logger.info(message, LogType.TRANSACTION),
     });
     this._autoTraffic.set(connectorId, runner);
     runner.start();
@@ -829,11 +837,6 @@ export class CLIChargePointService {
     return (
       this._autoTraffic.get(connectorId)?.counters ?? emptyAutoTrafficCounters()
     );
-  }
-
-  /** Authorize with the connector's pooled tag, used by the traffic runner. */
-  private startTransactionAuthorize(connectorId: number): void {
-    this.authorize(this._chargePoint.nextIdTag(connectorId) ?? undefined);
   }
 
   setAutoResetToAvailable(connectorId: number, enabled: boolean): void {
@@ -1893,12 +1896,14 @@ export class CLIChargePointService {
     this._lastRunStatusByScenario.clear();
     // Permanent deletion uses dispose() to cancel controller timers;
     // non-permanent (update, shutdown) uses disconnect().
+    // Before the permanent/temporary split: `CPRegistry.update` cleans up with
+    // `permanent = false` and then replaces the service, so a runner left
+    // going here would keep generating wire work from a discarded instance,
+    // alongside its replacement.
+    for (const runner of this._autoTraffic.values()) runner.stop();
+    this._autoTraffic.clear();
+
     if (permanent) {
-      // Timers outlive the charge point otherwise, and a daemon that kept
-      // generating traffic for a deleted station would be a leak with a wire
-      // presence.
-      for (const runner of this._autoTraffic.values()) runner.stop();
-      this._autoTraffic.clear();
       this._chargePoint.dispose();
     } else {
       this._chargePoint.disconnect();
@@ -2110,6 +2115,41 @@ export class CLIChargePointService {
    * Returns the number of connectors that had a stored snapshot
    * applied (i.e. were not at the default Available / 0 / null state).
    */
+  /**
+   * Restart background traffic that was configured before the last shutdown
+   * (#300).
+   *
+   * Separate from the runtime snapshot below because the config lives in
+   * `connector_settings`, not the connector row. Without this the row survived
+   * a restart and the charge point came back idle, with nothing to say the
+   * configuration had been dropped — the opposite of what "persisted" means
+   * for a feature whose whole job is to keep generating.
+   */
+  async restoreAutoTrafficFromDatabase(repository: {
+    loadAutoTrafficConfig(
+      cpId: string,
+      connectorId: number,
+    ): Promise<AutoTrafficConfig | null>;
+  }): Promise<number> {
+    if (!this.database) return 0;
+    let started = 0;
+    for (const connectorId of this._chargePoint.connectors.keys()) {
+      const config = await repository.loadAutoTrafficConfig(
+        this._init.cpId,
+        connectorId,
+      );
+      if (!config?.enabled) continue;
+      try {
+        this.setAutoTrafficConfig(connectorId, config);
+        started++;
+      } catch {
+        // A stored config that no longer validates must not stop the restore
+        // for every other connector.
+      }
+    }
+    return started;
+  }
+
   restoreConnectorRuntimeFromDatabase(): number {
     if (!this.database) return 0;
     let restored = 0;

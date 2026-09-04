@@ -220,3 +220,52 @@ describe("AutoTrafficRunner (#300)", () => {
     expect(h.events).toEqual([]);
   });
 });
+
+describe("stopping ends the session it started (#300)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("stops an in-flight transaction rather than leaving it charging", async () => {
+    // Clearing the duration timer alone left that transaction charging for as
+    // long as the daemon lived — disabling traffic, reconfiguring it or
+    // deleting the charge point would each have leaked one.
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    await advance(5_000);
+    expect(h.events).toEqual(["start"]);
+
+    runner.stop();
+    await advance(0);
+    expect(h.events).toEqual(["start", "stop"]);
+  });
+
+  it("does not stop a session it never started", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    runner.stop();
+    await advance(0);
+    expect(h.events).toEqual([]);
+  });
+
+  it("does not schedule a new attempt after being stopped mid-start", async () => {
+    // `stop()` can land while the start is in flight; without a post-await
+    // check the runner installed a fresh timer after cancellation.
+    let release: (() => void) | null = null;
+    const h = hooks({
+      startTransaction: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    await advance(5_000);
+
+    runner.stop();
+    release?.();
+    await advance(120_000);
+    expect(h.events).toEqual(["stop"]);
+  });
+});

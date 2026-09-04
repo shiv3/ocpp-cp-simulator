@@ -2,6 +2,7 @@ import * as fs from "fs";
 
 import { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
 import type { Database } from "../../cp/domain/persistence/Database";
 import type { NetworkSimManager } from "./NetworkSimManager";
@@ -63,6 +64,17 @@ export class CPRegistry {
      *  create. `null` keeps everything in-memory (no `--state-db`). */
     private readonly database: Database | null = null,
     private readonly options: CPRegistryOptions = {},
+    /**
+     * Optional so every existing caller keeps working; when present, a
+     * restored charge point resumes the background traffic it was configured
+     * with (#300).
+     */
+    private readonly connectorSettingsRepository?: {
+      loadAutoTrafficConfig(
+        cpId: string,
+        connectorId: number,
+      ): Promise<AutoTrafficConfig | null>;
+    },
   ) {}
 
   setNetworkSimManager(manager: NetworkSimManager): void {
@@ -179,6 +191,22 @@ export class CPRegistry {
           `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
             `snapshot(s) for CP "${row.cp_id}"`,
         );
+      }
+      // #300: the traffic config lives in `connector_settings`, not the
+      // connector row, so it needs its own restore. Without it an enabled
+      // configuration survived the restart as a row and came back idle.
+      if (this.connectorSettingsRepository) {
+        void svc
+          .restoreAutoTrafficFromDatabase(this.connectorSettingsRepository)
+          .then((started) => {
+            if (started > 0) {
+              console.log(
+                `[CPRegistry] Resumed background traffic on ${started} ` +
+                  `connector(s) for CP "${row.cp_id}"`,
+              );
+            }
+          })
+          .catch(() => undefined);
       }
       // Rehydrate every scenario the operator had loaded against this CP
       // before the restart. statusChange-trigger scenarios re-arm via the

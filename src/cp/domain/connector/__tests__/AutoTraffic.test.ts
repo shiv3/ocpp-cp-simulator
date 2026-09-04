@@ -119,6 +119,27 @@ describe("validateAutoTrafficConfig (#300)", () => {
     expect(validateAutoTrafficConfig(CONFIG)).toBeNull();
   });
 
+  it("rejects an incomplete config, not just an out-of-range one", () => {
+    // Every comparison is false against a missing field, so
+    // `{ enabled: true, seed: 1 }` validated, the planner produced NaN gaps,
+    // and setTimeout(NaN) fires immediately — a non-starting step then
+    // rescheduled itself in a hot loop.
+    const partial = { enabled: true, seed: 1 } as unknown as AutoTrafficConfig;
+    expect(validateAutoTrafficConfig(partial)).toMatch(/finite number/);
+    expect(
+      validateAutoTrafficConfig({
+        ...CONFIG,
+        minGapSec: NaN,
+      }),
+    ).toMatch(/finite number/);
+    expect(
+      validateAutoTrafficConfig({
+        ...CONFIG,
+        enabled: undefined as unknown as boolean,
+      }),
+    ).toMatch(/enabled/);
+  });
+
   it("rejects what the runner could not act on", () => {
     // Each of these would otherwise become a runtime surprise: a negative
     // delay, an inverted range, or a probability that is not one.

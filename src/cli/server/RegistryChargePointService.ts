@@ -386,6 +386,20 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).setAutoTrafficConfig(connectorId, config);
   }
 
+  /**
+   * Apply a traffic config to the running charge point without storing it.
+   *
+   * The CP-command path (`set_auto_traffic_config`) is "make this station do
+   * that now"; `saveAutoTrafficConfig` is the settings path and does both.
+   */
+  async setAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    this.requireService(id).setAutoTrafficConfig(connectorId, config);
+  }
+
   async setAutoResetToAvailable(
     id: string,
     connectorId: number,

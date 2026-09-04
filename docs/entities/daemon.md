@@ -69,6 +69,8 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--http-host <addr>`                | `127.0.0.1`                  | TCP bind address. Non-loopback binds require either `--web-console-basic-auth-user/pass` or `--unsafe-remote`.                                                                                                                    |
 | `--cp-count <n>`                    | `1`                          | Bootstrap N charge points instead of one, sharing every option but the id. Requires `--cp-id` as the id stem, and a server mode (#295).                                                                                           |
 | `--cp-id-pattern <tpl>`             | `<cp-id>{n:03}`              | Id template used with `--cp-count`. `{n}` is the index, `{n:03}` zero-pads it. The fleet registers before it dials, then connects 8 at a time.                                                                                    |
+| `--metrics`                         | off                          | Serve `GET /metrics` (Prometheus text exposition). Off by default; the path 404s without it. See [Metrics](#metrics).                                                                                                             |
+| `--metrics-no-auth`                 | off                          | Implies `--metrics` and serves it outside the Basic Auth gate. Trusted networks only; exempts nothing else.                                                                                                                       |
 | `--unsafe-remote`                   | -                            | Allows a non-loopback daemon bind without web-console Basic Auth. Use only on trusted networks or when another boundary handles access.                                                                                           |
 | `--web-console [<port>]`            | -                            | Serve the bundled browser UI alongside health and Socket.IO. Without a port, shares `--http-port`; with a port, serves the UI on that listener.                                                                                   |
 | `--web-console-basic-auth-user <u>` | -                            | Enables inbound Basic Auth for static assets and the Socket.IO handshake. Must be paired with `--web-console-basic-auth-pass`. The configured health path is exempt.                                                              |
@@ -130,8 +132,12 @@ and [Docker image → Custom health-check path](docker-image.md#custom-health-ch
 ## Metrics
 
 `--metrics` serves `GET /metrics` as Prometheus text exposition (`text/plain;
-version=0.0.4`). It is **opt-in**: without the flag the path 404s like any
-other.
+version=0.0.4`). It is **opt-in**: without the flag the path answers `404`
+explicitly — reserved rather than left to fall through to the web console's
+SPA fallback, which would otherwise answer `200` with `index.html` and let a
+scraper read HTML as a successful scrape. Setting `--health-path /metrics`
+alongside `--metrics` is refused at startup, since the health route matches
+first and would leave the metrics endpoint unreachable.
 
 | Metric                              | Type      | Labels                | Meaning                                     |
 | ----------------------------------- | --------- | --------------------- | ------------------------------------------- |

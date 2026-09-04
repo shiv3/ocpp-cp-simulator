@@ -378,3 +378,69 @@ describe("SOAP charge points are counted too (#298)", () => {
     }
   });
 });
+
+describe("action labels are bounded (#298)", () => {
+  it("folds anything that is not an OCPP-shaped name into `other`", () => {
+    const recorder = new MetricsRecorder();
+    for (const bad of ["", "with space", "semi;colon", "x".repeat(200)]) {
+      recorder.observe({
+        schemaVersion: "1.1",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        transport: "json",
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "m",
+        action: bad,
+      });
+    }
+    expect(recorder.messages.get("other cp-to-csms")).toBe(4);
+  });
+
+  it("caps how many distinct actions can mint a series", () => {
+    // The action comes off the wire, so a CSMS sending fuzzed values would
+    // otherwise mint a permanent Prometheus series each — the unbounded
+    // cardinality the `cpId` label is forbidden for, through another door.
+    const recorder = new MetricsRecorder();
+    for (let i = 0; i < 500; i++) {
+      recorder.observe(call(`Action${i}`, `m${i}`, "2026-01-01T00:00:00.000Z"));
+    }
+    const labels = new Set(
+      [...recorder.messages.keys()].map((k) => k.split(" ")[0]),
+    );
+    expect(labels.size).toBeLessThanOrEqual(129);
+    expect(labels.has("other")).toBe(true);
+  });
+
+  it("keeps counting a known action after the cap is reached", () => {
+    const recorder = new MetricsRecorder();
+    recorder.observe(call("Heartbeat", "m0", "2026-01-01T00:00:00.000Z"));
+    for (let i = 0; i < 500; i++) {
+      recorder.observe(call(`Filler${i}`, `f${i}`, "2026-01-01T00:00:00.000Z"));
+    }
+    recorder.observe(call("Heartbeat", "m1", "2026-01-01T00:00:00.000Z"));
+    expect(recorder.messages.get("Heartbeat cp-to-csms")).toBe(2);
+  });
+});
+
+describe("inbound SOAP callbacks are counted (#298)", () => {
+  it("counts the CS→CP lines the callback server logs", () => {
+    // `OCPPSoapHandler` logs the outbound pair; the callback server logs these.
+    // Counting only the first pair left every inbound SOAP exchange missing
+    // while the docs claimed SOAP coverage.
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({
+      cpId: "CP-SOAP",
+      ocppVersion: "OCPP-1.6S",
+      logger,
+    });
+    try {
+      logger.info("SOAP request Reset: <s:Envelope/>", LogType.OCPP);
+      logger.info("SOAP reply Reset: <soap:Envelope/>", LogType.OCPP);
+      expect(recorder.messages.get("Reset csms-to-cp")).toBe(1);
+      expect(recorder.messages.get("Reset cp-to-csms")).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+});

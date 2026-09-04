@@ -48,13 +48,16 @@ function authHeader(user: string, pass: string): string {
 const CREDS = { username: "admin", password: "secret" };
 
 describe("GET /metrics (#298)", () => {
-  it("is opt-in: absent without --metrics", async () => {
+  it("is opt-in, and reserved: an explicit 404 rather than a fallthrough", async () => {
+    // With a web console mounted, an unhandled extension-less path reaches the
+    // SPA fallback and answers 200 with index.html — a scraper would read HTML
+    // as a successful scrape.
     const { handlers } = makeHandlers({});
-    const res = await handlers.fetch(
+    const res = (await handlers.fetch(
       new Request("http://localhost/metrics"),
       stubServer,
-    );
-    expect((res as Response).status).not.toBe(200);
+    )) as Response;
+    expect(res.status).toBe(404);
   });
 
   it("serves the Prometheus text exposition when enabled", async () => {

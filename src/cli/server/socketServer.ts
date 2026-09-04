@@ -230,11 +230,21 @@ export function registerSocketHandlers(
       void handleRpc(socket, state, runtimeDeps, request, ack);
     });
 
+    // Counted here rather than in `dispatchRpcCore`: these two are handled as
+    // named socket.io events and never reach it, so leaving them out made
+    // `ocppcp_rpc_requests_total` quietly incomplete for the two calls every
+    // event-consuming client makes first.
     socket.on("events.subscribe", (request: unknown, ack?: DirectAckFn) => {
       if (typeof ack !== "function") return;
       void subscribeSocket(socket, state, runtimeDeps, request).then(
-        (result) => ack(result),
-        (err) => ack(directError(err)),
+        (result) => {
+          getGlobalMetricsRecorder()?.countRpc("events.subscribe", "ok");
+          ack(result);
+        },
+        (err) => {
+          getGlobalMetricsRecorder()?.countRpc("events.subscribe", "error");
+          ack(directError(err));
+        },
       );
     });
 
@@ -242,8 +252,10 @@ export function registerSocketHandlers(
       if (typeof ack !== "function") return;
       try {
         unsubscribeSocket(socket, state, request);
+        getGlobalMetricsRecorder()?.countRpc("events.unsubscribe", "ok");
         ack({ ok: true });
       } catch (err) {
+        getGlobalMetricsRecorder()?.countRpc("events.unsubscribe", "error");
         ack(directError(err));
       }
     });
@@ -351,8 +363,8 @@ export async function dispatchRpcCore(
   // Counted here rather than in `runRpc`: socket.io — the primary control
   // plane — goes handleRpc -> dispatchRpc -> dispatchRpcCore and never touches
   // `runRpc`, which only the MCP tools and the CLI client use. This is the one
-  // function both paths share, so it is the only place that sees every call
-  // exactly once.
+  // function both of those paths share. `events.subscribe` / `.unsubscribe`
+  // arrive as named socket.io events and are counted at their own handlers.
   const recorder = getGlobalMetricsRecorder();
   if (!recorder) return dispatchRpcCoreInner(deps, method, cpId, rawParams);
   try {

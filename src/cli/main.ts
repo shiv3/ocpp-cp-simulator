@@ -559,6 +559,14 @@ export function parseArgs(argv: string[]): CLIOptions {
 
   const isServerMode = daemon || httpPort != null || webConsoleEnabled;
 
+  if (metrics && healthPath === "/metrics") {
+    // The health route is matched first, so the enabled Prometheus endpoint
+    // would be unreachable while both were advertised as working.
+    process.stderr.write(
+      "Error: --health-path /metrics collides with the metrics endpoint\n",
+    );
+    process.exit(1);
+  }
   if (cpCount > 1 && !isServerMode) {
     // The standalone REPL / JSON paths bootstrap exactly one charge point, so
     // the flag would be accepted and then ignored: `--cp-count 20` would run a
@@ -777,6 +785,7 @@ Local modes (single CP, no server):
 Server modes (HTTP/WebSocket, multi-CP):
   --daemon [--cp-id X --ws-url Y]                  Background TCP server (127.0.0.1:${DEFAULT_HTTP_PORT})
   --cp-count N [--cp-id-pattern CP{n:03}]          Bootstrap N charge points instead of one
+  --metrics [--metrics-no-auth]                    Serve Prometheus text exposition at GET /metrics
   --daemon --http-port P [--cp-id ...]             Background TCP server on port P
   --http-port P [--cp-id ...]                      Foreground TCP server
 

@@ -55,6 +55,25 @@ export const RECONNECT_ATTEMPT_PREFIX = "Attempting reconnection";
  */
 const SOAP_REQUEST_PREFIX = "SOAP POST ";
 const SOAP_RESPONSE_PREFIX = "SOAP response ";
+/** CS→CP callbacks, logged by `OCPPSoapServer` rather than the outbound handler. */
+const SOAP_INBOUND_PREFIX = "SOAP request ";
+const SOAP_INBOUND_RESPONSE_PREFIX = "SOAP reply ";
+
+/**
+ * Prefix to direction. The outbound handler (`OCPPSoapHandler`) logs the two
+ * CP→CSMS lines; the callback server (`OCPPSoapServer`) logs the two CS→CP
+ * ones. Counting only the first pair left every inbound SOAP exchange — a
+ * `Reset` or `RemoteStartTransaction` arriving on the callback endpoint —
+ * missing from the exposition while the docs claimed SOAP coverage.
+ */
+const SOAP_LINE_PREFIXES: ReadonlyArray<
+  readonly [string, "cp-to-csms" | "csms-to-cp"]
+> = [
+  [SOAP_REQUEST_PREFIX, "cp-to-csms"],
+  [SOAP_RESPONSE_PREFIX, "csms-to-cp"],
+  [SOAP_INBOUND_PREFIX, "csms-to-cp"],
+  [SOAP_INBOUND_RESPONSE_PREFIX, "cp-to-csms"],
+];
 
 /** `"SOAP POST BootNotification: <xml>"` to `"BootNotification"`. */
 function soapOperation(message: string, prefix: string): string | null {
@@ -73,6 +92,24 @@ function soapOperation(message: string, prefix: string): string | null {
  * process expected to run for days.
  */
 const MAX_PENDING_CALLS = 4_096;
+
+/**
+ * How many distinct `action` labels the exposition may carry.
+ *
+ * The action comes off the wire, so a CSMS sending unsupported or fuzzed
+ * actions would mint a permanent Prometheus series per value — the same
+ * unbounded-cardinality failure the `cpId` label is forbidden for, arriving
+ * through a different door. Past this many distinct actions everything else
+ * is folded into `other`, and anything that does not look like an OCPP action
+ * name is folded there immediately.
+ */
+const MAX_ACTION_LABELS = 128;
+
+/** Label used for an unrecognisable or over-the-cap action. */
+const OTHER_ACTION = "other";
+
+/** OCPP action names are PascalCase identifiers; nothing else is one. */
+const ACTION_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 
 interface PendingCall {
   readonly action: string;
@@ -106,6 +143,8 @@ export class MetricsRecorder {
 
   /** `"<action> <direction>"` to count. */
   readonly messages = new Map<string, number>();
+  /** Distinct action labels admitted so far, for the cardinality cap. */
+  private readonly knownActions = new Set<string>();
   /** action to CALLERROR count. */
   readonly callErrors = new Map<string, number>();
   /** action to histogram series. */
@@ -165,7 +204,7 @@ export class MetricsRecorder {
    * wrong action and consume the entry the second answer needed.
    */
   observe(record: OcppTraceRecord, cpId = record.chargePointId ?? ""): void {
-    const action = record.action ?? "unknown";
+    const action = this.actionLabel(record.action);
     bump(this.messages, `${action} ${record.direction}`);
 
     const atMs = Date.parse(record.timestamp);
@@ -193,14 +232,12 @@ export class MetricsRecorder {
    * durations.
    */
   private countSoapLine(message: string): boolean {
-    if (message.startsWith(SOAP_REQUEST_PREFIX)) {
-      const operation = soapOperation(message, SOAP_REQUEST_PREFIX);
-      if (operation) bump(this.messages, `${operation} cp-to-csms`);
-      return true;
-    }
-    if (message.startsWith(SOAP_RESPONSE_PREFIX)) {
-      const operation = soapOperation(message, SOAP_RESPONSE_PREFIX);
-      if (operation) bump(this.messages, `${operation} csms-to-cp`);
+    for (const [prefix, direction] of SOAP_LINE_PREFIXES) {
+      if (!message.startsWith(prefix)) continue;
+      const operation = soapOperation(message, prefix);
+      if (operation) {
+        bump(this.messages, `${this.actionLabel(operation)} ${direction}`);
+      }
       return true;
     }
     return false;
@@ -212,6 +249,18 @@ export class MetricsRecorder {
 
   countRpc(method: string, outcome: "ok" | "error"): void {
     bump(this.rpcRequests, `${method} ${outcome}`);
+  }
+
+  /**
+   * The bounded label for a wire action. Keeps the exposition's cardinality a
+   * property of this process rather than of what the CSMS decides to send.
+   */
+  private actionLabel(action: string | undefined): string {
+    if (!action || !ACTION_NAME.test(action)) return OTHER_ACTION;
+    if (this.knownActions.has(action)) return action;
+    if (this.knownActions.size >= MAX_ACTION_LABELS) return OTHER_ACTION;
+    this.knownActions.add(action);
+    return action;
   }
 
   private rememberCall(

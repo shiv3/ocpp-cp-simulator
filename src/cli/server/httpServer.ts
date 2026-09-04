@@ -581,7 +581,14 @@ export function createHttpHandlers(deps: {
       return Response.json({ ok: true, version: appVersion() });
     }
 
-    if (metrics !== null && url.pathname === METRICS_PATH) {
+    if (url.pathname === METRICS_PATH) {
+      if (metrics === null) {
+        // Reserved even when disabled. Falling through would reach the SPA
+        // fallback, which answers 200 with index.html for any extension-less
+        // path — so a scraper would read HTML as a successful scrape instead
+        // of the documented 404.
+        return new Response("metrics are not enabled", { status: 404 });
+      }
       if (req.method !== "GET") {
         return new Response("method not allowed", {
           status: 405,

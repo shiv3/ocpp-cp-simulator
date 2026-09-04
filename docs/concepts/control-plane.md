@@ -171,8 +171,13 @@ determinism that is the point. So: the primary is retried while consecutive
 failures are below the threshold (3); on reaching it the pool advances one URL;
 and **any successful connection resets it to the primary**, so the next
 disconnect episode starts from the assigned node again. Only a close the charge
-point did not ask for counts as a failure — a manual `disconnect` says nothing
+point did not ask for counts as a failure: a `disconnect`, a `reset`, and an
+injected [network-simulation](network-simulation.md) disconnect all say nothing
 about the node and must not push a charge point off its primary.
+
+An unrecognised `urlDistribution` is **refused**, not defaulted — a typo that
+silently produced round-robin when affinity was asked for would take away the
+determinism affinity exists to provide.
 
 A list is an **OCPP-J** feature. The SOAP versions post to the Central System
 service and are called back on one advertised address, with no reconnect loop

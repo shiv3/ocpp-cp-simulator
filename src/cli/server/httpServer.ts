@@ -730,12 +730,22 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (typeof wsUrl !== "string" || wsUrl.length === 0) {
     throw new Error("wsUrl is required (string or non-empty array of strings)");
   }
-  const urlDistribution =
-    body.urlDistribution === "round-robin" ||
-    body.urlDistribution === "random" ||
-    body.urlDistribution === "cp-affinity"
-      ? body.urlDistribution
-      : undefined;
+  // Refused rather than defaulted: a typo like "round_robin" would otherwise
+  // succeed and silently give the caller round-robin when they asked for
+  // affinity, which is the opposite of the determinism affinity exists for.
+  let urlDistribution: ChargePointInitOptions["urlDistribution"];
+  if (Object.prototype.hasOwnProperty.call(body, "urlDistribution")) {
+    if (
+      body.urlDistribution !== "round-robin" &&
+      body.urlDistribution !== "random" &&
+      body.urlDistribution !== "cp-affinity"
+    ) {
+      throw new Error(
+        'urlDistribution must be "round-robin", "random" or "cp-affinity"',
+      );
+    }
+    urlDistribution = body.urlDistribution;
+  }
   const centralSystemUrl =
     typeof body.centralSystemUrl === "string" &&
     body.centralSystemUrl.length > 0

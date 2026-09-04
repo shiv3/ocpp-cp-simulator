@@ -6,6 +6,7 @@ sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
   - src/cli/server/__tests__/networkSimMcp.bun.test.ts
+  - src/cli/server/__tests__/mcpToolSchemaParity.test.ts
 related:
   - daemon.md
   - ../concepts/control-plane.md
@@ -49,16 +50,26 @@ The endpoint exposes 19 curated tools wrapping the daemon's
 | `cp_connect`            | `connect`                 | `cpId`                                                                                                                                                                                                               |
 | `cp_disconnect`         | `disconnect`              | `cpId`                                                                                                                                                                                                               |
 | `cp_status`             | `status`                  | `cpId`                                                                                                                                                                                                               |
-| `start_transaction`     | `start_transaction`       | `cpId`, `connector`, `tagId`                                                                                                                                                                                         |
+| `start_transaction`     | `start_transaction`       | `cpId`, `connector`, `tagId?` — omitted, draws from the CP's [idTag pool](../concepts/control-plane.md#idtag-pool) (#299)                                                                                            |
 | `stop_transaction`      | `stop_transaction`        | `cpId`, `connector`                                                                                                                                                                                                  |
-| `authorize`             | `authorize`               | `cpId`, `tagId`                                                                                                                                                                                                      |
-| `set_connector_status`  | `update_connector_status` | `cpId`, `connector`, `status`, `errorCode?`                                                                                                                                                                          |
+| `authorize`             | `authorize`               | `cpId`, `tagId?` — same idTag pool fallback as `start_transaction` (#299)                                                                                                                                            |
+| `set_connector_status`  | `update_connector_status` | `cpId`, `connector`, `status`, `errorCode?`, `info?`, `vendorErrorCode?`, `vendorId?`, `timestamp?`, `suppressChargingStateTransactionEvent?`                                                                        |
 | `set_meter_value`       | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                                                                                                         |
 | `send_meter_value`      | `send_meter_value`        | `cpId`, `connector`                                                                                                                                                                                                  |
 | `scenario_templates`    | `scenario.templates`      | —                                                                                                                                                                                                                    |
-| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`                                                                                                                                                                                    |
+| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`, `evSettings?`, `strict?`                                                                                                                                                          |
 | `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                                                                                                                                    |
 | `get_logs`              | `logs.get`                | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                   |
+
+Most of these tools hand-declare a copy of their method's fields rather than
+deriving it (`cp_create` / `cp_create_many` are the exception — see
+[cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)), so
+a field the method later gains, or an optional field the tool over-tightened
+to required, could silently drift out of reach of an MCP agent (#284, #299).
+`mcpToolSchemaParity.test.ts` guards against both directions for every
+curated tool except the ones noted in its own comments (`network_sim_get` /
+`network_sim_set`, which dispatch to one of two methods, and the generic
+`call_method` / `list_methods`).
 
 ### Network-simulation tools
 

@@ -385,4 +385,55 @@ describe("MCP server", () => {
       expect(text).toMatch(/not_found/);
     }
   });
+
+  // #299 made `tagId` optional on the `start_transaction` / `authorize` RPC
+  // methods (the charge point draws from its idTagPool when none is given),
+  // but the curated MCP tools kept declaring it `z.string()` (required).
+  // mcp-lite validates `arguments` against the tool's own inputSchema
+  // *before* calling the handler, so a required-but-omitted field never
+  // reaches `runRpc` / the RPC method at all -- it fails as a top-level
+  // JSON-RPC error, not as the tool's own `isError` result. These two tests
+  // tell that failure mode apart from a domain-level one (cp not found):
+  // with the bug, `response.error` is set (schema rejection); once fixed,
+  // the call reaches the handler and fails downstream instead, the same way
+  // `cp_status` does above.
+  it("start_transaction accepts an omitted tagId (#299)", async () => {
+    const response = await callMcp(handler, {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "start_transaction",
+        arguments: { cpId: "unknown-cp", connector: 1 },
+      },
+    });
+
+    expect((response as Record<string, unknown>).error).toBeUndefined();
+    expect(isToolError(response)).toBe(true);
+    const text = getToolContent(response);
+    expect(text).toBeDefined();
+    if (text) {
+      expect(text).toMatch(/not_found/);
+    }
+  });
+
+  it("authorize accepts an omitted tagId (#299)", async () => {
+    const response = await callMcp(handler, {
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: {
+        name: "authorize",
+        arguments: { cpId: "unknown-cp" },
+      },
+    });
+
+    expect((response as Record<string, unknown>).error).toBeUndefined();
+    expect(isToolError(response)).toBe(true);
+    const text = getToolContent(response);
+    expect(text).toBeDefined();
+    if (text) {
+      expect(text).toMatch(/not_found/);
+    }
+  });
 });

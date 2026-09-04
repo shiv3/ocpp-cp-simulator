@@ -9,6 +9,9 @@
     },
     {
       "path": "./tsconfig.cli.json"
+    },
+    {
+      "path": "./scripts/bench/tsconfig.json"
     }
   ]
 }

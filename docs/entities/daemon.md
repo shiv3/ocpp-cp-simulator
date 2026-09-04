@@ -150,6 +150,7 @@ first and would leave the metrics endpoint unreachable.
 | `ocppcp_ocpp_messages_total`        | counter   | `action`, `direction` | OCPP messages observed.                     |
 | `ocppcp_ocpp_call_errors_total`     | counter   | `action`              | CALLERROR frames.                           |
 | `ocppcp_ocpp_call_duration_seconds` | histogram | `action`              | CALL to CALLRESULT/CALLERROR round trip.    |
+| `ocppcp_ocpp_call_timeouts_total`   | counter   | `action`              | CALLs abandoned without an answer.          |
 | `ocppcp_rpc_requests_total`         | counter   | `method`, `outcome`   | Control-plane rpc calls.                    |
 | `ocppcp_ws_reconnects_total`        | counter   | —                     | WebSocket reconnect attempts.               |
 
@@ -175,6 +176,25 @@ Message counters come from the same log-stream seam `--trace-output` uses, so
 they cover OCPP-J and SOAP alike. `ocppcp_ocpp_call_duration_seconds` is
 **OCPP-J only**: a SOAP log line carries no message id, so there is nothing to
 correlate a response back to its request with.
+
+`ocppcp_ocpp_call_timeouts_total` exists because the duration histogram cannot
+see an unanswered CALL: a duration is only observed when the CALLRESULT or
+CALLERROR arrives, so a CSMS that never answers contributes **no observation at
+all** — a saturated CSMS would otherwise report zero slow calls and zero
+errors, the opposite of the truth. It counts two things, both of which mean
+"this call was given up on":
+
+- the **OCPP-1.6J per-CALL watchdog** (`SERIAL_CALL_TIMEOUT_MS`, 30s, in
+  `src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
+  the log line it writes; and
+- a pending call **evicted** from the correlation map once it holds
+  `MAX_PENDING_CALLS` (4096) entries.
+
+Coverage is not symmetric: `OCPPMessageHandlerV201` has no such watchdog, so
+OCPP 2.x calls reach this counter only through the eviction path. A CALL the
+CSMS answers _after_ the watchdog fired is counted here **and** lands in the
+histogram's `+Inf` bucket — those are different facts (given up on / answered
+late), and neither is double-counted as the other.
 
 `--metrics` must be passed at startup. Charge points restored from
 `--state-db` subscribe as they are constructed, so a recorder created later
@@ -220,8 +240,9 @@ see [Docker image](docker-image.md).
 - Future: bearer token auth or mTLS can be added at the HTTP/socket boundary
   without changing CP command method names.
 - Shipped: bulk CP creation, multiple supervision URLs, CP blueprints, the
-  metrics endpoint, an idTag pool and seeded background traffic (#295–#300).
-  Planned: a charging-curve EV model and a measured per-process ceiling. See
+  metrics endpoint, an idTag pool, seeded background traffic (#295–#300) and
+  the scale benchmark below (#302) — the _tooling_ for a measured ceiling; no
+  number has been produced yet. Planned: a charging-curve EV model. See
   [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)
   for the full sequencing.
 
@@ -239,10 +260,13 @@ that starts happening: it grows a fleet against a real CSMS via
 `cp.create_many`, drives heartbeats (and, optionally, a start/stop transaction
 cycle — the two axes the issue asked for) at a configurable rate, and reads
 this page's [`/metrics`](#metrics) endpoint before and after each step to
-report N vs. p50/p95 OCPP CALL round-trip latency, plus watchdog timeouts,
-CALLERRORs and reconnects as sharper knee signals than latency alone. See the
-script's README for the exact method (settle-then-measure, delta between two
-cumulative scrapes, linear bucket interpolation) and its limitations.
+report N vs. p50/p95 OCPP CALL round-trip latency, plus abandoned calls
+(`ocppcp_ocpp_call_timeouts_total`), CALLERRORs and reconnects as sharper knee
+signals than latency alone. See the script's README for the exact method
+(settle-then-measure, delta between two cumulative scrapes, linear bucket
+interpolation) and its limitations. It refuses to run against a daemon that
+already holds charge points, because `/metrics` has no `cpId` label and their
+traffic would land in the same histogram as the bench fleet's.
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review
@@ -256,7 +280,7 @@ here:
   worth-recording, knee),
 - the **N vs. p50/p95 table** for both the idle and active axes, and
 - the **knee** — the N where latency visibly diverges from baseline, or where
-  `>30s`/errors/reconnects first go non-zero.
+  timeouts/errors/reconnects first go non-zero.
 
 Once a number exists, it gates whether [5b, a worker
 model](../analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional)

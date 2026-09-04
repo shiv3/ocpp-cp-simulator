@@ -17,20 +17,30 @@ import {
   BenchValidationError,
   Semaphore,
   TokenBucket,
+  assertDaemonEmpty,
   diffHistogram,
+  fleetGauge,
   formatSeconds,
   formatTable,
   histogramQuantile,
   mergeHistogramDeltas,
   parseArgv,
   parseExposition,
+  redactOptions,
   sleep,
   validateOptions,
   type BenchOptions,
+  type FleetGauge,
   type Sample,
 } from "./lib.ts";
 
 const CALL_DURATION_METRIC = "ocppcp_ocpp_call_duration_seconds";
+const CALL_TIMEOUTS_METRIC = "ocppcp_ocpp_call_timeouts_total";
+
+/** `OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS`. A CALL sent inside the last
+ *  30s of a measurement window has its watchdog fire after the window closes,
+ *  so its timeout is attributed to the next step. */
+const CALL_WATCHDOG_SEC = 30;
 
 // Per-socket pacing, kept safely under the daemon's `RPC_RATE_PER_SEC` (100)
 // and `INFLIGHT_CAP` (64) so this script's own control-plane traffic never
@@ -72,38 +82,53 @@ class SocketPool {
     auth: { username: string; password: string } | null,
   ): Promise<SocketPool> {
     const pooled: PooledSocket[] = [];
-    for (let i = 0; i < count; i++) {
-      const socket = io(daemonUrl, {
-        path: "/socket.io/",
-        auth: auth ?? undefined,
-        reconnection: true,
-      });
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error(`socket ${i} did not connect within 10s`)),
-          10_000,
-        );
-        socket.once("connect", () => {
-          clearTimeout(timer);
-          resolve();
+    const opened: Socket[] = [];
+    try {
+      for (let i = 0; i < count; i++) {
+        const socket = io(daemonUrl, {
+          path: "/socket.io/",
+          auth: auth ?? undefined,
+          reconnection: true,
         });
-        socket.once("connect_error", (err: Error) => {
-          clearTimeout(timer);
-          reject(err);
+        opened.push(socket);
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error(`socket ${i} did not connect within 10s`)),
+            10_000,
+          );
+          socket.once("connect", () => {
+            clearTimeout(timer);
+            resolve();
+          });
+          socket.once("connect_error", (err: Error) => {
+            clearTimeout(timer);
+            reject(err);
+          });
         });
-      });
-      pooled.push({
-        socket,
-        bucket: new TokenBucket(RPC_RATE_PER_SOCKET),
-        sem: new Semaphore(INFLIGHT_PER_SOCKET),
-      });
+        pooled.push({
+          socket,
+          bucket: new TokenBucket(RPC_RATE_PER_SOCKET),
+          sem: new Semaphore(INFLIGHT_PER_SOCKET),
+        });
+      }
+    } catch (err) {
+      // Tear down *everything* opened so far, not just the one that failed.
+      // `reconnection: true` means the failing socket keeps retrying on its
+      // own timer and the ones that already connected keep their heartbeat
+      // timers, so a rejection here would otherwise leave the process alive
+      // long after the error was printed.
+      for (const socket of opened) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+      throw err;
     }
     return new SocketPool(pooled);
   }
 
   /** Round-robin one pooled socket, gated by its own rate + concurrency
    *  budget. `cpId` is omitted for daemon-level methods (`cp.create_many`,
-   *  `cp.list`, ...). */
+   *  `cp.delete`, ...). */
   async rpc<T = unknown>(
     method: string,
     params: unknown,
@@ -143,11 +168,6 @@ class SocketPool {
   }
 }
 
-interface CpListItem {
-  readonly cpId: string;
-  readonly status: string;
-}
-
 async function fetchMetrics(
   daemonUrl: string,
   auth: { username: string; password: string } | null,
@@ -165,7 +185,15 @@ async function fetchMetrics(
   return parseExposition(await res.text());
 }
 
-async function preflight(opts: BenchOptions): Promise<void> {
+interface Preflight {
+  readonly daemonVersion: string;
+  /** The fleet gauge before this run created anything. Every later settle
+   *  target and connected count is relative to it, so a run with
+   *  `--allow-existing` still reports its own fleet rather than the daemon's. */
+  readonly baseline: FleetGauge;
+}
+
+async function preflight(opts: BenchOptions): Promise<Preflight> {
   const headers: Record<string, string> = {};
   if (opts.daemonBasicAuth) {
     headers.Authorization =
@@ -210,6 +238,20 @@ async function preflight(opts: BenchOptions): Promise<void> {
       throw new Error(`--out ${opts.outFile}: directory ${dir} does not exist`);
     }
   }
+
+  const samples = parseExposition(await metricsRes.text());
+  const preExisting = assertDaemonEmpty(samples, opts.allowExisting);
+  if (preExisting > 0) {
+    process.stderr.write(
+      `[bench] WARNING: --allow-existing: ${preExisting} pre-existing charge ` +
+        `point(s) are on this daemon. Their OCPP traffic is inside every ` +
+        `measurement window below; N counts only this run's fleet.\n`,
+    );
+  }
+  return {
+    daemonVersion: health.version ?? "unknown",
+    baseline: fleetGauge(samples),
+  };
 }
 
 function machineInfo(daemonVersion: string): string {
@@ -223,21 +265,37 @@ function machineInfo(daemonVersion: string): string {
   ].join("\n");
 }
 
-/** Create `count` more CPs, starting at `startIndex`, chunked at
- *  `CP_CREATE_MANY_MAX` per call. Returns every id `cp.create_many` reported
- *  created; failures are logged and excluded rather than retried, matching
- *  `cp.create_many`'s own partial-success contract. */
+/** Where the next generated charge point id starts.
+ *
+ *  Tracked separately from the live fleet size on purpose: `cp.create_many`
+ *  succeeds partially, so "how many charge points exist" and "which ids have
+ *  been handed out" diverge the moment one creation fails. Indexing the id
+ *  pattern off the live count made the next step restart inside the previous
+ *  step's id range, where every id already existed — so the failure cascaded
+ *  and every later step's nominal `N` sat below target. */
+interface IdCursor {
+  nextIndex: number;
+}
+
+/** Create `count` more CPs, chunked at `CP_CREATE_MANY_MAX` per call. Returns
+ *  every id `cp.create_many` reported created; failures are logged and
+ *  excluded rather than retried, matching `cp.create_many`'s own
+ *  partial-success contract. */
 async function growFleet(
   pool: SocketPool,
   opts: BenchOptions,
-  startIndex: number,
+  cursor: IdCursor,
   count: number,
 ): Promise<string[]> {
   const created: string[] = [];
   let remaining = count;
-  let index = startIndex;
   while (remaining > 0) {
     const chunk = Math.min(remaining, CP_CREATE_MANY_MAX);
+    // Spend the ids *before* awaiting. Whether the call succeeds, partly
+    // succeeds or rejects outright, this index range has been offered to the
+    // daemon and must never be offered again.
+    const index = cursor.nextIndex;
+    cursor.nextIndex += chunk;
     const result = await pool.rpc<{
       created: string[];
       failed: { cpId: string; reason: string }[];
@@ -257,32 +315,38 @@ async function growFleet(
         `[bench] create failed for ${f.cpId}: ${f.reason}\n`,
       );
     }
-    index += chunk;
     remaining -= chunk;
   }
   return created;
 }
 
-/** Poll `cp.list` until every id in `cpIds` reports a status other than
- *  "Unavailable" (the value `ChargePoint.status` takes on disconnect / before
- *  boot) or the timeout elapses. Returns the count still not settled. */
+/** Poll the `ocppcp_charge_points` gauge until at least `targetConnected`
+ *  charge points report a state other than "Unavailable" (the value
+ *  `ChargePoint.status` takes on disconnect / before boot), or the timeout
+ *  elapses.
+ *
+ *  The gauge rather than `cp.list`: `cp.list`'s *result* schema is
+ *  `ARRAY_1000` (`src/protocol/methods.ts`), so past 1000 charge points the
+ *  response fails validation and the RPC answers `internal` — which made the
+ *  advertised 2000-CP sweep abort at the step that crossed the cap. The gauge
+ *  is one bounded number whatever the fleet size. */
 async function waitForSettle(
-  pool: SocketPool,
-  cpIds: readonly string[],
+  opts: BenchOptions,
+  targetConnected: number,
   timeoutSec: number,
-): Promise<number> {
-  const pending = new Set(cpIds);
+): Promise<{ connected: number; notSettled: number }> {
   const deadline = Date.now() + timeoutSec * 1000;
-  while (pending.size > 0 && Date.now() < deadline) {
-    const list = await pool.rpc<CpListItem[]>("cp.list", {});
-    for (const item of list) {
-      if (pending.has(item.cpId) && item.status !== "Unavailable") {
-        pending.delete(item.cpId);
-      }
+  for (;;) {
+    const samples = await fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth);
+    const connected = fleetGauge(samples).connected;
+    if (connected >= targetConnected || Date.now() >= deadline) {
+      return {
+        connected,
+        notSettled: Math.max(0, targetConnected - connected),
+      };
     }
-    if (pending.size > 0) await sleep(500);
+    await sleep(500);
   }
-  return pending.size;
 }
 
 /** Arm each given CP's heartbeat at the configured cadence and, in active
@@ -361,8 +425,22 @@ interface StepResult {
   readonly notSettled: number;
   readonly aggregate: ReturnType<typeof mergeHistogramDeltas>;
   readonly heartbeat: ReturnType<typeof mergeHistogramDeltas> | null;
+  readonly timeouts: number;
   readonly errors: number;
   readonly reconnects: number;
+}
+
+/** Calls that *answered* later than the last finite bucket edge (30s) — the
+ *  `+Inf` bucket's count minus the last finite bucket's cumulative count.
+ *
+ *  This is emphatically **not** the timeout count. A duration is only observed
+ *  when an answer arrives, so a CALL the CSMS never answers contributes
+ *  nothing here at all; that is what `ocppcp_ocpp_call_timeouts_total` is for.
+ *  A non-zero number in this column means the CSMS answered after the charge
+ *  point had already given up on the call. */
+function answeredAfterWatchdog(r: StepResult): number {
+  const lastFiniteCount = r.aggregate.buckets.at(-1)?.count ?? 0;
+  return Math.max(0, r.aggregate.count - lastFiniteCount);
 }
 
 function row(r: StepResult): string[] {
@@ -374,11 +452,6 @@ function row(r: StepResult): string[] {
   const hbP95 = r.heartbeat
     ? formatSeconds(histogramQuantile(r.heartbeat, 0.95))
     : "-";
-  // Calls slower than the last finite bucket edge (30s, the per-CALL
-  // watchdog) — the `+Inf` bucket's count minus the last finite bucket's
-  // cumulative count.
-  const lastFiniteCount = r.aggregate.buckets.at(-1)?.count ?? 0;
-  const overWatchdog = Math.max(0, r.aggregate.count - lastFiniteCount);
   return [
     String(r.n),
     String(r.connected),
@@ -388,7 +461,8 @@ function row(r: StepResult): string[] {
     p95,
     hbP50,
     hbP95,
-    String(overWatchdog),
+    String(r.timeouts),
+    String(answeredAfterWatchdog(r)),
     String(r.errors),
     String(r.reconnects),
   ];
@@ -411,14 +485,19 @@ async function main(): Promise<void> {
   process.stderr.write(
     `[bench] preflight: health + /metrics on ${opts.daemonUrl}\n`,
   );
-  await preflight(opts);
+  const { daemonVersion, baseline } = await preflight(opts);
 
-  const healthRes = await fetch(`${opts.daemonUrl}${opts.healthPath}`);
-  const health = (await healthRes.json()) as { version?: string };
-  process.stderr.write(machineInfo(health.version ?? "unknown") + "\n");
+  process.stderr.write(machineInfo(daemonVersion) + "\n");
   process.stderr.write(
     `[bench] mode: ${opts.txIntervalSec > 0 ? `active (tx every ~${opts.txIntervalSec}s)` : "idle (heartbeat only)"}, heartbeat every ${opts.heartbeatIntervalSec}s\n`,
   );
+  if (opts.durationSec < 2 * CALL_WATCHDOG_SEC) {
+    process.stderr.write(
+      `[bench] NOTE: --duration ${opts.durationSec}s is under 2x the ${CALL_WATCHDOG_SEC}s CALL watchdog, ` +
+        `so a timeout for a call sent late in a window lands in the next step's ` +
+        `"timeouts" column. Use --duration ${2 * CALL_WATCHDOG_SEC} or more to keep the knee attributed to the right N.\n`,
+    );
+  }
 
   const maxN = opts.counts.at(-1)!;
   const socketCount = Math.min(
@@ -462,21 +541,20 @@ async function main(): Promise<void> {
   });
 
   try {
-    let currentCount = 0;
-    let totalNotSettled = 0;
+    const cursor: IdCursor = { nextIndex: 1 };
     for (const n of opts.counts) {
-      const toCreate = n - currentCount;
+      const toCreate = n - allCpIds.length;
       process.stderr.write(`[bench] N=${n}: creating ${toCreate} more CP(s)\n`);
-      const created = await growFleet(pool, opts, currentCount + 1, toCreate);
+      const created = await growFleet(pool, opts, cursor, toCreate);
       allCpIds.push(...created);
-      currentCount = allCpIds.length;
 
-      const notSettled = await waitForSettle(
-        pool,
-        created,
+      // Relative to the preflight baseline, so `--allow-existing` measures
+      // this run's fleet settling rather than the daemon's whole population.
+      const { connected, notSettled } = await waitForSettle(
+        opts,
+        baseline.connected + allCpIds.length,
         opts.settleTimeoutSec,
       );
-      totalNotSettled += notSettled;
       if (notSettled > 0) {
         process.stderr.write(
           `[bench] N=${n}: ${notSettled} CP(s) did not report connected within ${opts.settleTimeoutSec}s\n`,
@@ -511,13 +589,20 @@ async function main(): Promise<void> {
         after.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ?? 0;
       const reconnectsBefore =
         before.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ?? 0;
+      const timeoutsAfter = after
+        .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
+        .reduce((sum, s) => sum + s.value, 0);
+      const timeoutsBefore = before
+        .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
+        .reduce((sum, s) => sum + s.value, 0);
 
       results.push({
         n,
-        connected: currentCount - totalNotSettled,
-        notSettled: totalNotSettled,
+        connected: Math.max(0, connected - baseline.connected),
+        notSettled,
         aggregate,
         heartbeat,
+        timeouts: Math.max(0, timeoutsAfter - timeoutsBefore),
         errors: Math.max(0, errorsAfter - errorsBefore),
         reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
       });
@@ -536,7 +621,8 @@ async function main(): Promise<void> {
       "p95",
       "hb p50",
       "hb p95",
-      ">30s",
+      "timeouts",
+      "late>30s",
       "errors",
       "reconnects",
     ],
@@ -547,8 +633,12 @@ async function main(): Promise<void> {
   if (opts.outFile) {
     const json = JSON.stringify(
       {
-        options: opts,
-        machine: machineInfo(health.version ?? "unknown"),
+        // Redacted: a result file is meant to be kept, attached to an issue
+        // and pasted into a doc, so the daemon's Basic Auth password and any
+        // userinfo embedded in a URL must not travel with it.
+        options: redactOptions(opts),
+        preExistingChargePoints: baseline.total,
+        machine: machineInfo(daemonVersion),
         results: results.map((r) => ({
           n: r.n,
           connected: r.connected,
@@ -562,6 +652,8 @@ async function main(): Promise<void> {
           heartbeatP95Seconds: r.heartbeat
             ? valueOrNull(histogramQuantile(r.heartbeat, 0.95))
             : null,
+          timeouts: r.timeouts,
+          answeredAfterWatchdog: answeredAfterWatchdog(r),
           errors: r.errors,
           reconnects: r.reconnects,
         })),
@@ -583,7 +675,7 @@ function printUsage(): void {
     .write(`Usage: bun scripts/bench/fleet-bench.ts --csms-url <url> --daemon-url <url> [options]
 
 Required:
-  --csms-url <url>            CSMS the benchmarked fleet connects to (ws(s):// or http(s)://)
+  --csms-url <url>            CSMS the benchmarked fleet connects to (ws:// or wss://; OCPP-J only)
   --daemon-url <url>          This simulator's daemon control plane (http(s)://)
 
 Options:
@@ -595,7 +687,10 @@ Options:
   --health-path <path>        Daemon health path (default /v1/healthz)
   --daemon-basic-auth-user <u>
   --daemon-basic-auth-pass <p>  Basic Auth for a protected daemon (both or neither)
-  --out <path>                 Also write full results as JSON to this path
+  --allow-existing            Run even though the daemon already holds charge points
+                              (their traffic is inside every measurement window)
+  --out <path>                Also write full results as JSON to this path
+                              (credentials redacted)
 
 See scripts/bench/README.md for a worked example and what to record.
 `);

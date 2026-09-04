@@ -42,6 +42,28 @@ export const CALL_DURATION_BUCKETS_SECONDS = [
 export const RECONNECT_ATTEMPT_PREFIX = "Attempting reconnection";
 
 /**
+ * The line `OCPPMessageHandler` writes when its per-CALL watchdog fires.
+ *
+ * Abandoned CALLs are invisible to the duration histogram by construction: a
+ * duration is only observed when the answering CALLRESULT/CALLERROR arrives,
+ * so a CSMS that never answers produces no observation at all — a saturated
+ * CSMS would read as "no slow calls, no errors", the exact opposite of the
+ * truth. This line is the only place the process learns a call was given up
+ * on, so it feeds {@link MetricsRecorder.callTimeouts}.
+ *
+ * Matched off the log stream for the same reason reconnects are: the transport
+ * also runs in the browser and has no business importing a Prometheus
+ * recorder. The coupling to the wording is real, so a test drives the real
+ * handler's watchdog and asserts the emitted line still matches.
+ *
+ * Only the OCPP-1.6J handler has this watchdog; `OCPPMessageHandlerV201`
+ * writes no such line, so 2.x calls reach the counter only through the
+ * {@link MAX_PENDING_CALLS} eviction path.
+ */
+export const CALL_TIMEOUT_LINE =
+  /^CALL (\S+) \(([^)]*)\) timed out after \d+ms/;
+
+/**
  * SOAP wire lines, which `logLineToTraceRecord` does not parse.
  *
  * That parser only recognises the OCPP-J `Sent: [...]` / `Received: [...]`
@@ -114,6 +136,14 @@ const ACTION_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 interface PendingCall {
   readonly action: string;
   readonly startedAtMs: number;
+  /**
+   * Whether the watchdog already counted this call as abandoned.
+   *
+   * The entry is kept rather than deleted so a late answer still records its
+   * (over-watchdog) duration, and the flag is what stops the eviction path
+   * from counting the same call a second time.
+   */
+  timedOut: boolean;
 }
 
 interface DurationSeries {
@@ -147,6 +177,8 @@ export class MetricsRecorder {
   private readonly knownActions = new Set<string>();
   /** action to CALLERROR count. */
   readonly callErrors = new Map<string, number>();
+  /** action to abandoned-CALL count (watchdog expiry or pending-map eviction). */
+  readonly callTimeouts = new Map<string, number>();
   /** action to histogram series. */
   readonly callDurations = new Map<string, DurationSeries>();
   /** `"<method> <outcome>"` to count. */
@@ -175,6 +207,12 @@ export class MetricsRecorder {
           entry.message.startsWith(RECONNECT_ATTEMPT_PREFIX)
         ) {
           this.countReconnect();
+          return;
+        }
+        if (
+          entry.type === LogType.OCPP &&
+          this.countCallTimeoutLine(ctx.cpId, entry.message)
+        ) {
           return;
         }
         if (transport === "soap" && this.countSoapLine(entry.message)) return;
@@ -243,6 +281,26 @@ export class MetricsRecorder {
     return false;
   }
 
+  /**
+   * Count one abandoned CALL from the watchdog log line. Returns whether the
+   * line was one.
+   *
+   * The pending entry is flagged rather than removed: the CSMS may still
+   * answer after the watchdog released the serialization slot, and that answer
+   * is a genuine over-30s duration worth observing. The flag is what keeps the
+   * eviction path from counting the same call twice.
+   */
+  private countCallTimeoutLine(cpId: string, message: string): boolean {
+    const m = CALL_TIMEOUT_LINE.exec(message);
+    if (!m) return false;
+    const key = `${cpId}\u0000${m[1]}`;
+    const call = this.pending.get(key);
+    if (call?.timedOut) return true;
+    if (call) call.timedOut = true;
+    bump(this.callTimeouts, call?.action ?? this.actionLabel(m[2]));
+    return true;
+  }
+
   countReconnect(): void {
     this.reconnects++;
   }
@@ -269,10 +327,17 @@ export class MetricsRecorder {
     startedAtMs: number,
   ): void {
     if (this.pending.size >= MAX_PENDING_CALLS) {
-      const oldest = this.pending.keys().next();
-      if (!oldest.done) this.pending.delete(oldest.value);
+      const oldest = this.pending.entries().next();
+      if (!oldest.done) {
+        const [key, evicted] = oldest.value;
+        this.pending.delete(key);
+        // Evicting the oldest entry *is* giving up on that call, so it counts
+        // as abandoned — unless the watchdog already counted it, in which case
+        // the entry only survived to catch a late answer.
+        if (!evicted.timedOut) bump(this.callTimeouts, evicted.action);
+      }
     }
-    this.pending.set(messageId, { action, startedAtMs });
+    this.pending.set(messageId, { action, startedAtMs, timedOut: false });
   }
 
   private observeDuration(action: string, seconds: number): void {

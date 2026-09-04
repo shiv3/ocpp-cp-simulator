@@ -106,15 +106,44 @@ the gap sooner by cutting a `cli-v*` release; nothing in the repository can do
 it, and no tag or release was created by the change that introduced the
 pointer.
 
-**The pointer only moves forward.** The move used to be an unconditional
-force-push plus `--clobber`, which meant re-running an older tag's workflow, or
-two release jobs finishing out of order, would silently leave `cli-latest`
-serving an _older_ package under the URL the docs call the newest.
-`roll-cli-latest.sh` reads the version the pointer currently holds from a
-machine-readable marker in its release body and refuses to move backwards
-(re-running the same version is allowed, so a failed upload can be retried);
-`cli-release.yml` additionally serialises release runs with a `concurrency:`
-group, because that read-then-write is not atomic on its own.
+**The pointer only moves forward, and every way it can fail points the safe
+way.** The move used to be an unconditional force-push plus `--clobber`, which
+meant re-running an older tag's workflow, or two release jobs finishing out of
+order, would silently leave `cli-latest` serving an _older_ package under the
+URL the docs call the newest. `roll-cli-latest.sh` now reads the version the
+pointer holds from a machine-readable marker in its release body and refuses to
+move backwards. A guard that fails open, aborts, or cancels the thing it
+protects is worse than no guard, because it is trusted, so:
+
+| Situation                                                          | What happens                                                                                                          |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Pointer holds a newer version                                      | `::notice::`, move skipped, release still green                                                                       |
+| Pointer holds the same version                                     | Allowed — that is how a failed upload is retried                                                                      |
+| Pointer lookup returns a confirmed **404**                         | Pointer is created at this version                                                                                    |
+| Pointer lookup fails any **other** way (401, 403, 5xx, DNS)        | **Release fails.** "Absent" must never be inferred from a transient error, or the roll-back check is skipped entirely |
+| Pointer exists with **no** version marker                          | `::warning::`, marker initialised — the migration case must not abort                                                 |
+| Marker is not a plain `X.Y.Z`                                      | **Release fails** rather than guessing an ordering                                                                    |
+| Version given is a prerelease (`1.0.0-rc.1`) or has build metadata | **Release fails** with an error naming the reason                                                                     |
+
+Versions are compared numerically field by field, not with `sort -V`, which is
+not SemVer-aware: it orders `1.0.0-rc.1` _after_ `1.0.0`, so re-running a
+prerelease after the stable release would have passed the check and rolled the
+pointer backwards — the exact bug the check exists for. Prerelease inputs are
+refused outright instead; the CLI train has only ever cut `X.Y.Z` tags. The
+asset is uploaded before the marker is written and before the tag moves, so a
+partial failure leaves the marker naming the version the pointer really serves.
+
+**Only the pointer move is serialised.** `cli-release.yml` is two jobs: the
+publish job, which creates the per-tag `cli-v*` release, and `roll-pointer`,
+which moves `cli-latest` and then installs from the documented URL. The
+`concurrency:` group is on `roll-pointer` alone. It must not be on the workflow
+or on the publish job: GitHub cancels the _pending_ run when a newer one enters
+a group, and `cancel-in-progress: false` protects only the run already
+executing — so a workflow-level group would cancel a queued CLI release
+outright and it would never publish its own `cli-v*` assets, which are the
+release. Cancelling a superseded _pointer_ move is harmless by comparison; the
+roll-back guard would have refused it anyway. `verify-install-urls.sh` asserts
+this placement so the group cannot migrate back up.
 
 CI runs `scripts/verify-install-urls.sh` on every pull request. It **fetches**
 every install command this page and `README.md` advertise and fails if one does

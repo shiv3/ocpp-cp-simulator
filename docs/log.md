@@ -338,3 +338,42 @@ Follow-up to the same-day ingest above, from review on PR #325.
   (calls the roll script, and a workflow-level `concurrency:` group serialises
   release runs because the read-then-write is not atomic on its own);
   `.github/workflows/ci.yml` (runs the URL guard on every pull request).
+
+## [2026-09-05] ingest | Guards that fail open, abort, or cancel what they protect (#320, #321)
+
+Second review pass on PR #325. Four findings, all in the machinery added by
+the previous two commits rather than in the original defects — three of them
+about the guard's own failure modes rather than its happy path.
+
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  the "only moves forward" paragraph is now a table of every way the pointer
+  move can fail and which direction each one points. The rules that changed:
+  a pointer lookup that fails as anything other than a confirmed 404 fails the
+  release instead of being read as "does not exist yet" (which skipped the
+  roll-back check and force-moved the tag); a pointer release carrying no
+  version marker initialises the marker with a `::warning::` instead of
+  aborting the script, which is the state the first hand-created pointer would
+  be in; a malformed marker fails the release rather than guessing an
+  ordering; and prerelease / build-metadata versions are refused outright,
+  because `sort -V` is not SemVer-aware — it orders `1.0.0-rc.1` after
+  `1.0.0`, so re-running a prerelease after the stable release would have
+  rolled the pointer backwards, the exact bug the check exists for. Versions
+  are now compared numerically field by field. The asset is uploaded before
+  the marker is written and before the tag moves, so a partial failure leaves
+  the marker naming the version the pointer really serves.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): new paragraph
+  on why only the pointer move is serialised. The previous commit put a
+  workflow-level `concurrency:` group on `cli-release.yml`, which was a
+  regression: GitHub cancels the _pending_ run when a newer one joins a group,
+  and `cancel-in-progress: false` protects only the run already executing — so
+  with several CLI releases queued the middle tag would have been cancelled and
+  would never have published its own `cli-v*` assets, which are the release.
+  The cure was worse than the race.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh`
+  (rewritten around the failure-direction rules above); `scripts/
+verify-install-urls.sh` (also asserts that `cli-release.yml` carries no
+  workflow-level `concurrency:` and still serialises the pointer job, so the
+  group cannot migrate back up); `.github/workflows/cli-release.yml` (split
+  into an uncancellable `release` job and a serialised `roll-pointer` job that
+  downloads the tarball back off the release it just published, so the bytes
+  the pointer serves are provably the bytes that release published).

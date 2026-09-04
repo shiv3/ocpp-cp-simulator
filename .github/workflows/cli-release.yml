@@ -34,19 +34,23 @@ on:
 permissions:
   contents: write
 
-# Serialise CLI releases. The rolling `cli-latest` pointer is moved by a
-# read-then-write (read the version it holds, refuse to go backwards, then
-# clobber the asset), which is not atomic: two release runs finishing out of
-# order could interleave and leave the pointer serving the older package.
-# cancel-in-progress is deliberately false — a release run must finish
-# publishing its own `cli-v*` assets even when a newer one is queued behind it.
-concurrency:
-  group: cli-release
-  cancel-in-progress: false
+# NOTE: there is deliberately NO workflow-level `concurrency:` here. GitHub's
+# concurrency cancels the *pending* run whenever a newer one enters the group,
+# and `cancel-in-progress: false` only protects the run that is already
+# executing — not the queue behind it. With three CLI releases queued, the
+# middle tag would be cancelled and would never publish its own `cli-v*`
+# assets, which ARE the release. Only the pointer-move job below is serialised;
+# see the comment on its `concurrency:` block for why cancelling that one is
+# harmless.
 
 jobs:
+  # Publishes the per-tag `cli-v*` release. Never cancellable, never gated on
+  # anything else: its assets are the release.
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -151,26 +155,67 @@ jobs:
                         --ws-url wss://example.com/chargepoint/
             ```
 
-      # ---------------------------------------------------------------------
-      # Rolling `cli-latest` pointer (#321) — see scripts/roll-cli-latest.sh
-      # for what the pointer is for, why it is a pre-release, and why the move
-      # is guarded so it can only ever roll forward. Skipping the move (an
-      # older tag re-run) is a `::notice::`, not a failure: that run still
-      # published its own `cli-v*` assets correctly.
+  # Moves the rolling `cli-latest` pointer onto the release the job above just
+  # published, then installs from the URL the documentation advertises.
+  #
+  # Serialised, because scripts/roll-cli-latest.sh is a read-then-write (read
+  # the version the pointer holds, refuse to go backwards, write the asset and
+  # the marker) and two of these interleaving could leave the pointer serving
+  # the older package. Unlike the publish job, cancelling this one is harmless
+  # and in fact correct: a pointer move superseded by a newer release's pointer
+  # move had nothing to contribute — the rollback guard in the script would
+  # have refused it anyway. `cancel-in-progress: false` so a move already
+  # under way still finishes rather than leaving a half-written pointer.
+  roll-pointer:
+    needs: release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: cli-latest-pointer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      # Taken from the release the previous job published rather than passed
+      # between jobs as an artifact: this way the bytes the pointer serves are
+      # provably the bytes that release published.
+      - name: Fetch the published tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ needs.release.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern ocpp-cp-simulator.tgz --clobber
+          ls -lh ocpp-cp-simulator.tgz
+
+      # See scripts/roll-cli-latest.sh for what the pointer is for, why it is a
+      # pre-release, and why every failure mode in it points the safe way.
+      # Skipping the move (an older tag re-run) is a `::notice::`, not a
+      # failure: that run still published its own `cli-v*` assets correctly.
       - name: Move the rolling `cli-latest` pointer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_SLUG: ${{ github.repository }}
         run: |
           ./scripts/roll-cli-latest.sh \
-            "${{ steps.version.outputs.version }}" \
-            "${{ steps.version.outputs.tag }}" \
+            "${{ needs.release.outputs.version }}" \
+            "${{ needs.release.outputs.tag }}" \
             ocpp-cp-simulator.tgz
 
-      # The documented install command, executed. Everything above verifies a
-      # LOCAL tarball; this is the only step that proves the URL README.md and
-      # docs/entities/cli.md tell people to run actually resolves and installs
-      # — the defect in #321 was a URL, not an artifact.
+      # The documented install command, executed. Everything in the publish job
+      # verifies a LOCAL tarball; this is the only step that proves the URL
+      # README.md and docs/entities/cli.md tell people to run actually resolves
+      # and installs — the defect in #321 was a URL, not an artifact.
       - name: Verify the documented install URL
         run: |
           set -euo pipefail

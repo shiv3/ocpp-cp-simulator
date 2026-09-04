@@ -19,6 +19,11 @@
 # (for example, describing the rolling pointer that a future release will
 # create) is deliberately not checked, because it is not an instruction.
 #
+# It also asserts a few release-plumbing invariants that decide whether that
+# URL keeps working: that cli-release.yml still advertises the rolling pointer,
+# still moves it through scripts/roll-cli-latest.sh, and serialises only the
+# pointer move rather than the whole workflow.
+#
 # Usage: scripts/verify-install-urls.sh
 # Needs network access to github.com.
 set -uo pipefail
@@ -80,6 +85,28 @@ grep -q 'releases/download/cli-latest/ocpp-cp-simulator.tgz' .github/workflows/c
 }
 grep -qE '^ *\./scripts/roll-cli-latest\.sh' .github/workflows/cli-release.yml || {
   echo "::error file=.github/workflows/cli-release.yml::the rolling cli-latest pointer is no longer moved by scripts/roll-cli-latest.sh"
+  rc=1
+}
+
+# ---------------------------------------------------------------------------
+# 4. Where `concurrency:` may and may not appear in cli-release.yml.
+#
+#    GitHub cancels the PENDING run whenever a newer one enters a concurrency
+#    group; `cancel-in-progress: false` protects only the run already
+#    executing, not the queue behind it. A workflow-level (or publish-job)
+#    group therefore cancels a queued CLI release outright, and that release
+#    never publishes its own `cli-v*` assets — which ARE the release. Only the
+#    pointer-move job may be serialised, where being superseded is harmless.
+#
+#    Top-level YAML keys sit at column 0, so `^concurrency:` is an exact test
+#    for the workflow-level form.
+# ---------------------------------------------------------------------------
+if grep -nE '^concurrency:' .github/workflows/cli-release.yml; then
+  echo "::error file=.github/workflows/cli-release.yml::workflow-level concurrency cancels queued CLI releases before they publish their cli-v* assets; serialise only the pointer-move job"
+  rc=1
+fi
+grep -q 'group: cli-latest-pointer' .github/workflows/cli-release.yml || {
+  echo "::error file=.github/workflows/cli-release.yml::the cli-latest pointer move is no longer serialised (concurrency group 'cli-latest-pointer')"
   rc=1
 }
 

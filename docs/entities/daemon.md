@@ -5,6 +5,7 @@ summary: The long-lived Bun process that hosts many charge points and exposes on
 sources:
   - src/cli/server/
   - src/cli/main.ts
+  - scripts/bench/README.md
 related:
   - cli.md
   - web-console.md
@@ -15,6 +16,7 @@ related:
   - ../concepts/state-persistence.md
   - ../concepts/log-format.md
   - ../analyses/fleet-load-and-observability-roadmap.md
+  - ../sources/bench-readme.md
 updated: 2026-09-05
 ---
 
@@ -222,3 +224,41 @@ see [Docker image](docker-image.md).
   Planned: a charging-curve EV model and a measured per-process ceiling. See
   [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)
   for the full sequencing.
+
+### Measured scale ceiling
+
+There is **no hard cap on how many charge points one daemon can hold** — every
+CP runs on the single Bun event loop, so the real limit is wherever per-CP
+scheduling and OCPP call handling start visibly slowing every CP down, not a
+number the code enforces (`cp.create_many`'s own `CP_CREATE_MANY_MAX` of 200
+is a per-_call_ batch limit, not a fleet-size limit — see
+[Control plane → `cp.create_many`](../concepts/control-plane.md#cpcreate_many--the-batch-fields)).
+
+[`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md) measures where
+that starts happening: it grows a fleet against a real CSMS via
+`cp.create_many`, drives heartbeats (and, optionally, a start/stop transaction
+cycle — the two axes the issue asked for) at a configurable rate, and reads
+this page's [`/metrics`](#metrics) endpoint before and after each step to
+report N vs. p50/p95 OCPP CALL round-trip latency, plus watchdog timeouts,
+CALLERRORs and reconnects as sharper knee signals than latency alone. See the
+script's README for the exact method (settle-then-measure, delta between two
+cumulative scrapes, linear bucket interpolation) and its limitations.
+
+**No number is recorded here yet.** Producing one requires a real CSMS and a
+stated machine, neither of which exists in this repository's CI or review
+sandboxes — running the benchmark is a manual step. When it is run, record
+here:
+
+- the **machine** (CPU model/cores, RAM, `bun --version`, this daemon's own
+  version — the script prints all four),
+- the **CSMS** used and whether it ran locally or remotely (a remote CSMS's
+  own latency dominates before the daemon's does — a different, also
+  worth-recording, knee),
+- the **N vs. p50/p95 table** for both the idle and active axes, and
+- the **knee** — the N where latency visibly diverges from baseline, or where
+  `>30s`/errors/reconnects first go non-zero.
+
+Once a number exists, it gates whether [5b, a worker
+model](../analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional)
+is worth building at all — building it before this number exists would be
+speculative.

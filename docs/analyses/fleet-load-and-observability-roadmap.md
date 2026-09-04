@@ -9,11 +9,13 @@ sources:
   - src/cp/domain/connector/EVSettings.ts
   - src/cp/domain/connector/MeterValueBuilder.ts
   - src/cp/infrastructure/transport/network-sim/SeededRng.ts
+  - scripts/bench/README.md
 related:
   - ../concepts/control-plane.md
   - ../entities/daemon.md
   - choosing-an-interface.md
   - ../sources/github-issues.md
+  - ../sources/bench-readme.md
 updated: 2026-09-04
 ---
 
@@ -55,7 +57,7 @@ runtime model.
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300  |
 | 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | planned     | #301  |
 | 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | 4a         | not filed   | —     |
-| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | planned     | #302  |
+| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped     | #302  |
 | 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |
 | 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | not filed   | —     |
 
@@ -413,6 +415,18 @@ knee for a stated machine.
 **Acceptance.** The number, the method, and the machine are all in
 `daemon.md`. This is the cheapest item on this page and it is what makes 5b a
 decision rather than a guess.
+
+**Shipped, number pending.** [`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md)
+implements the shape above — it grows a fleet via `cp.create_many`, drives
+both axes (idle heartbeat-only and active start/stop-transaction, staggered),
+and diffs two `/metrics` scrapes to isolate one step's
+`ocppcp_ocpp_call_duration_seconds` histogram, reporting p50/p95 plus watchdog
+timeouts/errors/reconnects as sharper knee signals. What is **not** done: no
+real CSMS is available in this repository's CI or review sandboxes to
+actually run it against, so
+[Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
+states the method and what to record rather than a number. Running it and
+filling in that number is the remaining step before 5b can be decided.
 
 ### 5b. Worker model (conditional)
 

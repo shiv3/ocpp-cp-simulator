@@ -405,6 +405,19 @@ export class CLIChargePointService {
         centralSystemUrl,
         soapCallbackUrl: init.soapCallbackUrl,
         soapPath: init.soapPath,
+        // Each supervision URL goes through the same normalisation as the
+        // single one: `OCPPWebSocket` appends the cpId, so a URL that already
+        // ends in it would otherwise connect to `.../CP001/CP001`.
+        ...(init.supervisionUrls && !isSoapVersion(ocppVersion)
+          ? {
+              supervisionUrls: init.supervisionUrls.map((url) =>
+                buildBaseUrl(url, init.cpId),
+              ),
+            }
+          : {}),
+        ...(init.urlDistribution
+          ? { urlDistribution: init.urlDistribution }
+          : {}),
       },
       init.securityProfile,
       init.authorizationKey,

@@ -73,9 +73,17 @@ const LOADABLE_SCENARIO_OBJ = () =>
  */
 const cpParamsBaseSchema = z.object({
   cpId: STR_64K.describe("Charge point identifier"),
-  wsUrl: STR_64K.describe(
-    "CSMS endpoint: ws(s):// for OCPP-J, http(s):// for the SOAP versions",
-  ),
+  wsUrl: z
+    .union([STR_64K, ARRAY_1000(STR_64K).min(1)])
+    .describe(
+      "CSMS endpoint: ws(s):// for OCPP-J, http(s):// for the SOAP versions. OCPP-J may pass several, and urlDistribution picks between them",
+    ),
+  urlDistribution: z
+    .enum(["round-robin", "random", "cp-affinity"])
+    .optional()
+    .describe(
+      'How a multi-URL charge point picks one: "round-robin" (default) moves on every attempt, "random" draws from a seeded stream, "cp-affinity" hashes the cpId to a primary and stays on it until it fails repeatedly',
+    ),
   centralSystemUrl: STR_64K.optional().describe(
     "SOAP only: the Central System service URL, when it differs from wsUrl",
   ),

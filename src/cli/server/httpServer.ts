@@ -714,10 +714,28 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (typeof cpId !== "string" || cpId.length === 0) {
     throw new Error("cpId is required (string)");
   }
-  const wsUrl = body.wsUrl;
-  if (typeof wsUrl !== "string" || wsUrl.length === 0) {
-    throw new Error("wsUrl is required (string)");
+  // `wsUrl` may be one URL or several. Several is an OCPP-J concept — the
+  // check that it is not SOAP happens below, once the version is known — and
+  // the list is kept beside a single `wsUrl` rather than replacing it, so the
+  // status snapshot, the persisted `charge_points.ws_url` and every log line
+  // keep seeing one string.
+  const rawWsUrl = body.wsUrl;
+  const supervisionUrls: string[] | undefined = Array.isArray(rawWsUrl)
+    ? rawWsUrl.filter((u): u is string => typeof u === "string" && u.length > 0)
+    : undefined;
+  if (supervisionUrls && supervisionUrls.length !== rawWsUrl.length) {
+    throw new Error("wsUrl entries must be non-empty strings");
   }
+  const wsUrl = supervisionUrls ? supervisionUrls[0] : rawWsUrl;
+  if (typeof wsUrl !== "string" || wsUrl.length === 0) {
+    throw new Error("wsUrl is required (string or non-empty array of strings)");
+  }
+  const urlDistribution =
+    body.urlDistribution === "round-robin" ||
+    body.urlDistribution === "random" ||
+    body.urlDistribution === "cp-affinity"
+      ? body.urlDistribution
+      : undefined;
   const centralSystemUrl =
     typeof body.centralSystemUrl === "string" &&
     body.centralSystemUrl.length > 0
@@ -754,6 +772,14 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   }
   if (isSoapVersion(ocppVersion) && !soapCallbackUrl) {
     throw new Error("soapCallbackUrl is required for OCPP SOAP versions");
+  }
+  // A SOAP charge point has no reconnect loop to rotate — it posts to the
+  // Central System service and the CSMS calls back on one advertised address —
+  // so a list would be accepted and then quietly ignored. Refuse it instead.
+  if (isSoapVersion(ocppVersion) && supervisionUrls) {
+    throw new Error(
+      "wsUrl must be a single URL for the OCPP SOAP versions; several supervision URLs are an OCPP-J feature",
+    );
   }
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
@@ -830,6 +856,10 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     ocppVersion,
     ...(soapCallbackUrl ? { soapCallbackUrl } : {}),
     ...(soapPath ? { soapPath } : {}),
+    ...(supervisionUrls && supervisionUrls.length > 1
+      ? { supervisionUrls }
+      : {}),
+    ...(urlDistribution ? { urlDistribution } : {}),
     securityProfile,
     authorizationKey,
     cpoName,

@@ -132,3 +132,8 @@ knowledge first entered the documentation, not wiki operations.
 - [Daemon](entities/daemon.md#starting-the-server): `--cp-count` / `--cp-id-pattern` repeated in the operator flag table, per the CLAUDE.md rule that daemon-only flags live on both pages.
 - [Control plane](concepts/control-plane.md#cpcreate_many--the-batch-fields): each **expanded** id is capped at 256 characters — a pattern may repeat the placeholder, so the pad-width cap bounds nothing on its own — and each expanded `soapCallbackUrl` must contain `/<generated cpId>/`, since `SOAP{n}` against `SOAP{n:03}` ids advertises a route that does not exist while every create reports success. Both are checked before the first charge point is created.
 - [GitHub issues](sources/github-issues.md): #295 row.
+
+## [2026-09-04] ingest | Multiple supervision URLs (#296)
+
+- [Control plane](concepts/control-plane.md#multiple-supervision-urls): new section. `wsUrl` accepts a list plus `urlDistribution` (`round-robin` default, `random`, `cp-affinity`). The list stays in the CP's config and one URL is resolved **per connection attempt**, so `cp.list`, `charge_points.ws_url` and the log lines keep seeing a single string — no DB schema or restore-path change. Records that `cp-affinity` is sticky with a failover threshold of 3 and that any success resets it to the primary, because "always return the primary" and "rotate like round-robin" are both wrong on their own; and that only an unrequested close counts as a failure, so a manual `disconnect` cannot push a CP off its primary. A list is OCPP-J only — SOAP has no reconnect loop to rotate, so it is refused rather than silently ignored.
+- [GitHub issues](sources/github-issues.md): #296 row.

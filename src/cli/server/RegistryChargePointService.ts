@@ -730,6 +730,12 @@ function toInitOptions(
   return {
     cpId: params.cpId,
     wsUrl: params.wsUrl,
+    // Without these two the whole feature is inert over the control plane:
+    // `parseCreateBody` would produce the list, the facade would drop it, and
+    // the charge point would come up on the first URL with no pool at all —
+    // while `cp.create` answered success.
+    supervisionUrls: params.supervisionUrls ?? existing?.supervisionUrls,
+    urlDistribution: params.urlDistribution ?? existing?.urlDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
     soapCallbackUrl: params.soapCallbackUrl ?? existing?.soapCallbackUrl,
     soapPath: params.soapPath ?? existing?.soapPath,

@@ -1,6 +1,7 @@
 import { Logger, LogType } from "../../shared/Logger";
 import { redactSensitiveText } from "../../shared/redaction";
 import { openOcppWebSocket, probeUpgradeRefusal } from "./wsUrlWithBasic";
+import type { SupervisionUrlPool } from "./SupervisionUrlPool";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -143,6 +144,12 @@ export class OCPPWebSocket {
   private _generationCounter: number = 0;
   private _currentGeneration: GenerationTokenImpl;
   private _reconnectNotBefore: number | null = null;
+  /**
+   * Set when the charge point was given more than one supervision URL. The
+   * pool decides which one each attempt uses; `_url` stays the one currently
+   * in play, so everything that reports a URL keeps reporting a single string.
+   */
+  private _urlPool: SupervisionUrlPool | null = null;
   private _onCloseTransactionCallback:
     ((finalized: GenerationToken) => void) | null = null;
   private _disposed: boolean = false;
@@ -193,6 +200,18 @@ export class OCPPWebSocket {
     return this._url;
   }
 
+  /**
+   * Hand the socket a set of supervision URLs to choose between.
+   *
+   * A setter rather than a constructor parameter: the constructor already
+   * carries eleven positional arguments, and a charge point with one URL —
+   * every charge point until now — should not have to pass anything.
+   */
+  public setSupervisionUrlPool(pool: SupervisionUrlPool | null): void {
+    this._urlPool = pool;
+    if (pool) this._url = pool.current();
+  }
+
   public connect(
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null,
@@ -211,6 +230,7 @@ export class OCPPWebSocket {
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
       this._lastRefusalProbeAt = 0;
+      this._urlPool?.onSuccess();
       this.handleOpen();
       if (this._onOpenCallback) {
         this._onOpenCallback();
@@ -232,6 +252,13 @@ export class OCPPWebSocket {
         this._onCloseCallback(ev);
       }
     };
+
+    // Resolving here, per attempt, is what keeps the URL list out of
+    // everything downstream: the snapshot, the persisted `ws_url` and the log
+    // lines all still see one string.
+    if (this._urlPool) {
+      this._url = this._urlPool.next();
+    }
 
     this._ws = openOcppWebSocket({
       baseUrl: this._url,
@@ -789,6 +816,10 @@ export class OCPPWebSocket {
 
     // Only attempt reconnect if not manually disconnected
     if (!this._isManualDisconnect) {
+      // A close the charge point did not ask for is what the pool counts as a
+      // failure of the URL it just used. A manual disconnect says nothing
+      // about the node, so it must not push an affinity pool off its primary.
+      this._urlPool?.onFailure();
       this.attemptReconnect();
     }
   }

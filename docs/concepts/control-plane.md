@@ -133,22 +133,51 @@ drops `cpId` and adds the batch fields), and — since #284 — by the MCP
 `cp_create` / `cp_create_many` tools, which derive their input schemas from this
 one rather than restating a subset.
 
-| Field                                             | Type                     | Notes                                                                                 |
-| ------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------- |
-| `cpId`                                            | string, **required**     | Charge point identifier.                                                              |
-| `wsUrl`                                           | string, **required**     | CSMS endpoint. `ws(s)://` for OCPP-J, `http(s)://` for the SOAP versions.             |
-| `ocppVersion`                                     | string                   | `OCPP-1.6J` (default), `OCPP-2.0.1`, `OCPP-2.1`, `OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`. |
-| `connectors`, `vendor`, `model`                   | number, string, string   | Connector count and BootNotification identity.                                        |
-| `basicAuth`                                       | `{ username, password }` | Legacy Basic Auth. Prefer `securityProfile` + `authorizationKey` for OCPP 1.6.        |
-| `bootNotification`                                | object                   | Overrides for the BootNotification payload.                                           |
-| `centralSystemUrl`, `soapPath`, `soapCallbackUrl` | string                   | SOAP only. See [OCPP versions & transports](ocpp-versions-and-transports.md).         |
-| `securityProfile`, `authorizationKey`, `cpoName`  | `0`–`3`, string, string  | OCPP 1.6 security profiles. See [Security profiles](security-profiles.md).            |
-| `tlsCaPath`, `tlsCertPath`, `tlsKeyPath`          | string                   | Paths to PEM material. `tlsCaPath` **replaces** the system trust store.               |
-| `tls`                                             | object                   | The same material inline: `ca`, `cert`, `key`, `rejectUnauthorized`, `serverName`.    |
-| `autoConnect`                                     | boolean                  | Connect immediately after the call.                                                   |
+| Field                                             | Type                             | Notes                                                                                                                                                            |
+| ------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cpId`                                            | string, **required**             | Charge point identifier.                                                                                                                                         |
+| `wsUrl`                                           | string \| string[], **required** | CSMS endpoint. `ws(s)://` for OCPP-J, `http(s)://` for the SOAP versions. OCPP-J may pass several — see [Multiple supervision URLs](#multiple-supervision-urls). |
+| `urlDistribution`                                 | string                           | `round-robin` (default), `random`, `cp-affinity`. Only meaningful with several URLs.                                                                             |
+| `ocppVersion`                                     | string                           | `OCPP-1.6J` (default), `OCPP-2.0.1`, `OCPP-2.1`, `OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`.                                                                            |
+| `connectors`, `vendor`, `model`                   | number, string, string           | Connector count and BootNotification identity.                                                                                                                   |
+| `basicAuth`                                       | `{ username, password }`         | Legacy Basic Auth. Prefer `securityProfile` + `authorizationKey` for OCPP 1.6.                                                                                   |
+| `bootNotification`                                | object                           | Overrides for the BootNotification payload.                                                                                                                      |
+| `centralSystemUrl`, `soapPath`, `soapCallbackUrl` | string                           | SOAP only. See [OCPP versions & transports](ocpp-versions-and-transports.md).                                                                                    |
+| `securityProfile`, `authorizationKey`, `cpoName`  | `0`–`3`, string, string          | OCPP 1.6 security profiles. See [Security profiles](security-profiles.md).                                                                                       |
+| `tlsCaPath`, `tlsCertPath`, `tlsKeyPath`          | string                           | Paths to PEM material. `tlsCaPath` **replaces** the system trust store.                                                                                          |
+| `tls`                                             | object                           | The same material inline: `ca`, `cert`, `key`, `rejectUnauthorized`, `serverName`.                                                                               |
+| `autoConnect`                                     | boolean                          | Connect immediately after the call.                                                                                                                              |
 
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.
+
+##### Multiple supervision URLs
+
+`wsUrl` accepts a list so a charge point can survive one CSMS node going away.
+The list stays in the charge point's config and **one URL is resolved per
+connection attempt**, so `cp.list`, the persisted `charge_points.ws_url` and
+every log line keep reporting a single string — the one currently in play.
+
+| `urlDistribution` | Behaviour                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| `round-robin`     | Default. Moves to the next URL on every connection attempt, so a dead node drains after one attempt.        |
+| `random`          | Draws per attempt from a stream seeded by the `cpId`, so a run replays.                                     |
+| `cp-affinity`     | Hashes the `cpId` to a **primary** and stays on it. Deterministic — a test can assert which node saw a run. |
+
+`cp-affinity` is **sticky, with a failover threshold**, because the two obvious
+readings of "affinity" contradict each other once the primary is down: always
+return the primary and never connect, or rotate like round-robin and lose the
+determinism that is the point. So: the primary is retried while consecutive
+failures are below the threshold (3); on reaching it the pool advances one URL;
+and **any successful connection resets it to the primary**, so the next
+disconnect episode starts from the assigned node again. Only a close the charge
+point did not ask for counts as a failure — a manual `disconnect` says nothing
+about the node and must not push a charge point off its primary.
+
+A list is an **OCPP-J** feature. The SOAP versions post to the Central System
+service and are called back on one advertised address, with no reconnect loop
+to rotate, so `cp.create` refuses a list for them rather than accepting one and
+ignoring it.
 
 ##### `cp.create_many` — the batch fields
 

@@ -79,7 +79,12 @@ For any RPC method not in the curated set, use the generic tools:
 
 Tool-level failures return an MCP tool result with `isError: true` and text in the format
 `"<code>: <message>"`, using the same error codes as the Socket.IO RPC:
-`not_found`, `invalid_params`, `timeout`, `internal`, `unauthorized`.
+`not_found`, `invalid_params`, `connect_failed`, `timeout`, `internal`,
+`unauthorized` — six of the seven codes the
+[Control plane](../concepts/control-plane.md#rpc) defines, with the same
+meanings. `disconnected` is the exception: the Socket.IO client synthesises
+it when the socket drops before an ack arrives, and an HTTP request/response
+has no such state to report.
 
 Transport-level errors (malformed JSON-RPC, invalid auth, rate limit) are handled by the MCP
 protocol layer. Every call is subject to a 30-second deadline; timeout failures surface as

@@ -153,13 +153,24 @@ type WebSocketWithHeaders = new (
   },
 ) => WebSocket;
 
+/** The `http.IncomingMessage` shape `ws` hands to `unexpected-response`. */
+interface NodeIncomingMessageLike {
+  readonly statusCode?: number;
+  readonly headers?: Record<string, string | undefined>;
+}
+
 interface NodeWsLike {
   on(event: "open", listener: () => void): void;
   on(event: "message", listener: (data: unknown) => void): void;
   on(event: "error", listener: (error: Error) => void): void;
   on(event: "close", listener: (code: number, reason: unknown) => void): void;
+  on(
+    event: "unexpected-response",
+    listener: (request: unknown, response: NodeIncomingMessageLike) => void,
+  ): void;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  terminate(): void;
   readonly readyState: number;
 }
 
@@ -359,6 +370,116 @@ export function buildOcppWebSocketConnectOptions(params: {
   };
 }
 
+/**
+ * #288 — why the CSMS refused the upgrade, when the client will not say.
+ *
+ * A rejected WebSocket upgrade has one symptom and several causes: the station
+ * is not registered (404), the credentials or the security profile were not
+ * accepted (401), or a TLS-terminating edge answered a cleartext connection
+ * with a redirect (301 + Location). Deciding between them is the difference
+ * between declaring a station, fixing a password and fixing a URL scheme.
+ *
+ * The HTTP status is available to the `ws` client, which surfaces it through
+ * `unexpected-response`. It is NOT available under Bun's native WebSocket —
+ * measured on Bun 1.4: every one of those three cases produces exactly
+ * `code=1002, reason=Expected 101 status code` and an error event whose only
+ * own property is `isTrusted`. Since the daemon and the published image run
+ * under Bun, the status simply does not exist on the path that matters.
+ *
+ * So it is fetched: after a refused handshake, one GET to the same URL with
+ * the same headers the upgrade carried. Bun's `fetch` forwards `Upgrade`,
+ * `Connection`, `Sec-WebSocket-Key/Version/Protocol` and `Authorization`
+ * unchanged (measured), so the server answers the request it just refused
+ * rather than a different one.
+ *
+ * `redirect: "manual"`, always: a 3xx is the answer, and following it would
+ * send the station's Basic credentials to whatever host `Location` names.
+ *
+ * Returns null when the probe cannot conclude — it never turns a diagnostic
+ * into a failure of its own.
+ */
+export interface UpgradeRefusalDetail {
+  readonly status: number;
+  readonly location?: string;
+}
+
+/**
+ * How long the diagnostic may take before it is abandoned. A CSMS or proxy
+ * that accepts the request and never answers would otherwise leave the fetch
+ * pending forever, and the once-a-minute throttle only limits how often a new
+ * one starts -- it would not stop them accumulating. A diagnostic that has
+ * not answered in ten seconds has already lost its value.
+ */
+const REFUSAL_PROBE_TIMEOUT_MS = 10_000;
+
+export async function probeUpgradeRefusal(
+  options: OcppWebSocketConnectOptions,
+  fetchImpl: typeof fetch = fetch,
+): Promise<UpgradeRefusalDetail | null> {
+  // The browser cannot do this: it may set neither the headers nor read a
+  // cross-origin status, and local mode does not talk to real CSMS anyway.
+  if (isBrowserRuntime()) return null;
+  let url: URL;
+  try {
+    url = new URL(options.url);
+  } catch {
+    return null;
+  }
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  // `ws://user:password@host` is a supported way to carry Basic credentials,
+  // and `fetch` silently DROPS userinfo rather than sending it (measured: the
+  // server sees no Authorization header). Probing without them would ask a
+  // different question and answer 401 for the wrong reason, so they are moved
+  // into the header the handshake would have sent. An Authorization the
+  // caller already set wins -- that is the one the socket used.
+  const userinfo =
+    url.username || url.password
+      ? btoa(
+          `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`,
+        )
+      : null;
+  url.username = "";
+  url.password = "";
+  const hasAuthorization = Object.keys(options.headers).some(
+    (key) => key.toLowerCase() === "authorization",
+  );
+  const headers: Record<string, string> = {
+    ...(userinfo && !hasAuthorization
+      ? { Authorization: `Basic ${userinfo}` }
+      : {}),
+    ...options.headers,
+    Upgrade: "websocket",
+    Connection: "Upgrade",
+    "Sec-WebSocket-Version": "13",
+    // A fresh key: the value is never checked by a server that refuses, and
+    // reusing the socket's would mean threading it out of the client.
+    "Sec-WebSocket-Key": btoa(
+      String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))),
+    ),
+  };
+  if (options.protocols.length > 0) {
+    headers["Sec-WebSocket-Protocol"] = options.protocols.join(", ");
+  }
+  try {
+    const response = await fetchImpl(url.toString(), {
+      method: "GET",
+      redirect: "manual",
+      headers,
+      signal: AbortSignal.timeout(REFUSAL_PROBE_TIMEOUT_MS),
+      // Same trust decisions as the handshake: a private-CA station whose
+      // probe verified against the public roots would report a lie.
+      ...(options.tls ? { tls: options.tls } : {}),
+    } as RequestInit);
+    const location = response.headers.get("location");
+    return {
+      status: response.status,
+      ...(location ? { location } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 class BufferedErrorWebSocket {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
@@ -480,6 +601,10 @@ class DeferredNodeWebSocket {
   private pendingClose: { code?: number; reason?: string } | null = null;
   private errorHandler: ((event: Event) => void) | null = null;
   private pendingErrors: Event[] = [];
+  /** A refused handshake is closed by us; ws may still close later. */
+  private closeDispatched = false;
+  /** Set once a non-101 response has been reported and the socket torn down. */
+  private refusalHandled = false;
 
   constructor(
     url: string,
@@ -555,6 +680,9 @@ class DeferredNodeWebSocket {
           : {}),
       });
       socket.on("error", (error) => {
+        // Once a refusal has been reported and terminated, ws's follow-up
+        // error is about our own teardown, not about the CSMS.
+        if (this.refusalHandled) return;
         this.state = WebSocket.CLOSING;
         this.dispatchError({
           type: "error",
@@ -562,6 +690,48 @@ class DeferredNodeWebSocket {
           message: error.message,
         } as unknown as Event);
       });
+      // #288: on a non-101 response `ws` hands over the whole HTTP reply
+      // before it errors. Forward the status (and a redirect's target) so the
+      // Node path names the cause without needing the probe that the Bun path
+      // has to make. `ws`'s own error message is "Unexpected server response:
+      // 401", which carries the status but not the Location.
+      //
+      // ATTACHING THIS LISTENER TAKES OWNERSHIP OF THE FAILED HANDSHAKE.
+      // Verified against ws directly: with a listener attached, only this
+      // event fires -- no `error`, no `close`, and readyState stays
+      // CONNECTING; without one, ws emits `error` + `close(1006)` itself. So
+      // the socket has to be finished here, or the reconnect loop never
+      // starts and connect() hangs to its 30 s timeout.
+      socket.on(
+        "unexpected-response",
+        (request: unknown, response: NodeIncomingMessageLike) => {
+          const location = response.headers?.location;
+          this.dispatchError({
+            type: "error",
+            message: `Unexpected server response: ${response.statusCode}`,
+            httpStatus: response.statusCode,
+            ...(location ? { httpLocation: location } : {}),
+          } as unknown as Event);
+          // terminate() is what actually ends it: destroying the request
+          // alone leaves ws reporting CONNECTING (measured), and this
+          // wrapper's readyState reads through to ws. It costs one extra
+          // "closed before the connection was established" error from ws,
+          // which `refusalHandled` swallows -- the status above is the line
+          // worth reading.
+          this.refusalHandled = true;
+          void request;
+          socket.terminate();
+          this.state = WebSocket.CLOSED;
+          // 1002 to match what the Bun client reports for the same refusal,
+          // so everything downstream sees one shape.
+          this.dispatchCloseOnce({
+            type: "close",
+            code: 1002,
+            reason: `Unexpected server response: ${response.statusCode}`,
+            wasClean: false,
+          } as CloseEvent);
+        },
+      );
       this.socket = socket;
       if (this.pendingClose) {
         socket.close(this.pendingClose.code, this.pendingClose.reason);
@@ -581,7 +751,7 @@ class DeferredNodeWebSocket {
             : reason instanceof Uint8Array
               ? new TextDecoder().decode(reason)
               : "";
-        this.onclose?.({
+        this.dispatchCloseOnce({
           type: "close",
           code,
           reason: reasonText,
@@ -613,6 +783,13 @@ class DeferredNodeWebSocket {
     }
     this.errorHandler(event);
   }
+
+  /** Exactly one close reaches the consumer, whoever noticed first. */
+  private dispatchCloseOnce(event: CloseEvent): void {
+    if (this.closeDispatched) return;
+    this.closeDispatched = true;
+    this.onclose?.(event);
+  }
 }
 
 export function openOcppWebSocket(params: {
@@ -636,12 +813,16 @@ export function openOcppWebSocket(params: {
   cpoName?: string;
   tls?: OcppTlsOptions;
   warn?: (message: string) => void;
+  /** #288: hands back the options this handshake is about to use, so a later
+   *  refusal probe replays the same request instead of a reconstruction of it. */
+  onConnectOptions?: (options: OcppWebSocketConnectOptions) => void;
   onopen?: ((event: Event) => void) | null;
   onmessage?: ((event: MessageEvent) => void) | null;
   onerror?: ((event: Event) => void) | null;
   onclose?: ((event: CloseEvent) => void) | null;
 }): WebSocket {
   const connectOptions = buildOcppWebSocketConnectOptions(params);
+  params.onConnectOptions?.(connectOptions);
   const hasHeaders = Object.keys(connectOptions.headers).length > 0;
   const handlers: OcppWebSocketEventHandlers = {
     onopen: params.onopen,

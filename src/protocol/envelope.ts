@@ -12,6 +12,7 @@ import { z } from "zod";
 import {
   ARRAY_1000,
   SCENARIO_MAX_BYTES,
+  SCENARIO_STR_256K,
   STR_64K,
   boundedObject,
 } from "./limits";
@@ -62,7 +63,13 @@ const fileReloadEnvelopeSchema = z.object({
   path: STR_64K,
   cpId: STR_64K,
   connectorId: z.number().int().min(1).nullable(),
-  scenarioId: STR_64K.nullable(),
+  // Bounded by the definition that carries it, not by the generic string cap:
+  // a file-backed scenario gets only a minimal shape check, so an id past 64 KB
+  // is accepted while the definition stays under its own size gate — and the
+  // reload then applied while this envelope rejected it, swallowing the event.
+  // `SCENARIO_MAX_BYTES` is the definition's cap, so an id inside a definition
+  // that passed it always fits here.
+  scenarioId: SCENARIO_STR_256K.nullable(),
   outcome: z.enum(["applied", "deferred", "rejected"]),
   // The rejection messages embed the path they are about
   // (`idTagPool.file "<path>" is not valid JSON`), so bounding this tighter

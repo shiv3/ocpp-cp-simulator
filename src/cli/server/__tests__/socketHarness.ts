@@ -103,6 +103,7 @@ export async function startTestServer(
           debounceMs: watchOptions.debounceMs ?? 20,
           watchFactory: watchOptions.watchFactory,
         }),
+        database,
       })
     : null;
   if (fileReload) {
@@ -112,6 +113,7 @@ export async function startTestServer(
     chargePointService.restoreFromDatabase(),
   );
   fileReload?.syncFromRegistry();
+  fileReload?.restoreScenarioWatches();
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,

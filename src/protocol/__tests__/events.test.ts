@@ -344,6 +344,29 @@ describe("envelopes", () => {
     ).toBe(true);
   });
 
+  it("file-reload envelopes accept any id a definition can carry (#314)", () => {
+    // A file-backed scenario gets only a minimal shape check, so an id past the
+    // generic 64 KB string cap is accepted while the definition stays under its
+    // own size gate — and the reload then applied while this envelope rejected
+    // it, swallowing the event. The bound is the definition's, so an id inside
+    // a definition that passed the size gate always fits.
+    const longId = "s".repeat(70_000);
+    expect(longId.length).toBeGreaterThan(65_536);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "scenario",
+        path: "/srv/s.json",
+        cpId: "CP1",
+        connectorId: 1,
+        scenarioId: longId,
+        outcome: "applied",
+        error: null,
+      }).success,
+    ).toBe(true);
+  });
+
   it("file-reload envelopes carry the outcome the consumer branches on (#314)", () => {
     // The three outcomes are the contract: applied means the new copy is live,
     // deferred means it is held until the session ends, rejected means the

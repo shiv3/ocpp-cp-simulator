@@ -194,7 +194,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // RPC layer can hand it the scenario files it loads. Its push sink is set
   // once the socket.io bridge exists.
   const fileReload = opts.watch
-    ? new FileReloadManager(registry, { log: serverLog })
+    ? new FileReloadManager(registry, { log: serverLog, database })
     : null;
   if (fileReload) {
     registry.onInitChange(() => fileReload.syncFromRegistry());
@@ -422,6 +422,10 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   }
 
   fileReload?.syncFromRegistry();
+  // After the fleet and its scenarios are back: re-establish the watches a
+  // previous run registered over the control plane (#314). The startup flags
+  // re-register themselves further down, because this bootstrap runs again.
+  fileReload?.restoreScenarioWatches();
 
   if (!opts.autoConnect && !opts.startupScenario) {
     logWatchSummary(fileReload, serverLog);
@@ -476,8 +480,10 @@ function logWatchSummary(
   serverLog: (message: string) => void,
 ): void {
   if (!fileReload) return;
+  const paths = fileReload.watchedPaths();
   serverLog(
-    `Watch: enabled — re-reading ${fileReload.watchedPaths().length} loaded file(s) on change (#314)`,
+    `Watch: enabled — re-reading ${paths.length} loaded file(s) on change (#314)` +
+      (paths.length > 0 ? `: ${paths.join(", ")}` : ""),
   );
 }
 

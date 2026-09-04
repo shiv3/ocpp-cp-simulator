@@ -5,7 +5,9 @@ import { describe, expect, it } from "bun:test";
 import {
   BENCH_ID_PATTERN,
   BENCH_OCPP_VERSIONS,
+  BenchAbortError,
   STEP_COLUMNS,
+  TransactionStarts,
   BenchValidationError,
   CALL_WATCHDOG_SEC,
   MAX_FLEET_SIZE,
@@ -36,6 +38,7 @@ import {
   redactUrlUserinfo,
   requiredRpcPerSec,
   row,
+  sleep,
   socketPoolSize,
   staggerOffsetsMs,
   sustainableRpcPerSec,
@@ -957,5 +960,94 @@ describe("a step's reported row (#302)", () => {
 
   it("surfaces unconfirmed transaction starts", () => {
     expect(col(step({ unconfirmedStarts: 7 }), "unconf.tx")).toBe("7");
+  });
+});
+
+describe("transaction-start tracking (#302)", () => {
+  it("resolves an armed waiter when its charge point confirms", () => {
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000);
+    starts.confirm("CP-A");
+    return expect(armed).resolves.toBe(true);
+  });
+
+  it("resolves false when no confirmation arrives in time", async () => {
+    const starts = new TransactionStarts();
+    expect(await starts.arm("CP-A", 10)).toBe(false);
+  });
+
+  it("ignores a confirmation for a charge point nobody is waiting on", async () => {
+    // 1.6 emits transaction_started a second time once StartTransaction.conf
+    // supplies the real id, after the waiter is long gone.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000);
+    starts.confirm("CP-A");
+    expect(await armed).toBe(true);
+    starts.confirm("CP-A");
+    expect(starts.isAvailable).toBe(true);
+  });
+
+  it("stops waiting the moment the stream is lost, instead of burning a hold", async () => {
+    // The finding: after a drop, every later arm waited its full hold for a
+    // confirmation that could never arrive, then the cycle waited the real
+    // hold on top — roughly doubling transaction occupancy and collapsing the
+    // rest period, so later rows carried a load the row no longer described.
+    const starts = new TransactionStarts();
+    starts.lose("socket dropped");
+    const startedAt = Date.now();
+    expect(await starts.arm("CP-A", 3_000)).toBe(false);
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(starts.isAvailable).toBe(false);
+  });
+
+  it("fails the waiters that were already armed when the stream was lost", async () => {
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000);
+    starts.lose("socket dropped");
+    expect(await armed).toBe(false);
+  });
+
+  it("aborts the waits raced against it, naming the reason", async () => {
+    const starts = new TransactionStarts();
+    const waiting = starts.lost(sleep(5_000));
+    starts.lose("socket dropped mid-sweep");
+    await expect(waiting).rejects.toThrow(BenchAbortError);
+    await expect(waiting).rejects.toThrow(/socket dropped mid-sweep/);
+    // And a wait started *after* the loss aborts too, rather than running on.
+    await expect(starts.lost(sleep(5_000))).rejects.toThrow(BenchAbortError);
+  });
+
+  it("lets a wait through while the stream is healthy", async () => {
+    const starts = new TransactionStarts();
+    expect(await starts.lost(Promise.resolve("ok"))).toBe("ok");
+  });
+
+  it("does not turn a deliberate close into an abort", async () => {
+    // The real sequence, not a hypothetical one: `TransactionWatcher.close()`
+    // closes the tracker and then disconnects the socket, and that disconnect
+    // fires the same handler a genuine drop does. A run that finished must not
+    // report a failure it did not have — nor abort whatever the SIGINT path is
+    // still awaiting.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000);
+    starts.close();
+    starts.lose("the socket disconnected because we closed it");
+    expect(await armed).toBe(false);
+    expect(starts.isAvailable).toBe(false);
+    const outcome = await Promise.race([
+      starts.lost(sleep(30)).then(() => "resolved"),
+      sleep(500).then(() => "still-waiting"),
+    ]).catch(() => "aborted");
+    expect(outcome).toBe("resolved");
+  });
+
+  it("keeps the first loss's reason when the socket reports more than one", async () => {
+    // A drop can surface as a disconnect and then an error; the operator needs
+    // the reason the run actually stopped for.
+    const starts = new TransactionStarts();
+    starts.lose("first");
+    starts.lose("second");
+    await expect(starts.lost(sleep(5_000))).rejects.toThrow(/first/);
+    await expect(starts.lost(sleep(5_000))).rejects.not.toThrow(/second/);
   });
 });

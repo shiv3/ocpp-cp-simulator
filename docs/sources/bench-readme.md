@@ -120,7 +120,19 @@ outside the RPC pool) and waits for `transaction_started` — specifically its
 first emission, the one carrying the placeholder id `0`, since 1.6 re-emits the
 event with the real id once `StartTransaction.conf` lands and a late conf would
 otherwise confirm the _next_ cycle's start. Starts it cannot confirm within one
-hold are counted in the `unconf.tx` column. The subscription is itself a small
+hold are counted in the `unconf.tx` column — a slow CSMS, not a broken one.
+**Losing the socket aborts the run instead:** without confirmations every later
+cycle would burn a full hold waiting for one that can never arrive and then the
+real hold, roughly doubling each transaction's occupancy and collapsing the
+rest period, so the remaining rows would carry about twice the configured load
+under the configured load's label. The sweep stops, prints `Aborted:` with the
+reason, writes no table and no `--out` file, and exits at once rather than
+waiting out the timers it was racing (`Promise.race` does not cancel the loser,
+and a measurement sleep runs up to an hour); a deliberate teardown closes
+the socket without triggering it. The socket is also opened _inside_ the run's
+cleanup scope, so a failure to connect or subscribe closes the control-plane
+pool rather than leaving its `reconnection: true` sockets open and the process
+alive after the error is printed. The subscription is itself a small
 load on the daemon (every charge point's connector-status and transaction
 envelopes are encoded and sent to that socket); it is still cheaper than
 polling each charge point's `status`, which would add a third RPC per cycle to

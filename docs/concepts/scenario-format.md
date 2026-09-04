@@ -399,13 +399,23 @@ resolved active phase count is therefore never below 1, which is what makes
 the current derivation's divisor safe. Its two companions are guarded the same
 way: a `voltageV` that is not positive and finite reads as 230, and a
 `powerFactor` outside `(0, 1]` reads as unity, so no divisor in the electrical
-model can reach zero from an accepted input. A connector declaring **none** of the four keeps the pre-1.2 conversion,
-`A × 230 V × numberPhases` with OCPP §7.21's default of 3 phases, and with it
-the pre-1.2 mismatch — this guarantee is about connectors that describe their
-electrics, and every scenario written before v1.2 is byte-identical.
-`GetCompositeSchedule` is deliberately outside it too: that response restates
-the CSMS's own profiles rather than metering a connector, so both directions
-there stay on the 230 V reference and remain each other's inverse.
+model can reach zero from an accepted input. This guarantee is about connectors that describe their electrics.
+`GetCompositeSchedule` is deliberately outside it: that response restates the
+CSMS's own profiles rather than metering a connector, so both directions there
+stay on the 230 V reference and remain each other's inverse.
+
+**Known limitation, not a guarantee: a connector declaring none of the four
+electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with
+`A × 230 V × numberPhases` (OCPP §7.21's default of 3 when the period names
+none) and derives the current back at one phase, so a 10 A profile caps at
+6900 W and reports 30 A. That is the same contradiction the rule above
+removes, and it is wrong in the same way — it is preserved only because every
+scenario written before v1.2 has no electrical fields, and changing it would
+change their MeterValues. The byte-identity of that path is the guarantee; the
+30 A is a defect inside it, recorded here so that correcting it later is
+recognised as a deliberate behaviour change rather than mistaken for a
+regression. Declaring any one of `currentType`, `phases`, `voltageV` or
+`powerFactor` opts a connector into the corrected conversion today.
 
 **A `Voltage` sample names the volts that produced `Current.Import`.** A
 `voltageV` of zero, negative or non-finite is out of contract and is treated

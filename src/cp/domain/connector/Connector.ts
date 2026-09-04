@@ -328,7 +328,18 @@ export class Connector {
    *
    * Side-effect: if the paused/active state flipped since the last call,
    * emits `scheduleLimitChange` so the ChargePoint can move the connector
-   * between Charging and SuspendedEVSE. Mid-tick crossings of a period
+   * between Charging and SuspendedEVSE.
+   *
+   * That emission is **edge-triggered and idempotent**, which is what makes it
+   * safe to call this more than once for the same instant — `MeterValueBuilder`
+   * does, once for accepted power and once for offered power. `lastSchedulePaused`
+   * is written before the emit, so a second call at the same boundary state
+   * finds it equal and emits nothing; an uncapped second call finds it already
+   * reset to `null` and does nothing either. A subscriber counting transitions
+   * therefore sees one per real crossing, not one per sample. Contrast
+   * {@link activePhaseCount} below, which is side-effect-free outright because
+   * it has no boundary state to latch — the two are safe for the same reason
+   * stated two different ways (#301). Mid-tick crossings of a period
    * boundary inside a Recurring or Absolute profile are picked up this way
    * without needing an extra timer.
    */

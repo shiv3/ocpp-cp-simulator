@@ -587,3 +587,96 @@ describe("a numberPhases of 0 is not a restriction (#301)", () => {
     expect(connector.currentScheduleLimitWatts()).toBe(16 * 230 * 2);
   });
 });
+
+describe("scheduleLimitChange is emitted per crossing, not per sample (#301)", () => {
+  /**
+   * `currentScheduleLimitWatts()` is side-effecting, and building one sample
+   * set calls it twice — once for accepted power, once for offered. A
+   * subscriber counting Charging/SuspendedEVSE transitions must see one event
+   * per real crossing, not one per call.
+   */
+  function pausingProfile(limitWatts: number): ActiveChargingProfile {
+    return {
+      chargingProfileId: 305,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: limitWatts }],
+    };
+  }
+
+  function countingConnector(): {
+    connector: Connector;
+    events: { paused: boolean; watts: number }[];
+  } {
+    const connector = makeConnector();
+    armCharging(connector);
+    const events: { paused: boolean; watts: number }[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+    return { connector, events };
+  }
+
+  it("emits once for a whole sample build, not once per derivation", () => {
+    const { connector, events } = countingConnector();
+    connector.addChargingProfile(pausingProfile(6000));
+
+    buildSampledValues(
+      connector,
+      ["Power.Active.Import", "Power.Offered", "Current.Import"],
+      "Sample.Periodic",
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]!.paused).toBe(false);
+  });
+
+  it("stays at one event across repeated sample builds while nothing crosses", () => {
+    const { connector, events } = countingConnector();
+    connector.addChargingProfile(pausingProfile(6000));
+    for (let i = 0; i < 5; i++) {
+      buildSampledValues(
+        connector,
+        ["Power.Active.Import", "Power.Offered"],
+        "Sample.Periodic",
+      );
+    }
+    expect(events).toHaveLength(1);
+  });
+
+  it("still emits on a real crossing into and out of paused", () => {
+    const { connector, events } = countingConnector();
+    connector.addChargingProfile(pausingProfile(6000));
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+    expect(events).toHaveLength(1);
+
+    // limit 0 = paused: a genuine crossing, so exactly one more event.
+    connector.addChargingProfile(pausingProfile(0));
+    buildSampledValues(
+      connector,
+      ["Power.Active.Import", "Power.Offered"],
+      "Sample.Periodic",
+    );
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(true);
+
+    connector.addChargingProfile(pausingProfile(6000));
+    buildSampledValues(
+      connector,
+      ["Power.Active.Import", "Power.Offered"],
+      "Sample.Periodic",
+    );
+    expect(events).toHaveLength(3);
+    expect(events[2]!.paused).toBe(false);
+  });
+
+  it("emits nothing at all while no profile is active", () => {
+    const { connector, events } = countingConnector();
+    buildSampledValues(
+      connector,
+      ["Power.Active.Import", "Power.Offered"],
+      "Sample.Periodic",
+    );
+    expect(events).toHaveLength(0);
+  });
+});

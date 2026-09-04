@@ -511,6 +511,15 @@ describe("a connector with no electrical fields is byte-identical to pre-v1.2 (#
    *
    * The expected values are the pre-#301 builder's output for this connector:
    * 22 kW at the default 230 V, one phase, unity cos φ.
+   *
+   * This pins current behaviour, not correct behaviour. A model-less connector
+   * still converts an amp limit at three phases and reports the current back
+   * at one — a 10 A profile caps at 6900 W and reads 30 A — which is the same
+   * contradiction the electrical model removes. It survives here because
+   * changing it would change the MeterValues of every scenario written before
+   * v1.2, so correcting it is a deliberate behaviour change that should break
+   * this test on purpose. See the "known limitation" note in
+   * `docs/concepts/scenario-format.md`.
    */
   const legacyConnector = () =>
     connectorStub({

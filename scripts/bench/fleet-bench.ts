@@ -42,6 +42,7 @@ import {
   sleep,
   socketPoolSize,
   staggerOffsetsMs,
+  START_CONFIRM_TIMEOUT_MS,
   TransactionStarts,
   STEP_COLUMNS,
   sustainableRpcPerSec,
@@ -555,6 +556,7 @@ async function waitForSettle(
 function armLoad(
   pool: SocketPool,
   cpIds: readonly string[],
+  startIndex: number,
   opts: BenchOptions,
   watcher: TransactionWatcher | null,
 ): { stop: () => void; ready: Promise<void>; unconfirmedStarts: () => number } {
@@ -598,10 +600,18 @@ function armLoad(
     // otherwise be followed by one fresh timer per charge point.
     if (stopped) return;
     if (opts.txIntervalSec <= 0) return;
-    // Evenly spaced, never random: the cycle period is one --tx-interval, so
-    // `i/count` of an interval is exact steady state, and two runs with the
-    // same flags issue the same traffic (see `staggerOffsetsMs`).
-    const offsets = staggerOffsetsMs(cpIds.length, opts.txIntervalSec);
+    // Phased off each charge point's **global** index, never its index within
+    // this cohort. The fleet grows in place, so a per-cohort stagger restarted
+    // the phase at 0 for every step — with `--counts 1,2,3` all three landed
+    // in nearly the same phase, a burst rather than a stagger, and a knee that
+    // would belong to this script rather than to the daemon. Deterministic, so
+    // two runs with the same flags issue the same traffic (see
+    // `staggerOffsetsMs`).
+    const offsets = staggerOffsetsMs(
+      startIndex,
+      cpIds.length,
+      opts.txIntervalSec,
+    );
     cpIds.forEach((cpId, i) => {
       schedule(() => void cycle(cpId), offsets[i]!);
     });
@@ -616,7 +626,8 @@ function armLoad(
     // Armed before the RPC is emitted, never after its ack: the
     // `transaction_started` event arrives on the watcher's socket while the
     // ack arrives on a pool socket, and nothing orders those two.
-    const started = watcher?.arm(cpId, holdMs) ?? Promise.resolve(true);
+    const started =
+      watcher?.arm(cpId, START_CONFIRM_TIMEOUT_MS) ?? Promise.resolve(true);
     try {
       await pool.rpc("start_transaction", { connector: 1 }, cpId);
     } catch (err) {
@@ -628,9 +639,20 @@ function armLoad(
     // daemon acknowledged the call. The ack returns while
     // `ChargePoint.startTransaction` is still awaiting `Authorize.conf`, so
     // timing the hold from it shortened every hold by the authorization
-    // latency and, past `holdMs` of it, made the stop a no-op that left the
-    // transaction running into later cycles — the load changing as a function
-    // of the very latency being measured.
+    // latency and made the stop a no-op that left the transaction running into
+    // later cycles — the load changing as a function of the very latency being
+    // measured.
+    //
+    // The wait is bounded by the *authorization* timeout, never by the hold.
+    // At `--tx-interval 2` the hold is 1s while authorization may legitimately
+    // take 10s, so a hold-length wait declared the start dead while it was
+    // still pending, stopped a transaction that did not exist, and started the
+    // next cycle straight into the arrival of the old one. Because
+    // `authorizeAndWait` never rejects — it resolves "Accepted" on timeout —
+    // a start still unconfirmed after this bound was genuinely denied, so this
+    // is waiting for a definitive answer rather than giving up early. No
+    // second cycle is scheduled until this one has been answered, held and
+    // stopped.
     if (!(await started)) unconfirmedStarts++;
     // The awaits above can span a `stop()`; without this check the callback
     // installs a timer after cleanup already cleared the set, keeping the
@@ -901,7 +923,17 @@ async function main(): Promise<void> {
         );
       }
 
-      const load = armLoad(pool, created, opts, watcher);
+      // The cohort's first global fleet index: `created` was just appended, so
+      // the cohort occupies the tail of `allCpIds`. Phases are assigned from
+      // these stable indices and never revisited, so growing the fleet never
+      // re-phases a charge point that is already cycling.
+      const load = armLoad(
+        pool,
+        created,
+        allCpIds.length - created.length,
+        opts,
+        watcher,
+      );
       stopLoads.push(load.stop);
       loads.push(load);
       await untilLost(load.ready);

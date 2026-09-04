@@ -49,7 +49,8 @@ the two scrapes bracketing a window covers calls issued 30s earlier — during
 the previous step, or this step's boot and stagger ramp, at a different `N`.
 Each step therefore holds the new `N` **and its load** for `--warmup` seconds
 before the `before` scrape; the default is `30 + --tx-interval` (one watchdog
-interval plus the stagger ramp, which is one interval long on the active axis).
+interval plus the stagger ramp, which is one cycle period long on the active
+axis and zero on the idle one, which starts no transactions to ramp).
 With it, a row's `timeouts` covers exactly the calls issued between 30s before
 the window opened and 30s before it closed, all at that step's `N`; calls issued
 in the window's last 30s expire during the next step's warmup and are counted in
@@ -57,13 +58,27 @@ neither row — dropped, never misattributed. `--warmup 0` opts out for a smoke
 run, with a printed note. Latency, `late>30s`, `errors` and `reconnects` do not
 depend on it.
 
-**The transaction stagger is evenly spaced, not random.** Charge point `i` of a
-step's `count` starts its first cycle `i/count` of a `--tx-interval` in, so two
-runs with the same flags issue the same traffic pattern and a knee is
-reproducible from the options recorded in `--out` — the project's
-"every random behaviour is seeded and replayable" rule, met by having no
-randomness at all here. `Math.random()` offsets could also cluster by chance and
-move the observed knee.
+**The transaction stagger is deterministic and phased off global fleet
+indices.** A charge point's phase is fixed once, from its index in the whole
+fleet, never from its index within the step that created it — so two runs with
+the same flags issue the same traffic pattern and a knee is reproducible from
+the options recorded in `--out`, the project's "every random behaviour is seeded
+and replayable" rule met by having no randomness at all here.
+
+Per-cohort spacing was the trap: the fleet is grown in place and the load is
+armed once per step with only that step's new charge points, so spacing each
+cohort evenly across the period restarted the phase at 0 every step. With
+`--counts 1,2,3` and step durations that are multiples of the period, all three
+landed in nearly the same phase — a burst, and a latency knee belonging to the
+tool rather than to the daemon. Exact even spacing cannot survive growth without
+re-phasing the running fleet, which would mean clearing in-flight transaction
+timers and re-issuing `start_transaction` mid-session, so the phases come from
+the van der Corput sequence in base 2 instead: _every prefix_ of it is
+near-uniform, which is exactly the property a fleet that grows needs. The widest
+silent stretch is at most `2/n` of a period at fleet size `n`, against `1/n` for
+a perfect ring. The span is the cycle period rather than the raw
+`--tx-interval`, which differ at `--tx-interval 1` because a hold is floored at
+1s.
 
 **Method.** Grows the fleet in place via `cp.create_many` (never
 `state.reset` — that is daemon-wide destructive), waits for each step's new
@@ -119,8 +134,23 @@ therefore opens one dedicated event socket (`events.subscribe`, scope `"*"`,
 outside the RPC pool) and waits for `transaction_started` — specifically its
 first emission, the one carrying the placeholder id `0`, since 1.6 re-emits the
 event with the real id once `StartTransaction.conf` lands and a late conf would
-otherwise confirm the _next_ cycle's start. Starts it cannot confirm within one
-hold are counted in the `unconf.tx` column — a slow CSMS, not a broken one.
+otherwise confirm the _next_ cycle's start. Starts it cannot confirm are counted in the
+`unconf.tx` column — a slow CSMS, not a broken one. The wait is bounded by the
+daemon's **authorization** timeout (10s, plus slack), never by the hold: at
+`--tx-interval 2` the hold is 1s while `authorizeAndWait` may legitimately take
+10s, so a hold-length wait declared the start dead while it was still pending,
+stopped a transaction that did not exist, and began the next cycle into the
+arrival of the old one — which could leave a transaction active or let its event
+confirm a newer cycle's waiter. `authorizeAndWait` never rejects (it resolves
+`"Accepted"` on timeout), so a start unconfirmed past that bound was genuinely
+denied; the wait ends on a definitive answer, and no second cycle for a charge
+point begins until the outstanding one is answered, held and stopped. The
+resulting drift is **one-way and permanent**: a cycle that waited out a denial
+occupies 15s plus a hold and the next is anchored one period after that one
+_started_, so at `--tx-interval 2` the charge point stretches from a 2s cycle to
+roughly 16s and never catches up. A non-zero `unconf.tx` means those charge
+points' cadence is their own rather than the flag's, not merely that the load
+was late.
 **Losing the socket aborts the run instead:** without confirmations every later
 cycle would burn a full hold waiting for one that can never arrive and then the
 real hold, roughly doubling each transaction's occupancy and collapsing the

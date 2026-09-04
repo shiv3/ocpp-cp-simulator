@@ -20,6 +20,7 @@ import {
   TokenBucket,
   answeredAfterWatchdog,
   assertDaemonEmpty,
+  AUTHORIZE_WAIT_SEC,
   benchCpId,
   cyclePeriodSec,
   diffHistogram,
@@ -33,6 +34,7 @@ import {
   maxSustainableFleet,
   minSustainableTxIntervalSec,
   parseExposition,
+  radicalInverseBase2,
   recommendedWarmupSec,
   redactOptions,
   redactUrlUserinfo,
@@ -41,6 +43,8 @@ import {
   sleep,
   socketPoolSize,
   staggerOffsetsMs,
+  START_CONFIRM_MARGIN_SEC,
+  START_CONFIRM_TIMEOUT_MS,
   sustainableRpcPerSec,
   validateOptions,
   type Sample,
@@ -303,6 +307,17 @@ describe("--ocpp-version", () => {
 });
 
 describe("--warmup", () => {
+  it("adds the ramp only when there is a cycle to ramp up", () => {
+    // `holdSec` floors at 1s, so `cyclePeriodSec(0)` is 2 — but the idle axis
+    // starts no transactions at all and has nothing to ramp. Asking for the
+    // period unconditionally invented a 2s ramp for a fleet that never uses
+    // one.
+    expect(recommendedWarmupSec(0)).toBe(CALL_WATCHDOG_SEC);
+    // `--tx-interval 1` really cycles every 2s, so its ramp is 2s, not 1s.
+    expect(recommendedWarmupSec(1)).toBe(CALL_WATCHDOG_SEC + 2);
+    expect(recommendedWarmupSec(15)).toBe(CALL_WATCHDOG_SEC + 15);
+  });
+
   it("defaults to one CALL watchdog on the idle axis", () => {
     expect(validateOptions(argMap()).warmupSec).toBe(CALL_WATCHDOG_SEC);
   });
@@ -342,11 +357,92 @@ describe("--warmup", () => {
 });
 
 describe("staggerOffsetsMs", () => {
-  it("spreads offsets evenly across one --tx-interval", () => {
-    expect(staggerOffsetsMs(4, 60)).toEqual([0, 15_000, 30_000, 45_000]);
-    // Never reaches the full interval: offset `count` would collide with the
-    // first CP's second cycle rather than sit between the others.
-    expect(staggerOffsetsMs(4, 60).every((ms) => ms < 60_000)).toBe(true);
+  const PERIOD_MS = 60_000;
+
+  /** The widest silent stretch in the cycle, as a fraction of one period —
+   *  the thing a stagger exists to keep small, and what a burst blows up. */
+  function maxGapFraction(offsetsMs: readonly number[]): number {
+    const sorted = [...offsetsMs].sort((a, b) => a - b);
+    let widest = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const next = sorted[(i + 1) % sorted.length]!;
+      const gap =
+        i === sorted.length - 1
+          ? next + PERIOD_MS - sorted[i]!
+          : next - sorted[i]!;
+      widest = Math.max(widest, gap);
+    }
+    return widest / PERIOD_MS;
+  }
+
+  it("spreads one cohort across the cycle period", () => {
+    expect(staggerOffsetsMs(0, 4, 60)).toEqual([0, 30_000, 15_000, 45_000]);
+    // Never reaches the full period: an offset of one period would collide
+    // with the first CP's next cycle rather than sit between the others.
+    expect(staggerOffsetsMs(0, 4, 60).every((ms) => ms < PERIOD_MS)).toBe(true);
+  });
+
+  it("spans the cycle period, not the raw --tx-interval", () => {
+    // A hold is floored at 1s, so `--tx-interval 1` really cycles every 2s.
+    // Spreading over 1s would bunch the whole fleet into half the phase space.
+    expect(staggerOffsetsMs(0, 2, 1)).toEqual([0, 1_000]);
+    expect(cyclePeriodSec(1)).toBe(2);
+  });
+
+  it("keeps later cohorts out of the phases earlier ones already hold", () => {
+    // The finding: `armLoad` gets only the step's *new* charge points, so a
+    // per-cohort stagger restarted at phase 0 every step. With --counts 1,2,3
+    // and step durations that are multiples of the period, all three singleton
+    // cohorts landed in nearly the same phase — a burst, and a knee belonging
+    // to this script rather than to the daemon.
+    const first = staggerOffsetsMs(0, 1, 60);
+    const second = staggerOffsetsMs(1, 1, 60);
+    const third = staggerOffsetsMs(2, 1, 60);
+    expect(new Set([...first, ...second, ...third]).size).toBe(3);
+    // And they are genuinely spread, not merely distinct.
+    expect(maxGapFraction([...first, ...second, ...third])).toBeLessThanOrEqual(
+      2 / 3,
+    );
+  });
+
+  it("stays well spread at every fleet size a growing sweep passes through", () => {
+    // The property that makes fixed global phases work at all: *every prefix*
+    // of the sequence is near-uniform, so the fleet is spread at each step of
+    // the sweep without ever re-phasing a charge point that is already
+    // cycling. A perfect ring would be 1/n; a burst would be ~1.
+    //
+    // Swept over the **whole accepted range**, not a sample of it: the docs
+    // promise `2/n` in three places, and `--counts` reaches MAX_FLEET_SIZE.
+    // The worst case sits at n = 2^k + 1, where the true bound
+    // `1/2^floor(log2 n)` is at its closest to `2/n`, so a loop that stopped
+    // early would leave the promise untested exactly where it is tightest.
+    for (let n = 1; n <= MAX_FLEET_SIZE; n++) {
+      expect(maxGapFraction(staggerOffsetsMs(0, n, 60))).toBeLessThanOrEqual(
+        2 / n,
+      );
+    }
+    // And the tightest points specifically, named so a regression says why.
+    // From k = 1: `floor(log2 n)` is k only once n = 2^k + 1 exceeds 2, and at
+    // n = 2 the two phases are 0 and ½, a gap of ½ rather than 1.
+    for (let k = 1; k <= 10; k++) {
+      const n = 2 ** k + 1;
+      expect(maxGapFraction(staggerOffsetsMs(0, n, 60))).toBeCloseTo(
+        1 / 2 ** k,
+        10,
+      );
+    }
+  });
+
+  it("gives a grown fleet the same phases as one created all at once", () => {
+    // Grow-in-place must not change the answer: cohorts of 10, then 40, then
+    // 50 must leave the fleet in exactly the arrangement 100 at once would.
+    const grown = [
+      ...staggerOffsetsMs(0, 10, 60),
+      ...staggerOffsetsMs(10, 40, 60),
+      ...staggerOffsetsMs(50, 50, 60),
+    ];
+    expect(grown).toEqual(staggerOffsetsMs(0, 100, 60));
+    expect(new Set(grown).size).toBe(100);
   });
 
   it("is deterministic, so two identical runs issue the same pattern", () => {
@@ -354,16 +450,44 @@ describe("staggerOffsetsMs", () => {
     // replayable (docs/analyses/fleet-load-and-observability-roadmap.md).
     // `Math.random()` here made the phase distribution — and so the observed
     // knee — differ between two runs with identical flags.
-    const a = staggerOffsetsMs(50, 30);
-    const b = staggerOffsetsMs(50, 30);
+    const a = staggerOffsetsMs(0, 50, 30);
+    const b = staggerOffsetsMs(0, 50, 30);
     expect(a).toEqual(b);
-    // Distinct offsets, not a lockstep burst: the whole point of staggering.
     expect(new Set(a).size).toBe(50);
   });
 
   it("returns nothing for an empty step and zeros for the idle axis", () => {
-    expect(staggerOffsetsMs(0, 30)).toEqual([]);
-    expect(staggerOffsetsMs(3, 0)).toEqual([0, 0, 0]);
+    expect(staggerOffsetsMs(0, 0, 30)).toEqual([]);
+    expect(staggerOffsetsMs(0, 3, 0)).toEqual([0, 0, 0]);
+  });
+
+  it("generates the van der Corput sequence it documents", () => {
+    expect([0, 1, 2, 3, 4, 5, 6, 7].map(radicalInverseBase2)).toEqual([
+      0, 0.5, 0.25, 0.75, 0.125, 0.625, 0.375, 0.875,
+    ]);
+  });
+});
+
+describe("waiting for a transaction to start (#302)", () => {
+  it("waits for authorization, never merely for a hold", () => {
+    // The finding: `--tx-interval 2` gives a 1s hold while `authorizeAndWait`
+    // may legitimately take 10s, so a hold-length wait declared the start dead
+    // while it was still pending — the stop then hit a transaction that did
+    // not exist and the next cycle began into the arrival of the old one.
+    expect(START_CONFIRM_TIMEOUT_MS).toBeGreaterThan(AUTHORIZE_WAIT_SEC * 1000);
+    for (const tx of [1, 2, 3, 5, 10]) {
+      expect(START_CONFIRM_TIMEOUT_MS).toBeGreaterThan(holdSec(tx) * 1000);
+    }
+  });
+
+  it("waits long enough for the answer to be definitive", () => {
+    // `authorizeAndWait` never rejects: on timeout it warns and resolves
+    // "Accepted". So past its bound the start was genuinely denied, and a
+    // cycle that waited this long waited for an answer rather than giving up.
+    expect(START_CONFIRM_TIMEOUT_MS).toBe(
+      (AUTHORIZE_WAIT_SEC + START_CONFIRM_MARGIN_SEC) * 1000,
+    );
+    expect(START_CONFIRM_MARGIN_SEC).toBeGreaterThan(0);
   });
 });
 

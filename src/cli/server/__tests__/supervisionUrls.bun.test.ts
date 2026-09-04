@@ -6,6 +6,8 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { RegistryChargePointService } from "../RegistryChargePointService";
 import { SupervisionUrlPool } from "../../../cp/infrastructure/transport/SupervisionUrlPool";
+import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
+import { toWireCreateParams } from "../../../data/remote/RemoteChargePointService";
 
 const OCPP_J = {
   cpId: "CP001",
@@ -128,7 +130,41 @@ describe("supervision URLs survive the control-plane path (#296)", () => {
     }
   });
 
-  it("keeps the list across an update that does not mention it", async () => {
+  it("clears the pool when an update names a single endpoint", async () => {
+    // `wsUrl` is required on update, so an update fully specifies the URL
+    // configuration. Falling back to the stored list would leave a charge
+    // point that was just pointed at one endpoint still failing over to the
+    // stale pool — and still persisting it.
+    const registry = new CPRegistry(new EventBus());
+    const service = new RegistryChargePointService(registry);
+    try {
+      await service.createChargePoint(
+        parseCreateBody({
+          cpId: "CP-CLEAR",
+          connectors: 1,
+          wsUrl: ["ws://a/ocpp/", "ws://b/ocpp/"],
+        }),
+      );
+      expect(registry.get("CP-CLEAR")?.getInit().supervisionUrls).toHaveLength(
+        2,
+      );
+
+      await service.updateChargePoint(
+        parseCreateBody({
+          cpId: "CP-CLEAR",
+          connectors: 1,
+          wsUrl: "ws://a/ocpp/",
+        }),
+      );
+      expect(
+        registry.get("CP-CLEAR")?.getInit().supervisionUrls,
+      ).toBeUndefined();
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
+  it("keeps the list across an update that repeats it", async () => {
     const registry = new CPRegistry(new EventBus());
     const service = new RegistryChargePointService(registry);
     try {
@@ -139,11 +175,14 @@ describe("supervision URLs survive the control-plane path (#296)", () => {
           wsUrl: ["ws://a/ocpp/", "ws://b/ocpp/"],
         }),
       );
-      await service.updateChargePoint({
-        cpId: "CP-KEEP",
-        wsUrl: "ws://a/ocpp/",
-        model: "Renamed",
-      });
+      await service.updateChargePoint(
+        parseCreateBody({
+          cpId: "CP-KEEP",
+          connectors: 1,
+          wsUrl: ["ws://a/ocpp/", "ws://b/ocpp/"],
+          model: "Renamed",
+        }),
+      );
 
       expect(registry.get("CP-KEEP")?.getInit().supervisionUrls).toEqual([
         "ws://a/ocpp/",
@@ -166,5 +205,119 @@ describe("SupervisionUrlPool inspection is side-effect free (#296)", () => {
     inspected.current();
     const fresh = new SupervisionUrlPool(urls, "random", "CP1");
     expect(inspected.next()).toBe(fresh.next());
+  });
+});
+
+describe("supervision URLs survive a daemon restart (#296)", () => {
+  it("persists the list and the policy, and restores them", () => {
+    // The list is the failover configuration. Restoring a charge point with
+    // only `ws_url` brings it back with failover silently disabled — the one
+    // thing a URL list exists to provide — and nothing would say so.
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const first = new CPRegistry(new EventBus(), db);
+      first.create(
+        {
+          cpId: "CP-RESTART",
+          wsUrl: "ws://a/ocpp/",
+          supervisionUrls: ["ws://a/ocpp/", "ws://b/ocpp/", "ws://c/ocpp/"],
+          urlDistribution: "cp-affinity",
+          connectors: 1,
+          vendor: "V",
+          model: "M",
+          basicAuth: null,
+        },
+        { seedDefault: false },
+      );
+      first.shutdownAll();
+
+      const second = new CPRegistry(new EventBus(), db);
+      try {
+        expect(second.restoreFromDatabase()).toContain("CP-RESTART");
+        const init = second.get("CP-RESTART")?.getInit();
+        expect(init?.wsUrl).toBe("ws://a/ocpp/");
+        expect(init?.supervisionUrls).toEqual([
+          "ws://a/ocpp/",
+          "ws://b/ocpp/",
+          "ws://c/ocpp/",
+        ]);
+        expect(init?.urlDistribution).toBe("cp-affinity");
+      } finally {
+        second.shutdownAll();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves a single-URL charge point exactly as it was", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const first = new CPRegistry(new EventBus(), db);
+      first.create(
+        {
+          cpId: "CP-SINGLE",
+          wsUrl: "ws://a/ocpp/",
+          connectors: 1,
+          vendor: "V",
+          model: "M",
+          basicAuth: null,
+        },
+        { seedDefault: false },
+      );
+      first.shutdownAll();
+
+      const second = new CPRegistry(new EventBus(), db);
+      try {
+        second.restoreFromDatabase();
+        const init = second.get("CP-SINGLE")?.getInit();
+        expect(init?.wsUrl).toBe("ws://a/ocpp/");
+        expect(init?.supervisionUrls).toBeUndefined();
+        expect(init?.urlDistribution).toBeUndefined();
+      } finally {
+        second.shutdownAll();
+      }
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("the typed remote adapter does not lose the list (#296)", () => {
+  it("folds supervisionUrls into the wire wsUrl array", () => {
+    // `CreateChargePointParams` keeps the list in a field of its own because
+    // that is what the charge point consumes, but the wire expresses it as an
+    // array `wsUrl`. Forwarding the typed shape verbatim let the schema strip
+    // the unknown key: the call succeeded and quietly made a single-URL CP.
+    const wire = toWireCreateParams({
+      cpId: "CP-REMOTE",
+      wsUrl: "ws://a/ocpp/",
+      supervisionUrls: ["ws://a/ocpp/", "ws://b/ocpp/"],
+      urlDistribution: "round-robin",
+    });
+
+    expect(wire.wsUrl).toEqual(["ws://a/ocpp/", "ws://b/ocpp/"]);
+    expect("supervisionUrls" in wire).toBe(false);
+    // And it survives the schema the daemon validates against.
+    const parsed = createParamsSchema.safeParse(wire);
+    expect(parsed.success).toBe(true);
+    expect(parseCreateBody(wire).supervisionUrls).toHaveLength(2);
+  });
+
+  it("leaves a single-URL charge point alone", () => {
+    const wire = toWireCreateParams({
+      cpId: "CP-REMOTE",
+      wsUrl: "ws://a/ocpp/",
+    });
+    expect(wire.wsUrl).toBe("ws://a/ocpp/");
+  });
+
+  it("does not promote a one-element list to an array", () => {
+    const wire = toWireCreateParams({
+      cpId: "CP-REMOTE",
+      wsUrl: "ws://a/ocpp/",
+      supervisionUrls: ["ws://a/ocpp/"],
+    });
+    expect(wire.wsUrl).toBe("ws://a/ocpp/");
   });
 });

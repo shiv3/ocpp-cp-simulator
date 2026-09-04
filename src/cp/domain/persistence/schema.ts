@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -104,6 +104,12 @@ CREATE INDEX IF NOT EXISTS logs_by_cp_ts
 CREATE TABLE IF NOT EXISTS charge_points (
   cp_id          TEXT PRIMARY KEY,
   ws_url         TEXT NOT NULL,
+  -- Every supervision URL, as a JSON array, when the charge point was given
+  -- more than one (#296). \`ws_url\` stays a single string so every reader
+  -- that predates this column keeps working; this is the failover config,
+  -- which would otherwise be silently lost on a daemon restart.
+  supervision_urls TEXT,
+  url_distribution TEXT,
   connectors     INTEGER NOT NULL,
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
@@ -300,6 +306,22 @@ export function runMigrations(db: Database): void {
     db.exec(
       "CREATE INDEX IF NOT EXISTS pending_by_cp_seq ON pending_messages (cp_id, seq)",
     );
+  }
+
+  // v6 → v7: persist the supervision-URL list and its distribution policy
+  // (#296). `ws_url` still holds the single URL every other reader expects;
+  // without these two columns a charge point created with a list came back
+  // from `--state-db` with failover silently disabled — the one thing the
+  // feature exists to provide.
+  if (stored < 7) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("supervision_urls")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN supervision_urls TEXT");
+    }
+    if (!have.has("url_distribution")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN url_distribution TEXT");
+    }
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

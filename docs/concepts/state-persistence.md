@@ -12,7 +12,7 @@ related:
   - log-format.md
   - network-simulation.md
   - control-plane.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # State persistence
@@ -44,18 +44,18 @@ ocpp-cp-sim --daemon ...
 
 ## Tables
 
-| Table                | Holds                                                                                                                                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `schema_meta`        | Single row stamping the schema version. Used by future migrations.                                                                                                                                                       |
-| `scenarios`          | Scenario definitions (per CP/connector). Browser saves go through here. Template instances are idempotent per (template, connector) — see [Scenario format → Template instances](scenario-format.md#template-instances). |
-| `connector_settings` | `auto_meter`, `availability` and `soc_meter_sync` per `(cp_id, connector_id)`. `connector_id=0` represents the CP main controller.                                                                                       |
-| `charging_profiles`  | One row per active `SetChargingProfile.req`, keyed by `(cp_id, connector_id, charging_profile_id)`.                                                                                                                      |
-| `configuration`      | Per-CP overrides written by `ChangeConfiguration.req` (§5.3). The OCPP defaults are computed at boot; only operator/CSMS-set values land here.                                                                           |
-| `pending_messages`   | Transaction-related CALLs queued while offline (§4.7 / §4.8 errata 3.18). Retried with backoff on reconnect.                                                                                                             |
-| `logs`               | Persisted log entries — every OCPP message, scenario step, state transition. Batched writes (50 entries / 500 ms) and trimmed to 10 k rows per CP. See [Log format](log-format.md).                                      |
-| `charge_points`      | Daemon-side CP registry. Re-created on restart by `CPRegistry.restoreFromDatabase` and **auto-connected**, so the CSMS sees BootNotification fly again.                                                                  |
-| `charge_point_state` | Per-CP runtime flags (currently `desired_connected`). Browser local mode writes this on Connect/Disconnect so a reload restores the WebSocket.                                                                           |
-| `kv`                 | App-level prefs (global config, SoC↔Meter sync, [network-sim](network-simulation.md#persistence) layers under `networkSim:global` / `networkSim:cp:<cpId>`, etc.).                                                       |
+| Table                | Holds                                                                                                                                                                                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_meta`        | Single row stamping the schema version. Used by future migrations.                                                                                                                                                                                                                           |
+| `scenarios`          | Scenario definitions (per CP/connector). Browser saves go through here. Template instances are idempotent per (template, connector) — see [Scenario format → Template instances](scenario-format.md#template-instances).                                                                     |
+| `connector_settings` | `auto_meter`, `availability` and `soc_meter_sync` per `(cp_id, connector_id)`. `connector_id=0` represents the CP main controller.                                                                                                                                                           |
+| `charging_profiles`  | One row per active `SetChargingProfile.req`, keyed by `(cp_id, connector_id, charging_profile_id)`.                                                                                                                                                                                          |
+| `configuration`      | Per-CP overrides written by `ChangeConfiguration.req` (§5.3). The OCPP defaults are computed at boot; only operator/CSMS-set values land here.                                                                                                                                               |
+| `pending_messages`   | Transaction-related CALLs queued while offline (§4.7 / §4.8 errata 3.18). Retried with backoff on reconnect.                                                                                                                                                                                 |
+| `logs`               | Persisted log entries — every OCPP message, scenario step, state transition. Batched writes (50 entries / 500 ms) and trimmed to 10 k rows per CP. See [Log format](log-format.md).                                                                                                          |
+| `charge_points`      | Daemon-side CP registry. Re-created on restart by `CPRegistry.restoreFromDatabase` and **auto-connected**, so the CSMS sees BootNotification fly again. Carries `supervision_urls` / `url_distribution` since schema v7 (#296) — `ws_url` remains the single URL every other reader expects. |
+| `charge_point_state` | Per-CP runtime flags (currently `desired_connected`). Browser local mode writes this on Connect/Disconnect so a reload restores the WebSocket.                                                                                                                                               |
+| `kv`                 | App-level prefs (global config, SoC↔Meter sync, [network-sim](network-simulation.md#persistence) layers under `networkSim:global` / `networkSim:cp:<cpId>`, etc.).                                                                                                                           |
 
 ## Reset
 

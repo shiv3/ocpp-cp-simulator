@@ -179,6 +179,12 @@ service and are called back on one advertised address, with no reconnect loop
 to rotate, so `cp.create` refuses a list for them rather than accepting one and
 ignoring it.
 
+The list and the policy are **persisted** (`charge_points.supervision_urls` /
+`url_distribution`, schema v7) and restored with the charge point. They are the
+failover configuration: a restart that brought the charge point back on
+`ws_url` alone would silently disable the one thing the list exists to provide.
+See [State persistence](state-persistence.md).
+
 ##### `cp.create_many` — the batch fields
 
 `cp.create_many` takes the table above **without `cpId`** (ids are generated),

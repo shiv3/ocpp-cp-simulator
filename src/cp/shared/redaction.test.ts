@@ -115,6 +115,38 @@ describe("URL credentials (#288)", () => {
     }
   });
 
+  it("redacts a credential carried as a query parameter", () => {
+    // The browser cannot set an Authorization header, so the Basic password
+    // travels as ?ocpp_ws_secret= there.
+    const redacted = redactSensitiveText(
+      "WebSocket connection to 'wss://csms.example/ocpp/CP001?ocpp_ws_secret=hunter2' failed",
+    );
+
+    expect(redacted).not.toContain("hunter2");
+    expect(redacted).toContain("ocpp_ws_secret=");
+    expect(redacted).toContain("csms.example/ocpp/CP001");
+  });
+
+  it("redacts the other names a CSMS may expect for the same job", () => {
+    for (const name of [
+      "token",
+      "access_token",
+      "api_key",
+      "apikey",
+      "secret",
+      "password",
+    ]) {
+      expect(
+        redactSensitiveText(`wss://host/ocpp?x=1&${name}=hunter2&y=2`),
+      ).not.toContain("hunter2");
+    }
+  });
+
+  it("leaves a non-secret query parameter alone", () => {
+    const url = "wss://csms.example/ocpp/CP001?tenant=acme&region=eu";
+    expect(redactSensitiveText(url)).toBe(url);
+  });
+
   it("leaves a credential-free URL alone", () => {
     const url = "ws://csms.example:8080/ocpp/CP001";
     expect(redactSensitiveText(url)).toBe(url);

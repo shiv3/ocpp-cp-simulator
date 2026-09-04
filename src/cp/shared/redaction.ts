@@ -46,11 +46,23 @@ export function isSensitiveKeyName(key: string): boolean {
  */
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+):[^/\s@]*@/gi;
 
+/**
+ * Credentials carried as a query parameter. `ocpp_ws_secret` is this
+ * project's own — the browser cannot set an `Authorization` header, so the
+ * Basic password goes in the URL there (see `wsUrlWithBasic.ts`) — and the
+ * rest are the names a CSMS is likely to expect for the same job. Same
+ * reason as the userinfo pattern above: a client's error message quotes the
+ * whole URL, and #288 made those messages loggable.
+ */
+const URL_SECRET_QUERY =
+  /([?&](?:ocpp_ws_secret|password|passwd|secret|token|access_token|api[-_]?key|auth(?:orization)?[-_]?key)=)([^&#\s"'<>]+)/gi;
+
 export function redactSensitiveText(text: string): string {
   return redactOcppKeyValueText(text)
     .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
     .replace(SENSITIVE_BARE_ASSIGNMENT, `$1${REDACTED_VALUE}`)
-    .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`);
+    .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
+    .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`);
 }
 
 export function redactSensitiveValue(value: unknown): unknown {

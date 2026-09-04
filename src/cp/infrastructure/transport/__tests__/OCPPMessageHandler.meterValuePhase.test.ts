@@ -67,6 +67,8 @@ class MockChargePoint {
         voltageV: 230,
       },
       currentScheduleLimitWatts: () => Infinity,
+      // Three phases in use: no profile restricts them (#301).
+      activePhaseCount: () => 3,
     };
   }
   cleanTransaction(): void {}

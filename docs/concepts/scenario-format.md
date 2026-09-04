@@ -442,6 +442,12 @@ would sit at their starting value forever while `Power.Active.Import` kept
 reporting 1000 W. The carry is reset whenever the auto-meter starts or stops,
 so a session always begins on a whole watt-hour.
 
+For the same reason, an auto-meter's `maxValue` stop condition is judged on
+the delivered energy rather than on the published integer. A fractional cap
+below the next half-watt-hour boundary — 10.4 Wh — is reached exactly by the
+delivered value and then published as 10; a check on what was published would
+never fire, and the scheduler would tick forever republishing the same 10.
+
 The guarantee holds **across transactions**, not only within the first one. A
 connector's second session starts from its cumulative register, not from zero,
 so a bezier trajectory read as an absolute value would have been behind that
@@ -459,8 +465,27 @@ nearly-full battery that the curve says only draws 10% of it; conflating the
 two would make a charger appear to shrink as a car fills up.
 
 On a 3-phase AC connector, `Current.Import` and `Power.Active.Import` are also
-reported per phase (`L1` / `L2` / `L3`), summing to the aggregate. Energy
-registers are not split — a meter has one.
+reported per phase (`L1` / `L2` / `L3`). The three power legs sum to the
+aggregate `Power.Active.Import`; the three current legs each carry the same
+value as the aggregate `Current.Import`, because a per-phase line current is
+what `I = P / (V × phases × cos φ)` already computes — three legs of a
+three-phase supply do not add up to a larger current. Energy registers are not
+split — a meter has one.
+
+**Per-phase samples are emitted only when all three phases are actually in
+use.** The phase count is the connector's wiring narrowed by the active
+profile period's `numberPhases`, the same `min(connector phases, numberPhases)`
+that produces the watt cap for an amp-based limit. Under a profile restricting
+a 3-phase connector to one or two phases, only the aggregate is reported: the
+station must not claim consumption on phases the CSMS said it may not use, and
+because OCPP's `numberPhases` says how _many_ phases, never _which_, naming a
+subset of `L1` / `L2` / `L3` would invent an allocation the profile never
+expressed. The restriction suppresses the per-phase detail only; the aggregate
+number is unchanged, since the watt cap already governs it. `Voltage`,
+`Power.Offered` and `Current.Offered` are not emitted per phase at all — the
+first would be three copies of one configured phase-to-neutral value, and the
+other two describe what the EVSE offers rather than what it draws, so neither
+can claim consumption anywhere.
 
 **`phase` on the wire is OCPP-version-dependent.** 1.6-J, 1.6-S SOAP, 2.0.1
 and 2.1 all carry a `phase` attribute on `SampledValue`, so the L1/L2/L3 tag

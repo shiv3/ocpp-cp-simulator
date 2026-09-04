@@ -489,3 +489,56 @@ describe("the curve trajectory is offset by the register it starts from (#301)",
     expect(connector.meterValue).toBeGreaterThan(startWh);
   });
 });
+
+describe("a fractional maxValue still stops the auto-meter (#301)", () => {
+  /**
+   * The published register is an integer watt-hour, so a `maxValue` that sits
+   * below the next half-watt-hour boundary is never reached by the published
+   * value: 10.4 rounds to 10, every later tick caps at 10.4 and rounds to 10
+   * again, and a stop condition read off the published number never fires.
+   * The condition is judged on the delivered energy instead.
+   */
+  it("stops at a maxValue of 10.4 Wh instead of ticking forever", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    const ticks: number[] = [];
+    connector.events.on("meterValueChange", ({ meterValue }) =>
+      ticks.push(meterValue),
+    );
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 4,
+      maxValue: 10.4,
+    });
+
+    // 4, 8, then clamped to 10.4 — published as 10 — and the scheduler stops
+    // on that same tick, because the cap was reached in delivered energy even
+    // though the published integer never reaches it.
+    vi.advanceTimersByTime(60_000);
+    expect(connector.isAutoMeterValueActive()).toBe(false);
+    expect(connector.meterValue).toBe(10);
+    expect(ticks).toEqual([4, 8, 10]);
+  });
+
+  it("still stops on an integral maxValue", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 4,
+      maxValue: 10,
+    });
+
+    vi.advanceTimersByTime(60_000);
+    expect(connector.isAutoMeterValueActive()).toBe(false);
+    expect(connector.meterValue).toBe(10);
+  });
+});

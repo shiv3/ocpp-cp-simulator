@@ -28,6 +28,7 @@ import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
 import {
   effectiveChargingPowerW,
   electricalModelOf,
+  resolveActivePhases,
   resolveSocForCurve,
   withNormalizedChargingCurve,
 } from "./ChargingCurve";
@@ -333,6 +334,36 @@ export class Connector {
       this.lastSchedulePaused = null;
     }
     return resolved.watts;
+  }
+
+  /**
+   * How many phases this connector is delivering on right now: its own wiring
+   * (1 for DC), narrowed by the active charging profile period's
+   * `numberPhases`.
+   *
+   * The same count that produced the watt cap in
+   * {@link currentScheduleLimitWatts}, so the per-phase MeterValues samples
+   * cannot claim consumption on a phase the CSMS excluded while the cap says
+   * that phase is unavailable (#301). Unlike `currentScheduleLimitWatts` this
+   * has no side effects — it never emits `scheduleLimitChange` — because it is
+   * called while building a sample set, not while driving the meter.
+   */
+  activePhaseCount(): number {
+    const stationMax =
+      this.stationProfilesProvider()?.getActive(
+        ChargingProfilePurposeType.ChargePointMaxProfile,
+      ) ?? null;
+    const resolved = resolveEffectiveLimitWatts(
+      this.getActiveChargingProfile(),
+      stationMax,
+      this.transactionValue?.startTime ?? null,
+      new Date(),
+      electricalModelOf(this._evSettings),
+    );
+    return resolveActivePhases(
+      this._evSettings,
+      resolved.limitNumberPhases ?? undefined,
+    );
   }
 
   /** Snapshot of the last resolved "paused" state, used to detect crossings

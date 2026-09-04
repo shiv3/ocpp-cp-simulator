@@ -179,3 +179,68 @@ describe("an amp-based charging profile is not violated by the report (#301)", (
     expect(reportedCurrentA(connector)).toBeCloseTo(16, 6);
   });
 });
+
+describe("the resolved phase count reaches the per-phase samples (#301)", () => {
+  // End to end through a real Connector: the profile period's `numberPhases`
+  // has to travel out of `ChargingScheduleResolver` and into the sampling
+  // loop, or the message claims consumption on phases the CSMS excluded while
+  // the watt cap says those phases are unavailable.
+  function threePhaseConnector(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+    };
+    armCharging(connector);
+    return connector;
+  }
+
+  function phasedSamples(connector: Connector): (string | undefined)[] {
+    return buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    )
+      .filter((s) => s.phase !== undefined)
+      .map((s) => s.phase);
+  }
+
+  it("suppresses per-phase samples under a single-phase profile", () => {
+    const connector = threePhaseConnector();
+    connector.addChargingProfile(ampProfile(16, 1));
+    expect(connector.activePhaseCount()).toBe(1);
+    expect(phasedSamples(connector)).toEqual([]);
+  });
+
+  it("suppresses them under a two-phase profile", () => {
+    const connector = threePhaseConnector();
+    connector.addChargingProfile(ampProfile(16, 2));
+    expect(connector.activePhaseCount()).toBe(2);
+    expect(phasedSamples(connector)).toEqual([]);
+  });
+
+  it("keeps all three under a three-phase profile, and with no profile at all", () => {
+    const withProfile = threePhaseConnector();
+    withProfile.addChargingProfile(ampProfile(16, 3));
+    expect(withProfile.activePhaseCount()).toBe(3);
+    expect(phasedSamples(withProfile)).toEqual(["L1", "L2", "L3"]);
+
+    const bare = threePhaseConnector();
+    expect(bare.activePhaseCount()).toBe(3);
+    expect(phasedSamples(bare)).toEqual(["L1", "L2", "L3"]);
+  });
+
+  it("is always one phase on DC, whatever the profile says", () => {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "DC",
+      voltageV: 400,
+    };
+    armCharging(connector);
+    connector.addChargingProfile(ampProfile(200, 3));
+    expect(connector.activePhaseCount()).toBe(1);
+    expect(phasedSamples(connector)).toEqual([]);
+  });
+});

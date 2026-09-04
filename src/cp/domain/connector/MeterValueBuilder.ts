@@ -73,7 +73,10 @@ export function buildSampledValues(
   // on the wire that the `Current.Import` beside it contradicts (#301).
   const voltageV = effectiveVoltageV(settings ?? {});
   const powerFactor = effectivePowerFactor(settings ?? {});
-  const phases = settings?.currentType === "DC" ? 1 : (settings?.phases ?? 1);
+  // The phases actually in use — the connector's wiring narrowed by the
+  // active profile's `numberPhases`, the same count that produced the watt cap
+  // (#301) — not the wiring alone.
+  const phases = connector.activePhaseCount();
 
   for (const measurand of measurands) {
     const sample = buildSingleSample(measurand, context, {
@@ -87,8 +90,12 @@ export function buildSampledValues(
       powerFactor,
     });
     if (sample) samples.push(sample);
-    // Per-phase current on a 3-phase AC connector: the aggregate above is the
-    // total, and these are what a CSMS reading L1/L2/L3 expects to sum to it.
+    // Per-phase samples, but only when all three phases are actually in use.
+    // A profile restricting a 3-phase connector to fewer would otherwise have
+    // the message claim consumption on phases the CSMS excluded — and OCPP's
+    // `numberPhases` says how many phases, never which, so naming a subset of
+    // L1/L2/L3 would invent an allocation the profile never expressed. The
+    // aggregate sample alone is the honest answer there (#301).
     if (phases === 3 && PER_PHASE_MEASURANDS.has(measurand)) {
       for (const phase of ["L1", "L2", "L3"] as const) {
         const perPhase = buildSingleSample(measurand, context, {

@@ -272,14 +272,12 @@ export function currentAmpsFor(
  * twice the limit the CSMS set. Routing the A → W half through this function
  * makes the trip exact.
  *
- * `limitPhases` is the profile period's `numberPhases` (OCPP 1.6 §7.21). The
- * conversion uses `min(connector phases, limitPhases)`: a CSMS restricting a
- * 3-phase connector to one phase must lower the cap, and a profile naming
- * more phases than the connector is wired for cannot raise it. Because
- * {@link currentAmpsFor} always divides by the connector's own phase count,
- * that `min` is what guarantees the reported current stays at or below the
- * limit in both mismatch directions. DC ignores `limitPhases` entirely —
- * there are no phases to restrict.
+ * `limitPhases` is the profile period's `numberPhases` (OCPP 1.6 §7.21) and is
+ * folded in by {@link resolveActivePhases}. Because {@link currentAmpsFor}
+ * always divides by the connector's own phase count, taking the smaller of the
+ * two is what guarantees the reported current stays at or below the limit in
+ * both mismatch directions. DC ignores `limitPhases` entirely — there are no
+ * phases to restrict.
  */
 export function powerWattsForCurrent(
   amps: number,
@@ -289,21 +287,45 @@ export function powerWattsForCurrent(
   if (amps <= 0) return 0;
   const voltage = effectiveVoltageV(settings);
   if (settings.currentType === "DC") return amps * voltage;
+  return (
+    amps *
+    voltage *
+    resolveActivePhases(settings, limitPhases) *
+    effectivePowerFactor(settings)
+  );
+}
+
+/**
+ * How many phases the connector is actually delivering on right now: its own
+ * wiring, narrowed by the active charging profile period's `numberPhases`.
+ *
+ * The one place that rule lives, so that both halves of the pipeline read the
+ * same answer — the A → W conversion in {@link powerWattsForCurrent}, and the
+ * per-phase `MeterValues` sampling. A profile restricting a 3-phase connector
+ * to one phase lowers the watt cap; the message must not then claim
+ * consumption on the two phases the CSMS excluded (#301). A profile naming
+ * more phases than the connector is wired for cannot raise either, so the
+ * answer is the smaller of the two.
+ *
+ * Any non-negative integer counts, not just 1 or 3: OCPP allows
+ * `numberPhases: 2`, and `ChargingScheduleResolver`'s no-model branch already
+ * multiplies by whatever the profile named. Anything else — absent,
+ * fractional, negative, smuggled past the types by raw RPC — falls back to
+ * the connector's own count rather than being read as a restriction that was
+ * never expressed. DC has no phases at all and is always 1, whatever the
+ * profile says.
+ */
+export function resolveActivePhases(
+  settings: Pick<EVSettings, "currentType" | "phases">,
+  limitPhases?: number,
+): number {
+  if (settings.currentType === "DC") return 1;
   const connectorPhases = acPhases(settings);
-  // Any non-negative integer, not just 1 or 3: OCPP allows `numberPhases: 2`,
-  // and the no-model path below this one has always honoured whatever the
-  // profile named (`numberPhases ?? 3`). Restricting to {1, 3} here would
-  // make the two halves of the same conversion disagree for a legal profile,
-  // and would contradict the `min(connector phases, limitPhases)` rule stated
-  // above. Anything else -- absent, fractional, negative, smuggled past the
-  // types by raw RPC -- falls back to the connector's own count.
-  const phases =
-    typeof limitPhases === "number" &&
+  return typeof limitPhases === "number" &&
     Number.isInteger(limitPhases) &&
     limitPhases >= 0
-      ? Math.min(limitPhases, connectorPhases)
-      : connectorPhases;
-  return amps * voltage * phases * effectivePowerFactor(settings);
+    ? Math.min(limitPhases, connectorPhases)
+    : connectorPhases;
 }
 
 /** AC phase count for the derivations above. `phases` is `1 | 3`; anything

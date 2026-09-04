@@ -2,6 +2,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+// `parseStoredDefaultEv` is pure, so it is imported once here rather than
+// re-imported per test: a `vi.resetModules()` round trip re-transforms this
+// provider's whole module graph (both charge-point services, the persistence
+// layer) and is slow enough to trip the default 5 s timeout on a loaded host.
+// Only the module-level seed test, which has to observe import-time work,
+// pays that cost.
+import { parseStoredDefaultEv } from "./DataProvider";
 
 /**
  * Regression for #301: a malformed `chargingCurve` sitting in localStorage
@@ -26,24 +33,15 @@ afterEach(() => {
   vi.resetModules();
 });
 
-async function loadProvider() {
-  vi.resetModules();
-  return import("./DataProvider");
-}
-
 describe("parseStoredDefaultEv normalizes the stored charging curve (#301)", () => {
   it("discards an array of nulls", () => {
     const raw = JSON.stringify({ ...STORED_BASE, chargingCurve: [null] });
-    return loadProvider().then(({ parseStoredDefaultEv }) => {
-      expect(parseStoredDefaultEv(raw)?.chargingCurve).toEqual([]);
-    });
+    expect(parseStoredDefaultEv(raw)?.chargingCurve).toEqual([]);
   });
 
   it("discards a curve that is not an array", () => {
     const raw = JSON.stringify({ ...STORED_BASE, chargingCurve: {} });
-    return loadProvider().then(({ parseStoredDefaultEv }) => {
-      expect(parseStoredDefaultEv(raw)?.chargingCurve).toEqual([]);
-    });
+    expect(parseStoredDefaultEv(raw)?.chargingCurve).toEqual([]);
   });
 
   it("sorts and keeps a valid curve", () => {
@@ -54,21 +52,15 @@ describe("parseStoredDefaultEv normalizes the stored charging curve (#301)", () 
         { socPercent: 0, powerFraction: 1 },
       ],
     });
-    return loadProvider().then(({ parseStoredDefaultEv }) => {
-      expect(
-        parseStoredDefaultEv(raw)?.chargingCurve?.map((p) => p.socPercent),
-      ).toEqual([0, 80]);
-    });
+    expect(
+      parseStoredDefaultEv(raw)?.chargingCurve?.map((p) => p.socPercent),
+    ).toEqual([0, 80]);
   });
 
   it("returns null for absent or unusable storage", () => {
-    return loadProvider().then(({ parseStoredDefaultEv }) => {
-      expect(parseStoredDefaultEv(null)).toBeNull();
-      expect(parseStoredDefaultEv("not json")).toBeNull();
-      expect(
-        parseStoredDefaultEv(JSON.stringify({ modelName: "x" })),
-      ).toBeNull();
-    });
+    expect(parseStoredDefaultEv(null)).toBeNull();
+    expect(parseStoredDefaultEv("not json")).toBeNull();
+    expect(parseStoredDefaultEv(JSON.stringify({ modelName: "x" }))).toBeNull();
   });
 
   it("seeds the connector-domain override from the same guarded value", async () => {
@@ -78,7 +70,8 @@ describe("parseStoredDefaultEv normalizes the stored charging curve (#301)", () 
       STORAGE_KEY,
       JSON.stringify({ ...STORED_BASE, chargingCurve: [null] }),
     );
-    await loadProvider();
+    vi.resetModules();
+    await import("./DataProvider");
     const { getUserDefaultEVSettings, setUserDefaultEVSettings } =
       await import("../../cp/domain/connector/EVSettings");
     const seeded = getUserDefaultEVSettings() as EVSettings | null;

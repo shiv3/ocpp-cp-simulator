@@ -40,6 +40,8 @@ function threePhaseConnectorStub(): unknown {
       voltageV: 230,
     },
     currentScheduleLimitWatts: () => Infinity,
+    // Three phases in use: no profile restricts them (#301).
+    activePhaseCount: () => 3,
   };
 }
 
@@ -151,6 +153,8 @@ function taperedConnectorStub(): unknown {
       ],
     },
     currentScheduleLimitWatts: () => Infinity,
+    // DC has no phases (#301).
+    activePhaseCount: () => 1,
   };
 }
 

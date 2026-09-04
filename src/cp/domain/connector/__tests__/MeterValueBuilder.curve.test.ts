@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildSampledValues } from "../MeterValueBuilder";
 import type { Connector } from "../Connector";
 import type { EVSettings } from "../EVSettings";
+import { resolveActivePhases } from "../ChargingCurve";
 
 /**
  * The slice of `Connector` the sample builder actually reads. A stub rather
@@ -16,6 +17,8 @@ function connectorStub(options: {
   scheduleLimitW?: number;
   meterValue?: number;
   transactionInitialSoc?: number;
+  /** The active profile period's `numberPhases`, when one restricts us. */
+  limitNumberPhases?: number;
 }): Connector {
   return {
     status: options.status ?? "Charging",
@@ -34,6 +37,16 @@ function connectorStub(options: {
       ...options.evSettings,
     },
     currentScheduleLimitWatts: () => options.scheduleLimitW ?? Infinity,
+    // Mirrors `Connector.activePhaseCount()`: the wiring, narrowed by the
+    // active profile's `numberPhases`.
+    activePhaseCount: () =>
+      resolveActivePhases(
+        {
+          currentType: options.evSettings?.currentType,
+          phases: options.evSettings?.phases,
+        },
+        options.limitNumberPhases,
+      ),
   } as unknown as Connector;
 }
 
@@ -411,5 +424,77 @@ describe("the Voltage sample names the volts that produced the current (#301)", 
     });
     expect(valueOf(connector, "Voltage")).toBe(400);
     expect(valueOf(connector, "Current.Import")).toBeCloseTo(100, 1);
+  });
+});
+
+describe("per-phase samples honour the profile's phase restriction (#301)", () => {
+  /**
+   * The resolver lowers the watt cap using `min(connector phases, the
+   * period's numberPhases)`. The sampling side has to read the same count, or
+   * a 3-phase connector under a single-phase profile reports consumption on
+   * two phases the CSMS said it may not use.
+   */
+  const threePhase = (limitNumberPhases?: number) =>
+    connectorStub({
+      soc: 50,
+      evSettings: {
+        maxChargingPowerKw: 22,
+        currentType: "AC",
+        phases: 3,
+      },
+      limitNumberPhases,
+    });
+
+  const phased = (connector: Connector, measurand: string) =>
+    buildSampledValues(connector, [measurand], "Sample.Periodic").filter(
+      (s) => s.phase !== undefined,
+    );
+
+  it("emits no per-phase sample when the profile restricts to one phase", () => {
+    const connector = threePhase(1);
+    expect(phased(connector, "Current.Import")).toHaveLength(0);
+    expect(phased(connector, "Power.Active.Import")).toHaveLength(0);
+  });
+
+  it("emits no per-phase sample when the profile restricts to two phases", () => {
+    // OCPP's `numberPhases` says how many, never which, so naming L1 and L2
+    // would invent an allocation the profile never expressed.
+    expect(phased(threePhase(2), "Power.Active.Import")).toHaveLength(0);
+  });
+
+  it("still emits all three when the profile names three, or names none", () => {
+    for (const limit of [undefined, 3]) {
+      const connector = threePhase(limit);
+      expect(
+        phased(connector, "Power.Active.Import").map((s) => s.phase),
+      ).toEqual(["L1", "L2", "L3"]);
+    }
+  });
+
+  it("keeps the emitted phases summing to the whole-connector power", () => {
+    const connector = threePhase(3);
+    const samples = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    );
+    const aggregate = Number(
+      samples.find((s) => s.phase === undefined)?.value ?? "0",
+    );
+    const sum = samples
+      .filter((s) => s.phase !== undefined)
+      .reduce((acc, s) => acc + Number(s.value), 0);
+    expect(aggregate).toBeGreaterThan(0);
+    // Each sample is reported as a whole watt, so the three legs can differ
+    // from the aggregate by at most one watt each.
+    expect(Math.abs(sum - aggregate)).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps the aggregate itself unchanged when phases are restricted", () => {
+    // The restriction suppresses the per-phase detail; it does not alter the
+    // whole-connector number, which the schedule cap already governs.
+    expect(valueOf(threePhase(1), "Power.Active.Import")).toBe(
+      valueOf(threePhase(3), "Power.Active.Import"),
+    );
   });
 });

@@ -155,11 +155,14 @@ export class MeterValueScheduler {
 
     const current = this.callbacks.getCurrentValue();
 
-    // Check max value before incrementing
+    // Check max value before incrementing. Judged on the delivered energy —
+    // the register plus the fraction the last rounding could not publish — not
+    // on the published integer, for the same reason the post-tick check below
+    // is (#301).
     if (
       strategy.maxValue &&
       strategy.maxValue > 0 &&
-      current >= strategy.maxValue
+      current + this.carryWh >= strategy.maxValue
     ) {
       this.logger?.info?.(
         `[MeterValueScheduler] Max value reached (${strategy.maxValue}Wh) for connector ${this.connectorId}, stopping`,
@@ -203,10 +206,17 @@ export class MeterValueScheduler {
       this.callbacks.onSend(this.connectorId);
     }
 
+    // Judged on `cappedRaw`, the energy actually delivered, not on the integer
+    // that was published. A fractional `maxValue` below the next half-watt-hour
+    // boundary — 10.4 Wh, from a direct caller or an imported scenario — is
+    // reached exactly by `cappedRaw` and then rounds down to 10, so a check on
+    // the published value would never fire and the scheduler would tick
+    // forever, republishing the same 10 (#301). The register stays integral;
+    // only the stop condition looks at the fraction.
     if (
       strategy.maxValue &&
       strategy.maxValue > 0 &&
-      finalValue >= strategy.maxValue
+      cappedRaw >= strategy.maxValue
     ) {
       this.logger?.info?.(
         `[MeterValueScheduler] Max value reached (${strategy.maxValue}Wh) for connector ${this.connectorId}, stopping`,

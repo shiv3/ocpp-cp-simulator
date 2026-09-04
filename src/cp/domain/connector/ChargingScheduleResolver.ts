@@ -38,6 +38,14 @@ export interface ResolvedScheduleLimit {
   rawLimit: number | null;
   /** Unit the profile declared (`W` or `A`). */
   unit: ChargingRateUnitType | null;
+  /**
+   * The active period's `numberPhases`, verbatim (`null` when the period
+   * omits it or no profile is active). Carried out of the resolver so the
+   * MeterValues side can narrow its per-phase sampling to the phases the
+   * profile allows, using exactly the count that produced the watt cap
+   * (#301).
+   */
+  limitNumberPhases: number | null;
 }
 
 const UNCAPPED: ResolvedScheduleLimit = {
@@ -46,6 +54,7 @@ const UNCAPPED: ResolvedScheduleLimit = {
   periodIndex: null,
   rawLimit: null,
   unit: null,
+  limitNumberPhases: null,
 };
 
 /**
@@ -178,6 +187,7 @@ export function resolveScheduleLimitWatts(
     periodIndex: idx,
     rawLimit: period.limit,
     unit: profile.chargingRateUnit,
+    limitNumberPhases: period.numberPhases ?? null,
   };
 }
 

@@ -289,8 +289,12 @@ arming.
   even when the CSMS black-holes responses. It exists because the two classes of
   defect that recurred through review — "the process never exits" and
   sweep-level composition — are invariants about the whole run rather than about
-  any function, and so are invisible to unit tests. Gated by `bun run test:bun`
-  in CI.
+  any function, and so are invisible to unit tests. It covers both axes and
+  kills the daemon mid-run, and it is gated by `bun run test:bun` in CI. Its
+  mock CSMS is deliberately more permissive than a real one — no subprotocol
+  negotiation, no schema validation, never a CALLERROR — so a pass there says
+  nothing about handshake or version behaviour, which the test file records in
+  full.
 - `tsconfig.json` — this directory is outside `tsconfig.cli.json`'s
   `include`; typechecked separately, and referenced from the root
   `tsconfig.json` as a `composite` project so `tsc -b` covers it.

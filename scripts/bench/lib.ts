@@ -993,6 +993,25 @@ export class TokenBucket {
 
 /** Counting semaphore bounding concurrent in-flight work, so this script
  *  stays under the daemon's per-socket `INFLIGHT_CAP`. */
+/**
+ * A counting semaphore that **hands a released permit straight to the next
+ * waiter** instead of publishing it as available.
+ *
+ * The difference is not cosmetic. Publishing first — `available++`, then wake
+ * a waiter — leaves the permit visible for the whole gap between the wake-up
+ * and the waiter's continuation actually running, which is a microtask away.
+ * An `acquire()` arriving inside that gap took the permit, and the woken
+ * waiter then decremented as well, so both ran: concurrency exceeded the
+ * limit, `available` went negative, and it stayed wrong for the rest of the
+ * run. That defeated the whole point of the cap — staying under the daemon's
+ * `INFLIGHT_CAP` — and did so exactly under the contention this benchmark
+ * exists to create, where late-arriving acquisitions are the norm.
+ *
+ * With the hand-off there is no gap: a permit either belongs to a running
+ * holder or to a specific woken waiter, and a barging `acquire()` sees
+ * `available === 0` and queues behind it. That also makes the queue FIFO,
+ * which the publishing version silently was not.
+ */
 export class Semaphore {
   private available: number;
   private readonly waiters: Array<() => void> = [];
@@ -1005,13 +1024,18 @@ export class Semaphore {
       return () => this.release();
     }
     await new Promise<void>((resolve) => this.waiters.push(resolve));
-    this.available--;
+    // Deliberately no decrement: `release()` transferred the permit rather
+    // than publishing it, so it was never added back in the first place.
     return () => this.release();
   }
   private release(): void {
-    this.available++;
     const next = this.waiters.shift();
-    if (next) next();
+    if (next) {
+      // Straight to the waiter; `available` never rises, so nothing can barge.
+      next();
+      return;
+    }
+    this.available++;
   }
 }
 
@@ -1425,4 +1449,39 @@ export function unpredictedCreatedIds(
 ): string[] {
   const predicted = new Set(offered);
   return created.filter((id) => !predicted.has(id));
+}
+
+/** RPC error codes the daemon returns as a bare code, with no message behind
+ *  them: `createFailureReason` falls back to `err.code` when the failure
+ *  carries no text. */
+const BARE_RPC_CODES = new Set([
+  "invalid_params",
+  "not_found",
+  "internal",
+  "timeout",
+  "rate_limited",
+  "unauthorized",
+]);
+
+/**
+ * An extra sentence for a `cp.create_many` failure whose reason is a bare
+ * error code.
+ *
+ * `createFailureReason` in `src/cli/server/socketServer.ts` answers
+ * `err.message || err.code`, and the already-exists collision carries no
+ * message — so the operator sees `invalid_params` and nothing else. That code
+ * covers several unrelated causes, and after a run that also printed "this run
+ * did not create it" the bare code reads like a collision even when it was a
+ * bad `--csms-url` or `--ocpp-version`. Naming the candidates is the
+ * difference between a line that diagnoses and a line that misleads.
+ *
+ * Returns `""` when the daemon gave real text, which needs no help.
+ */
+export function createFailureHint(reason: string): string {
+  if (!BARE_RPC_CODES.has(reason.trim())) return "";
+  return (
+    ` — the daemon gave no detail beyond "${reason.trim()}", which covers an id` +
+    ` that already exists on it, a --csms-url it rejects, and an --ocpp-version` +
+    ` it will not create; check the daemon's own log to tell them apart`
+  );
 }

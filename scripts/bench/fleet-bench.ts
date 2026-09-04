@@ -27,6 +27,7 @@ import {
   benchCpId,
   benchIdPattern,
   cleanupIdsAfterBatch,
+  createFailureHint,
   cyclePeriodSec,
   daemonIsLocal,
   diffHistogram,
@@ -205,16 +206,51 @@ class SocketPool {
     cpId?: string,
     timeoutMs: number = RPC_TIMEOUT_MS,
   ): Promise<T> {
-    const p = this.pooled[this.rr % this.pooled.length]!;
-    this.rr++;
+    // One deadline for the whole call, started here rather than after
+    // admission. A call can wait through several token-bucket refills and
+    // semaphore permits before it is ever emitted, and timing only the ack
+    // meant `RPC_TIMEOUT_MS` bounded the last stage alone — so step setup and
+    // the "60 second" cleanup budget could both run far past the number they
+    // document, and a documented bound is the contract.
+    const deadline = Date.now() + Math.max(1, timeoutMs);
+    const p = this.pick();
     await p.bucket.take();
+    if (Date.now() >= deadline) {
+      throw new RpcFailedError(
+        "timeout",
+        `${method} timed out waiting for a rate-limit slot`,
+      );
+    }
     const release = await p.sem.acquire();
     try {
-      return await new Promise<T>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new RpcFailedError("timeout", `${method} timed out`)),
-          Math.max(1, timeoutMs),
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new RpcFailedError(
+          "timeout",
+          `${method} timed out waiting for an in-flight slot`,
         );
+      }
+      // Socket.IO **buffers** an emit issued on a disconnected socket and
+      // flushes it on reconnect, and our own timer cannot cancel a buffered
+      // packet or its ack callback. A timed-out RPC could therefore execute
+      // afterwards — a stale `start_transaction` or `stop_transaction`
+      // arriving long after the caller handled it as failed, corrupting the
+      // cadence and able to confirm a later cycle's waiter. Nothing is emitted
+      // on a socket that is not connected: `pick()` prefers a connected one,
+      // and if none is connected the call fails here rather than being queued
+      // for an unknowable future.
+      if (!p.socket.connected) {
+        throw new RpcFailedError(
+          "disconnected",
+          `${method} not sent: no control-plane socket is connected`,
+        );
+      }
+      return await new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          settled = true;
+          reject(new RpcFailedError("timeout", `${method} timed out`));
+        }, remainingMs);
         p.socket.emit(
           "rpc",
           { cpId, method, params },
@@ -223,6 +259,9 @@ class SocketPool {
               | { ok: true; result: T }
               | { ok: false; error: { code: string; message: string } },
           ) => {
+            // A late ack for a call already rejected is dropped rather than
+            // settling a promise nobody is waiting on any more.
+            if (settled) return;
             clearTimeout(timer);
             if (ack.ok) resolve(ack.result);
             else reject(new RpcFailedError(ack.error.code, ack.error.message));
@@ -232,6 +271,18 @@ class SocketPool {
     } finally {
       release();
     }
+  }
+
+  /** Round-robin, but skipping sockets that are not connected — a call is
+   *  rerouted to a live socket rather than buffered on a dead one. Falls back
+   *  to the plain round-robin pick when none is connected, so the caller gets
+   *  the explicit `disconnected` failure above. */
+  private pick(): PooledSocket {
+    for (let i = 0; i < this.pooled.length; i++) {
+      const candidate = this.pooled[this.rr++ % this.pooled.length]!;
+      if (candidate.socket.connected) return candidate;
+    }
+    return this.pooled[this.rr++ % this.pooled.length]!;
   }
 
   /** Whether any pooled socket is currently connected.
@@ -588,7 +639,7 @@ async function growFleet(
     for (const f of result.failed) {
       process.stderr.write(
         `[bench] create failed for ${f.cpId} (not deleted at teardown: this run ` +
-          `did not create it): ${f.reason}\n`,
+          `did not create it): ${f.reason}${createFailureHint(f.reason)}\n`,
       );
     }
     remaining -= chunk;

@@ -426,7 +426,27 @@ export async function probeUpgradeRefusal(
     return null;
   }
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  // `ws://user:password@host` is a supported way to carry Basic credentials,
+  // and `fetch` silently DROPS userinfo rather than sending it (measured: the
+  // server sees no Authorization header). Probing without them would ask a
+  // different question and answer 401 for the wrong reason, so they are moved
+  // into the header the handshake would have sent. An Authorization the
+  // caller already set wins -- that is the one the socket used.
+  const userinfo =
+    url.username || url.password
+      ? btoa(
+          `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`,
+        )
+      : null;
+  url.username = "";
+  url.password = "";
+  const hasAuthorization = Object.keys(options.headers).some(
+    (key) => key.toLowerCase() === "authorization",
+  );
   const headers: Record<string, string> = {
+    ...(userinfo && !hasAuthorization
+      ? { Authorization: `Basic ${userinfo}` }
+      : {}),
     ...options.headers,
     Upgrade: "websocket",
     Connection: "Upgrade",

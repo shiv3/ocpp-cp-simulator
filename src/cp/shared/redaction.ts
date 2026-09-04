@@ -44,7 +44,7 @@ export function isSensitiveKeyName(key: string): boolean {
  * messages loggable). The username is kept: it is the charge point id in
  * every OCPP use of this form, and losing it would cost the diagnosis.
  */
-const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+):[^/\s@]*@/gi;
+const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*):[^/\s@]*@/gi;
 
 /**
  * Credentials carried as a query parameter. `ocpp_ws_secret` is this

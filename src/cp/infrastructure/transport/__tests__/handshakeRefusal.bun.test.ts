@@ -169,6 +169,34 @@ describe("probeUpgradeRefusal", () => {
     }
   }, 25_000);
 
+  it("carries ws://user:password@host credentials into the probe", async () => {
+    // fetch drops userinfo, so without this the probe asks unauthenticated
+    // and a 401 would mean "no credentials" rather than "these were refused".
+    let seen: string | null = null;
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        seen = req.headers.get("authorization");
+        return new Response("", { status: 401 });
+      },
+    });
+    try {
+      const result = await probeUpgradeRefusal({
+        url: `ws://CP001:s3cr3t@127.0.0.1:${server.port}/ocpp/`,
+        protocols: [],
+        headers: {},
+        useNodeWsFallback: false,
+      });
+
+      expect(result).toEqual({ status: 401 });
+      expect(seen).toBe(
+        `Basic ${Buffer.from("CP001:s3cr3t").toString("base64")}`,
+      );
+    } finally {
+      server.stop(true);
+    }
+  });
+
   it("returns null rather than throwing when it cannot conclude", async () => {
     expect(
       await probeUpgradeRefusal({

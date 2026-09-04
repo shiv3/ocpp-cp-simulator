@@ -107,6 +107,14 @@ describe("URL credentials (#288)", () => {
     expect(redacted).toContain("csms.example/ocpp/");
   });
 
+  it("redacts a password when the username is empty", () => {
+    // `wss://:secret@host` is what the URL serializer produces for Basic auth
+    // with an empty username, and it is a valid URL.
+    expect(
+      redactSensitiveText("wss://:s3cr3t@csms.example/ocpp/"),
+    ).not.toContain("s3cr3t");
+  });
+
   it("redacts it for wss:// and https:// alike", () => {
     for (const scheme of ["wss", "https", "http"]) {
       expect(

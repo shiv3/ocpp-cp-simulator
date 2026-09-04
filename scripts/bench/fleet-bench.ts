@@ -14,7 +14,9 @@ import { io, type Socket } from "socket.io-client";
 
 import { CP_CREATE_MANY_MAX } from "../../src/protocol/limits.ts";
 import {
+  BENCH_OCPP_VERSIONS,
   BenchValidationError,
+  CALL_WATCHDOG_SEC,
   Semaphore,
   TokenBucket,
   assertDaemonEmpty,
@@ -26,21 +28,19 @@ import {
   mergeHistogramDeltas,
   parseArgv,
   parseExposition,
+  recommendedWarmupSec,
   redactOptions,
   sleep,
+  staggerOffsetsMs,
   validateOptions,
   type BenchOptions,
   type FleetGauge,
   type Sample,
 } from "./lib.ts";
+import { OCPP_1_6 } from "../../src/cp/domain/types/OcppVersion.ts";
 
 const CALL_DURATION_METRIC = "ocppcp_ocpp_call_duration_seconds";
 const CALL_TIMEOUTS_METRIC = "ocppcp_ocpp_call_timeouts_total";
-
-/** `OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS`. A CALL sent inside the last
- *  30s of a measurement window has its watchdog fire after the window closes,
- *  so its timeout is attributed to the next step. */
-const CALL_WATCHDOG_SEC = 30;
 
 // Per-socket pacing, kept safely under the daemon's `RPC_RATE_PER_SEC` (100)
 // and `INFLIGHT_CAP` (64) so this script's own control-plane traffic never
@@ -52,6 +52,17 @@ const INFLIGHT_PER_SOCKET = 48;
 const MAX_SOCKETS = 10;
 const CPS_PER_SOCKET = 200;
 const RPC_TIMEOUT_MS = 35_000;
+
+/** Overall budget for the best-effort `cp.delete` sweep at the end of a run
+ *  (and on Ctrl-C). Cleanup used to delete sequentially with the full
+ *  {@link RPC_TIMEOUT_MS} per charge point, so a dead daemon turned a 2000-CP
+ *  run's teardown into ~19 hours of blocked failure handling and an
+ *  unresponsive Ctrl-C. Anything still registered when this elapses is
+ *  reported and abandoned. */
+const CLEANUP_BUDGET_MS = 60_000;
+/** Concurrent `cp.delete` calls during cleanup. Well under the pool's
+ *  per-socket `INFLIGHT_PER_SOCKET`, and the token buckets still pace them. */
+const CLEANUP_CONCURRENCY = 32;
 
 interface PooledSocket {
   readonly socket: Socket;
@@ -133,6 +144,7 @@ class SocketPool {
     method: string,
     params: unknown,
     cpId?: string,
+    timeoutMs: number = RPC_TIMEOUT_MS,
   ): Promise<T> {
     const p = this.pooled[this.rr % this.pooled.length]!;
     this.rr++;
@@ -142,7 +154,7 @@ class SocketPool {
       return await new Promise<T>((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new RpcFailedError("timeout", `${method} timed out`)),
-          RPC_TIMEOUT_MS,
+          Math.max(1, timeoutMs),
         );
         p.socket.emit(
           "rpc",
@@ -161,6 +173,17 @@ class SocketPool {
     } finally {
       release();
     }
+  }
+
+  /** Whether any pooled socket is currently connected.
+   *
+   *  socket.io *buffers* an `emit` issued while disconnected rather than
+   *  failing it, so an RPC against a dead daemon does not error — it sits in
+   *  the buffer until its timeout fires. Cleanup checks this first so a run
+   *  whose daemon went away skips the delete sweep outright instead of
+   *  spending its whole budget discovering that, one timeout at a time. */
+  anyConnected(): boolean {
+    return this.pooled.some((p) => p.socket.connected);
   }
 
   async closeAll(): Promise<void> {
@@ -301,6 +324,10 @@ async function growFleet(
       failed: { cpId: string; reason: string }[];
     }>("cp.create_many", {
       wsUrl: opts.csmsUrl,
+      // Passed explicitly: `cp.create_many` defaults to OCPP-1.6J, so against
+      // a 2.x-only CSMS every handshake was rejected and the run reported an
+      // unsettled fleet with no latency data and no reason why.
+      ocppVersion: opts.ocppVersion,
       connectors: 1,
       vendor: "ocpp-cp-simulator",
       model: "fleet-bench",
@@ -359,10 +386,27 @@ function armLoad(
   opts: BenchOptions,
 ): { stop: () => void; ready: Promise<void> } {
   let stopped = false;
-  const timers: ReturnType<typeof setTimeout>[] = [];
+  // Only *live* timers, and each one removes itself as it fires. A plain
+  // array that every cycle appended to grew by two handles per transaction
+  // per charge point and never shrank, so a long 2000-CP run retained
+  // millions of dead handles for a `stop()` that would only ever clear them.
+  const live = new Set<ReturnType<typeof setTimeout>>();
+
+  /** `setTimeout` whose handle leaves {@link live} the moment it fires, and
+   *  which does not run its body at all once `stop()` has been called. */
+  function schedule(fn: () => void, ms: number): void {
+    if (stopped) return;
+    const timer = setTimeout(() => {
+      live.delete(timer);
+      if (stopped) return;
+      fn();
+    }, ms);
+    live.add(timer);
+  }
 
   const ready = (async () => {
     for (const cpId of cpIds) {
+      if (stopped) return;
       try {
         await pool.rpc(
           "start_heartbeat",
@@ -375,14 +419,18 @@ function armLoad(
         );
       }
     }
+    // Re-checked after the arming loop's awaits, the way `AutoTrafficRunner`
+    // re-checks after every await (#300): `stop()` landing mid-loop would
+    // otherwise be followed by one fresh timer per charge point.
+    if (stopped) return;
     if (opts.txIntervalSec <= 0) return;
-    for (const cpId of cpIds) {
-      // Stagger each CP's first cycle across one interval so the fleet
-      // reaches steady state instead of bursting in lockstep.
-      const offsetMs = Math.random() * opts.txIntervalSec * 1000;
-      const timer = setTimeout(() => void cycle(cpId), offsetMs);
-      timers.push(timer);
-    }
+    // Evenly spaced, never random: the cycle period is one --tx-interval, so
+    // `i/count` of an interval is exact steady state, and two runs with the
+    // same flags issue the same traffic (see `staggerOffsetsMs`).
+    const offsets = staggerOffsetsMs(cpIds.length, opts.txIntervalSec);
+    cpIds.forEach((cpId, i) => {
+      schedule(() => void cycle(cpId), offsets[i]!);
+    });
   })();
 
   async function cycle(cpId: string): Promise<void> {
@@ -394,27 +442,32 @@ function armLoad(
         `[bench] start_transaction failed for ${cpId}: ${String(err)}\n`,
       );
     }
+    // The RPC above can be in flight when `stop()` runs; without this check
+    // the callback installs a timer after cleanup already cleared the set,
+    // keeping the process alive for up to half a --tx-interval.
+    if (stopped) return;
     const holdMs = Math.max(1000, (opts.txIntervalSec * 1000) / 2);
-    const timer = setTimeout(async () => {
-      if (stopped) return;
-      try {
-        await pool.rpc("stop_transaction", { connector: 1 }, cpId);
-      } catch (err) {
-        process.stderr.write(
-          `[bench] stop_transaction failed for ${cpId}: ${String(err)}\n`,
-        );
-      }
-      const nextTimer = setTimeout(() => void cycle(cpId), holdMs);
-      timers.push(nextTimer);
+    schedule(() => {
+      void (async () => {
+        try {
+          await pool.rpc("stop_transaction", { connector: 1 }, cpId);
+        } catch (err) {
+          process.stderr.write(
+            `[bench] stop_transaction failed for ${cpId}: ${String(err)}\n`,
+          );
+        }
+        if (stopped) return;
+        schedule(() => void cycle(cpId), holdMs);
+      })();
     }, holdMs);
-    timers.push(timer);
   }
 
   return {
     ready,
     stop: () => {
       stopped = true;
-      for (const t of timers) clearTimeout(t);
+      for (const t of live) clearTimeout(t);
+      live.clear();
     },
   };
 }
@@ -468,6 +521,77 @@ function row(r: StepResult): string[] {
   ];
 }
 
+/** Best-effort teardown of everything this run created, bounded by
+ *  {@link CLEANUP_BUDGET_MS} and run {@link CLEANUP_CONCURRENCY}-wide.
+ *
+ *  Bounded because it is best-effort: deleting sequentially with the full
+ *  35s RPC timeout each meant a daemon that had died turned teardown of a
+ *  2000-CP fleet into hours of blocked failure handling and an unresponsive
+ *  Ctrl-C. Anything left is named in the output, because the next run's
+ *  preflight will refuse this daemon over it (`assertDaemonEmpty`). */
+async function deleteFleet(
+  pool: SocketPool,
+  cpIds: readonly string[],
+): Promise<void> {
+  if (cpIds.length === 0) return;
+  if (!pool.anyConnected()) {
+    process.stderr.write(
+      `[bench] skipping cleanup: no control-plane socket is connected, so ` +
+        `${cpIds.length} charge point(s) remain on the daemon. Restart it, or ` +
+        `delete them before the next run — the preflight refuses a daemon that ` +
+        `already holds charge points.\n`,
+    );
+    return;
+  }
+  process.stderr.write(
+    `[bench] cleaning up ${cpIds.length} charge point(s) (up to ${CLEANUP_BUDGET_MS / 1000}s)\n`,
+  );
+  const deadline = Date.now() + CLEANUP_BUDGET_MS;
+  let next = 0;
+  let deleted = 0;
+  // One timeout means the daemon has stopped answering; the remaining ids
+  // would each spend the rest of the budget learning the same thing.
+  let daemonUnresponsive = false;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (daemonUnresponsive) return;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return;
+      const i = next++;
+      if (i >= cpIds.length) return;
+      try {
+        await pool.rpc(
+          "cp.delete",
+          { cpId: cpIds[i]! },
+          undefined,
+          remainingMs,
+        );
+        deleted++;
+      } catch (err) {
+        if (err instanceof RpcFailedError && err.code === "timeout") {
+          daemonUnresponsive = true;
+        } else if (err instanceof RpcFailedError && err.code === "not_found") {
+          // Already gone — the outcome cleanup wanted, so it counts as done
+          // rather than inflating the "still registered" tally below.
+          deleted++;
+        }
+        // Anything else is best-effort and simply left behind.
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(CLEANUP_CONCURRENCY, cpIds.length) }, worker),
+  );
+  const left = cpIds.length - deleted;
+  if (left > 0) {
+    process.stderr.write(
+      `[bench] cleanup gave up with ${left} charge point(s) still registered` +
+        `${daemonUnresponsive ? " (the daemon stopped answering)" : ""}. The next ` +
+        `run's preflight will refuse this daemon until they are gone.\n`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   let opts: BenchOptions;
   try {
@@ -491,11 +615,23 @@ async function main(): Promise<void> {
   process.stderr.write(
     `[bench] mode: ${opts.txIntervalSec > 0 ? `active (tx every ~${opts.txIntervalSec}s)` : "idle (heartbeat only)"}, heartbeat every ${opts.heartbeatIntervalSec}s\n`,
   );
-  if (opts.durationSec < 2 * CALL_WATCHDOG_SEC) {
+  process.stderr.write(
+    `[bench] OCPP version: ${opts.ocppVersion}, warmup ${opts.warmupSec}s per step\n`,
+  );
+  if (opts.ocppVersion !== OCPP_1_6) {
     process.stderr.write(
-      `[bench] NOTE: --duration ${opts.durationSec}s is under 2x the ${CALL_WATCHDOG_SEC}s CALL watchdog, ` +
-        `so a timeout for a call sent late in a window lands in the next step's ` +
-        `"timeouts" column. Use --duration ${2 * CALL_WATCHDOG_SEC} or more to keep the knee attributed to the right N.\n`,
+      `[bench] NOTE: the 30s per-CALL watchdog is implemented only in the ` +
+        `OCPP-1.6J message handler, so on ${opts.ocppVersion} the "timeouts" column ` +
+        `counts only pending-call-map evictions. Latency, "late>30s", errors and ` +
+        `reconnects are unaffected.\n`,
+    );
+  }
+  const recommendedWarmup = recommendedWarmupSec(opts.txIntervalSec);
+  if (opts.warmupSec < recommendedWarmup) {
+    process.stderr.write(
+      `[bench] NOTE: --warmup ${opts.warmupSec}s is under the ${recommendedWarmup}s this run needs ` +
+        `(${opts.txIntervalSec}s stagger ramp + the ${CALL_WATCHDOG_SEC}s CALL watchdog), so a step's ` +
+        `"timeouts" delta can still contain calls issued before that step reached N.\n`,
     );
   }
 
@@ -522,19 +658,17 @@ async function main(): Promise<void> {
   // connectors already mid-session).
   const stopLoads: Array<() => void> = [];
 
-  const cleanup = async () => {
-    for (const stop of stopLoads) stop();
-    process.stderr.write(
-      `[bench] cleaning up ${allCpIds.length} charge point(s)\n`,
-    );
-    for (const cpId of allCpIds) {
-      try {
-        await pool.rpc("cp.delete", { cpId });
-      } catch {
-        // best-effort
-      }
-    }
-    await pool.closeAll();
+  // Runs once: the `finally` below and the SIGINT handler can both reach it,
+  // and a second concurrent delete sweep would double the teardown budget for
+  // charge points the first sweep is already deleting.
+  let cleanupStarted: Promise<void> | null = null;
+  const cleanup = async (): Promise<void> => {
+    cleanupStarted ??= (async () => {
+      for (const stop of stopLoads) stop();
+      await deleteFleet(pool, allCpIds);
+      await pool.closeAll();
+    })();
+    return cleanupStarted;
   };
   process.on("SIGINT", () => {
     void cleanup().finally(() => process.exit(130));
@@ -564,6 +698,21 @@ async function main(): Promise<void> {
       const load = armLoad(pool, created, opts);
       stopLoads.push(load.stop);
       await load.ready;
+
+      // Warm up *before* the `before` scrape, not after it. Every counter
+      // below is a delta between the two scrapes, and a watchdog timeout
+      // increments 30s after the CALL it belongs to — so without holding this
+      // N and its load steady for the stagger ramp plus one watchdog
+      // interval, the delta would carry expirations for calls issued during
+      // the previous step, this step's boot, or its ramp, and the first
+      // non-zero timeout would be reported at a larger N than the one that
+      // produced it.
+      if (opts.warmupSec > 0) {
+        process.stderr.write(
+          `[bench] N=${n}: warming up for ${opts.warmupSec}s before the first scrape\n`,
+        );
+        await sleep(opts.warmupSec * 1000);
+      }
 
       process.stderr.write(
         `[bench] N=${n}: measuring for ${opts.durationSec}s\n`,
@@ -684,6 +833,11 @@ Options:
   --heartbeat-interval <sec>  Heartbeat cadence applied to every CP (default 5)
   --tx-interval <seconds>     Start/stop transaction cycle period; 0 = idle/heartbeat-only (default 0)
   --settle-timeout <seconds>  How long to wait for new CPs to connect per step (default 60)
+  --warmup <seconds>          Hold the new N and its load this long before the first
+                              scrape, so a step's timeouts are its own
+                              (default ${CALL_WATCHDOG_SEC} + --tx-interval)
+  --ocpp-version <version>    OCPP version every benchmarked CP is created with
+                              (default OCPP-1.6J; one of ${BENCH_OCPP_VERSIONS.join(", ")})
   --health-path <path>        Daemon health path (default /v1/healthz)
   --daemon-basic-auth-user <u>
   --daemon-basic-auth-pass <p>  Basic Auth for a protected daemon (both or neither)

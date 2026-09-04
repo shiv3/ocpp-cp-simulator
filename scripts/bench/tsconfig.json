@@ -22,7 +22,12 @@
   },
   // `composite` (this project is referenced from the root tsconfig, so it is
   // built rather than orphaned) requires every file in the program to be
-  // listed. `fleet-bench.ts` imports CP_CREATE_MANY_MAX from the protocol
-  // limits, which is the single file it borrows from src/.
-  "include": ["**/*.ts", "../../src/protocol/limits.ts"]
+  // listed. The two files borrowed from src/ are CP_CREATE_MANY_MAX (the
+  // batch size `cp.create_many` accepts) and the OCPP version list
+  // `--ocpp-version` validates against — both dependency-free constants.
+  "include": [
+    "**/*.ts",
+    "../../src/protocol/limits.ts",
+    "../../src/cp/domain/types/OcppVersion.ts"
+  ]
 }

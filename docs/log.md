@@ -758,3 +758,29 @@ Sixth review pass on PR #325.
   rest: the socket.io dispatcher's only other `handled({…})` sites _construct_
   results from void-returning calls (`remove_connector`, `remove_scenario`)
   rather than sanitise a facade result, so no other field has this shape.
+
+## [2026-09-05] ingest | `--watch`: the read-then-watch window on the other path, and a reset that raced the run it stopped (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — states that both watched kinds establish the
+  watch before reading the copy they reconcile against, so an edit landing
+  between load and watch is still seen.
+- The idTag path had the read-then-watch ordering the scenario path had already
+  been fixed for. Swapping the two closes it, and closes the wider caller
+  window too: the idTag reconciliation compares _tags_ against the live pool
+  rather than bytes against a cached copy, so reading after the watch is
+  enough. `FileReloadManager` has exactly two `watcher.watch` call sites —
+  the idTag one and `registerScenarioFile` — so there is no third registration
+  path with this shape.
+- `reset_scenario` stopped a run and then announced the settle synchronously,
+  inside the window where that run's `finally` is still queued. A drained
+  reload whose definition auto-starts would be torn down by the run it
+  replaced. The announcement is now made only when there was no run to stop;
+  otherwise the stopped run's own post-cleanup notification does the drain,
+  which keeps one terminator per run instead of two racing ones.
+- The invariant is now asserted in code rather than assumed: a run's cleanup
+  checks that it is still the registered executor before touching any of the
+  bookkeeping keyed by its scenario id, and does nothing but announce itself if
+  it has been superseded. Every drain entry point is either post-cleanup by
+  construction (a run's own `finally`; a connector's `transactionChange` to
+  null) or re-checks a gate that is authoritative at that moment (the registry
+  sync, and the reconcile after a scenario registration).

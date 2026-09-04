@@ -328,6 +328,12 @@ absolute path when the charge point is created** and stored that way, so a
 daemon restarted from a different working directory still watches the file the
 operator meant. See [State persistence](../concepts/state-persistence.md).
 
+Both watched kinds establish the watch **before** reading the copy they compare
+against, so an edit landing between a file being loaded and its watch starting
+is still seen — otherwise the cached text would already be the pre-edit copy and
+the reconciliation would compare the old file with the state it produced, find
+them equal, and leave the charge point stale.
+
 A file edited **while the daemon was stopped** is reconciled at startup rather
 than merely watched from then on: the restore brings back the tags as of the
 last time the daemon saw the file, so the daemon compares the file against what

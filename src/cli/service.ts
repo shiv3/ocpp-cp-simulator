@@ -1479,6 +1479,20 @@ export class CLIChargePointService {
     });
 
     executor.start(resumeOpts).finally(() => {
+      // The invariant, asserted rather than assumed. Every teardown below is
+      // keyed by `scenarioId`, so a *later* run of the same scenario that began
+      // while this promise was queued would have its executor, run id and
+      // transcript deleted by the run it replaced — and then be finalized under
+      // the wrong verdict. Nothing should be able to start a replacement inside
+      // that window (drains are entered only from points where cleanup is
+      // complete), but "should" is what the last three ordering bugs in this
+      // feature had in common. If this run is no longer the registered one its
+      // bookkeeping has already been replaced, so the only correct action is to
+      // touch none of it.
+      if (this._executors.get(scenarioId) !== executor) {
+        this.notifySessionSettled({ connectorId, scenarioId });
+        return;
+      }
       // Freeze the terminal status BEFORE dropping the executor, so
       // scenario_status keeps answering once this map entry is gone. A manual
       // stop takes the same snapshot in stopScenario, ahead of executor.stop().
@@ -1919,7 +1933,8 @@ export class CLIChargePointService {
    * drop the persisted scenario position.
    */
   resetScenario(connectorId: number, scenarioId: string): void {
-    if (this._executors.has(scenarioId)) {
+    const stoppedRun = this._executors.has(scenarioId);
+    if (stoppedRun) {
       this.stopScenario(connectorId, scenarioId);
     }
 
@@ -1927,10 +1942,18 @@ export class CLIChargePointService {
     if (!connector) return;
 
     connector.transaction = null;
-    // The setter does not emit `transactionChange`, so the forwarder above
-    // cannot see this one (#314). Announce it here or a reload held behind this
-    // transaction has nothing to release it.
-    this.notifySessionSettled({ connectorId, scenarioId: null });
+    // The setter does not emit `transactionChange`, so nothing else would
+    // announce this one (#314) — but only announce it here when there was no
+    // run to stop. `stopScenario` drops the executor synchronously and leaves
+    // its `start()` promise's `finally` queued as a microtask; announcing now
+    // drains a held reload *inside* that window, and a reloaded definition with
+    // a matching connect trigger can auto-start immediately, whereupon the old
+    // `finally` runs and tears down the run it never started. The stopped run's
+    // own post-cleanup notification does the drain instead, which keeps one
+    // terminator per run rather than two racing ones.
+    if (!stoppedRun) {
+      this.notifySessionSettled({ connectorId, scenarioId: null });
+    }
 
     const reservation =
       this._chargePoint.reservationManager.getReservationForConnector(

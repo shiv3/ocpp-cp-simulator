@@ -1,0 +1,187 @@
+import { describe, it, expect } from "bun:test";
+import type * as fsTypes from "fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+
+import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
+import { CLIChargePointService } from "../../service";
+import { CPRegistry } from "../CPRegistry";
+import { EventBus } from "../eventBus";
+import { FileReloadManager } from "../FileReloadManager";
+import { FileWatcher, type WatchFactory } from "../FileWatcher";
+import { runStartupScenario } from "../startServer";
+
+/**
+ * `--watch` over a `--scenario-template-file` fan-out (#314).
+ *
+ * The startup flags are the case the issue is actually about — a human editing
+ * a scenario file by hand — and they are the one registration path that does
+ * not go through the RPC layer, so it needs its own coverage. The fan-out
+ * matters too: each connector gets its own instance, and a reload has to rerun
+ * the same per-connector rewrite instead of collapsing every connector onto the
+ * file's own `targetId`.
+ */
+
+/** A hand-driven `fs.watch`: the file is real, only the notification is not. */
+class TestWatchBackend {
+  private readonly listeners = new Map<
+    string,
+    Set<(eventType: string, filename: string | null) => void>
+  >();
+
+  readonly factory: WatchFactory = (directory, listener) => {
+    let set = this.listeners.get(directory);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(directory, set);
+    }
+    set.add(listener);
+    const handle = {
+      on: () => handle,
+      close: () => {
+        set?.delete(listener);
+      },
+    };
+    return handle as unknown as fsTypes.FSWatcher;
+  };
+
+  save(filePath: string, contents: string): void {
+    writeFileSync(filePath, contents);
+    for (const listener of [...(this.listeners.get(dirname(filePath)) ?? [])]) {
+      listener("change", basename(filePath));
+    }
+  }
+}
+
+function template(delayMs: number): string {
+  return JSON.stringify({
+    id: "startup-template",
+    name: "Startup template",
+    targetType: "connector",
+    targetId: 1,
+    trigger: { type: "manual" },
+    nodes: [
+      {
+        id: "wait",
+        type: "delay",
+        position: { x: 0, y: 0 },
+        data: { label: "Wait", delaySeconds: delayMs },
+      },
+    ],
+    edges: [],
+  });
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  what: string,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** The `delaySeconds` of the single node in the instance on this connector. */
+function loadedDelay(
+  svc: CLIChargePointService,
+  connectorId: number,
+): number | null {
+  const scenarioId = svc.listScenarios(connectorId)[0]?.scenarioId;
+  if (!scenarioId) return null;
+  const node = svc.getScenario(connectorId, scenarioId)?.nodes[0] as
+    { data?: { delaySeconds?: number } } | undefined;
+  return node?.data?.delaySeconds ?? null;
+}
+
+describe("--watch over a startup scenario file (#314)", () => {
+  it("re-reads --scenario-template-file and reinstantiates it per connector", async () => {
+    const csms = startMockCsms();
+    const registry = new CPRegistry(new EventBus());
+    const bus = new EventBus();
+    const backend = new TestWatchBackend();
+    const fileReload = new FileReloadManager(registry, bus, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314",
+      wsUrl: csms.url,
+      connectors: 2,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-startup-"));
+    const templateFile = join(tmpDir, "template.json");
+    writeFileSync(templateFile, template(11));
+
+    try {
+      await svc.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      const runPromise = runStartupScenario(
+        svc,
+        {
+          scenario: null,
+          scenarioTemplate: null,
+          scenarioTemplateFile: templateFile,
+          scenarioConnector: "all",
+        },
+        2,
+        fileReload,
+      );
+      csms.replyCallResult(boot.messageId, {
+        currentTime: new Date().toISOString(),
+        interval: 300,
+        status: "Accepted",
+      });
+      await runPromise;
+
+      // One registration per connector, all on the one file.
+      expect(fileReload.watchedPaths()).toEqual([templateFile]);
+      expect(loadedDelay(svc, 1)).toBe(11);
+      expect(loadedDelay(svc, 2)).toBe(11);
+      const idsBefore = [
+        svc.listScenarios(1)[0]?.scenarioId,
+        svc.listScenarios(2)[0]?.scenarioId,
+      ];
+      expect(idsBefore[0]).not.toBe(idsBefore[1]);
+
+      backend.save(templateFile, template(22));
+      await waitFor(
+        () => loadedDelay(svc, 1) === 22 && loadedDelay(svc, 2) === 22,
+        "both connectors to pick up the edited template",
+      );
+
+      // The per-connector rewrite ran again: without it both connectors would
+      // come back pointing at the file's own targetId (1), and connector 2
+      // would be driving connector 1.
+      expect(svc.getScenario(1, idsBefore[0] as string)?.targetId).toBe(1);
+      expect(svc.getScenario(2, idsBefore[1] as string)?.targetId).toBe(2);
+
+      // Still one instance per connector, under the ids they were loaded as:
+      // a reload replaces, it never adds.
+      expect(svc.listScenarios(1)).toHaveLength(1);
+      expect(svc.listScenarios(2)).toHaveLength(1);
+      expect([
+        svc.listScenarios(1)[0]?.scenarioId,
+        svc.listScenarios(2)[0]?.scenarioId,
+      ]).toEqual(idsBefore);
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

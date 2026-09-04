@@ -1,5 +1,4 @@
 import type { Server } from "bun";
-import * as fs from "fs";
 import * as path from "path";
 import type { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
@@ -18,6 +17,7 @@ import {
 } from "../soapPath";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "../../protocol/limits";
 import { appVersion } from "../appVersion";
+import { MAX_ID_TAGS, readIdTagsFile } from "./idTagFile";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -748,53 +748,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-/**
- * How many idTags one pool may hold. Bounded because the list is persisted as
- * JSON on the charge point row and drawn from on a hot path; a tag file is an
- * operator-supplied input like any other.
- */
-const MAX_ID_TAGS = 1_000;
-
-/** Matches the inline form's `STR_256`, so `file` is not a way around it. */
-const MAX_ID_TAG_LENGTH = 256;
-
-/** Read an idTag file: a JSON array of non-empty strings. */
-function readIdTagsFile(filePath: string): string[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf-8");
-  } catch (err) {
-    throw new Error(
-      `idTagPool.file "${filePath}" could not be read: ${err instanceof Error ? err.message : String(err)}`,
-      { cause: err },
-    );
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`idTagPool.file "${filePath}" is not valid JSON`);
-  }
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every((t) => typeof t === "string" && t.length > 0)
-  ) {
-    throw new Error(
-      `idTagPool.file "${filePath}" must hold a JSON array of non-empty strings`,
-    );
-  }
-  // The same per-tag bound the inline form gets from `STR_256`. Without it the
-  // file was a way around the identifier cap, persisting and presenting
-  // arbitrarily long tags.
-  const tooLong = parsed.find((t) => t.length > MAX_ID_TAG_LENGTH);
-  if (tooLong !== undefined) {
-    throw new Error(
-      `idTagPool.file "${filePath}" holds a tag longer than ${MAX_ID_TAG_LENGTH} characters`,
-    );
-  }
-  return parsed;
-}
-
 /** Whether a string parses as a `ws:` / `wss:` URL. */
 function isWebSocketUrl(value: string): boolean {
   try {
@@ -900,11 +853,14 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     }
   }
 
-  // The `file` form is resolved here, once, so what the charge point stores
-  // and persists is always the list itself: a file edited later cannot
-  // silently change a running charge point, and a bad path fails the create
-  // rather than the first transaction.
+  // The `file` form is resolved here, so what the charge point stores and
+  // persists is always the list itself, and a bad path fails the create rather
+  // than the first transaction. The path is kept alongside it (#314): without
+  // `--watch` nothing re-reads it, but the daemon cannot re-establish a watch
+  // for a charge point restored from `--state-db` unless it knows where the
+  // list came from.
   let idTags: readonly string[] | undefined;
+  let idTagFile: string | undefined;
   let idTagDistribution: ChargePointInitOptions["idTagDistribution"];
   if (isRecord(body.idTagPool)) {
     const pool = body.idTagPool;
@@ -928,6 +884,7 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       }
     } else if (typeof pool.file === "string" && pool.file.length > 0) {
       idTags = readIdTagsFile(pool.file);
+      idTagFile = pool.file;
     }
     if (!idTags || idTags.length === 0) {
       throw new Error("idTagPool needs a non-empty tags array or a file");
@@ -1017,6 +974,7 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       : {}),
     ...(urlDistribution ? { urlDistribution } : {}),
     ...(idTags ? { idTags } : {}),
+    ...(idTagFile ? { idTagFile } : {}),
     ...(idTagDistribution ? { idTagDistribution } : {}),
     securityProfile,
     authorizationKey,

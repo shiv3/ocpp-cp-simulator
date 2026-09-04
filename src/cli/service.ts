@@ -363,7 +363,11 @@ export class CLIChargePointService {
   // modal without us having to round-trip the persisted SQL row back into
   // ChargePointInitOptions shape. Exposed via getInit() and the
   // `config` block of getStatus().
-  private readonly _init: ChargePointInitOptions;
+  // Not `readonly`: a `--watch` idTag reload (#314) replaces the block so
+  // `getInit().idTags` keeps agreeing with what the charge point is actually
+  // drawing from — `cp.update` merges against this, and a stale copy there
+  // would quietly re-install the pre-edit pool.
+  private _init: ChargePointInitOptions;
 
   constructor(
     init: ChargePointInitOptions,
@@ -647,6 +651,37 @@ export class CLIChargePointService {
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {
     return this._init;
+  }
+
+  /**
+   * Install a re-read `idTagPool.file` on the live charge point (#314).
+   *
+   * Applied immediately, mid-transaction included: the pool is drawn from once
+   * per session, so a transaction already under way keeps the tag it presented
+   * at StartTransaction and only the next draw sees the new list. Returns
+   * `false` when this charge point has no pool to replace.
+   */
+  replaceIdTags(tags: readonly string[]): boolean {
+    if (!this._chargePoint.replaceIdTags(tags)) return false;
+    this._init = { ...this._init, idTags: [...tags] };
+    return true;
+  }
+
+  /**
+   * Whether a transaction is open on this connector (#314).
+   *
+   * `transactionId` is 0 between StartTransaction.req and its .conf, so this
+   * asks whether the connector holds a transaction at all rather than whether
+   * it has a CSMS-assigned id — a reload during that window is still a reload
+   * mid-transaction.
+   */
+  hasOpenTransaction(connectorId: number): boolean {
+    return this._chargePoint.connectors.get(connectorId)?.transaction != null;
+  }
+
+  /** Whether a run of this scenario is in flight (#314). */
+  isScenarioRunning(scenarioId: string): boolean {
+    return this._executors.has(scenarioId);
   }
 
   setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {

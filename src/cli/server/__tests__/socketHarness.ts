@@ -11,6 +11,8 @@ import type { Database } from "../../../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../../data/sqlite/SqliteConnectorSettingsRepository";
 import { CPRegistry } from "../CPRegistry";
+import { FileReloadManager } from "../FileReloadManager";
+import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import { EventBus } from "../eventBus";
 import { createHttpHandlers, type CorsPolicy } from "../httpServer";
 import { createLifecycle } from "../lifecycle";
@@ -35,6 +37,18 @@ export interface TestServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms?: boolean;
+  /**
+   * Run this test daemon as if it had been started with `--watch` (#314).
+   * `debounceMs` is exposed so a test does not have to sleep for the
+   * production 200 ms trailing debounce on every save.
+   */
+  readonly watch?:
+    | {
+        readonly debounceMs?: number;
+        /** Injected so a test does not depend on the host's `fs.watch`. */
+        readonly watchFactory?: WatchFactory;
+      }
+    | boolean;
 }
 
 export interface TestServer {
@@ -45,6 +59,8 @@ export interface TestServer {
   readonly url: string;
   readonly port: number;
   readonly restored: ReadonlyArray<string>;
+  /** Non-null only when `watch` was requested. */
+  readonly fileReload: FileReloadManager | null;
   close(): Promise<void>;
 }
 
@@ -73,6 +89,24 @@ export async function startTestServer(
   const restored = await Promise.resolve(
     chargePointService.restoreFromDatabase(),
   );
+  const watchOptions =
+    options.watch === true
+      ? {}
+      : options.watch === false
+        ? null
+        : options.watch;
+  const fileReload = watchOptions
+    ? new FileReloadManager(registry, bus, {
+        watcher: new FileWatcher({
+          debounceMs: watchOptions.debounceMs ?? 20,
+          watchFactory: watchOptions.watchFactory,
+        }),
+      })
+    : null;
+  if (fileReload) {
+    registry.onInitChange(() => fileReload.syncFromRegistry());
+    fileReload.syncFromRegistry();
+  }
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
@@ -82,15 +116,20 @@ export async function startTestServer(
     scenarioRepository,
     connectorSettingsRepository,
     chargePointService,
+    fileReload,
     webConsoleBasicAuth: options.webConsoleBasicAuth ?? null,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },
   });
+  fileReload?.setSink((event) =>
+    socketIo.registryEvents?.emitFileReloaded(event),
+  );
   lifecycle = createLifecycle({
     pidPath: null,
     registry,
     onShutdownStart: () => {
+      fileReload?.close();
       void socketIo.close();
     },
   });
@@ -131,9 +170,11 @@ export async function startTestServer(
     url,
     port: server.port ?? 0,
     restored,
+    fileReload,
     async close() {
       if (closed) return;
       closed = true;
+      fileReload?.close();
       await closeSocketIo(socketIo);
       server.stop(true);
       registry.shutdownAll();

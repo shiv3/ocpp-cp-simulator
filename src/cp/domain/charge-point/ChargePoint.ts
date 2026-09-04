@@ -631,6 +631,19 @@ export class ChargePoint {
     return this._idTagPool?.next(connectorId) ?? null;
   }
 
+  /**
+   * Replace the pool's tags after an `idTagPool.file` was edited (#314).
+   *
+   * `false` when this charge point has no pool: it was created without one, and
+   * conjuring one here would make a `--watch` daemon behave differently from
+   * the `cp.create` that produced the charge point.
+   */
+  replaceIdTags(tags: readonly string[]): boolean {
+    if (!this._idTagPool || tags.length === 0) return false;
+    this._idTagPool.replaceTags(tags);
+    return true;
+  }
+
   get wsUrl(): string {
     return this._webSocket?.url ?? this._transportUrl;
   }

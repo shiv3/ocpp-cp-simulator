@@ -96,6 +96,7 @@ import {
   createRegistryEventBridge,
   type RegistryEventBridge,
 } from "./registryEvents";
+import type { FileReloadManager } from "./FileReloadManager";
 import {
   RegistryChargePointService,
   type RegistryConfigRepository,
@@ -112,6 +113,9 @@ export interface SocketIoAttachment {
   readonly engine: Engine;
   readonly websocket: AnyWebSocketHandler;
   readonly idleTimeout: number;
+  /** The push bridge, so a caller that produced it indirectly (the daemon's
+   *  `--watch` reloader, #314) can emit through the same socket.io server. */
+  readonly registryEvents: RegistryEventBridge | null;
   handleRequest(
     req: Request,
     server: BunServer<Record<string, unknown>>,
@@ -140,6 +144,14 @@ export interface SocketIoDeps {
   readonly blueprints?: BlueprintRepository;
   readonly chargePointService?: RegistryChargePointService;
   readonly registryEvents?: RegistryEventBridge | null;
+  /**
+   * The `--watch` file reloader (#314), or null/absent when the daemon was
+   * started without `--watch`. Threaded through so the RPCs that load a
+   * scenario *from a path* can register that path — without it `--watch`
+   * would only ever cover the startup flags, and a scenario loaded over the
+   * control plane would silently not be watched.
+   */
+  readonly fileReload?: FileReloadManager | null;
 }
 
 export interface RuntimeSocketIoDeps extends SocketIoDeps {
@@ -168,6 +180,7 @@ const EXPLICIT_METHOD_SET = new Set<string>(EXPLICIT_METHODS);
 const CONFIG_KEY = "global_config";
 const CONFIG_EVENTS_SCOPE = "config";
 const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
+const FILE_RELOAD_EVENTS_SCOPE = "file-reload";
 const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
   "manual",
   "scenario",
@@ -214,6 +227,7 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
     engine,
     websocket: handler.websocket as AnyWebSocketHandler,
     idleTimeout,
+    registryEvents,
     handleRequest(req, server) {
       return engine.handleRequest(req, server as never);
     },
@@ -495,6 +509,7 @@ export async function dispatchRpcCore(
     method,
     cpId,
     rawParams,
+    deps.fileReload ?? null,
   );
   if (facadeResult.handled) return facadeResult.value;
 
@@ -1419,6 +1434,8 @@ async function dispatchFacadeCpCommand(
   method: RpcMethod,
   cpId: string | undefined,
   rawParams: unknown,
+  /** Null unless the daemon runs with `--watch` (#314). */
+  fileReload: FileReloadManager | null = null,
 ): Promise<FacadeDispatchResult> {
   const params = rawParamsAsRecord(rawParams);
 
@@ -1774,11 +1791,18 @@ async function dispatchFacadeCpCommand(
           throw new RpcFailure("invalid_params", "");
         }
         warnOnScenarioSchemaMismatch(params.file, parsed);
-        return handled(
-          await runFacadeOperation(() =>
-            chargePointService.loadScenario(id, connectorId, parsed),
-          ),
+        const loaded = await runFacadeOperation(() =>
+          chargePointService.loadScenario(id, connectorId, parsed),
         );
+        // #314: a scenario loaded *from a path* is watchable; the inline
+        // `params.scenario` branch below has no file behind it and is not.
+        fileReload?.registerScenarioFile({
+          filePath: params.file,
+          cpId: id,
+          connectorId,
+          scenarioId: loaded.scenarioId,
+        });
+        return handled(loaded);
       }
       if (params.scenario) {
         warnOnScenarioSchemaMismatch(
@@ -1936,15 +1960,21 @@ async function dispatchFacadeCpCommand(
         params.strict === undefined
           ? undefined
           : requireBoolean(params, "strict");
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.runScenarioFile(
-            id,
-            requireString(params, "file"),
-            { connectorId: requirePositiveInt(params, "connector"), strict },
-          ),
-        ),
+      const filePath = requireString(params, "file");
+      const connectorId = requirePositiveInt(params, "connector");
+      const started = await runFacadeOperation(() =>
+        chargePointService.runScenarioFile(id, filePath, {
+          connectorId,
+          strict,
+        }),
       );
+      fileReload?.registerScenarioFile({
+        filePath,
+        cpId: id,
+        connectorId,
+        scenarioId: started.scenarioId,
+      });
+      return handled(started);
     }
     case "run_scenario_template": {
       const id = requireFacadeCpId(cpId, rawParams);
@@ -2021,7 +2051,8 @@ async function captureSubscribeSnapshot(
   // those instead of doing the per-connector work and discarding the result.
   const wantsPerCp =
     scope !== CONFIG_EVENTS_SCOPE &&
-    scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE;
+    scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE &&
+    scope !== FILE_RELOAD_EVENTS_SCOPE;
   const snapshots = await chargePointService.listChargePoints();
 
   const perCp: Record<string, StatusWire> = {};
@@ -2253,6 +2284,7 @@ function isValidSubscribeScope(registry: CPRegistry, scope: string): boolean {
     scope === "registry" ||
     scope === CONFIG_EVENTS_SCOPE ||
     scope === SCENARIO_DEFINITIONS_EVENTS_SCOPE ||
+    scope === FILE_RELOAD_EVENTS_SCOPE ||
     registry.has(scope)
   );
 }

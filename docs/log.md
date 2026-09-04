@@ -722,3 +722,50 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   (simulator / export.) The worst case here is 1.5 kWh on a 10 kWh curve — about 15% of its span, at the midpoint. This is **pre-existing**, not a #301 semantic, and was already noted in this log's round-16 entry as "k6's own linear one against the daemon's bezier"; what is new is that it is now quantified and recorded on [the fidelity table](entities/cli.md#what-the-exported-runtime-models), whose auto-meter row previously read "**Yes**, and agreeing" without qualification. That row is now split: agreeing on the baseline, not on the shape between points.
 
 - The cross-runtime agreement table was deliberately **not** built. It cannot assert agreement while the interpolators differ, and a table pinning a known-wrong 15% gap as the expected answer would have to be rewritten the moment the real fix lands. The instrument that would actually catch the next divergence is one shared interpolator, which is a behaviour change to one runtime or the other and belongs with the bezier/linear issue rather than at a merge gate.
+
+## [2026-09-04] ingest | `--watch` re-reads loaded idTag and scenario files (#314)
+
+- `entities/daemon.md` — new **File hot-reload** section (what is watched,
+  debounce, malformed-file rule, mid-session rule, the scenario-id rule, why
+  blueprints are not watched, graceful degradation, the persisted source path);
+  `--watch` row in the daemon flag table; Limits & Roadmap "Shipped" line now
+  names #314.
+- `entities/cli.md` — `--watch` row in the full CLI flag table, pointing at the
+  daemon section (the deliberate daemon/CLI table duplication, kept in sync).
+- `concepts/control-plane.md` — the `file-reload` / `file-reloaded` event
+  envelope, the `applied` / `deferred` / `rejected` outcome table, and the
+  `"file-reload"` subscribe scope. Also filled the two scopes the table had
+  always been missing (`"config"`, `"scenario-definitions"`) — a lint fix taken
+  while the table was open. The **idTag pool** section's "`file` is resolved
+  once, at creation" paragraph now states the `--watch` exception and the new
+  `id_tag_file` column.
+- `concepts/scenario-format.md` — new **Re-reading a scenario file (`--watch`)**
+  section: debounce, rejection, the mid-session hold, and the rule that a
+  reloaded definition keeps the id it was loaded under.
+- `concepts/state-persistence.md` — `charge_points.id_tag_file` (v11, #314)
+  added to the table catalog beside the v7 / v9 columns.
+- `analyses/fleet-load-and-observability-roadmap.md` — phase 6 row is now
+  `shipped` / `#314`; the "two items are not filed" sentence corrected to one
+  (4b); the Phase 6 body rewritten as shipped behaviour, including why
+  blueprints are explicitly out of scope (#297 declined a watched blueprint
+  file; a blueprint's `params.idTagPool.file` is re-read per instantiation,
+  which is exactly the "affects CPs created afterwards" semantics the issue
+  asked for).
+- `sources/github-issues.md` — `#314` row.
+- Also corrected `src/protocol/methods.ts`'s `idTagPool.file` description
+  ("read once at creation"), which is not a comment — it is what `list_methods`
+  and the MCP `cp_create` tool schema show an agent, and it became false under
+  `--watch`.
+- Flagged, not fixed: the issue's premise that "blueprints are loadable from
+  files" is not true of the code; `src/utils/blueprints/README.md` still has no
+  `docs/sources/` page and there is still no `entities/blueprints.md` despite
+  #297's acceptance criteria naming one (both ingest gaps from #297).
+- `--watch` is **refused outside a server mode** rather than accepted and
+  ignored. The watcher lives in the daemon, so a standalone REPL run would
+  parse the flag and watch nothing — the silent no-op #295's review rejected
+  for `--cp-count`. (`--metrics` is still a silent no-op outside server mode:
+  pre-existing, reported not changed here, since altering a shipped flag's
+  behaviour is a separate decision.)
+- `--watch` was missing from `--help`'s `Options:` section — caught by #316's
+  new property test ("every flag the parser accepts has an `Options:` entry"),
+  which is the first time that guard fired on a flag added after it landed.

@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -113,10 +113,14 @@ CREATE TABLE IF NOT EXISTS charge_points (
   supervision_urls TEXT,
   url_distribution TEXT,
   -- Resolved idTags as a JSON array (#299), plus how the charge point picks
-  -- among them. Resolved at creation, so a \`file\` that changes later cannot
-  -- silently change a running charge point.
+  -- among them. Resolved at creation; a \`file\` that changes later only
+  -- changes a running charge point when the daemon runs with --watch (#314).
   id_tags TEXT,
   id_tag_distribution TEXT,
+  -- The \`idTagPool.file\` \`id_tags\` was read from, when it came from a file
+  -- (#314). Without it a restored charge point comes back with the tags but
+  -- with nothing for --watch to watch.
+  id_tag_file TEXT,
   connectors     INTEGER NOT NULL,
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
@@ -402,6 +406,24 @@ export function runMigrations(db: Database): void {
         "ALTER TABLE connector_runtime " +
           "ADD COLUMN soc_awaits_next_transaction INTEGER",
       );
+    }
+  }
+
+  // v12 → v13: file hot-reload (#314). The idTag pool's source path, so a
+  // daemon restarted with --watch can watch the same file again instead of
+  // coming back with the tags and no watch.
+  //
+  // This branch developed against 11 and then 12, and both numbers were taken
+  // on `main` before it merged — 11 by a column that was never released and 12
+  // by `soc_awaits_next_transaction`. Rather than skip a number silently, the
+  // whole of this feature's schema lands in one step at 13. A database stamped
+  // 11 or 12 by an earlier build of *this* branch already has some of what
+  // follows, which is why every statement here is `IF NOT EXISTS` or guarded by
+  // a `PRAGMA table_info` check: re-running the step is a no-op, not an error.
+  if (stored < 13) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("id_tag_file")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN id_tag_file TEXT");
     }
   }
 

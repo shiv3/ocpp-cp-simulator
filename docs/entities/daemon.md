@@ -71,6 +71,7 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--cp-id-pattern <tpl>`             | `<cp-id>{n:03}`              | Id template used with `--cp-count`. `{n}` is the index, `{n:03}` zero-pads it. The fleet registers before it dials, then connects 8 at a time.                                                                                                                                           |
 | `--metrics`                         | off                          | Serve `GET /metrics` (Prometheus text exposition). Off by default; the path 404s without it. See [Metrics](#metrics).                                                                                                                                                                    |
 | `--metrics-no-auth`                 | off                          | Implies `--metrics` and serves it outside the Basic Auth gate. Trusted networks only; exempts nothing else.                                                                                                                                                                              |
+| `--watch`                           | off                          | Re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. Off by default; **refused outside a server mode** (`--daemon`, `--http-port`, `--web-console`) rather than accepted and ignored. See [File hot-reload](#file-hot-reload) (#314). |
 | `--unsafe-remote`                   | -                            | Allows a non-loopback daemon bind without web-console Basic Auth. Use only on trusted networks or when another boundary handles access.                                                                                                                                                  |
 | `--web-console [<port>]`            | -                            | Serve the bundled browser UI alongside health and Socket.IO. Without a port, shares `--http-port`; with a port, serves the UI on that listener.                                                                                                                                          |
 | `--web-console-dist <dir>`          | -                            | Serve the console from this directory instead of searching for a bundled `dist/`. Must contain `index.html`; a path that does not is a startup error, not a fallback. The [desktop app](desktop-app.md#how-the-sidecar-finds-the-web-console) passes its Tauri resource dir here (#319). |
@@ -209,6 +210,73 @@ image is published on every push to `main` / version tag at
 `--http-host 0.0.0.0 --unsafe-remote --web-console` pinned in its entrypoint —
 see [Docker image](docker-image.md).
 
+## File hot-reload
+
+`--watch` (#314) makes the daemon re-read the files it loaded when they change,
+so editing a file by hand does not mean deleting and recreating a charge point.
+It is **off by default**: a daemon that silently re-reads files under the
+operator is surprising, and the agent-driven workflows this project is built
+around go through the [control plane](../concepts/control-plane.md), where there
+is nothing on disk to re-read. `--watch` serves the human editing a file.
+
+The watcher lives in the daemon, so `--watch` **is refused outside a server
+mode** (`--daemon`, `--http-port`, `--web-console`) rather than parsed and then
+ignored — the same rule `--cp-count` follows (#295).
+
+What is watched — and only these, because these are the only paths the daemon
+reads and then keeps a copy of:
+
+| File                               | Reached by                                                                                            | What a reload does                                                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `idTagPool.file` on a charge point | `cp.create` / `cp.update` / `cp.create_many`, and a `--state-db` restore of any of them               | Replaces the pool **live** on every charge point that was created from that path. The next session draws the new tags. |
+| A scenario file                    | `--scenario`, `--scenario-template-file`, and the `load_scenario { file }` / `run_scenario_file` RPCs | Replaces the definition **under the same scenario id**, unless the connector is mid-session — see the rule below.      |
+
+The rules, in the order they bite:
+
+- **Debounced.** Editors save in bursts — write a temp file, rename it over the
+  target, touch the mtime — so an undebounced watch fires two or three times per
+  save and can read a truncated intermediate file. The watch waits 200 ms after
+  the last event, then reads once. Identical bytes are not a reload and produce
+  no event.
+- **A malformed file never lands.** The reload path applies exactly the checks
+  the load path applies. A file that fails them is logged, reported as
+  `rejected`, and the previous good copy stays in place — a half-saved file
+  never leaves a charge point with half a configuration.
+- **A reload never mutates a charge point mid-session.** A scenario reload for a
+  connector with an open transaction, or for a scenario whose run is in flight,
+  is _held_ — not dropped — and installed when that session ends. An in-flight
+  transaction therefore always runs to completion on the values it started with.
+  An idTag pool is exempt by construction: it is drawn from once per session, so
+  the transaction under way keeps the tag it presented at StartTransaction and
+  only the next draw sees the new list.
+- **A scenario keeps the id it was loaded under.** If the edited file's own `id`
+  changed, it is ignored. Honouring it would load a _second_ scenario and leave
+  the first one in place under the old definition.
+- **Blueprints are not watched, and do not need to be.** A blueprint is stored
+  through `blueprint.save` and lives in the `blueprints` table, not in a file
+  (#297 declined a watched blueprint file deliberately, so the control plane
+  stays the single source of truth). The file a blueprint can _reference_ — its
+  `params.idTagPool.file` — is re-read at every `cp.create_many` instantiation,
+  which is why editing it affects charge points created from the blueprint
+  **afterwards** and never retroactively: charge points instantiated from a
+  blueprint are independent copies, not live views of it.
+- **Watching degrades, it never fails to start.** `fs.watch` is unreliable on
+  network mounts and some container filesystems. When it cannot be established
+  the daemon logs one line saying watching is unavailable and carries on
+  unwatched, rather than refusing to start over a convenience.
+
+Every reload pushes a `file-reload` event on the control plane carrying
+`target`, `path`, `cpId`, `connectorId`, `scenarioId` and an `outcome` of
+`applied`, `deferred` or `rejected` — see
+[Control plane → Event push and rooms](../concepts/control-plane.md#event-push-and-rooms).
+The daemon also logs each reload to stderr with a `[watch]` prefix.
+
+Under `--state-db` the `idTagPool.file` path is persisted alongside the resolved
+tags (`charge_points.id_tag_file`, schema v11), so a daemon restarted with
+`--watch` watches the same files again instead of coming back holding a frozen
+snapshot of a file it believes it is watching. See
+[State persistence](../concepts/state-persistence.md).
+
 ## Limits & Roadmap
 
 - Current: one Socket.IO connection per client, `rpc` ack for commands, `event`
@@ -218,7 +286,8 @@ see [Docker image](docker-image.md).
 - Future: bearer token auth or mTLS can be added at the HTTP/socket boundary
   without changing CP command method names.
 - Shipped: bulk CP creation, multiple supervision URLs, CP blueprints, the
-  metrics endpoint, an idTag pool and seeded background traffic (#295–#300).
+  metrics endpoint, an idTag pool, seeded background traffic and `--watch` file
+  hot-reload (#295–#300, #314).
   Planned: a charging-curve EV model and a measured per-process ceiling. See
   [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)
   for the full sequencing.

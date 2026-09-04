@@ -76,8 +76,8 @@ the CP → CSMS link.
 
 ### `--tls-ca` is optional, and it replaces rather than adds
 
-Every profile 2/3 example below passes `--tls-ca`, which makes it look
-required. It is not.
+The flag sits under the profile 2/3 examples and reads as required. It is
+not, and the first profile-2 example below passes no TLS flag at all.
 
 - **Without `--tls-ca`**, no CA option is passed to the client and the CSMS
   certificate is verified against the **system trust store**. That is what a
@@ -112,6 +112,20 @@ Making it accept means configuring the CSMS to read the original protocol
 from a forwarded header; the setting is CSMS-specific (SteVe, for one, has a
 protocol-header-from-proxy setting that is empty by default). Check the CSMS
 documentation.
+
+Turning that setting on moves a security decision onto a header, so it is
+only safe under two conditions, and both belong to the deployment rather than
+to the station:
+
+- **The proxy strips whatever the client sent.** `Forwarded` and
+  `X-Forwarded-Proto` arrive from the network; unless the TLS-terminating
+  proxy overwrites them, a station can claim `proto=https` over a cleartext
+  connection and be granted a profile it never earned.
+- **The CSMS trusts them only from that proxy.** A CSMS reachable other than
+  through the edge must not honour the header on those paths.
+
+The same reasoning covers the daemon's own
+`--trust-forwarded-headers` ([Access control](access-control.md)).
 
 **Configure the CSMS first, then switch the station over.** In the other
 order the station is locked out in between.

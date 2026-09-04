@@ -585,6 +585,9 @@ export const createScenarioExecutorCallbacks = (
     onStatusChange: async (status) => {
       chargePoint.updateConnectorStatus(connector.id, status);
     },
+    // #299: the executor has no connector of its own, so the connector it is
+    // bound to is closed over here.
+    onResolveIdTag: () => chargePoint.nextIdTag(connector.id),
     onStartTransaction: async (
       tagId,
       batteryCapacityKwh,

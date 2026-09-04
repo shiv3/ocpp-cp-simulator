@@ -16,7 +16,7 @@ export const STR_64K = z.string().max(65_536);
  */
 export const STR_256 = z.string().max(256);
 
-/** Short prose (a description): ≤ 1 KB. */
+/** Short prose or a path: ≤ 1 KB. */
 export const STR_1K = z.string().max(1_024);
 
 /** Scenario-definition payload string: ≤ 256 KB (scenarios can be large). */

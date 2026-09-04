@@ -14,6 +14,7 @@ import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/diale
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
+import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
 import { getGlobalMetricsRecorder } from "./server/metrics/MetricsRecorder";
 import {
   waitForBootAccepted,
@@ -419,6 +420,10 @@ export class CLIChargePointService {
         ...(init.urlDistribution
           ? { urlDistribution: init.urlDistribution }
           : {}),
+        ...(init.idTags ? { idTags: init.idTags } : {}),
+        ...(init.idTagDistribution
+          ? { idTagDistribution: init.idTagDistribution }
+          : {}),
       },
       init.securityProfile,
       init.authorizationKey,
@@ -650,8 +655,13 @@ export class CLIChargePointService {
     return this._chargePoint.isSoapChargePoint();
   }
 
-  startTransaction(connectorId: number, tagId: string): void {
-    this._chargePoint.startTransaction(tagId, connectorId);
+  startTransaction(connectorId: number, tagId?: string): void {
+    // An explicit tag always wins; the pool only fills a gap, and a charge
+    // point without one keeps the historical literal so nothing changes for a
+    // caller that never configured a pool.
+    const resolved =
+      tagId ?? this._chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
+    this._chargePoint.startTransaction(resolved, connectorId);
   }
 
   stopTransaction(connectorId: number): void {
@@ -705,8 +715,9 @@ export class CLIChargePointService {
     this._chargePoint.stopHeartbeat();
   }
 
-  authorize(tagId: string): void {
-    this._chargePoint.authorize(tagId);
+  authorize(tagId?: string): void {
+    const resolved = tagId ?? this._chargePoint.nextIdTag() ?? DEFAULT_ID_TAG;
+    this._chargePoint.authorize(resolved);
   }
 
   updateConnectorStatus(

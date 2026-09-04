@@ -136,6 +136,7 @@ one rather than restating a subset.
 | Field                                             | Type                             | Notes                                                                                                                                                            |
 | ------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cpId`                                            | string, **required**             | Charge point identifier.                                                                                                                                         |
+| `idTagPool`                                       | object                           | Tags this CP draws from when a call names none — see [idTag pool](#idtag-pool).                                                                                  |
 | `wsUrl`                                           | string \| string[], **required** | CSMS endpoint. `ws(s)://` for OCPP-J, `http(s)://` for the SOAP versions. OCPP-J may pass several — see [Multiple supervision URLs](#multiple-supervision-urls). |
 | `urlDistribution`                                 | string                           | `round-robin` (default), `random`, `cp-affinity`. Only meaningful with several URLs.                                                                             |
 | `ocppVersion`                                     | string                           | `OCPP-1.6J` (default), `OCPP-2.0.1`, `OCPP-2.1`, `OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`.                                                                            |
@@ -150,6 +151,43 @@ one rather than restating a subset.
 
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.
+
+##### idTag pool
+
+Every place an idTag was needed took a literal. That is fine for one scripted
+run and wrong for anything with more than one session: a fleet where every
+charge point presents the same tag is not exercising the CSMS's authorization
+cache, its local auth list, or its per-tag concurrency rules.
+
+`idTagPool` gives a charge point tags to draw from when a call names none:
+
+```jsonc
+"idTagPool": { "tags": ["RFID-001", "RFID-002"], "distribution": "connector-affinity" }
+"idTagPool": { "file": "./tags.json" }   // a JSON array of strings
+```
+
+Exactly one of `tags` or `file` — naming both, or neither, is refused.
+
+| `distribution`       | Behaviour                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `round-robin`        | Default. The next tag per draw, across the whole charge point.                            |
+| `random`             | Drawn from a stream seeded by the `cpId`, so a run replays and a fleet does not lockstep. |
+| `connector-affinity` | A connector always presents the same tag — the captive-fleet model, and assertable.       |
+
+**An explicit `tagId` always wins.** The pool only fills a gap, so
+`start_transaction` and `authorize` take `tagId` as optional now, and a scenario
+transaction node without one draws from the pool. A charge point with no pool
+keeps the historical `123456` fallback, so nothing changes for a caller that
+never configured one.
+
+**`file` is resolved once, at creation.** What the charge point stores and
+persists is the list itself, so a file edited later cannot silently change a
+running charge point, and a bad path fails the create rather than the first
+transaction. The pool holds at most 1000 tags and is persisted in
+`charge_points.id_tags` / `id_tag_distribution` (schema v9), so a restart does
+not bring the charge point back drawing nothing.
+
+An unrecognised `distribution` is refused rather than defaulted.
 
 ##### Multiple supervision URLs
 

@@ -46,6 +46,7 @@ import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import { IdTagPool, type IdTagDistribution } from "../auth/IdTagPool";
 import {
   SupervisionUrlPool,
   type UrlDistribution,
@@ -135,6 +136,9 @@ export interface ChargePointTransportOptions {
    */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /** Resolved idTags this charge point draws from (#299). */
+  readonly idTags?: readonly string[];
+  readonly idTagDistribution?: IdTagDistribution;
 }
 
 export class ChargePoint {
@@ -146,6 +150,7 @@ export class ChargePoint {
   private readonly _webSocket: OCPPWebSocket | null;
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
+  private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
@@ -354,6 +359,17 @@ export class ChargePoint {
 
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
+
+    // #299: a charge point that draws from a pool when a call names no tag.
+    // An explicit tagId always wins, so this only ever fills a gap.
+    this._idTagPool =
+      transportOptions.idTags && transportOptions.idTags.length > 0
+        ? new IdTagPool(
+            transportOptions.idTags,
+            transportOptions.idTagDistribution,
+            this._id,
+          )
+        : null;
 
     this._reservationManager = new ReservationManager(
       this._logger,
@@ -603,6 +619,16 @@ export class ChargePoint {
 
   get connectors(): Map<number, Connector> {
     return new Map(this._connectors);
+  }
+
+  /**
+   * The idTag to present when the caller named none.
+   *
+   * `null` when this charge point has no pool, so every existing call site
+   * keeps its own fallback rather than inheriting one.
+   */
+  nextIdTag(connectorId = 0): string | null {
+    return this._idTagPool?.next(connectorId) ?? null;
   }
 
   get wsUrl(): string {

@@ -32,6 +32,7 @@ import {
   StopTransactionOptions,
   ScenarioExpectation,
 } from "./ScenarioTypes";
+import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {
   createScenarioMachine,
@@ -900,7 +901,15 @@ export class ScenarioExecutor {
     if (data.action === "start") {
       if (this.callbacks.onStartTransaction) {
         // Use the tagId captured from a preceding RemoteStartTrigger node if available
-        const tagId = this.remoteStartTagId || data.tagId || "123456";
+        // Precedence: a tag captured from a preceding RemoteStartTrigger, then
+        // the node's own literal, then the charge point's pool (#299), then
+        // the historical default so a charge point without a pool is
+        // unchanged.
+        const tagId =
+          this.remoteStartTagId ||
+          data.tagId ||
+          this.callbacks.onResolveIdTag?.() ||
+          DEFAULT_ID_TAG;
         const options = this.remoteStartOptions;
         this.remoteStartTagId = null;
         this.remoteStartOptions = null;

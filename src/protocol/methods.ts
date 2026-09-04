@@ -80,6 +80,29 @@ const cpParamsBaseSchema = z.object({
     .describe(
       "CSMS endpoint: ws(s):// for OCPP-J, http(s):// for the SOAP versions. OCPP-J may pass several, and urlDistribution picks between them",
     ),
+  idTagPool: z
+    .object({
+      tags: ARRAY_1000(STR_256.min(1))
+        .min(1)
+        .optional()
+        .describe("Inline idTags"),
+      file: STR_1K.optional().describe(
+        "Path to a JSON file holding a string array of idTags, read once at creation",
+      ),
+      distribution: z
+        .enum(["round-robin", "random", "connector-affinity"])
+        .optional()
+        .describe(
+          '"round-robin" (default), "random" (seeded by the cpId, so a run replays), or "connector-affinity" (a connector always presents the same tag)',
+        ),
+    })
+    .refine((v) => (v.tags === undefined) !== (v.file === undefined), {
+      message: "idTagPool needs exactly one of tags or file",
+    })
+    .optional()
+    .describe(
+      "idTags this charge point draws from when a call names none. An explicit tagId always wins",
+    ),
   urlDistribution: z
     .enum(["round-robin", "random", "cp-affinity"])
     .optional()
@@ -360,11 +383,13 @@ export const METHODS = {
 
   // -- transactions --
   start_transaction: {
-    params: z.object({ connector: CONN_POS, tagId: STR_64K }),
+    // `tagId` is optional since #299: without one the charge point draws from
+    // its idTag pool, and falls back to the historical literal if it has none.
+    params: z.object({ connector: CONN_POS, tagId: STR_64K.optional() }),
     result: ANY,
   },
   stop_transaction: { params: z.object({ connector: CONN_POS }), result: ANY },
-  authorize: { params: z.object({ tagId: STR_64K }), result: ANY },
+  authorize: { params: z.object({ tagId: STR_64K.optional() }), result: ANY },
 
   // -- status notifications --
   diagnostics_status_notification: {

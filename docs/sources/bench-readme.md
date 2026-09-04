@@ -198,9 +198,27 @@ envelopes are encoded and sent to that socket); it is still cheaper than
 polling each charge point's `status`, which would add a third RPC per cycle to
 the rationed budget below. The idle axis opens no event socket.
 
-**Cleanup is best-effort and bounded.** Every charge point id the run _offered_
-to `cp.create_many` — not only those it was told were created — is `cp.delete`d
-at the end and on Ctrl-C, 32 concurrently and within a 60s budget. A batch whose
+**Cleanup deletes what this run created, and refuses to touch anything else.**
+An id enters the delete list when it is _offered_ to `cp.create_many`, before
+the call is awaited, and leaves it again if the ack names that id as a failure.
+The first rule covers the indeterminate case — an RPC deadline does not tell the
+daemon to stop, so it may hold charge points whose ids never reached the client,
+and `not_found` on a delete already counts as success, so over-listing is free.
+The second covers the determinate one: a reported failure is positive evidence
+the daemon did not register the charge point, since `createOneCp` throws before
+creating anything on an id collision and the blueprint-defaults path rolls back
+before reporting. Keeping failed ids was **destructive**: under
+`--allow-existing`, a charge point somebody else created that already held an
+offered id was reported as failed _because it already exists_, and teardown then
+deleted it. The primary fix is that the collision is now unrepresentable — every
+run mints a **run id** and creates its charge points as `BENCH-<runid>-000001`,
+so no pre-existing charge point can sit on an id this run offers; the run id is
+printed on stderr and recorded in `--out`, and the shared `BENCH-` root still
+identifies a crashed run's leftovers. The randomness in it is identity, not
+behaviour, so the traffic pattern stays deterministic. The asymmetry is deliberate — a kept id leaks,
+which is recoverable, while a deleted charge point is not — so an id leaves the
+list only on positive evidence that it was never ours. The sweep itself is
+best-effort and bounded: 32 concurrently, within a 60s budget. A batch whose
 RPC hit its deadline can still have created charge points server-side, and ids
 that never reached the client would otherwise be left registered for the next
 run's preflight to refuse; `not_found` on a delete counts as success, so
@@ -213,9 +231,18 @@ Sequential deletes at the full 35s RPC timeout each turned teardown of a
 an unresponsive Ctrl-C. Whatever is left is named on stderr — the next run's
 preflight refuses a daemon that still holds it.
 
-**`--out` is redacted.** A result file is meant to be kept and shared, so the
-daemon Basic Auth password and any userinfo embedded in `--csms-url` /
-`--daemon-url` are written as `***`.
+**Credentials are redacted from stderr as well as `--out`.** A result file is
+meant to be kept and shared, so the daemon Basic Auth password and any userinfo
+embedded in `--csms-url` / `--daemon-url` are written as `***` — and the same
+redaction now applies to the progress lines, the hardware block and error
+messages, because stderr commonly ends up in a CI log.
+
+**Every HTTP request carries a 30s deadline.** `fetch` has none of its own, so a
+daemon that accepts the connection and then stalls while serving `/metrics` —
+the condition at the top of a sweep, which is what the tool exists to reach —
+used to hang the run forever: `--settle-timeout` never fired, the measurement
+never finished and the cleanup in the `finally` never ran. The deadline covers
+the response body, not just the headers.
 
 **Two axes**, one per invocation: `--tx-interval 0` (default) measures idle
 CPs (heartbeat only — an idle timer any outgoing CALL resets, so this isolates
@@ -255,6 +282,15 @@ arming.
   parser, before/after histogram diffing, quantile interpolation, table
   formatting, and rate/concurrency pacing helpers. No network.
 - `lib.bun.test.ts` — unit tests for the above.
+- `fleetBench.smoke.bun.test.ts` — an end-to-end smoke test that spawns the real
+  script against a real daemon and mock CSMS, asserting the run terminates
+  inside a hard wall-clock bound, reports both sweep steps, leaves the daemon
+  empty, spares a pre-existing charge point under `--allow-existing`, and ends
+  even when the CSMS black-holes responses. It exists because the two classes of
+  defect that recurred through review — "the process never exits" and
+  sweep-level composition — are invariants about the whole run rather than about
+  any function, and so are invisible to unit tests. Gated by `bun run test:bun`
+  in CI.
 - `tsconfig.json` — this directory is outside `tsconfig.cli.json`'s
   `include`; typechecked separately, and referenced from the root
   `tsconfig.json` as a `composite` project so `tsc -b` covers it.

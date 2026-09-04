@@ -284,14 +284,43 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    other column it is counted in this process, not scraped, so its window is
    step-end to step-end and includes the warmup rather than only `--duration`.
 
-8. **Cleanup.** Every charge point id the run _offered_ to `cp.create_many` is
-   `cp.delete`d at the end (or on Ctrl-C), 32 at a time and **within a 60s
-   budget**. Offered, not created: a batch whose RPC hit its deadline or lost
-   its connection can still have created charge points server-side, and ids
-   that never reach this process are ids cleanup would otherwise miss — leaving
-   a daemon the next run's preflight refuses. The ids are recorded before the
-   call is awaited, and `cp.delete` answering `not_found` for one that was
-   never created counts as success, so over-listing costs nothing. It is best-effort, so it is
+8. **Cleanup, and what it refuses to touch.** Charge points this run created
+   are `cp.delete`d at the end (or on Ctrl-C), 32 at a time and **within a 60s
+   budget**.
+
+   An id enters the delete list when it is _offered_ to `cp.create_many`,
+   before the call is awaited, and **leaves it again if the ack names that id
+   as a failure**. The two rules cover two different cases. While the outcome
+   is unknown — an RPC deadline, a dropped connection — the daemon was never
+   told to stop and may hold charge points whose ids never reached this
+   process, so keeping them costs nothing (`cp.delete` answering `not_found`
+   already counts as success) while dropping them would leave a daemon the next
+   run's preflight refuses. Once the ack names an id as failed we _know_ the
+   daemon did not register it: `createOneCp` throws before creating anything on
+   an id collision, and the blueprint-defaults path rolls the charge point back
+   before reporting it.
+
+   That second rule is not a nicety. Under `--allow-existing`, a charge point
+   somebody else created that already held an offered id was reported as failed
+   **because it already exists** — and deleting on that basis destroyed a fleet
+   this benchmark never created. The asymmetry is deliberate: an id kept by
+   mistake leaks, which an operator can recover from, while a charge point
+   deleted by mistake cannot be recovered. So an id leaves the list only on
+   positive evidence that it was never ours.
+
+   **But the bookkeeping is the second line of defence, not the first.** Every
+   run mints a **run id** and creates its charge points as
+   `BENCH-<runid>-000001`, `BENCH-<runid>-000002`, … The run id is printed on
+   stderr at startup and recorded in `--out`. Because no two runs share an id
+   space, a pre-existing charge point _cannot_ be sitting on an id this run
+   offers, so "the benchmark deleted something it did not create" is not a case
+   that has to be reasoned about correctly — it cannot arise. Anything left
+   behind by a crashed run is still recognisable by the shared `BENCH-` root,
+   which is what the preflight's refusal is asking you to clear.
+
+   The randomness in a run id is _identity_, not behaviour: it names charge
+   points and never influences the traffic pattern, so the stagger, the cycle
+   and every other observable stay deterministic and replayable. It is best-effort, so it is
    bounded: deleting sequentially with the full 35s RPC timeout each meant a
    daemon that had died turned teardown of a 2000-CP fleet into ~19 hours of
    blocked failure handling and an unresponsive Ctrl-C. If no control-plane
@@ -458,6 +487,16 @@ a spare machine and a CSMS.
   `status`, would add a third RPC per cycle to the very budget the ceiling
   above rations, and each of those builds a full per-connector snapshot. The
   idle axis opens no event socket at all.
+- **Every HTTP request carries a 30s deadline**, because `fetch` has none of
+  its own. A daemon that accepts the connection and then stalls while serving
+  `/metrics` — the condition at the top of a sweep, which is what this tool
+  exists to reach — would otherwise hang the run forever: `--settle-timeout`
+  would never fire, the measurement would never finish, and the cleanup in the
+  `finally` would never run. The deadline covers the response body, not just
+  the headers.
+- **Credentials are redacted from stderr, not only from `--out`.** Userinfo in
+  `--daemon-url` is replaced with `***` in the progress lines, the hardware
+  block and error messages, because stderr commonly ends up in a CI log.
 - `/metrics` is scraped every 500ms during settle-wait. That is one bounded
   HTTP response whatever the fleet size, and it is HTTP rather than
   control-plane traffic, so it is not paced through the socket pool.
@@ -470,6 +509,21 @@ a spare machine and a CSMS.
 
 ## Directory layout
 
+- `fleetBench.smoke.bun.test.ts` — an end-to-end smoke test that spawns the
+  real script as a subprocess against a real daemon and a real mock CSMS. It
+  exists because two classes of defect in this tool are invisible to unit
+  tests: **"the process never exits"** (a pool left connected, a timer set that
+  grew without bound, an uncancelled `Promise.race` loser, an unbounded
+  `fetch`) and **sweep-level composition** (a function correct in isolation
+  that breaks across steps or against pre-existing daemon state). Both recurred
+  repeatedly during review; the stagger is the proof, since a _tested_ `lib.ts`
+  function broke twice in how `main()` called it. The test asserts the run
+  terminates inside a hard wall-clock bound, that both sweep steps are reported
+  with the fleet size they describe, that the daemon is left empty, that a
+  pre-existing charge point survives an `--allow-existing` run, and that a
+  black-holing CSMS still ends the run. It runs under `bun run test:bun`, so
+  CI gates on it; it roughly doubles that suite's wall time, which is the price
+  of covering the thing that actually broke.
 - `fleet-bench.ts` — the CLI entry point / orchestrator.
 - `lib.ts` — pure logic: flag validation, the Prometheus exposition parser,
   before/after histogram diffing, quantile interpolation, table formatting,

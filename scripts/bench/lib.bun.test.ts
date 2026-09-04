@@ -3,7 +3,9 @@
 // test` (picked up by `bun.test` name filter, see package.json's `test:bun`).
 import { describe, expect, it } from "bun:test";
 import {
-  BENCH_ID_PATTERN,
+  benchIdPattern,
+  BENCH_ID_ROOT,
+  newRunId,
   BENCH_OCPP_VERSIONS,
   BenchAbortError,
   STEP_COLUMNS,
@@ -22,6 +24,7 @@ import {
   assertDaemonEmpty,
   AUTHORIZE_WAIT_SEC,
   benchCpId,
+  cleanupIdsAfterBatch,
   cyclePeriodSec,
   daemonIsLocal,
   droppedDuringWindow,
@@ -50,6 +53,7 @@ import {
   START_CONFIRM_MARGIN_SEC,
   START_CONFIRM_TIMEOUT_MS,
   sustainableRpcPerSec,
+  unpredictedCreatedIds,
   validateOptions,
   type Sample,
   type StepResult,
@@ -1002,14 +1006,38 @@ describe("predicted charge point ids (#302)", () => {
     // The ids a batch offers must be nameable before its RPC answers: a
     // create that times out after the daemon created the charge points leaves
     // them registered, and the next run's preflight refuses that daemon.
-    expect(BENCH_ID_PATTERN).toBe("BENCH{n:06}");
-    expect(benchCpId(1)).toBe("BENCH000001");
-    expect(benchCpId(42)).toBe("BENCH000042");
-    expect(benchCpId(1000)).toBe("BENCH001000");
-    expect(benchCpId(999_999)).toBe("BENCH999999");
+    const runId = "abc-1234";
+    expect(benchIdPattern(runId)).toBe("BENCH-abc-1234-{n:06}");
+    expect(benchCpId(runId, 1)).toBe("BENCH-abc-1234-000001");
+    expect(benchCpId(runId, 42)).toBe("BENCH-abc-1234-000042");
+    expect(benchCpId(runId, 1000)).toBe("BENCH-abc-1234-001000");
+    expect(benchCpId(runId, 999_999)).toBe("BENCH-abc-1234-999999");
     // Past the pad width the index simply grows, exactly as padStart does in
     // `expandIdPattern`.
-    expect(benchCpId(1_000_000)).toBe("BENCH1000000");
+    expect(benchCpId(runId, 1_000_000)).toBe("BENCH-abc-1234-1000000");
+  });
+
+  it("gives every run its own id space, so a collision cannot arise", () => {
+    // The primary fix for "the benchmark deletes charge points it did not
+    // create": it is not that we reason about the ack correctly, it is that a
+    // pre-existing charge point cannot be sitting on an id this run offers.
+    const a = newRunId(1_700_000_000_000);
+    const b = newRunId(1_700_000_000_000);
+    expect(a).not.toBe(b);
+    expect(benchCpId(a, 1)).not.toBe(benchCpId(b, 1));
+    // The shared root is what still recognises an older run's leftovers.
+    expect(benchCpId(a, 1).startsWith(`${BENCH_ID_ROOT}-`)).toBe(true);
+    // A run id never contains the `{n}` placeholder or anything that would
+    // change how the daemon expands the pattern.
+    expect(a).toMatch(/^[0-9a-z]+-[0-9a-z]{4}$/);
+  });
+
+  it("sorts run ids in run order and stays inside the daemon's id cap", () => {
+    const early = newRunId(1_700_000_000_000, () => 0);
+    const later = newRunId(1_700_000_001_000, () => 0);
+    expect(later > early).toBe(true);
+    // MAX_GENERATED_CP_ID_LENGTH is 256 in src/protocol/methods.ts.
+    expect(benchCpId(newRunId(Date.now()), 999_999).length).toBeLessThan(64);
   });
 });
 
@@ -1332,5 +1360,105 @@ describe("machine attribution (#302)", () => {
     expect(remote).toContain("daemon host: UNKNOWN");
     expect(remote).toContain("bench-host.internal:9700");
     expect(remote).not.toContain("machine (daemon host");
+  });
+});
+
+describe("what teardown is allowed to delete (#302)", () => {
+  const RUN = "test-run";
+  const offered = [benchCpId(RUN, 1), benchCpId(RUN, 2), benchCpId(RUN, 3)];
+
+  it("NEVER deletes a pre-existing charge point whose id collided", () => {
+    // The destructive bug. Under --allow-existing, a charge point somebody
+    // else created that already holds BENCH000001 makes `cp.create_many`
+    // report that id as failed *because it already exists* — and teardown then
+    // deleted it, destroying a fleet this run never created.
+    const survivor = benchCpId(RUN, 1);
+    const keep = cleanupIdsAfterBatch(offered, {
+      created: [benchCpId(RUN, 2), benchCpId(RUN, 3)],
+      failed: [{ cpId: survivor, reason: "charge point already exists" }],
+    });
+    expect(keep).not.toContain(survivor);
+    expect(keep).toEqual([benchCpId(RUN, 2), benchCpId(RUN, 3)]);
+  });
+
+  it("drops every explicitly-failed id, whatever the reason given", () => {
+    // The daemon does not register a charge point it reports as failed:
+    // createOneCp throws before creating on a collision, and the
+    // blueprint-defaults path rolls back with removeChargePoint first. So the
+    // reason text is not what makes the id safe — the ack naming it is.
+    const keep = cleanupIdsAfterBatch(offered, {
+      created: [benchCpId(RUN, 3)],
+      failed: [
+        { cpId: benchCpId(RUN, 1), reason: "already exists" },
+        { cpId: benchCpId(RUN, 2), reason: "some other failure" },
+      ],
+    });
+    expect(keep).toEqual([benchCpId(RUN, 3)]);
+  });
+
+  it("keeps every offered id while the outcome is unknown", () => {
+    // An RPC deadline or a dropped connection does not tell the daemon to
+    // stop, so it may hold charge points whose ids never reached this
+    // process. Over-listing is free: `cp.delete` answering `not_found`
+    // already counts as success.
+    expect(cleanupIdsAfterBatch(offered, null)).toEqual(offered);
+  });
+
+  it("still deletes everything the daemon says it created", () => {
+    const keep = cleanupIdsAfterBatch(offered, {
+      created: [...offered],
+      failed: [],
+    });
+    expect(keep).toEqual(offered);
+  });
+
+  it("adopts a created id this run did not predict", () => {
+    // benchCpId drifting from the daemon's expandIdPattern would otherwise
+    // leave real charge points behind for the next run's preflight to refuse.
+    const surprise = "SURPRISE-1";
+    const keep = cleanupIdsAfterBatch(offered, {
+      created: [...offered, surprise],
+      failed: [],
+    });
+    expect(keep).toContain(surprise);
+    expect(unpredictedCreatedIds(offered, [...offered, surprise])).toEqual([
+      surprise,
+    ]);
+  });
+
+  it("lets 'created' win over 'failed' for the same id", () => {
+    // Contradictory acks should not be resolved in the deleting direction,
+    // but an id the daemon says it created must still be cleaned up.
+    const keep = cleanupIdsAfterBatch([], {
+      created: ["ODD-1"],
+      failed: [{ cpId: "ODD-1", reason: "contradictory" }],
+    });
+    expect(keep).toContain("ODD-1");
+  });
+
+  it("reports no unpredicted ids when the pattern matches", () => {
+    expect(unpredictedCreatedIds(offered, [benchCpId(RUN, 1)])).toEqual([]);
+  });
+});
+
+describe("credentials never reach stderr (#302)", () => {
+  it("redacts userinfo from the hardware block's daemon host", () => {
+    // stderr commonly ends up in a CI log; --out was already redacted.
+    const facts = {
+      cpuModel: "Test CPU",
+      cores: 8,
+      memGb: "16.0",
+      platform: "linux",
+      arch: "x64",
+      bunVersion: "1.4.0",
+      daemonVersion: "9.9.9",
+    };
+    // Unparseable, so the fallback path is what renders the host.
+    const report = machineReport({
+      ...facts,
+      daemonUrl: "http://admin:hunter2@bad url:9700",
+    });
+    expect(report).not.toContain("hunter2");
+    expect(report).toContain("***");
   });
 });

@@ -1375,7 +1375,7 @@ describe("the RPCs hand the watcher the text they loaded (#314)", () => {
 
     const manager = server.fileReload;
     if (!manager) throw new Error("expected a --watch server");
-    const seen: Array<{ scenarioId: string; loadedText?: string }> = [];
+    const seen: Array<{ scenarioId: string; loadedText?: string | null }> = [];
     const real = manager.registerScenarioFile.bind(manager);
     manager.registerScenarioFile = (registration) => {
       seen.push(registration);
@@ -1634,6 +1634,224 @@ describe("a run's cleanup only ever tears down its own run (#314)", () => {
       "the held reload to land after the stopped run's cleanup",
     );
     expect(events.some((e) => e.outcome === "applied")).toBe(true);
+  });
+});
+
+describe("no drain runs inside a synchronous teardown (#314)", () => {
+  it("applies a held reload after stopTransaction has finished unwinding", async () => {
+    // `transactionChange` fires from inside `ChargePoint.stopTransaction`, with
+    // the transaction already null but auto-reset and scheduled-availability
+    // cleanup still to come. Draining there starts a new run against a
+    // half-torn-down connector — an open gate is not the same as a finished
+    // teardown, which is what four ordering bugs here had in common.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("teardown", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-TEARDOWN");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-TEARDOWN");
+
+    const service = server.registry.get("CP-TEARDOWN");
+    if (!service) throw new Error("CP-TEARDOWN missing");
+    expect(await openSession(server, "CP-TEARDOWN", "TAG-TD")).toBe("TAG-TD");
+    backend.save(file, scenario("teardown", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+
+    service.stopTransaction(1);
+    // Observed synchronously: the notification is queued, so nothing can have
+    // been reloaded before `stopTransaction` finished its own cleanup.
+    expect(loadedDelay(server, "CP-TEARDOWN", "teardown")).toBe(11);
+
+    await waitFor(
+      () => loadedDelay(server, "CP-TEARDOWN", "teardown") === 22,
+      "the held reload to land once the teardown completed",
+    );
+  });
+});
+
+describe("a scenario file's watch survives a --state-db restart (#314)", () => {
+  it("re-registers it and reconciles an edit made while the daemon was down", async () => {
+    // The definition came back from the database either way; without the path
+    // the *watch* did not, so the daemon held exactly the frozen snapshot of a
+    // file it believed it was watching that the idTag half exists to prevent.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("persisted-watch", 11));
+    const dbPath = path.join(dir, "state.sqlite");
+
+    const firstDb = BunSqliteDatabase.open(dbPath);
+    databases.push(firstDb);
+    const first = await startWatchingServer(new TestWatchBackend(), firstDb);
+    const firstSocket = await openClient(first);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-WATCH-PERSIST",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-WATCH-PERSIST",
+    );
+    expect(first.fileReload?.watchedPaths()).toContain(file);
+    firstSocket.disconnect();
+    await first.close();
+    servers.pop();
+    firstDb.close();
+    databases.pop();
+
+    // Edited with nothing running.
+    fs.writeFileSync(file, scenario("persisted-watch", 22));
+
+    const backend = new TestWatchBackend();
+    const secondDb = BunSqliteDatabase.open(dbPath);
+    databases.push(secondDb);
+    const second = await startWatchingServer(backend, secondDb);
+    expect(second.restored).toContain("CP-WATCH-PERSIST");
+    // Both directions: the row was written, and the restore reads it back.
+    expect(second.fileReload?.watchedPaths()).toContain(file);
+    // …and registering re-reads after the watch, so the edit made while the
+    // daemon was down is applied rather than adopted as a silent baseline.
+    await waitFor(
+      () => loadedDelay(second, "CP-WATCH-PERSIST", "persisted-watch") === 22,
+      "the edit made while the daemon was down to be reconciled",
+    );
+
+    // A later edit is watched too, not just the one-off reconcile.
+    backend.save(file, scenario("persisted-watch", 33));
+    await waitFor(
+      () => loadedDelay(second, "CP-WATCH-PERSIST", "persisted-watch") === 33,
+      "the restored watch to be live",
+    );
+  });
+
+  it("drops the row for a scenario the operator removed", async () => {
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("removed-watch", 11));
+    const dbPath = path.join(dir, "state.sqlite");
+    const firstDb = BunSqliteDatabase.open(dbPath);
+    databases.push(firstDb);
+    const first = await startWatchingServer(new TestWatchBackend(), firstDb);
+    const firstSocket = await openClient(first);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-WATCH-RM",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-WATCH-RM",
+    );
+    await rpc(
+      firstSocket,
+      "remove_scenario",
+      { connector: 1, scenarioId: "removed-watch" },
+      "CP-WATCH-RM",
+    );
+    expect(firstDb.all("SELECT path FROM watched_scenario_files")).toHaveLength(
+      0,
+    );
+    firstSocket.disconnect();
+    await first.close();
+    servers.pop();
+    firstDb.close();
+    databases.pop();
+
+    const secondDb = BunSqliteDatabase.open(dbPath);
+    databases.push(secondDb);
+    const second = await startWatchingServer(new TestWatchBackend(), secondDb);
+    expect(second.fileReload?.watchedPaths()).toEqual([]);
+  });
+});
+
+describe("a failed persist does not become the baseline (#314)", () => {
+  it("reports the failure and judges the same bytes again", async () => {
+    // `applyIdTagReload` mutates the live pool and then writes it back. A
+    // transient SQLITE_BUSY or a full disk throws after the mutation: caching
+    // the new text first left persisted state stale, emitted no outcome at all,
+    // and made a retry of those same bytes an early return.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["P1"]));
+    const dbPath = path.join(dir, "state.sqlite");
+    const database = BunSqliteDatabase.open(dbPath);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, database);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-PERSIST-FAIL",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+
+    // The write-back now fails; the in-memory mutation still happens first.
+    database.close();
+
+    backend.save(file, JSON.stringify(["P2"]));
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+    expect(events[0]?.cpId).toBe("CP-PERSIST-FAIL");
+
+    // The same bytes again must be judged afresh, not written off as a
+    // duplicate — the baseline records what landed, not what was read.
+    backend.save(file, JSON.stringify(["P2"]));
+    await waitFor(
+      () => events.length > 1,
+      "a second rejection for the same bytes",
+    );
+    expect(events[1]?.outcome).toBe("rejected");
+  });
+});
+
+describe("cp.update to a different idTag file is reconciled (#314)", () => {
+  it("does not treat the charge point as already checked against the new path", async () => {
+    // The reconcile marker was keyed by charge point alone. `cp.update` deletes
+    // and re-adds without an intervening sync, so the *new* path was filtered
+    // out as "already reconciled" and its bytes became the baseline unapplied.
+    const dir = tempDir();
+    const first = writeFile(dir, "first.json", JSON.stringify(["FIRST"]));
+    const second = writeFile(dir, "second.json", JSON.stringify(["SECOND"]));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-SWAP",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file: first },
+    });
+    expect(server.registry.get("CP-SWAP")?.getInit().idTags).toEqual(["FIRST"]);
+
+    // The second file moves on as its watch is opened — after `parseCreateBody`
+    // read it for the update, before anything can observe the change.
+    backend.onWatch = (watched) => {
+      if (watched !== dir) return;
+      backend.onWatch = null;
+      fs.writeFileSync(second, JSON.stringify(["SECOND-EDITED"]));
+    };
+    await rpc(socket, "cp.update", {
+      cpId: "CP-SWAP",
+      wsUrl: server.registry.get("CP-SWAP")?.getInit().wsUrl,
+      connectors: 1,
+      idTagPool: { file: second },
+    });
+
+    await waitFor(
+      () =>
+        server.registry.get("CP-SWAP")?.getInit().idTags?.[0] ===
+        "SECOND-EDITED",
+      "the swapped-in file to be reconciled against the charge point",
+    );
   });
 });
 

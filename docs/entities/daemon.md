@@ -258,6 +258,11 @@ The rules, in the order they bite:
   A held definition is applied when the transaction stops **or when the run's
   cleanup completes**, whichever released the gate — whether the run reached the
   end of its graph, errored, or was stopped by hand with `stop_scenario`. The
+  A held definition is never installed from inside a teardown, even one whose
+  own gate has already opened: the settle is announced on a later microtask, so
+  the enclosing synchronous cleanup always finishes first. "The gate is clear"
+  is not a sufficient condition, because installing a definition can auto-start
+  a run that snapshots connector state the gate says nothing about.
   The daemon waits for the blocking state to actually clear, never for the
   lifecycle event that announces it: every such event on the control plane is
   published from inside the code that is ending the thing, while the state it

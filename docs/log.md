@@ -784,3 +784,37 @@ Sixth review pass on PR #325.
   construction (a run's own `finally`; a connector's `transactionChange` to
   null) or re-checks a gate that is authoritative at that moment (the registry
   sync, and the reconcile after a scenario registration).
+
+## [2026-09-05] ingest | `--watch`: the fourth ordering instance, the invariant restated, and scenario watches that survive a restart (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — the corrected invariant is written down: a held
+  definition is never installed from inside a teardown, **even one whose own
+  gate has already opened**, because installing it can auto-start a run that
+  snapshots connector state the gate says nothing about. The watch table's
+  scenario row now includes a `--state-db` restore, and the startup summary
+  names the files it is watching instead of only counting them.
+- [State persistence](concepts/state-persistence.md) — new
+  `watched_scenario_files` table (schema v12): the path behind a control-plane
+  scenario load, so its watch is re-established on restart. `--scenario` and
+  `--scenario-template-file` need no row, because the bootstrap that registered
+  them runs again.
+- Why the previous closure failed, recorded so it is not repeated: the invariant
+  was stated in terms of the gate the drain _reads_
+  (`hasOpenTransaction` / `isScenarioRunning`), but a drain also _starts work_ —
+  `loadScenario` can auto-start a run — whose correctness depends on state the
+  gate never mentions. Enumerating safe emit sites could never cover that.
+  `notifySessionSettled` now announces on a microtask, which is the requirement
+  expressed once, in one place, and covers emit sites not yet written.
+- The idTag baseline is now advanced only after the pool has actually been
+  installed everywhere, and a persistence failure is reported as `rejected`
+  rather than reaching the watcher as a generic handler crash — the third
+  instance of "the baseline moved before the thing landed". Audited the others:
+  the scenario `lastText` already advances on success only, and
+  `registerScenarioFile`'s baseline records what the caller loaded (or nothing,
+  on a restore) rather than what is on disk.
+- The reconciliation marker is keyed by charge point **and path**, so a
+  `cp.update` that swaps `idTagPool.file` is looked at again instead of
+  remembered as done.
+- The `file-reload` envelope bounds `scenarioId` by the definition that carries
+  it, so an id a file-backed scenario may legitimately have can no longer make
+  the reload apply while the event is silently dropped.

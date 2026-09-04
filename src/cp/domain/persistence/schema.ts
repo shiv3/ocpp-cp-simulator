@@ -13,12 +13,28 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+
+-- #314: which file a scenario was loaded from, when it came from one over the
+-- control plane. The definition itself lives in \`scenarios\` and is restored
+-- either way; without this the *watch* was not, so a restarted --watch daemon
+-- came back holding a frozen snapshot of a file it believed it was watching --
+-- the exact failure \`charge_points.id_tag_file\` exists to prevent, on the other
+-- half of the feature. Daemon-only, and deliberately not a column on
+-- \`scenarios\`: a source path is meaningless to the browser services that share
+-- that table's repository.
+CREATE TABLE IF NOT EXISTS watched_scenario_files (
+  cp_id        TEXT NOT NULL,
+  connector_id INTEGER NOT NULL,
+  scenario_id  TEXT NOT NULL,
+  path         TEXT NOT NULL,
+  PRIMARY KEY (cp_id, connector_id, scenario_id)
 );
 
 CREATE TABLE IF NOT EXISTS scenarios (
@@ -390,6 +406,20 @@ export function runMigrations(db: Database): void {
     if (!new Set(cols.map((c) => c.name)).has("id_tag_file")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN id_tag_file TEXT");
     }
+  }
+
+  // v11 → v12: file hot-reload (#314), second half. The scenario file a
+  // control-plane `load_scenario { file }` / `run_scenario_file` was loaded
+  // from, so its watch is re-established on restart. The startup flags
+  // (`--scenario`, `--scenario-template-file`) re-register by themselves
+  // because the bootstrap runs again; only the control-plane loads were lost.
+  if (stored < 12) {
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS watched_scenario_files (" +
+        "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
+        "scenario_id TEXT NOT NULL, path TEXT NOT NULL, " +
+        "PRIMARY KEY (cp_id, connector_id, scenario_id))",
+    );
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

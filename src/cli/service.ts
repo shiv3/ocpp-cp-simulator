@@ -1551,14 +1551,41 @@ export class CLIChargePointService {
 
   /** Tell {@link onSessionSettled} subscribers a gate has opened. A throwing
    *  handler is logged and never breaks the path it was called from. */
+  /**
+   * Announce a settle — always on a later microtask, never inline (#314).
+   *
+   * This is the one place the invariant lives, because enumerating safe emit
+   * sites kept missing one. The rule that actually holds is *not* "the gate the
+   * listener checks is clear": a drain does not merely read that gate, it calls
+   * `loadScenario`, which can auto-start a run that snapshots connector state
+   * and starts a transcript. Its correctness therefore depends on state the
+   * gate says nothing about. `transactionChange` fires from inside
+   * `ChargePoint.stopTransaction` with the transaction already null but auto-
+   * reset and scheduled-availability cleanup still to come; `resetScenario`
+   * emits before its own meter and status cleanup. Both have an open gate and a
+   * half-torn-down connector, which is exactly the combination four separate
+   * bugs here have been.
+   *
+   * So the requirement is the stronger one: **no listener runs inside any
+   * synchronous teardown, even one whose own gate has already opened.** A
+   * microtask is precisely that guarantee — JavaScript runs the enclosing
+   * synchronous block to completion first — and asserting it here covers every
+   * emit site, including ones not yet written.
+   */
   private notifySessionSettled(info: SessionSettledInfo): void {
-    for (const handler of this._sessionSettledHandlers) {
-      try {
-        handler(info);
-      } catch (err) {
-        process.stderr.write(`[CLI] Session settled handler error: ${err}\n`);
+    const handlers = [...this._sessionSettledHandlers];
+    if (handlers.length === 0) return;
+    queueMicrotask(() => {
+      for (const handler of handlers) {
+        // Re-checked: the service can be torn down between the emit and here.
+        if (!this._sessionSettledHandlers.has(handler)) continue;
+        try {
+          handler(info);
+        } catch (err) {
+          process.stderr.write(`[CLI] Session settled handler error: ${err}\n`);
+        }
       }
-    }
+    });
   }
 
   /** Resolve (and clear) any pending waitForScenarioArmed() callers for

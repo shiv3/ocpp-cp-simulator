@@ -4,6 +4,7 @@ import * as path from "path";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { CPRegistry } from "./CPRegistry";
+import type { Database } from "../../cp/domain/persistence/Database";
 import { FileWatcher } from "./FileWatcher";
 import { parseIdTagsFile } from "./idTagFile";
 import { SCENARIO_MAX_BYTES } from "../../protocol/limits";
@@ -72,8 +73,13 @@ export interface ScenarioFileRegistration {
    * came from, not whatever is on disk by the time this registration runs — a
    * write between the caller's read and this call would otherwise be recorded
    * as already-seen and never applied at all (#314).
+   *
+   * Explicitly `null` means "there is no baseline to trust": the definition did
+   * not come from a read of this file at all — a `--state-db` restore rebuilt
+   * it from the database — so whatever is on disk now must be applied rather
+   * than adopted as already-seen.
    */
-  readonly loadedText?: string;
+  readonly loadedText?: string | null;
 }
 
 interface ScenarioEntry extends ScenarioFileRegistration {
@@ -124,9 +130,18 @@ export class FileReloadManager {
   private readonly watcher: FileWatcher;
   private readonly idTagWatches = new Map<string, () => void>();
   private readonly idTagText = new Map<string, string>();
-  /** Charge points already checked against the file they were loaded from.
-   *  Reconciliation is a once-per-charge-point step, not a once-per-file one. */
+  /**
+   * Charge points already checked against the file they were loaded from, keyed
+   * by charge point **and absolute path**.
+   *
+   * Once per charge point, not once per file — several restored charge points
+   * can share one pool and arrive one at a time. And once per *source*: a
+   * `cp.update` that swaps `idTagPool.file` deletes and re-adds the charge
+   * point without an intervening sync, so an id-only key filtered the new path
+   * out as "already reconciled" and let its bytes become the baseline unapplied.
+   */
   private readonly reconciledCps = new Set<string>();
+  private readonly database: Database | null;
   private readonly scenarios = new Map<string, ScenarioEntry>();
   private sink: FileReloadSink | null = null;
   private definitionsSink: ScenarioDefinitionsChangedSink | null = null;
@@ -139,8 +154,12 @@ export class FileReloadManager {
     options: {
       readonly watcher?: FileWatcher;
       readonly log?: (message: string) => void;
+      /** The daemon's `--state-db`, when it has one. Scenario registrations are
+       *  written here so a restart re-establishes their watches (#314). */
+      readonly database?: Database | null;
     } = {},
   ) {
+    this.database = options.database ?? null;
     this.log = options.log ?? ((m) => process.stderr.write(`${m}\n`));
     this.watcher = options.watcher ?? new FileWatcher({ log: this.log });
     // The only drain trigger, by design — see the note above `FileReloadManager`
@@ -223,9 +242,16 @@ export class FileReloadManager {
       if (this.registry.has(entry.cpId)) continue;
       entry.unwatch();
       this.scenarios.delete(key);
+      this.forgetScenarioFile(entry.cpId, entry.connectorId, entry.scenarioId);
     }
-    for (const cpId of [...this.reconciledCps]) {
-      if (!this.registry.has(cpId)) this.reconciledCps.delete(cpId);
+    for (const key of [...this.reconciledCps]) {
+      const [cpId, watched] = splitReconcileKey(key);
+      // Dropped when the charge point is gone, and when it no longer draws from
+      // that file — a `cp.update` that repoints `idTagPool.file` has to be
+      // looked at again, not remembered as done.
+      if (!this.registry.has(cpId) || !wanted.has(watched)) {
+        this.reconciledCps.delete(key);
+      }
     }
     // A `cp.update` tears the charge point down and builds a replacement. That
     // ends whatever session was holding a reload back, but the old service's
@@ -254,13 +280,16 @@ export class FileReloadManager {
       absolutePath,
       unwatch: () => {},
       lastText:
-        (registration.loadedText ?? readTextOrEmpty(absolutePath)) || null,
+        registration.loadedText === null
+          ? null
+          : (registration.loadedText ?? readTextOrEmpty(absolutePath)) || null,
       pending: null,
     };
     entry.unwatch = this.watcher.watch(absolutePath, () =>
       this.reloadScenario(key),
     );
     this.scenarios.set(key, entry);
+    this.rememberScenarioFile(entry);
     // Close the rest of the window. Between the caller reading the file and the
     // watch starting, nothing is looking: a write in there produces no event,
     // and with the baseline holding the loaded text it would sit unnoticed
@@ -287,6 +316,10 @@ export class FileReloadManager {
   ): void {
     const key = scenarioKey(cpId, connectorId, scenarioId);
     const entry = this.scenarios.get(key);
+    // Forgotten even when nothing is registered in memory: after a restart the
+    // row can outlive the registration it came from, and a scenario the
+    // operator removed must not come back as a watch at the next restart.
+    this.forgetScenarioFile(cpId, connectorId, scenarioId);
     if (!entry) return;
     entry.unwatch();
     this.scenarios.delete(key);
@@ -307,6 +340,74 @@ export class FileReloadManager {
       entry.unwatch();
       this.scenarios.delete(key);
     }
+    this.database?.run(
+      "DELETE FROM watched_scenario_files WHERE cp_id = ? AND connector_id = ?",
+      [cpId, connectorId],
+    );
+  }
+
+  /**
+   * Re-establish the watches a previous run of this daemon registered (#314).
+   *
+   * Called once, after `restoreFromDatabase` has rebuilt the fleet and its
+   * scenarios. Only control-plane loads are here: `--scenario` and
+   * `--scenario-template-file` re-register by themselves, because the bootstrap
+   * runs again on every start. A row whose scenario is no longer loaded — the
+   * operator removed it, or `--state-db` was pointed elsewhere — is dropped
+   * rather than re-watched.
+   */
+  restoreScenarioWatches(): void {
+    if (this.closed || !this.database) return;
+    const rows = this.database.all<{
+      cp_id: string;
+      connector_id: number;
+      scenario_id: string;
+      path: string;
+    }>(
+      "SELECT cp_id, connector_id, scenario_id, path FROM watched_scenario_files",
+    );
+    for (const row of rows) {
+      const loaded = this.registry
+        .get(row.cp_id)
+        ?.getScenario(row.connector_id, row.scenario_id);
+      if (!loaded) {
+        this.forgetScenarioFile(row.cp_id, row.connector_id, row.scenario_id);
+        continue;
+      }
+      // `loadedText: null` — no baseline to trust. The definition came back
+      // from the database, not from a read of this file, so seeding the
+      // baseline from disk would adopt an edit made while the daemon was down
+      // as already-seen. Registering with no baseline makes the reconcile that
+      // follows apply it, which is the guarantee the idTag half already gives.
+      this.registerScenarioFile({
+        filePath: row.path,
+        cpId: row.cp_id,
+        connectorId: row.connector_id,
+        scenarioId: row.scenario_id,
+        loadedText: null,
+      });
+    }
+  }
+
+  private rememberScenarioFile(entry: ScenarioEntry): void {
+    this.database?.run(
+      "INSERT INTO watched_scenario_files (cp_id, connector_id, scenario_id, path) " +
+        "VALUES (?, ?, ?, ?) ON CONFLICT (cp_id, connector_id, scenario_id) " +
+        "DO UPDATE SET path = excluded.path",
+      [entry.cpId, entry.connectorId, entry.scenarioId, entry.absolutePath],
+    );
+  }
+
+  private forgetScenarioFile(
+    cpId: string,
+    connectorId: number,
+    scenarioId: string,
+  ): void {
+    this.database?.run(
+      "DELETE FROM watched_scenario_files " +
+        "WHERE cp_id = ? AND connector_id = ? AND scenario_id = ?",
+      [cpId, connectorId, scenarioId],
+    );
   }
 
   close(): void {
@@ -357,8 +458,15 @@ export class FileReloadManager {
       this.rejectAll(affected, "id-tags", absolutePath, err);
       return;
     }
-    this.idTagText.set(absolutePath, text);
-    this.applyIdTags(affected, absolutePath, tags);
+    // Recorded only once the pool has actually been installed everywhere it
+    // had to be. `applyIdTagReload` persists as well as mutates, so a transient
+    // SQLITE_BUSY or a full disk throws *after* the live pool changed: caching
+    // the text first left persisted state stale, emitted no outcome at all
+    // (the throw reached the watcher's generic handler), and suppressed a retry
+    // of the very same bytes. The baseline is a record of what landed.
+    if (this.applyIdTags(affected, absolutePath, tags)) {
+      this.idTagText.set(absolutePath, text);
+    }
   }
 
   /**
@@ -379,13 +487,15 @@ export class FileReloadManager {
   private reconcileIdTags(absolutePath: string): void {
     if (this.closed) return;
     const affected = this.affectedByIdTagFile(absolutePath).filter(
-      (cpId) => !this.reconciledCps.has(cpId),
+      (cpId) => !this.reconciledCps.has(reconcileKey(cpId, absolutePath)),
     );
     if (affected.length === 0) return;
     // Marked before anything can fail: a file that has been broken on disk all
     // along is reported once, not once per registry sync for the rest of the
     // daemon's life.
-    for (const cpId of affected) this.reconciledCps.add(cpId);
+    for (const cpId of affected) {
+      this.reconciledCps.add(reconcileKey(cpId, absolutePath));
+    }
     const text =
       this.idTagText.get(absolutePath) ?? readTextOrEmpty(absolutePath);
 
@@ -407,16 +517,30 @@ export class FileReloadManager {
     this.log(
       `[watch] ${absolutePath} no longer matches ${stale.length} charge point(s) it was loaded into; reconciling`,
     );
-    this.applyIdTags(stale, absolutePath, tags);
+    void this.applyIdTags(stale, absolutePath, tags);
   }
 
+  /** Whether every charge point took the new pool without throwing. A charge
+   *  point that simply has no pool to replace is reported and counts as
+   *  settled; a persistence failure does not. */
   private applyIdTags(
     cpIds: readonly string[],
     absolutePath: string,
     tags: readonly string[],
-  ): void {
+  ): boolean {
+    let allSettled = true;
     for (const cpId of cpIds) {
-      const applied = this.registry.applyIdTagReload(cpId, tags);
+      let applied: boolean;
+      try {
+        applied = this.registry.applyIdTagReload(cpId, tags);
+      } catch (err) {
+        // Persisting is part of applying: a pool that is live but not written
+        // back comes apart at the next restart, so this is reported like any
+        // other rejection rather than swallowed as a handler crash.
+        allSettled = false;
+        this.rejectAll([cpId], "id-tags", absolutePath, err);
+        continue;
+      }
       this.emit({
         target: "id-tags",
         path: absolutePath,
@@ -434,6 +558,7 @@ export class FileReloadManager {
         );
       }
     }
+    return allSettled;
   }
 
   private reloadScenario(key: string): void {
@@ -443,6 +568,7 @@ export class FileReloadManager {
     if (!this.registry.has(entry.cpId) || !this.stillLoaded(entry)) {
       entry.unwatch();
       this.scenarios.delete(key);
+      this.forgetScenarioFile(entry.cpId, entry.connectorId, entry.scenarioId);
       return;
     }
 
@@ -694,6 +820,16 @@ export class FileReloadManager {
       );
     }
   }
+}
+
+/** `cpId` + absolute path. NUL cannot appear in either, so the split is exact. */
+function reconcileKey(cpId: string, absolutePath: string): string {
+  return `${cpId}\u0000${absolutePath}`;
+}
+
+function splitReconcileKey(key: string): [string, string] {
+  const at = key.indexOf("\u0000");
+  return [key.slice(0, at), key.slice(at + 1)];
 }
 
 function scenarioKey(

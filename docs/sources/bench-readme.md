@@ -80,6 +80,15 @@ a perfect ring. The span is the cycle period rather than the raw
 `--tx-interval`, which differ at `--tx-interval 1` because a hold is floored at
 1s.
 
+The offsets are also **anchored to a run-wide epoch**, not to each cohort's own
+arming. A global sequence fixes which fraction of the period a charge point
+gets, not what that fraction is measured from, and creation, settling and
+heartbeat arming take variable time — so scheduling from each cohort's own
+finish rotated every cohort by an arbitrary amount and let well-separated
+indices collide in wall-clock phase anyway. Each first cycle is rebased modulo
+the period against one epoch fixed before the first charge point exists, so an
+index means the same instant whichever step created it.
+
 **Method.** Grows the fleet in place via `cp.create_many` (never
 `state.reset` — that is daemon-wide destructive), waits for each step's new
 CPs to settle, then diffs two `/metrics` scrapes bracketing a measurement
@@ -117,6 +126,27 @@ counted on its own as `ocppcp_ocpp_pending_calls_evicted_total` (see
 per step and warns on stderr when it moves, because each eviction costs one
 duration sample — the row's `p50`/`p95` then rest on fewer observations than its
 `calls` column implies.
+
+**Connectivity is read from the final scrape.** The `connected` column is the
+fleet that generated the row's histogram, not the one the settle poll saw before
+the warmup, and `dropped` is how many had settled and were gone by the end.
+Reporting the settle-time count attributed a window's latency to a fleet larger
+than the one producing it; a disconnect during the _warmup_ is the worst case,
+because its reconnect attempts land before the `before` scrape and leave even
+the `reconnects` column at zero. Both ends of the step are in `--out`
+(`connectedAtSettle` and `connected`), and a non-zero drop is warned about on
+stderr.
+
+**The hardware block says whose hardware it is.** `os.cpus()`, `os.totalmem()`
+and `Bun.version` describe the process running the script, which is the machine
+under test only when `--daemon-url` is local. A local run prints
+`machine (daemon host, and this runner):`; a remote one prints
+`benchmark client, NOT the daemon host:` plus `daemon host: UNKNOWN` and says
+to record the daemon host by hand, and `--out` carries the same distinction as
+`daemonHostIsRunner`. Since [the acceptance criteria on
+#302](github-issues.md) require a published ceiling to name the machine it was
+measured on, a wrong attribution would be quotable and false — worse than a
+missing one.
 
 **A row is labelled with the fleet it describes.** `cp.create_many` succeeds
 partially, so `N` is the number of charge points that actually exist and

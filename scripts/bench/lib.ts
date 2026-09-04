@@ -1013,7 +1013,16 @@ export interface StepResult {
    *  the two diverge the moment a creation fails, and reporting a row's
    *  latency under `requested` attributes it to a fleet that never existed. */
   readonly fleet: number;
-  readonly connected: number;
+  /** Charge points connected when the step finished settling, i.e. before the
+   *  warmup and the measurement window. */
+  readonly connectedAtSettle: number;
+  /** Charge points connected in the **final** scrape — the fleet that actually
+   *  generated the histogram this row reports. Reporting the settle-time count
+   *  attributed a window's latency to a fleet larger than the one producing
+   *  it whenever a charge point dropped during warmup or the window, and a
+   *  warmup disconnect is invisible otherwise: its reconnect attempts land
+   *  before the `before` scrape, so even the `reconnects` column stays 0. */
+  readonly connectedAtEnd: number;
   readonly notSettled: number;
   readonly aggregate: ReturnType<typeof mergeHistogramDeltas>;
   readonly heartbeat: ReturnType<typeof mergeHistogramDeltas> | null;
@@ -1039,6 +1048,14 @@ export function answeredAfterWatchdog(r: StepResult): number {
   return Math.max(0, r.aggregate.count - lastFiniteCount);
 }
 
+/** Charge points that were connected when the step settled but not when it
+ *  ended: lost during the warmup or the measurement window. Reported next to
+ *  the end-of-window `connected` so both ends of the step are explicit rather
+ *  than one standing in for the other. */
+export function droppedDuringWindow(r: StepResult): number {
+  return Math.max(0, r.connectedAtSettle - r.connectedAtEnd);
+}
+
 export function row(r: StepResult): string[] {
   const p50 = formatSeconds(histogramQuantile(r.aggregate, 0.5));
   const p95 = formatSeconds(histogramQuantile(r.aggregate, 0.95));
@@ -1051,7 +1068,8 @@ export function row(r: StepResult): string[] {
   return [
     String(r.fleet),
     String(r.requested - r.fleet),
-    String(r.connected),
+    String(r.connectedAtEnd),
+    String(droppedDuringWindow(r)),
     String(r.notSettled),
     String(r.aggregate.count),
     p50,
@@ -1072,6 +1090,7 @@ export const STEP_COLUMNS = [
   "N",
   "uncreated",
   "connected",
+  "dropped",
   "unsettled",
   "calls",
   "p50",
@@ -1195,4 +1214,101 @@ export class TransactionStarts {
     for (const settle of this.waiters.values()) settle(false);
     this.waiters.clear();
   }
+}
+
+/**
+ * Delay before a charge point's *first* transaction cycle, so that its phase
+ * is measured from a **run-wide epoch** rather than from whenever its own
+ * cohort finished arming.
+ *
+ * Global indices fixed *which* fraction of the period each charge point gets;
+ * they did nothing about what that fraction is measured from. The load is
+ * armed once per sweep step, and creation, settling and heartbeat arming all
+ * take variable time, so each cohort's offsets used to be rotated by an
+ * arbitrary amount relative to the cohorts already cycling. Two charge points
+ * with well-separated indices could still collide in wall-clock phase, which
+ * is the artificial-knee failure the stagger exists to prevent, reached by
+ * another route.
+ *
+ * Rebasing modulo the period fixes the origin as well as the sequence: index
+ * `i` means the same instant whichever step created it. The result is always
+ * in `[0, periodMs)` — the next occurrence of that phase on the run-wide grid.
+ */
+export function firstCycleDelayMs(
+  phaseMs: number,
+  elapsedSinceEpochMs: number,
+  periodMs: number,
+): number {
+  if (periodMs <= 0) return Math.max(0, phaseMs);
+  const delay = (phaseMs - elapsedSinceEpochMs) % periodMs;
+  return delay < 0 ? delay + periodMs : delay;
+}
+
+/** Hosts that mean "this machine". `URL.hostname` keeps IPv6 literals in
+ *  brackets, hence both spellings of the loopback address. */
+const LOOPBACK_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "[::1]",
+  "0.0.0.0",
+]);
+
+/** Whether `--daemon-url` names a daemon on the machine running this script.
+ *  A URL that will not parse is treated as remote: over-claiming that the
+ *  hardware below belongs to the daemon is the failure worth avoiding. */
+export function daemonIsLocal(daemonUrl: string): boolean {
+  try {
+    const host = new URL(daemonUrl).hostname.toLowerCase();
+    return LOOPBACK_HOSTS.has(host) || host.startsWith("127.");
+  } catch {
+    return false;
+  }
+}
+
+export interface MachineFacts {
+  readonly daemonUrl: string;
+  readonly cpuModel: string;
+  readonly cores: number;
+  readonly memGb: string;
+  readonly platform: string;
+  readonly arch: string;
+  readonly bunVersion: string;
+  readonly daemonVersion: string;
+}
+
+/**
+ * The hardware block a run reports, honest about **whose** hardware it is.
+ *
+ * `os.cpus()`, `os.totalmem()` and `Bun.version` describe the process running
+ * this script. With `--daemon-url` pointing at another host that is not the
+ * machine under test, and labelling it `machine:` made a recorded ceiling
+ * name the wrong hardware. Since the README's whole contract is that a
+ * published number names the machine it was measured on, a wrong attribution
+ * is worse than a missing one: it is quotable and false. So a remote run says
+ * plainly that the daemon host is unknown rather than presenting the runner
+ * as it.
+ */
+export function machineReport(facts: MachineFacts): string {
+  const hardware = `${facts.cpuModel} (${facts.cores} cores), ${facts.memGb} GiB RAM, ${facts.platform}/${facts.arch}`;
+  const versions = `bun: ${facts.bunVersion}, daemon: ${facts.daemonVersion}`;
+  if (daemonIsLocal(facts.daemonUrl)) {
+    return [
+      `machine (daemon host, and this runner): ${hardware}`,
+      versions,
+    ].join("\n");
+  }
+  let host = facts.daemonUrl;
+  try {
+    host = new URL(facts.daemonUrl).host;
+  } catch {
+    // Keep the raw string; it is only ever quoted back at the operator.
+  }
+  return [
+    `benchmark client, NOT the daemon host: ${hardware}`,
+    versions,
+    `daemon host: UNKNOWN — --daemon-url points at ${host}, so the hardware ` +
+      `above is this runner's and says nothing about the machine under test. ` +
+      `Record the daemon host's CPU/RAM/OS by hand before publishing a ceiling.`,
+  ].join("\n");
 }

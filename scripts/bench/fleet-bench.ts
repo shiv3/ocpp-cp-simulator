@@ -26,11 +26,15 @@ import {
   assertDaemonEmpty,
   benchCpId,
   cyclePeriodSec,
+  daemonIsLocal,
   diffHistogram,
+  droppedDuringWindow,
+  firstCycleDelayMs,
   fleetGauge,
   formatTable,
   histogramQuantile,
   holdSec,
+  machineReport,
   maxSustainableFleet,
   mergeHistogramDeltas,
   parseArgv,
@@ -424,15 +428,21 @@ async function preflight(opts: BenchOptions): Promise<Preflight> {
   };
 }
 
-function machineInfo(daemonVersion: string): string {
+/** The hardware block, attributed to whoever it actually describes. `os.*`
+ *  and `Bun.version` describe this process, which is the machine under test
+ *  only when the daemon is local — see {@link machineReport}. */
+function machineInfo(daemonUrl: string, daemonVersion: string): string {
   const cpus = os.cpus();
-  const model = cpus[0]?.model ?? "unknown CPU";
-  const cores = cpus.length;
-  const memGb = (os.totalmem() / 1024 ** 3).toFixed(1);
-  return [
-    `machine: ${model} (${cores} cores), ${memGb} GiB RAM, ${os.platform()}/${os.arch()}`,
-    `bun: ${Bun.version}, daemon: ${daemonVersion}`,
-  ].join("\n");
+  return machineReport({
+    daemonUrl,
+    cpuModel: cpus[0]?.model ?? "unknown CPU",
+    cores: cpus.length,
+    memGb: (os.totalmem() / 1024 ** 3).toFixed(1),
+    platform: os.platform(),
+    arch: os.arch(),
+    bunVersion: Bun.version,
+    daemonVersion,
+  });
 }
 
 /** Where the next generated charge point id starts.
@@ -557,6 +567,7 @@ function armLoad(
   pool: SocketPool,
   cpIds: readonly string[],
   startIndex: number,
+  epochMs: number,
   opts: BenchOptions,
   watcher: TransactionWatcher | null,
 ): { stop: () => void; ready: Promise<void>; unconfirmedStarts: () => number } {
@@ -579,6 +590,9 @@ function armLoad(
     }, ms);
     live.add(timer);
   }
+
+  const holdMs = holdSec(opts.txIntervalSec) * 1000;
+  const periodMs = cyclePeriodSec(opts.txIntervalSec) * 1000;
 
   const ready = (async () => {
     for (const cpId of cpIds) {
@@ -612,13 +626,22 @@ function armLoad(
       cpIds.length,
       opts.txIntervalSec,
     );
+    // Measured from the run-wide epoch, not from whenever this cohort finished
+    // arming. Global indices fix *which* fraction of the period a charge point
+    // gets; they say nothing about what it is measured from, and creation,
+    // settling and heartbeat arming all take variable time — so without this
+    // every cohort was rotated by an arbitrary amount and two well-separated
+    // indices could still collide in wall-clock phase. The offsets are read
+    // once, after the arming awaits, so every charge point in the cohort is
+    // rebased against the same instant.
+    const elapsedMs = Date.now() - epochMs;
     cpIds.forEach((cpId, i) => {
-      schedule(() => void cycle(cpId), offsets[i]!);
+      schedule(
+        () => void cycle(cpId),
+        firstCycleDelayMs(offsets[i]!, elapsedMs, periodMs),
+      );
     });
   })();
-
-  const holdMs = holdSec(opts.txIntervalSec) * 1000;
-  const periodMs = cyclePeriodSec(opts.txIntervalSec) * 1000;
 
   async function cycle(cpId: string): Promise<void> {
     if (stopped) return;
@@ -784,7 +807,7 @@ async function main(): Promise<void> {
   );
   const { daemonVersion, baseline } = await preflight(opts);
 
-  process.stderr.write(machineInfo(daemonVersion) + "\n");
+  process.stderr.write(machineInfo(opts.daemonUrl, daemonVersion) + "\n");
   process.stderr.write(
     `[bench] mode: ${opts.txIntervalSec > 0 ? `active (tx every ~${opts.txIntervalSec}s)` : "idle (heartbeat only)"}, heartbeat every ${opts.heartbeatIntervalSec}s\n`,
   );
@@ -889,6 +912,9 @@ async function main(): Promise<void> {
     const untilLost = <T>(p: Promise<T>): Promise<T> =>
       watcher ? watcher.lost(p) : p;
 
+    // One origin for every cohort's stagger, fixed before the first charge
+    // point exists. See `firstCycleDelayMs`.
+    const runEpochMs = Date.now();
     const cursor: IdCursor = { nextIndex: 1 };
     // Cumulative across steps, like the daemon's counters: each row reports
     // its own delta.
@@ -931,6 +957,7 @@ async function main(): Promise<void> {
         pool,
         created,
         allCpIds.length - created.length,
+        runEpochMs,
         opts,
         watcher,
       );
@@ -1008,10 +1035,28 @@ async function main(): Promise<void> {
         0,
       );
 
+      // Read from the *final* scrape, not from the settle poll: a charge point
+      // that dropped during the warmup or the window would otherwise still be
+      // counted, attributing this row's latency to a fleet larger than the one
+      // that produced it. A warmup disconnect is the worst case — its
+      // reconnect attempts land before the `before` scrape, so the
+      // `reconnects` column stays 0 and nothing else in the row hints at it.
+      const connectedAtEnd = fleetGauge(after).connected;
+      const dropped = Math.max(0, connected - connectedAtEnd);
+      if (dropped > 0) {
+        process.stderr.write(
+          `[bench] N=${n}: WARNING: ${dropped} charge point(s) that had settled ` +
+            `were no longer connected at the end of the window; the row's ` +
+            `latency comes from the ${Math.max(0, connectedAtEnd - baseline.connected)} ` +
+            `still connected, not from all ${Math.max(0, connected - baseline.connected)}.\n`,
+        );
+      }
+
       results.push({
         requested: n,
         fleet: allCpIds.length,
-        connected: Math.max(0, connected - baseline.connected),
+        connectedAtSettle: Math.max(0, connected - baseline.connected),
+        connectedAtEnd: Math.max(0, connectedAtEnd - baseline.connected),
         notSettled,
         aggregate,
         heartbeat,
@@ -1044,7 +1089,11 @@ async function main(): Promise<void> {
         // userinfo embedded in a URL must not travel with it.
         options: redactOptions(opts),
         preExistingChargePoints: baseline.total,
-        machine: machineInfo(daemonVersion),
+        // Says whose hardware it is; `daemonHostIsRunner` makes that
+        // machine-readable, so a collected result can be filtered rather than
+        // read hopefully.
+        machine: machineInfo(opts.daemonUrl, daemonVersion),
+        daemonHostIsRunner: daemonIsLocal(opts.daemonUrl),
         results: results.map((r) => ({
           // `n` is the fleet the row's numbers actually describe.
           // `requested` is the `--counts` entry it was aiming for; they differ
@@ -1052,7 +1101,11 @@ async function main(): Promise<void> {
           n: r.fleet,
           requested: r.requested,
           notCreated: r.requested - r.fleet,
-          connected: r.connected,
+          // Both ends of the step, explicitly: `connected` is what generated
+          // the histogram, `connectedAtSettle` is what the window opened with.
+          connected: r.connectedAtEnd,
+          connectedAtSettle: r.connectedAtSettle,
+          droppedDuringWindow: droppedDuringWindow(r),
           notSettled: r.notSettled,
           calls: r.aggregate.count,
           p50Seconds: valueOrNull(histogramQuantile(r.aggregate, 0.5)),

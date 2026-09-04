@@ -23,6 +23,7 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import type { UrlDistribution } from "../../cp/infrastructure/transport/SupervisionUrlPool";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
@@ -94,6 +95,13 @@ export interface ChargePointSnapshot {
 export interface CreateChargePointParams {
   cpId: string;
   wsUrl: string;
+  /**
+   * Every supervision URL, when more than one was given. OCPP-J only; the
+   * transport resolves one of them per connection attempt while `wsUrl` stays
+   * the single string everything else reports and persists.
+   */
+  supervisionUrls?: readonly string[];
+  urlDistribution?: UrlDistribution;
   centralSystemUrl?: string;
   soapCallbackUrl?: string;
   soapPath?: string;

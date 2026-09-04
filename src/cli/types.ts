@@ -2,6 +2,7 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../cp/infrastructure/transport/wsUrlWithBasic";
+import type { UrlDistribution } from "../cp/infrastructure/transport/SupervisionUrlPool";
 
 export interface CLIOptions {
   readonly wsUrl: string;
@@ -129,7 +130,15 @@ export interface CLIOptions {
 
 export interface ChargePointInitOptions {
   readonly cpId: string;
+  /**
+   * The supervision URL in play. When `supervisionUrls` is set this is the
+   * first of them; the transport picks per connection attempt, so this is what
+   * gets persisted and reported rather than what is necessarily connected.
+   */
   readonly wsUrl: string;
+  /** All supervision URLs, when more than one was given. OCPP-J only. */
+  readonly supervisionUrls?: readonly string[];
+  readonly urlDistribution?: UrlDistribution;
   readonly connectors: number;
   readonly vendor: string;
   readonly model: string;

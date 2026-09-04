@@ -1,6 +1,7 @@
 import { Logger, LogType } from "../../shared/Logger";
 import { redactSensitiveText } from "../../shared/redaction";
 import { openOcppWebSocket, probeUpgradeRefusal } from "./wsUrlWithBasic";
+import type { SupervisionUrlPool } from "./SupervisionUrlPool";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -118,6 +119,18 @@ export class OCPPWebSocket {
   private _onOpenCallback: (() => void) | null = null;
   private _onCloseCallback: ((ev: CloseEvent) => void) | null = null;
   private _isManualDisconnect: boolean = false;
+  /**
+   * Whether the close now in flight was asked for by this charge point.
+   *
+   * Distinct from `_isManualDisconnect`, which additionally means "do not
+   * reconnect": `disconnectInternal()` (behind `ChargePoint.reset()`) and
+   * `simulateConnectionLoss()` both close the socket *and* want the reconnect
+   * loop to run, so they deliberately leave that flag false. Without a second
+   * flag every reset and every injected disconnect would be counted as a
+   * failure of the supervision URL in use — scattering an affinity fleet off
+   * its assigned nodes because of something the fleet did to itself.
+   */
+  private _selfRequestedClose: boolean = false;
   /** #288: the options the current handshake used, replayed by the refusal
    *  probe so it asks the question the socket asked. */
   private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
@@ -143,6 +156,12 @@ export class OCPPWebSocket {
   private _generationCounter: number = 0;
   private _currentGeneration: GenerationTokenImpl;
   private _reconnectNotBefore: number | null = null;
+  /**
+   * Set when the charge point was given more than one supervision URL. The
+   * pool decides which one each attempt uses; `_url` stays the one currently
+   * in play, so everything that reports a URL keeps reporting a single string.
+   */
+  private _urlPool: SupervisionUrlPool | null = null;
   private _onCloseTransactionCallback:
     ((finalized: GenerationToken) => void) | null = null;
   private _disposed: boolean = false;
@@ -193,6 +212,18 @@ export class OCPPWebSocket {
     return this._url;
   }
 
+  /**
+   * Hand the socket a set of supervision URLs to choose between.
+   *
+   * A setter rather than a constructor parameter: the constructor already
+   * carries eleven positional arguments, and a charge point with one URL —
+   * every charge point until now — should not have to pass anything.
+   */
+  public setSupervisionUrlPool(pool: SupervisionUrlPool | null): void {
+    this._urlPool = pool;
+    if (pool) this._url = pool.current();
+  }
+
   public connect(
     onopen: (() => void) | null = null,
     onclose: ((ev: CloseEvent) => void) | null = null,
@@ -206,11 +237,13 @@ export class OCPPWebSocket {
     if (onclose) this._onCloseCallback = onclose;
 
     this._isManualDisconnect = false;
+    this._selfRequestedClose = false;
 
     const onopenHandler = () => {
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
       this._lastRefusalProbeAt = 0;
+      this._urlPool?.onSuccess();
       this.handleOpen();
       if (this._onOpenCallback) {
         this._onOpenCallback();
@@ -232,6 +265,13 @@ export class OCPPWebSocket {
         this._onCloseCallback(ev);
       }
     };
+
+    // Resolving here, per attempt, is what keeps the URL list out of
+    // everything downstream: the snapshot, the persisted `ws_url` and the log
+    // lines all still see one string.
+    if (this._urlPool) {
+      this._url = this._urlPool.next();
+    }
 
     this._ws = openOcppWebSocket({
       baseUrl: this._url,
@@ -298,6 +338,10 @@ export class OCPPWebSocket {
     }
 
     this.runCloseTransaction("internal");
+
+    // Asked for by the charge point (a reset), so it is not evidence about the
+    // supervision URL — see `_selfRequestedClose`.
+    this._selfRequestedClose = true;
 
     // Close the socket WITHOUT setting _isManualDisconnect (so auto-reconnect runs)
     if (this._ws) {
@@ -529,6 +573,10 @@ export class OCPPWebSocket {
 
     // THEN run the close transaction for a 'simulated' cause
     this.runCloseTransaction("simulated");
+
+    // Injected by this charge point's own fault simulator, so it is not
+    // evidence about the supervision URL — see `_selfRequestedClose`.
+    this._selfRequestedClose = true;
 
     // THEN close the socket WITHOUT setting _isManualDisconnect
     if (this._ws) {
@@ -789,6 +837,10 @@ export class OCPPWebSocket {
 
     // Only attempt reconnect if not manually disconnected
     if (!this._isManualDisconnect) {
+      // Only a close the charge point did not ask for counts as a failure of
+      // the URL in use. A reset, or an injected disconnect, says nothing about
+      // the node and must not push an affinity pool off its primary.
+      if (!this._selfRequestedClose) this._urlPool?.onFailure();
       this.attemptReconnect();
     }
   }

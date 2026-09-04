@@ -708,15 +708,53 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+/** Whether a string parses as a `ws:` / `wss:` URL. */
+function isWebSocketUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "ws:" || protocol === "wss:";
+  } catch {
+    return false;
+  }
+}
+
 export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (!isRecord(body)) throw new Error("body must be an object");
   const cpId = body.cpId;
   if (typeof cpId !== "string" || cpId.length === 0) {
     throw new Error("cpId is required (string)");
   }
-  const wsUrl = body.wsUrl;
+  // `wsUrl` may be one URL or several. Several is an OCPP-J concept — the
+  // check that it is not SOAP happens below, once the version is known — and
+  // the list is kept beside a single `wsUrl` rather than replacing it, so the
+  // status snapshot, the persisted `charge_points.ws_url` and every log line
+  // keep seeing one string.
+  const rawWsUrl = body.wsUrl;
+  const supervisionUrls: string[] | undefined = Array.isArray(rawWsUrl)
+    ? rawWsUrl.filter((u): u is string => typeof u === "string" && u.length > 0)
+    : undefined;
+  if (supervisionUrls && supervisionUrls.length !== rawWsUrl.length) {
+    throw new Error("wsUrl entries must be non-empty strings");
+  }
+  const wsUrl = supervisionUrls ? supervisionUrls[0] : rawWsUrl;
   if (typeof wsUrl !== "string" || wsUrl.length === 0) {
-    throw new Error("wsUrl is required (string)");
+    throw new Error("wsUrl is required (string or non-empty array of strings)");
+  }
+  // Refused rather than defaulted: a typo like "round_robin" would otherwise
+  // succeed and silently give the caller round-robin when they asked for
+  // affinity, which is the opposite of the determinism affinity exists for.
+  let urlDistribution: ChargePointInitOptions["urlDistribution"];
+  if (Object.prototype.hasOwnProperty.call(body, "urlDistribution")) {
+    if (
+      body.urlDistribution !== "round-robin" &&
+      body.urlDistribution !== "random" &&
+      body.urlDistribution !== "cp-affinity"
+    ) {
+      throw new Error(
+        'urlDistribution must be "round-robin", "random" or "cp-affinity"',
+      );
+    }
+    urlDistribution = body.urlDistribution;
   }
   const centralSystemUrl =
     typeof body.centralSystemUrl === "string" &&
@@ -755,6 +793,26 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (isSoapVersion(ocppVersion) && !soapCallbackUrl) {
     throw new Error("soapCallbackUrl is required for OCPP SOAP versions");
   }
+  // A SOAP charge point has no reconnect loop to rotate — it posts to the
+  // Central System service and the CSMS calls back on one advertised address —
+  // so a list would be accepted and then quietly ignored. Refuse it instead.
+  if (isSoapVersion(ocppVersion) && supervisionUrls) {
+    throw new Error(
+      "wsUrl must be a single URL for the OCPP SOAP versions; several supervision URLs are an OCPP-J feature",
+    );
+  }
+  // Every entry is checked here, not just the first. A later member is only
+  // touched at reconnect time, where `buildOcppWebSocketUrl` calls `new URL()`
+  // synchronously inside a `setTimeout` callback — a malformed one throws
+  // there, uncaught, and takes the daemon down instead of failing over.
+  for (const url of supervisionUrls ?? []) {
+    if (!isWebSocketUrl(url)) {
+      throw new Error(
+        `wsUrl entry "${url}" is not a ws:// or wss:// URL; every supervision URL must be usable, since a later one is only reached on reconnect`,
+      );
+    }
+  }
+
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
     const username = body.basicAuth.username;
@@ -830,6 +888,10 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     ocppVersion,
     ...(soapCallbackUrl ? { soapCallbackUrl } : {}),
     ...(soapPath ? { soapPath } : {}),
+    ...(supervisionUrls && supervisionUrls.length > 1
+      ? { supervisionUrls }
+      : {}),
+    ...(urlDistribution ? { urlDistribution } : {}),
     securityProfile,
     authorizationKey,
     cpoName,

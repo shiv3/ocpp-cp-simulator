@@ -1370,11 +1370,11 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async createChargePoint(params: CreateChargePointParams): Promise<void> {
-    await this.rpc("cp.create", params as Params<"cp.create">);
+    await this.rpc("cp.create", toWireCreateParams(params));
   }
 
   async updateChargePoint(params: CreateChargePointParams): Promise<void> {
-    await this.rpc("cp.update", params);
+    await this.rpc("cp.update", toWireCreateParams(params));
   }
 
   async removeChargePoint(id: string): Promise<void> {
@@ -2074,4 +2074,24 @@ function scenarioDefinitionsKey(
   connectorId: number | null,
 ): string {
   return `${cpId}\u0000${connectorId ?? "cp"}`;
+}
+
+/**
+ * Fold `supervisionUrls` into the wire shape.
+ *
+ * The control plane expresses several supervision URLs as an array `wsUrl`
+ * (#296); `CreateChargePointParams` keeps them in a field of their own because
+ * that is what the charge point consumes. Forwarding the typed shape verbatim
+ * meant the schema stripped the unknown key and the call succeeded while
+ * quietly creating a single-URL charge point — the failure mode this whole
+ * translation exists to avoid.
+ */
+export function toWireCreateParams(
+  params: CreateChargePointParams,
+): Params<"cp.create"> {
+  const { supervisionUrls, ...rest } = params;
+  if (!supervisionUrls || supervisionUrls.length <= 1) {
+    return rest as Params<"cp.create">;
+  }
+  return { ...rest, wsUrl: [...supervisionUrls] } as Params<"cp.create">;
 }

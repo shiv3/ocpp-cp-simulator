@@ -25,6 +25,8 @@ export type RegistryMembershipSink = (event: RegistryMembershipEvent) => void;
 interface ChargePointRow {
   cp_id: string;
   ws_url: string;
+  supervision_urls: string | null;
+  url_distribution: string | null;
   connectors: number;
   vendor: string;
   model: string;
@@ -97,7 +99,8 @@ export class CPRegistry {
   restoreFromDatabase(): string[] {
     if (!this.database) return [];
     const rows = this.database.all<ChargePointRow>(
-      "SELECT cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+      "SELECT cp_id, ws_url, supervision_urls, url_distribution, " +
+        "connectors, vendor, model, ocpp_version, " +
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
@@ -108,9 +111,22 @@ export class CPRegistry {
     for (const row of rows) {
       if (this.services.has(row.cp_id)) continue;
       const securityProfile = parsePersistedSecurityProfile(row);
+      // #296: without these the charge point comes back with failover
+      // silently disabled — the one thing a URL list exists to provide.
+      const supervisionUrls = safeJsonParse<string[]>(row.supervision_urls);
       const init: ChargePointInitOptions = {
         cpId: row.cp_id,
         wsUrl: row.ws_url,
+        ...(supervisionUrls && supervisionUrls.length > 1
+          ? { supervisionUrls }
+          : {}),
+        ...(row.url_distribution
+          ? {
+              urlDistribution: row.url_distribution as NonNullable<
+                ChargePointInitOptions["urlDistribution"]
+              >,
+            }
+          : {}),
         connectors: row.connectors,
         vendor: row.vendor,
         model: row.model,
@@ -374,14 +390,18 @@ export class CPRegistry {
     if (!this.database) return;
     this.database.run(
       "INSERT INTO charge_points " +
-        "(cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+        "(cp_id, ws_url, supervision_urls, url_distribution, " +
+        "connectors, vendor, model, ocpp_version, " +
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
-        "ws_url = excluded.ws_url, connectors = excluded.connectors, " +
+        "ws_url = excluded.ws_url, " +
+        "supervision_urls = excluded.supervision_urls, " +
+        "url_distribution = excluded.url_distribution, " +
+        "connectors = excluded.connectors, " +
         "vendor = excluded.vendor, model = excluded.model, " +
         "ocpp_version = excluded.ocpp_version, " +
         "central_system_url = excluded.central_system_url, " +
@@ -397,6 +417,8 @@ export class CPRegistry {
       [
         init.cpId,
         init.wsUrl,
+        init.supervisionUrls ? JSON.stringify(init.supervisionUrls) : null,
+        init.urlDistribution ?? null,
         init.connectors,
         init.vendor,
         init.model,

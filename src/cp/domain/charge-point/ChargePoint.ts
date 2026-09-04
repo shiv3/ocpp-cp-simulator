@@ -46,6 +46,10 @@ import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import {
+  SupervisionUrlPool,
+  type UrlDistribution,
+} from "../../infrastructure/transport/SupervisionUrlPool";
 
 interface BasicAuthSettings {
   username: string;
@@ -123,6 +127,14 @@ export interface ChargePointTransportOptions {
   readonly soapCallbackUrl?: string;
   readonly soapPath?: string;
   readonly soapRequestTimeoutMs?: number;
+  /**
+   * Every supervision URL this charge point may use, when it was given more
+   * than one. `wsUrl` stays the first of them, so everything that reports or
+   * persists a URL keeps seeing one string; the pool picks per attempt.
+   * OCPP-J only — SOAP has no reconnect loop to rotate.
+   */
+  readonly supervisionUrls?: readonly string[];
+  readonly urlDistribution?: UrlDistribution;
 }
 
 export class ChargePoint {
@@ -324,6 +336,16 @@ export class ChargePoint {
         cpoName,
         tls,
       );
+      const supervisionUrls = transportOptions.supervisionUrls;
+      if (supervisionUrls && supervisionUrls.length > 1) {
+        this._webSocket.setSupervisionUrlPool(
+          new SupervisionUrlPool(
+            supervisionUrls,
+            transportOptions.urlDistribution,
+            this._id,
+          ),
+        );
+      }
       this._messageHandler = getProtocolProfile(
         this._ocppVersion,
       ).createMessageHandler(this, this._webSocket, this._logger);

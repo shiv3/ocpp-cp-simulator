@@ -403,6 +403,15 @@ export interface UpgradeRefusalDetail {
   readonly location?: string;
 }
 
+/**
+ * How long the diagnostic may take before it is abandoned. A CSMS or proxy
+ * that accepts the request and never answers would otherwise leave the fetch
+ * pending forever, and the once-a-minute throttle only limits how often a new
+ * one starts -- it would not stop them accumulating. A diagnostic that has
+ * not answered in ten seconds has already lost its value.
+ */
+const REFUSAL_PROBE_TIMEOUT_MS = 10_000;
+
 export async function probeUpgradeRefusal(
   options: OcppWebSocketConnectOptions,
   fetchImpl: typeof fetch = fetch,
@@ -436,6 +445,7 @@ export async function probeUpgradeRefusal(
       method: "GET",
       redirect: "manual",
       headers,
+      signal: AbortSignal.timeout(REFUSAL_PROBE_TIMEOUT_MS),
       // Same trust decisions as the handshake: a private-CA station whose
       // probe verified against the public roots would report a lie.
       ...(options.tls ? { tls: options.tls } : {}),

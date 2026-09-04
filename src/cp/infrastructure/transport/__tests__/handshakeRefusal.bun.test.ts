@@ -142,6 +142,33 @@ describe("probeUpgradeRefusal", () => {
     }
   });
 
+  it("gives up on a server that accepts the request and never answers", async () => {
+    // Otherwise the fetch stays pending forever while the reconnect loop
+    // starts another one every minute.
+    const server = Bun.serve({
+      port: 0,
+      async fetch() {
+        await Bun.sleep(60_000);
+        return new Response("late", { status: 401 });
+      },
+    });
+    try {
+      const started = Date.now();
+      const result = await probeUpgradeRefusal({
+        url: `ws://127.0.0.1:${server.port}/ocpp/CP001`,
+        protocols: [],
+        headers: {},
+        useNodeWsFallback: false,
+      });
+
+      expect(result).toBeNull();
+      // The cap is 10s; this asserts it is bounded, not its exact value.
+      expect(Date.now() - started).toBeLessThan(20_000);
+    } finally {
+      server.stop(true);
+    }
+  }, 25_000);
+
   it("returns null rather than throwing when it cannot conclude", async () => {
     expect(
       await probeUpgradeRefusal({

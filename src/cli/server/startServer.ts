@@ -241,6 +241,15 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   fileReload?.setSink((event) =>
     socketIo.registryEvents?.emitFileReloaded(event),
   );
+  // #314: a reloaded scenario is a definition change like any other, and the
+  // console listens on the `scenario-definitions` scope, not on `file-reload`.
+  fileReload?.setScenarioDefinitionsSink((cpId, connectorId, definitions) =>
+    socketIo.registryEvents?.emitScenarioDefinitionsChanged(
+      cpId,
+      connectorId,
+      definitions,
+    ),
+  );
   lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,

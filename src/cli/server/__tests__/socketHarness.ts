@@ -86,15 +86,17 @@ export async function startTestServer(
     scenarioRepository,
     connectorSettingsRepository,
   });
-  const restored = await Promise.resolve(
-    chargePointService.restoreFromDatabase(),
-  );
   const watchOptions =
     options.watch === true
       ? {}
       : options.watch === false
         ? null
         : options.watch;
+  // Constructed and subscribed BEFORE the restore, exactly as `startServer`
+  // does it (#314). The restore re-creates charge points one at a time and each
+  // fires its own `onInitChange`, so a harness that built the reloader
+  // afterwards would only ever exercise a single sync over the whole fleet —
+  // and would not reproduce what the daemon does at boot.
   const fileReload = watchOptions
     ? new FileReloadManager(registry, bus, {
         watcher: new FileWatcher({
@@ -105,8 +107,11 @@ export async function startTestServer(
     : null;
   if (fileReload) {
     registry.onInitChange(() => fileReload.syncFromRegistry());
-    fileReload.syncFromRegistry();
   }
+  const restored = await Promise.resolve(
+    chargePointService.restoreFromDatabase(),
+  );
+  fileReload?.syncFromRegistry();
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
@@ -124,6 +129,15 @@ export async function startTestServer(
   });
   fileReload?.setSink((event) =>
     socketIo.registryEvents?.emitFileReloaded(event),
+  );
+  // #314: a reloaded scenario is a definition change like any other, and the
+  // console listens on the `scenario-definitions` scope, not on `file-reload`.
+  fileReload?.setScenarioDefinitionsSink((cpId, connectorId, definitions) =>
+    socketIo.registryEvents?.emitScenarioDefinitionsChanged(
+      cpId,
+      connectorId,
+      definitions,
+    ),
   );
   lifecycle = createLifecycle({
     pidPath: null,

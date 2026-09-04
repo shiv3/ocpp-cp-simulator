@@ -1039,6 +1039,158 @@ describe("run_scenario_file registers even when the file auto-starts (#314)", ()
   });
 });
 
+describe("run_scenario_file runs what it was given, with what it was given (#314)", () => {
+  it("honours strict on a file the auto-start gate would have started", async () => {
+    // The regression this pins: with the gate left on, the load started the
+    // scenario itself and the explicit start had nothing to do, so `strict`
+    // went missing and the call reported success for a run it never began.
+    const dir = tempDir();
+    const file = writeFile(
+      dir,
+      "s.json",
+      autoStartScenario("strict-run", 0.05),
+    );
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await createConnectedCp(server, socket, "CP-STRICT");
+    const service = server.registry.get("CP-STRICT");
+    if (!service) throw new Error("CP-STRICT missing");
+    // Clear the seeded default so the auto-start gate would reach this file —
+    // otherwise the gate never fires and the test proves nothing.
+    for (const loaded of service.listScenarios(1)) {
+      service.removeScenario(1, loaded.scenarioId);
+    }
+
+    await rpc(
+      socket,
+      "run_scenario_file",
+      { connector: 1, file, strict: true },
+      "CP-STRICT",
+    );
+    await waitFor(
+      () => service.getScenarioRunResult("strict-run") !== null,
+      "the run to be recorded",
+    );
+    expect(service.getScenarioRunResult("strict-run")?.strict).toBe(true);
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+  });
+
+  it("refuses a scenario id that was already running before the call", async () => {
+    // A wrong error beats a wrong success: reporting ok while never executing
+    // the file the caller handed over is not something a caller can detect.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", autoStartScenario("busy-run", 30));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await createConnectedCp(server, socket, "CP-BUSY");
+    const service = server.registry.get("CP-BUSY");
+    if (!service) throw new Error("CP-BUSY missing");
+    for (const loaded of service.listScenarios(1)) {
+      service.removeScenario(1, loaded.scenarioId);
+    }
+
+    await rpc(socket, "run_scenario_file", { connector: 1, file }, "CP-BUSY");
+    expect(service.isScenarioRunning("busy-run")).toBe(true);
+
+    // A second call, same id, while the first run is still in flight.
+    await expect(
+      rpc(socket, "run_scenario_file", { connector: 1, file }, "CP-BUSY"),
+    ).rejects.toThrow(/run_scenario_file failed/);
+  });
+});
+
+describe("every charge point sharing a file is reconciled on restart (#314)", () => {
+  it("applies the edit to each restored charge point, not just the first", async () => {
+    // `restoreFromDatabase` re-creates the fleet one charge point at a time,
+    // each firing its own registry sync. Reconciling once per *file* left every
+    // charge point after the first holding the tags it was persisted with.
+    const dir = tempDir();
+    const file = writeFile(dir, "shared.json", JSON.stringify(["OLD"]));
+    const dbPath = path.join(dir, "state.sqlite");
+
+    const firstDb = BunSqliteDatabase.open(dbPath);
+    databases.push(firstDb);
+    const first = await startWatchingServer(new TestWatchBackend(), firstDb);
+    const firstSocket = await openClient(first);
+    for (const cpId of ["CP-SHARE-A", "CP-SHARE-B", "CP-SHARE-C"]) {
+      await rpc(firstSocket, "cp.create", {
+        cpId,
+        wsUrl: csmsUrl(),
+        connectors: 1,
+        idTagPool: { file },
+      });
+    }
+    firstSocket.disconnect();
+    await first.close();
+    servers.pop();
+    firstDb.close();
+    databases.pop();
+
+    fs.writeFileSync(file, JSON.stringify(["NEW"]));
+
+    const secondDb = BunSqliteDatabase.open(dbPath);
+    databases.push(secondDb);
+    const second = await startWatchingServer(new TestWatchBackend(), secondDb);
+    for (const cpId of ["CP-SHARE-A", "CP-SHARE-B", "CP-SHARE-C"]) {
+      expect(second.restored).toContain(cpId);
+      expect(second.registry.get(cpId)?.getInit().idTags).toEqual(["NEW"]);
+    }
+  });
+});
+
+describe("a reload reaches the scenario editor (#314)", () => {
+  it("pushes scenario-definitions-changed as well as file-reload", async () => {
+    // The console subscribes through `subscribeScenarioDefinitions`, which is
+    // the `scenario-definitions` scope — it never sees a `file-reload`
+    // envelope, so an open editor kept showing the graph the daemon had
+    // stopped executing.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("edited-live", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    interface DefinitionsEvent {
+      readonly kind?: string;
+      readonly cpId?: string;
+      readonly connectorId?: number;
+      readonly definitions?: ReadonlyArray<{
+        readonly id?: string;
+        readonly nodes?: ReadonlyArray<{ readonly data?: unknown }>;
+      }>;
+    }
+    const definitionEvents: DefinitionsEvent[] = [];
+    socket.on("event", (envelope: DefinitionsEvent) => {
+      if (envelope?.kind === "scenario-definitions") {
+        definitionEvents.push(envelope);
+      }
+    });
+    await rpc(socket, "events.subscribe", { scope: "scenario-definitions" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-EDITOR",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-EDITOR");
+    definitionEvents.length = 0;
+
+    backend.save(file, scenario("edited-live", 22));
+    await waitFor(
+      () => definitionEvents.length > 0,
+      "a scenario-definitions-changed push",
+    );
+    const pushed = definitionEvents.at(-1);
+    expect(pushed?.cpId).toBe("CP-EDITOR");
+    expect(pushed?.connectorId).toBe(1);
+    const reloaded = pushed?.definitions?.find((d) => d.id === "edited-live");
+    expect(
+      (reloaded?.nodes?.[0]?.data as { duration?: number } | undefined)
+        ?.duration,
+    ).toBe(22);
+  });
+});
+
 /** The `delaySeconds` of the loaded definition's delay node. */
 function loadedDelaySeconds(
   server: TestServer,

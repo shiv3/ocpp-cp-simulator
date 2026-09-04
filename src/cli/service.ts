@@ -1049,7 +1049,21 @@ export class CLIChargePointService {
     }
   }
 
-  loadScenario(connectorId: number, definition: ScenarioDefinition): string {
+  /**
+   * Load a scenario onto a connector.
+   *
+   * `options.autoStart: false` suppresses the auto-start gate below. The one
+   * caller that needs it is a "load this and run it *now, with these options*"
+   * path (`run_scenario_file`): letting the gate start the scenario first left
+   * the explicit start with nothing to do, so the caller's per-run options were
+   * silently discarded and there was no way to tell that from a start this call
+   * actually made (#314).
+   */
+  loadScenario(
+    connectorId: number,
+    definition: ScenarioDefinition,
+    options: { readonly autoStart?: boolean } = {},
+  ): string {
     // Hard gate on the fields the runtime map and every scenario RPC key on.
     // Without it a definition with no `id` was stored under the key
     // `undefined`, returned as `{}` instead of `{ scenarioId }`, and left an
@@ -1079,7 +1093,10 @@ export class CLIChargePointService {
     // the JSON `load_scenario` command on a long-running daemon). The CP
     // statusChange event won't refire, so kick the auto-start gate here
     // too — it's idempotent thanks to the dedup key.
-    if (this._chargePoint.status === OCPPStatus.Available) {
+    if (
+      options.autoStart !== false &&
+      this._chargePoint.status === OCPPStatus.Available
+    ) {
       this.tryAutoStartForConnector(connectorId, "connect", null);
       this.tryAutoStartForConnector(connectorId, "status", connector.status);
     }

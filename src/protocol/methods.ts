@@ -136,6 +136,17 @@ const cpParamsBaseSchema = z.object({
     .nullable()
     .optional()
     .describe("Overrides for the BootNotification payload"),
+  // Honoured by `createCp` and `updateCp` since long before it was declared:
+  // both read it straight off the raw params, so it worked over socket.io yet
+  // appeared in no schema, which is why the MCP tool had to re-add it by hand.
+  // On the shared base rather than on `cp.create` alone, so `list_methods`
+  // advertises it for `cp.update` too — that method honours it as a reconnect.
+  autoConnect: z
+    .boolean()
+    .optional()
+    .describe(
+      "Connect to the CSMS immediately after the call (cp.update reconnects)",
+    ),
 });
 
 const scenarioTemplateInfoSchema = z.object({
@@ -161,14 +172,6 @@ export const createParamsSchema = cpParamsBaseSchema.extend({
     .describe(
       "Basic auth credentials for the CSMS link. Prefer securityProfile + authorizationKey for OCPP 1.6 security profiles",
     ),
-  // Honoured by `createCp` since long before it was declared: the handler read
-  // it straight off the raw params, so it worked over socket.io yet appeared
-  // in no schema, which is why the MCP tool had to re-add it by hand. Declared
-  // here so there is one description of what `cp.create` accepts.
-  autoConnect: z
-    .boolean()
-    .optional()
-    .describe("Connect to the CSMS immediately after creation"),
 });
 
 /**
@@ -222,6 +225,19 @@ export const createManyParamsSchema = createParamsSchema
 export function hasIdPatternPlaceholder(value: string): boolean {
   return ID_PATTERN_PLACEHOLDER.test(value);
 }
+
+/**
+ * Longest generated charge point id.
+ *
+ * The pad-width cap alone does not bound the result: a pattern may repeat the
+ * placeholder, and `"{n:99}".repeat(1000)` is 6 KB of schema-valid input that
+ * expands to a 99 KB id. `parseCreateBody` only asks that an id be non-empty,
+ * so the charge point would be registered and only then would the result fail
+ * to validate — an internal error reported over a side effect that already
+ * happened, times `count`. 256 matches the `cpId` cap the rpc envelope already
+ * enforces.
+ */
+export const MAX_GENERATED_CP_ID_LENGTH = 256;
 
 /** Expand `idPattern` for one index. Shared by the server and its tests. */
 export function expandIdPattern(pattern: string, index: number): string {

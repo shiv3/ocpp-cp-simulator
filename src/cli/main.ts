@@ -515,6 +515,15 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.stderr.write("Error: --cp-count must be a positive integer\n");
     process.exit(1);
   }
+  if (cpCount > 1 && !cpId) {
+    // `buildBootstrap` returns null without a cpId, so the fleet would expand
+    // to nothing and the daemon would start with zero charge points while
+    // reporting success — the requested count silently ignored.
+    process.stderr.write(
+      "Error: --cp-count requires --cp-id (the fleet's id stem)\n",
+    );
+    process.exit(1);
+  }
   if (cpCount > 1 && cpIdPattern && !hasIdPatternPlaceholder(cpIdPattern)) {
     // Without a placeholder every charge point is asked for under the same id,
     // so the second create throws "already exists" and takes the daemon down

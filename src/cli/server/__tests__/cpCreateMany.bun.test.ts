@@ -2,7 +2,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
-import { CP_CREATE_MANY_MAX, expandIdPattern } from "../../../protocol";
+import {
+  CP_CREATE_MANY_MAX,
+  expandIdPattern,
+  MAX_GENERATED_CP_ID_LENGTH,
+} from "../../../protocol";
 import {
   connectTestClient,
   startTestServer,
@@ -280,6 +284,113 @@ describe("idPattern padding width (#295)", () => {
       expect(list.result).toHaveLength(0);
     } finally {
       socket.disconnect();
+    }
+  });
+});
+
+describe("expanded ids are bounded, not just the pad width (#295)", () => {
+  it("refuses a pattern that repeats the placeholder into a huge id", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      // The width cap alone does not bound the result: this is a few KB of
+      // schema-valid input that expands to tens of KB per id, and the charge
+      // point would be registered before the result failed to validate.
+      const ack = await rpc(socket, "cp.create_many", {
+        ...SHARED,
+        count: 2,
+        idPattern: "{n:99}".repeat(200),
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+
+      // Rejected before any side effect: nothing was created.
+      const list = await rpc(socket, "cp.list", {});
+      expect(list.result).toHaveLength(0);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("accepts an id right at the limit", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const stem = "C".repeat(MAX_GENERATED_CP_ID_LENGTH - 3);
+      const ack = await rpc(socket, "cp.create_many", {
+        ...SHARED,
+        count: 1,
+        idPattern: `${stem}{n:03}`,
+      });
+      expect(ack.ok).toBe(true);
+      expect(ack.result.created[0]).toHaveLength(MAX_GENERATED_CP_ID_LENGTH);
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("SOAP callback routes must match the generated ids (#295)", () => {
+  it("refuses a placeholder spelled differently from idPattern", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      // Registers SOAP001 while advertising a route for SOAP1: the SOAP router
+      // looks up that exact path segment, so every inbound call 404s — and the
+      // creates would all have reported success.
+      const ack = await rpc(socket, "cp.create_many", {
+        wsUrl: "http://csms.example/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+        connectors: 1,
+        count: 2,
+        idPattern: "SOAP{n:03}",
+        soapCallbackUrl:
+          "http://sim.example:9700/ocpp/soap/SOAP{n}/ChargePointService",
+      });
+
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+      const list = await rpc(socket, "cp.list", {});
+      expect(list.result).toHaveLength(0);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("accepts a callback whose placeholder matches", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await rpc(socket, "cp.create_many", {
+        wsUrl: "http://csms.example/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+        connectors: 1,
+        count: 2,
+        idPattern: "MATCH{n:03}",
+        soapCallbackUrl:
+          "http://sim.example:9700/ocpp/soap/MATCH{n:03}/ChargePointService",
+      });
+      expect(ack.ok).toBe(true);
+      expect(ack.result.created).toEqual(["MATCH001", "MATCH002"]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("cp.update declares autoConnect too (#295)", () => {
+  it("advertises it on both methods, since both honour it", async () => {
+    // `updateCp` reads autoConnect off the raw params as a reconnect. Leaving
+    // it off updateParamsSchema made list_methods advertise a schema that
+    // omitted it, so schema-driven clients could not discover the option.
+    const { METHODS } = await import("../../../protocol");
+    for (const method of ["cp.create", "cp.update"] as const) {
+      const shape = (
+        METHODS[method].params as unknown as {
+          shape: Record<string, unknown>;
+        }
+      ).shape;
+      expect(Object.keys(shape)).toContain("autoConnect");
     }
   });
 });

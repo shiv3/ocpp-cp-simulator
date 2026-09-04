@@ -16,6 +16,7 @@ export {
   createManyParamsSchema,
   expandIdPattern,
   hasIdPatternPlaceholder,
+  MAX_GENERATED_CP_ID_LENGTH,
 } from "./methods";
 
 /** Every valid rpc method id. */

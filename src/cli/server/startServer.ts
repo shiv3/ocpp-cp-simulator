@@ -418,7 +418,19 @@ function fleetSoapCallbackUrl(
   index: number,
 ): string | undefined {
   const explicit = opts.soapCallbackUrlExplicit?.trim();
-  if (explicit) return expandIdPattern(explicit, index);
+  if (explicit) {
+    const expanded = expandIdPattern(explicit, index);
+    // Same rule the RPC enforces: the daemon routes inbound SOAP calls by the
+    // cpId in the path, so a callback whose placeholder is spelled differently
+    // from the id pattern advertises a route that does not exist.
+    if (!expanded.includes(`/${cpId}/`)) {
+      throw new Error(
+        `--soap-callback-url expands to "${expanded}", which does not contain "/${cpId}/". ` +
+          `The daemon routes inbound SOAP calls by the cpId in that path, so the CSMS would get 404s.`,
+      );
+    }
+    return expanded;
+  }
   const resolved = resolveSoapCallbackUrl({
     explicitCallbackUrl: null,
     publicBaseUrl: opts.soapPublicBaseUrl ?? null,

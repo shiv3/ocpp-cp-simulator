@@ -27,7 +27,7 @@ import {
   RpcFailure,
   createManyParamsSchema,
   expandIdPattern,
-  hasIdPatternPlaceholder,
+  MAX_GENERATED_CP_ID_LENGTH,
   isRpcMethod,
   redactSimulatorConfig,
   registryCpToWire,
@@ -575,41 +575,61 @@ async function createManyCps(
   const { count, idPattern, startIndex, ...shared } = parsed.data;
   const first = startIndex ?? 1;
 
-  // A SOAP charge point advertises the address the CSMS calls back on, and the
-  // daemon routes those calls by the cpId embedded in it
-  // (`<soapPath>/<cpId>/ChargePointService`). Copying one callback URL across a
-  // batch would point every station at the first station's route, so every
-  // other station's inbound calls would 404 — silently, since the create
-  // itself succeeds. Require the placeholder instead, and expand it per id.
   const soapCallbackUrl = shared.soapCallbackUrl;
-  if (
-    count > 1 &&
-    soapCallbackUrl &&
-    !hasIdPatternPlaceholder(soapCallbackUrl)
-  ) {
-    throw new RpcFailure(
-      "invalid_params",
-      "soapCallbackUrl must contain the same {n} placeholder as idPattern when creating more than one charge point; one URL cannot route callbacks for a whole batch",
-    );
+
+  // Expand every id first and check the batch as a whole. Creating as we go
+  // and failing partway would leave charge points registered under ids the
+  // result cannot even report — the schema caps the result strings — so the
+  // parameters are rejected outright instead, before any side effect.
+  const plan: Array<{ cpId: string; soapCallbackUrl?: string }> = [];
+  for (let i = 0; i < count; i++) {
+    const index = first + i;
+    const cpId = expandIdPattern(idPattern, index);
+    if (cpId.length > MAX_GENERATED_CP_ID_LENGTH) {
+      // The pad-width cap does not bound this on its own: a pattern may repeat
+      // the placeholder, and a few KB of input expands to a huge id.
+      throw new RpcFailure(
+        "invalid_params",
+        `idPattern expands to a charge point id longer than ${MAX_GENERATED_CP_ID_LENGTH} characters`,
+      );
+    }
+    if (!soapCallbackUrl) {
+      plan.push({ cpId });
+      continue;
+    }
+    // A SOAP charge point advertises the address the CSMS calls back on, and
+    // the daemon routes those calls by the cpId embedded in it
+    // (`<soapPath>/<cpId>/ChargePointService`). One URL shared across a batch
+    // would point every station at the first station's route; so would a URL
+    // whose placeholder is spelled differently from `idPattern`'s, e.g.
+    // `SOAP{n}` against ids generated as `SOAP{n:03}` — the station registers
+    // as SOAP001 while advertising SOAP1, and every inbound call 404s. Both
+    // creates succeed either way, so the check has to be here.
+    const expanded = expandIdPattern(soapCallbackUrl, index);
+    if (!expanded.includes(`/${cpId}/`)) {
+      throw new RpcFailure(
+        "invalid_params",
+        `soapCallbackUrl must expand to a route containing "/${cpId}/" for each generated id; the daemon routes inbound SOAP calls by the cpId in that path`,
+      );
+    }
+    plan.push({ cpId, soapCallbackUrl: expanded });
   }
 
   const created: string[] = [];
   const failed: Array<{ cpId: string; reason: string }> = [];
-  for (let i = 0; i < count; i++) {
-    const index = first + i;
-    const cpId = expandIdPattern(idPattern, index);
+  for (const entry of plan) {
     try {
       created.push(
         await createOneCp(deps, {
           ...shared,
-          cpId,
-          ...(soapCallbackUrl
-            ? { soapCallbackUrl: expandIdPattern(soapCallbackUrl, index) }
+          cpId: entry.cpId,
+          ...(entry.soapCallbackUrl
+            ? { soapCallbackUrl: entry.soapCallbackUrl }
             : {}),
         }),
       );
     } catch (err) {
-      failed.push({ cpId, reason: createFailureReason(err) });
+      failed.push({ cpId: entry.cpId, reason: createFailureReason(err) });
     }
   }
   return { created, failed };

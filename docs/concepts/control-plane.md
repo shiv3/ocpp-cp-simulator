@@ -174,17 +174,21 @@ Two guarantees worth relying on:
 
 The `count` ceiling is enforced rather than merely documented: this is the one
 control-plane method that allocates unbounded resources from a single request.
-The `{n:0W}` width is capped at two digits for the same reason — an unbounded
-one lets a schema-valid pattern expand an id past the 64 KB string cap, and the
-charge point would already exist by the time the result failed to validate.
+The `{n:0W}` width is capped at two digits for the same reason, and — because a
+pattern may repeat the placeholder, so the width cap alone bounds nothing — each
+**expanded id** is capped at 256 characters. Every id and callback route in the
+batch is checked before the first charge point is created, so a bad pattern is
+refused outright rather than leaving a partial fleet behind.
 
 **SOAP batches need a placeholder in the callback URL too.** The daemon routes
 inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService` and advertises
 `soapCallbackUrl` verbatim, so one address shared across a batch would send
 every station's callbacks to the first station's route — while every create
-reported success. `cp.create_many` therefore refuses a `count > 1` batch whose
-`soapCallbackUrl` carries no `{n}`, and expands the placeholder per id when it
-does.
+reported success. `cp.create_many` therefore requires each **expanded** `soapCallbackUrl` to
+contain `/<generated cpId>/`. A placeholder alone is not enough: `SOAP{n}`
+against ids generated as `SOAP{n:03}` registers `SOAP001` while advertising a
+route for `SOAP1`, and every inbound call 404s while all the creates report
+success. The CLI applies the same rule to `--soap-callback-url`.
 
 ### Daemon methods
 

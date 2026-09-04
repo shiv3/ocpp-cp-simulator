@@ -67,6 +67,7 @@ import {
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
+import { SOAP_CHARGE_POINT_SERVICE_ROUTE } from "../soapPath";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
@@ -554,8 +555,42 @@ async function createCp(
  * use, since a create can fail on a URL carrying Basic Auth credentials.
  */
 function createFailureReason(err: unknown): string {
-  if (err instanceof RpcFailure) return err.message || err.code;
-  return safeLogMessage(err);
+  const reason =
+    err instanceof RpcFailure ? err.message || err.code : safeLogMessage(err);
+  // Bounded to the result schema's own limit. A failure whose message repeats a
+  // long input — a 40 KB `tlsCaPath` that does not exist, say — would otherwise
+  // make the *whole batch's* ack fail result validation and answer `internal`,
+  // discarding the per-item report this method exists to give.
+  return reason.length > MAX_FAILURE_REASON_LENGTH
+    ? reason.slice(0, MAX_FAILURE_REASON_LENGTH - 1) + "\u2026"
+    : reason;
+}
+
+/** Fits inside the result schema's `STR_64K`, with room for the ellipsis. */
+const MAX_FAILURE_REASON_LENGTH = 2_000;
+
+/** Bounds an expanded `soapCallbackUrl`; generous for a real URL. */
+const MAX_SOAP_CALLBACK_URL_LENGTH = 2_048;
+
+/**
+ * The charge point id a callback URL's path would route to, or `null` if the
+ * path is not a `ChargePointService` route at all. Uses the router's own
+ * pattern and percent-decoding so this check and the router cannot disagree.
+ */
+export function soapCallbackRouteCpId(callbackUrl: string): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(callbackUrl).pathname;
+  } catch {
+    return null;
+  }
+  const match = SOAP_CHARGE_POINT_SERVICE_ROUTE.exec(pathname);
+  if (!match?.[2]) return null;
+  try {
+    return decodeURIComponent(match[2]);
+  } catch {
+    return null;
+  }
 }
 
 async function createManyCps(
@@ -606,10 +641,23 @@ async function createManyCps(
     // as SOAP001 while advertising SOAP1, and every inbound call 404s. Both
     // creates succeed either way, so the check has to be here.
     const expanded = expandIdPattern(soapCallbackUrl, index);
-    if (!expanded.includes(`/${cpId}/`)) {
+    // Bounded for the same reason the id is: a template repeating the
+    // placeholder expands far past what any string limit allows, and this
+    // value is retained and persisted per charge point.
+    if (expanded.length > MAX_SOAP_CALLBACK_URL_LENGTH) {
       throw new RpcFailure(
         "invalid_params",
-        `soapCallbackUrl must expand to a route containing "/${cpId}/" for each generated id; the daemon routes inbound SOAP calls by the cpId in that path`,
+        `soapCallbackUrl expands to more than ${MAX_SOAP_CALLBACK_URL_LENGTH} characters`,
+      );
+    }
+    if (soapCallbackRouteCpId(expanded) !== cpId) {
+      // Checked through the router's own pattern and percent-decoding rather
+      // than by substring: an id like "SITE A-1" is advertised as
+      // "/SITE%20A-1/" and would fail a raw match, while
+      // "/SITE A-1/extra/ChargePointService" would pass one and still 404.
+      throw new RpcFailure(
+        "invalid_params",
+        `soapCallbackUrl must expand to a route whose charge point segment is "${cpId}" and which ends in /ChargePointService; the daemon routes inbound SOAP calls by that segment`,
       );
     }
     plan.push({ cpId, soapCallbackUrl: expanded });

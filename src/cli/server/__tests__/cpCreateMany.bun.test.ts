@@ -394,3 +394,101 @@ describe("cp.update declares autoConnect too (#295)", () => {
     }
   });
 });
+
+describe("expanded callback URLs are bounded and route-matched (#295)", () => {
+  it("refuses a callback template that expands past the URL bound", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      // Schema-valid input, ~1 MB per charge point once expanded, retained and
+      // persisted per CP — 200 of them from one RPC.
+      const ack = await rpc(socket, "cp.create_many", {
+        wsUrl: "http://csms.example/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+        connectors: 1,
+        count: 2,
+        idPattern: "BIG{n:03}",
+        soapCallbackUrl:
+          "http://sim.example:9700/ocpp/soap/" +
+          "{n:99}".repeat(60) +
+          "/ChargePointService",
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+      expect((await rpc(socket, "cp.list", {})).result).toHaveLength(0);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("accepts a percent-encoded id the router decodes", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      // A raw substring test would reject this even though the router decodes
+      // "/SITE%20A-1/" to "SITE A-1" and matches it.
+      const ack = await rpc(socket, "cp.create_many", {
+        wsUrl: "http://csms.example/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+        connectors: 1,
+        count: 1,
+        idPattern: "SITE A-{n}",
+        soapCallbackUrl:
+          "http://sim.example:9700/ocpp/soap/SITE%20A-{n}/ChargePointService",
+      });
+      expect(ack.ok).toBe(true);
+      expect(ack.result.created).toEqual(["SITE A-1"]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("refuses a route with an extra segment that would 404", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      // Contains "/EXTRA1/" so a substring test passes, but the router's
+      // pattern reads the segment before /ChargePointService, which is "more".
+      const ack = await rpc(socket, "cp.create_many", {
+        wsUrl: "http://csms.example/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+        connectors: 1,
+        count: 1,
+        idPattern: "EXTRA{n}",
+        soapCallbackUrl:
+          "http://sim.example:9700/ocpp/soap/EXTRA{n}/more/ChargePointService",
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("a failure reason cannot sink the whole batch (#295)", () => {
+  it("bounds the reason so the ack still validates", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      // The wrapped filesystem error repeats the path, so an oversized but
+      // schema-valid tlsCaPath used to push `failed[].reason` past the result
+      // schema's limit — turning a per-item report into an opaque `internal`
+      // ack, after every charge point had already been created.
+      const ack = await rpc(socket, "cp.create_many", {
+        ...SHARED,
+        wsUrl: "wss://example.test/ocpp/",
+        count: 1,
+        idPattern: "TLS{n}",
+        tlsCaPath: "/nonexistent/" + "p".repeat(40_000) + ".pem",
+      });
+
+      expect(ack.ok).toBe(true);
+      expect(ack.result.created).toEqual([]);
+      expect(ack.result.failed).toHaveLength(1);
+      expect(ack.result.failed[0].reason.length).toBeLessThanOrEqual(2_000);
+    } finally {
+      socket.disconnect();
+    }
+  });
+});

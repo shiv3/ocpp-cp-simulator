@@ -550,6 +550,16 @@ export function parseArgs(argv: string[]): CLIOptions {
 
   const isServerMode = daemon || httpPort != null || webConsoleEnabled;
 
+  if (cpCount > 1 && !isServerMode) {
+    // The standalone REPL / JSON paths bootstrap exactly one charge point, so
+    // the flag would be accepted and then ignored: `--cp-count 20` would run a
+    // single CP and say nothing about the other nineteen.
+    process.stderr.write(
+      "Error: --cp-count needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
+
   if (isClientMode) {
     if ((send !== null || events) && !cpId && !allEvents) {
       process.stderr.write(

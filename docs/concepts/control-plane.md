@@ -184,11 +184,20 @@ refused outright rather than leaving a partial fleet behind.
 inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService` and advertises
 `soapCallbackUrl` verbatim, so one address shared across a batch would send
 every station's callbacks to the first station's route — while every create
-reported success. `cp.create_many` therefore requires each **expanded** `soapCallbackUrl` to
-contain `/<generated cpId>/`. A placeholder alone is not enough: `SOAP{n}`
-against ids generated as `SOAP{n:03}` registers `SOAP001` while advertising a
-route for `SOAP1`, and every inbound call 404s while all the creates report
-success. The CLI applies the same rule to `--soap-callback-url`.
+reported success. `cp.create_many` therefore parses each **expanded** `soapCallbackUrl` with the
+router's own pattern and requires the charge point segment to equal the
+generated id. A placeholder alone is not enough: `SOAP{n}` against ids
+generated as `SOAP{n:03}` registers `SOAP001` while advertising a route for
+`SOAP1`, and every inbound call 404s while all the creates report success.
+Matching the way the router does — rather than by substring — also accepts a
+percent-encoded id such as `/SITE%20A-1/` and rejects an extra path segment
+that would 404. Expanded URLs are capped at 2048 characters. The CLI applies
+the same rule to `--soap-callback-url`.
+
+A `failed[].reason` is truncated to 2000 characters. An error message that
+repeated a long input would otherwise push the batch's ack past the result
+schema and turn the promised per-item report into an opaque `internal` — after
+every charge point had already been created.
 
 ### Daemon methods
 

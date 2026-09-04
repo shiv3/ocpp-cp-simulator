@@ -26,6 +26,7 @@ import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConne
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
 import { expandIdPattern } from "../../protocol";
 import { resolveSoapCallbackUrl } from "../soapCallbackUrl";
+import { soapCallbackRouteCpId } from "./socketServer";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -420,13 +421,13 @@ function fleetSoapCallbackUrl(
   const explicit = opts.soapCallbackUrlExplicit?.trim();
   if (explicit) {
     const expanded = expandIdPattern(explicit, index);
-    // Same rule the RPC enforces: the daemon routes inbound SOAP calls by the
-    // cpId in the path, so a callback whose placeholder is spelled differently
-    // from the id pattern advertises a route that does not exist.
-    if (!expanded.includes(`/${cpId}/`)) {
+    // Same rule the RPC enforces, checked the same way — through the router's
+    // own pattern and percent-decoding, so the two cannot disagree about an id
+    // that needs encoding or a path with an extra segment.
+    if (soapCallbackRouteCpId(expanded) !== cpId) {
       throw new Error(
-        `--soap-callback-url expands to "${expanded}", which does not contain "/${cpId}/". ` +
-          `The daemon routes inbound SOAP calls by the cpId in that path, so the CSMS would get 404s.`,
+        `--soap-callback-url expands to "${expanded}", whose charge point route segment is not "${cpId}". ` +
+          `The daemon routes inbound SOAP calls by that segment, so the CSMS would get 404s.`,
       );
     }
     return expanded;

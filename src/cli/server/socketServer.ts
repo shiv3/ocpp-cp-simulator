@@ -25,6 +25,8 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
+  blueprintSchema,
+  createManyFromBlueprintSchema,
   createManyParamsSchema,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
@@ -67,10 +69,16 @@ import {
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
+import { z } from "zod";
 import { SOAP_CHARGE_POINT_SERVICE_ROUTE } from "../soapPath";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
+import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
+import {
+  BUILT_IN_BLUEPRINTS,
+  isBuiltInBlueprint,
+} from "../../utils/blueprints";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { selectLogWindow } from "./logWindow";
@@ -127,6 +135,7 @@ export interface RuntimeSocketIoDeps extends SocketIoDeps {
   readonly configRepository: SocketConfigRepository;
   readonly chargePointService: RegistryChargePointService;
   readonly registryEvents: RegistryEventBridge | null;
+  readonly blueprints: BlueprintRepository;
 }
 
 interface SocketRpcState {
@@ -279,6 +288,7 @@ export function createRuntimeDeps(
     database,
     configRepository,
     registryEvents,
+    blueprints: new BlueprintRepository(database),
     chargePointService:
       deps.chargePointService ??
       new RegistryChargePointService(deps.registry, {
@@ -393,6 +403,14 @@ export async function dispatchRpcCore(
       return createCp(deps, rawParams);
     case "cp.create_many":
       return createManyCps(deps, rawParams);
+    case "blueprint.list":
+      // Built-ins first, then stored ones. Ids are unique across both because
+      // `blueprint.save` refuses a built-in id.
+      return [...BUILT_IN_BLUEPRINTS, ...deps.blueprints.list()];
+    case "blueprint.save":
+      return saveBlueprint(deps, rawParams);
+    case "blueprint.delete":
+      return deleteBlueprint(deps, rawParams);
     case "cp.update":
       return updateCp(deps, rawParams);
     case "cp.delete":
@@ -591,6 +609,63 @@ async function createCp(
  *   so there is nothing to win by racing them.
  */
 /**
+ * Drop keys whose value is `undefined` so a spread cannot un-set a blueprint
+ * field. `{ ...blueprint, ...requested }` with `requested.vendor === undefined`
+ * would otherwise erase the blueprint's vendor.
+ */
+function stripUndefined<T extends Record<string, unknown>>(value: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (v !== undefined) out[key] = v;
+  }
+  return out as T;
+}
+
+function saveBlueprint(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): { id: string } {
+  const parsed = z.object({ blueprint: blueprintSchema }).safeParse(rawParams);
+  if (!parsed.success) {
+    throw new RpcFailure(
+      "invalid_params",
+      parsed.error.issues[0]?.message ?? "",
+    );
+  }
+  const { blueprint } = parsed.data;
+  if (isBuiltInBlueprint(blueprint.id)) {
+    // Refused rather than shadowed: `blueprint.delete` cannot restore a
+    // built-in, so an accidental overwrite would be permanent for that daemon.
+    throw new RpcFailure(
+      "invalid_params",
+      `"${blueprint.id}" is a built-in blueprint and cannot be replaced; choose another id`,
+    );
+  }
+  deps.blueprints.save(blueprint);
+  return { id: blueprint.id };
+}
+
+function deleteBlueprint(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): { ok: true } {
+  const id = rawParamsAsRecord(rawParams).id;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new RpcFailure("invalid_params", "");
+  }
+  if (isBuiltInBlueprint(id)) {
+    throw new RpcFailure(
+      "invalid_params",
+      `"${id}" is a built-in blueprint and cannot be deleted`,
+    );
+  }
+  // `not_found` rather than a silent success: a delete that reports ok for an
+  // id that was never there hides a typo until the instantiate fails.
+  if (!deps.blueprints.delete(id)) throw new RpcFailure("not_found", "");
+  return { ok: true };
+}
+
+/**
  * Why one charge point in a batch could not be created, in a form safe to send
  * back over the control plane.
  *
@@ -647,14 +722,38 @@ async function createManyCps(
   created: string[];
   failed: Array<{ cpId: string; reason: string }>;
 }> {
-  const parsed = createManyParamsSchema.safeParse(rawParams);
+  const parsed = createManyFromBlueprintSchema.safeParse(rawParams);
   if (!parsed.success) {
     throw new RpcFailure(
       "invalid_params",
       parsed.error.issues[0]?.message ?? "",
     );
   }
-  const { count, idPattern, startIndex, ...shared } = parsed.data;
+  // A blueprint supplies the parameter block; anything given alongside it
+  // wins, so a fleet can share hardware and differ in one field. Resolved
+  // before validation of the merged result, since the merge is what the
+  // charge points are actually created from.
+  const { blueprintId, ...requested } = parsed.data as typeof parsed.data & {
+    blueprintId?: string;
+  };
+  let merged = requested;
+  if (blueprintId !== undefined) {
+    const blueprint =
+      BUILT_IN_BLUEPRINTS.find((b) => b.id === blueprintId) ??
+      deps.blueprints.get(blueprintId);
+    if (!blueprint) {
+      throw new RpcFailure("not_found", `no blueprint "${blueprintId}"`);
+    }
+    merged = { ...blueprint.params, ...stripUndefined(requested) };
+  }
+  const validated = createManyParamsSchema.safeParse(merged);
+  if (!validated.success) {
+    throw new RpcFailure(
+      "invalid_params",
+      validated.error.issues[0]?.message ?? "",
+    );
+  }
+  const { count, idPattern, startIndex, ...shared } = validated.data;
   const first = startIndex ?? 1;
 
   const soapCallbackUrl = shared.soapCallbackUrl;

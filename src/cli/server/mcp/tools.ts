@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
-  createManyParamsSchema,
+  blueprintSchema,
+  createManyToolSchema,
   createParamsSchema,
   EXPLICIT_METHODS,
   METHODS,
@@ -95,8 +96,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   // name, so it gets a tool -- with its schema derived, per #284.
   mcp.tool("cp_create_many", {
     description:
-      "Create and register many charge points at once. Every parameter except the id is shared by the batch; ids come from idPattern ({n}, or {n:03} to zero-pad), starting at startIndex (default 1). Returns the ids created and, separately, the ones that failed with the reason -- a partial batch is a normal result, not an error.",
-    inputSchema: createManyParamsSchema,
+      "Create and register many charge points at once, either from explicit parameters or from a stored blueprint (blueprintId). Every parameter except the id is shared by the batch; ids come from idPattern ({n}, or {n:03} to zero-pad), starting at startIndex (default 1). Returns the ids created and, separately, the ones that failed with the reason -- a partial batch is a normal result, not an error.",
+    inputSchema: createManyToolSchema,
     handler: async (args) => {
       try {
         const result = await runRpc(deps, {
@@ -104,6 +105,36 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           params: args,
         });
         return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("blueprint_list", {
+    description:
+      "List the stored charge point blueprints: named, reusable hardware descriptions that cp_create_many can instantiate by id.",
+    inputSchema: z.object({}),
+    handler: async () => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "blueprint.list", params: {} }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("blueprint_save", {
+    description:
+      "Create or replace a charge point blueprint. A blueprint is the hardware half (what a charge point is); a scenario is the behaviour half (what it does). Instantiate one with cp_create_many { blueprintId, count, idPattern }.",
+    inputSchema: z.object({ blueprint: blueprintSchema }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "blueprint.save", params: args }),
+        );
       } catch (err) {
         return errorResult(err);
       }

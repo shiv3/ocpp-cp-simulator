@@ -48,8 +48,8 @@ runtime model.
 | --- | ------------------------------------------------------------ | ---- | ---------- | ----------- | ----- |
 | 1a  | [Bulk CP creation](#1a-bulk-cp-creation)                     | S    | —          | shipped     | #295  |
 | 1b  | [Multiple supervision URLs](#1b-multiple-supervision-urls)   | S    | —          | shipped     | #296  |
-| 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | planned     | #297  |
-| 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | planned     | #297  |
+| 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | shipped     | #297  |
+| 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | shipped     | #297  |
 | 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped     | #298  |
 | 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | planned     | #299  |
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | planned     | #300  |

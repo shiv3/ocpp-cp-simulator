@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -137,6 +137,17 @@ CREATE TABLE IF NOT EXISTS charge_points (
 --     that side), but it DOES write this table.
 --   - Per-CP state is a UI / runtime concern that drifts independently of
 --     the immutable creation params.
+-- Named, reusable charge point descriptions (#297). The hardware half, where
+-- \`scenarios\` is the behaviour half. Daemon-side only: the browser has no
+-- registry to instantiate one into.
+CREATE TABLE IF NOT EXISTS blueprints (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  definition  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS charge_point_state (
   cp_id             TEXT PRIMARY KEY,
   desired_connected INTEGER NOT NULL DEFAULT 0,
@@ -322,6 +333,16 @@ export function runMigrations(db: Database): void {
     if (!have.has("url_distribution")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN url_distribution TEXT");
     }
+  }
+
+  // v7 → v8: blueprints (#297). A new table, so the migration only has to
+  // create it; `CREATE TABLE IF NOT EXISTS` in SCHEMA_SQL covers fresh DBs.
+  if (stored < 8) {
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS blueprints (" +
+        "id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, " +
+        "definition TEXT NOT NULL, updated_at TEXT NOT NULL)",
+    );
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

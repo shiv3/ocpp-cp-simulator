@@ -12,6 +12,8 @@ import { z } from "zod";
 import {
   ARRAY_1000,
   CP_CREATE_MANY_MAX,
+  STR_256,
+  STR_1K,
   OBJ_MAX_BYTES,
   SCENARIO_MAX_BYTES,
   STR_64K,
@@ -266,6 +268,77 @@ const updateParamsSchema = cpParamsBaseSchema.extend({
     .optional(),
 });
 
+/**
+ * A named, reusable charge point description — the *hardware* half, where a
+ * scenario is the *behaviour* half. The two compose: instantiate a blueprint,
+ * then load a scenario onto a connector; neither needs to know about the other.
+ *
+ * `params` is the `cp.create` block minus `cpId`, which `cp.create_many`
+ * generates. Derived from `createManyParamsSchema` rather than restated, and
+ * without the batch fields — a blueprint says what a charge point *is*, not
+ * how many of them to make.
+ */
+export const blueprintSchema = z.object({
+  id: STR_256.describe("Blueprint identifier, unique within the daemon"),
+  name: STR_256.describe("Human-readable name"),
+  description: STR_1K.optional().describe("What this hardware profile is"),
+  params: createManyParamsSchema
+    .omit({ count: true, idPattern: true, startIndex: true })
+    // `wsUrl` is optional here and required at instantiation. A blueprint
+    // describes hardware; the CSMS a fleet points at is a property of the run,
+    // which is why the built-in profiles carry no URL at all. `cp.create_many`
+    // validates the merged result against `createManyParamsSchema`, so a
+    // blueprint without one still cannot produce a charge point without one.
+    .partial({ wsUrl: true })
+    .describe("The cp.create parameter block, minus the generated cpId"),
+  evSettings: OBJ()
+    .optional()
+    .describe("Default EV settings applied to every connector"),
+  scenarioTemplateId: STR_256.optional().describe(
+    "Scenario template loaded onto each connector after creation",
+  ),
+});
+
+export type Blueprint = z.infer<typeof blueprintSchema>;
+
+/**
+ * The flattened shape for schema-driven clients (the MCP tool, `list_methods`).
+ *
+ * Every field with `wsUrl` optional, so `blueprintId` is visible rather than
+ * hidden behind a union branch. `createManyFromBlueprintSchema` adds the
+ * refinement that one of the two must be present.
+ */
+export const createManyToolSchema = createManyParamsSchema
+  .partial({ wsUrl: true })
+  .extend({
+    blueprintId: STR_256.optional().describe(
+      "Blueprint to instantiate. Any parameter given alongside it overrides the blueprint's. Either this or wsUrl is required",
+    ),
+  });
+
+/**
+ * `cp.create_many` accepts either an explicit parameter block or a blueprint
+ * id, so `wsUrl` cannot simply be required. A union rather than an
+ * all-optional object: the latter would accept a call naming neither and fail
+ * later, inside the loop, after some charge points already existed.
+ */
+/**
+ * `cp.create_many` accepts either an explicit parameter block or a blueprint
+ * id, so `wsUrl` cannot simply be required.
+ *
+ * One object with a refinement, **not** a union. A union's first matching
+ * branch wins and unknown properties are stripped, so
+ * `{ blueprintId, wsUrl, count, idPattern }` matched the explicit branch and
+ * lost `blueprintId` silently — the batch came up with the caller's URL and
+ * none of the blueprint's hardware, reporting success. The refinement keeps
+ * every field and still refuses a call naming neither source, before anything
+ * is created.
+ */
+export const createManyFromBlueprintSchema = createManyToolSchema.refine(
+  (value) => value.wsUrl !== undefined || value.blueprintId !== undefined,
+  { message: "either wsUrl or blueprintId is required" },
+);
+
 export const METHODS = {
   // -- lifecycle --
   connect: { params: EMPTY, result: ANY },
@@ -491,8 +564,17 @@ export const METHODS = {
   // Partial success is the result, not an error: one unreachable CSMS URL must
   // not roll back the charge points that came up fine, so failures are
   // reported per id instead of thrown.
+  "blueprint.list": { params: EMPTY, result: ARRAY_1000(blueprintSchema) },
+  "blueprint.save": {
+    params: z.object({ blueprint: blueprintSchema }),
+    result: z.object({ id: STR_256 }),
+  },
+  "blueprint.delete": {
+    params: z.object({ id: STR_256 }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "cp.create_many": {
-    params: createManyParamsSchema,
+    params: createManyFromBlueprintSchema,
     result: z.object({
       created: ARRAY_1000(STR_64K),
       failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
@@ -592,6 +674,9 @@ export const EXPLICIT_METHODS = [
   "cp.list",
   "cp.create",
   "cp.create_many",
+  "blueprint.list",
+  "blueprint.save",
+  "blueprint.delete",
   "cp.update",
   "cp.delete",
   "logs.get",

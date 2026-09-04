@@ -754,21 +754,26 @@ export async function runStartupScenario(
     warnOnScenarioSchemaMismatch(opt.scenario, definition);
     for (const connectorId of connectors) {
       try {
-        const fanOut = !(
-          connectors.length === 1 && connectorId === definition.targetId
-        );
-        const instance = fanOut
-          ? instantiateTemplate(definition, connectorId)
-          : definition;
-        const scenarioId = svc.loadScenario(connectorId, instance);
+        // Re-evaluated per definition, not captured once (#314). A single
+        // connector whose `--scenario` already targets it is loaded as-is; edit
+        // `targetId` or `targetType` in that file and the answer changes, so a
+        // `prepare` that remembered the first answer left the definition
+        // registered on the original connector while its executor derived
+        // expectations from the edited target — waiting on a connector it was
+        // not attached to, and never firing.
+        const alreadyTargeted = (next: ScenarioDefinition): boolean =>
+          connectors.length === 1 &&
+          next.targetType === "connector" &&
+          next.targetId === connectorId;
+        const prepare = (next: ScenarioDefinition): ScenarioDefinition =>
+          alreadyTargeted(next) ? next : instantiateTemplate(next, connectorId);
+        const scenarioId = svc.loadScenario(connectorId, prepare(definition));
         fileReload?.registerScenarioFile({
           filePath: opt.scenario as string,
           cpId: svc.getInit().cpId,
           connectorId,
           scenarioId,
-          prepare: fanOut
-            ? (next) => instantiateTemplate(next, connectorId)
-            : undefined,
+          prepare,
           loadedText: scenarioText,
         });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);

@@ -1981,10 +1981,14 @@ async function dispatchFacadeCpCommand(
           : requireBoolean(params, "strict");
       const filePath = requireString(params, "file");
       const connectorId = requirePositiveInt(params, "connector");
+      let loadedText: string | undefined;
       const started = await runFacadeOperation(() =>
         chargePointService.runScenarioFile(id, filePath, {
           connectorId,
           strict,
+          onSourceText: (text) => {
+            loadedText = text;
+          },
         }),
       );
       fileReload?.registerScenarioFile({
@@ -1992,11 +1996,9 @@ async function dispatchFacadeCpCommand(
         cpId: id,
         connectorId,
         scenarioId: started.scenarioId,
-        loadedText: started.sourceText,
+        loadedText,
       });
-      // `sourceText` is for the watcher's baseline only — the file's contents
-      // have no business on the wire.
-      return handled({ scenarioId: started.scenarioId });
+      return handled(started);
     }
     case "run_scenario_template": {
       const id = requireFacadeCpId(cpId, rawParams);

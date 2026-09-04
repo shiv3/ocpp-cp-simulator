@@ -6,6 +6,7 @@ import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { CPRegistry } from "./CPRegistry";
 import { FileWatcher } from "./FileWatcher";
 import { parseIdTagsFile } from "./idTagFile";
+import { SCENARIO_MAX_BYTES } from "../../protocol/limits";
 
 /** What kind of file was reloaded. */
 export type FileReloadTarget = "id-tags" | "scenario";
@@ -527,6 +528,26 @@ export class FileReloadManager {
     if (!this.stillLoaded(entry)) {
       entry.pending = definition;
       return true;
+    }
+    // Checked before anything is applied, because the alternative is the shape
+    // this feature has been bitten by twice: the reload lands, is reported
+    // `applied`, and then the push that tells every subscriber about it fails
+    // envelope validation and is merely logged — leaving an editor drawing a
+    // graph the daemon has stopped executing. A scenario file has no size bound
+    // of its own, but the `scenario-definitions-changed` envelope caps a
+    // definition at `SCENARIO_MAX_BYTES`, so anything past that is refused here
+    // and reported as `rejected`, with the previous good definition left in
+    // place — the same contract a malformed file gets.
+    const serialized = JSON.stringify(definition).length;
+    if (serialized > SCENARIO_MAX_BYTES) {
+      this.rejectScenario(
+        entry,
+        new Error(
+          `scenario is ${serialized} bytes, over the ${SCENARIO_MAX_BYTES}-byte limit the control plane can carry; ` +
+            "the previous definition is still loaded",
+        ),
+      );
+      return false;
     }
     if (
       service.hasOpenTransaction(entry.connectorId) ||

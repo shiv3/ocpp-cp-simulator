@@ -246,7 +246,11 @@ The rules, in the order they bite:
 - **A malformed file never lands.** The reload path applies exactly the checks
   the load path applies. A file that fails them is logged, reported as
   `rejected`, and the previous good copy stays in place — a half-saved file
-  never leaves a charge point with half a configuration.
+  never leaves a charge point with half a configuration. A scenario larger than
+  the control plane can carry (256 KiB serialized, the
+  `scenario-definitions-changed` envelope's per-definition cap) is refused the
+  same way and for the same reason: applying it would leave every subscriber on
+  the previous graph with nothing to say so.
 - **A reload never mutates a charge point mid-session.** A scenario reload for a
   connector with an open transaction, or for a scenario whose run is in flight,
   is _held_ — not dropped — and installed when that session ends. An in-flight
@@ -278,7 +282,12 @@ The rules, in the order they bite:
   deleted, or overwrite the definition they had just uploaded. The reload path
   checks as well: a scenario the charge point no longer holds is **never
   re-created** by an edit, whichever path removed it.
-- **A scenario keeps the id it was loaded under.** If the edited file's own `id`
+- **A scenario keeps the connector it was loaded onto, and the id it was loaded
+  under.** An edited `targetType` / `targetId` is re-applied to the connector the
+  scenario is registered for, on every reload — a startup `--scenario` fanned out
+  across connectors keeps its independent copies, and a single-connector one
+  repointed by hand is rewritten back rather than left waiting on a connector it
+  is not attached to. If the edited file's own `id`
   changed, it is ignored. Honouring it would load a _second_ scenario and leave
   the first one in place under the old definition.
 - **Blueprints are not watched, and do not need to be.** A blueprint is stored

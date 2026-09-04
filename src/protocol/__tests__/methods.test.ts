@@ -46,6 +46,8 @@ const JSONMODE_COMMAND_IDS = [
   "get_ev_settings",
   "set_auto_meter_config",
   "get_auto_meter_config",
+  "set_auto_traffic_config",
+  "get_auto_traffic_config",
   "set_auto_reset_to_available",
   "set_mode",
   "set_soc",
@@ -69,7 +71,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(31);
+    expect(EXPLICIT_METHODS).toHaveLength(33);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {

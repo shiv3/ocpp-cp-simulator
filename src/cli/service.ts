@@ -15,6 +15,14 @@ import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServ
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
+import { AutoTrafficRunner } from "../cp/application/services/AutoTrafficRunner";
+import {
+  defaultAutoTrafficConfig,
+  emptyAutoTrafficCounters,
+  validateAutoTrafficConfig,
+  type AutoTrafficConfig,
+  type AutoTrafficCounters,
+} from "../cp/domain/connector/AutoTraffic";
 import { getGlobalMetricsRecorder } from "./server/metrics/MetricsRecorder";
 import {
   waitForBootAccepted,
@@ -263,6 +271,8 @@ export class CLIChargePointService {
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
+  private readonly _autoTraffic = new Map<number, AutoTrafficRunner>();
+  private readonly _autoTrafficConfigs = new Map<number, AutoTrafficConfig>();
   // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
   // Populated only when a caller actually opts in (run_scenario's
   // awaitArmed); resolved and cleared by the onStateChange hook in
@@ -765,6 +775,65 @@ export class CLIChargePointService {
 
   getAutoMeterValueConfig(connectorId: number): AutoMeterValueConfig {
     return this.requireConnector(connectorId).autoMeterValueConfig;
+  }
+
+  /**
+   * Seeded background traffic (#300).
+   *
+   * Modelled on the auto-meter config above: a per-connector runtime
+   * behaviour set by RPC, independent of whether a scenario is loaded. The
+   * runner is replaced rather than mutated so the seed takes effect — a
+   * reconfigure that kept the old stream would not be reproducible.
+   */
+  setAutoTrafficConfig(connectorId: number, config: AutoTrafficConfig): void {
+    this.requireConnector(connectorId);
+    const invalid = validateAutoTrafficConfig(config);
+    if (invalid) throw new Error(invalid);
+
+    this._autoTrafficConfigs.set(connectorId, config);
+    const existing = this._autoTraffic.get(connectorId);
+    if (existing) {
+      existing.reconfigure(config);
+      if (!config.enabled) this._autoTraffic.delete(connectorId);
+      return;
+    }
+    if (!config.enabled) return;
+
+    const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
+      authorize: async (id) => {
+        this.startTransactionAuthorize(id);
+        return true;
+      },
+      startTransaction: async (id) => this.startTransaction(id),
+      stopTransaction: async (id) => this.stopTransaction(id),
+      // A scenario owns the connector while any executor is running: a run's
+      // verdict must never depend on whether background traffic fired.
+      scenarioActive: () => this._executors.size > 0,
+      log: (message) => this._chargePoint.logger.info(message, LogType.CP),
+    });
+    this._autoTraffic.set(connectorId, runner);
+    runner.start();
+  }
+
+  getAutoTrafficConfig(connectorId: number): AutoTrafficConfig {
+    this.requireConnector(connectorId);
+    return (
+      this._autoTrafficConfigs.get(connectorId) ?? {
+        ...defaultAutoTrafficConfig,
+      }
+    );
+  }
+
+  /** Per-connector counters, the assertion surface for a load run. */
+  getAutoTrafficCounters(connectorId: number): AutoTrafficCounters {
+    return (
+      this._autoTraffic.get(connectorId)?.counters ?? emptyAutoTrafficCounters()
+    );
+  }
+
+  /** Authorize with the connector's pooled tag, used by the traffic runner. */
+  private startTransactionAuthorize(connectorId: number): void {
+    this.authorize(this._chargePoint.nextIdTag(connectorId) ?? undefined);
   }
 
   setAutoResetToAvailable(connectorId: number, enabled: boolean): void {
@@ -1825,6 +1894,11 @@ export class CLIChargePointService {
     // Permanent deletion uses dispose() to cancel controller timers;
     // non-permanent (update, shutdown) uses disconnect().
     if (permanent) {
+      // Timers outlive the charge point otherwise, and a daemon that kept
+      // generating traffic for a deleted station would be a leak with a wire
+      // presence.
+      for (const runner of this._autoTraffic.values()) runner.stop();
+      this._autoTraffic.clear();
       this._chargePoint.dispose();
     } else {
       this._chargePoint.disconnect();

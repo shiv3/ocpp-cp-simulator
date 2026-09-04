@@ -2,6 +2,7 @@ import * as fs from "fs";
 
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import {
   isScenarioDefinitionShape,
@@ -357,6 +358,32 @@ export class RegistryChargePointService implements ChargePointService {
       config,
     );
     await this.deps.database?.flush?.();
+  }
+
+  async getAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null> {
+    return this.deps.connectorSettingsRepository.loadAutoTrafficConfig(
+      id,
+      connectorId,
+    );
+  }
+
+  async saveAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    await this.deps.connectorSettingsRepository.saveAutoTrafficConfig(
+      id,
+      connectorId,
+      config,
+    );
+    await this.deps.database?.flush?.();
+    // Applied to the running charge point as well as stored: a save that only
+    // wrote a row would report success and generate nothing until a restart.
+    this.requireService(id).setAutoTrafficConfig(connectorId, config);
   }
 
   async setAutoResetToAvailable(

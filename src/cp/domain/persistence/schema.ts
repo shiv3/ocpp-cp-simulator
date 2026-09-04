@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS connector_settings (
   cp_id          TEXT NOT NULL,
   connector_id   INTEGER NOT NULL,
   auto_meter     TEXT,
+  -- Seeded background traffic (#300), same shape and lifetime as auto_meter.
+  auto_traffic   TEXT,
   availability   TEXT,
   soc_meter_sync INTEGER,
   PRIMARY KEY (cp_id, connector_id)
@@ -361,6 +363,18 @@ export function runMigrations(db: Database): void {
     }
     if (!have.has("id_tag_distribution")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN id_tag_distribution TEXT");
+    }
+  }
+
+  // v9 → v10: seeded background traffic (#300). Without it a connector
+  // configured to generate traffic came back from `--state-db` idle, with
+  // nothing to say the configuration had been dropped.
+  if (stored < 10) {
+    const cols = db.all<{ name: string }>(
+      "PRAGMA table_info(connector_settings)",
+    );
+    if (!new Set(cols.map((c) => c.name)).has("auto_traffic")) {
+      db.exec("ALTER TABLE connector_settings ADD COLUMN auto_traffic TEXT");
     }
   }
 

@@ -75,6 +75,7 @@ import { z } from "zod";
 import { SOAP_CHARGE_POINT_SERVICE_ROUTE } from "../soapPath";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import {
@@ -459,6 +460,10 @@ export async function dispatchRpcCore(
       return getAutoMeterConfig(deps, rawParams);
     case "connector_settings.auto_meter.save":
       return saveAutoMeterConfig(deps, rawParams);
+    case "connector_settings.auto_traffic.get":
+      return getAutoTrafficSetting(deps, rawParams);
+    case "connector_settings.auto_traffic.save":
+      return saveAutoTrafficSetting(deps, rawParams);
     case "connector_settings.soc_meter_sync.get":
       return getSocMeterSync(deps, rawParams);
     case "connector_settings.soc_meter_sync.save":
@@ -1254,6 +1259,40 @@ async function saveAutoMeterConfig(
   return { ok: true };
 }
 
+async function getAutoTrafficSetting(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<AutoTrafficConfig | null> {
+  const params =
+    METHODS["connector_settings.auto_traffic.get"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  return runFacadeOperation(() =>
+    deps.chargePointService.getAutoTrafficConfig(
+      params.data.cpId,
+      params.data.connectorId,
+    ),
+  );
+}
+
+async function saveAutoTrafficSetting(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ ok: true }> {
+  const params =
+    METHODS["connector_settings.auto_traffic.save"].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+
+  await runFacadeOperation(() =>
+    deps.chargePointService.saveAutoTrafficConfig(
+      params.data.cpId,
+      params.data.connectorId,
+      params.data.config as unknown as AutoTrafficConfig,
+    ),
+  );
+  return { ok: true };
+}
+
 async function getSocMeterSync(
   deps: RuntimeSocketIoDeps,
   rawParams: unknown,
@@ -1569,6 +1608,28 @@ async function dispatchFacadeCpCommand(
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getEVSettings(
+            id,
+            requirePositiveInt(params, "connector"),
+          ),
+        ),
+      );
+    }
+    case "set_auto_traffic_config": {
+      const id = requireFacadeCpId(cpId, rawParams);
+      await runFacadeOperation(() =>
+        chargePointService.setAutoTrafficConfig(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireObject(params, "config") as unknown as AutoTrafficConfig,
+        ),
+      );
+      return handled(undefined);
+    }
+    case "get_auto_traffic_config": {
+      const id = requireFacadeCpId(cpId, rawParams);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getAutoTrafficConfig(
             id,
             requirePositiveInt(params, "connector"),
           ),

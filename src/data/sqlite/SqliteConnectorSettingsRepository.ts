@@ -1,4 +1,5 @@
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { Database } from "../../cp/domain/persistence/Database";
 import type { OCPPAvailability } from "../../cp/domain/types/OcppTypes";
@@ -55,6 +56,39 @@ export class SqliteConnectorSettingsRepository implements ConnectorSettingsRepos
       "INSERT INTO connector_settings (cp_id, connector_id, auto_meter) " +
         "VALUES (?, ?, ?) " +
         "ON CONFLICT (cp_id, connector_id) DO UPDATE SET auto_meter = excluded.auto_meter",
+      [chargePointId, connectorId, JSON.stringify(config)],
+    );
+  }
+
+  async loadAutoTrafficConfig(
+    chargePointId: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null> {
+    if (!this.db) return null;
+    const row = this.db.get<{ auto_traffic: string | null }>(
+      "SELECT auto_traffic FROM connector_settings WHERE cp_id = ? AND connector_id = ?",
+      [chargePointId, connectorId],
+    );
+    if (!row?.auto_traffic) return null;
+    try {
+      return JSON.parse(row.auto_traffic) as AutoTrafficConfig;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveAutoTrafficConfig(
+    chargePointId: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    if (!this.db) return;
+    // Same targeted upsert as auto_meter: writing the whole row would clobber
+    // a sibling column when the caller is only changing this one.
+    this.db.run(
+      "INSERT INTO connector_settings (cp_id, connector_id, auto_traffic) " +
+        "VALUES (?, ?, ?) " +
+        "ON CONFLICT (cp_id, connector_id) DO UPDATE SET auto_traffic = excluded.auto_traffic",
       [chargePointId, connectorId, JSON.stringify(config)],
     );
   }

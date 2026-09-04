@@ -25,6 +25,9 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
+  blueprintSchema,
+  type Blueprint,
+  createManyFromBlueprintSchema,
   createManyParamsSchema,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
@@ -67,10 +70,17 @@ import {
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
+import { z } from "zod";
 import { SOAP_CHARGE_POINT_SERVICE_ROUTE } from "../soapPath";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
+import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
+import {
+  builtInBlueprints,
+  isBuiltInBlueprint,
+  MAX_STORED_BLUEPRINTS,
+} from "../../utils/blueprints";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { selectLogWindow } from "./logWindow";
@@ -119,6 +129,13 @@ export interface SocketIoDeps {
   readonly configRepository?: SocketConfigRepository;
   readonly scenarioRepository?: ScenarioRepository;
   readonly connectorSettingsRepository?: ConnectorSettingsRepository;
+  /**
+   * Injected so socket.io and the MCP endpoint share one instance. Without
+   * `--state-db` — the daemon's default — the repository holds blueprints in
+   * memory, so a per-transport instance would make a blueprint saved over one
+   * transport `not_found` over the other.
+   */
+  readonly blueprints?: BlueprintRepository;
   readonly chargePointService?: RegistryChargePointService;
   readonly registryEvents?: RegistryEventBridge | null;
 }
@@ -127,6 +144,7 @@ export interface RuntimeSocketIoDeps extends SocketIoDeps {
   readonly configRepository: SocketConfigRepository;
   readonly chargePointService: RegistryChargePointService;
   readonly registryEvents: RegistryEventBridge | null;
+  readonly blueprints: BlueprintRepository;
 }
 
 interface SocketRpcState {
@@ -279,6 +297,7 @@ export function createRuntimeDeps(
     database,
     configRepository,
     registryEvents,
+    blueprints: deps.blueprints ?? new BlueprintRepository(database),
     chargePointService:
       deps.chargePointService ??
       new RegistryChargePointService(deps.registry, {
@@ -393,6 +412,14 @@ export async function dispatchRpcCore(
       return createCp(deps, rawParams);
     case "cp.create_many":
       return createManyCps(deps, rawParams);
+    case "blueprint.list":
+      // Built-ins first, then stored ones. Ids are unique across both because
+      // `blueprint.save` refuses a built-in id.
+      return [...builtInBlueprints(), ...deps.blueprints.list()];
+    case "blueprint.save":
+      return saveBlueprint(deps, rawParams);
+    case "blueprint.delete":
+      return deleteBlueprint(deps, rawParams);
     case "cp.update":
       return updateCp(deps, rawParams);
     case "cp.delete":
@@ -591,6 +618,76 @@ async function createCp(
  *   so there is nothing to win by racing them.
  */
 /**
+ * Drop keys whose value is `undefined` so a spread cannot un-set a blueprint
+ * field. `{ ...blueprint, ...requested }` with `requested.vendor === undefined`
+ * would otherwise erase the blueprint's vendor.
+ */
+function stripUndefined<T extends Record<string, unknown>>(value: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (v !== undefined) out[key] = v;
+  }
+  return out as T;
+}
+
+function saveBlueprint(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): { id: string } {
+  const parsed = z.object({ blueprint: blueprintSchema }).safeParse(rawParams);
+  if (!parsed.success) {
+    throw new RpcFailure(
+      "invalid_params",
+      parsed.error.issues[0]?.message ?? "",
+    );
+  }
+  const { blueprint } = parsed.data;
+  if (isBuiltInBlueprint(blueprint.id)) {
+    // Refused rather than shadowed: `blueprint.delete` cannot restore a
+    // built-in, so an accidental overwrite would be permanent for that daemon.
+    throw new RpcFailure(
+      "invalid_params",
+      `"${blueprint.id}" is a built-in blueprint and cannot be replaced; choose another id`,
+    );
+  }
+  // Checked before the write: the list result carries the built-ins too, so an
+  // unbounded store would make `blueprint.list` fail validation for everyone
+  // rather than refuse the one save that crossed the line.
+  const stored = deps.blueprints.list();
+  if (
+    stored.length >= MAX_STORED_BLUEPRINTS &&
+    !stored.some((b) => b.id === blueprint.id)
+  ) {
+    throw new RpcFailure(
+      "invalid_params",
+      `at most ${MAX_STORED_BLUEPRINTS} blueprints can be stored; delete one first`,
+    );
+  }
+  deps.blueprints.save(blueprint);
+  return { id: blueprint.id };
+}
+
+function deleteBlueprint(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): { ok: true } {
+  const id = rawParamsAsRecord(rawParams).id;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new RpcFailure("invalid_params", "");
+  }
+  if (isBuiltInBlueprint(id)) {
+    throw new RpcFailure(
+      "invalid_params",
+      `"${id}" is a built-in blueprint and cannot be deleted`,
+    );
+  }
+  // `not_found` rather than a silent success: a delete that reports ok for an
+  // id that was never there hides a typo until the instantiate fails.
+  if (!deps.blueprints.delete(id)) throw new RpcFailure("not_found", "");
+  return { ok: true };
+}
+
+/**
  * Why one charge point in a batch could not be created, in a form safe to send
  * back over the control plane.
  *
@@ -647,14 +744,53 @@ async function createManyCps(
   created: string[];
   failed: Array<{ cpId: string; reason: string }>;
 }> {
-  const parsed = createManyParamsSchema.safeParse(rawParams);
+  const parsed = createManyFromBlueprintSchema.safeParse(rawParams);
   if (!parsed.success) {
     throw new RpcFailure(
       "invalid_params",
       parsed.error.issues[0]?.message ?? "",
     );
   }
-  const { count, idPattern, startIndex, ...shared } = parsed.data;
+  // A blueprint supplies the parameter block; anything given alongside it
+  // wins, so a fleet can share hardware and differ in one field. Resolved
+  // before validation of the merged result, since the merge is what the
+  // charge points are actually created from.
+  const { blueprintId, ...requested } = parsed.data as typeof parsed.data & {
+    blueprintId?: string;
+  };
+  let merged = requested;
+  let defaults: Pick<Blueprint, "evSettings" | "scenarioTemplateId"> = {};
+  if (blueprintId !== undefined) {
+    const blueprint =
+      builtInBlueprints().find((b) => b.id === blueprintId) ??
+      deps.blueprints.get(blueprintId);
+    if (!blueprint) {
+      throw new RpcFailure("not_found", `no blueprint "${blueprintId}"`);
+    }
+    merged = { ...blueprint.params, ...stripUndefined(requested) };
+    // A blueprint is more than its `cp.create` block: the schema also promises
+    // default EV settings and a startup scenario. Copying only `params` left
+    // both silently unapplied — including for every built-in, which is where
+    // the EV settings are the whole point of picking a 150 kW profile.
+    defaults = {
+      evSettings: blueprint.evSettings,
+      scenarioTemplateId: blueprint.scenarioTemplateId,
+    };
+  }
+  // A blueprint batch may omit `idPattern`; derive one from the blueprint id so
+  // `{ blueprintId, count }` is a complete call rather than a validation error.
+  const withPattern =
+    merged.idPattern === undefined && blueprintId !== undefined
+      ? { ...merged, idPattern: `${blueprintId}-{n:03}` }
+      : merged;
+  const validated = createManyParamsSchema.safeParse(withPattern);
+  if (!validated.success) {
+    throw new RpcFailure(
+      "invalid_params",
+      validated.error.issues[0]?.message ?? "",
+    );
+  }
+  const { count, idPattern, startIndex, ...shared } = validated.data;
   const first = startIndex ?? 1;
 
   const soapCallbackUrl = shared.soapCallbackUrl;
@@ -710,24 +846,78 @@ async function createManyCps(
     plan.push({ cpId, soapCallbackUrl: expanded });
   }
 
+  const connectors = validated.data.connectors ?? 1;
   const created: string[] = [];
   const failed: Array<{ cpId: string; reason: string }> = [];
   for (const entry of plan) {
     try {
-      created.push(
-        await createOneCp(deps, {
-          ...shared,
-          cpId: entry.cpId,
-          ...(entry.soapCallbackUrl
-            ? { soapCallbackUrl: entry.soapCallbackUrl }
-            : {}),
-        }),
-      );
+      const cpId = await createOneCp(deps, {
+        ...shared,
+        cpId: entry.cpId,
+        ...(entry.soapCallbackUrl
+          ? { soapCallbackUrl: entry.soapCallbackUrl }
+          : {}),
+      });
+      try {
+        await applyBlueprintDefaults(deps, cpId, connectors, defaults);
+      } catch (err) {
+        // Roll the charge point back. `createOneCp` has already registered and
+        // persisted it, so reporting the id in `failed` while leaving it
+        // behind would put a half-configured station in `cp.list` and make the
+        // obvious retry fail with an already-exists error.
+        await deps.chargePointService
+          .removeChargePoint(cpId)
+          .catch(() => undefined);
+        throw err;
+      }
+      created.push(cpId);
     } catch (err) {
       failed.push({ cpId: entry.cpId, reason: createFailureReason(err) });
     }
   }
   return { created, failed };
+}
+
+/**
+ * Apply a blueprint's EV settings and startup scenario to a created charge
+ * point, one connector at a time.
+ *
+ * A failure here fails the charge point: it is reported in `failed` rather
+ * than left half-configured in `created`, since a station that came up with
+ * generic EV settings while the caller asked for a 150 kW profile is the kind
+ * of wrong that only shows up in the meter readings.
+ */
+async function applyBlueprintDefaults(
+  deps: RuntimeSocketIoDeps,
+  cpId: string,
+  connectors: number,
+  defaults: Pick<Blueprint, "evSettings" | "scenarioTemplateId">,
+): Promise<void> {
+  if (!defaults.evSettings && !defaults.scenarioTemplateId) return;
+  for (let connectorId = 1; connectorId <= connectors; connectorId++) {
+    if (defaults.evSettings) {
+      await runFacadeOperation(() =>
+        deps.chargePointService.setEVSettings(
+          cpId,
+          connectorId,
+          defaults.evSettings as never,
+        ),
+      );
+    }
+    if (defaults.scenarioTemplateId) {
+      await runFacadeOperation(() =>
+        deps.chargePointService.loadScenarioTemplate(
+          cpId,
+          defaults.scenarioTemplateId as string,
+          connectorId,
+          // The blueprint's EV settings again, as the override: a template
+          // carries its own and applies them when it starts, so without this
+          // the scenario would quietly undo the settings applied above.
+          defaults.evSettings as never,
+        ),
+      );
+    }
+  }
 }
 
 async function updateCp(

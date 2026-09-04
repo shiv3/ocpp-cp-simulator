@@ -195,6 +195,64 @@ failover configuration: a restart that brought the charge point back on
 `ws_url` alone would silently disable the one thing the list exists to provide.
 See [State persistence](state-persistence.md).
 
+##### Blueprints
+
+A **blueprint** is a named, reusable _hardware_ description — what a charge
+point is — where a [scenario](scenario-format.md) is the _behaviour_ half: what
+it does. They compose, and neither knows about the other.
+
+| Method             | Params          | Returns                     |
+| ------------------ | --------------- | --------------------------- |
+| `blueprint.list`   | `{}`            | Built-ins, then stored ones |
+| `blueprint.save`   | `{ blueprint }` | `{ id }`                    |
+| `blueprint.delete` | `{ id }`        | `{ ok: true }`              |
+
+A blueprint carries an `id`, a `name`, an optional `description`, the
+`cp.create` parameter block (minus `cpId`, which is generated), optional
+default `evSettings`, and an optional `scenarioTemplateId`.
+
+**`wsUrl` is optional on a blueprint and required at instantiation.** A
+blueprint describes hardware; the CSMS a fleet points at is a property of the
+run, which is why the built-in profiles carry no URL at all. The merged result
+is validated against `cp.create_many`'s own schema, so a blueprint without a
+URL still cannot produce a charge point without one.
+
+Instantiate with `cp.create_many { blueprintId, count }`; `idPattern` is
+optional here and defaults to `<blueprintId>-{n:03}`. Any
+parameter given alongside `blueprintId` **overrides** the blueprint's, so a
+fleet can share hardware and differ in one field. A `blueprintId` that names
+nothing is `not_found` before anything is created.
+
+A blueprint is more than its `cp.create` block: `evSettings` are applied to
+**every** connector of each created charge point, and `scenarioTemplateId` is
+loaded onto each. A charge point whose defaults could not be applied is
+reported in `failed` rather than left half-configured in `created` — a station
+that came up with generic EV settings while the caller asked for a 150 kW
+profile is the kind of wrong that only shows up in the meter readings.
+
+Five read-only built-ins ship with the daemon (`ac-22kw`, `ac-22kw-x2`,
+`dc-50kw`, `dc-150kw`, `dc-350kw`) — the authoritative mapping is
+`src/utils/blueprints/README.md`. Saving or deleting a built-in id is refused:
+`blueprint.delete` cannot restore one, so an accidental overwrite would be
+permanent for that daemon.
+
+At most 995 blueprints can be stored. `blueprint.list` returns the built-ins
+and the stored ones under one result cap, so an unbounded store would make the
+call fail validation for everyone rather than refuse the one save that crossed
+the line. A stored row that no longer matches the schema is skipped rather than
+returned, for the same reason.
+
+A charge point whose blueprint defaults could not be applied is **rolled
+back**, not left in `cp.list`: it is already registered and persisted by then,
+so reporting it in `failed` and leaving it behind would put a half-configured
+station in the registry and make the obvious retry fail with an already-exists
+error.
+
+Blueprints are stored in `charge_points`' sibling table `blueprints`
+(schema v8) when `--state-db` is given, and **in memory otherwise** — the
+daemon's default is no database, and a save that answered success while storing
+nothing would be worse than either.
+
 ##### `cp.create_many` — the batch fields
 
 `cp.create_many` takes the table above **without `cpId`** (ids are generated),

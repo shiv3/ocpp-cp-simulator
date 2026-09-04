@@ -9,6 +9,16 @@ import { z } from "zod";
 /** General-purpose string field: ≤ 64 KB. */
 export const STR_64K = z.string().max(65_536);
 
+/**
+ * Identifier-sized string: ≤ 256 chars, the same cap the rpc envelope already
+ * enforces on `cpId`. For names and ids that end up in log lines, table keys
+ * and metric labels, where 64 KB is not a bound anyone wants.
+ */
+export const STR_256 = z.string().max(256);
+
+/** Short prose (a description): ≤ 1 KB. */
+export const STR_1K = z.string().max(1_024);
+
 /** Scenario-definition payload string: ≤ 256 KB (scenarios can be large). */
 export const SCENARIO_STR_256K = z.string().max(262_144);
 

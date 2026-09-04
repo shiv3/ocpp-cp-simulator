@@ -5,7 +5,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createMcpHandler } from "../mcp/mcpServer";
 import { createRuntimeDeps } from "../socketServer";
-import { createManyParamsSchema, createParamsSchema } from "../../../protocol";
+import { createManyToolSchema, createParamsSchema } from "../../../protocol";
 
 /**
  * #284 — the typed tool must not be narrower than the method it wraps.
@@ -150,7 +150,7 @@ describe("MCP cp_create schema parity (#284)", () => {
 describe("MCP cp_create_many schema parity (#295)", () => {
   it("exposes every parameter cp.create_many accepts", async () => {
     const canonical = Object.keys(
-      (createManyParamsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
+      (createManyToolSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
     ).sort();
     const exposed = await toolProperties("cp_create_many");
 
@@ -175,7 +175,7 @@ describe("MCP cp_create_many schema parity (#295)", () => {
     ]) {
       expect(exposed).toContain(field);
     }
-    for (const field of ["count", "idPattern", "startIndex"]) {
+    for (const field of ["count", "idPattern", "startIndex", "blueprintId"]) {
       expect(exposed).toContain(field);
     }
     // `cpId` is generated from `idPattern`; accepting one would be ambiguous.

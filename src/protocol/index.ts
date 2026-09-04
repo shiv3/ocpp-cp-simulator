@@ -17,7 +17,11 @@ export {
   expandIdPattern,
   hasIdPatternPlaceholder,
   MAX_GENERATED_CP_ID_LENGTH,
+  blueprintSchema,
+  createManyFromBlueprintSchema,
+  createManyToolSchema,
 } from "./methods";
+export type { Blueprint } from "./methods";
 
 /** Every valid rpc method id. */
 export type RpcMethod = keyof typeof METHODS;

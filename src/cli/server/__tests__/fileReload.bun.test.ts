@@ -1855,6 +1855,209 @@ describe("cp.update to a different idTag file is reconciled (#314)", () => {
   });
 });
 
+describe("a rejected idTag reload is rejected everywhere (#314)", () => {
+  it("leaves the live pool alone when the write-back fails", async () => {
+    // The event, the running daemon and the stored state have to agree. With
+    // the live pool mutated first, a failing write reported `rejected` while
+    // the new tags were in force — and a restart quietly reverted them.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["KEEP"]));
+    const dbPath = path.join(dir, "state.sqlite");
+    const database = BunSqliteDatabase.open(dbPath);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, database);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-ATOMIC", {
+      idTagPool: { file },
+    });
+    expect(await drawnTag(server, "CP-ATOMIC")).toBe("KEEP");
+
+    database.close();
+    backend.save(file, JSON.stringify(["NEVER-LANDED"]));
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+
+    // Reported rejected, so it must actually be rejected: the charge point is
+    // still drawing the pool it had.
+    expect(server.registry.get("CP-ATOMIC")?.getInit().idTags).toEqual([
+      "KEEP",
+    ]);
+    expect(await drawnTag(server, "CP-ATOMIC")).toBe("KEEP");
+  });
+
+  it("clears the baseline when a startup reconciliation could not be persisted", async () => {
+    // The startup-reconciliation counterpart of the rule above. `idTagText` is
+    // seeded with the file's current contents before the reconcile runs, so a
+    // reconcile that could not be persisted must drop that cache — otherwise
+    // the operator's next save of those same bytes is discarded as unchanged
+    // and the database can never catch up.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["BEFORE"]));
+    const dbPath = path.join(dir, "state.sqlite");
+    const database = BunSqliteDatabase.open(dbPath);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, database);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+
+    // As the watch opens — after `parseCreateBody` read the file for the create,
+    // and after the create row was written — the file moves on and the database
+    // goes away. The reconcile that follows therefore has work to do and cannot
+    // persist it.
+    backend.onWatch = (watched) => {
+      if (watched !== dir) return;
+      backend.onWatch = null;
+      fs.writeFileSync(file, JSON.stringify(["AFTER"]));
+      database.close();
+    };
+    await rpc(socket, "cp.create", {
+      cpId: "CP-RECONCILE-FAIL",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+
+    await waitFor(() => events.length > 0, "the reconcile to report a failure");
+    expect(events[0]?.outcome).toBe("rejected");
+    // Persist-first, so the live pool is untouched — the rejection is true.
+    expect(server.registry.get("CP-RECONCILE-FAIL")?.getInit().idTags).toEqual([
+      "BEFORE",
+    ]);
+
+    // The same bytes again must be judged afresh rather than discarded as
+    // unchanged; without clearing the baseline this produces nothing at all.
+    backend.save(file, JSON.stringify(["AFTER"]));
+    await waitFor(
+      () => events.length > 1,
+      "the same bytes to be re-judged after the failed reconcile",
+    );
+  });
+});
+
+describe("a watch row does not depend on --watch to be cleaned up (#314)", () => {
+  it("remove_scenario and definitions.replace drop their rows with no watcher", async () => {
+    // Both cleanups used to sit behind `fileReload`. On a daemon running
+    // without `--watch` the rows survived, and a later watched restart
+    // reattached files the operator had already replaced or deleted.
+    const dir = tempDir();
+    const removed = writeFile(dir, "a.json", scenario("row-removed", 11));
+    const replaced = writeFile(dir, "b.json", scenario("row-replaced", 12));
+    const dbPath = path.join(dir, "state.sqlite");
+
+    const db = BunSqliteDatabase.open(dbPath);
+    databases.push(db);
+    const watching = await startWatchingServer(new TestWatchBackend(), db);
+    const firstSocket = await openClient(watching);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-ROWS",
+      wsUrl: csmsUrl(),
+      connectors: 2,
+    });
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 1, file: removed },
+      "CP-ROWS",
+    );
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 2, file: replaced },
+      "CP-ROWS",
+    );
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(2);
+    firstSocket.disconnect();
+    await watching.close();
+    servers.pop();
+
+    // Restarted WITHOUT --watch.
+    const plain = await startTestServer({ database: db });
+    servers.push(plain);
+    const socket = await openClient(plain);
+    expect(plain.fileReload).toBeNull();
+    await rpc(
+      socket,
+      "remove_scenario",
+      { connector: 1, scenarioId: "row-removed" },
+      "CP-ROWS",
+    );
+    await rpc(socket, "scenario.definitions.replace", {
+      cpId: "CP-ROWS",
+      connectorId: 2,
+      definitions: [JSON.parse(scenario("row-replaced", 99))],
+    });
+
+    // Both rows gone, with nothing watching anything.
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(0);
+  });
+
+  it("an inline replacement without --watch does not leave the file live", async () => {
+    // The row is a fact about stored state. Cleaned up only behind the flag, a
+    // daemon restarted without `--watch` left it for a later watched restart to
+    // reattach — overwriting the definition installed in between.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("flagless", 11));
+    const dbPath = path.join(dir, "state.sqlite");
+
+    const firstDb = BunSqliteDatabase.open(dbPath);
+    databases.push(firstDb);
+    const first = await startWatchingServer(new TestWatchBackend(), firstDb);
+    const firstSocket = await openClient(first);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-FLAGLESS",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-FLAGLESS",
+    );
+    expect(firstDb.all("SELECT path FROM watched_scenario_files")).toHaveLength(
+      1,
+    );
+    firstSocket.disconnect();
+    await first.close();
+    servers.pop();
+
+    // Restarted WITHOUT --watch; the operator replaces the scenario by hand.
+    const plain = await startTestServer({ database: firstDb });
+    servers.push(plain);
+    const plainSocket = await openClient(plain);
+    expect(plain.fileReload).toBeNull();
+    await rpc(plainSocket, "cp.create", {
+      cpId: "CP-FLAGLESS",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    }).catch(() => undefined);
+    await rpc(
+      plainSocket,
+      "load_scenario",
+      { connector: 1, scenario: JSON.parse(scenario("flagless", 33)) },
+      "CP-FLAGLESS",
+    );
+    // The row is gone even though nothing was watching.
+    expect(firstDb.all("SELECT path FROM watched_scenario_files")).toHaveLength(
+      0,
+    );
+    plainSocket.disconnect();
+    await plain.close();
+    servers.pop();
+
+    // A later watched restart must not reattach the abandoned file.
+    const backend = new TestWatchBackend();
+    const third = await startWatchingServer(backend, firstDb);
+    expect(third.fileReload?.watchedPaths()).toEqual([]);
+    backend.save(file, scenario("flagless", 44));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(loadedDelay(third, "CP-FLAGLESS", "flagless")).toBe(33);
+  });
+});
+
 /** The `delaySeconds` of the loaded definition's delay node. */
 function loadedDelaySeconds(
   server: TestServer,

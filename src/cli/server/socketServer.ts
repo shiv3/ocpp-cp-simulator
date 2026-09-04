@@ -98,6 +98,10 @@ import {
 } from "./registryEvents";
 import type { FileReloadManager } from "./FileReloadManager";
 import {
+  forgetWatchedConnectorScenarioFiles,
+  forgetWatchedScenarioFile,
+} from "./watchedScenarioFiles";
+import {
   RegistryChargePointService,
   type RegistryConfigRepository,
 } from "./RegistryChargePointService";
@@ -510,6 +514,7 @@ export async function dispatchRpcCore(
     cpId,
     rawParams,
     deps.fileReload ?? null,
+    deps.database ?? null,
   );
   if (facadeResult.handled) return facadeResult.value;
 
@@ -1192,6 +1197,11 @@ async function replaceConnectorScenarioDefinitions(
       params.data.cpId,
       params.data.connectorId,
     );
+    forgetWatchedConnectorScenarioFiles(
+      deps.database,
+      params.data.cpId,
+      params.data.connectorId,
+    );
   }
   deps.registryEvents?.emitScenarioDefinitionsChanged(
     params.data.cpId,
@@ -1445,6 +1455,10 @@ async function dispatchFacadeCpCommand(
   rawParams: unknown,
   /** Null unless the daemon runs with `--watch` (#314). */
   fileReload: FileReloadManager | null = null,
+  /** The `--state-db`, when there is one. Separate from `fileReload` on
+   *  purpose: a `watched_scenario_files` row is a fact about stored state, so
+   *  invalidating it must not depend on this daemon happening to watch (#314). */
+  database: Database | null = null,
 ): Promise<FacadeDispatchResult> {
   const params = rawParamsAsRecord(rawParams);
 
@@ -1831,8 +1845,11 @@ async function dispatchFacadeCpCommand(
         // #314: an inline definition replaces whatever was under this id, file
         // or not. Leaving an earlier `load_scenario { file }` watch in place
         // would let the next edit of that file overwrite the definition the
-        // operator just installed by hand.
+        // operator just installed by hand — and leaving its persisted row in
+        // place would let a later `--watch` restart do the same, which is why
+        // that goes whether or not this daemon is watching anything.
         fileReload?.unregisterScenario(id, connectorId, loaded.scenarioId);
+        forgetWatchedScenarioFile(database, id, connectorId, loaded.scenarioId);
         return handled(loaded);
       }
       throw new Error("Either 'file' or 'scenario' parameter is required");
@@ -1965,8 +1982,12 @@ async function dispatchFacadeCpCommand(
       );
       const after = await chargePointService.listScenarios(id, connectorId);
       // #314: the file behind a removed scenario stops being watched, or the
-      // next edit would re-create the scenario that was just deleted.
+      // next edit would re-create the scenario that was just deleted. The
+      // persisted row goes unconditionally — it is a fact about stored state,
+      // not about `--watch`, and a daemon running without the flag would
+      // otherwise leave it for a later watched restart to reattach.
       fileReload?.unregisterScenario(id, connectorId, scenarioId);
+      forgetWatchedScenarioFile(database, id, connectorId, scenarioId);
       return handled({
         removed:
           before.some((scenario) => scenario.scenarioId === scenarioId) &&

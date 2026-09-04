@@ -13,7 +13,8 @@ related:
   - ../entities/docker-image.md
   - ../entities/mcp-endpoint.md
   - ../concepts/local-vs-remote-mode.md
-updated: 2026-09-03
+  - fleet-load-and-observability-roadmap.md
+updated: 2026-09-04
 ---
 
 # Choosing an interface

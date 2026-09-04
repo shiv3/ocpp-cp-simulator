@@ -6,6 +6,7 @@ sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
   - ../log.md
+  - ../analyses/fleet-load-and-observability-roadmap.md
 updated: 2026-09-04
 ---
 
@@ -47,5 +48,13 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #286                                             | `connect_failed` for a refused handshake; a misplaced `cpId` is `invalid_params`                       | [Control plane](../concepts/control-plane.md#rpc)                                                                                          |
 | #288                                             | A refused WebSocket upgrade logs the HTTP status behind it                                             | [Log format](../concepts/log-format.md#websocket-handshake-failures)                                                                       |
 | #289                                             | `--tls-ca` is optional and replaces the default roots; the CSMS can refuse a correct profile-2 station | [Security profiles](../concepts/security-profiles.md#--tls-ca-is-optional-and-it-replaces-rather-than-adds)                                |
+| #295                                             | Bulk CP creation (`cp.create_many`) — a fleet from one call                                            | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #296                                             | Multiple supervision URLs with a distribution and failover policy                                      | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #297                                             | CP blueprints — a named, reusable hardware description                                                 | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #298                                             | Prometheus `/metrics` on the daemon                                                                    | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #299                                             | idTag pool with a distribution policy                                                                  | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #300                                             | Seeded background traffic as a per-connector runtime behaviour                                         | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #301                                             | Charging-curve EV model behind MeterValues                                                             | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
+| #302                                             | Measured per-daemon charge-point ceiling                                                               | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                               |
 | steve-community/steve #2068, #2069, #2070, #2074 | SteVe REST API gaps                                                                                    | [steve-verify](steve-verify-readme.md), [CSMS peers](../entities/csms-peers.md)                                                            |
 | steve-community/steve #2093                      | OCTT certificate behaviors                                                                             | [Scenario format](../concepts/scenario-format.md#inboundpolicy-and-certificate-quirks-notes)                                               |

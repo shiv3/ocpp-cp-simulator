@@ -14,7 +14,8 @@ related:
   - ../concepts/access-control.md
   - ../concepts/state-persistence.md
   - ../concepts/log-format.md
-updated: 2026-09-03
+  - ../analyses/fleet-load-and-observability-roadmap.md
+updated: 2026-09-04
 ---
 
 # Daemon (server mode)
@@ -161,3 +162,6 @@ see [Docker image](docker-image.md).
   Unix-domain socket control listener.
 - Future: bearer token auth or mTLS can be added at the HTTP/socket boundary
   without changing CP command method names.
+- Planned: fleet-scale creation, a metrics endpoint, seeded background traffic
+  and a measured per-process ceiling are sequenced in
+  [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md).

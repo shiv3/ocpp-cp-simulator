@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # Index
@@ -59,12 +59,13 @@ Start at [Overview](overview.md). Conventions for pages are in
 
 ## Analyses (`analyses/`)
 
-| Page                                                                 | Summary                                                                                      |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [Choosing an interface](analyses/choosing-an-interface.md)           | Use-case → interface table and a feature-coverage matrix across web / desktop / daemon / CLI |
-| [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)     | Feature checklist, minimal setup, MCP vs CLI vs socket.io-client, assertion patterns         |
-| [REST → Socket.IO migration](analyses/rest-to-socketio-migration.md) | Endpoint-by-endpoint mapping from the removed REST / WebSocket / Unix-socket control surface |
-| [Testing strategy](analyses/testing-strategy.md)                     | Vitest vs Bun test, merged coverage, and the e2e / steve-verify / Testcontainers layers      |
+| Page                                                                                      | Summary                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Choosing an interface](analyses/choosing-an-interface.md)                                | Use-case → interface table and a feature-coverage matrix across web / desktop / daemon / CLI                                                                              |
+| [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)                          | Feature checklist, minimal setup, MCP vs CLI vs socket.io-client, assertion patterns                                                                                      |
+| [REST → Socket.IO migration](analyses/rest-to-socketio-migration.md)                      | Endpoint-by-endpoint mapping from the removed REST / WebSocket / Unix-socket control surface                                                                              |
+| [Testing strategy](analyses/testing-strategy.md)                                          | Vitest vs Bun test, merged coverage, and the e2e / steve-verify / Testcontainers layers                                                                                   |
+| [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) | Sequenced plan for fleet-scale work: bulk create and blueprints, `/metrics`, seeded background traffic, charging-curve meter values, a measured scale ceiling, hot-reload |
 
 ## Raw assets kept under `docs/`
 

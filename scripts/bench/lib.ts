@@ -176,27 +176,113 @@ export function minSustainableTxIntervalSec(n: number): number {
  *  ramp. That moved the first non-zero timeout to a larger N than the one
  *  that actually produced it, and finding that N is the whole point. */
 export function recommendedWarmupSec(txIntervalSec: number): number {
-  return Math.min(MAX_WARMUP_SEC, CALL_WATCHDOG_SEC + txIntervalSec);
+  // The ramp is one *cycle period*, not one raw `--tx-interval`: they differ at
+  // `--tx-interval 1`, where a hold is floored at 1s and the real period is 2s
+  // — the same "the flag is not the period" slip that made the pool ceiling
+  // overstate its requirement. The idle axis has no cycle and so no ramp,
+  // which is why the period is asked for only when there is one: `holdSec`'s
+  // 1s floor would otherwise invent a 2s ramp for a fleet that never starts a
+  // transaction.
+  const rampSec = txIntervalSec > 0 ? cyclePeriodSec(txIntervalSec) : 0;
+  return Math.min(MAX_WARMUP_SEC, CALL_WATCHDOG_SEC + rampSec);
 }
 
-/** Transaction-cycle start offsets for one step's charge points: evenly
- *  spaced across one `--tx-interval`, never random.
+/**
+ * The van der Corput sequence in base 2: `0, ½, ¼, ¾, ⅛, ⅝, ⅜, ⅞, …`.
  *
- *  `Math.random()` here made two identical invocations issue different traffic
- *  patterns — bursts could cluster by chance and move the observed knee, and a
- *  run could not be replayed from the options recorded in `--out`, against the
- *  project's rule that every random behaviour is seeded and replayable. Even
- *  spacing is both reproducible and a better stagger: the cycle period is one
- *  `--tx-interval`, so `i/count` of an interval puts the fleet in exact steady
- *  state rather than approximately. */
+ * Its defining property is the one a fleet that **grows in place** needs:
+ * *every prefix* is near-uniform over `[0, 1)`, not just the whole sequence.
+ * A charge point's phase can therefore be fixed once, from its global index,
+ * and stay correct as the fleet grows around it — no cohort has to be
+ * re-phased, and no cohort has to know how large the fleet will end up.
+ */
+export function radicalInverseBase2(index: number): number {
+  let remaining = Math.floor(Math.abs(index));
+  let denominator = 1;
+  let result = 0;
+  while (remaining > 0) {
+    denominator *= 2;
+    result += (remaining % 2) / denominator;
+    remaining = Math.floor(remaining / 2);
+  }
+  return result;
+}
+
+/**
+ * Transaction-cycle start offsets for the charge points at global fleet
+ * indices `startIndex .. startIndex + count - 1`, spread across one cycle
+ * period. Deterministic, never random.
+ *
+ * **Global indices, not per-cohort ones.** The fleet is grown in place, so
+ * `armLoad` is called once per sweep step with only that step's new charge
+ * points. Spacing each cohort evenly across the period *by itself* restarted
+ * the phase at 0 for every cohort: with `--counts 1,2,3` and step durations
+ * that are multiples of the period, all three charge points ended up in
+ * nearly the same phase — a burst, exactly what the stagger exists to prevent,
+ * and a latency knee that would be an artefact of this script rather than a
+ * property of the daemon. That is the worst failure available to a tool whose
+ * entire output is a knee.
+ *
+ * Exact even spacing (`i/count`) cannot survive growth without re-phasing the
+ * whole running fleet, which would mean tearing down in-flight transaction
+ * timers and re-issuing `start_transaction` on connectors mid-session. The van
+ * der Corput sequence buys the property that matters instead: every prefix is
+ * near-uniform, so the fleet is well spread at *every* step of the sweep, with
+ * a maximum gap of at most `2 / n` of a period at fleet size `n` — against the
+ * `1 / n` of a perfectly even ring, and against the "all in one phase" the
+ * per-cohort version produced.
+ *
+ * The span is the **cycle period**, not the raw `--tx-interval`: a hold is
+ * floored at 1s, so at `--tx-interval 1` the period is 2s and spreading over
+ * 1s would leave the fleet bunched in half the phase space.
+ */
 export function staggerOffsetsMs(
+  startIndex: number,
   count: number,
   txIntervalSec: number,
 ): number[] {
   if (count <= 0) return [];
-  const spanMs = Math.max(0, txIntervalSec) * 1000;
-  return Array.from({ length: count }, (_, i) => (i * spanMs) / count);
+  const spanMs = txIntervalSec <= 0 ? 0 : cyclePeriodSec(txIntervalSec) * 1000;
+  return Array.from(
+    { length: count },
+    (_, i) => radicalInverseBase2(startIndex + i) * spanMs,
+  );
 }
+
+/**
+ * How long `ChargePoint.authorizeAndWait` may take, in seconds — its
+ * `timeoutMs` default in `src/cp/domain/charge-point/ChargePoint.ts`.
+ *
+ * It **never rejects**: on timeout or disconnect it warns and resolves as
+ * `"Accepted"`. So a local start is always definitively resolved within this
+ * bound — either the transaction begins and `transaction_started` fires, or
+ * authorization was denied and it never will.
+ */
+export const AUTHORIZE_WAIT_SEC = 10;
+
+/** Slack over {@link AUTHORIZE_WAIT_SEC} for the control-plane hop, the
+ *  daemon's own scheduling and the event's trip back. */
+export const START_CONFIRM_MARGIN_SEC = 5;
+
+/**
+ * How long a cycle waits for its `transaction_started` before concluding the
+ * start is not happening.
+ *
+ * Deliberately **not the hold**. `--tx-interval 2` gives a 1s hold while
+ * authorization may legitimately take 10s, so a hold-length wait declared the
+ * start dead while it was still pending: the stop then fired against a
+ * transaction that did not exist, the next cycle began immediately, and the
+ * original start landed *after* that ineffective stop — leaving a transaction
+ * active, or letting its event confirm a newer cycle's waiter. The row
+ * reported `unconf.tx` while the traffic had quietly stopped matching the
+ * configured cadence.
+ *
+ * Because {@link AUTHORIZE_WAIT_SEC} bounds the domain's own resolution, a
+ * start still unconfirmed after this really was denied — so a cycle that waits
+ * this long has waited for a definitive answer, not merely given up early.
+ */
+export const START_CONFIRM_TIMEOUT_MS =
+  (AUTHORIZE_WAIT_SEC + START_CONFIRM_MARGIN_SEC) * 1000;
 
 export interface DaemonBasicAuth {
   readonly username: string;

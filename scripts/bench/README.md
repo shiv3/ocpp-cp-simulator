@@ -103,13 +103,35 @@ script measures one axis per invocation:
   calls "the one that matters" — it drives the daemon's actual OCPP call
   handling path, not just timers.
 
-  The stagger is **evenly spaced, not random**: charge point `i` of a step's
-  `count` starts its first cycle `i/count` of an interval in. Two runs with
-  the same flags therefore issue the same traffic pattern, so a knee is
+  The stagger is **deterministic, and phased off each charge point's global
+  fleet index** — never its index within the step that created it. Two runs
+  with the same flags therefore issue the same traffic pattern, so a knee is
   reproducible and a run can be replayed from the options recorded in `--out`
   — the same guarantee the rest of the project's randomness gives by being
-  seeded. `Math.random()` offsets could also cluster by chance and move the
-  observed knee, which even spacing cannot.
+  seeded. `Math.random()` offsets could cluster by chance and move the observed
+  knee, which this cannot.
+
+  **Why global indices, and why not exact even spacing.** The fleet is grown in
+  place, so the load is armed once per step with only that step's new charge
+  points. Spacing each cohort evenly across the period _by itself_ restarted
+  the phase at 0 for every step: with `--counts 1,2,3` and step durations that
+  are multiples of the period, all three charge points ended up in nearly the
+  same phase — a burst, and a latency knee belonging to this script rather than
+  to the daemon, which is the worst answer a tool whose whole output is a knee
+  can give. Exact even spacing cannot survive growth without re-phasing the
+  running fleet, which would mean clearing in-flight transaction timers and
+  re-issuing `start_transaction` on connectors mid-session.
+
+  So a charge point's phase is fixed once, from its global index, using the
+  van der Corput sequence in base 2 (`0, ½, ¼, ¾, ⅛, …`). Its defining property
+  is the one grow-in-place needs: _every prefix_ is near-uniform, so the fleet
+  is well spread at every step of the sweep and a cohort added later never has
+  to disturb one already running. The widest silent stretch is at most `2/n` of
+  a period at fleet size `n`, against `1/n` for a perfect ring — and against
+  "the entire fleet in one phase" for the per-cohort version. The span is the
+  cycle period, not the raw `--tx-interval`: a hold is floored at 1s, so at
+  `--tx-interval 1` the period is 2s and spreading over 1s would bunch the
+  fleet into half the phase space.
 
 Run both and compare:
 
@@ -206,11 +228,32 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    and got 8 used to print `N=10, connected=8, unsettled=0` — latency
    attributed to a fleet that never existed. Now it prints `N=8, uncreated=2`.
 
-   **`unconf.tx`** counts transaction starts this step could not confirm within
-   one hold (`--tx-interval` ÷ 2, floored at 1s): the `start_transaction` ack
-   returns while the charge point is still waiting on `Authorize.conf`, so the
-   script waits for the daemon's `transaction_started` event before timing the
-   hold. A non-zero value means authorization is taking longer than a hold — a
+   **`unconf.tx`** counts transaction starts this step could not confirm: the
+   `start_transaction` ack returns while the charge point is still waiting on
+   `Authorize.conf`, so the script waits for the daemon's `transaction_started`
+   event before timing the hold. It waits **15s — the daemon's own 10s
+   authorization timeout plus slack — never the hold**. At `--tx-interval 2`
+   the hold is 1s while authorization may legitimately take 10s, so a
+   hold-length wait declared the start dead while it was still pending: the
+   stop then fired against a transaction that did not exist, the next cycle
+   began immediately, and the original start landed _after_ that ineffective
+   stop — leaving a transaction active, or letting its event confirm a newer
+   cycle's waiter. `authorizeAndWait` never rejects (on timeout it warns and
+   proceeds as `Accepted`), so a start still unconfirmed after 15s was
+   genuinely denied: the wait ends with a definitive answer rather than a
+   guess, and no second cycle for a charge point begins until the outstanding
+   one has been answered, held and stopped.
+
+   **The drift this causes is one-way and permanent.** A cycle that had to wait
+   out a denial occupies 15s plus a hold, and the next cycle is anchored one
+   period after the _start_ of that one — so at `--tx-interval 2` the charge
+   point's cycle stretches from 2s to about 16s and is never caught back up. A
+   non-zero `unconf.tx` therefore does not mean "the load was fine, just late":
+   it means those charge points' cadence is now their own rather than the
+   flag's, and the fleet is that much below the configured load from then on.
+   That is the honest trade against the alternative — beginning a new cycle
+   while the old start is still outstanding, which is the desynchronisation
+   this bound exists to prevent. A non-zero value means authorization is taking longer than a hold — a
    knee signal in its own right, and a warning that those cycles applied less
    load than the flags asked for — a slow CSMS, not a broken one, since a lost
    event stream aborts the run rather than filling this column. Unlike every
@@ -250,8 +293,10 @@ where it first goes non-zero is the entire point of the sweep.
 So each step holds the fleet at its new `N`, with its load already running, for
 `--warmup` seconds before taking the `before` scrape. The default is
 `30 + --tx-interval`: one CALL watchdog, plus the stagger ramp, because on the
-active axis the last charge point issues its first StartTransaction one
-`--tx-interval` after the first one does.
+active axis the last charge point issues its first StartTransaction one cycle
+period after the first one does. (Precisely: one _cycle period_, which is
+`--tx-interval` for every interval of 2s or more and 2s below that, and zero on
+the idle axis, which starts no transactions and so has nothing to ramp.)
 
 **What a row's `timeouts` covers, precisely:** every watchdog expiry between
 the two scrapes — i.e. every CALL issued between 30s before the window opened

@@ -36,10 +36,21 @@ export function isSensitiveKeyName(key: string): boolean {
   return SENSITIVE_KEY_NAMES.has(key.replace(/[-_]/g, "").toLowerCase());
 }
 
+/**
+ * `scheme://user:password@host` — the form the config modal documents for
+ * putting Basic credentials in a WebSocket URL. It is not a named assignment,
+ * so the patterns above never saw it, and a client error message that quotes
+ * the connection URL would otherwise print the password (#288 made those
+ * messages loggable). The username is kept: it is the charge point id in
+ * every OCPP use of this form, and losing it would cost the diagnosis.
+ */
+const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+):[^/\s@]*@/gi;
+
 export function redactSensitiveText(text: string): string {
   return redactOcppKeyValueText(text)
     .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
-    .replace(SENSITIVE_BARE_ASSIGNMENT, `$1${REDACTED_VALUE}`);
+    .replace(SENSITIVE_BARE_ASSIGNMENT, `$1${REDACTED_VALUE}`)
+    .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`);
 }
 
 export function redactSensitiveValue(value: unknown): unknown {

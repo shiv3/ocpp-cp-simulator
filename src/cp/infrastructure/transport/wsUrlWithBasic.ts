@@ -170,6 +170,7 @@ interface NodeWsLike {
   ): void;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  terminate(): void;
   readonly readyState: number;
 }
 
@@ -570,6 +571,10 @@ class DeferredNodeWebSocket {
   private pendingClose: { code?: number; reason?: string } | null = null;
   private errorHandler: ((event: Event) => void) | null = null;
   private pendingErrors: Event[] = [];
+  /** A refused handshake is closed by us; ws may still close later. */
+  private closeDispatched = false;
+  /** Set once a non-101 response has been reported and the socket torn down. */
+  private refusalHandled = false;
 
   constructor(
     url: string,
@@ -645,6 +650,9 @@ class DeferredNodeWebSocket {
           : {}),
       });
       socket.on("error", (error) => {
+        // Once a refusal has been reported and terminated, ws's follow-up
+        // error is about our own teardown, not about the CSMS.
+        if (this.refusalHandled) return;
         this.state = WebSocket.CLOSING;
         this.dispatchError({
           type: "error",
@@ -657,9 +665,16 @@ class DeferredNodeWebSocket {
       // Node path names the cause without needing the probe that the Bun path
       // has to make. `ws`'s own error message is "Unexpected server response:
       // 401", which carries the status but not the Location.
+      //
+      // ATTACHING THIS LISTENER TAKES OWNERSHIP OF THE FAILED HANDSHAKE.
+      // Verified against ws directly: with a listener attached, only this
+      // event fires -- no `error`, no `close`, and readyState stays
+      // CONNECTING; without one, ws emits `error` + `close(1006)` itself. So
+      // the socket has to be finished here, or the reconnect loop never
+      // starts and connect() hangs to its 30 s timeout.
       socket.on(
         "unexpected-response",
-        (_request: unknown, response: NodeIncomingMessageLike) => {
+        (request: unknown, response: NodeIncomingMessageLike) => {
           const location = response.headers?.location;
           this.dispatchError({
             type: "error",
@@ -667,6 +682,24 @@ class DeferredNodeWebSocket {
             httpStatus: response.statusCode,
             ...(location ? { httpLocation: location } : {}),
           } as unknown as Event);
+          // terminate() is what actually ends it: destroying the request
+          // alone leaves ws reporting CONNECTING (measured), and this
+          // wrapper's readyState reads through to ws. It costs one extra
+          // "closed before the connection was established" error from ws,
+          // which `refusalHandled` swallows -- the status above is the line
+          // worth reading.
+          this.refusalHandled = true;
+          void request;
+          socket.terminate();
+          this.state = WebSocket.CLOSED;
+          // 1002 to match what the Bun client reports for the same refusal,
+          // so everything downstream sees one shape.
+          this.dispatchCloseOnce({
+            type: "close",
+            code: 1002,
+            reason: `Unexpected server response: ${response.statusCode}`,
+            wasClean: false,
+          } as CloseEvent);
         },
       );
       this.socket = socket;
@@ -688,7 +721,7 @@ class DeferredNodeWebSocket {
             : reason instanceof Uint8Array
               ? new TextDecoder().decode(reason)
               : "";
-        this.onclose?.({
+        this.dispatchCloseOnce({
           type: "close",
           code,
           reason: reasonText,
@@ -719,6 +752,13 @@ class DeferredNodeWebSocket {
       return;
     }
     this.errorHandler(event);
+  }
+
+  /** Exactly one close reaches the consumer, whoever noticed first. */
+  private dispatchCloseOnce(event: CloseEvent): void {
+    if (this.closeDispatched) return;
+    this.closeDispatched = true;
+    this.onclose?.(event);
   }
 }
 

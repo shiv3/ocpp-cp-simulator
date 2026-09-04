@@ -1,4 +1,5 @@
 import { Logger, LogType } from "../../shared/Logger";
+import { redactSensitiveText } from "../../shared/redaction";
 import { openOcppWebSocket, probeUpgradeRefusal } from "./wsUrlWithBasic";
 import type {
   OcppSecurityProfile,
@@ -701,7 +702,9 @@ export class OCPPWebSocket {
     }
     this._logger.error(
       detail.message
-        ? `WebSocket error: ${detail.message}`
+        ? // The client's message quotes the connection URL, which may carry
+          // `user:password@host` credentials -- redact before logging.
+          `WebSocket error: ${redactSensitiveText(detail.message)}`
         : `WebSocket error type: ${detail.type}`,
       LogType.WEBSOCKET,
     );

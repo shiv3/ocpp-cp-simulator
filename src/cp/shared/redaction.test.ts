@@ -92,3 +92,36 @@ describe("redaction", () => {
     });
   });
 });
+
+describe("URL credentials (#288)", () => {
+  it("redacts the password in a ws://user:password@host URL", () => {
+    // The config modal documents this form, and a client's error message
+    // quotes the connection URL -- which #288 made loggable.
+    const redacted = redactSensitiveText(
+      "WebSocket connection to 'ws://CP001:s3cr3t@csms.example/ocpp/' failed: Expected 101 status code",
+    );
+
+    expect(redacted).not.toContain("s3cr3t");
+    // The username is the charge point id; keeping it is the diagnosis.
+    expect(redacted).toContain("CP001");
+    expect(redacted).toContain("csms.example/ocpp/");
+  });
+
+  it("redacts it for wss:// and https:// alike", () => {
+    for (const scheme of ["wss", "https", "http"]) {
+      expect(
+        redactSensitiveText(`${scheme}://user:hunter2@host/path`),
+      ).not.toContain("hunter2");
+    }
+  });
+
+  it("leaves a credential-free URL alone", () => {
+    const url = "ws://csms.example:8080/ocpp/CP001";
+    expect(redactSensitiveText(url)).toBe(url);
+  });
+
+  it("does not mangle a bare host:port", () => {
+    const text = "listening on 127.0.0.1:9700";
+    expect(redactSensitiveText(text)).toBe(text);
+  });
+});

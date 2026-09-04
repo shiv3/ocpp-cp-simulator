@@ -1,6 +1,10 @@
 import { Logger, LogType } from "../../shared/Logger";
-import { openOcppWebSocket } from "./wsUrlWithBasic";
-import type { OcppSecurityProfile, OcppTlsOptions } from "./wsUrlWithBasic";
+import { openOcppWebSocket, probeUpgradeRefusal } from "./wsUrlWithBasic";
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+  OcppWebSocketConnectOptions,
+} from "./wsUrlWithBasic";
 import {
   OCPPAction,
   OCPPErrorCode,
@@ -113,6 +117,15 @@ export class OCPPWebSocket {
   private _onOpenCallback: (() => void) | null = null;
   private _onCloseCallback: ((ev: CloseEvent) => void) | null = null;
   private _isManualDisconnect: boolean = false;
+  /** #288: the options the current handshake used, replayed by the refusal
+   *  probe so it asks the question the socket asked. */
+  private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
+  /** When the probe last ran, so a retry loop cannot multiply the CSMS's
+   *  request rate. Cleared on a successful open. */
+  private _lastRefusalProbeAt: number = 0;
+  /** Set when the client itself reported the HTTP status (the `ws` path),
+   *  so the probe does not ask a question already answered. */
+  private _refusalStatusReported: boolean = false;
   // Extra HTTP headers + Sec-WebSocket-Protocol tokens attached on each
   // upgrade. Both are CLI-only — DOM WebSocket ignores extraHeaders, but
   // the runtime fallback in openOcppWebSocket handles that.
@@ -194,6 +207,9 @@ export class OCPPWebSocket {
     this._isManualDisconnect = false;
 
     const onopenHandler = () => {
+      // A working connection clears the refusal budget, so the next genuine
+      // refusal is diagnosed immediately rather than waiting out the window.
+      this._lastRefusalProbeAt = 0;
       this.handleOpen();
       if (this._onOpenCallback) {
         this._onOpenCallback();
@@ -228,6 +244,10 @@ export class OCPPWebSocket {
       cpoName: this._cpoName,
       tls: this._tls,
       warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
+      onConnectOptions: (options) => {
+        this._lastConnectOptions = options;
+        this._refusalStatusReported = false;
+      },
       onopen: onopenHandler,
       onmessage: onmessageHandler,
       onerror: onerrorHandler,
@@ -651,8 +671,86 @@ export class OCPPWebSocket {
     }
   }
 
+  /**
+   * #288 — say what the error was, not merely that there was one.
+   *
+   * The event carries a message on every runtime that has one to give: the
+   * `ws` client's "Unexpected server response: 401", Bun's
+   * "WebSocket connection to '…' failed: Expected 101 status code", a TLS
+   * failure's own text. Logging only `evt.type` threw all of it away, and
+   * `evt.type` is the constant string "error".
+   *
+   * `httpStatus` is present only on the `ws` path, which is handed the whole
+   * HTTP reply before it errors. Under Bun the status is not knowable here at
+   * all — {@link handleClose} probes for it instead.
+   */
   private handleError(evt: Event): void {
-    this._logger.error(`WebSocket error type: ${evt.type}`, LogType.WEBSOCKET);
+    const detail = evt as {
+      type: string;
+      message?: string;
+      httpStatus?: number;
+      httpLocation?: string;
+    };
+    if (typeof detail.httpStatus === "number") {
+      this._refusalStatusReported = true;
+      this._logger.error(
+        this.describeRefusal(detail.httpStatus, detail.httpLocation),
+        LogType.WEBSOCKET,
+      );
+      return;
+    }
+    this._logger.error(
+      detail.message
+        ? `WebSocket error: ${detail.message}`
+        : `WebSocket error type: ${detail.type}`,
+      LogType.WEBSOCKET,
+    );
+  }
+
+  /** One sentence per HTTP status, naming the operator's next move (#288). */
+  private describeRefusal(status: number, location?: string): string {
+    const hint =
+      status === 401 || status === 403
+        ? " — credentials refused, or the CSMS considers the connection insecure for its security profile"
+        : status === 404
+          ? " — the CSMS does not know this charge point id"
+          : status >= 300 && status < 400
+            ? ` — the endpoint redirects${location ? ` to ${location}` : ""}; a cleartext ws:// to a TLS-only edge looks like this`
+            : "";
+    return `WebSocket upgrade refused: HTTP ${status}${hint}`;
+  }
+
+  /**
+   * #288 — ask the CSMS why, when the client will not say.
+   *
+   * Bun's native WebSocket reports every refused upgrade identically
+   * (`code=1002, Expected 101 status code`), and the daemon runs under Bun. So
+   * on that close, and only that close, replay the handshake as one plain GET
+   * and log the status it answers with. Gated three ways: the `ws` path has
+   * already reported the status, the probe runs at most once a minute per
+   * charge point, and a manual disconnect never triggers it — the reconnect
+   * loop must not multiply the CSMS's request rate.
+   */
+  private maybeProbeRefusal(ev: CloseEvent): void {
+    if (this._isManualDisconnect || this._disposed) return;
+    if (this._refusalStatusReported) return;
+    if (ev.code !== 1002 || !/expected 101/i.test(ev.reason ?? "")) return;
+    const options = this._lastConnectOptions;
+    if (!options) return;
+    const now = Date.now();
+    if (now - this._lastRefusalProbeAt < 60_000) return;
+    this._lastRefusalProbeAt = now;
+    void probeUpgradeRefusal(options)
+      .then((detail) => {
+        if (this._disposed || !detail) return;
+        this._logger.error(
+          `${this.describeRefusal(detail.status, detail.location)} (diagnostic GET after the handshake failed)`,
+          LogType.WEBSOCKET,
+        );
+      })
+      .catch(() => {
+        // A diagnostic must never become a failure of its own.
+      });
   }
 
   private handleClose(ev: CloseEvent): void {
@@ -660,6 +758,7 @@ export class OCPPWebSocket {
       `WebSocket closed: code=${ev.code}, reason=${ev.reason || "none"}, wasClean=${ev.wasClean}`,
       LogType.WEBSOCKET,
     );
+    this.maybeProbeRefusal(ev);
     this.stopPingInterval();
 
     if (this._disposed) {

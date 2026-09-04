@@ -24,10 +24,13 @@ describe("rpc error codes", () => {
     expect(RPC_ERROR_CODES).toContain("not_found");
     expect(RPC_ERROR_CODES).toContain("invalid_params");
     expect(RPC_ERROR_CODES).toContain("internal");
+    // #286: a CSMS refusing the connection is not this daemon breaking, and
+    // `internal` said it was.
+    expect(RPC_ERROR_CODES).toContain("connect_failed");
     expect(RPC_ERROR_CODES).toContain("unauthorized");
     expect(RPC_ERROR_CODES).toContain("timeout");
     expect(RPC_ERROR_CODES).toContain("disconnected");
-    expect(RPC_ERROR_CODES).toHaveLength(6);
+    expect(RPC_ERROR_CODES).toHaveLength(7);
   });
 
   it("rpcErrorSchema rejects an unknown code", () => {

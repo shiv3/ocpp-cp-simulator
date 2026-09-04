@@ -376,7 +376,18 @@ describe.skipIf(!canBindBunServe())("OCPP 1.6 TLS security profiles", () => {
       );
 
       expect(closeEvent.wasClean).toBe(false);
-      expect(errorMessages).toContain("WebSocket error type: error");
+      // #288: this used to assert `WebSocket error type: error`, the same
+      // string every failure produced. The client's own message says which
+      // failure it was, and an untrusted certificate is one an operator can
+      // act on.
+      expect(
+        errorMessages.some((message) => message.includes("TLS handshake")),
+      ).toBe(true);
+      expect(
+        errorMessages.some((message) =>
+          message.includes("WebSocket error type:"),
+        ),
+      ).toBe(false);
     } finally {
       ws.disconnect();
     }

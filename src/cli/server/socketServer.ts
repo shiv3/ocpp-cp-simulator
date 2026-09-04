@@ -420,7 +420,7 @@ export async function dispatchRpcCore(
   );
   if (facadeResult.handled) return facadeResult.value;
 
-  if (!cpId) throw new RpcFailure("not_found", "");
+  if (!cpId) throw missingCpId(rawParams);
   const service = deps.registry.get(cpId);
   if (!service) throw new RpcFailure("not_found", "");
 
@@ -972,29 +972,29 @@ async function dispatchFacadeCpCommand(
 
   switch (method) {
     case "connect": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.connect(id));
       return handled(undefined);
     }
     case "disconnect": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.disconnect(id));
       return handled(undefined);
     }
     case "status": {
       const snapshot = await requireChargePointSnapshot(
         chargePointService,
-        requireFacadeCpId(cpId),
+        requireFacadeCpId(cpId, rawParams),
       );
       return handled(snapshotToWireStatus(snapshot));
     }
     case "heartbeat": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.sendHeartbeat(id));
       return handled(undefined);
     }
     case "start_heartbeat": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.startHeartbeat(
           id,
@@ -1004,12 +1004,12 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "stop_heartbeat": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.stopHeartbeat(id));
       return handled(undefined);
     }
     case "start_transaction": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.startTransaction(
           id,
@@ -1020,7 +1020,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "stop_transaction": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.stopTransaction(
           id,
@@ -1030,14 +1030,14 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "authorize": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.authorize(id, requireString(params, "tagId")),
       );
       return handled(undefined);
     }
     case "diagnostics_status_notification": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.sendDiagnosticsStatusNotification(
           id,
@@ -1047,7 +1047,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "firmware_status_notification": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.sendFirmwareStatusNotification(
           id,
@@ -1057,7 +1057,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "security_event_notification": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const techInfo =
         params.techInfo === undefined
           ? undefined
@@ -1072,7 +1072,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "sign_certificate": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const csr =
         params.csr === undefined ? undefined : requireString(params, "csr");
       await runFacadeOperation(() =>
@@ -1081,7 +1081,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "update_connector_status": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const status = requireString(params, "status");
       if (!VALID_STATUSES.has(status as OCPPStatus)) {
         throw new Error(
@@ -1099,7 +1099,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "set_meter_value": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const value = requireNumber(params, "value");
       if (value < 0 || !Number.isInteger(value)) {
         throw new Error("value must be a non-negative integer (Wh)");
@@ -1114,7 +1114,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "send_meter_value": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.sendMeterValue(
           id,
@@ -1124,7 +1124,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "remove_connector": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const connectorId = requirePositiveInt(params, "connector");
       const before = await requireChargePointSnapshot(chargePointService, id);
       await runFacadeOperation(() =>
@@ -1138,7 +1138,7 @@ async function dispatchFacadeCpCommand(
       });
     }
     case "set_ev_settings": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.setEVSettings(
           id,
@@ -1149,7 +1149,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "get_ev_settings": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getEVSettings(
@@ -1160,7 +1160,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "set_auto_meter_config": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.setAutoMeterValueConfig(
           id,
@@ -1171,7 +1171,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "get_auto_meter_config": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getAutoMeterValueConfig(
@@ -1182,7 +1182,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "set_auto_reset_to_available": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.setAutoResetToAvailable(
           id,
@@ -1193,7 +1193,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "set_mode": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const mode = requireString(params, "mode");
       if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
         throw new Error(
@@ -1210,7 +1210,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "set_soc": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const rawSoc = params.soc;
       const soc: number | null =
         rawSoc === null || rawSoc === undefined
@@ -1230,7 +1230,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "set_soc_meter_sync": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.setConnectorSocMeterSync(
           id,
@@ -1241,7 +1241,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "get_charging_profiles": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getChargingProfiles(
@@ -1252,7 +1252,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "get_state_history": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getStateHistory(
@@ -1265,7 +1265,7 @@ async function dispatchFacadeCpCommand(
     case "list_scenario_templates": {
       await requireChargePointSnapshot(
         chargePointService,
-        requireFacadeCpId(cpId),
+        requireFacadeCpId(cpId, rawParams),
       );
       return handled(
         await runFacadeOperation(() =>
@@ -1274,7 +1274,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "load_scenario_template": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.loadScenarioTemplate(
@@ -1287,7 +1287,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "load_scenario": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const connectorId = requirePositiveInt(params, "connector");
       if (typeof params.file === "string") {
         const parsed: unknown = JSON.parse(
@@ -1321,7 +1321,7 @@ async function dispatchFacadeCpCommand(
       throw new Error("Either 'file' or 'scenario' parameter is required");
     }
     case "list_scenarios": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.listScenarios(
@@ -1332,7 +1332,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "run_scenario": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const strict =
         params.strict === undefined
           ? undefined
@@ -1354,7 +1354,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "scenario_status": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenarioStatus(
@@ -1366,7 +1366,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "scenario_report": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenarioReport(
@@ -1381,7 +1381,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "get_scenario": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenario(
@@ -1393,7 +1393,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "stop_scenario": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.stopScenario(
           id,
@@ -1404,7 +1404,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "scenario_reset": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.resetScenario(
           id,
@@ -1415,7 +1415,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "step_scenario": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.stepScenario(
           id,
@@ -1427,7 +1427,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "stop_all_scenarios": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
         chargePointService.stopAllScenarios(
           id,
@@ -1437,7 +1437,7 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "remove_scenario": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
       const before = await runFacadeOperation(() =>
@@ -1454,7 +1454,7 @@ async function dispatchFacadeCpCommand(
       });
     }
     case "run_scenario_file": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const strict =
         params.strict === undefined
           ? undefined
@@ -1470,7 +1470,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "run_scenario_template": {
-      const id = requireFacadeCpId(cpId);
+      const id = requireFacadeCpId(cpId, rawParams);
       const strict =
         params.strict === undefined
           ? undefined
@@ -1571,6 +1571,47 @@ function handled(value: unknown): FacadeDispatchResult {
   return { handled: true, value };
 }
 
+/**
+ * The rule that decides which word a facade failure gets back (#286).
+ *
+ * Exported because it *is* the contract: `not_found` is a statement about the
+ * registry, `connect_failed` about the CSMS, `internal` about this daemon, and
+ * a test that re-implements the rule instead of calling it would keep passing
+ * while the three drifted apart. Returns null when the error is not one this
+ * rule classifies, leaving it to propagate.
+ */
+export function classifyFacadeError(err: unknown): RpcFailure | null {
+  if (err instanceof RpcFailure) return err;
+  // cp.create/cp.update reject bad security-profile config (missing
+  // authorizationKey for profiles 1-2, missing client cert/key for profile 3)
+  // eagerly via CPRegistry.prepareInit, before anything is mutated.
+  if (err instanceof OcppSecurityProfileConfigError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  if (!(err instanceof Error)) return null;
+  if (err.message.includes("already exists")) {
+    return new RpcFailure("invalid_params", "");
+  }
+  if (
+    err.message.includes("cpId not found") ||
+    err.message.includes("not registered in LocalChargePointService")
+  ) {
+    return new RpcFailure("not_found", "");
+  }
+  // #286: `connect` resolves when the socket opens and rejects on the first
+  // close, so a CSMS that refuses the upgrade lands here. Nothing broke -- the
+  // daemon opened a socket, the CSMS said no, and the reconnect loop is
+  // already running -- so `internal` was the wrong word for it. The close code
+  // and reason travel in the message.
+  if (
+    err.message.startsWith("Connection failed:") ||
+    err.message.startsWith("Connection timeout")
+  ) {
+    return new RpcFailure("connect_failed", err.message);
+  }
+  return null;
+}
+
 async function runFacadeOperation<T>(
   operation: () => T | Promise<T>,
 ): Promise<T> {
@@ -1578,34 +1619,47 @@ async function runFacadeOperation<T>(
     return await operation();
   } catch (err) {
     if (err instanceof RpcFailure) throw err;
-    // cp.create/cp.update reject bad security-profile config (missing
-    // authorizationKey for profiles 1-2, missing client cert/key for
-    // profile 3) eagerly via CPRegistry.prepareInit, before anything is
-    // mutated. Surface that as invalid_params with the human-readable
-    // message intact (it names the missing field, never a secret) instead
-    // of letting it fall through to an opaque, unlogged "internal error".
+    // The config rejection is the one case worth a server-side line: it names
+    // the missing field (never a secret) and an operator reading the daemon
+    // log should see why a create was refused.
     if (err instanceof OcppSecurityProfileConfigError) {
       console.warn(`[server] rejected charge point config: ${err.message}`);
-      throw new RpcFailure("invalid_params", err.message);
     }
-    if (err instanceof Error) {
-      if (err.message.includes("already exists")) {
-        throw new RpcFailure("invalid_params", "");
-      }
-      if (
-        err.message.includes("cpId not found") ||
-        err.message.includes("not registered in LocalChargePointService")
-      ) {
-        throw new RpcFailure("not_found", "");
-      }
-    }
+    const classified = classifyFacadeError(err);
+    if (classified) throw classified;
     throw err;
   }
 }
 
-function requireFacadeCpId(cpId: string | undefined): string {
-  if (!cpId) throw new RpcFailure("not_found", "");
+/**
+ * #286 — a missing `cpId` is `invalid_params`, not `not_found`.
+ *
+ * `not_found` is a statement about the registry: this charge point does not
+ * exist. When the envelope simply carried `cpId` in the wrong place it does
+ * exist, and the reader is sent hunting for a creation bug. The two shapes
+ * are genuinely easy to mix up — `cp.create` takes `cpId` INSIDE `params`,
+ * every CP-scoped method takes it as a SIBLING of `method` — so the message
+ * names the confusion when the params object is where it ended up.
+ */
+function requireFacadeCpId(
+  cpId: string | undefined,
+  rawParams?: unknown,
+): string {
+  if (!cpId) throw missingCpId(rawParams);
   return cpId;
+}
+
+function missingCpId(rawParams?: unknown): RpcFailure {
+  const inParams =
+    typeof rawParams === "object" &&
+    rawParams !== null &&
+    typeof (rawParams as { cpId?: unknown }).cpId === "string";
+  return new RpcFailure(
+    "invalid_params",
+    inParams
+      ? 'missing cpId: it belongs beside "method", not inside "params"'
+      : "missing cpId",
+  );
 }
 
 async function requireChargePointSnapshot(

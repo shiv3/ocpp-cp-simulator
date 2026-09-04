@@ -103,3 +103,10 @@ knowledge first entered the documentation, not wiki operations.
 - [Control plane](concepts/control-plane.md#cpcreate-parameters): the full `cp.create` parameter set is now a table of its own — the SOAP and security-profile fields were working, documented nowhere, and effectively undocumented public API. Records that unknown properties are stripped rather than rejected.
 - [MCP endpoint](entities/mcp-endpoint.md): `cp_create` accepts every `cp.create` parameter, and its row says the schema is derived rather than restated.
 - [GitHub issues](sources/github-issues.md): #284 row.
+
+## [2026-09-04] ingest | Naming a refused handshake, and the error it reports (#288, #286)
+
+- [Log format](concepts/log-format.md#websocket-handshake-failures): new section. A refused upgrade now logs the HTTP status behind it — measured, because Bun's native WebSocket reports 401, 404 and 301 identically and the daemon runs under Bun, so the status is fetched by replaying the handshake as one `GET`. Records the gating (once a minute per CP, only on a refused upgrade, never follows a redirect) and that browser local mode cannot do this.
+- [Control plane](concepts/control-plane.md#rpc): the error codes get a table, `connect_failed` joins the closed union, and `connect` documents its semantics — resolves on open, rejects on the first close, reconnect loop continues afterwards.
+- [MCP endpoint](entities/mcp-endpoint.md): error list points at the canonical table rather than restating a stale copy.
+- [GitHub issues](sources/github-issues.md): #286 and #288 rows.

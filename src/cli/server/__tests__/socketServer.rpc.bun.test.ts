@@ -218,7 +218,29 @@ describe("socket.io rpc dispatch", () => {
         params: {},
       });
       expect(ack.ok).toBe(false);
-      expect(ack.error.code).toBe("not_found");
+      // #286: `not_found` is a statement about the registry. Omitting cpId is
+      // a malformed call, and saying "not found" sent readers looking for a
+      // charge point that was never the problem.
+      expect(ack.error.code).toBe("invalid_params");
+      expect(ack.error.message).toContain("cpId");
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("says where cpId belongs when it was put inside params (#286)", async () => {
+    const server = await serverWithCp();
+    const socket = await connectTestClient(server);
+    try {
+      // `cp.create` takes cpId inside params, every CP-scoped method takes it
+      // beside `method` — which is exactly the mix-up worth naming.
+      const ack = await emitRpc(socket, {
+        method: "status",
+        params: { cpId: "CP-A" },
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+      expect(ack.error.message).toContain('inside "params"');
     } finally {
       socket.disconnect();
     }

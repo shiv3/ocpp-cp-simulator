@@ -9,6 +9,13 @@ export const RPC_ERROR_CODES = [
   "not_found",
   "invalid_params",
   "internal",
+  // #286: a CSMS that refuses the WebSocket upgrade is not the server
+  // breaking. `connect` used to report `internal` for it, which sent the
+  // reader looking for a daemon fault while the daemon was working correctly
+  // and the retry loop was already running. The message carries the close
+  // code and reason; the HTTP status, when it can be had, is logged by the
+  // transport (#288).
+  "connect_failed",
   "unauthorized",
   "timeout",
   "disconnected",

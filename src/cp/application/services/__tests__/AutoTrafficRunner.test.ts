@@ -252,11 +252,11 @@ describe("stopping ends the session it started (#300)", () => {
   it("does not schedule a new attempt after being stopped mid-start", async () => {
     // `stop()` can land while the start is in flight; without a post-await
     // check the runner installed a fresh timer after cancellation.
-    let release: (() => void) | null = null;
+    const pending: { release: (() => void) | null } = { release: null };
     const h = hooks({
       startTransaction: () =>
         new Promise<void>((resolve) => {
-          release = resolve;
+          pending.release = resolve;
         }),
     });
     const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
@@ -264,7 +264,7 @@ describe("stopping ends the session it started (#300)", () => {
     await advance(5_000);
 
     runner.stop();
-    release?.();
+    pending.release?.();
     await advance(120_000);
     expect(h.events).toEqual(["stop"]);
   });

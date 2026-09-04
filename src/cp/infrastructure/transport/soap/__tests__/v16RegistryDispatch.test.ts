@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  assertValidInboundRequest,
+  coerceAndSchemaForOperation,
   coerceSoapPayloadWithSchema,
   dispatchSoapCallViaV16Registry,
   SoapRequestValidationError,
   transformResponseForOcpp12,
 } from "../v16RegistryDispatch";
 import { OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
+import type { SoapParsedValue } from "../soapEnvelope";
 import { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
@@ -495,7 +498,7 @@ describe("inbound request validation (#285)", () => {
   } as unknown as ChargePoint;
 
   // The table from the issue, one mandatory element removed per request.
-  const cases: Array<[string, Record<string, unknown>, string]> = [
+  const cases: Array<[string, Record<string, SoapParsedValue>, string]> = [
     ["SetChargingProfile", { connectorId: "1" }, "csChargingProfiles"],
     ["GetCompositeSchedule", { connectorId: "1" }, "duration"],
     ["ReserveNow", { connectorId: "1" }, "expiryDate"],
@@ -521,6 +524,37 @@ describe("inbound request validation (#285)", () => {
       await expect(attempt).rejects.toThrow(operation);
     });
   }
+
+  // Reset never reaches the dispatcher -- OCPPSoapServer answers it from a
+  // legacy registry first -- so the rule is exported and applied there too.
+  // A check that covered every operation except the one that reboots the
+  // station would be the wrong one to have.
+  it("covers Reset, which takes the legacy path", () => {
+    const { coerced, schema } = coerceAndSchemaForOperation(
+      "Reset" as never,
+      { type: "Hard", bogus: "x" } as never,
+    );
+
+    expect(() =>
+      assertValidInboundRequest("Reset", coerced, schema, OCPP16_DIALECT),
+    ).toThrow(SoapRequestValidationError);
+    expect(() =>
+      assertValidInboundRequest("Reset", coerced, schema, OCPP15_DIALECT),
+    ).not.toThrow();
+  });
+
+  it("accepts a valid Reset", () => {
+    const { coerced, schema } = coerceAndSchemaForOperation(
+      "Reset" as never,
+      {
+        type: "Hard",
+      } as never,
+    );
+
+    expect(() =>
+      assertValidInboundRequest("Reset", coerced, schema, OCPP16_DIALECT),
+    ).not.toThrow();
+  });
 
   it("accepts a complete request unchanged", async () => {
     const response = await dispatchSoapCallViaV16Registry({

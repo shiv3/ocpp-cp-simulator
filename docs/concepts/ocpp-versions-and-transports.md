@@ -152,6 +152,11 @@ request got a well-formed verdict back and its own defect was masked. The
 seventh crashed and returned a Fault carrying a raw JavaScript `TypeError`
 that named an implementation variable.
 
+`Reset` is covered too, although it never reaches the shared dispatcher —
+the server answers it from an older registry first, and a check that covered
+every operation except the one that reboots the station would be the wrong
+one to have.
+
 **Scope: 1.6-S only.** The schemas are the vendored 1.6 ones and OCPP 1.2 /
 1.5 have none of their own, so validating a 1.2 request against a 1.6 schema
 would reject requests that are correct for their version. Type coercion —

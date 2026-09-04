@@ -270,6 +270,37 @@ export class SoapRequestValidationError extends Error {
 }
 
 /**
+ * The check itself, exported because `Reset` never reaches the dispatcher:
+ * `OCPPSoapServer` answers it from a legacy registry first, for every
+ * dialect. A rule that covered every operation *except* the one that reboots
+ * the station would be the wrong one to have.
+ *
+ * A no-op unless the dialect is 1.6-S and a schema exists.
+ */
+export function assertValidInboundRequest(
+  operation: string,
+  payload: unknown,
+  schema: Record<string, unknown> | undefined,
+  dialect: SoapDialect,
+): void {
+  if (!schema || dialect.version !== OCPP_1_6_SOAP) return;
+  const issues = validationErrors(schema, payload);
+  if (issues.length > 0) {
+    throw new SoapRequestValidationError(operation, issues);
+  }
+}
+
+/** The coerced payload and schema for an operation, for callers outside the
+ *  dispatcher that still need to check a request (the legacy Reset path). */
+export function coerceAndSchemaForOperation(
+  operation: SoapOperation,
+  payload: SoapParsedPayload,
+): { coerced: unknown; schema: Record<string, unknown> | undefined } {
+  const { schema } = getSchemaForOperation(operation);
+  return { coerced: coerceSoapPayloadWithSchema(payload, schema), schema };
+}
+
+/**
  * Dispatch a SOAP CS→CP request through the shared v16 CALL-handler registry.
  *
  * Steps:
@@ -315,12 +346,7 @@ export async function dispatchSoapCallViaV16Registry(input: {
   // 1.2 request against a 1.6 schema would reject requests that are correct
   // for their own version. Coercion stays schema-guided for every dialect,
   // because being lenient in that direction cannot reject anything.
-  if (schema && input.dialect.version === OCPP_1_6_SOAP) {
-    const issues = validationErrors(schema, coercedPayload);
-    if (issues.length > 0) {
-      throw new SoapRequestValidationError(operation, issues);
-    }
-  }
+  assertValidInboundRequest(operation, coercedPayload, schema, input.dialect);
 
   // Build the handler registry (stateless handlers only; DataTransfer is special)
   const registry = buildV16CallHandlerRegistry();

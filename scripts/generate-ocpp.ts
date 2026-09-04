@@ -336,6 +336,88 @@ export function validationErrors(schema: object, data: unknown): string[] {
   return (validate.errors ?? []).map((error) =>
     \`\${error.instancePath} \${error.message ?? ""}\`.trim(),
   );
+}
+
+// The strict pair. The instances above leave formats unchecked, which is the
+// right default for a warning: a CSMS with a sloppy timestamp should still be
+// simulated against. It is the wrong default for a gate that REFUSES a
+// request (#285), where an unchecked format means expiryDate "not-a-date"
+// reaches the handler and gets a normal answer. Only date-time and uri appear
+// in the vendored OCPP 1.6 schemas, so they are implemented here rather than
+// by taking on ajv-formats.
+const strictAjvOptions = { ...ajvOptions, validateFormats: true };
+
+type FormatCheck = (value: string) => boolean;
+
+const OCPP_FORMATS: Record<string, FormatCheck> = {
+  // RFC 3339, which is what OCPP means by dateTime, and a real instant.
+  "date-time": (value) =>
+    /^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([Zz]|[+-]\\d{2}:\\d{2})$/.test(
+      value,
+    ) && !Number.isNaN(Date.parse(value)),
+  // Absolute only: OCPP uses these for firmware and diagnostics locations,
+  // which a charge point has to reach on its own.
+  uri: (value) => {
+    try {
+      return Boolean(new URL(value).protocol);
+    } catch {
+      return false;
+    }
+  },
+};
+
+interface FormatAware {
+  addFormat(name: string, format: FormatCheck): unknown;
+}
+
+function withFormats<T>(instance: T): T {
+  for (const [name, check] of Object.entries(OCPP_FORMATS)) {
+    (instance as FormatAware).addFormat(name, check);
+  }
+  return instance;
+}
+
+const strictDraft04Ajv = withFormats(
+  new Ajv04(strictAjvOptions),
+) as unknown as SchemaCompiler;
+const strictDraft06Instance = new Ajv(strictAjvOptions);
+strictDraft06Instance.addMetaSchema(draft06MetaSchema as AnySchemaObject);
+withFormats(strictDraft06Instance);
+const strictDraft06Ajv = strictDraft06Instance as unknown as SchemaCompiler;
+const strictDraft04Cache = new WeakMap<object, ValidateFunction>();
+const strictDraft06Cache = new WeakMap<object, ValidateFunction>();
+
+function strictValidatorFor(schema: object): ValidateFunction {
+  const draft04 = isDraft04Schema(schema);
+  const cache = draft04 ? strictDraft04Cache : strictDraft06Cache;
+  const cached = cache.get(schema);
+
+  if (cached) {
+    return cached;
+  }
+
+  const compiled = (draft04 ? strictDraft04Ajv : strictDraft06Ajv).compile(
+    schema as AnySchema,
+  );
+  cache.set(schema, compiled);
+
+  return compiled;
+}
+
+/** Like validationErrors, but formats count. */
+export function strictValidationErrors(
+  schema: object,
+  data: unknown,
+): string[] {
+  const validate = strictValidatorFor(schema);
+
+  if (validate(data)) {
+    return [];
+  }
+
+  return (validate.errors ?? []).map((error) =>
+    \`\${error.instancePath} \${error.message ?? ""}\`.trim(),
+  );
 }`,
   );
 }
@@ -497,7 +579,7 @@ export * from "./v21";`,
 async function writeCompatibilityModules(): Promise<void> {
   await writeGenerated(
     join(outputDir, "validation", "index.ts"),
-    `${generatedHeader}export { validateOCPPPayload, validationErrors } from "../validate";
+    `${generatedHeader}export { validateOCPPPayload, validationErrors, strictValidationErrors } from "../validate";
 export * from "./v16";
 export * from "./v201";
 export * from "./v21";`,

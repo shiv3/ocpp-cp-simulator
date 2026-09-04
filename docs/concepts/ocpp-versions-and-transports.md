@@ -152,6 +152,13 @@ request got a well-formed verdict back and its own defect was masked. The
 seventh crashed and returned a Fault carrying a raw JavaScript `TypeError`
 that named an implementation variable.
 
+What counts as invalid is the schema in full: a missing mandatory element, an
+unexpected one, a value outside its type — including XML that only _looks_
+numeric, since `<duration/>` and `<duration>1e2</duration>` would otherwise be
+coerced into a perfectly good `0` and `100` — and a `date-time` or `uri` that
+does not parse. Formats are checked on this path only; elsewhere a sloppy
+timestamp from a CSMS is still worth simulating against rather than refusing.
+
 `Reset` is covered too, although it never reaches the shared dispatcher —
 the server answers it from an older registry first, and a check that covered
 every operation except the one that reboots the station would be the wrong

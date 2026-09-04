@@ -20,6 +20,8 @@ const silentLogger = (): Logger =>
     warn: () => {},
     error: () => {},
     debug: () => {},
+    // GetDiagnostics reads the log buffer to build its upload.
+    getLogs: () => [],
   }) as unknown as Logger;
 
 describe("coerceSoapPayloadWithSchema", () => {
@@ -490,6 +492,7 @@ describe("dispatchSoapCallViaV16Registry", () => {
 describe("inbound request validation (#285)", () => {
   const chargePoint = {
     sendCurrentStatusNotification: () => {},
+    sendDiagnosticsStatusNotification: () => {},
     getConfiguration: () => [],
     setConfiguration: () => "Accepted",
     connectors: new Map(),
@@ -611,6 +614,63 @@ describe("inbound request validation (#285)", () => {
     });
 
     await expect(attempt).rejects.toThrow("multiple of 0.1");
+  });
+
+  // Coercion runs before validation, and `Number("")` is 0 while
+  // `Number("1e2")` is 100 -- so it used to manufacture a schema-valid number
+  // out of XML that carried none, and an empty <duration/> was answered.
+  it.each([
+    ["an empty element", ""],
+    ["exponent notation", "1e2"],
+    ["a word", "soon"],
+  ])("refuses %s where an integer is required", async (_label, duration) => {
+    const attempt = dispatchSoapCallViaV16Registry({
+      operation: "GetCompositeSchedule" as never,
+      payload: { connectorId: "1", duration } as never,
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    await expect(attempt).rejects.toThrow("must be integer");
+  });
+
+  // The shared validator leaves formats unchecked, which is right for a
+  // warning and wrong for a gate that refuses: expiryDate "not-a-date" would
+  // otherwise reach the handler and get a normal answer.
+  it("refuses a malformed date-time, and accepts a real one", async () => {
+    const reserve = (expiryDate: string) =>
+      dispatchSoapCallViaV16Registry({
+        operation: "ReserveNow" as never,
+        payload: {
+          connectorId: "1",
+          expiryDate,
+          idTag: "TAG123",
+          reservationId: "1",
+        } as never,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+
+    await expect(reserve("not-a-date")).rejects.toThrow('format "date-time"');
+    await expect(reserve("2026-01-01T00:00:00Z")).resolves.toHaveProperty(
+      "status",
+    );
+  });
+
+  it("refuses a malformed uri, and accepts a real one", async () => {
+    const getDiagnostics = (location: string) =>
+      dispatchSoapCallViaV16Registry({
+        operation: "GetDiagnostics" as never,
+        payload: { location } as never,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+
+    await expect(getDiagnostics("not a uri")).rejects.toThrow('format "uri"');
+    await expect(getDiagnostics("ftp://host/dir")).resolves.toBeDefined();
   });
 
   it("accepts a complete request unchanged", async () => {

@@ -11,7 +11,7 @@ import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegi
 import { DataTransferHandler } from "../handlers";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
 import { v16Schemas } from "../../../../ocpp/v16";
-import { validationErrors } from "../../../../ocpp/validate";
+import { strictValidationErrors } from "../../../../ocpp/validate";
 import { OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 import {
   normalizeHandlerResult,
@@ -205,7 +205,15 @@ function coerceValueWithSchema(
   const type = schema.type;
 
   if (type === "integer" || type === "number") {
-    return typeof value === "string" ? Number(value) : value;
+    if (typeof value !== "string") return value;
+    // #285: `Number("")` is 0 and `Number("1e2")` is 100, so coercion used to
+    // manufacture a schema-valid number out of XML that does not carry one --
+    // an empty `<duration/>` became a perfectly good `0` and the request was
+    // answered. Anything outside the lexical space its type declares is
+    // handed on untouched, so the validation gate sees a string and says so.
+    const lexical =
+      type === "integer" ? /^[+-]?\d+$/ : /^[+-]?(\d+(\.\d*)?|\.\d+)$/;
+    return lexical.test(value.trim()) ? Number(value) : value;
   }
   if (type === "boolean") {
     return value === "true" || value === true;
@@ -284,7 +292,7 @@ export function assertValidInboundRequest(
   dialect: SoapDialect,
 ): void {
   if (!schema || dialect.version !== OCPP_1_6_SOAP) return;
-  const issues = validationErrors(schema, payload);
+  const issues = strictValidationErrors(schema, payload);
   if (issues.length > 0) {
     throw new SoapRequestValidationError(operation, issues);
   }

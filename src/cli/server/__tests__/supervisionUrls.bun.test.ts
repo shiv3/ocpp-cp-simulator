@@ -85,6 +85,31 @@ describe("multiple supervision URLs (#296)", () => {
     ).toThrow(/single URL for the OCPP SOAP versions/);
   });
 
+  it("refuses a malformed later entry, not just the first", () => {
+    // A later member is only reached at reconnect, where buildOcppWebSocketUrl
+    // calls new URL() synchronously inside a setTimeout callback: a malformed
+    // one throws there, uncaught, and takes the daemon down rather than
+    // failing over to the next node.
+    expect(() =>
+      parseCreateBody({
+        ...OCPP_J,
+        wsUrl: ["ws://a/ocpp/", "not a url"],
+      }),
+    ).toThrow(/not a ws:\/\/ or wss:\/\/ URL/);
+    expect(() =>
+      parseCreateBody({
+        ...OCPP_J,
+        wsUrl: ["ws://a/ocpp/", "http://b/ocpp/"],
+      }),
+    ).toThrow(/not a ws:\/\/ or wss:\/\/ URL/);
+    expect(
+      parseCreateBody({
+        ...OCPP_J,
+        wsUrl: ["ws://a/ocpp/", "wss://b/ocpp/"],
+      }).supervisionUrls,
+    ).toHaveLength(2);
+  });
+
   it("refuses an empty or non-string entry", () => {
     expect(() => parseCreateBody({ ...OCPP_J, wsUrl: [] })).toThrow();
     expect(() =>

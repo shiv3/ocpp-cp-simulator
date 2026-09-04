@@ -708,6 +708,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+/** Whether a string parses as a `ws:` / `wss:` URL. */
+function isWebSocketUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "ws:" || protocol === "wss:";
+  } catch {
+    return false;
+  }
+}
+
 export function parseCreateBody(body: unknown): ChargePointInitOptions {
   if (!isRecord(body)) throw new Error("body must be an object");
   const cpId = body.cpId;
@@ -791,6 +801,18 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       "wsUrl must be a single URL for the OCPP SOAP versions; several supervision URLs are an OCPP-J feature",
     );
   }
+  // Every entry is checked here, not just the first. A later member is only
+  // touched at reconnect time, where `buildOcppWebSocketUrl` calls `new URL()`
+  // synchronously inside a `setTimeout` callback — a malformed one throws
+  // there, uncaught, and takes the daemon down instead of failing over.
+  for (const url of supervisionUrls ?? []) {
+    if (!isWebSocketUrl(url)) {
+      throw new Error(
+        `wsUrl entry "${url}" is not a ws:// or wss:// URL; every supervision URL must be usable, since a later one is only reached on reconnect`,
+      );
+    }
+  }
+
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
     const username = body.basicAuth.username;

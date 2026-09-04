@@ -175,6 +175,11 @@ point did not ask for counts as a failure: a `disconnect`, a `reset`, and an
 injected [network-simulation](network-simulation.md) disconnect all say nothing
 about the node and must not push a charge point off its primary.
 
+**Every URL in the list is validated at creation**, not just the first. A later
+entry is only reached on reconnect, where the URL is parsed synchronously
+inside a timer callback — a malformed one would throw there, uncaught, and take
+the daemon down instead of failing over to the next node.
+
 An unrecognised `urlDistribution` is **refused**, not defaulted — a typo that
 silently produced round-robin when affinity was asked for would take away the
 determinism affinity exists to provide.

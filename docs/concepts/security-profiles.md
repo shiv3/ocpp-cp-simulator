@@ -80,10 +80,13 @@ The flag sits under the profile 2/3 examples and reads as required. It is
 not, and the first profile-2 example below passes no TLS flag at all.
 
 - **Without `--tls-ca`**, no CA option is passed to the client and the CSMS
-  certificate is verified against the **system trust store**. That is what a
+  certificate is verified against **the runtime's own bundled root set** —
+  the Mozilla-curated public CAs that Bun and Node ship (121 of them on the
+  pinned Bun), _not_ the operating system's trust store. That is what a
   publicly-issued certificate needs, so a profile-2 station against a CSMS
   behind a public certificate (Let's Encrypt, a cloud load balancer) connects
-  with no TLS flag at all.
+  with no TLS flag at all. A private root installed only in the OS keychain
+  is **not** picked up: pass it with `--tls-ca`.
 - **With `--tls-ca`**, the bundle **replaces** the default roots rather than
   adding to them, so a station configured with a private CA stops trusting
   public ones. Pass it only for a CSMS whose certificate a public root does

@@ -23,7 +23,10 @@ import {
   OCPP_1_2,
 } from "../../../domain/types/OcppVersion";
 import {
+  assertValidInboundRequest,
+  coerceAndSchemaForOperation,
   dispatchSoapCallViaV16Registry,
+  SoapRequestValidationError,
   transformResponseForOcpp12,
 } from "./v16RegistryDispatch";
 
@@ -128,6 +131,19 @@ export class OCPPSoapServer {
       const legacyHandler = this.registry.get(envelope.operation);
       if (legacyHandler) {
         notifyIncomingCall();
+        // #285: this path predates the shared dispatcher and would otherwise
+        // be the one 1.6-S operation nobody checks -- the one that reboots
+        // the station.
+        const { coerced, schema } = coerceAndSchemaForOperation(
+          envelope.operation,
+          envelope.payload,
+        );
+        assertValidInboundRequest(
+          envelope.operation,
+          coerced,
+          schema,
+          this.dialect,
+        );
         const result = legacyHandler.handle(envelope.payload, {
           target: this.target,
           envelope,
@@ -160,6 +176,13 @@ export class OCPPSoapServer {
             );
           }
         } catch (dispatchErr) {
+          // #285: a request that does not satisfy its schema is the caller's
+          // fault and says which element is wrong, so it is reported as
+          // itself. Wrapping it in "Dispatch error for X" would bury the one
+          // part of the message worth reading.
+          if (dispatchErr instanceof SoapRequestValidationError) {
+            throw new OCPPSoapFaultError(errorMessage(dispatchErr));
+          }
           // If dispatch fails, treat as not-implemented
           throw new OCPPSoapFaultError(
             `Dispatch error for ${envelope.operation}: ${errorMessage(dispatchErr)}`,

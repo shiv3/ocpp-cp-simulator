@@ -14,6 +14,12 @@ const ajvOptions = {
   strict: false,
   strictSchema: false,
   validateFormats: false,
+  // OCPP 1.6 declares multipleOf 0.1 on charging limits, and AJV's exact
+  // check reads 0.3 as not a multiple of 0.1 because 0.3 / 0.1 is
+  // 2.9999999999999996 in binary floating point. Without a tolerance a legal
+  // SetChargingProfile is rejected -- which mattered the moment #285 turned
+  // these results into SOAP Faults rather than warnings.
+  multipleOfPrecision: 6,
 };
 
 const draft04Ajv = new Ajv04(ajvOptions) as SchemaCompiler;
@@ -63,6 +69,131 @@ export function validateOCPPPayload(schema: object, data: unknown): boolean {
 
 export function validationErrors(schema: object, data: unknown): string[] {
   const validate = validatorFor(schema);
+
+  if (validate(data)) {
+    return [];
+  }
+
+  return (validate.errors ?? []).map((error) =>
+    `${error.instancePath} ${error.message ?? ""}`.trim(),
+  );
+}
+
+// The strict pair. The instances above leave formats unchecked, which is the
+// right default for a warning: a CSMS with a sloppy timestamp should still be
+// simulated against. It is the wrong default for a gate that REFUSES a
+// request (#285), where an unchecked format means expiryDate "not-a-date"
+// reaches the handler and gets a normal answer. Only date-time and uri appear
+// in the vendored OCPP 1.6 schemas, so they are implemented here rather than
+// by taking on ajv-formats.
+const strictAjvOptions = { ...ajvOptions, validateFormats: true };
+
+type FormatCheck = (value: string) => boolean;
+
+const DATE_TIME_SHAPE =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+
+function isRealCalendarInstant(value: string): boolean {
+  const match = DATE_TIME_SHAPE.exec(value);
+  if (!match) return false;
+  const [, ys, mos, ds, hs, mis, secs] = match;
+  const offset = match[8];
+  const y = Number(ys);
+  const mo = Number(mos);
+  const d = Number(ds);
+  const h = Number(hs);
+  const mi = Number(mis);
+  const sec = Number(secs);
+  if (mo < 1 || mo > 12) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  // Deliberately not Date.parse: it NORMALISES, so 2026-02-30 becomes March 2
+  // and reports success, and it rejects the leap second RFC 3339 allows.
+  if (d < 1 || d > days[mo - 1]) return false;
+  if (h > 23 || mi > 59 || sec > 60) return false;
+
+  // The offset is part of the grammar, so +24:00 and +09:60 have to go too.
+  let offsetMinutes = 0;
+  if (offset && offset !== "Z" && offset !== "z") {
+    const oh = Number(offset.slice(1, 3));
+    const om = Number(offset.slice(4, 6));
+    if (oh > 23 || om > 59) return false;
+    offsetMinutes = (oh * 60 + om) * (offset[0] === "-" ? -1 : 1);
+  }
+
+  // A leap second exists only at 23:59:60 UTC, so a local 12:00:60 is not one.
+  if (sec === 60) {
+    const utcMinutes = (((h * 60 + mi - offsetMinutes) % 1440) + 1440) % 1440;
+    return utcMinutes === 23 * 60 + 59;
+  }
+  return true;
+}
+
+const OCPP_FORMATS: Record<string, FormatCheck> = {
+  // RFC 3339, which is what OCPP means by dateTime.
+  "date-time": isRealCalendarInstant,
+  // Absolute only: OCPP uses these for firmware and diagnostics locations,
+  // which a charge point has to reach on its own. `new URL()` alone is too
+  // permissive -- it accepts a space and a dangling percent by normalising
+  // them -- so the RFC 3986 character rules are checked first.
+  uri: (value) => {
+    // RFC 3986 is ASCII: anything outside it has to arrive percent-encoded,
+    // and `new URL()` would silently encode it for us instead of objecting.
+    if (/[^\u0021-\u007e]/.test(value)) return false;
+    if (/[\s<>"{}|\\^`]/.test(value)) return false;
+    if (/%(?![0-9A-Fa-f]{2})/.test(value)) return false;
+    try {
+      return Boolean(new URL(value).protocol);
+    } catch {
+      return false;
+    }
+  },
+};
+
+interface FormatAware {
+  addFormat(name: string, format: FormatCheck): unknown;
+}
+
+function withFormats<T>(instance: T): T {
+  for (const [name, check] of Object.entries(OCPP_FORMATS)) {
+    (instance as FormatAware).addFormat(name, check);
+  }
+  return instance;
+}
+
+const strictDraft04Ajv = withFormats(
+  new Ajv04(strictAjvOptions),
+) as unknown as SchemaCompiler;
+const strictDraft06Instance = new Ajv(strictAjvOptions);
+strictDraft06Instance.addMetaSchema(draft06MetaSchema as AnySchemaObject);
+withFormats(strictDraft06Instance);
+const strictDraft06Ajv = strictDraft06Instance as unknown as SchemaCompiler;
+const strictDraft04Cache = new WeakMap<object, ValidateFunction>();
+const strictDraft06Cache = new WeakMap<object, ValidateFunction>();
+
+function strictValidatorFor(schema: object): ValidateFunction {
+  const draft04 = isDraft04Schema(schema);
+  const cache = draft04 ? strictDraft04Cache : strictDraft06Cache;
+  const cached = cache.get(schema);
+
+  if (cached) {
+    return cached;
+  }
+
+  const compiled = (draft04 ? strictDraft04Ajv : strictDraft06Ajv).compile(
+    schema as AnySchema,
+  );
+  cache.set(schema, compiled);
+
+  return compiled;
+}
+
+/** Like validationErrors, but formats count. */
+export function strictValidationErrors(
+  schema: object,
+  data: unknown,
+): string[] {
+  const validate = strictValidatorFor(schema);
 
   if (validate(data)) {
     return [];

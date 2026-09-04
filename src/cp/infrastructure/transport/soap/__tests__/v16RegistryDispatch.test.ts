@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  assertValidInboundRequest,
+  coerceAndSchemaForOperation,
   coerceSoapPayloadWithSchema,
   dispatchSoapCallViaV16Registry,
+  SoapRequestValidationError,
   transformResponseForOcpp12,
 } from "../v16RegistryDispatch";
-import { OCPP16_DIALECT } from "../dialect";
+import { OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
+import type { SoapParsedValue } from "../soapEnvelope";
 import { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
@@ -16,6 +20,8 @@ const silentLogger = (): Logger =>
     warn: () => {},
     error: () => {},
     debug: () => {},
+    // GetDiagnostics reads the log buffer to build its upload.
+    getLogs: () => [],
   }) as unknown as Logger;
 
 describe("coerceSoapPayloadWithSchema", () => {
@@ -468,5 +474,228 @@ describe("dispatchSoapCallViaV16Registry", () => {
     });
 
     expect(response).toEqual({ status: "Accepted" });
+  });
+});
+
+/**
+ * #285 — an inbound request missing a mandatory element must not come back
+ * with a verdict.
+ *
+ * The measured behaviour before this: six of these seven answered `200` with
+ * a plausible OCPP status (`Rejected`, `NotSupported`, `VersionMismatch`,
+ * even `Accepted` with a full payload) and the seventh crashed with a
+ * TypeError naming an implementation variable. For a tool whose job is to
+ * judge a CSMS, the first is the dangerous one: a malformed request came back
+ * with a well-formed verdict, so the CSMS's defect was masked rather than
+ * merely undetected.
+ */
+describe("inbound request validation (#285)", () => {
+  const chargePoint = {
+    sendCurrentStatusNotification: () => {},
+    sendDiagnosticsStatusNotification: () => {},
+    getConfiguration: () => [],
+    setConfiguration: () => "Accepted",
+    connectors: new Map(),
+    getConnector: () => undefined,
+    status: "Available",
+  } as unknown as ChargePoint;
+
+  // The table from the issue, one mandatory element removed per request.
+  const cases: Array<[string, Record<string, SoapParsedValue>, string]> = [
+    ["SetChargingProfile", { connectorId: "1" }, "csChargingProfiles"],
+    ["GetCompositeSchedule", { connectorId: "1" }, "duration"],
+    ["ReserveNow", { connectorId: "1" }, "expiryDate"],
+    ["ChangeConfiguration", { key: "HeartbeatInterval" }, "value"],
+    ["RemoteStartTransaction", { connectorId: "1" }, "idTag"],
+    ["SendLocalList", { listVersion: "1" }, "updateType"],
+    ["UnlockConnector", {}, "connectorId"],
+  ];
+
+  for (const [operation, payload, missing] of cases) {
+    it(`refuses ${operation} without ${missing}, naming the element`, async () => {
+      const attempt = dispatchSoapCallViaV16Registry({
+        operation: operation as never,
+        payload,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+
+      await expect(attempt).rejects.toBeInstanceOf(SoapRequestValidationError);
+      await expect(attempt).rejects.toThrow(missing);
+      // The name of the operation, not of a variable inside the handler.
+      await expect(attempt).rejects.toThrow(operation);
+    });
+  }
+
+  // Reset never reaches the dispatcher -- OCPPSoapServer answers it from a
+  // legacy registry first -- so the rule is exported and applied there too.
+  // A check that covered every operation except the one that reboots the
+  // station would be the wrong one to have.
+  it("covers Reset, which takes the legacy path", () => {
+    const { coerced, schema } = coerceAndSchemaForOperation(
+      "Reset" as never,
+      { type: "Hard", bogus: "x" } as never,
+    );
+
+    expect(() =>
+      assertValidInboundRequest("Reset", coerced, schema, OCPP16_DIALECT),
+    ).toThrow(SoapRequestValidationError);
+    expect(() =>
+      assertValidInboundRequest("Reset", coerced, schema, OCPP15_DIALECT),
+    ).not.toThrow();
+  });
+
+  it("accepts a valid Reset", () => {
+    const { coerced, schema } = coerceAndSchemaForOperation(
+      "Reset" as never,
+      {
+        type: "Hard",
+      } as never,
+    );
+
+    expect(() =>
+      assertValidInboundRequest("Reset", coerced, schema, OCPP16_DIALECT),
+    ).not.toThrow();
+  });
+
+  // AJV checks `multipleOf` exactly, and OCPP 1.6 puts `multipleOf: 0.1` on
+  // charging limits -- 0.3 / 0.1 is 2.9999999999999996 in binary floating
+  // point. Warning about that was harmless; faulting on it would reject legal
+  // smart-charging requests, so the validator carries a tolerance.
+  it("accepts the decimal charging limits OCPP allows", async () => {
+    const profile = (limit: number) => ({
+      chargingProfileId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: "TxProfile",
+      chargingProfileKind: "Absolute",
+      chargingSchedule: {
+        chargingRateUnit: "A",
+        chargingSchedulePeriod: [{ startPeriod: 0, limit }],
+      },
+    });
+
+    for (const limit of [0.1, 0.3, 6.6, 16]) {
+      const response = await dispatchSoapCallViaV16Registry({
+        operation: "RemoteStartTransaction" as never,
+        payload: {
+          connectorId: "1",
+          idTag: "TAG123",
+          chargingProfile: profile(limit),
+        } as never,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+      expect(response).toHaveProperty("status");
+    }
+  });
+
+  it("still refuses a limit that is genuinely not a multiple of 0.1", async () => {
+    const attempt = dispatchSoapCallViaV16Registry({
+      operation: "RemoteStartTransaction" as never,
+      payload: {
+        connectorId: "1",
+        idTag: "TAG123",
+        chargingProfile: {
+          chargingProfileId: 1,
+          stackLevel: 0,
+          chargingProfilePurpose: "TxProfile",
+          chargingProfileKind: "Absolute",
+          chargingSchedule: {
+            chargingRateUnit: "A",
+            chargingSchedulePeriod: [{ startPeriod: 0, limit: 0.05 }],
+          },
+        },
+      } as never,
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    await expect(attempt).rejects.toThrow("multiple of 0.1");
+  });
+
+  // Coercion runs before validation, and `Number("")` is 0 while
+  // `Number("1e2")` is 100 -- so it used to manufacture a schema-valid number
+  // out of XML that carried none, and an empty <duration/> was answered.
+  it.each([
+    ["an empty element", ""],
+    ["exponent notation", "1e2"],
+    ["a word", "soon"],
+  ])("refuses %s where an integer is required", async (_label, duration) => {
+    const attempt = dispatchSoapCallViaV16Registry({
+      operation: "GetCompositeSchedule" as never,
+      payload: { connectorId: "1", duration } as never,
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    await expect(attempt).rejects.toThrow("must be integer");
+  });
+
+  // The shared validator leaves formats unchecked, which is right for a
+  // warning and wrong for a gate that refuses: expiryDate "not-a-date" would
+  // otherwise reach the handler and get a normal answer.
+  it("refuses a malformed date-time, and accepts a real one", async () => {
+    const reserve = (expiryDate: string) =>
+      dispatchSoapCallViaV16Registry({
+        operation: "ReserveNow" as never,
+        payload: {
+          connectorId: "1",
+          expiryDate,
+          idTag: "TAG123",
+          reservationId: "1",
+        } as never,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+
+    await expect(reserve("not-a-date")).rejects.toThrow('format "date-time"');
+    await expect(reserve("2026-01-01T00:00:00Z")).resolves.toHaveProperty(
+      "status",
+    );
+  });
+
+  it("refuses a malformed uri, and accepts a real one", async () => {
+    const getDiagnostics = (location: string) =>
+      dispatchSoapCallViaV16Registry({
+        operation: "GetDiagnostics" as never,
+        payload: { location } as never,
+        chargePoint,
+        logger: silentLogger(),
+        dialect: OCPP16_DIALECT,
+      });
+
+    await expect(getDiagnostics("not a uri")).rejects.toThrow('format "uri"');
+    await expect(getDiagnostics("ftp://host/dir")).resolves.toBeDefined();
+  });
+
+  it("accepts a complete request unchanged", async () => {
+    const response = await dispatchSoapCallViaV16Registry({
+      operation: "RemoteStartTransaction" as never,
+      payload: { connectorId: "1", idTag: "TAG123" },
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP16_DIALECT,
+    });
+
+    expect(response).toHaveProperty("status");
+  });
+
+  it("leaves the 1.5 dialect alone, which has no schemas of its own", async () => {
+    // Validating a 1.2/1.5 request against a 1.6 schema would reject requests
+    // that are correct for their own version, so the check is 1.6-S only.
+    const response = await dispatchSoapCallViaV16Registry({
+      operation: "RemoteStartTransaction" as never,
+      payload: { connectorId: "1" },
+      chargePoint,
+      logger: silentLogger(),
+      dialect: OCPP15_DIALECT,
+    });
+
+    expect(response).toHaveProperty("status");
   });
 });

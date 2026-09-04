@@ -220,6 +220,7 @@ export class Connector {
     transaction: Transaction | null;
     meterValueWh: number;
     socPercent: number | null;
+    socIsMeterDerived: boolean;
     lastAutoStartedScenarioKey: string | null;
   } {
     return {
@@ -229,6 +230,7 @@ export class Connector {
       transaction: this.transactionValue ? { ...this.transactionValue } : null,
       meterValueWh: this.meterValueWh,
       socPercent: this.socPercent,
+      socIsMeterDerived: this.socIsMeterDerived,
       lastAutoStartedScenarioKey: this.lastAutoStartedScenarioKeyValue,
     };
   }
@@ -251,6 +253,9 @@ export class Connector {
     transaction: Transaction | null;
     meterValueWh: number;
     socPercent: number | null;
+    /** Absent in snapshots written before this field existed; `false` there,
+     *  which is the behaviour those builds had. */
+    socIsMeterDerived?: boolean;
     lastAutoStartedScenarioKey: string | null;
   }): void {
     this.statusValue = snapshot.status;
@@ -261,6 +266,12 @@ export class Connector {
       : null;
     this.meterValueWh = snapshot.meterValueWh;
     this.socPercent = snapshot.socPercent;
+    // Carried across the restart with the SoC it describes. Without it a
+    // restored meter-derived SoC came back looking explicit, and the next
+    // transaction on that connector opened on the previous battery's charge
+    // again — the defect this marker exists to prevent, reachable a second
+    // time through persistence (#301).
+    this.socIsMeterDerived = snapshot.socIsMeterDerived ?? false;
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
   }
 

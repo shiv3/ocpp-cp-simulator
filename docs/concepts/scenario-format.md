@@ -371,11 +371,17 @@ current derived from it in the same MeterValue.
 `ChargingRateUnit=A` period limit is converted to watts to cap the session,
 and that wattage is converted back to the reported `Current.Import`. When the
 connector declares an electrical model — any of `currentType`, `phases`,
-`voltageV`, `powerFactor` — both halves use the same numbers, so the reported
-current is at most the amperage the CSMS set. Without that, the two halves
-disagreed: a 3-phase 10 A profile on a `powerFactor: 0.5` connector resolved
-to `10 × 230 × 3 = 6900 W` and reported `6900 / (230 × 3 × 0.5) = 20 A`, twice
-the limit. The phase count used is `min(connector phases, the period's
+`voltageV`, `powerFactor` — both halves use the same numbers, so a binding
+amp limit is reported back as **exactly** that amperage, never above it.
+Without that, the two halves disagreed: a 3-phase 10 A profile on a
+`powerFactor: 0.5` connector resolved to `10 × 230 × 3 = 6900 W` and reported
+`6900 / (230 × 3 × 0.5) = 20 A`, twice the limit. Both halves also divide by
+the **phases actually in use**, not by the connector's wiring: a 10 A
+single-phase profile caps a 3-phase connector at 2300 W, and dividing that
+across three conductors reported 3.3 A for a line genuinely carrying 10.
+`EVSettings.phases` is read in exactly one place in the domain — the helper
+that resolves the active count — and neither conversion infers a phase count
+of its own, so the wiring cannot stand in for the phases in use by accident. The phase count used is `min(connector phases, the period's
 numberPhases)` — a profile cannot give a single-phase connector three phases
 to draw on, and a CSMS restricting a 3-phase connector to one phase lowers the
 cap. Any non-negative integer `numberPhases` counts, not only 1 and 3: OCPP
@@ -551,6 +557,18 @@ be worse: it is the aliasing that was removed above, and here it would report
 the EVSE's offer as the station's consumption with nothing to reveal the
 substitution. Nothing is lost that was not already unavailable — as soon as
 one supported measurand is configured, the request goes out with it.
+
+**A transaction opens on its own SoC, never the previous session's — across a
+daemon restart too.** Whether the stored SoC was derived from the energy
+register or set explicitly is persisted alongside it (`connector_runtime`
+schema v11), because that distinction is what decides which of the two a new
+transaction replaces. Rows written before v11 carry no value and are read as
+"not derived", which is how those builds behaved. The auto-meter's own cursors
+are deliberately _not_ persisted: the sub-watt-hour carry is worth at most half
+a watt-hour and resets when a scheduler starts, and the curve baseline is
+re-captured from the restored register when the strategy restarts — storing a
+baseline against a register that has since moved would be worse than
+recomputing it.
 
 **A transaction opens on its own SoC, never the previous session's.** Stopping
 a transaction deliberately leaves `socPercent` in place — disconnect/reconnect

@@ -18,7 +18,12 @@ import type { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
  *   - Auto-meter scheduler state: the schedule itself is reproducible
  *     from {@link ConnectorSettingsRepository}'s `auto_meter` row and
  *     the restored `meterValueWh`, so we don't store the scheduler's
- *     internal cursor.
+ *     internal cursor. That includes the two cursors #301 added: the
+ *     sub-watt-hour carry, worth at most half a watt-hour and reset when a
+ *     scheduler starts, and the curve baseline, which is re-captured from
+ *     the restored register the moment the strategy restarts — persisting
+ *     that one would be worse than recomputing it, since a stale baseline
+ *     would offset the trajectory from a register that has since moved.
  */
 export interface ConnectorRuntimeSnapshot {
   status: OCPPStatus;
@@ -30,6 +35,15 @@ export interface ConnectorRuntimeSnapshot {
   transaction: Transaction | null;
   meterValueWh: number;
   socPercent: number | null;
+  /** Whether `socPercent` was derived from the energy register rather than set
+   *  explicitly. Carried so a restored connector still knows the difference
+   *  between "this session synchronised it" and "the last session left it" —
+   *  the next transaction replaces the former and keeps the latter (#301).
+   *
+   *  Optional for the same reason as `scenarioPosition`: rows written by
+   *  older daemon builds do not carry it, and absence means `false`, which is
+   *  what those builds behaved as. */
+  socIsMeterDerived?: boolean;
   /** Mirror of {@link Connector.lastAutoStartedScenarioKey}: prevents
    *  the auto-start path from re-firing the same scenario after a
    *  restart, which would otherwise reset the connector to the

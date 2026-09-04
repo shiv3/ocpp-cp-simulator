@@ -263,16 +263,28 @@ export function effectiveVoltageV(
  * by the power factor: `I = P / (V × phases × cos φ)`, with `voltageV` read as
  * **phase-to-neutral**. Applying `powerFactor` to DC — as a single shared
  * formula would — reports a current the hardware could not draw.
+ *
+ * `activePhases` is required, and required-nullable rather than optional, so
+ * that no caller can divide by the connector's wiring merely by forgetting to
+ * say which phases are live. That is the mistake this parameter exists to
+ * prevent: a 10 A single-phase profile caps a 3-phase connector at 2300 W, and
+ * dividing that across three wires reported 3.3 A for a line actually carrying
+ * 10 (#301). Pass `undefined` only where nothing restricts the phases; pass
+ * `Connector.activePhaseCount()` from any sampling path.
  */
 export function currentAmpsFor(
   powerW: number,
   settings: ElectricalSettings,
+  activePhases: number | undefined,
 ): number {
   const voltage = effectiveVoltageV(settings);
   if (powerW <= 0) return 0;
   if (settings.currentType === "DC") return powerW / voltage;
   return (
-    powerW / (voltage * acPhases(settings) * effectivePowerFactor(settings))
+    powerW /
+    (voltage *
+      resolveActivePhases(settings, activePhases) *
+      effectivePowerFactor(settings))
   );
 }
 
@@ -301,7 +313,7 @@ export function currentAmpsFor(
 export function powerWattsForCurrent(
   amps: number,
   settings: ElectricalSettings,
-  limitPhases?: number,
+  limitPhases: number | undefined,
 ): number {
   if (amps <= 0) return 0;
   const voltage = effectiveVoltageV(settings);
@@ -336,7 +348,7 @@ export function powerWattsForCurrent(
  */
 export function resolveActivePhases(
   settings: Pick<EVSettings, "currentType" | "phases">,
-  limitPhases?: number,
+  limitPhases: number | undefined,
 ): number {
   if (settings.currentType === "DC") return 1;
   const connectorPhases = acPhases(settings);
@@ -347,8 +359,15 @@ export function resolveActivePhases(
     : connectorPhases;
 }
 
-/** AC phase count for the derivations above. `phases` is `1 | 3`; anything
- *  else (absent, or a value smuggled past the types by raw RPC) is 1. */
+/**
+ * The connector's own wiring. `phases` is `1 | 3`; anything else (absent, or a
+ * value smuggled past the types by raw RPC) is 1.
+ *
+ * The **only** place in the domain that reads `EVSettings.phases`. Both
+ * watt/ampere conversions and the per-phase sampling go through
+ * {@link resolveActivePhases} instead, so the wiring can never stand in for
+ * the phases actually in use (#301).
+ */
 function acPhases(settings: Pick<EVSettings, "phases">): number {
   return settings.phases === 3 ? 3 : 1;
 }

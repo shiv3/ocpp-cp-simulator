@@ -666,3 +666,79 @@ describe("a new transaction opens on its own SoC, not the last one's (#301)", ()
     expect(reportedPowerW(connector)).toBe(100_000);
   });
 });
+
+describe("the derived-SoC marker survives a restart (#301)", () => {
+  /**
+   * The marker distinguishing "synchronised during this transaction" from
+   * "left over from the last one" lives on the connector, so it has to be
+   * carried in the runtime snapshot too. Without it a restored meter-derived
+   * SoC came back looking explicit, and the next transaction on that
+   * connector opened on the previous battery's charge — the same defect,
+   * reachable through persistence.
+   */
+  function chargedConnector(): Connector {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      batteryCapacityKwh: 1,
+      maxChargingPowerKw: 100,
+      initialSoc: 20,
+      targetSoc: 100,
+    };
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0));
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 20_000,
+    });
+    vi.advanceTimersByTime(40_000);
+    connector.stopAutoMeterValue();
+    return connector;
+  }
+
+  it("round-trips through snapshotRuntime and restoreRuntimeSnapshot", () => {
+    const connector = chargedConnector();
+    expect(connector.soc).toBeGreaterThan(20);
+    const snapshot = connector.snapshotRuntime();
+    expect(snapshot.socIsMeterDerived).toBe(true);
+
+    const restored = makeConnector();
+    restored.evSettings = { ...connector.evSettings };
+    restored.restoreRuntimeSnapshot(snapshot);
+    expect(restored.soc).toBe(snapshot.socPercent);
+
+    // The restored transaction ends, then a new one starts with no explicit
+    // SoC — the leftover must not become this session's opening charge.
+    restored.stopTransaction();
+    restored.beginTransaction(transaction(snapshot.meterValueWh));
+    expect(restored.soc).toBe(20);
+  });
+
+  it("marks an explicitly set SoC as not meter-derived in the snapshot", () => {
+    const connector = makeConnector();
+    connector.soc = 62;
+    const snapshot = connector.snapshotRuntime();
+    expect(snapshot.socIsMeterDerived).toBe(false);
+
+    const restored = makeConnector();
+    restored.restoreRuntimeSnapshot(snapshot);
+    restored.beginTransaction(transaction(0));
+    expect(restored.soc).toBe(62);
+  });
+
+  it("treats a snapshot without the field as not meter-derived", () => {
+    // Rows written before the v11 migration: absence means `false`, which is
+    // what those daemon builds behaved as.
+    const connector = makeConnector();
+    const legacy = { ...connector.snapshotRuntime(), socPercent: 77 } as Omit<
+      ReturnType<Connector["snapshotRuntime"]>,
+      "socIsMeterDerived"
+    > & { socIsMeterDerived?: boolean };
+    delete legacy.socIsMeterDerived;
+    connector.restoreRuntimeSnapshot(legacy);
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(77);
+  });
+});

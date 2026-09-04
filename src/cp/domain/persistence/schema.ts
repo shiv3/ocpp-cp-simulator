@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
   transaction_json                 TEXT,
   meter_value_wh                   INTEGER NOT NULL DEFAULT 0,
   soc_percent                      REAL,
+  soc_is_meter_derived             INTEGER,
   last_auto_started_scenario_key   TEXT,
   scenario_position_json           TEXT,
   updated_at                       TEXT NOT NULL,
@@ -375,6 +376,23 @@ export function runMigrations(db: Database): void {
     );
     if (!new Set(cols.map((c) => c.name)).has("auto_traffic")) {
       db.exec("ALTER TABLE connector_settings ADD COLUMN auto_traffic TEXT");
+    }
+  }
+
+  // v10 → v11: persist whether `soc_percent` was derived from the energy
+  // register or set explicitly (#301). A restored connector otherwise came
+  // back treating a meter-derived SoC as explicit, so the next transaction
+  // opened on the previous battery's charge — the defect the in-memory marker
+  // fixes, reachable again through persistence. Rows written before this
+  // column have NULL, read as `false`, which is exactly what those builds did.
+  if (stored < 11) {
+    const cols = db.all<{ name: string }>(
+      "PRAGMA table_info(connector_runtime)",
+    );
+    if (!new Set(cols.map((c) => c.name)).has("soc_is_meter_derived")) {
+      db.exec(
+        "ALTER TABLE connector_runtime ADD COLUMN soc_is_meter_derived INTEGER",
+      );
     }
   }
 

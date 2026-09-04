@@ -138,7 +138,7 @@ describe("an amp-based charging profile is not violated by the report (#301)", (
     expect(reportedCurrentA(connector)).toBeCloseTo(16, 6);
   });
 
-  it("stays under the limit when the profile restricts a 3-phase connector to one phase", () => {
+  it("reports the limit exactly when the profile restricts a 3-phase connector to one phase", () => {
     const connector = makeConnector();
     connector.evSettings = {
       ...connector.evSettings,
@@ -148,14 +148,13 @@ describe("an amp-based charging profile is not violated by the report (#301)", (
     armCharging(connector);
     connector.addChargingProfile(ampProfile(16, 1));
 
-    // The CSMS restricted delivery to one phase, so the cap drops to
-    // 16 A on one phase; the meter still reports a 3-phase aggregate, which
-    // is therefore a third of the per-phase limit — under it, never over.
+    // The CSMS restricted delivery to one phase, so the cap drops to 16 A on
+    // that phase — and the current derivation divides by the phases in use,
+    // not by the three the connector is wired for. Reporting 16/3 here was
+    // the sample contradicting the line it describes: 3680 W flowing down one
+    // conductor is 16 A on it, not 5.3 (#301).
     expect(connector.currentScheduleLimitWatts()).toBeCloseTo(16 * 230, 6);
-    const reported = reportedCurrentA(connector);
-    // `Current.Import` is reported to one decimal.
-    expect(reported).toBeCloseTo(16 / 3, 1);
-    expect(reported).toBeLessThanOrEqual(16);
+    expect(reportedCurrentA(connector)).toBeCloseTo(16, 6);
   });
 
   it("leaves the conversion untouched for a connector that declares no electrical model", () => {
@@ -435,5 +434,62 @@ describe("an amp limit converts on the joint phase count, not its own (#301)", (
     armCharging(connector);
     connector.addChargingProfile(ampProfile(10, 3));
     expect(connector.currentScheduleLimitWatts()).toBe(10 * 230);
+  });
+});
+
+describe("the reported current divides by the phases in use (#301)", () => {
+  // The third instance in this PR of one half of the pipeline reading the
+  // resolved phase count while the other read the connector's wiring. Here
+  // the watt cap was converted on the active count and the current derived
+  // back on the wiring, so the sample contradicted the line it describes.
+  function threePhase(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+    };
+    armCharging(connector);
+    return connector;
+  }
+
+  function reportedOffered(connector: Connector): number {
+    const samples = buildSampledValues(
+      connector,
+      ["Current.Offered"],
+      "Sample.Periodic",
+    );
+    return Number(samples.find((s) => s.phase === undefined)!.value);
+  }
+
+  it("reports 10 A, not 3.3 A, under a 10 A single-phase profile", () => {
+    const connector = threePhase();
+    connector.addChargingProfile(ampProfile(10, 1));
+    expect(connector.activePhaseCount()).toBe(1);
+    expect(connector.currentScheduleLimitWatts()).toBeCloseTo(10 * 230, 6);
+    expect(reportedCurrentA(connector)).toBeCloseTo(10, 6);
+  });
+
+  it("applies the same count to Current.Offered", () => {
+    const connector = threePhase();
+    connector.addChargingProfile(ampProfile(10, 1));
+    // Both currents in one message must describe the same conductors.
+    expect(reportedOffered(connector)).toBeCloseTo(
+      reportedCurrentA(connector),
+      6,
+    );
+    expect(reportedOffered(connector)).toBeCloseTo(10, 6);
+  });
+
+  it("is unchanged on three phases, where the wiring and the active count agree", () => {
+    const connector = threePhase();
+    connector.addChargingProfile(ampProfile(10, 3));
+    expect(reportedCurrentA(connector)).toBeCloseTo(10, 6);
+  });
+
+  it("is unchanged with no profile at all", () => {
+    const connector = threePhase();
+    // 350 kW ceiling, 230 V, three phases, unity cos φ.
+    expect(reportedCurrentA(connector)).toBeCloseTo(350_000 / (230 * 3), 1);
   });
 });

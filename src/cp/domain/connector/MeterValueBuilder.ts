@@ -65,18 +65,25 @@ export function buildSampledValues(
   const powerW = derivedInstantaneousPowerW(connector);
   const offeredW = derivedOfferedPowerW(connector);
   const settings = connector.evSettings;
-  const currentA = currentAmpsFor(powerW, settings ?? {});
-  const offeredCurrentA = currentAmpsFor(offeredW, settings ?? {});
+  // Both currents divide by the phases actually in use, the same count the
+  // watt cap was converted on — not the connector's wiring. A 10 A
+  // single-phase limit caps a 3-phase connector at 2300 W, and dividing that
+  // across three wires reported 3.3 A for a line carrying 10, so the sample
+  // contradicted the profile it was produced under (#301).
+  const activePhases = connector.activePhaseCount();
+  const currentA = currentAmpsFor(powerW, settings ?? {}, activePhases);
+  const offeredCurrentA = currentAmpsFor(
+    offeredW,
+    settings ?? {},
+    activePhases,
+  );
   // The voltage that actually produced `currentA`, not the raw configured
   // value: a `voltageV` of 0, negative or non-finite falls back to 230 in the
   // derivation, and reporting the raw number here would put a `Voltage` sample
   // on the wire that the `Current.Import` beside it contradicts (#301).
   const voltageV = effectiveVoltageV(settings ?? {});
   const powerFactor = effectivePowerFactor(settings ?? {});
-  // The phases actually in use — the connector's wiring narrowed by the
-  // active profile's `numberPhases`, the same count that produced the watt cap
-  // (#301) — not the wiring alone.
-  const phases = connector.activePhaseCount();
+  const phases = activePhases;
 
   for (const measurand of measurands) {
     const sample = buildSingleSample(measurand, context, {

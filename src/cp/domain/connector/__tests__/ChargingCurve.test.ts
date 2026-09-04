@@ -133,50 +133,62 @@ describe("powerFractionAtSoc (#301)", () => {
 
 describe("currentAmpsFor (#301)", () => {
   it("uses I = P / V for DC", () => {
-    expect(currentAmpsFor(150_000, { currentType: "DC", voltageV: 400 })).toBe(
-      375,
-    );
+    expect(
+      currentAmpsFor(150_000, { currentType: "DC", voltageV: 400 }, undefined),
+    ).toBe(375);
   });
 
   it("ignores powerFactor on DC, which has no reactive component", () => {
     // A single shared formula would report a current the hardware could not
     // draw.
     expect(
-      currentAmpsFor(1_000, {
-        currentType: "DC",
-        voltageV: 100,
-        powerFactor: 0.5,
-      }),
+      currentAmpsFor(
+        1_000,
+        {
+          currentType: "DC",
+          voltageV: 100,
+          powerFactor: 0.5,
+        },
+        undefined,
+      ),
     ).toBe(10);
   });
 
   it("divides across phases and by cos phi for AC", () => {
     expect(
-      currentAmpsFor(22_000, {
-        currentType: "AC",
-        phases: 3,
-        voltageV: 230,
-        powerFactor: 0.98,
-      }),
+      currentAmpsFor(
+        22_000,
+        {
+          currentType: "AC",
+          phases: 3,
+          voltageV: 230,
+          powerFactor: 0.98,
+        },
+        undefined,
+      ),
     ).toBeCloseTo(22_000 / (230 * 3 * 0.98), 3);
   });
 
   it("defaults to single-phase 230 V at unity", () => {
-    expect(currentAmpsFor(2_300, {})).toBeCloseTo(10);
+    expect(currentAmpsFor(2_300, {}, undefined)).toBeCloseTo(10);
     expect(DEFAULT_VOLTAGE_V).toBe(230);
   });
 
   it("is zero at zero power, not NaN", () => {
-    expect(currentAmpsFor(0, { currentType: "DC", voltageV: 400 })).toBe(0);
+    expect(
+      currentAmpsFor(0, { currentType: "DC", voltageV: 400 }, undefined),
+    ).toBe(0);
   });
 
   it("falls back rather than dividing by a nonsense voltage or power factor", () => {
-    expect(currentAmpsFor(2_300, { voltageV: 0 })).toBeCloseTo(10);
-    expect(currentAmpsFor(2_300, { voltageV: NaN })).toBeCloseTo(10);
+    expect(currentAmpsFor(2_300, { voltageV: 0 }, undefined)).toBeCloseTo(10);
+    expect(currentAmpsFor(2_300, { voltageV: NaN }, undefined)).toBeCloseTo(10);
     // powerFactor 0 is out of contract; effectivePowerFactor substitutes
     // unity, and the reported Power.Factor sample names that same 1 — see the
     // effectivePowerFactor block below and MeterValueBuilder.curve.test.ts.
-    expect(currentAmpsFor(2_300, { powerFactor: 0 })).toBeCloseTo(10);
+    expect(currentAmpsFor(2_300, { powerFactor: 0 }, undefined)).toBeCloseTo(
+      10,
+    );
   });
 });
 
@@ -318,8 +330,8 @@ describe("powerWattsForCurrent (#301)", () => {
       {},
     ];
     for (const settings of cases) {
-      const watts = powerWattsForCurrent(16, settings);
-      expect(currentAmpsFor(watts, settings)).toBeCloseTo(16, 9);
+      const watts = powerWattsForCurrent(16, settings, undefined);
+      expect(currentAmpsFor(watts, settings, undefined)).toBeCloseTo(16, 9);
     }
   });
 
@@ -338,7 +350,7 @@ describe("powerWattsForCurrent (#301)", () => {
     expect(powerWattsForCurrent(16, threePhase, 1)).toBe(16 * 230);
     expect(powerWattsForCurrent(16, threePhase, 3)).toBe(16 * 230 * 3);
     // Absent numberPhases leaves the connector's own count in charge.
-    expect(powerWattsForCurrent(16, threePhase)).toBe(16 * 230 * 3);
+    expect(powerWattsForCurrent(16, threePhase, undefined)).toBe(16 * 230 * 3);
   });
 
   it("honours a numberPhases of 2, which OCPP allows", () => {
@@ -362,13 +374,15 @@ describe("powerWattsForCurrent (#301)", () => {
     const settings = { currentType: "AC" as const, phases: 3 as const };
     for (const limitPhases of [undefined, 0, 1, 2, 3, 1.5, -1]) {
       const watts = powerWattsForCurrent(16, settings, limitPhases);
-      expect(currentAmpsFor(watts, settings)).toBeLessThanOrEqual(16);
+      expect(currentAmpsFor(watts, settings, undefined)).toBeLessThanOrEqual(
+        16,
+      );
     }
   });
 
   it("returns 0 for a non-positive current", () => {
-    expect(powerWattsForCurrent(0, { currentType: "DC" })).toBe(0);
-    expect(powerWattsForCurrent(-5, {})).toBe(0);
+    expect(powerWattsForCurrent(0, { currentType: "DC" }, undefined)).toBe(0);
+    expect(powerWattsForCurrent(-5, {}, undefined)).toBe(0);
   });
 });
 

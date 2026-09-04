@@ -57,8 +57,10 @@ export const RECONNECT_ATTEMPT_PREFIX = "Attempting reconnection";
  * handler's watchdog and asserts the emitted line still matches.
  *
  * Only the OCPP-1.6J handler has this watchdog; `OCPPMessageHandlerV201`
- * writes no such line, so 2.x calls reach the counter only through the
- * {@link MAX_PENDING_CALLS} eviction path.
+ * writes no such line, so an abandoned 2.x CALL is never counted here at all.
+ * Nothing else feeds this counter: a {@link MAX_PENDING_CALLS} eviction is a
+ * capacity event in this recorder, not a protocol event on the wire, and is
+ * counted separately as {@link MetricsRecorder.pendingEvictions}.
  */
 export const CALL_TIMEOUT_LINE =
   /^CALL (\S+) \(([^)]*)\) timed out after \d+ms/;
@@ -112,6 +114,15 @@ function soapOperation(message: string, prefix: string): string | null {
  * for the life of the daemon. The map is trimmed oldest-first past this size:
  * losing a duration sample is the right trade against unbounded growth in a
  * process expected to run for days.
+ *
+ * An eviction is **never** a timeout. It says this recorder's correlation
+ * cache is full — the transport has abandoned nothing, and the CSMS may answer
+ * the evicted CALL a millisecond later. Counting evictions as timeouts made
+ * the timeout counter report load rather than failure, and worst at exactly
+ * the fleet sizes a scale benchmark exists to measure, since 4096 concurrent
+ * pending CALLs is a big-fleet condition. Evictions are counted on their own
+ * as {@link MetricsRecorder.pendingEvictions}; what they cost is duration
+ * samples, which is what that counter is there to disclose.
  */
 const MAX_PENDING_CALLS = 4_096;
 
@@ -140,8 +151,8 @@ interface PendingCall {
    * Whether the watchdog already counted this call as abandoned.
    *
    * The entry is kept rather than deleted so a late answer still records its
-   * (over-watchdog) duration, and the flag is what stops the eviction path
-   * from counting the same call a second time.
+   * (over-watchdog) duration, and the flag is what stops a repeated watchdog
+   * line for the same message id from counting the call twice.
    */
   timedOut: boolean;
 }
@@ -177,8 +188,13 @@ export class MetricsRecorder {
   private readonly knownActions = new Set<string>();
   /** action to CALLERROR count. */
   readonly callErrors = new Map<string, number>();
-  /** action to abandoned-CALL count (watchdog expiry or pending-map eviction). */
+  /** action to abandoned-CALL count. Only the transport giving up on a CALL
+   *  counts here — see {@link CALL_TIMEOUT_LINE}. */
   readonly callTimeouts = new Map<string, number>();
+  /** Correlation-cache evictions: in-flight CALLs dropped because more than
+   *  {@link MAX_PENDING_CALLS} were pending at once. A capacity event in this
+   *  recorder, never a timeout; each one costs one duration sample. */
+  pendingEvictions = 0;
   /** action to histogram series. */
   readonly callDurations = new Map<string, DurationSeries>();
   /** `"<method> <outcome>"` to count. */
@@ -287,8 +303,8 @@ export class MetricsRecorder {
    *
    * The pending entry is flagged rather than removed: the CSMS may still
    * answer after the watchdog released the serialization slot, and that answer
-   * is a genuine over-30s duration worth observing. The flag is what keeps the
-   * eviction path from counting the same call twice.
+   * is a genuine over-30s duration worth observing. The flag is what keeps a
+   * repeated watchdog line for the same message id from counting twice.
    */
   private countCallTimeoutLine(cpId: string, message: string): boolean {
     const m = CALL_TIMEOUT_LINE.exec(message);
@@ -329,12 +345,13 @@ export class MetricsRecorder {
     if (this.pending.size >= MAX_PENDING_CALLS) {
       const oldest = this.pending.entries().next();
       if (!oldest.done) {
-        const [key, evicted] = oldest.value;
-        this.pending.delete(key);
-        // Evicting the oldest entry *is* giving up on that call, so it counts
-        // as abandoned — unless the watchdog already counted it, in which case
-        // the entry only survived to catch a late answer.
-        if (!evicted.timedOut) bump(this.callTimeouts, evicted.action);
+        this.pending.delete(oldest.value[0]);
+        // Deliberately NOT a timeout. Dropping the entry only means this
+        // recorder can no longer time that CALL; the transport still has it
+        // in flight and its watchdog, if it has one, will report the real
+        // abandonment on its own. Counting evictions here also double-counted
+        // any call whose watchdog fired after its eviction.
+        this.pendingEvictions++;
       }
     }
     this.pending.set(messageId, { action, startedAtMs, timedOut: false });

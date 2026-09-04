@@ -55,6 +55,116 @@ export const MAX_WARMUP_SEC = MAX_INTERVAL_SEC + CALL_WATCHDOG_SEC;
 export const BENCH_OCPP_VERSIONS: readonly OcppVersion[] =
   SUPPORTED_OCPP_VERSIONS.filter((v) => !isSoapVersion(v));
 
+/** The `idPattern` every benchmarked charge point is created under.
+ *
+ *  Kept here beside {@link benchCpId} because the run must be able to name the
+ *  ids of a batch whose `cp.create_many` never answered: an RPC deadline or a
+ *  dropped connection can reject the call *after* the daemon created the
+ *  charge points, and ids that never reach the client are ids the cleanup
+ *  sweep cannot delete — leaving a daemon the next run's preflight refuses. */
+export const BENCH_ID_PATTERN = "BENCH{n:06}";
+
+/** Expand {@link BENCH_ID_PATTERN} for one index.
+ *
+ *  A deliberate local copy of what `expandIdPattern` in
+ *  `src/protocol/methods.ts` does for this one pattern: importing that module
+ *  would pull zod and the whole protocol graph into a bench project whose
+ *  point is to be dependency-free. The authority is still the daemon, so
+ *  `growFleet` compares every answered batch's real ids against the predicted
+ *  ones and says so loudly if they ever diverge. */
+export function benchCpId(index: number): string {
+  return `BENCH${String(index).padStart(6, "0")}`;
+}
+
+/** Control-plane RPC budget per pooled socket, per second.
+ *
+ *  Kept under the daemon's `RPC_RATE_PER_SEC` (100), which `socketServer`
+ *  meters **per connection** (`SocketRpcState.tokens`), so the pool's total
+ *  budget grows with the socket count rather than being shared. This script's
+ *  own control-plane traffic must never get itself rate-limited or be mistaken
+ *  for the thing being measured. */
+export const RPC_RATE_PER_SOCKET = 80;
+
+/** Hard cap on pooled control-plane sockets. Ten connections is already an
+ *  unusual client; past it the bench is a load generator against the control
+ *  plane rather than a measurement of the OCPP wire. */
+export const MAX_SOCKETS = 10;
+
+/** Charge points per socket, before the required RPC rate is taken into
+ *  account. See {@link socketPoolSize}. */
+export const CPS_PER_SOCKET = 200;
+
+/** Fraction of the pool's nominal RPC budget the transaction load may claim.
+ *
+ *  Not a fudge factor: a token bucket driven at exactly its refill rate is a
+ *  queue at utilisation 1, where every scheduling jitter is absorbed by a
+ *  backlog that never drains — the cycle period would drift past
+ *  `--tx-interval` and keep drifting, which is the same silent under-load this
+ *  ceiling exists to prevent. The remaining fifth also covers the step's own
+ *  `start_heartbeat` arming and the end-of-run `cp.delete` sweep, which share
+ *  the same buckets. */
+export const RPC_HEADROOM = 0.8;
+
+/** How long a transaction is held open, and how long the connector then rests
+ *  before the next cycle — the `holdMs` in `fleet-bench.ts`'s `cycle`, in
+ *  seconds. Floored at 1s so a 1s `--tx-interval` does not degenerate into a
+ *  start and stop in the same tick. */
+export function holdSec(txIntervalSec: number): number {
+  return Math.max(1, txIntervalSec / 2);
+}
+
+/** One charge point's start-to-next-start period, in seconds: a hold plus a
+ *  rest. Equal to `--tx-interval` for every interval of 2s or more, and 2s
+ *  below that — which is why it, and not the raw flag, is what the required
+ *  RPC rate is computed from. */
+export function cyclePeriodSec(txIntervalSec: number): number {
+  return 2 * holdSec(txIntervalSec);
+}
+
+/** Sustained control-plane RPC rate the active axis demands: two calls
+ *  (`start_transaction`, `stop_transaction`) per charge point per cycle.
+ *  Zero on the idle axis, where the daemon's own timers drive the heartbeats
+ *  and the bench issues nothing after arming. */
+export function requiredRpcPerSec(n: number, txIntervalSec: number): number {
+  if (txIntervalSec <= 0 || n <= 0) return 0;
+  return (2 * n) / cyclePeriodSec(txIntervalSec);
+}
+
+/** What a pool of `sockets` sockets may sustain, headroom applied. */
+export function sustainableRpcPerSec(sockets: number): number {
+  return sockets * RPC_RATE_PER_SOCKET * RPC_HEADROOM;
+}
+
+/** How many control-plane sockets a run needs: enough for the fleet size *and*
+ *  enough for the transaction rate.
+ *
+ *  Sizing on the fleet alone is what let the pool throttle the load below what
+ *  was asked for: 200 charge points fit on one socket, but at
+ *  `--tx-interval 2` they demand 200 RPC/s and one socket allows 64, so the
+ *  bench applied a third of the configured load and reported the latency of
+ *  that smaller load instead. */
+export function socketPoolSize(maxN: number, txIntervalSec: number): number {
+  const forFleet = Math.ceil(maxN / CPS_PER_SOCKET);
+  const forRate = Math.ceil(
+    requiredRpcPerSec(maxN, txIntervalSec) / sustainableRpcPerSec(1),
+  );
+  return Math.min(MAX_SOCKETS, Math.max(1, forFleet, forRate));
+}
+
+/** The largest fleet the full socket pool can drive at this `--tx-interval`.
+ *  Quoted in the rejection message and in the README's ceiling. */
+export function maxSustainableFleet(txIntervalSec: number): number {
+  return Math.floor(
+    (sustainableRpcPerSec(MAX_SOCKETS) * cyclePeriodSec(txIntervalSec)) / 2,
+  );
+}
+
+/** The smallest `--tx-interval` at which the full pool can drive `n` charge
+ *  points. Integer, because the flag is one. */
+export function minSustainableTxIntervalSec(n: number): number {
+  return Math.max(2, Math.ceil((2 * n) / sustainableRpcPerSec(MAX_SOCKETS)));
+}
+
 /** How long a step should hold the new fleet size and its load before the
  *  `before` scrape: the transaction stagger ramp (one `--tx-interval`, 0 on
  *  the idle axis) plus one CALL watchdog interval.
@@ -340,6 +450,28 @@ export function validateOptions(raw: Map<string, RawArgValue>): BenchOptions {
     );
   }
   const ocppVersion = ocppVersionRaw as OcppVersion;
+  // Reject a rate the socket pool cannot sustain, rather than quietly
+  // applying less OCPP load than was asked for and reporting the latency of
+  // that smaller load. The pool paces every RPC through a per-socket token
+  // bucket, and the transaction cycle awaits its RPC before scheduling the
+  // next phase, so a required rate above the pool's ceiling does not queue —
+  // it stretches the cycle, and the fleet silently runs at a longer interval
+  // than the flag says.
+  const maxN = counts.at(-1)!;
+  const requiredRpc = requiredRpcPerSec(maxN, txIntervalSec);
+  const ceilingRpc = sustainableRpcPerSec(MAX_SOCKETS);
+  if (requiredRpc > ceilingRpc) {
+    throw new BenchValidationError(
+      `--counts up to ${maxN} at --tx-interval ${txIntervalSec}s needs ` +
+        `${requiredRpc.toFixed(0)} control-plane RPC/s (2 per charge point per ` +
+        `${cyclePeriodSec(txIntervalSec)}s cycle), but ${MAX_SOCKETS} sockets ` +
+        `sustain ${ceilingRpc.toFixed(0)} RPC/s. The run would apply less load ` +
+        `than configured and report the latency of that smaller load. Raise ` +
+        `--tx-interval to ${minSustainableTxIntervalSec(maxN)} or more, or cap ` +
+        `--counts at ${maxSustainableFleet(txIntervalSec)}`,
+    );
+  }
+
   if (durationSec < 2 * heartbeatIntervalSec) {
     throw new BenchValidationError(
       `--duration (${durationSec}s) must be at least twice --heartbeat-interval ` +
@@ -780,3 +912,89 @@ export function formatTable(
     ...rows.map(line),
   ].join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// One sweep step's reported row. Here rather than in fleet-bench.ts because
+// that file connects a socket and calls main() on import, so nothing in it can
+// be unit-tested; the row's labelling is a claim about what a number describes
+// and must be.
+// ---------------------------------------------------------------------------
+
+export interface StepResult {
+  /** The fleet size this step *asked* for — the `--counts` entry. */
+  readonly requested: number;
+  /** The fleet size it actually has. `cp.create_many` succeeds partially, so
+   *  the two diverge the moment a creation fails, and reporting a row's
+   *  latency under `requested` attributes it to a fleet that never existed. */
+  readonly fleet: number;
+  readonly connected: number;
+  readonly notSettled: number;
+  readonly aggregate: ReturnType<typeof mergeHistogramDeltas>;
+  readonly heartbeat: ReturnType<typeof mergeHistogramDeltas> | null;
+  /** Watchdog-abandoned CALLs, or `null` on a transport with no watchdog —
+   *  where the honest answer is "not measured", not "zero". */
+  readonly timeouts: number | null;
+  readonly evictions: number;
+  readonly errors: number;
+  readonly reconnects: number;
+  readonly unconfirmedStarts: number;
+}
+
+/** Calls that *answered* later than the last finite bucket edge (30s) — the
+ *  `+Inf` bucket's count minus the last finite bucket's cumulative count.
+ *
+ *  This is emphatically **not** the timeout count. A duration is only observed
+ *  when an answer arrives, so a CALL the CSMS never answers contributes
+ *  nothing here at all; that is what `ocppcp_ocpp_call_timeouts_total` is for.
+ *  A non-zero number in this column means the CSMS answered after the charge
+ *  point had already given up on the call. */
+export function answeredAfterWatchdog(r: StepResult): number {
+  const lastFiniteCount = r.aggregate.buckets.at(-1)?.count ?? 0;
+  return Math.max(0, r.aggregate.count - lastFiniteCount);
+}
+
+export function row(r: StepResult): string[] {
+  const p50 = formatSeconds(histogramQuantile(r.aggregate, 0.5));
+  const p95 = formatSeconds(histogramQuantile(r.aggregate, 0.95));
+  const hbP50 = r.heartbeat
+    ? formatSeconds(histogramQuantile(r.heartbeat, 0.5))
+    : "-";
+  const hbP95 = r.heartbeat
+    ? formatSeconds(histogramQuantile(r.heartbeat, 0.95))
+    : "-";
+  return [
+    String(r.fleet),
+    String(r.requested - r.fleet),
+    String(r.connected),
+    String(r.notSettled),
+    String(r.aggregate.count),
+    p50,
+    p95,
+    hbP50,
+    hbP95,
+    r.timeouts === null ? "n/a" : String(r.timeouts),
+    String(answeredAfterWatchdog(r)),
+    String(r.errors),
+    String(r.reconnects),
+    String(r.unconfirmedStarts),
+  ];
+}
+
+/** Header row for {@link row}. Kept beside it so a column added to one is
+ *  a compile error in the other rather than a silently shifted table. */
+export const STEP_COLUMNS = [
+  "N",
+  "uncreated",
+  "connected",
+  "unsettled",
+  "calls",
+  "p50",
+  "p95",
+  "hb p50",
+  "hb p95",
+  "timeouts",
+  "late>30s",
+  "errors",
+  "reconnects",
+  "unconf.tx",
+] as const;

@@ -565,10 +565,12 @@ describe("abandoned CALLs are counted (#302)", () => {
     }
   });
 
-  it("counts a call evicted from the pending map as abandoned", () => {
-    // The eviction path is the only thing that catches an unanswered CALL on a
-    // transport with no watchdog line (OCPP 2.x), and dropping it silently is
-    // what let unanswered calls vanish from every counter.
+  it("counts a correlation-cache eviction as an eviction, never as a timeout", () => {
+    // An eviction says this recorder's cache is full, not that the transport
+    // gave up: the CSMS may answer the evicted CALL a millisecond later.
+    // Counting it as a timeout made the counter report load rather than
+    // failure, and did so worst at the fleet sizes where 4096 concurrent
+    // pending CALLs is normal.
     const recorder = new MetricsRecorder();
     for (let i = 0; i < 4_097; i++) {
       recorder.observe(
@@ -576,13 +578,42 @@ describe("abandoned CALLs are counted (#302)", () => {
         "CP001",
       );
     }
-    expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+    expect(recorder.pendingEvictions).toBe(1);
+    expect(recorder.callTimeouts.size).toBe(0);
+  });
+
+  it("counts a CALL once when its watchdog fires after the cache evicted it", () => {
+    // The double count codex named: the eviction counted the call, and the
+    // watchdog line arriving later found no pending entry and counted it
+    // again — so one abandoned CALL reported as two.
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({ cpId: "CP001", logger });
+    try {
+      logger.info('Sent: [2,"m1","Heartbeat",{}]', LogType.OCPP);
+      // 4096 further CALLs push m1 out of the correlation cache...
+      for (let i = 0; i < 4_096; i++) {
+        recorder.observe(
+          call("StatusNotification", `x${i}`, "2026-01-01T00:00:00.000Z"),
+          "CP001",
+        );
+      }
+      expect(recorder.pendingEvictions).toBe(1);
+      // ...and only afterwards does the transport actually give up on it.
+      logger.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("does not count a call twice when the watchdog fires and it is then evicted", () => {
     // The pending entry survives the watchdog so a late answer can still be
-    // timed; if eviction then counted it again, a stuck CSMS would inflate the
-    // timeout count by a factor of two.
+    // timed. Its later eviction is a cache event and must leave the timeout
+    // count alone.
     const recorder = new MetricsRecorder();
     const logger = new Logger();
     const unsubscribe = recorder.attach({ cpId: "CP001", logger });
@@ -606,6 +637,7 @@ describe("abandoned CALLs are counted (#302)", () => {
       );
     }
     expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+    expect(recorder.pendingEvictions).toBe(1);
   });
 
   it("renders the counter, and renders zero as an empty series rather than a wrong number", () => {
@@ -632,6 +664,40 @@ describe("abandoned CALLs are counted (#302)", () => {
       expect(
         found.get('ocppcp_ocpp_call_timeouts_total{action="Heartbeat"}'),
       ).toBe(1);
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
+  it("renders the eviction counter separately from the timeout counter", () => {
+    // Two different facts with two different names: a reader must be able to
+    // tell "the CSMS stopped answering" from "the recorder's cache filled up".
+    const registry = new CPRegistry(undefined as never);
+    try {
+      const recorder = new MetricsRecorder();
+      const rendered = renderMetrics(registry, recorder);
+      expect(rendered).toContain(
+        "# TYPE ocppcp_ocpp_pending_calls_evicted_total counter",
+      );
+      expect(
+        samples(rendered, "ocppcp_ocpp_pending_calls_evicted_total").get(
+          "ocppcp_ocpp_pending_calls_evicted_total",
+        ),
+      ).toBe(0);
+
+      for (let i = 0; i < 4_097; i++) {
+        recorder.observe(
+          call("Heartbeat", `m${i}`, "2026-01-01T00:00:00.000Z"),
+          "CP001",
+        );
+      }
+      const after = renderMetrics(registry, recorder);
+      expect(
+        samples(after, "ocppcp_ocpp_pending_calls_evicted_total").get(
+          "ocppcp_ocpp_pending_calls_evicted_total",
+        ),
+      ).toBe(1);
+      expect(samples(after, "ocppcp_ocpp_call_timeouts_total").size).toBe(0);
     } finally {
       registry.shutdownAll();
     }

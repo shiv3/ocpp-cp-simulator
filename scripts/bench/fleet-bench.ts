@@ -14,43 +14,52 @@ import { io, type Socket } from "socket.io-client";
 
 import { CP_CREATE_MANY_MAX } from "../../src/protocol/limits.ts";
 import {
+  BENCH_ID_PATTERN,
   BENCH_OCPP_VERSIONS,
   BenchValidationError,
   CALL_WATCHDOG_SEC,
+  RPC_RATE_PER_SOCKET,
   Semaphore,
   TokenBucket,
+  answeredAfterWatchdog,
   assertDaemonEmpty,
+  benchCpId,
+  cyclePeriodSec,
   diffHistogram,
   fleetGauge,
-  formatSeconds,
   formatTable,
   histogramQuantile,
+  holdSec,
+  maxSustainableFleet,
   mergeHistogramDeltas,
   parseArgv,
   parseExposition,
   recommendedWarmupSec,
   redactOptions,
+  requiredRpcPerSec,
+  row,
   sleep,
+  socketPoolSize,
   staggerOffsetsMs,
+  STEP_COLUMNS,
+  sustainableRpcPerSec,
   validateOptions,
   type BenchOptions,
   type FleetGauge,
   type Sample,
+  type StepResult,
 } from "./lib.ts";
 import { OCPP_1_6 } from "../../src/cp/domain/types/OcppVersion.ts";
 
 const CALL_DURATION_METRIC = "ocppcp_ocpp_call_duration_seconds";
 const CALL_TIMEOUTS_METRIC = "ocppcp_ocpp_call_timeouts_total";
+const PENDING_EVICTIONS_METRIC = "ocppcp_ocpp_pending_calls_evicted_total";
 
-// Per-socket pacing, kept safely under the daemon's `RPC_RATE_PER_SEC` (100)
-// and `INFLIGHT_CAP` (64) so this script's own control-plane traffic never
-// gets itself rate-limited or mistaken for the thing being measured — the
-// OCPP wire traffic these RPCs trigger is asynchronous and not bounded by
-// this pacing (see the README's "Why a socket pool" section).
-const RPC_RATE_PER_SOCKET = 80;
+// Per-socket concurrency, kept under the daemon's `INFLIGHT_CAP` (64). The
+// matching rate budget, the socket count and the fleet ceiling they imply
+// live in lib.ts, where `validateOptions` can refuse a run the pool cannot
+// sustain (see the README's "Why a socket pool" section).
 const INFLIGHT_PER_SOCKET = 48;
-const MAX_SOCKETS = 10;
-const CPS_PER_SOCKET = 200;
 const RPC_TIMEOUT_MS = 35_000;
 
 /** Overall budget for the best-effort `cp.delete` sweep at the end of a run
@@ -191,6 +200,152 @@ class SocketPool {
   }
 }
 
+/** Waits for a charge point's transaction to *actually* start.
+ *
+ *  The control-plane `start_transaction` ack says only that the daemon
+ *  accepted the call: `CLIChargePointService.startTransaction` does not await
+ *  `ChargePoint.startTransaction`, and with `AuthorizeBeforeLocalStart`
+ *  (default **true**) that promise is still waiting on `Authorize.conf` when
+ *  the ack lands. Timing the hold from the ack therefore made the generated
+ *  load a function of CSMS latency — the variable this benchmark exists to
+ *  measure. A slow enough authorization made the stop a no-op and left the
+ *  transaction active into later cycles.
+ *
+ *  One dedicated socket, outside the RPC pool so its traffic spends none of
+ *  the pool's rate budget, subscribed to the `"*"` scope. `reconnection` is
+ *  off on purpose: room membership is per-connection server-side, and
+ *  re-subscribing once the fleet is past 1000 charge points would fail
+ *  `subscribeResultSchema`'s `ARRAY_1000` cap on the snapshot it returns. The
+ *  subscribe therefore happens once, before the first charge point exists. */
+class TransactionWatcher {
+  private readonly waiters = new Map<string, (started: boolean) => void>();
+  private closed = false;
+
+  private constructor(private readonly socket: Socket) {}
+
+  static async open(
+    daemonUrl: string,
+    auth: { username: string; password: string } | null,
+  ): Promise<TransactionWatcher> {
+    const socket = io(daemonUrl, {
+      path: "/socket.io/",
+      auth: auth ?? undefined,
+      reconnection: false,
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("event socket did not connect within 10s")),
+          10_000,
+        );
+        socket.once("connect", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        socket.once("connect_error", (err: Error) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("events.subscribe timed out")),
+          10_000,
+        );
+        socket.emit(
+          "events.subscribe",
+          { scope: "*" },
+          (ack: { ok: boolean; error?: { message: string } } | undefined) => {
+            clearTimeout(timer);
+            if (ack && ack.ok === false) {
+              reject(
+                new Error(ack.error?.message ?? "events.subscribe failed"),
+              );
+            } else resolve();
+          },
+        );
+      });
+    } catch (err) {
+      socket.removeAllListeners();
+      socket.disconnect();
+      throw err;
+    }
+    const watcher = new TransactionWatcher(socket);
+    socket.on("event", (envelope: unknown) => watcher.onEvent(envelope));
+    // Without `reconnection` there is no recovery, so say so once rather than
+    // letting every later cycle silently report an unconfirmed start.
+    socket.on("disconnect", () => {
+      if (watcher.closed) return;
+      process.stderr.write(
+        `[bench] WARNING: the event socket dropped; transaction starts can no ` +
+          `longer be confirmed and every remaining cycle counts as unconfirmed.\n`,
+      );
+      watcher.failAll();
+    });
+    return watcher;
+  }
+
+  /** Arm a waiter for `cpId` **before** its `start_transaction` is emitted.
+   *  The event arrives on this socket while the ack arrives on a pool socket,
+   *  and nothing orders the two — arming after the ack would drop the event
+   *  of every fast CSMS and skip every stop. Resolves `false` on timeout. */
+  arm(cpId: string, timeoutMs: number): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.waiters.get(cpId) === settle) this.waiters.delete(cpId);
+        resolve(false);
+      }, timeoutMs);
+      const settle = (started: boolean): void => {
+        clearTimeout(timer);
+        resolve(started);
+      };
+      // One connector per benchmarked charge point and one cycle at a time,
+      // so a second armed waiter for the same id can only be a bug; drop the
+      // older one rather than leaking it.
+      this.waiters.get(cpId)?.(false);
+      this.waiters.set(cpId, settle);
+    });
+  }
+
+  private onEvent(envelope: unknown): void {
+    const env = envelope as
+      | {
+          kind?: string;
+          cpId?: string;
+          evt?: { event?: string; data?: { transactionId?: number } };
+        }
+      | undefined;
+    if (env?.kind !== "cp" || env.evt?.event !== "transaction_started") return;
+    // `transaction_started` is emitted **twice** per 1.6 transaction: once by
+    // the domain when the transaction begins, carrying the placeholder id 0,
+    // and again by `CLIChargePointService` when `StartTransaction.conf`
+    // supplies the real id. Only the first one means "the transaction
+    // started". Accepting the second would let a slow conf from the previous
+    // cycle confirm the *next* cycle's start — reintroducing the early hold
+    // this class exists to prevent, and doing it only on a saturated CSMS.
+    if (env.evt.data?.transactionId !== 0) return;
+    const cpId = env.cpId;
+    if (cpId === undefined) return;
+    const settle = this.waiters.get(cpId);
+    if (!settle) return;
+    this.waiters.delete(cpId);
+    settle(true);
+  }
+
+  private failAll(): void {
+    for (const settle of this.waiters.values()) settle(false);
+    this.waiters.clear();
+  }
+
+  close(): void {
+    this.closed = true;
+    this.failAll();
+    this.socket.removeAllListeners();
+    this.socket.disconnect();
+  }
+}
+
 async function fetchMetrics(
   daemonUrl: string,
   auth: { username: string; password: string } | null,
@@ -303,12 +458,22 @@ interface IdCursor {
 /** Create `count` more CPs, chunked at `CP_CREATE_MANY_MAX` per call. Returns
  *  every id `cp.create_many` reported created; failures are logged and
  *  excluded rather than retried, matching `cp.create_many`'s own
- *  partial-success contract. */
+ *  partial-success contract.
+ *
+ *  Every id a chunk *offers* is pushed into `cleanupIds` before the RPC is
+ *  awaited, not after it answers. An RPC deadline or a dropped connection
+ *  rejects the call without cancelling the server-side work, so the daemon can
+ *  hold charge points whose ids never reached this process — and the cleanup
+ *  sweep would then leave them registered, which is exactly what the next
+ *  run's `assertDaemonEmpty` preflight refuses a daemon for. `cp.delete`
+ *  answering `not_found` for an id that was never created is already treated
+ *  as success, so over-listing costs nothing. */
 async function growFleet(
   pool: SocketPool,
   opts: BenchOptions,
   cursor: IdCursor,
   count: number,
+  cleanupIds: string[],
 ): Promise<string[]> {
   const created: string[] = [];
   let remaining = count;
@@ -319,6 +484,9 @@ async function growFleet(
     // daemon and must never be offered again.
     const index = cursor.nextIndex;
     cursor.nextIndex += chunk;
+    const offered: string[] = [];
+    for (let i = 0; i < chunk; i++) offered.push(benchCpId(index + i));
+    cleanupIds.push(...offered);
     const result = await pool.rpc<{
       created: string[];
       failed: { cpId: string; reason: string }[];
@@ -333,9 +501,22 @@ async function growFleet(
       model: "fleet-bench",
       autoConnect: true,
       count: chunk,
-      idPattern: "BENCH{n:06}",
+      idPattern: BENCH_ID_PATTERN,
       startIndex: index,
     });
+    // The daemon expands `idPattern` itself, so this is the check that keeps
+    // the local copy honest: an id it created that this process did not
+    // predict is an id cleanup would miss.
+    const predicted = new Set(offered);
+    const unpredicted = result.created.filter((id) => !predicted.has(id));
+    if (unpredicted.length > 0) {
+      cleanupIds.push(...unpredicted);
+      process.stderr.write(
+        `[bench] WARNING: cp.create_many returned ${unpredicted.length} id(s) this ` +
+          `script did not predict (e.g. ${unpredicted[0]}). benchCpId() has drifted ` +
+          `from expandIdPattern() in src/protocol/methods.ts.\n`,
+      );
+    }
     created.push(...result.created);
     for (const f of result.failed) {
       process.stderr.write(
@@ -384,8 +565,10 @@ function armLoad(
   pool: SocketPool,
   cpIds: readonly string[],
   opts: BenchOptions,
-): { stop: () => void; ready: Promise<void> } {
+  watcher: TransactionWatcher | null,
+): { stop: () => void; ready: Promise<void>; unconfirmedStarts: () => number } {
   let stopped = false;
+  let unconfirmedStarts = 0;
   // Only *live* timers, and each one removes itself as it fires. A plain
   // array that every cycle appended to grew by two handles per transaction
   // per charge point and never shrank, so a long 2000-CP run retained
@@ -433,8 +616,16 @@ function armLoad(
     });
   })();
 
+  const holdMs = holdSec(opts.txIntervalSec) * 1000;
+  const periodMs = cyclePeriodSec(opts.txIntervalSec) * 1000;
+
   async function cycle(cpId: string): Promise<void> {
     if (stopped) return;
+    const cycleStartedAtMs = Date.now();
+    // Armed before the RPC is emitted, never after its ack: the
+    // `transaction_started` event arrives on the watcher's socket while the
+    // ack arrives on a pool socket, and nothing orders those two.
+    const started = watcher?.arm(cpId, holdMs) ?? Promise.resolve(true);
     try {
       await pool.rpc("start_transaction", { connector: 1 }, cpId);
     } catch (err) {
@@ -442,13 +633,23 @@ function armLoad(
         `[bench] start_transaction failed for ${cpId}: ${String(err)}\n`,
       );
     }
-    // The RPC above can be in flight when `stop()` runs; without this check
-    // the callback installs a timer after cleanup already cleared the set,
-    // keeping the process alive for up to half a --tx-interval.
+    // Hold from the moment the transaction *started*, not from the moment the
+    // daemon acknowledged the call. The ack returns while
+    // `ChargePoint.startTransaction` is still awaiting `Authorize.conf`, so
+    // timing the hold from it shortened every hold by the authorization
+    // latency and, past `holdMs` of it, made the stop a no-op that left the
+    // transaction running into later cycles — the load changing as a function
+    // of the very latency being measured.
+    if (!(await started)) unconfirmedStarts++;
+    // The awaits above can span a `stop()`; without this check the callback
+    // installs a timer after cleanup already cleared the set, keeping the
+    // process alive for up to half a --tx-interval.
     if (stopped) return;
-    const holdMs = Math.max(1000, (opts.txIntervalSec * 1000) / 2);
     schedule(() => {
       void (async () => {
+        // Sent even when the start was never confirmed: a start that was only
+        // slow still has to be cleared, or the connector stays occupied and
+        // every later cycle for this charge point is refused as a duplicate.
         try {
           await pool.rpc("stop_transaction", { connector: 1 }, cpId);
         } catch (err) {
@@ -457,68 +658,27 @@ function armLoad(
           );
         }
         if (stopped) return;
-        schedule(() => void cycle(cpId), holdMs);
+        // Next start one full period after this one *started*, not one hold
+        // after this one stopped: the cycle period stays exactly
+        // --tx-interval while the CSMS keeps up, and stretches only when it
+        // genuinely cannot.
+        schedule(
+          () => void cycle(cpId),
+          Math.max(0, cycleStartedAtMs + periodMs - Date.now()),
+        );
       })();
     }, holdMs);
   }
 
   return {
     ready,
+    unconfirmedStarts: () => unconfirmedStarts,
     stop: () => {
       stopped = true;
       for (const t of live) clearTimeout(t);
       live.clear();
     },
   };
-}
-
-interface StepResult {
-  readonly n: number;
-  readonly connected: number;
-  readonly notSettled: number;
-  readonly aggregate: ReturnType<typeof mergeHistogramDeltas>;
-  readonly heartbeat: ReturnType<typeof mergeHistogramDeltas> | null;
-  readonly timeouts: number;
-  readonly errors: number;
-  readonly reconnects: number;
-}
-
-/** Calls that *answered* later than the last finite bucket edge (30s) — the
- *  `+Inf` bucket's count minus the last finite bucket's cumulative count.
- *
- *  This is emphatically **not** the timeout count. A duration is only observed
- *  when an answer arrives, so a CALL the CSMS never answers contributes
- *  nothing here at all; that is what `ocppcp_ocpp_call_timeouts_total` is for.
- *  A non-zero number in this column means the CSMS answered after the charge
- *  point had already given up on the call. */
-function answeredAfterWatchdog(r: StepResult): number {
-  const lastFiniteCount = r.aggregate.buckets.at(-1)?.count ?? 0;
-  return Math.max(0, r.aggregate.count - lastFiniteCount);
-}
-
-function row(r: StepResult): string[] {
-  const p50 = formatSeconds(histogramQuantile(r.aggregate, 0.5));
-  const p95 = formatSeconds(histogramQuantile(r.aggregate, 0.95));
-  const hbP50 = r.heartbeat
-    ? formatSeconds(histogramQuantile(r.heartbeat, 0.5))
-    : "-";
-  const hbP95 = r.heartbeat
-    ? formatSeconds(histogramQuantile(r.heartbeat, 0.95))
-    : "-";
-  return [
-    String(r.n),
-    String(r.connected),
-    String(r.notSettled),
-    String(r.aggregate.count),
-    p50,
-    p95,
-    hbP50,
-    hbP95,
-    String(r.timeouts),
-    String(answeredAfterWatchdog(r)),
-    String(r.errors),
-    String(r.reconnects),
-  ];
 }
 
 /** Best-effort teardown of everything this run created, bounded by
@@ -621,9 +781,18 @@ async function main(): Promise<void> {
   if (opts.ocppVersion !== OCPP_1_6) {
     process.stderr.write(
       `[bench] NOTE: the 30s per-CALL watchdog is implemented only in the ` +
-        `OCPP-1.6J message handler, so on ${opts.ocppVersion} the "timeouts" column ` +
-        `counts only pending-call-map evictions. Latency, "late>30s", errors and ` +
-        `reconnects are unaffected.\n`,
+        `OCPP-1.6J message handler, so on ${opts.ocppVersion} an abandoned CALL is ` +
+        `never counted at all and the "timeouts" column reads n/a rather than 0. ` +
+        `Use "late>30s", errors and reconnects as the knee signals there.\n`,
+    );
+  }
+  if (opts.txIntervalSec > 0) {
+    const maxN = opts.counts.at(-1)!;
+    process.stderr.write(
+      `[bench] transaction load at N=${maxN}: ` +
+        `${requiredRpcPerSec(maxN, opts.txIntervalSec).toFixed(0)} RPC/s of a ` +
+        `${sustainableRpcPerSec(socketPoolSize(maxN, opts.txIntervalSec)).toFixed(0)} RPC/s ` +
+        `pool budget (2 calls per CP per ${cyclePeriodSec(opts.txIntervalSec)}s cycle)\n`,
     );
   }
   const recommendedWarmup = recommendedWarmupSec(opts.txIntervalSec);
@@ -636,10 +805,12 @@ async function main(): Promise<void> {
   }
 
   const maxN = opts.counts.at(-1)!;
-  const socketCount = Math.min(
-    MAX_SOCKETS,
-    Math.max(1, Math.ceil(maxN / CPS_PER_SOCKET)),
-  );
+  // Sized by the transaction rate as well as the fleet: 200 charge points fit
+  // on one socket, but at `--tx-interval 2` they demand 200 RPC/s and one
+  // socket allows 64, so a fleet-only pool applied a third of the configured
+  // load and reported the latency of that smaller load. `validateOptions` has
+  // already refused anything the full pool cannot sustain.
+  const socketCount = socketPoolSize(maxN, opts.txIntervalSec);
   process.stderr.write(
     `[bench] opening ${socketCount} control-plane socket(s)\n`,
   );
@@ -649,7 +820,20 @@ async function main(): Promise<void> {
     opts.daemonBasicAuth,
   );
 
+  // Opened before the first charge point exists, on purpose: the subscribe ack
+  // carries a snapshot of the whole fleet through an `ARRAY_1000` schema, so
+  // subscribing once the sweep is past 1000 charge points would fail.
+  const watcher =
+    opts.txIntervalSec > 0
+      ? await TransactionWatcher.open(opts.daemonUrl, opts.daemonBasicAuth)
+      : null;
+
   const allCpIds: string[] = [];
+  // A superset of `allCpIds`: every id offered to `cp.create_many`, including
+  // those of a batch whose RPC never answered. Cleanup sweeps this, so an
+  // indeterminate create cannot leave charge points behind for the next run's
+  // preflight to trip over.
+  const cleanupIds: string[] = [];
   const results: StepResult[] = [];
   // One stop handle per step's `armLoad` call — steps only ever *add* CPs, so
   // each step arms just the CPs it created and earlier steps' handles keep
@@ -657,6 +841,7 @@ async function main(): Promise<void> {
   // clear in-flight transaction timers and re-issue start_transaction on
   // connectors already mid-session).
   const stopLoads: Array<() => void> = [];
+  const loads: Array<{ unconfirmedStarts: () => number }> = [];
 
   // Runs once: the `finally` below and the SIGINT handler can both reach it,
   // and a second concurrent delete sweep would double the teardown budget for
@@ -665,7 +850,8 @@ async function main(): Promise<void> {
   const cleanup = async (): Promise<void> => {
     cleanupStarted ??= (async () => {
       for (const stop of stopLoads) stop();
-      await deleteFleet(pool, allCpIds);
+      watcher?.close();
+      await deleteFleet(pool, cleanupIds);
       await pool.closeAll();
     })();
     return cleanupStarted;
@@ -676,11 +862,21 @@ async function main(): Promise<void> {
 
   try {
     const cursor: IdCursor = { nextIndex: 1 };
+    // Cumulative across steps, like the daemon's counters: each row reports
+    // its own delta.
+    let unconfirmedStartsBefore = 0;
     for (const n of opts.counts) {
       const toCreate = n - allCpIds.length;
       process.stderr.write(`[bench] N=${n}: creating ${toCreate} more CP(s)\n`);
-      const created = await growFleet(pool, opts, cursor, toCreate);
+      const created = await growFleet(pool, opts, cursor, toCreate, cleanupIds);
       allCpIds.push(...created);
+      const notCreated = n - allCpIds.length;
+      if (notCreated > 0) {
+        process.stderr.write(
+          `[bench] N=${n}: only ${allCpIds.length} charge point(s) exist; the row ` +
+            `below is labelled with that, not with ${n}\n`,
+        );
+      }
 
       // Relative to the preflight baseline, so `--allow-existing` measures
       // this run's fleet settling rather than the daemon's whole population.
@@ -695,8 +891,9 @@ async function main(): Promise<void> {
         );
       }
 
-      const load = armLoad(pool, created, opts);
+      const load = armLoad(pool, created, opts, watcher);
       stopLoads.push(load.stop);
+      loads.push(load);
       await load.ready;
 
       // Warm up *before* the `before` scrape, not after it. Every counter
@@ -744,39 +941,53 @@ async function main(): Promise<void> {
       const timeoutsBefore = before
         .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
         .reduce((sum, s) => sum + s.value, 0);
+      const evictionsAfter =
+        after.find((s) => s.name === PENDING_EVICTIONS_METRIC)?.value ?? 0;
+      const evictionsBefore =
+        before.find((s) => s.name === PENDING_EVICTIONS_METRIC)?.value ?? 0;
+      const evictions = Math.max(0, evictionsAfter - evictionsBefore);
+      // The one case where p50/p95 are silently incomplete: an evicted CALL
+      // loses its duration sample, and 4096 concurrent pending CALLs is a
+      // condition this sweep is built to reach.
+      if (evictions > 0) {
+        process.stderr.write(
+          `[bench] N=${n}: WARNING: the daemon's correlation cache evicted ` +
+            `${evictions} in-flight CALL(s) during this window, so the latency ` +
+            `below is missing that many observations. Not timeouts — the calls ` +
+            `may well have been answered.\n`,
+        );
+      }
+      const unconfirmedStarts = loads.reduce(
+        (sum, l) => sum + l.unconfirmedStarts(),
+        0,
+      );
 
       results.push({
-        n,
+        requested: n,
+        fleet: allCpIds.length,
         connected: Math.max(0, connected - baseline.connected),
         notSettled,
         aggregate,
         heartbeat,
-        timeouts: Math.max(0, timeoutsAfter - timeoutsBefore),
+        // Only the OCPP-1.6J handler has the watchdog that feeds this counter,
+        // so on any other version it is structurally zero — and printing 0
+        // would read as "no calls were abandoned" rather than "not measured".
+        timeouts:
+          opts.ocppVersion === OCPP_1_6
+            ? Math.max(0, timeoutsAfter - timeoutsBefore)
+            : null,
+        evictions,
         errors: Math.max(0, errorsAfter - errorsBefore),
         reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
+        unconfirmedStarts: unconfirmedStarts - unconfirmedStartsBefore,
       });
+      unconfirmedStartsBefore = unconfirmedStarts;
     }
   } finally {
     await cleanup();
   }
 
-  const table = formatTable(
-    [
-      "N",
-      "connected",
-      "unsettled",
-      "calls",
-      "p50",
-      "p95",
-      "hb p50",
-      "hb p95",
-      "timeouts",
-      "late>30s",
-      "errors",
-      "reconnects",
-    ],
-    results.map(row),
-  );
+  const table = formatTable([...STEP_COLUMNS], results.map(row));
   process.stdout.write("\n" + table + "\n");
 
   if (opts.outFile) {
@@ -789,7 +1000,12 @@ async function main(): Promise<void> {
         preExistingChargePoints: baseline.total,
         machine: machineInfo(daemonVersion),
         results: results.map((r) => ({
-          n: r.n,
+          // `n` is the fleet the row's numbers actually describe.
+          // `requested` is the `--counts` entry it was aiming for; they differ
+          // whenever `cp.create_many` only partly succeeded.
+          n: r.fleet,
+          requested: r.requested,
+          notCreated: r.requested - r.fleet,
           connected: r.connected,
           notSettled: r.notSettled,
           calls: r.aggregate.count,
@@ -802,9 +1018,11 @@ async function main(): Promise<void> {
             ? valueOrNull(histogramQuantile(r.heartbeat, 0.95))
             : null,
           timeouts: r.timeouts,
+          correlationCacheEvictions: r.evictions,
           answeredAfterWatchdog: answeredAfterWatchdog(r),
           errors: r.errors,
           reconnects: r.reconnects,
+          unconfirmedTransactionStarts: r.unconfirmedStarts,
         })),
       },
       null,
@@ -819,6 +1037,10 @@ function valueOrNull(q: ReturnType<typeof histogramQuantile>): number | null {
   return q.kind === "value" ? q.seconds : null;
 }
 
+/** Charge points per second of `--tx-interval` the full pool sustains — the
+ *  ceiling `validateOptions` enforces, quoted in `--help` and the README. */
+const MAX_SUSTAINABLE_PER_TX_SEC = maxSustainableFleet(2) / 2;
+
 function printUsage(): void {
   process.stderr
     .write(`Usage: bun scripts/bench/fleet-bench.ts --csms-url <url> --daemon-url <url> [options]
@@ -832,6 +1054,9 @@ Options:
   --duration <seconds>        Measurement window per step (default 60)
   --heartbeat-interval <sec>  Heartbeat cadence applied to every CP (default 5)
   --tx-interval <seconds>     Start/stop transaction cycle period; 0 = idle/heartbeat-only (default 0)
+                              The socket pool sustains ${MAX_SUSTAINABLE_PER_TX_SEC} charge points per second
+                              of --tx-interval; a larger sweep is refused rather than
+                              run at less load than configured
   --settle-timeout <seconds>  How long to wait for new CPs to connect per step (default 60)
   --warmup <seconds>          Hold the new N and its load this long before the first
                               scrape, so a step's timeouts are its own

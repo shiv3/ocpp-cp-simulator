@@ -338,13 +338,13 @@ export function powerWattsForCurrent(
  * more phases than the connector is wired for cannot raise either, so the
  * answer is the smaller of the two.
  *
- * Any non-negative integer counts, not just 1 or 3: OCPP allows
- * `numberPhases: 2`, and `ChargingScheduleResolver`'s no-model branch already
- * multiplies by whatever the profile named. Anything else — absent,
- * fractional, negative, smuggled past the types by raw RPC — falls back to
- * the connector's own count rather than being read as a restriction that was
- * never expressed. DC has no phases at all and is always 1, whatever the
- * profile says.
+ * Any positive integer counts, not just 1 or 3: OCPP allows
+ * `numberPhases: 2`. Anything else — absent, zero, fractional, negative,
+ * smuggled past the types by raw RPC — is not a restriction we can honour and
+ * falls back to the connector's own count rather than being read as a
+ * restriction that was never expressed; see {@link isPhaseRestriction} for why
+ * zero belongs in that list. DC has no phases at all and is always 1, whatever
+ * the profile says.
  */
 export function resolveActivePhases(
   settings: Pick<EVSettings, "currentType" | "phases">,
@@ -352,11 +352,32 @@ export function resolveActivePhases(
 ): number {
   if (settings.currentType === "DC") return 1;
   const connectorPhases = acPhases(settings);
-  return typeof limitPhases === "number" &&
-    Number.isInteger(limitPhases) &&
-    limitPhases >= 0
+  return isPhaseRestriction(limitPhases)
     ? Math.min(limitPhases, connectorPhases)
     : connectorPhases;
+}
+
+/**
+ * Whether a profile period's `numberPhases` states a restriction we can honour:
+ * a positive integer, nothing else.
+ *
+ * The single rule, used everywhere a `numberPhases` is read, so the answer
+ * cannot differ between the conversion and the sampling. **Zero is not a
+ * restriction.** It looks like one — the bundled OCPP schemas ask only for an
+ * integer and the profile handlers do not reject it, so a conforming-looking
+ * CSMS can send it — but a station cannot deliver on zero phases, and taking
+ * it literally divides by zero: `resolveActivePhases` would return 0 and a
+ * positive W-based limit would then report `Current.Import` as `Infinity`, or
+ * `null` once serialised on OCPP 2.x (#301). Fractional, negative and
+ * non-finite values are rejected for the same reason they always were.
+ *
+ * Anything rejected falls back to the connector's own phase count, which is at
+ * least 1, so no phase count reaching the electrical model is ever zero.
+ */
+export function isPhaseRestriction(
+  value: number | null | undefined,
+): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
 
 /**

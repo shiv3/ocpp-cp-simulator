@@ -31,7 +31,7 @@ function ampProfile(
       {
         startPeriod: 0,
         limit: limitAmps,
-        ...(numberPhases ? { numberPhases } : {}),
+        ...(numberPhases !== undefined ? { numberPhases } : {}),
       },
     ],
   };
@@ -268,7 +268,7 @@ describe("the phase restriction composes across both profiles (#301)", () => {
         {
           startPeriod: 0,
           limit: limitWatts,
-          ...(numberPhases ? { numberPhases } : {}),
+          ...(numberPhases !== undefined ? { numberPhases } : {}),
         },
       ],
     };
@@ -359,7 +359,7 @@ describe("an amp limit converts on the joint phase count, not its own (#301)", (
         {
           startPeriod: 0,
           limit: limitWatts,
-          ...(numberPhases ? { numberPhases } : {}),
+          ...(numberPhases !== undefined ? { numberPhases } : {}),
         },
       ],
     };
@@ -491,5 +491,99 @@ describe("the reported current divides by the phases in use (#301)", () => {
     const connector = threePhase();
     // 350 kW ceiling, 230 V, three phases, unity cos φ.
     expect(reportedCurrentA(connector)).toBeCloseTo(350_000 / (230 * 3), 1);
+  });
+});
+
+describe("a numberPhases of 0 is not a restriction (#301)", () => {
+  /**
+   * A station cannot deliver on zero phases, but the bundled OCPP schemas ask
+   * only for an integer and the profile handlers do not reject zero, so a
+   * conforming-looking CSMS can send one. Taken literally it divides by zero:
+   * the active count becomes 0 and a positive W-based limit reports
+   * `Current.Import` as `Infinity`, or `null` once serialised on 2.x.
+   */
+  function wattProfile(
+    limitWatts: number,
+    numberPhases?: number,
+  ): ActiveChargingProfile {
+    return {
+      chargingProfileId: 304,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [
+        {
+          startPeriod: 0,
+          limit: limitWatts,
+          ...(numberPhases !== undefined ? { numberPhases } : {}),
+        },
+      ],
+    };
+  }
+
+  function threePhase(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+    };
+    armCharging(connector);
+    return connector;
+  }
+
+  it("reports a finite current for a W profile carrying numberPhases 0", () => {
+    const connector = threePhase();
+    connector.addChargingProfile(wattProfile(6900, 0));
+
+    expect(connector.activePhaseCount()).toBe(3);
+    const reported = reportedCurrentA(connector);
+    expect(Number.isFinite(reported)).toBe(true);
+    expect(reported).toBeCloseTo(6900 / (230 * 3), 1);
+  });
+
+  it("puts no Infinity on the wire for any measurand", () => {
+    const connector = threePhase();
+    connector.addChargingProfile(wattProfile(6900, 0));
+    const samples = buildSampledValues(
+      connector,
+      [
+        "Current.Import",
+        "Current.Offered",
+        "Power.Active.Import",
+        "Power.Offered",
+        "Voltage",
+      ],
+      "Sample.Periodic",
+    );
+    expect(samples.length).toBeGreaterThan(0);
+    for (const sample of samples) {
+      expect(sample.value).not.toContain("Infinity");
+      expect(Number.isFinite(Number(sample.value))).toBe(true);
+    }
+  });
+
+  it("does not cap an amp profile at zero watts because of numberPhases 0", () => {
+    // Previously the joint count of 0 multiplied the conversion by zero, which
+    // paused the session — a phase count is not how OCPP expresses a pause.
+    const connector = threePhase();
+    connector.addChargingProfile(ampProfile(16, 0));
+    expect(connector.currentScheduleLimitWatts()).toBe(16 * 230 * 3);
+  });
+
+  it("does not cap at zero on a connector with no electrical model either", () => {
+    const connector = makeConnector();
+    armCharging(connector);
+    connector.addChargingProfile(ampProfile(16, 0));
+    expect(connector.currentScheduleLimitWatts()).toBe(16 * 230 * 3);
+  });
+
+  it("still honours a legal numberPhases of 2", () => {
+    const connector = threePhase();
+    connector.addChargingProfile(ampProfile(16, 2));
+    expect(connector.activePhaseCount()).toBe(2);
+    expect(connector.currentScheduleLimitWatts()).toBe(16 * 230 * 2);
   });
 });

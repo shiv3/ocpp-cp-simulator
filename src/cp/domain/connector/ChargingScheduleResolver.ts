@@ -4,7 +4,11 @@ import {
   ChargingRateUnitType,
   RecurrencyKindType,
 } from "../types/OcppTypes";
-import { type ElectricalSettings, powerWattsForCurrent } from "./ChargingCurve";
+import {
+  type ElectricalSettings,
+  isPhaseRestriction,
+  powerWattsForCurrent,
+} from "./ChargingCurve";
 
 /**
  * Reference voltage used to convert ChargingRateUnit=A to watts when the
@@ -144,7 +148,9 @@ function limitToWatts(
   // a per-phase current: converting 10 A on 3 phases while another profile
   // holds the connector to 1 gives a cap that draws about 13 A on the phase
   // actually in use, violating the 10 A limit still in force (#301).
-  const phases = jointPhases ?? numberPhases;
+  const phases =
+    jointPhases ??
+    (isPhaseRestriction(numberPhases) ? numberPhases : undefined);
   if (unit === ChargingRateUnitType.W) return rawLimit;
   // A → W through the connector's own model when it has one, so that the
   // W → A conversion `MeterValueBuilder` applies to the resulting cap lands
@@ -284,7 +290,9 @@ export function resolveEffectivePhaseLimit(
   const limits = [txProfile, chargePointMaxProfile]
     .map((p) => resolveScheduleLimitWatts(p, transactionStart, now))
     .map((r) => r.limitNumberPhases)
-    .filter((n): n is number => n !== null);
+    // A `numberPhases` that is not a positive integer states no restriction we
+    // can honour, so it must not narrow anything — least of all to zero (#301).
+    .filter(isPhaseRestriction);
   return limits.length === 0 ? null : Math.min(...limits);
 }
 

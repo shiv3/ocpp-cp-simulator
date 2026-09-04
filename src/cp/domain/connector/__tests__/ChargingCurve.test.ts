@@ -4,6 +4,8 @@ import type { EVSettings } from "../EVSettings";
 import {
   currentAmpsFor,
   effectiveVoltageV,
+  isPhaseRestriction,
+  resolveActivePhases,
   withNormalizedChargingCurve,
   electricalModelOf,
   powerWattsForCurrent,
@@ -508,5 +510,47 @@ describe("effectiveVoltageV (#301)", () => {
     expect(effectiveVoltageV({ voltageV: -400 })).toBe(230);
     expect(effectiveVoltageV({ voltageV: NaN })).toBe(230);
     expect(effectiveVoltageV({ voltageV: Infinity })).toBe(230);
+  });
+});
+
+describe("isPhaseRestriction / numberPhases: 0 (#301)", () => {
+  it("accepts only positive integers", () => {
+    expect(isPhaseRestriction(1)).toBe(true);
+    expect(isPhaseRestriction(2)).toBe(true);
+    expect(isPhaseRestriction(3)).toBe(true);
+    expect(isPhaseRestriction(0)).toBe(false);
+    expect(isPhaseRestriction(-1)).toBe(false);
+    expect(isPhaseRestriction(1.5)).toBe(false);
+    expect(isPhaseRestriction(NaN)).toBe(false);
+    expect(isPhaseRestriction(Infinity)).toBe(false);
+    expect(isPhaseRestriction(null)).toBe(false);
+    expect(isPhaseRestriction(undefined)).toBe(false);
+  });
+
+  it("never resolves an active phase count of zero", () => {
+    // A station cannot deliver on zero phases, and a zero here divides by
+    // zero downstream. The connector's own count stands instead.
+    for (const bad of [0, -1, 1.5, NaN]) {
+      expect(resolveActivePhases({ currentType: "AC", phases: 3 }, bad)).toBe(
+        3,
+      );
+      expect(resolveActivePhases({ currentType: "AC", phases: 1 }, bad)).toBe(
+        1,
+      );
+    }
+  });
+
+  it("keeps the current finite for a numberPhases of 0", () => {
+    const settings = { currentType: "AC" as const, phases: 3 as const };
+    const amps = currentAmpsFor(22_000, settings, 0);
+    expect(Number.isFinite(amps)).toBe(true);
+    expect(amps).toBeCloseTo(22_000 / (230 * 3), 6);
+  });
+
+  it("keeps the watt conversion finite for a numberPhases of 0", () => {
+    const settings = { currentType: "AC" as const, phases: 3 as const };
+    const watts = powerWattsForCurrent(16, settings, 0);
+    expect(Number.isFinite(watts)).toBe(true);
+    expect(watts).toBe(16 * 230 * 3);
   });
 });

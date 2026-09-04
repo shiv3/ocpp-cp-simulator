@@ -43,6 +43,25 @@ function displayedElectricalDefaults(draft: EVSettings): Partial<EVSettings> {
   };
 }
 
+/**
+ * Seed the editable draft with the model the controls will show.
+ *
+ * The draft is what Apply saves and what `evDirty` compares, so it has to hold
+ * the same values the panel renders or the button that would change something
+ * is disabled. Straight after load with no stored override — and straight
+ * after Reset — the draft used to equal `defaultEVSettings` exactly, `evDirty`
+ * was false, and Apply was greyed out: the page showed AC / single-phase /
+ * 230 V / unity while the connector kept the legacy no-model conversion, which
+ * reads an amp limit with no `numberPhases` as three-phase and reports 48 A
+ * for a 16 A profile. Materializing the draft here makes it dirty against the
+ * stored state precisely when the screen and the stored state disagree, which
+ * is when Apply should be pressable (#301).
+ */
+function seedDraftEv(stored: EVSettings | null): EVSettings {
+  const base = stored ?? { ...defaultEVSettings };
+  return { ...base, ...displayedElectricalDefaults(base) };
+}
+
 const Settings: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
   const {
@@ -55,8 +74,8 @@ const Settings: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
-  const [draftEv, setDraftEv] = useState<EVSettings>(
-    defaultEvSettings ?? { ...defaultEVSettings },
+  const [draftEv, setDraftEv] = useState<EVSettings>(() =>
+    seedDraftEv(defaultEvSettings),
   );
   const { tagIds: globalTagIds, setTagIds: persistGlobalTagIds } =
     useGlobalTagIds();
@@ -85,7 +104,7 @@ const Settings: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    setDraftEv(defaultEvSettings ?? { ...defaultEVSettings });
+    setDraftEv(seedDraftEv(defaultEvSettings));
   }, [defaultEvSettings]);
 
   const [resetState, setResetState] = useState<"idle" | "running" | "error">(

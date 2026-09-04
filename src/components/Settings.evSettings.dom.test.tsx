@@ -15,12 +15,15 @@ import type { EVSettings } from "../cp/domain/connector/EVSettings";
  */
 
 let setDefaultEvSettings: ReturnType<typeof vi.fn>;
+/** The stored override the provider hands back. Mutable so a test can render
+ *  the "an override is already saved" state as well as the default one. */
+let storedDefaultEv: EVSettings | null = null;
 
 vi.mock("../data/providers/DataProvider", () => ({
   useDataContext: () => ({
     mode: "remote",
     serverUrl: "http://test",
-    defaultEvSettings: null,
+    defaultEvSettings: storedDefaultEv,
     setDefaultEvSettings,
     chargePointService: {
       loadConfig: vi.fn(async () => null),
@@ -348,5 +351,102 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
 
     const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
     expect(applied.voltageV).toBe(400);
+  });
+});
+
+describe("Apply is reachable from the default state (#301)", () => {
+  /**
+   * Materializing the displayed model on Apply only helps if Apply can be
+   * pressed. With no stored override — and straight after Reset — the draft
+   * equalled `defaultEVSettings`, so the dirty check was false and the button
+   * was disabled: the page showed AC / single-phase / 230 V / unity while the
+   * connector kept the legacy no-model conversion, which reads an amp limit
+   * with no `numberPhases` as three-phase and reports 48 A for a 16 A profile.
+   */
+  let cleanup: (() => Promise<void>) | null = null;
+
+  beforeAll(() => {
+    (
+      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(async () => {
+    if (cleanup) {
+      await cleanup();
+      cleanup = null;
+    }
+    storedDefaultEv = null;
+    vi.restoreAllMocks();
+  });
+
+  async function render(): Promise<HTMLElement> {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Settings />
+        </MemoryRouter>,
+      );
+    });
+    cleanup = () => unmount(root);
+    await flush();
+    return container;
+  }
+
+  const applyButton = (container: HTMLElement) =>
+    findButton(container, "Apply");
+
+  it("enables Apply with no stored override, and saves the displayed model", async () => {
+    setDefaultEvSettings = vi.fn();
+    const container = await render();
+
+    expect(applyButton(container).disabled).toBe(false);
+
+    await act(async () => applyButton(container).click());
+    await flush();
+
+    expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect(applied.currentType).toBe("AC");
+    expect(applied.phases).toBe(1);
+    expect(applied.voltageV).toBe(230);
+    expect(applied.powerFactor).toBe(1);
+  });
+
+  it("disables Apply again once the stored override already holds that model", async () => {
+    // Nothing on screen differs from what is stored, so there is nothing to
+    // apply — the button must not stay permanently lit.
+    setDefaultEvSettings = vi.fn();
+    storedDefaultEv = {
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+      currentType: "AC",
+      phases: 1,
+      voltageV: 230,
+      powerFactor: 1,
+    };
+    const container = await render();
+    expect(applyButton(container).disabled).toBe(true);
+  });
+
+  it("enables Apply when a stored override predates the electrical fields", async () => {
+    // A v1.1-era override: the page shows a model the stored settings do not
+    // hold, which is exactly when Apply should be pressable.
+    setDefaultEvSettings = vi.fn();
+    storedDefaultEv = {
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+    };
+    const container = await render();
+    expect(applyButton(container).disabled).toBe(false);
   });
 });

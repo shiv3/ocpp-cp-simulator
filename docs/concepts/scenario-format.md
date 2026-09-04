@@ -384,12 +384,22 @@ that resolves the active count — and neither conversion infers a phase count
 of its own, so the wiring cannot stand in for the phases in use by accident. The phase count used is `min(connector phases, the period's
 numberPhases)` — a profile cannot give a single-phase connector three phases
 to draw on, and a CSMS restricting a 3-phase connector to one phase lowers the
-cap. Any non-negative integer `numberPhases` counts, not only 1 and 3: OCPP
-permits 2, and the no-model conversion below has always used the value
-verbatim, so treating 2 as "absent" here would cap the same profile at ×2 in
-one half and ×3 in the other. A value that is not a non-negative integer —
-fractional or negative, smuggled past the types by raw RPC — falls back to the
-connector's own phase count. A connector declaring **none** of the four keeps the pre-1.2 conversion,
+cap. Any **positive** integer `numberPhases` counts, not only 1 and 3: OCPP
+permits 2, so treating 2 as "absent" would cap the same profile at ×2 in one
+half and ×3 in the other. Anything else — **zero**, fractional, negative,
+non-finite, smuggled past the types by raw RPC — states no restriction that
+can be honoured and falls back to the connector's own phase count, in every
+branch of the conversion. Zero deserves naming: it looks legal, because the
+bundled OCPP schemas ask only for an integer and the profile handlers do not
+reject it, but a station cannot deliver on zero phases and taking it literally
+divides by zero — the active count would be 0, and a positive `W`-based limit
+would report `Current.Import` as `Infinity`, or `null` once serialised on
+2.x. It is also not how OCPP expresses a pause; that is `limit: 0`. The
+resolved active phase count is therefore never below 1, which is what makes
+the current derivation's divisor safe. Its two companions are guarded the same
+way: a `voltageV` that is not positive and finite reads as 230, and a
+`powerFactor` outside `(0, 1]` reads as unity, so no divisor in the electrical
+model can reach zero from an accepted input. A connector declaring **none** of the four keeps the pre-1.2 conversion,
 `A × 230 V × numberPhases` with OCPP §7.21's default of 3 phases, and with it
 the pre-1.2 mismatch — this guarantee is about connectors that describe their
 electrics, and every scenario written before v1.2 is byte-identical.
@@ -600,10 +610,17 @@ pre-1.2 fields — the v1.2 fields are not JSON/RPC-only. Both clamp
 `powerFactor` to `[0.01, 1]`; the scenario editor's field left empty means
 "inherit the default", not zero.
 
-**The Settings page saves the electrical model it displays.** Its four
-electrical controls always render a specific value — AC, single-phase, 230 V,
-cos φ 1 when nothing is set — so Apply writes those values rather than leaving
-the fields absent. Absent fields mean "no electrical model", which selects the
+**The Settings page saves the electrical model it displays, and can always be
+made to.** Its four electrical controls always render a specific value — AC,
+single-phase, 230 V, cos φ 1 when nothing is set — so Apply writes those values
+rather than leaving the fields absent, and the editable draft is seeded with
+them too. Seeding matters as much as saving: with the draft left unseeded the
+panel matched the stored state exactly whenever nothing was stored, so the
+"anything to apply?" check said no and the button was disabled — the displayed
+model could only be saved by someone who happened to change an unrelated field
+first. Apply is enabled exactly when the screen and the stored settings
+disagree, which includes a fresh page, the state right after Reset, and an
+override saved before v1.2 had electrical fields. Absent fields mean "no electrical model", which selects the
 pre-1.2 A → W conversion at three phases, and the page would then have been
 showing single-phase while the connector metered as three: a 16 A profile
 reported as 48 A. The scenario editor's panel is different by design — a field

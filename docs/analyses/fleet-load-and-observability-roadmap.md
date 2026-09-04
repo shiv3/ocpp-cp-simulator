@@ -53,7 +53,7 @@ runtime model.
 | 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped     | #298  |
 | 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped     | #299  |
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300  |
-| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | planned     | #301  |
+| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped     | #301  |
 | 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | 4a         | not filed   | —     |
 | 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | planned     | #302  |
 | 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |

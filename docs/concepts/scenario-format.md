@@ -1,5 +1,5 @@
 ---
-title: Scenario file format (v1.1)
+title: Scenario file format (v1.2)
 type: concept
 summary: The node-graph JSON format for scripted charge-point behavior — 23 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
@@ -19,7 +19,7 @@ related:
 updated: 2026-09-03
 ---
 
-# Scenario File Format (v1.1)
+# Scenario File Format (v1.2)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -37,7 +37,7 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.1`** (`schemaVersion`). Files stamped `1.0` remain valid — 1.x
+- **Version `1.2`** (`schemaVersion`). Files stamped `1.0` or `1.1` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
 - Covers the full 23-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
@@ -65,24 +65,24 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 ## Top-level fields
 
-| Field                   | Type                                                                            | Required | Notes                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.1"` (current) or `"1.0"` (still valid — additive). Absent on files predating issue #214 — still valid.                               |
-| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                   |
-| `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances). |
-| `name`                  | string                                                                          | Yes      |                                                                                                                                               |
-| `description`           | string                                                                          | No       |                                                                                                                                               |
-| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                                               |
-| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                                                |
-| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                                               |
-| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                                               |
-| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                                                     |
-| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                                                     |
-| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                                           |
-| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                                              |
-| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`.                                                           |
-| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides.                            |
-| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                                               |
+| Field                   | Type                                                                            | Required | Notes                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.2"` (current); `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                    |
+| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                 |
+| `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).               |
+| `name`                  | string                                                                          | Yes      |                                                                                                                                                             |
+| `description`           | string                                                                          | No       |                                                                                                                                                             |
+| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                                                             |
+| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                                                              |
+| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                                                             |
+| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                                                             |
+| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                                                                   |
+| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                                                                   |
+| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                                                         |
+| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                                                            |
+| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`, plus the v1.2 curve fields — see [Charging curve](#charging-curve-v12). |
+| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides.                                          |
+| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                                                             |
 
 ## Node shape
 
@@ -308,8 +308,44 @@ connector, is untouched. Instances persisted before `templateId` existed are
 recognised by their id format, so an existing state DB tidies itself on the
 next boot.
 
+## Charging curve (v1.2)
+
+`evSettings` describes an EV's _electrical_ behaviour as well as its battery
+(#301). Every field is optional and absence keeps the pre-1.2 behaviour: flat
+acceptance at `maxChargingPowerKw`, 230 V, single phase.
+
+| Field           | Meaning                                                                               |
+| --------------- | ------------------------------------------------------------------------------------- |
+| `chargingCurve` | `{ socPercent, powerFraction }[]` — piecewise-linear power acceptance against SoC.    |
+| `rampShape`     | `linear` (default) or `sigmoid`, for the climb from session start to full acceptance. |
+| `currentType`   | `AC` or `DC`. DC has no reactive component.                                           |
+| `phases`        | `1` (default) or `3`, AC only.                                                        |
+| `voltageV`      | **Phase-to-neutral** volts. Default 230.                                              |
+| `powerFactor`   | cos φ, AC only. Default 1.                                                            |
+
+**Current is derived by type, not by one shared formula.** DC is `I = P / V`;
+AC is `I = P / (V × phases × cos φ)`. Applying `powerFactor` to DC would report
+a current the hardware could not draw.
+
+**The curve lowers demand and never raises it.** Effective power is
+`min(curve-derived power, ChargingScheduleResolver limit)`, so an active
+`SetChargingProfile` always wins — a curve cannot let a session draw above a
+limit the CSMS set. A curve is clamped to its first and last point rather than
+extrapolated: a curve that starts at 20% says nothing about 10%, and inventing
+a number there would be worse than admitting it.
+
+On a 3-phase AC connector, `Current.Import` and `Power.Active.Import` are also
+reported per phase (`L1` / `L2` / `L3`), summing to the aggregate. Energy
+registers are not split — a meter has one.
+
 ## Changelog
 
+- **v1.2**: Issue #301. Adds the charging-curve and electrical fields to
+  `evSettings` — `chargingCurve`, `rampShape`, `currentType`, `phases`,
+  `voltageV`, `powerFactor`. All optional: settings without a `chargingCurve`
+  keep flat acceptance at `maxChargingPowerKw`, which is what every file
+  written before this produced. Purely additive, so `1.1` and `1.0` files
+  remain valid.
 - **v1.1**: Issue #240. Adds the `connectionTrigger` node type (waits for the
   WebSocket to connect/disconnect) and an optional `payload` deep-partial
   match condition on `csmsCallTrigger`. Both purely additive — files stamped

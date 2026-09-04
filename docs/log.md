@@ -542,3 +542,9 @@ Sixth review pass on PR #325.
   it. This is the third round in which this page needed correcting after the
   code moved — the correction pass is now part of the work, not a follow-up.
 - Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.
+## [2026-09-04] ingest | Charging-curve EV model (#301)
+
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): new section, and **schema v1.2**. `evSettings` gains `chargingCurve`, `rampShape`, `currentType`, `phases`, `voltageV` and `powerFactor`. All optional and absence keeps the pre-1.2 behaviour — flat acceptance at `maxChargingPowerKw`, 230 V, single phase — so every file written before this produces identical MeterValues. Purely additive, so `1.1` and `1.0` files remain valid.
+- [Scenario format](concepts/scenario-format.md#charging-curve-v12): records two rules. Current is derived **by type**: DC is `I = P / V`, AC is `I = P / (V × phases × cos φ)` with `voltageV` read as phase-to-neutral — one shared formula would report a DC current the hardware could not draw. And effective power is **`min(curve, ChargingScheduleResolver limit)`**, so a curve lowers demand and can never let a session exceed a `SetChargingProfile` the CSMS set.
+- [Scenario format](concepts/scenario-format.md#charging-curve-v12): a curve is clamped to its first and last point rather than extrapolated — a curve that starts at 20% says nothing about 10%. On 3-phase AC, `Current.Import` and `Power.Active.Import` are also reported per phase; energy registers are not split, because a meter has one.
+- [GitHub issues](sources/github-issues.md): #301 row.

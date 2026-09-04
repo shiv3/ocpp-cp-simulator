@@ -1,4 +1,9 @@
 import type { Connector } from "./Connector";
+import {
+  currentAmpsFor,
+  DEFAULT_VOLTAGE_V,
+  powerFractionAtSoc,
+} from "./ChargingCurve";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
 export type ReadingContext =
@@ -28,7 +33,6 @@ export interface SampledValue {
  * hardware; the simulator synthesizes plausible numbers so CSMS-side parsers
  * see well-formed MeterValues.req payloads.
  */
-const DEFAULT_VOLTAGE_V = 230;
 const DEFAULT_TEMPERATURE_C = 25;
 const DEFAULT_FREQUENCY_HZ = 50;
 
@@ -55,7 +59,10 @@ export function buildSampledValues(
   // else 0. We don't have a true instantaneous-power model so use the
   // most recently observed configuration where possible.
   const powerW = derivedInstantaneousPowerW(connector);
-  const currentA = powerW > 0 ? powerW / DEFAULT_VOLTAGE_V : 0;
+  const settings = connector.evSettings;
+  const currentA = currentAmpsFor(powerW, settings ?? {});
+  const voltageV = settings?.voltageV ?? DEFAULT_VOLTAGE_V;
+  const phases = settings?.currentType === "DC" ? 1 : (settings?.phases ?? 1);
 
   for (const measurand of measurands) {
     const sample = buildSingleSample(measurand, context, {
@@ -63,8 +70,23 @@ export function buildSampledValues(
       soc,
       powerW,
       currentA,
+      voltageV,
     });
     if (sample) samples.push(sample);
+    // Per-phase current on a 3-phase AC connector: the aggregate above is the
+    // total, and these are what a CSMS reading L1/L2/L3 expects to sum to it.
+    if (phases === 3 && PER_PHASE_MEASURANDS.has(measurand)) {
+      for (const phase of ["L1", "L2", "L3"] as const) {
+        const perPhase = buildSingleSample(measurand, context, {
+          meterWh,
+          soc,
+          powerW: powerW / 3,
+          currentA,
+          voltageV,
+        });
+        if (perPhase) samples.push({ ...perPhase, phase });
+      }
+    }
   }
   return samples;
 }
@@ -74,7 +96,17 @@ interface MeasurandInputs {
   soc: number | null;
   powerW: number;
   currentA: number;
+  voltageV: number;
 }
+
+/**
+ * Measurands a 3-phase connector also reports per phase.
+ *
+ * Only the ones where a per-phase value means something: an energy register is
+ * a whole-meter total, so splitting it would invent three counters that do not
+ * exist.
+ */
+const PER_PHASE_MEASURANDS = new Set(["Current.Import", "Power.Active.Import"]);
 
 function buildSingleSample(
   measurand: string,
@@ -91,7 +123,7 @@ function buildSingleSample(
       };
     case "Voltage":
       return {
-        value: String(DEFAULT_VOLTAGE_V),
+        value: String(inputs.voltageV),
         context,
         measurand,
         unit: "V",
@@ -179,16 +211,28 @@ function derivedInstantaneousPowerW(connector: Connector): number {
   // `OCPPStatus.Charging` import is avoided here to keep this module free
   // of cycles; check via the public string value.
   if (connector.status !== "Charging") return 0;
-  const maxKw = connector.evSettings?.maxChargingPowerKw ?? 0;
+  const settings = connector.evSettings;
+  const maxKw = settings?.maxChargingPowerKw ?? 0;
   const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
+
+  // The charging curve lowers demand; it never raises it (#301). A battery
+  // near full accepts less than the connector could deliver, so the curve
+  // scales the EV's own ceiling before the profile is considered.
+  const curve = settings?.chargingCurve;
+  const acceptedW =
+    curve && curve.length > 0 && Number.isFinite(evMaxW)
+      ? evMaxW * powerFractionAtSoc(curve, connector.soc ?? 0)
+      : evMaxW;
+
   // The OCPP charging profile (if any) is the real ceiling — surface it on
   // Power.Active.Import so a CSMS that's verifying its SetChargingProfile
-  // landed can read it back here.
+  // landed can read it back here. `min(curve, profile)`: the profile always
+  // wins, so a curve can never let a session draw above an active limit.
   const scheduleW = connector.currentScheduleLimitWatts();
-  const effective = Math.min(evMaxW, scheduleW);
+  const effective = Math.min(acceptedW, scheduleW);
   return Number.isFinite(effective)
     ? effective
-    : evMaxW === Infinity
+    : acceptedW === Infinity
       ? 0
-      : evMaxW;
+      : acceptedW;
 }

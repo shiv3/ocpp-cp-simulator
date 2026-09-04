@@ -883,8 +883,14 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
         throw new Error("idTagPool.tags entries must be non-empty strings");
       }
     } else if (typeof pool.file === "string" && pool.file.length > 0) {
-      idTags = readIdTagsFile(pool.file);
-      idTagFile = pool.file;
+      // Resolved against the process CWD here, once, and persisted absolute:
+      // the read below already resolves it that way, so storing the caller's
+      // relative string would have a `--state-db` daemon restarted from another
+      // directory re-resolve it somewhere else and watch the wrong file — or
+      // nothing at all — while reporting the pool as file-backed.
+      const resolvedFile = path.resolve(pool.file);
+      idTags = readIdTagsFile(resolvedFile);
+      idTagFile = resolvedFile;
     }
     if (!idTags || idTags.length === 0) {
       throw new Error("idTagPool needs a non-empty tags array or a file");

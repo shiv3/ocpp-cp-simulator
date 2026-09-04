@@ -1,6 +1,7 @@
 import * as fs from "fs";
 
 import { CLIChargePointService } from "../service";
+import type { ScenarioRunSettledInfo } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
@@ -22,6 +23,12 @@ export interface RegistryMembershipEvent {
 }
 
 export type RegistryMembershipSink = (event: RegistryMembershipEvent) => void;
+
+/** #314: "a scenario run on this charge point has ended and been cleaned up". */
+export type ScenarioRunSettledSink = (
+  cpId: string,
+  info: ScenarioRunSettledInfo,
+) => void;
 
 interface ChargePointRow {
   cp_id: string;
@@ -61,6 +68,9 @@ export class CPRegistry {
    *  behind one, changes. `--watch` uses it to keep its watched-file set in
    *  step without every mutation path having to know the watcher exists. */
   private readonly initChangeSinks = new Set<() => void>();
+  /** #314: fan-in of every live service's `onScenarioRunSettled`, so a
+   *  fleet-wide listener subscribes once instead of tracking memberships. */
+  private readonly runSettledSinks = new Set<ScenarioRunSettledSink>();
   private networkSimManager: NetworkSimManager | null = null;
 
   constructor(
@@ -284,6 +294,38 @@ export class CPRegistry {
   }
 
   /**
+   * Subscribe to "a scenario run finished and its cleanup completed" across
+   * the whole fleet (#314).
+   *
+   * The bus's `scenario_completed` / `scenario_error` events are emitted from
+   * inside the run, while the executor is still registered, so they cannot be
+   * used to decide that a scenario is free to be swapped. This forwards each
+   * service's post-cleanup hook instead.
+   */
+  onScenarioRunSettled(handler: ScenarioRunSettledSink): () => void {
+    this.runSettledSinks.add(handler);
+    return () => {
+      this.runSettledSinks.delete(handler);
+    };
+  }
+
+  private notifyScenarioRunSettled(
+    cpId: string,
+    info: ScenarioRunSettledInfo,
+  ): void {
+    for (const sink of this.runSettledSinks) {
+      try {
+        sink(cpId, info);
+      } catch (err) {
+        console.error(
+          `[CPRegistry] scenario-run-settled sink error for "${cpId}":`,
+          err,
+        );
+      }
+    }
+  }
+
+  /**
    * Swap the idTag pool of a live charge point, and re-persist it (#314).
    *
    * Safe to apply mid-transaction, unlike a scenario reload: the pool is drawn
@@ -319,8 +361,14 @@ export class CPRegistry {
       throw new Error(`cpId already exists: ${init.cpId}`);
     }
     const unsub = service.onEvent((evt) => this.bus.publish(init.cpId, evt));
+    const unsubSettled = service.onScenarioRunSettled((info) =>
+      this.notifyScenarioRunSettled(init.cpId, info),
+    );
     this.services.set(init.cpId, service);
-    this.unsubscribes.set(init.cpId, unsub);
+    this.unsubscribes.set(init.cpId, () => {
+      unsub();
+      unsubSettled();
+    });
     this.notifyInitChange();
     this.notifyRegistryMembership({
       change: "added",
@@ -416,6 +464,11 @@ export class CPRegistry {
         );
       }
     }
+    // #314: `instantiate` already pinged, but that was *before* the scenarios
+    // came back, so a subscriber that inspects them (the `--watch` drain) saw a
+    // charge point with none. Ping again now the rebuild is actually complete;
+    // `syncFromRegistry` is idempotent, so the extra ping costs nothing.
+    this.notifyInitChange();
     return svc;
   }
 
@@ -425,8 +478,14 @@ export class CPRegistry {
   private instantiate(init: ChargePointInitOptions): CLIChargePointService {
     const svc = new CLIChargePointService(init, this.database);
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
+    const unsubSettled = svc.onScenarioRunSettled((info) =>
+      this.notifyScenarioRunSettled(init.cpId, info),
+    );
     this.services.set(init.cpId, svc);
-    this.unsubscribes.set(init.cpId, unsub);
+    this.unsubscribes.set(init.cpId, () => {
+      unsub();
+      unsubSettled();
+    });
     // The single choke point for "a service now exists under this init" —
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();

@@ -594,10 +594,19 @@ export class RegistryChargePointService implements ChargePointService {
       );
     }
     const scenarioId = service.loadScenario(connectorId, parsed);
-    if (opts.strict === undefined) {
-      service.runScenario(connectorId, scenarioId);
-    } else {
-      service.runScenario(connectorId, scenarioId, { strict: opts.strict });
+    // `loadScenario` runs the auto-start gate, so a file with the usual
+    // connect-triggered start node is already running by the time we get here
+    // whenever the charge point is Available — the common case. Starting it a
+    // second time throws "already running", which used to fail the whole RPC
+    // and, with it, skip the `--watch` registration for a file that had in fact
+    // been loaded and started (#314). The per-run `strict` override is lost in
+    // that case; it belongs to a run this call did not begin.
+    if (!service.isScenarioRunning(scenarioId)) {
+      if (opts.strict === undefined) {
+        service.runScenario(connectorId, scenarioId);
+      } else {
+        service.runScenario(connectorId, scenarioId, { strict: opts.strict });
+      }
     }
     return { scenarioId };
   }

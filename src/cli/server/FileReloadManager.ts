@@ -54,20 +54,23 @@ interface ScenarioEntry extends ScenarioFileRegistration {
 }
 
 /**
- * Events after which a deferred reload is worth retrying. `transaction_stopped`
- * is the one the rule is written around; the scenario-run terminators are here
- * because a run in flight also blocks a swap, and `connector_status` is a cheap
- * backstop for the paths that end a session without either (a hard reset, a
- * disconnect mid-charge). Draining re-evaluates the gate, so an extra attempt
- * is never an early one.
+ * Bus events after which a deferred reload is worth retrying.
+ *
+ * `transaction_stopped` is the one the mid-session rule is written around, and
+ * `connector_status` is a cheap backstop for the paths that end a session
+ * without it (a hard reset, a disconnect mid-charge). Draining re-evaluates the
+ * gate, so an extra attempt is never an early one.
+ *
+ * The scenario-run terminators are deliberately **not** here.
+ * `scenario_completed` and `scenario_error` are emitted from the executor's own
+ * state hooks — synchronously, while the executor is still registered and
+ * `isScenarioRunning` still answers `true`. Draining on them re-deferred every
+ * reload held behind a run and then waited for a further event that a run
+ * ending normally never produces, so the held definition was silently dropped.
+ * `CPRegistry.onScenarioRunSettled` (fired after the run's cleanup) is the
+ * authoritative terminator instead.
  */
-const DRAIN_EVENTS = new Set([
-  "transaction_stopped",
-  "scenario_completed",
-  "scenario_error",
-  "scenario_stopped",
-  "connector_status",
-]);
+const DRAIN_EVENTS = new Set(["transaction_stopped", "connector_status"]);
 
 /**
  * Re-reads the files the daemon loaded, when it was started with `--watch`
@@ -93,6 +96,7 @@ export class FileReloadManager {
   private readonly scenarios = new Map<string, ScenarioEntry>();
   private sink: FileReloadSink | null = null;
   private unsubscribeBus: (() => void) | null = null;
+  private unsubscribeRunSettled: (() => void) | null = null;
   private closed = false;
   private readonly log: (message: string) => void;
 
@@ -111,6 +115,14 @@ export class FileReloadManager {
       if (this.scenarios.size === 0) return;
       if (!DRAIN_EVENTS.has(env.evt.event)) return;
       this.drainPending(env.cpId);
+    });
+    // The other half of the drain, and the load-bearing one for a scenario that
+    // simply runs to its end: by the time this fires the executor is gone, so
+    // the held definition actually lands instead of being deferred a second
+    // time and forgotten.
+    this.unsubscribeRunSettled = this.registry.onScenarioRunSettled((cpId) => {
+      if (this.scenarios.size === 0) return;
+      this.drainPending(cpId);
     });
   }
 
@@ -156,6 +168,8 @@ export class FileReloadManager {
         absolute,
         this.watcher.watch(absolute, () => this.reloadIdTags(absolute)),
       );
+      // Once per watch, never on a later sync for an unrelated charge point.
+      this.reconcileIdTags(absolute);
     }
     // A charge point that is gone takes its scenario registrations with it.
     for (const [key, entry] of [...this.scenarios]) {
@@ -163,6 +177,10 @@ export class FileReloadManager {
       entry.unwatch();
       this.scenarios.delete(key);
     }
+    // A `cp.update` tears the charge point down and builds a replacement. That
+    // ends whatever session was holding a reload back, but the old service's
+    // lifecycle handlers went with it, so nothing else would ever retry.
+    this.drainAllPending();
   }
 
   /**
@@ -194,10 +212,52 @@ export class FileReloadManager {
     this.scenarios.set(key, entry);
   }
 
+  /**
+   * Stop watching the file behind a scenario that is no longer file-backed.
+   *
+   * Called when a scenario is removed, and when one is replaced by an inline
+   * definition under the same id. Without it the file stays authoritative: the
+   * next edit would re-create a scenario the operator deleted, or overwrite the
+   * inline definition they just installed. {@link applyOrDefer} refuses to
+   * resurrect a removed scenario in any case — removal paths that never reach
+   * the control plane exist — but this drops the watch at once rather than at
+   * the next edit.
+   */
+  unregisterScenario(
+    cpId: string,
+    connectorId: number,
+    scenarioId: string,
+  ): void {
+    const key = scenarioKey(cpId, connectorId, scenarioId);
+    const entry = this.scenarios.get(key);
+    if (!entry) return;
+    entry.unwatch();
+    this.scenarios.delete(key);
+  }
+
+  /**
+   * Stop watching every file-backed scenario on one connector (#314).
+   *
+   * `scenario.definitions.replace` swaps a connector's whole definition set for
+   * one uploaded from the console, which makes the console the source of truth
+   * for that connector. Any file still watched behind one of those ids would
+   * otherwise overwrite the upload at its next edit — the same defect an inline
+   * `load_scenario` had, through a second door.
+   */
+  unregisterConnectorScenarios(cpId: string, connectorId: number): void {
+    for (const [key, entry] of [...this.scenarios]) {
+      if (entry.cpId !== cpId || entry.connectorId !== connectorId) continue;
+      entry.unwatch();
+      this.scenarios.delete(key);
+    }
+  }
+
   close(): void {
     this.closed = true;
     this.unsubscribeBus?.();
     this.unsubscribeBus = null;
+    this.unsubscribeRunSettled?.();
+    this.unsubscribeRunSettled = null;
     this.watcher.close();
     this.idTagWatches.clear();
     this.idTagText.clear();
@@ -206,12 +266,17 @@ export class FileReloadManager {
 
   // -- reload paths ---------------------------------------------------------
 
-  private reloadIdTags(absolutePath: string): void {
-    if (this.closed) return;
-    const affected = this.registry.list().filter((cpId) => {
+  /** Every live charge point whose `idTagPool.file` is this path. */
+  private affectedByIdTagFile(absolutePath: string): string[] {
+    return this.registry.list().filter((cpId) => {
       const file = this.registry.get(cpId)?.getInit().idTagFile;
       return file !== undefined && path.resolve(file) === absolutePath;
     });
+  }
+
+  private reloadIdTags(absolutePath: string): void {
+    if (this.closed) return;
+    const affected = this.affectedByIdTagFile(absolutePath);
     if (affected.length === 0) return;
 
     let text: string;
@@ -236,7 +301,58 @@ export class FileReloadManager {
       return;
     }
     this.idTagText.set(absolutePath, text);
-    for (const cpId of affected) {
+    this.applyIdTags(affected, absolutePath, tags);
+  }
+
+  /**
+   * Bring a newly watched file and the charge points behind it into agreement
+   * (#314).
+   *
+   * A `--state-db` restore brings back the tags as they were when the daemon
+   * last saw the file. Edit that file while the daemon is stopped and the
+   * charge point comes back **stale** — and recording the file's current bytes
+   * as the duplicate-suppression baseline would then suppress the operator's
+   * next save of that same content as "not a change", leaving the pool stale
+   * until the file happened to change again. So the comparison here is against
+   * the tags the charge point actually holds, not against the bytes.
+   *
+   * Runs once per watch, from the branch that establishes it, so an unrelated
+   * `cp.create` cannot re-report a file that has been broken on disk all along.
+   */
+  private reconcileIdTags(absolutePath: string): void {
+    if (this.closed) return;
+    const text = this.idTagText.get(absolutePath);
+    if (text === undefined) return;
+    const affected = this.affectedByIdTagFile(absolutePath);
+    if (affected.length === 0) return;
+
+    let tags: string[];
+    try {
+      tags = parseIdTagsFile(absolutePath, text);
+    } catch (err) {
+      // Same rule as the watch path: the baseline is dropped rather than left
+      // pointing at bytes that never parsed, so the next save — good or bad —
+      // is judged fresh instead of being written off as a duplicate.
+      this.idTagText.delete(absolutePath);
+      this.rejectAll(affected, "id-tags", absolutePath, err);
+      return;
+    }
+    const stale = affected.filter(
+      (cpId) => !sameTags(this.registry.get(cpId)?.getInit().idTags, tags),
+    );
+    if (stale.length === 0) return;
+    this.log(
+      `[watch] ${absolutePath} no longer matches ${stale.length} charge point(s) it was loaded into; reconciling`,
+    );
+    this.applyIdTags(stale, absolutePath, tags);
+  }
+
+  private applyIdTags(
+    cpIds: readonly string[],
+    absolutePath: string,
+    tags: readonly string[],
+  ): void {
+    for (const cpId of cpIds) {
       const applied = this.registry.applyIdTagReload(cpId, tags);
       this.emit({
         target: "id-tags",
@@ -261,7 +377,7 @@ export class FileReloadManager {
     if (this.closed) return;
     const entry = this.scenarios.get(key);
     if (!entry) return;
-    if (!this.registry.has(entry.cpId)) {
+    if (!this.registry.has(entry.cpId) || !this.stillLoaded(entry)) {
       entry.unwatch();
       this.scenarios.delete(key);
       return;
@@ -320,7 +436,24 @@ export class FileReloadManager {
     definition: ScenarioDefinition,
   ): void {
     const service = this.registry.get(entry.cpId);
-    if (!service) return;
+    // Held, not dropped, in both of the cases below — `drainPending` has
+    // already cleared `entry.pending`, so returning without restoring it is
+    // exactly how a validated edit goes missing.
+    if (!service) {
+      entry.pending = definition;
+      return;
+    }
+    // The scenario is not on the connector right now. Either it was removed —
+    // and `loadScenario` would cheerfully re-create it, which is the bug — or
+    // this is the window inside a `cp.update` rebuild, where the old service
+    // has been torn down and the snapshot is not yet re-attached. Never load,
+    // and never unregister either: unregistering here would throw away the
+    // watch and the held definition every time a charge point is edited.
+    // `reloadScenario` drops a genuinely stale registration at the next edit.
+    if (!this.stillLoaded(entry)) {
+      entry.pending = definition;
+      return;
+    }
     if (
       service.hasOpenTransaction(entry.connectorId) ||
       service.isScenarioRunning(entry.scenarioId)
@@ -359,6 +492,29 @@ export class FileReloadManager {
     this.log(
       `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reloaded from ${entry.absolutePath}`,
     );
+  }
+
+  /** Whether the charge point still holds the scenario this registration was
+   *  made for. False once it has been removed. */
+  private stillLoaded(entry: ScenarioEntry): boolean {
+    return (
+      this.registry
+        .get(entry.cpId)
+        ?.getScenario(entry.connectorId, entry.scenarioId) != null
+    );
+  }
+
+  /** Retry every held definition, whatever charge point it belongs to. Used
+   *  after a registry sync, where the charge point that was blocking a reload
+   *  may have been rebuilt out from under it. */
+  private drainAllPending(): void {
+    for (const cpId of new Set(
+      [...this.scenarios.values()]
+        .filter((entry) => entry.pending !== null)
+        .map((entry) => entry.cpId),
+    )) {
+      this.drainPending(cpId);
+    }
   }
 
   private drainPending(cpId: string): void {
@@ -427,6 +583,16 @@ function scenarioKey(
   scenarioId: string,
 ): string {
   return `${cpId} ${connectorId} ${scenarioId}`;
+}
+
+/** Order-sensitive: an idTag pool's order is its draw order under
+ *  `round-robin`, so a reordered file is a real change. */
+function sameTags(
+  current: readonly string[] | undefined,
+  next: readonly string[],
+): boolean {
+  if (current === undefined || current.length !== next.length) return false;
+  return current.every((tag, i) => tag === next[i]);
 }
 
 function readTextOrEmpty(filePath: string): string {

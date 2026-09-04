@@ -246,9 +246,26 @@ The rules, in the order they bite:
   connector with an open transaction, or for a scenario whose run is in flight,
   is _held_ — not dropped — and installed when that session ends. An in-flight
   transaction therefore always runs to completion on the values it started with.
+  A held definition is applied when the transaction stops **or when the run's
+  cleanup completes**, whichever released the gate — whether the run reached the
+  end of its graph, errored, or was stopped by hand with `stop_scenario`. The
+  daemon waits for the run to be wound up rather than for the
+  `scenario_completed` event, which is emitted from inside the run while the
+  executor is still registered. A `cp.update` that rebuilds the charge point
+  releases it too: the rebuild ends the session, and the held definition is
+  applied to the replacement once its scenarios are back.
   An idTag pool is exempt by construction: it is drawn from once per session, so
   the transaction under way keeps the tag it presented at StartTransaction and
   only the next draw sees the new list.
+- **Removing or replacing a scenario drops its watch.** `remove_scenario` stops
+  the watch behind a file-backed scenario; so does a `load_scenario` that
+  installs an inline definition under the same id, and so does a
+  `scenario.definitions.replace` upload, which makes the console the source of
+  truth for that connector's whole set. Without that the file would stay
+  authoritative and the next edit would re-create a scenario the operator
+  deleted, or overwrite the definition they had just uploaded. The reload path
+  checks as well: a scenario the charge point no longer holds is **never
+  re-created** by an edit, whichever path removed it.
 - **A scenario keeps the id it was loaded under.** If the edited file's own `id`
   changed, it is ignored. Honouring it would load a _second_ scenario and leave
   the first one in place under the old definition.
@@ -274,8 +291,18 @@ The daemon also logs each reload to stderr with a `[watch]` prefix.
 Under `--state-db` the `idTagPool.file` path is persisted alongside the resolved
 tags (`charge_points.id_tag_file`, schema v11), so a daemon restarted with
 `--watch` watches the same files again instead of coming back holding a frozen
-snapshot of a file it believes it is watching. See
-[State persistence](../concepts/state-persistence.md).
+snapshot of a file it believes it is watching. The path is **resolved to an
+absolute path when the charge point is created** and stored that way, so a
+daemon restarted from a different working directory still watches the file the
+operator meant. See [State persistence](../concepts/state-persistence.md).
+
+A file edited **while the daemon was stopped** is reconciled at startup rather
+than merely watched from then on: the restore brings back the tags as of the
+last time the daemon saw the file, so the daemon compares the file against what
+each restored charge point actually holds and applies it if they differ. Without
+that step the current bytes would be recorded as already-seen, and the
+operator's next save of that same content would be dismissed as a duplicate —
+the pool would stay stale until the file happened to change again.
 
 ## Limits & Roadmap
 

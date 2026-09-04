@@ -314,6 +314,57 @@ function scenario(id: string, delayMs: number): string {
   });
 }
 
+/**
+ * A scenario that actually runs: a `start` node walking into a single `delay`.
+ *
+ * `scenario()` above has no start node, so `runScenario` would fail before the
+ * first step — enough to load, not enough to test a run that ends normally.
+ * `enabled: false` keeps `tryAutoStartForConnector` out of it: a start node
+ * without `triggerOn` defaults to "connect", so every `loadScenario` (the
+ * reload included) would otherwise kick off a run of its own.
+ */
+function runnableScenario(id: string, delaySeconds: number): string {
+  return JSON.stringify({
+    id,
+    name: id,
+    targetType: "connector",
+    targetId: 1,
+    enabled: false,
+    trigger: { type: "manual" },
+    nodes: [
+      {
+        id: "start-1",
+        type: "start",
+        position: { x: 0, y: 0 },
+        data: { label: "Start" },
+      },
+      {
+        id: "delay-1",
+        type: "delay",
+        position: { x: 0, y: 100 },
+        data: { label: "Wait", delaySeconds },
+      },
+    ],
+    edges: [{ id: "e1", source: "start-1", target: "delay-1" }],
+  });
+}
+
+/**
+ * The same graph as {@link runnableScenario} but left auto-startable: a `start`
+ * node with no `triggerOn` defaults to "connect", so `loadScenario` starts it
+ * the moment it lands on an Available charge point. That is the ordinary shape
+ * of a scenario file, and the one `run_scenario_file` used to choke on.
+ */
+function autoStartScenario(id: string, delaySeconds: number): string {
+  const parsed = JSON.parse(runnableScenario(id, delaySeconds)) as Record<
+    string,
+    unknown
+  >;
+  delete parsed.enabled;
+  delete parsed.trigger;
+  return JSON.stringify(parsed);
+}
+
 describe("--watch reloads an idTag file (#314)", () => {
   it("re-reads the pool a charge point was created from and applies it live", async () => {
     const dir = tempDir();
@@ -578,6 +629,427 @@ describe("without --watch nothing is re-read (#314)", () => {
     expect(loadedDelay(server, "CP-NOWATCH", "static")).toBe(55);
   });
 });
+
+describe("a held scenario reload survives the run that blocked it (#314)", () => {
+  it("applies the held definition when the run ends by itself", async () => {
+    // The common path, and the one that used to drop the reload silently:
+    // `scenario_completed` is emitted from inside the run, while the executor
+    // is still registered, so a drain triggered by it re-deferred and then
+    // waited for a further event that a run ending normally never sends.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", runnableScenario("held-run", 0.4));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-RUN");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-RUN");
+
+    const service = server.registry.get("CP-RUN");
+    if (!service) throw new Error("CP-RUN missing");
+    service.runScenario(1, "held-run");
+    // Guard the guard: a reload that arrived after the run had already
+    // finished would never be deferred, and would pass for the wrong reason.
+    expect(service.isScenarioRunning("held-run")).toBe(true);
+    // The run, not a transaction, is what holds this reload back — nothing
+    // here ever emits transaction_stopped.
+    expect(service.hasOpenTransaction(1)).toBe(false);
+
+    backend.save(file, runnableScenario("held-run", 9));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+    expect(loadedDelaySeconds(server, "CP-RUN", "held-run")).toBe(0.4);
+
+    await waitFor(
+      () => !service.isScenarioRunning("held-run"),
+      "the run to finish on its own",
+    );
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held reload to land once the run settled",
+    );
+    expect(loadedDelaySeconds(server, "CP-RUN", "held-run")).toBe(9);
+  });
+
+  it("applies the held definition when the run is stopped by hand", async () => {
+    // The other terminal state, and since the run terminators left
+    // DRAIN_EVENTS the post-cleanup hook is the *only* thing that releases a
+    // reload held behind a manually stopped run. `stopScenario` drops the
+    // executor synchronously and emits `scenario_completed` itself, which no
+    // longer drains anything — so this pins the hook, not that event.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", runnableScenario("stopped-run", 30));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-STOP");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-STOP");
+
+    const service = server.registry.get("CP-STOP");
+    if (!service) throw new Error("CP-STOP missing");
+    service.runScenario(1, "stopped-run");
+    // A 30-second delay node: the run cannot end on its own inside this test,
+    // so only the stop can be what releases the held definition.
+    expect(service.isScenarioRunning("stopped-run")).toBe(true);
+    expect(service.hasOpenTransaction(1)).toBe(false);
+
+    backend.save(file, runnableScenario("stopped-run", 7));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+    expect(loadedDelaySeconds(server, "CP-STOP", "stopped-run")).toBe(30);
+
+    await rpc(
+      socket,
+      "stop_scenario",
+      { connector: 1, scenarioId: "stopped-run" },
+      "CP-STOP",
+    );
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held reload to land after the manual stop",
+    );
+    expect(loadedDelaySeconds(server, "CP-STOP", "stopped-run")).toBe(7);
+  });
+});
+
+describe("a scenario that is gone stays gone (#314)", () => {
+  it("stops watching the file behind a removed scenario", async () => {
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("removed-scenario", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-RM",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-RM");
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+
+    const removal = await rpc(
+      socket,
+      "remove_scenario",
+      { connector: 1, scenarioId: "removed-scenario" },
+      "CP-RM",
+    );
+    expect(removal.removed).toBe(true);
+    expect(server.fileReload?.watchedPaths()).not.toContain(file);
+
+    backend.save(file, scenario("removed-scenario", 22));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(events).toHaveLength(0);
+    const service = server.registry.get("CP-RM");
+    expect(service?.listScenarios(1).map((s) => s.scenarioId)).not.toContain(
+      "removed-scenario",
+    );
+  });
+
+  it("does not re-create a scenario removed without going through the RPC", async () => {
+    // Removal has paths the control plane never sees — a template instance
+    // superseded by a newer one, the web console replacing a connector's whole
+    // set. The reload path itself has to refuse to resurrect, not just the
+    // handler that happens to know about the watcher.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("gone-scenario", 55));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-RM-DIRECT",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-RM-DIRECT");
+
+    const service = server.registry.get("CP-RM-DIRECT");
+    if (!service) throw new Error("CP-RM-DIRECT missing");
+    expect(service.removeScenario(1, "gone-scenario")).toBe(true);
+    // Nothing has told the watcher yet: the file is still watched.
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+
+    backend.save(file, scenario("gone-scenario", 66));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(service.listScenarios(1).map((s) => s.scenarioId)).not.toContain(
+      "gone-scenario",
+    );
+    expect(events).toHaveLength(0);
+    // …and the stale registration is dropped rather than retried forever.
+    expect(server.fileReload?.watchedPaths()).not.toContain(file);
+  });
+
+  it("stops watching the file once an inline definition takes over the id", async () => {
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("swapped", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-INLINE",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-INLINE");
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+
+    await rpc(
+      socket,
+      "load_scenario",
+      { connector: 1, scenario: JSON.parse(scenario("swapped", 33)) },
+      "CP-INLINE",
+    );
+    expect(server.fileReload?.watchedPaths()).not.toContain(file);
+
+    backend.save(file, scenario("swapped", 44));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(events).toHaveLength(0);
+    // The hand-written definition is the live one; the abandoned file is not.
+    expect(loadedDelay(server, "CP-INLINE", "swapped")).toBe(33);
+  });
+});
+
+describe("a relative idTagPool.file is stored resolved (#314)", () => {
+  it("persists and watches the absolute path, not the caller's CWD-relative one", async () => {
+    // A daemon restarted from another directory would otherwise re-resolve the
+    // stored string against the new CWD and watch the wrong file, or nothing.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["REL"]));
+    const relative = path.relative(process.cwd(), file);
+    expect(path.isAbsolute(relative)).toBe(false);
+
+    const dbPath = path.join(dir, "state.sqlite");
+    const database = BunSqliteDatabase.open(dbPath);
+    databases.push(database);
+    const server = await startWatchingServer(new TestWatchBackend(), database);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-REL",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file: relative },
+    });
+
+    expect(server.registry.get("CP-REL")?.getInit().idTagFile).toBe(file);
+    const rows = database.all<{ id_tag_file: string | null }>(
+      "SELECT id_tag_file FROM charge_points WHERE cp_id = ?",
+      ["CP-REL"],
+    );
+    expect(rows[0]?.id_tag_file).toBe(file);
+    expect(server.fileReload?.watchedPaths()).toEqual([file]);
+  });
+});
+
+describe("a file edited while the daemon was down is reconciled (#314)", () => {
+  it("applies the current file to a charge point restored from --state-db", async () => {
+    // The half-feature this guards against: the restore brings back the tags as
+    // of the last time the daemon saw the file, and recording the file's
+    // *current* bytes as already-seen would then suppress the operator's next
+    // save of that same content as a duplicate — the pool would stay stale.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["BEFORE-DOWN"]));
+    const dbPath = path.join(dir, "state.sqlite");
+
+    const firstDb = BunSqliteDatabase.open(dbPath);
+    databases.push(firstDb);
+    const first = await startWatchingServer(new TestWatchBackend(), firstDb);
+    const firstSocket = await openClient(first);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-DOWN",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+    expect(first.registry.get("CP-DOWN")?.getInit().idTags).toEqual([
+      "BEFORE-DOWN",
+    ]);
+    firstSocket.disconnect();
+    await first.close();
+    servers.pop();
+    firstDb.close();
+    databases.pop();
+
+    // Edited with the daemon stopped — no watch is running to see it.
+    fs.writeFileSync(file, JSON.stringify(["AFTER-DOWN"]));
+
+    const backend = new TestWatchBackend();
+    const secondDb = BunSqliteDatabase.open(dbPath);
+    databases.push(secondDb);
+    const second = await startWatchingServer(backend, secondDb);
+    expect(second.restored).toContain("CP-DOWN");
+    expect(second.registry.get("CP-DOWN")?.getInit().idTags).toEqual([
+      "AFTER-DOWN",
+    ]);
+    // Reconciled through applyIdTagReload, so the DB agrees too — otherwise the
+    // next restart would undo it.
+    const rows = secondDb.all<{ id_tags: string | null }>(
+      "SELECT id_tags FROM charge_points WHERE cp_id = ?",
+      ["CP-DOWN"],
+    );
+    expect(JSON.parse(rows[0]?.id_tags ?? "null")).toEqual(["AFTER-DOWN"]);
+  });
+
+  it("leaves an unchanged file alone", async () => {
+    // The other half of the contract: reconciling must not turn every restart
+    // into a reload event for files nobody touched.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["SAME"]));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-SAME",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+    // A second, unrelated charge point re-runs syncFromRegistry.
+    await rpc(socket, "cp.create", {
+      cpId: "CP-OTHER",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(events).toHaveLength(0);
+  });
+});
+
+describe("a console upload takes a connector away from its files (#314)", () => {
+  it("stops watching after scenario.definitions.replace", async () => {
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("uploaded", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-UPLOAD",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-UPLOAD");
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+
+    // The console replaces the connector's whole set, keeping the id.
+    await rpc(socket, "scenario.definitions.replace", {
+      cpId: "CP-UPLOAD",
+      connectorId: 1,
+      definitions: [JSON.parse(scenario("uploaded", 33))],
+    });
+    expect(server.fileReload?.watchedPaths()).not.toContain(file);
+
+    backend.save(file, scenario("uploaded", 44));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(events).toHaveLength(0);
+    // The upload is still what the connector holds.
+    expect(loadedDelay(server, "CP-UPLOAD", "uploaded")).toBe(33);
+  });
+});
+
+describe("a held reload survives the charge point being rebuilt (#314)", () => {
+  it("applies once cp.update has replaced the charge point", async () => {
+    // `cp.update` tears the service down and builds a replacement. That ends
+    // the transaction holding the reload back, but it also takes the old
+    // service's lifecycle handlers with it, so nothing would ever retry.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("rebuilt", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-REBUILD");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-REBUILD");
+
+    expect(await openSession(server, "CP-REBUILD", "TAG-REBUILD")).toBe(
+      "TAG-REBUILD",
+    );
+    backend.save(file, scenario("rebuilt", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+    expect(loadedDelay(server, "CP-REBUILD", "rebuilt")).toBe(11);
+
+    // No transaction is ever stopped on the *new* service — the rebuild is the
+    // only thing that ends the session.
+    await rpc(socket, "cp.update", {
+      cpId: "CP-REBUILD",
+      wsUrl: server.registry.get("CP-REBUILD")?.getInit().wsUrl,
+      connectors: 1,
+      vendor: "RebuiltVendor",
+    });
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held reload to land after the rebuild",
+    );
+    expect(loadedDelay(server, "CP-REBUILD", "rebuilt")).toBe(22);
+    expect(server.registry.get("CP-REBUILD")?.getInit().vendor).toBe(
+      "RebuiltVendor",
+    );
+  });
+});
+
+describe("run_scenario_file registers even when the file auto-starts (#314)", () => {
+  it("watches a connect-triggered scenario the load already started", async () => {
+    // `loadScenario` runs the auto-start gate, so on an Available charge point
+    // the run is already in flight before the explicit start. That start used
+    // to throw "already running" and fail the RPC, leaving the scenario loaded
+    // and running but unwatched.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", autoStartScenario("auto-run", 30));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await createConnectedCp(server, socket, "CP-AUTO");
+    const service = server.registry.get("CP-AUTO");
+    if (!service) throw new Error("CP-AUTO missing");
+    // `cp.create` seeds "Essential CP Behavior", which auto-starts on connect
+    // and then owns the connector's auto-start slot (both the active-executor
+    // gate and the dedup key). Clear it, so the gate actually reaches the file
+    // under test — otherwise this test would prove nothing.
+    for (const loaded of service.listScenarios(1)) {
+      service.removeScenario(1, loaded.scenarioId);
+    }
+
+    const started = await rpc(
+      socket,
+      "run_scenario_file",
+      { connector: 1, file },
+      "CP-AUTO",
+    );
+    expect(started.scenarioId).toBe("auto-run");
+    expect(service.isScenarioRunning("auto-run")).toBe(true);
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+  });
+});
+
+/** The `delaySeconds` of the loaded definition's delay node. */
+function loadedDelaySeconds(
+  server: TestServer,
+  cpId: string,
+  scenarioId: string,
+): number | null {
+  const definition = server.registry.get(cpId)?.getScenario(1, scenarioId);
+  const node = definition?.nodes.find((n) => n.type === "delay") as
+    { data?: { delaySeconds?: number } } | undefined;
+  return node?.data?.delaySeconds ?? null;
+}
 
 /** The `duration` of the loaded definition's single delay node. */
 function loadedDelay(

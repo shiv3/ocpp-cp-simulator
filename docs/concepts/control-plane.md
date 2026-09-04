@@ -14,6 +14,7 @@ related:
   - log-format.md
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
+  - ../analyses/fleet-load-and-observability-roadmap.md
 updated: 2026-09-04
 ---
 

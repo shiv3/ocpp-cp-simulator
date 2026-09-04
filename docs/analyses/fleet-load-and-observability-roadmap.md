@@ -13,6 +13,7 @@ related:
   - ../concepts/control-plane.md
   - ../entities/daemon.md
   - choosing-an-interface.md
+  - ../sources/github-issues.md
 updated: 2026-09-04
 ---
 
@@ -33,6 +34,9 @@ dependency. Every item carries the files and RPCs it touches, its acceptance
 criteria and a size. Per the [ingest rule](../../CLAUDE.md), the PR that ships
 an item updates its row here — status and issue number — in the same commit, so
 this page stays true as work lands.
+
+Issue provenance for every row below is indexed in
+[GitHub issues](../sources/github-issues.md).
 
 **Size key:** S = a few files, one RPC. M = a new subsystem behind an existing
 seam. L = crosses persistence, UI and the scenario schema, or changes the
@@ -90,16 +94,27 @@ cp.create_many {
 Partial success is the honest result: one bad CSMS URL should not roll back 199
 good CPs. Creation stays sequential so registry events fire in id order.
 
-**Touches.** `src/protocol/methods.ts` (`cpParamsBaseSchema` is already
-factored out — reuse it, do not restate it), `src/cli/server/socketServer.ts`
-(`dispatchRpcCore`), `src/cli/server/CPRegistry.ts`, and a CLI flag pair
-(`--cp-count`, `--cp-id-pattern`) in `src/cli/main.ts`.
+**Derive the schema — but from the right one.** `cpParamsBaseSchema` is not
+it: it requires `cpId` (which bulk creation generates) and it does _not_ carry
+`basicAuth`, which `createParamsSchema` adds by `.extend()`. So the bulk schema
+is `createParamsSchema.omit({ cpId: true }).extend({ count, idPattern, startIndex })`.
+
+One loose end to close while here: `autoConnect` is declared in no schema —
+`createCp` reads it straight off the raw params
+(`rawParamsAsRecord(rawParams).autoConnect`). Bulk creation should declare it
+rather than copy that.
+
+**Touches.** `src/protocol/methods.ts`, `src/cli/server/socketServer.ts`
+(`dispatchRpcCore`), `src/cli/server/CPRegistry.ts`, a curated tool in
+`src/cli/server/mcp/tools.ts`, and a CLI flag pair (`--cp-count`,
+`--cp-id-pattern`) in `src/cli/main.ts`.
 
 **Acceptance.**
 
-- The MCP tool is _derived_ from the zod schema, not restated — this is the
-  lesson from #284 and the reason `cp_create` and `cp.create` stopped
-  disagreeing.
+- A `cp_create_many` tool is registered in `src/cli/server/mcp/tools.ts` — the
+  curated tools are registered by hand there, so adding the method to `METHODS`
+  alone would only reach it through the generic `call_method` — and its schema
+  is _derived_, not restated (the lesson from #284).
 - A documented, enforced `count` ceiling (`src/protocol/limits.ts`), and a row
   in [Control plane](../concepts/control-plane.md).
 - e2e against gocpp: create 20 CPs, all reach BootNotification Accepted.
@@ -110,18 +125,39 @@ factored out — reuse it, do not restate it), `src/cli/server/socketServer.ts`
 
 **Shape.** `wsUrl` accepts `string | string[]`, plus
 `urlDistribution: "round-robin" | "random" | "cp-affinity"` (default
-`round-robin`). `cp-affinity` hashes the `cpId` so a CP keeps its URL across
-restarts — that is the one policy that makes a reconnect deterministic.
+`round-robin`).
 
-**Touches.** `cpParamsBaseSchema`, and URL selection in
+**Failover semantics — state it, do not imply it.** `round-robin` and `random`
+move to another URL on every reconnect attempt. `cp-affinity` hashes the `cpId`
+to a **primary** and is sticky: it retries that primary and only falls over
+after a configured number of consecutive failures, returning to it as soon as it
+is reachable again. "Sticky" and "always rotates" are contradictory, and
+choosing between them silently is how an acceptance test ends up asserting the
+opposite of the implementation.
+
+**Scope it to OCPP-J, and resolve before persisting.** `wsUrl` is a `string`
+well past the schema: `buildBaseUrl(wsUrl: string, cpId: string)` in
+`src/cli/service.ts`, the `ChargePoint` init options, the status snapshot, and
+`charge_points.ws_url TEXT NOT NULL` in `src/cp/domain/persistence/schema.ts`.
+So:
+
+- The list is an **OCPP-J** concept. SOAP takes `centralSystemUrl` and has no
+  reconnect loop to rotate; reject an array there rather than half-supporting it.
+- Keep the list in the CP's config and resolve one URL at connect time. What is
+  persisted and reported in the snapshot stays a single string, so neither the
+  DB schema nor the restore path changes.
+
+**Touches.** `cpParamsBaseSchema` in `src/protocol/methods.ts`, the resolution
+step in `src/cli/service.ts`, and URL selection in
 `src/cp/infrastructure/transport/OCPPWebSocket.ts` beside the existing
-exponential-backoff logic (~L820). Reconnect rotates to the next URL, so a
-dead node drains rather than blocking a CP forever.
+exponential-backoff logic (~L820).
 
-**Acceptance.** Reconnect after a forced disconnect lands on a different URL
-under `round-robin` and the same URL under `cp-affinity`; covered by a unit
-test, reusing [network simulation](../concepts/network-simulation.md) to force
-the disconnect.
+**Acceptance.** After a forced disconnect (reusing
+[network simulation](../concepts/network-simulation.md)) `round-robin` lands on
+the next URL while `cp-affinity` retries its primary; after the configured
+number of consecutive failures `cp-affinity` moves on, and returns to the
+primary once it is reachable. A SOAP CP rejects an array `wsUrl` with a clear
+error. The persisted `ws_url` and the status snapshot are unchanged in shape.
 
 ### 1c. CP blueprints
 
@@ -205,11 +241,18 @@ field, so this is a separate tap, not a trace consumer.
 **Access control — decide explicitly.** `/v1/healthz` is deliberately
 unauthenticated so container probes work. `/metrics` is different: it exposes
 fleet size and traffic shape. Default it **behind the existing Basic Auth
-gate**, with a documented opt-out flag for a trusted network, and add the row to
-the policy table in [Access control](../concepts/access-control.md).
+gate** — `--web-console-basic-auth-user` / `--web-console-basic-auth-pass`,
+which already covers static assets, the Socket.IO handshake, `POST /mcp` and
+the SOAP callback, and from which only the health path is exempt.
+(`--basic-auth-user/pass` is the CSMS-facing credential and unrelated;
+`--http-basic-auth-user/pass` is what `analyze --from-daemon` uses to
+authenticate _to_ a daemon.) Add a documented opt-out flag for a trusted
+network, and add the row to the policy table in
+[Access control](../concepts/access-control.md#basic-auth-gate).
 
 **Acceptance.** A scrape parses under `promtool check metrics`; the endpoint
-returns 401 under `--basic-auth` without credentials; counters survive a CP
+returns 401 under `--web-console-basic-auth-user/pass` without credentials and
+`/v1/healthz` stays exempt; counters survive a CP
 reconnect.
 
 ## Phase 3 — Background load

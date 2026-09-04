@@ -16,6 +16,18 @@ export const SCENARIO_STR_256K = z.string().max(262_144);
 export const ARRAY_1000 = <T extends z.ZodTypeAny>(schema: T) =>
   z.array(schema).max(1_000);
 
+/**
+ * Max charge points a single `cp.create_many` call may create.
+ *
+ * Bulk creation is the one control-plane method that allocates unbounded
+ * resources from a single request — every created CP holds a WebSocket, a
+ * message queue and (with `--state-db`) rows — so the ceiling is enforced in
+ * the schema rather than left to the caller's good manners. 200 is well past
+ * what a CI fleet asks for and well short of what exhausts a daemon; raise it
+ * once `cp.create_many` has a measured per-process ceiling to sit under.
+ */
+export const CP_CREATE_MANY_MAX = 200;
+
 /** Client-side rpc ack timeout (ms). Also the server-side handler deadline. */
 export const RPC_TIMEOUT_MS = 30_000;
 

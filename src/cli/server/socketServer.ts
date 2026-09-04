@@ -25,6 +25,9 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
+  createManyParamsSchema,
+  expandIdPattern,
+  hasIdPatternPlaceholder,
   isRpcMethod,
   redactSimulatorConfig,
   registryCpToWire,
@@ -348,6 +351,8 @@ export async function dispatchRpcCore(
       return listCps(deps.chargePointService);
     case "cp.create":
       return createCp(deps, rawParams);
+    case "cp.create_many":
+      return createManyCps(deps, rawParams);
     case "cp.update":
       return updateCp(deps, rawParams);
     case "cp.delete":
@@ -482,10 +487,18 @@ async function listCps(
   );
 }
 
-async function createCp(
+/**
+ * Create exactly one charge point from an already-shaped params object.
+ *
+ * Split out of `createCp` so `cp.create_many` runs the identical path — the
+ * SOAP callback warning, the facade error classification and the fire-and-
+ * forget autoConnect included. A bulk-created charge point that behaved even
+ * slightly differently from a singly-created one would be a trap.
+ */
+async function createOneCp(
   deps: RuntimeSocketIoDeps,
   rawParams: unknown,
-): Promise<{ cpId: string }> {
+): Promise<string> {
   const init = parseCreateInput(rawParams);
   if (isSoapVersion(init.ocppVersion) && init.soapCallbackUrl) {
     const suffixWarning = soapCallbackUrlSuffixWarning(init.soapCallbackUrl);
@@ -505,7 +518,101 @@ async function createCp(
       );
     });
   }
-  return { cpId: init.cpId };
+  return init.cpId;
+}
+
+async function createCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ cpId: string }> {
+  return { cpId: await createOneCp(deps, rawParams) };
+}
+
+/**
+ * `cp.create_many` — one call, N charge points sharing every parameter but the
+ * generated id.
+ *
+ * Two behaviours worth naming because they are contracts, not incidentals:
+ *
+ * - **Partial success is the result.** A CSMS URL that only some ids can reach,
+ *   or an id that collides with an existing charge point, must not discard the
+ *   ones that came up. Failures are collected per id and returned; the call
+ *   itself only fails when the parameters are unusable.
+ * - **Creation is sequential.** Registry `event` pushes therefore arrive in id
+ *   order, which a subscriber can rely on. Bulk creation is not on a hot path,
+ *   so there is nothing to win by racing them.
+ */
+/**
+ * Why one charge point in a batch could not be created, in a form safe to send
+ * back over the control plane.
+ *
+ * `classifyFacadeError` deliberately blanks the message for the failures whose
+ * text could carry a CSMS URL — an "already exists" collision among them — so
+ * falling back to the error code is what keeps the row from being an empty
+ * string. Terse, but paired with the `cpId` it is enough to act on, and it
+ * leaks nothing. Anything else goes through the same redaction the log lines
+ * use, since a create can fail on a URL carrying Basic Auth credentials.
+ */
+function createFailureReason(err: unknown): string {
+  if (err instanceof RpcFailure) return err.message || err.code;
+  return safeLogMessage(err);
+}
+
+async function createManyCps(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{
+  created: string[];
+  failed: Array<{ cpId: string; reason: string }>;
+}> {
+  const parsed = createManyParamsSchema.safeParse(rawParams);
+  if (!parsed.success) {
+    throw new RpcFailure(
+      "invalid_params",
+      parsed.error.issues[0]?.message ?? "",
+    );
+  }
+  const { count, idPattern, startIndex, ...shared } = parsed.data;
+  const first = startIndex ?? 1;
+
+  // A SOAP charge point advertises the address the CSMS calls back on, and the
+  // daemon routes those calls by the cpId embedded in it
+  // (`<soapPath>/<cpId>/ChargePointService`). Copying one callback URL across a
+  // batch would point every station at the first station's route, so every
+  // other station's inbound calls would 404 — silently, since the create
+  // itself succeeds. Require the placeholder instead, and expand it per id.
+  const soapCallbackUrl = shared.soapCallbackUrl;
+  if (
+    count > 1 &&
+    soapCallbackUrl &&
+    !hasIdPatternPlaceholder(soapCallbackUrl)
+  ) {
+    throw new RpcFailure(
+      "invalid_params",
+      "soapCallbackUrl must contain the same {n} placeholder as idPattern when creating more than one charge point; one URL cannot route callbacks for a whole batch",
+    );
+  }
+
+  const created: string[] = [];
+  const failed: Array<{ cpId: string; reason: string }> = [];
+  for (let i = 0; i < count; i++) {
+    const index = first + i;
+    const cpId = expandIdPattern(idPattern, index);
+    try {
+      created.push(
+        await createOneCp(deps, {
+          ...shared,
+          cpId,
+          ...(soapCallbackUrl
+            ? { soapCallbackUrl: expandIdPattern(soapCallbackUrl, index) }
+            : {}),
+        }),
+      );
+    } catch (err) {
+      failed.push({ cpId, reason: createFailureReason(err) });
+    }
+  }
+  return { created, failed };
 }
 
 async function updateCp(

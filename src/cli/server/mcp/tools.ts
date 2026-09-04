@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
+  createManyParamsSchema,
   createParamsSchema,
   EXPLICIT_METHODS,
   METHODS,
@@ -66,21 +67,40 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   // be created at all (its companions vanished and the create then failed
   // `invalid_params`), and `securityProfile` / `authorizationKey` were
   // dropped while the tool answered success -- the station came up
-  // authenticating differently from what the agent asked for. `autoConnect`
-  // is the one field that is genuinely the tool's own.
+  // authenticating differently from what the agent asked for.
+  //
+  // `autoConnect` used to be re-added here because the handler honoured it
+  // while no schema declared it; it now lives on `createParamsSchema`, so
+  // there is nothing left for this tool to add.
   mcp.tool("cp_create", {
     description:
       "Create and register a new charge point. Accepts every parameter the cp.create RPC method does, including the SOAP fields (centralSystemUrl, soapPath, soapCallbackUrl) and the OCPP 1.6 security profile fields (securityProfile, authorizationKey, tls*). It stays disconnected until cp_connect is called (or pass autoConnect: true).",
-    inputSchema: createParamsSchema.extend({
-      autoConnect: z
-        .boolean()
-        .optional()
-        .describe("Connect to the CSMS immediately after creation"),
-    }),
+    inputSchema: createParamsSchema,
     handler: async (args) => {
       try {
         const result = await runRpc(deps, {
           method: "cp.create",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // Curated tools are registered by hand, so a method added to `METHODS`
+  // alone would only be reachable through the generic `call_method` escape
+  // hatch. Fleet creation is exactly the operation an agent should find by
+  // name, so it gets a tool -- with its schema derived, per #284.
+  mcp.tool("cp_create_many", {
+    description:
+      "Create and register many charge points at once. Every parameter except the id is shared by the batch; ids come from idPattern ({n}, or {n:03} to zero-pad), starting at startIndex (default 1). Returns the ids created and, separately, the ones that failed with the reason -- a partial batch is a normal result, not an error.",
+    inputSchema: createManyParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.create_many",
           params: args,
         });
         return successResult(result);

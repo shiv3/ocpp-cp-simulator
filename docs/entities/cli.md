@@ -12,7 +12,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -203,8 +203,26 @@ flags. See [Network simulation](../concepts/network-simulation.md).
 
 #### Multiple Charge Points in One Process
 
-`--cp-id` becomes optional in server mode. Additional CPs can be added at
-runtime with the browser UI or the `cp.create` Socket.IO RPC method:
+`--cp-id` becomes optional in server mode. A whole fleet can be bootstrapped
+from the flags:
+
+```bash
+# CP001 .. CP020, all pointed at the same CSMS
+ocpp-cp-sim --http-port 5172 --cp-id CP --cp-count 20 \
+            --ws-url wss://csms.example.com/ocpp/
+```
+
+`--cp-id-pattern` overrides the generated ids (`--cp-id-pattern "site-a-{n:04}"`).
+A startup scenario, if given, is loaded onto every charge point in the fleet.
+
+The whole fleet is registered before anything dials the CSMS, so `cp.list`
+answers immediately even against an unreachable one; connecting then proceeds
+8 charge points at a time. For SOAP, `--soap-public-base-url` is re-derived per
+generated id, while an explicit `--soap-callback-url` must carry the same `{n}`
+placeholder — one callback address cannot route a fleet.
+
+Additional CPs can also be added at runtime with the browser UI, the
+`cp.create` Socket.IO RPC method, or `cp.create_many` for a batch:
 
 ```js
 await rpc({
@@ -350,6 +368,8 @@ Events are emitted in all modes:
 | `--cp-id <id>`                      | Yes\*    | -                                       | Charge Point ID                                                                                                                                                                                                                  |
 | `--ws-url <url>`                    | Yes\*\*  | -                                       | WebSocket URL of CSMS (or the SOAP `CentralSystemService` URL for SOAP versions, see [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md))                                                                  |
 | `--connectors <n>`                  | No       | `1`                                     | Number of connectors                                                                                                                                                                                                             |
+| `--cp-count <n>`                    | No       | `1`                                     | Server mode: bootstrap N charge points instead of one, sharing every option but the id (#295)                                                                                                                                    |
+| `--cp-id-pattern <tpl>`             | No       | `<cp-id>{n:03}`                         | Id template used with `--cp-count`. `{n}` is the index, `{n:03}` zero-pads it                                                                                                                                                    |
 | `--ocpp-version <ver>`              | No       | `OCPP-1.6J`                             | `OCPP-1.6J`, `OCPP-2.0.1`, `OCPP-2.1`, or the SOAP versions `OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`, for a directly started or bootstrapped CP                                                                                       |
 | `--soap-callback-url <url>`         | No       | -                                       | SOAP versions: full callback URL the CSMS reaches the CP on (used verbatim)                                                                                                                                                      |
 | `--soap-public-base-url <url>`      | No       | -                                       | SOAP versions: public base the callback URL is derived from (`<base><soap-path>/<cp-id>/ChargePointService`)                                                                                                                     |

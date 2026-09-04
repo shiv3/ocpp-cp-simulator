@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import {
   ARRAY_1000,
+  CP_CREATE_MANY_MAX,
   OBJ_MAX_BYTES,
   SCENARIO_MAX_BYTES,
   STR_64K,
@@ -160,7 +161,78 @@ export const createParamsSchema = cpParamsBaseSchema.extend({
     .describe(
       "Basic auth credentials for the CSMS link. Prefer securityProfile + authorizationKey for OCPP 1.6 security profiles",
     ),
+  // Honoured by `createCp` since long before it was declared: the handler read
+  // it straight off the raw params, so it worked over socket.io yet appeared
+  // in no schema, which is why the MCP tool had to re-add it by hand. Declared
+  // here so there is one description of what `cp.create` accepts.
+  autoConnect: z
+    .boolean()
+    .optional()
+    .describe("Connect to the CSMS immediately after creation"),
 });
+
+/**
+ * `{n}` / `{n:0W}` — the only substitution `idPattern` performs. Deliberately
+ * not a template language: one index placeholder, optionally zero-padded to a
+ * fixed width, is what generated station ids need, and anything richer becomes
+ * a parser to maintain and a surface to escape.
+ *
+ * The width is capped at two digits on purpose. An unbounded one lets a
+ * schema-valid `{n:065537}` expand past `STR_64K` — the charge point would be
+ * created (`parseCreateBody` only asks that the id be non-empty) and then the
+ * result validation would fail, reporting an internal error over a side effect
+ * that already happened. It also invites a padStart allocation chosen by the
+ * caller. 99 characters of zero-padding is far past any real station id.
+ */
+const ID_PATTERN_PLACEHOLDER = /\{n(?::0(\d{1,2}))?\}/;
+
+/**
+ * Bulk creation. Derived from `createParamsSchema` rather than restating it —
+ * the same rule #284 established for the MCP tool. `cpId` is dropped because
+ * `idPattern` generates it; everything else, SOAP and security fields
+ * included, is shared by every charge point in the batch.
+ */
+export const createManyParamsSchema = createParamsSchema
+  .omit({ cpId: true })
+  .extend({
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .max(CP_CREATE_MANY_MAX)
+      .describe(`How many charge points to create (1..${CP_CREATE_MANY_MAX})`),
+    idPattern: STR_64K.refine((v) => ID_PATTERN_PLACEHOLDER.test(v), {
+      message:
+        "idPattern must contain {n} or {n:0W} with W at most 2 digits, e.g. CP{n:03}",
+    }).describe(
+      'Charge point id template. "{n}" is the index; "{n:03}" zero-pads it to width 3, so CP{n:03} yields CP001, CP002, …',
+    ),
+    startIndex: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("First index substituted into idPattern (default 1)"),
+  });
+
+/**
+ * Whether a string carries an index placeholder. Used to refuse a batch whose
+ * SOAP callback URL would be identical for every charge point in it.
+ */
+export function hasIdPatternPlaceholder(value: string): boolean {
+  return ID_PATTERN_PLACEHOLDER.test(value);
+}
+
+/** Expand `idPattern` for one index. Shared by the server and its tests. */
+export function expandIdPattern(pattern: string, index: number): string {
+  return pattern.replace(
+    new RegExp(ID_PATTERN_PLACEHOLDER, "g"),
+    (_match, width: string | undefined) =>
+      width === undefined
+        ? String(index)
+        : String(index).padStart(Number(width), "0"),
+  );
+}
 
 /** update CP — redacted snapshots may omit password; server preserves it. */
 const updateParamsSchema = cpParamsBaseSchema.extend({
@@ -392,6 +464,16 @@ export const METHODS = {
   // -- explicit non-jsonMode ops (~10) --
   "cp.list": { params: EMPTY, result: ARRAY_1000(cpListItemSchema) },
   "cp.create": { params: createParamsSchema, result: ANY },
+  // Partial success is the result, not an error: one unreachable CSMS URL must
+  // not roll back the charge points that came up fine, so failures are
+  // reported per id instead of thrown.
+  "cp.create_many": {
+    params: createManyParamsSchema,
+    result: z.object({
+      created: ARRAY_1000(STR_64K),
+      failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+    }),
+  },
   "cp.update": { params: updateParamsSchema, result: ANY },
   "cp.delete": { params: z.object({ cpId: STR_64K }), result: ANY },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
@@ -485,6 +567,7 @@ export const METHODS = {
 export const EXPLICIT_METHODS = [
   "cp.list",
   "cp.create",
+  "cp.create_many",
   "cp.update",
   "cp.delete",
   "logs.get",

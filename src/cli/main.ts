@@ -12,6 +12,7 @@ import {
   soapCallbackUrlSuffixWarning,
 } from "./soapCallbackUrl";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
+import { hasIdPatternPlaceholder } from "../protocol";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
@@ -106,6 +107,8 @@ function isLoopbackHost(host: string): boolean {
 export function parseArgs(argv: string[]): CLIOptions {
   let wsUrl = "";
   let cpId: string | null = null;
+  let cpCount = 1;
+  let cpIdPattern: string | null = null;
   let connectors = 1;
   let jsonMode = false;
   let daemon = false;
@@ -177,6 +180,14 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--connectors":
         connectors = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--cp-count":
+        cpCount = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--cp-id-pattern":
+        cpIdPattern = next ?? null;
         i++;
         break;
       case "--json":
@@ -497,6 +508,37 @@ export function parseArgs(argv: string[]): CLIOptions {
     // alongside the UI on the same origin.
   }
 
+  // A fleet size that is silently wrong is worse than a refused flag: a
+  // non-numeric --cp-count would become NaN and bootstrap nothing, and 0 or a
+  // negative would quietly bootstrap one, in both cases without saying so.
+  if (!Number.isInteger(cpCount) || cpCount < 1) {
+    process.stderr.write("Error: --cp-count must be a positive integer\n");
+    process.exit(1);
+  }
+  if (cpCount > 1 && cpIdPattern && !hasIdPatternPlaceholder(cpIdPattern)) {
+    // Without a placeholder every charge point is asked for under the same id,
+    // so the second create throws "already exists" and takes the daemon down
+    // after a partially-started fleet. Same rule as `cp.create_many`.
+    process.stderr.write(
+      "Error: --cp-id-pattern must contain {n} or {n:0W}, e.g. CP{n:03}\n",
+    );
+    process.exit(1);
+  }
+  if (
+    cpCount > 1 &&
+    soapCallbackUrl &&
+    !hasIdPatternPlaceholder(soapCallbackUrl)
+  ) {
+    // The daemon routes inbound SOAP calls by the cpId in the callback URL, so
+    // one explicit URL cannot serve a fleet. --soap-public-base-url has no such
+    // problem: it is expanded per charge point.
+    process.stderr.write(
+      "Error: --soap-callback-url must contain {n} when --cp-count is greater than 1 " +
+        "(or use --soap-public-base-url, which is derived per charge point)\n",
+    );
+    process.exit(1);
+  }
+
   const isServerMode = daemon || httpPort != null || webConsoleEnabled;
 
   if (isClientMode) {
@@ -645,6 +687,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   return {
     wsUrl,
     cpId,
+    cpCount,
+    cpIdPattern,
     connectors,
     jsonMode,
     daemon,
@@ -677,6 +721,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     extraWsHeaders,
     extraWsSubprotocols,
     soapCallbackUrl: resolvedSoapCallbackUrl,
+    soapCallbackUrlExplicit: soapCallbackUrl,
+    soapPublicBaseUrl,
     soapPath,
     securityProfile,
     authorizationKey,
@@ -700,6 +746,7 @@ Local modes (single CP, no server):
 
 Server modes (HTTP/WebSocket, multi-CP):
   --daemon [--cp-id X --ws-url Y]                  Background TCP server (127.0.0.1:${DEFAULT_HTTP_PORT})
+  --cp-count N [--cp-id-pattern CP{n:03}]          Bootstrap N charge points instead of one
   --daemon --http-port P [--cp-id ...]             Background TCP server on port P
   --http-port P [--cp-id ...]                      Foreground TCP server
 
@@ -1059,6 +1106,10 @@ async function main(): Promise<void> {
       httpHost: options.httpHost,
       pidPath: options.daemon ? DEFAULT_PID_PATH : null,
       bootstrap: buildBootstrap(options),
+      bootstrapCount: options.cpCount,
+      bootstrapIdPattern: options.cpIdPattern ?? undefined,
+      soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
+      soapPublicBaseUrl: options.soapPublicBaseUrl,
       autoConnect: !!options.cpId,
       startupScenario: options.cpId
         ? {

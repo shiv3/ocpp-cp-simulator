@@ -786,6 +786,10 @@ function toInitOptions(
     // there is no `existing` fallback — an update that drops `idTagPool`
     // means the charge point no longer has one.
     idTags: params.idTags,
+    // #314: the path travels with the list. Dropping it here is exactly the
+    // failure #299 shipped with — the create reports success and the feature
+    // (here, the watch) is inert.
+    idTagFile: params.idTagFile,
     idTagDistribution: params.idTagDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
     soapCallbackUrl: params.soapCallbackUrl ?? existing?.soapCallbackUrl,

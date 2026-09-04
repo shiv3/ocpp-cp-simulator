@@ -16,7 +16,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # Scenario File Format (v1.1)
@@ -290,6 +290,34 @@ The simulator itself calls this at every import point (browser upload,
 `--scenario` / `--scenario-template-file`, and the `load_scenario` /
 `run_scenario_file` Socket.IO methods) and only ever warns — see [Status &
 scope](#status--scope).
+
+## Re-reading a scenario file (`--watch`)
+
+A scenario file is read once, at load, and the in-memory definition is
+authoritative from then on. A daemon started with
+[`--watch`](../entities/daemon.md#file-hot-reload) (#314) also re-reads the file
+a scenario was loaded from — via `--scenario`, `--scenario-template-file`,
+`load_scenario { file }` or `run_scenario_file` — when it changes on disk, so
+editing a graph by hand does not mean recreating the charge point. Four rules,
+all of them contracts:
+
+- The reload is **debounced** and a file whose bytes did not change is not a
+  reload.
+- A file that no longer parses is **rejected**: the previous good definition
+  stays loaded, and nothing is half-applied.
+- The reload **never mutates a connector mid-session**. With an open
+  transaction, or with a run of that scenario in flight, the new definition is
+  _held_ and installed when the session ends — an in-flight run always finishes
+  on the graph it started with.
+- The reloaded definition keeps **the scenario id it was loaded under**, even if
+  the file's own `id` was edited. Honouring a changed id would load a second
+  scenario and leave the first one running on the old graph.
+
+Reloading replaces the definition; it does not itself start a run. It does go
+through the ordinary auto-start gate, though, so a reloaded scenario whose
+trigger already matches the connector's current state — a `connect` trigger on
+an already-connected charge point, for instance — **may start immediately** on
+the new graph. Anything else is run explicitly, as before.
 
 ## Template instances
 

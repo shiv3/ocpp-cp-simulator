@@ -33,6 +33,7 @@ import {
 } from "./metrics/MetricsRecorder";
 import { renderMetrics } from "./metrics/render";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
+import { FileReloadManager } from "./FileReloadManager";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -118,6 +119,14 @@ export interface ServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms: boolean;
+  /**
+   * Re-read the blueprint-instantiated idTag files and scenario files this
+   * process loaded when they change on disk (#314). Off by default: a daemon
+   * that silently re-reads files under the operator is surprising, and the
+   * agent-driven workflows this project is built around go through the control
+   * plane, where there is nothing on disk to re-read.
+   */
+  readonly watch?: boolean;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
@@ -180,6 +189,17 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   });
   registry.setNetworkSimManager(networkSimManager);
 
+  // #314: constructed before the charge points are restored below so the
+  // initial `syncFromRegistry()` sees them, and before attachSocketIo so the
+  // RPC layer can hand it the scenario files it loads. Its push sink is set
+  // once the socket.io bridge exists.
+  const fileReload = opts.watch
+    ? new FileReloadManager(registry, bus, { log: serverLog })
+    : null;
+  if (fileReload) {
+    registry.onInitChange(() => fileReload.syncFromRegistry());
+  }
+
   const configRepository = createSocketConfigRepository(database);
   const scenarioRepository = new SqliteScenarioRepository(database);
   const chargePointService = new RegistryChargePointService(registry, {
@@ -210,15 +230,22 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     connectorSettingsRepository,
     blueprints,
     chargePointService,
+    fileReload,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },
   });
+  // The bridge only exists once socket.io is attached, so the sink is wired
+  // here rather than at construction.
+  fileReload?.setSink((event) =>
+    socketIo.registryEvents?.emitFileReloaded(event),
+  );
   lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
     onShutdownStart: () => {
+      fileReload?.close();
       void socketIo.close();
     },
   });
@@ -239,6 +266,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     connectorSettingsRepository,
     blueprints,
     chargePointService,
+    fileReload,
   });
   const mcpHandler = createMcpHandler(runtimeDeps);
 
@@ -384,6 +412,17 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     started.push({ svc, init });
   }
 
+  if (fileReload) {
+    // Logged after the fleet exists, so an operator who sees nothing reload
+    // can tell "--watch is off" from "--watch is on and no file is behind any
+    // of this daemon's state". A filesystem that cannot watch reports itself
+    // separately, once, from FileWatcher.
+    fileReload.syncFromRegistry();
+    serverLog(
+      `Watch: enabled — re-reading ${fileReload.watchedPaths().length} loaded file(s) on change (#314)`,
+    );
+  }
+
   if (!opts.autoConnect && !opts.startupScenario) return;
 
   // Bounded rather than unbounded: a fleet all dialling at once is a thundering
@@ -405,7 +444,12 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         }
       }
       if (opts.startupScenario) {
-        await runStartupScenario(svc, opts.startupScenario, init.connectors);
+        await runStartupScenario(
+          svc,
+          opts.startupScenario,
+          init.connectors,
+          fileReload,
+        );
       }
     },
   );
@@ -562,6 +606,8 @@ export async function runStartupScenario(
   svc: CLIChargePointService,
   opt: NonNullable<ServerOptions["startupScenario"]>,
   connectorCount: number,
+  /** Null unless the daemon runs with `--watch` (#314). */
+  fileReload: FileReloadManager | null = null,
 ): Promise<void> {
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
@@ -637,6 +683,16 @@ export async function runStartupScenario(
       try {
         const instance = instantiateTemplate(template, connectorId);
         const scenarioId = svc.loadScenario(connectorId, instance);
+        // #314: `prepare` replays the same per-connector rewrite on every
+        // reload, so a fan-out across connectors keeps its independent copies
+        // instead of collapsing onto the file's own targetId.
+        fileReload?.registerScenarioFile({
+          filePath: opt.scenarioTemplateFile as string,
+          cpId: svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          prepare: (definition) => instantiateTemplate(definition, connectorId),
+        });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
@@ -671,11 +727,22 @@ export async function runStartupScenario(
     warnOnScenarioSchemaMismatch(opt.scenario, definition);
     for (const connectorId of connectors) {
       try {
-        const instance =
+        const fanOut = !(
           connectors.length === 1 && connectorId === definition.targetId
-            ? definition
-            : instantiateTemplate(definition, connectorId);
+        );
+        const instance = fanOut
+          ? instantiateTemplate(definition, connectorId)
+          : definition;
         const scenarioId = svc.loadScenario(connectorId, instance);
+        fileReload?.registerScenarioFile({
+          filePath: opt.scenario as string,
+          cpId: svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          prepare: fanOut
+            ? (next) => instantiateTemplate(next, connectorId)
+            : undefined,
+        });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,

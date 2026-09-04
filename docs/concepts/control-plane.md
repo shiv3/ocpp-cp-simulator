@@ -182,12 +182,16 @@ transaction node without one draws from the pool. A charge point with no pool
 keeps the historical `123456` fallback, so nothing changes for a caller that
 never configured one.
 
-**`file` is resolved once, at creation.** What the charge point stores and
-persists is the list itself, so a file edited later cannot silently change a
-running charge point, and a bad path fails the create rather than the first
-transaction. The pool holds at most 1000 tags and is persisted in
-`charge_points.id_tags` / `id_tag_distribution` (schema v9), so a restart does
-not bring the charge point back drawing nothing.
+**`file` is resolved at creation.** What the charge point stores and persists is
+the list itself, so a bad path fails the create rather than the first
+transaction. By default a file edited later does not change a running charge
+point; a daemon started with
+[`--watch`](../entities/daemon.md#file-hot-reload) (#314) re-reads it and
+replaces the pool live, which is safe because the pool is drawn from once per
+session. The pool holds at most 1000 tags and is persisted in
+`charge_points.id_tags` / `id_tag_distribution` (schema v9) plus the source path
+in `id_tag_file` (schema v11), so a restart does not bring the charge point back
+drawing nothing — or, under `--watch`, watching nothing.
 
 An unrecognised `distribution` is refused rather than defaulted.
 
@@ -435,7 +439,8 @@ Server-to-client push uses one Socket.IO event:
 
 ```js
 socket.on("event", (envelope) => {
-  // envelope.kind is "cp" or "registry"
+  // envelope.kind is "cp", "registry", "config", "scenario-definitions"
+  // or "file-reload"
 });
 ```
 
@@ -472,6 +477,35 @@ Registry event envelope:
 }
 ```
 
+File-reload event envelope, pushed only by a daemon started with `--watch`
+(#314) — see [Daemon → File hot-reload](../entities/daemon.md#file-hot-reload):
+
+```json
+{
+  "kind": "file-reload",
+  "event": "file-reloaded",
+  "target": "id-tags",
+  "path": "/srv/fleet/tags.json",
+  "cpId": "CP001",
+  "connectorId": null,
+  "scenarioId": null,
+  "outcome": "applied",
+  "error": null
+}
+```
+
+`outcome` is the whole contract, and a consumer should branch on it rather than
+assume a reload took effect:
+
+| `outcome`  | Meaning                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `applied`  | The re-read copy is live.                                                                                                       |
+| `deferred` | The file parsed, but the charge point is mid-session; the new copy is held and installed when that session ends. Never dropped. |
+| `rejected` | The file could not be read or did not parse. The previous good copy is untouched, and `error` says why.                         |
+
+`target` is `"id-tags"` or `"scenario"`. `connectorId` and `scenarioId` are
+non-null only for `"scenario"`; an idTag reload is charge-point wide.
+
 Subscribe with `events.subscribe`:
 
 ```js
@@ -483,11 +517,14 @@ const ack = await socket.timeout(30_000).emitWithAck("rpc", {
 
 Scopes:
 
-| Scope        | Push events received                                        | Subscribe result snapshot                                                                  |
-| ------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `"*"`        | CP events for every CP and all registry changes             | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
-| `"registry"` | Registry `added`, `removed`, `updated`, and `reset` changes | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
-| `"<cpId>"`   | CP events for that CP                                       | `snapshot.cps` still includes registry entries; `snapshot.perCp` includes the selected CP. |
+| Scope                    | Push events received                                        | Subscribe result snapshot                                                                  |
+| ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `"*"`                    | CP events for every CP and all registry changes             | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
+| `"registry"`             | Registry `added`, `removed`, `updated`, and `reset` changes | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
+| `"<cpId>"`               | CP events for that CP                                       | `snapshot.cps` still includes registry entries; `snapshot.perCp` includes the selected CP. |
+| `"config"`               | `config-changed` pushes for the shared simulator config     | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| `"scenario-definitions"` | `scenario-definitions-changed` pushes                       | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| `"file-reload"`          | `file-reloaded` pushes from a `--watch` daemon (#314)       | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
 
 The subscribe ack is atomic: the room join and snapshot capture happen together,
 so clients can apply the snapshot before processing subsequent `event` pushes.

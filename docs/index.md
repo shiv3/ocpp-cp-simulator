@@ -17,7 +17,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [CLI (`ocpp-cp-sim`)](entities/cli.md)                        | Headless Bun binary — REPL, JSON Lines, daemon launcher, client modes, install / packaging, `export-k6`, full flag reference        |
 | [analyze subcommand](entities/analyze.md)                     | DebugKit failure-pattern reports from a trace file or a live daemon; per-CP / per-connector splitting; excluded records; disclaimer |
-| [Daemon (server mode)](entities/daemon.md)                    | Long-lived multi-CP process: starting, flags, HTTP surfaces, health endpoint, security posture, limits                              |
+| [Daemon (server mode)](entities/daemon.md)                    | Long-lived multi-CP process: starting, flags, HTTP surfaces, health endpoint, `--watch` file hot-reload, security posture, limits   |
 | [Web console](entities/web-console.md)                        | React browser UI at `/`, `/v3`, `/v1`; Local vs Remote; what it can do; dev commands                                                |
 | [Desktop app (Tauri)](entities/desktop-app.md)                | Tauri bundle running the daemon as a sidecar; installers per OS; state location; dev/build                                          |
 | [Legacy v1 UI](entities/legacy-v1-ui.md)                      | Original single-page UI at `/v1`; URL-hash presets; experimental multi-charger mode                                                 |
@@ -29,18 +29,18 @@ Start at [Overview](overview.md). Conventions for pages are in
 
 ## Concepts (`concepts/`)
 
-| Page                                                                     | Summary                                                                                                                    |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| [Socket.IO control plane](concepts/control-plane.md)                     | The `rpc` / `event` contract: CP command methods, daemon methods, rooms and snapshots, error codes, end-to-end example     |
-| [Scenario file format (v1.1)](concepts/scenario-format.md)               | Node-graph JSON: 23 node types, triggers, assertions and the two-axis verdict, template instances, versioning, changelog   |
-| [OCPP trace format (v1.1)](concepts/trace-format.md)                     | Implementation-independent JSONL record per OCPP exchange; JSON Schema; producing records from logs                        |
-| [State persistence](concepts/state-persistence.md)                       | SQLite schema shared by daemon (`--state-db`) and browser (sql.js); table catalog; `state.reset`                           |
-| [Log format](concepts/log-format.md)                                     | One log-line shape across stderr, `logs` table, browser download and `logs.get`; newest-first `limit` windowing; retention |
-| [Network simulation](concepts/network-simulation.md)                     | Seeded latency / disconnect fault injection; layering and null semantics; RPC methods; timer behaviors; limitations        |
-| [Access control](concepts/access-control.md)                             | Bind gate, Basic Auth gate, CORS policy table, reverse-proxy 403 fix (`--cors-origin` / `--trust-forwarded-headers`)       |
-| [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) | 1.6J / 2.0.1 / 2.1 over WebSocket and 1.2 / 1.5 / 1.6S over SOAP; callback URL precedence; per-surface support             |
-| [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security extension messages and keys                                              |
-| [Local vs Remote mode](concepts/local-vs-remote-mode.md)                 | How the browser picks in-tab vs daemon operation via the health probe, and what differs                                    |
+| Page                                                                     | Summary                                                                                                                                      |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Socket.IO control plane](concepts/control-plane.md)                     | The `rpc` / `event` contract: CP command methods, daemon methods, rooms and snapshots, error codes, end-to-end example                       |
+| [Scenario file format (v1.1)](concepts/scenario-format.md)               | Node-graph JSON: 23 node types, triggers, assertions and the two-axis verdict, `--watch` re-reads, template instances, versioning, changelog |
+| [OCPP trace format (v1.1)](concepts/trace-format.md)                     | Implementation-independent JSONL record per OCPP exchange; JSON Schema; producing records from logs                                          |
+| [State persistence](concepts/state-persistence.md)                       | SQLite schema shared by daemon (`--state-db`) and browser (sql.js); table catalog; `state.reset`                                             |
+| [Log format](concepts/log-format.md)                                     | One log-line shape across stderr, `logs` table, browser download and `logs.get`; newest-first `limit` windowing; retention                   |
+| [Network simulation](concepts/network-simulation.md)                     | Seeded latency / disconnect fault injection; layering and null semantics; RPC methods; timer behaviors; limitations                          |
+| [Access control](concepts/access-control.md)                             | Bind gate, Basic Auth gate, CORS policy table, reverse-proxy 403 fix (`--cors-origin` / `--trust-forwarded-headers`)                         |
+| [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) | 1.6J / 2.0.1 / 2.1 over WebSocket and 1.2 / 1.5 / 1.6S over SOAP; callback URL precedence; per-surface support                               |
+| [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security extension messages and keys                                                                |
+| [Local vs Remote mode](concepts/local-vs-remote-mode.md)                 | How the browser picks in-tab vs daemon operation via the health probe, and what differs                                                      |
 
 ## Sources (`sources/`)
 

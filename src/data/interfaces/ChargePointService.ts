@@ -111,6 +111,10 @@ export interface CreateChargePointParams {
    * with no pool at all.
    */
   idTags?: readonly string[];
+  /** Where `idTags` was read from, when it came from `idTagPool.file` (#314).
+   *  Declared here for the same reason `idTags` is: the facade is where a
+   *  create parameter goes to be silently dropped. */
+  idTagFile?: string;
   idTagDistribution?: IdTagDistribution;
   centralSystemUrl?: string;
   soapCallbackUrl?: string;

@@ -10,6 +10,7 @@ import {
   type SimulatorConfigInput,
 } from "../../protocol";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
+import type { FileReloadEvent } from "./FileReloadManager";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus, EventEnvelope as BusEventEnvelope } from "./eventBus";
 
@@ -23,6 +24,7 @@ export interface RegistryEventBridge {
     connectorId: number | null,
     definitions: readonly ScenarioDefinition[],
   ): void;
+  emitFileReloaded(event: FileReloadEvent): void;
   close(): void;
 }
 
@@ -57,6 +59,9 @@ export function createRegistryEventBridge(
     },
     emitScenarioDefinitionsChanged(cpId, connectorId, definitions) {
       emitScenarioDefinitionsChanged(io, cpId, connectorId, definitions);
+    },
+    emitFileReloaded(event) {
+      emitFileReloaded(io, event);
     },
     close() {
       unsubscribeBus();
@@ -133,6 +138,24 @@ function emitScenarioDefinitionsChanged(
     definitions,
   });
   io.to("scenario-definitions").to(cpId).to("*").emit("event", envelope);
+}
+
+function emitFileReloaded(io: SocketIoServer, event: FileReloadEvent): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "file-reload",
+    event: "file-reloaded",
+    target: event.target,
+    path: event.path,
+    cpId: event.cpId,
+    connectorId: event.connectorId,
+    scenarioId: event.scenarioId,
+    outcome: event.outcome,
+    error: event.error,
+  });
+  // Delivered to the dedicated scope, to the affected charge point's room, and
+  // to "*": an operator watching one charge point should see its files reload
+  // without having to know the scope exists.
+  io.to("file-reload").to(event.cpId).to("*").emit("event", envelope);
 }
 
 function cpForWire(cpId: string, service: CLIChargePointService): FullCp {

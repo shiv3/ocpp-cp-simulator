@@ -45,6 +45,7 @@ function runParseArgs(args: string[]) {
     "  soapPath: options.soapPath,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "  traceOutput: options.traceOutput,",
+    "  watch: options.watch,",
     "}));",
   ].join("\n");
 
@@ -53,6 +54,53 @@ function runParseArgs(args: string[]) {
     encoding: "utf8",
   });
 }
+
+describe("parseArgs --watch (#314)", () => {
+  it("is off unless asked for", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--cp-id",
+      "CP-W",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+
+    expect(result.status).toBe(0);
+    // Opt-in by construction: a daemon that silently re-reads files under the
+    // operator is surprising, and the RPC workflows have nothing on disk.
+    expect(JSON.parse(result.stdout).watch).toBe(false);
+  });
+
+  it("turns file hot-reload on", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--watch",
+      "--cp-id",
+      "CP-W",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).watch).toBe(true);
+  });
+
+  it("refuses --watch outside a server mode instead of ignoring it", () => {
+    // The file watcher lives in the daemon. Without this the flag parses,
+    // the process runs a single standalone CP, and nothing is ever watched --
+    // the same silent-no-op #295's review rejected for --cp-count.
+    const result = runParseArgs([
+      "--watch",
+      "--cp-id",
+      "CP-W",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("--watch needs a server mode");
+  });
+});
 
 describe("parseArgs OCPP 1.6 security flags", () => {
   it("parses security profile, AuthorizationKey, and CPO name", () => {

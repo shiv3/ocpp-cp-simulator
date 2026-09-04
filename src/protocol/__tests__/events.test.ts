@@ -288,7 +288,61 @@ describe("envelopes", () => {
       }).success,
     ).toBe(true);
     expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "id-tags",
+        path: "/srv/tags.json",
+        cpId: "CP1",
+        connectorId: null,
+        scenarioId: null,
+        outcome: "applied",
+        error: null,
+      }).success,
+    ).toBe(true);
+    expect(
       eventEnvelopeSchema.safeParse({ cpId: "CP1", evt: {} }).success,
+    ).toBe(false);
+  });
+
+  it("file-reload envelopes carry the outcome the consumer branches on (#314)", () => {
+    // The three outcomes are the contract: applied means the new copy is live,
+    // deferred means it is held until the session ends, rejected means the
+    // previous good copy is untouched. A fourth value would silently reach a
+    // console that only knows these three.
+    const base = {
+      kind: "file-reload" as const,
+      event: "file-reloaded" as const,
+      target: "scenario" as const,
+      path: "/srv/s.json",
+      cpId: "CP1",
+      connectorId: 1,
+      scenarioId: "s1",
+      error: null,
+    };
+    for (const outcome of ["applied", "deferred", "rejected"]) {
+      expect(eventEnvelopeSchema.safeParse({ ...base, outcome }).success).toBe(
+        true,
+      );
+    }
+    expect(
+      eventEnvelopeSchema.safeParse({ ...base, outcome: "maybe" }).success,
+    ).toBe(false);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        ...base,
+        outcome: "applied",
+        target: "blueprint",
+      }).success,
+    ).toBe(false);
+    // connectorId is nullable but never 0: an idTag reload is charge-point
+    // wide, and a connector id is 1-based everywhere else on this wire.
+    expect(
+      eventEnvelopeSchema.safeParse({
+        ...base,
+        outcome: "applied",
+        connectorId: 0,
+      }).success,
     ).toBe(false);
   });
 

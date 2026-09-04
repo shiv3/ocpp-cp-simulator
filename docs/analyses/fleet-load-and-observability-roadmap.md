@@ -50,7 +50,7 @@ runtime model.
 | 1b  | [Multiple supervision URLs](#1b-multiple-supervision-urls)   | S    | —          | shipped     | #296  |
 | 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | planned     | #297  |
 | 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | planned     | #297  |
-| 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | planned     | #298  |
+| 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped     | #298  |
 | 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | planned     | #299  |
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | planned     | #300  |
 | 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | planned     | #301  |

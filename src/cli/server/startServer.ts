@@ -27,6 +27,11 @@ import { getGlobalLogFormat } from "../../cp/shared/Logger";
 import { expandIdPattern } from "../../protocol";
 import { resolveSoapCallbackUrl } from "../soapCallbackUrl";
 import { soapCallbackRouteCpId } from "./socketServer";
+import {
+  MetricsRecorder,
+  setGlobalMetricsRecorder,
+} from "./metrics/MetricsRecorder";
+import { renderMetrics } from "./metrics/render";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -69,6 +74,13 @@ export interface ServerOptions {
    */
   readonly soapCallbackUrlExplicit?: string | null;
   readonly soapPublicBaseUrl?: string | null;
+  /** Serve `GET /metrics`. Off by default; `--metrics` turns it on. */
+  readonly metrics?: boolean;
+  /**
+   * Serve `/metrics` outside the Basic Auth gate. Opt-in for a trusted
+   * network — the default is that the gate covers it, unlike the health path.
+   */
+  readonly metricsNoAuth?: boolean;
   readonly autoConnect: boolean;
   readonly startupScenario: {
     readonly scenario: string | null;
@@ -119,6 +131,18 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   } else {
     serverLog("State DB: in-memory (pass --state-db <path> to persist)");
   }
+
+  // One recorder for the whole daemon: the exposition is process-wide and
+  // carries no cpId label, so there is nothing per-charge-point to keep.
+  //
+  // Registered HERE, before `restoreFromDatabase()` below, for the same reason
+  // the network-sim manager is: a restored charge point's
+  // CLIChargePointService constructor is where the recorder gets attached, and
+  // a recorder created after that runs would leave every persisted charge
+  // point counted in the gauges but silent in every counter, for the life of
+  // the daemon.
+  const metricsRecorder = opts.metrics ? new MetricsRecorder() : null;
+  setGlobalMetricsRecorder(metricsRecorder);
 
   const bus = new EventBus();
   const registry = new CPRegistry(bus, database, {
@@ -209,6 +233,13 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   //   * "console" — health + socket.io + static files (UI); used by the
   //     --web-console port so the browser talks to the daemon at the same
   //     origin without CORS.
+  const metricsConfig = metricsRecorder
+    ? {
+        render: () => renderMetrics(registry, metricsRecorder),
+        exemptFromBasicAuth: opts.metricsNoAuth === true,
+      }
+    : null;
+
   const apiHandlers = createHttpHandlers({
     registry,
     bus,
@@ -219,6 +250,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
     socketIo: socketIoRoute,
     mcp: { handler: mcpHandler },
+    metrics: metricsConfig,
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
@@ -232,10 +264,18 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         webConsoleBasicAuth: opts.webConsoleBasicAuth,
         socketIo: socketIoRoute,
         mcp: { handler: mcpHandler },
+        metrics: metricsConfig,
       })
     : apiHandlers;
   if (opts.staticDir) {
     serverLog(`Web console: ${opts.staticDir}`);
+  }
+  if (metricsRecorder) {
+    serverLog(
+      opts.metricsNoAuth
+        ? "Metrics: GET /metrics (unauthenticated — trusted network only)"
+        : "Metrics: GET /metrics",
+    );
   }
   if (opts.webConsoleBasicAuth) {
     // Visible-on-startup log line so an operator can confirm the gate is on.

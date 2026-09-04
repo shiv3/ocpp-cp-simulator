@@ -74,6 +74,7 @@ import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConne
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { selectLogWindow } from "./logWindow";
+import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
 import {
   parseCreateBody,
   parseBasicAuthHeader,
@@ -229,11 +230,21 @@ export function registerSocketHandlers(
       void handleRpc(socket, state, runtimeDeps, request, ack);
     });
 
+    // Counted here rather than in `dispatchRpcCore`: these two are handled as
+    // named socket.io events and never reach it, so leaving them out made
+    // `ocppcp_rpc_requests_total` quietly incomplete for the two calls every
+    // event-consuming client makes first.
     socket.on("events.subscribe", (request: unknown, ack?: DirectAckFn) => {
       if (typeof ack !== "function") return;
       void subscribeSocket(socket, state, runtimeDeps, request).then(
-        (result) => ack(result),
-        (err) => ack(directError(err)),
+        (result) => {
+          getGlobalMetricsRecorder()?.countRpc("events.subscribe", "ok");
+          ack(result);
+        },
+        (err) => {
+          getGlobalMetricsRecorder()?.countRpc("events.subscribe", "error");
+          ack(directError(err));
+        },
       );
     });
 
@@ -241,8 +252,10 @@ export function registerSocketHandlers(
       if (typeof ack !== "function") return;
       try {
         unsubscribeSocket(socket, state, request);
+        getGlobalMetricsRecorder()?.countRpc("events.unsubscribe", "ok");
         ack({ ok: true });
       } catch (err) {
+        getGlobalMetricsRecorder()?.countRpc("events.unsubscribe", "error");
         ack(directError(err));
       }
     });
@@ -288,25 +301,47 @@ async function handleRpc(
   ack: RpcAckFn,
 ): Promise<void> {
   if (!consumeRpcToken(state)) {
+    getGlobalMetricsRecorder()?.countRpc(rpcMethodLabel(request), "error");
     ack(errorAck("invalid_params"));
     return;
   }
   if (state.inFlight >= INFLIGHT_CAP) {
+    getGlobalMetricsRecorder()?.countRpc(rpcMethodLabel(request), "error");
     ack(errorAck("invalid_params"));
     return;
   }
 
   state.inFlight += 1;
+  // Counted around the *whole* request, not around the dispatch it wraps.
+  // Parameter validation, the deadline and result validation all live out
+  // here: counting inside `dispatchRpcCore` dropped every rejected request
+  // and recorded a failed result validation as `ok`.
+  const recorder = getGlobalMetricsRecorder();
+  const method = rpcMethodLabel(request);
   try {
     const result = await withRpcDeadline(
       dispatchRpc(socket, state, deps, request),
     );
+    recorder?.countRpc(method, "ok");
     ack({ ok: true, result });
   } catch (err) {
+    recorder?.countRpc(method, "error");
     ack(errorAck(errorCodeFrom(err), rpcFailureMessage(err)));
   } finally {
     state.inFlight = Math.max(0, state.inFlight - 1);
   }
+}
+
+/**
+ * The `method` label for a request that may not have parsed.
+ *
+ * Bounded on purpose: an unparseable or unknown method is counted as
+ * `unknown` rather than minting a Prometheus series per garbage value, the
+ * same rule the wire `action` label follows.
+ */
+function rpcMethodLabel(request: unknown): string {
+  const method = rawParamsAsRecord(request).method;
+  return typeof method === "string" && isRpcMethod(method) ? method : "unknown";
 }
 
 async function dispatchRpc(
@@ -347,6 +382,10 @@ export async function dispatchRpcCore(
   cpId: string | undefined,
   rawParams: unknown,
 ): Promise<unknown> {
+  // Not counted here. The metric is recorded at the two boundaries that
+  // produce a final ack — `handleRpc` for socket.io and `runRpc` for the MCP
+  // tools and the CLI client — because parameter validation, the deadline and
+  // result validation all sit outside this function.
   switch (method) {
     case "cp.list":
       return listCps(deps.chargePointService);
@@ -467,17 +506,25 @@ export async function runRpc(
   const { method, cpId } = request;
   const rawParams = request.params ?? {};
 
-  if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
+  const recorder = getGlobalMetricsRecorder();
+  const label = isRpcMethod(method) ? method : "unknown";
+  try {
+    if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
 
-  const params = METHODS[method].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
+    const params = METHODS[method].params.safeParse(rawParams);
+    if (!params.success) throw new RpcFailure("invalid_params", "");
 
-  const result = await withRpcDeadline(
-    dispatchRpcCore(deps, method, cpId, rawParams),
-  );
-  const parsedResult = METHODS[method].result.safeParse(result);
-  if (!parsedResult.success) throw new Error("RPC result failed validation");
-  return parsedResult.data;
+    const result = await withRpcDeadline(
+      dispatchRpcCore(deps, method, cpId, rawParams),
+    );
+    const parsedResult = METHODS[method].result.safeParse(result);
+    if (!parsedResult.success) throw new Error("RPC result failed validation");
+    recorder?.countRpc(label, "ok");
+    return parsedResult.data;
+  } catch (err) {
+    recorder?.countRpc(label, "error");
+    throw err;
+  }
 }
 
 async function listCps(

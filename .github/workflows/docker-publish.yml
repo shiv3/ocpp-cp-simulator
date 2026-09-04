@@ -114,3 +114,35 @@ jobs:
           # cache is local to the repo so it's safe to write back.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # #287: "Build & push" succeeding is not the same fact as the tags being
+      # in the registry, and the release notes promise the registry. v0.7.6
+      # published notes saying `ghcr.io/...:0.7.6` existed while the build had
+      # failed, and the gap was invisible from GitHub -- the tag was there, the
+      # release page looked complete, and only a registry query said otherwise
+      # (0.7.1 went the same way and was never republished). #282 removed one
+      # cause, a flaky tarball; this covers the class -- a genuine build
+      # failure, a registry outage, a permissions change, an action bump that
+      # silently pushes nothing.
+      #
+      # Tag builds only: a branch build promises nobody anything, and `latest`
+      # moving is not a claim in a release note.
+      - name: Verify the pushed tags resolve
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          missing=0
+          # steps.meta.outputs.tags is newline-separated, one image ref per line.
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "ok       $tag"
+            else
+              echo "::error::$tag was not published -- the release notes promise it"
+              missing=$((missing + 1))
+            fi
+          done <<< "${{ steps.meta.outputs.tags }}"
+          if [ "$missing" -ne 0 ]; then
+            echo "$missing tag(s) missing from the registry." >&2
+            exit 1
+          fi

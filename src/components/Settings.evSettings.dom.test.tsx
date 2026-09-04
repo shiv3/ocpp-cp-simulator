@@ -236,3 +236,117 @@ describe("Settings electrical controls have accessible names (#301)", () => {
     }
   });
 });
+
+describe("Apply saves the electrical model the panel is showing (#301)", () => {
+  // With built-in defaults loaded, `currentType` / `phases` / `voltageV` /
+  // `powerFactor` are all undefined while the controls display AC, 1, 230 and
+  // 1. Saving them as undefined selected the pre-1.2 conversion, which reads
+  // an amp-based profile limit as three-phase — so a 16 A profile metered as
+  // 48 A while this page claimed single-phase.
+  let cleanup: (() => Promise<void>) | null = null;
+
+  beforeAll(() => {
+    (
+      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(async () => {
+    if (cleanup) {
+      await cleanup();
+      cleanup = null;
+    }
+    vi.restoreAllMocks();
+  });
+
+  async function renderSettings(): Promise<HTMLElement> {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Settings />
+        </MemoryRouter>,
+      );
+    });
+    cleanup = () => unmount(root);
+    await flush();
+    return container;
+  }
+
+  it("materializes the four displayed electrical fields on Apply", async () => {
+    setDefaultEvSettings = vi.fn();
+    const container = await renderSettings();
+
+    // The finding's own scenario: change something unrelated — a curve point —
+    // and Apply. Nothing electrical is touched, so all four fields are still
+    // the fallbacks the controls render.
+    await act(async () => findButton(container, "Add point").click());
+    await flush();
+    await act(async () => findButton(container, "Apply").click());
+    await flush();
+
+    expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect(applied.currentType).toBe("AC");
+    expect(applied.phases).toBe(1);
+    expect(applied.voltageV).toBe(230);
+    expect(applied.powerFactor).toBe(1);
+  });
+
+  it("saves exactly what each control displays", async () => {
+    setDefaultEvSettings = vi.fn();
+    const container = await renderSettings();
+
+    for (const [text, tag] of [
+      ["Current Type", "SELECT"],
+      ["Phases", "SELECT"],
+      ["Voltage (V)", "INPUT"],
+      ["Power Factor", "INPUT"],
+    ] as const) {
+      const control = controlFor(container, text);
+      expect(control!.tagName).toBe(tag);
+    }
+    await act(async () => findButton(container, "Add point").click());
+    await flush();
+    const displayed = {
+      currentType: (controlFor(container, "Current Type") as HTMLSelectElement)
+        .value,
+      phases: Number(
+        (controlFor(container, "Phases") as HTMLSelectElement).value,
+      ),
+      voltageV: Number(
+        (controlFor(container, "Voltage (V)") as HTMLInputElement).value,
+      ),
+      powerFactor: Number(
+        (controlFor(container, "Power Factor") as HTMLInputElement).value,
+      ),
+    };
+
+    await act(async () => findButton(container, "Apply").click());
+    await flush();
+
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect({
+      currentType: applied.currentType,
+      phases: applied.phases,
+      voltageV: applied.voltageV,
+      powerFactor: applied.powerFactor,
+    }).toEqual(displayed);
+  });
+
+  it("does not override a value the user did set", async () => {
+    setDefaultEvSettings = vi.fn();
+    const container = await renderSettings();
+
+    const voltage = controlFor(container, "Voltage (V)") as HTMLInputElement;
+    await act(async () => setInputValue(voltage, "400"));
+    await flush();
+    await act(async () => findButton(container, "Apply").click());
+    await flush();
+
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect(applied.voltageV).toBe(400);
+  });
+});

@@ -206,3 +206,59 @@ describe("OCPPSoapHandler.sendMeterValue on OCPP 1.5 measurands (#301)", () => {
     }
   });
 });
+
+describe("OCPPSoapHandler.sendMeterValue on OCPP 1.5 with only unsupported measurands (#301)", () => {
+  it("sends nothing rather than an empty MeterValues request", async () => {
+    // OCPP 1.5 defines neither Offered measurand, so every sample projects to
+    // null and the request would carry an empty `values[].value` list. A 1.5
+    // MeterValues.req must have at least one sample, so a conforming CSMS
+    // rejects it — an empty request is worse than no request.
+    const fetchMock = mockFetchCapturingBody();
+    try {
+      const chargePoint = createMockChargePoint(taperedConnectorStub(), [
+        "Power.Offered",
+        "Current.Offered",
+      ]);
+      const handler = new OCPPSoapHandler(chargePoint, createMockLogger(), {
+        centralSystemUrl: CSMS_URL,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      handler.sendMeterValue(1, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(fetchMock.bodies.length).toBe(0);
+    } finally {
+      fetchMock.restore();
+    }
+  });
+
+  it("still sends when at least one configured measurand survives", async () => {
+    const fetchMock = mockFetchCapturingBody();
+    try {
+      const chargePoint = createMockChargePoint(taperedConnectorStub(), [
+        "Power.Offered",
+        "Current.Offered",
+        "Energy.Active.Import.Register",
+      ]);
+      const handler = new OCPPSoapHandler(chargePoint, createMockLogger(), {
+        centralSystemUrl: CSMS_URL,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      handler.sendMeterValue(1, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(fetchMock.bodies.length).toBe(1);
+      expect(fetchMock.bodies[0]!).toContain(
+        'measurand="Energy.Active.Import.Register"',
+      );
+    } finally {
+      fetchMock.restore();
+    }
+  });
+});

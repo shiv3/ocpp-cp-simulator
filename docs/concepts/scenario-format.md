@@ -23,7 +23,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # Scenario File Format (v1.2)
@@ -336,6 +336,13 @@ axis. A curve is clamped to its first and last point rather than
 extrapolated: a curve that starts at 20% says nothing about 10%, and inventing
 a number there would be worse than admitting it.
 
+**A curve may repeat a SoC to step, and at that SoC the last point wins.**
+Two points at the same `socPercent` describe a vertical step: the earlier one
+ends the ramp into it, the later one begins the run after it. Evaluated
+exactly on the step, the value _after_ it is the answer — so a curve dropping
+to `powerFraction: 0` at 50% pauses a battery sitting exactly at 50%, rather
+than holding it at full power. The same rule applies at either end of a curve.
+
 **A malformed `chargingCurve` is discarded, never thrown on.** A value that is
 not an array, or whose entries are not objects with numeric `socPercent` and
 `powerFraction`, is dropped exactly like a point that fails the range checks;
@@ -473,9 +480,13 @@ three-phase supply do not add up to a larger current. Energy registers are not
 split — a meter has one.
 
 **Per-phase samples are emitted only when all three phases are actually in
-use.** The phase count is the connector's wiring narrowed by the active
-profile period's `numberPhases`, the same `min(connector phases, numberPhases)`
-that produces the watt cap for an amp-based limit. Under a profile restricting
+use.** The phase count is the connector's wiring narrowed by the tightest
+`numberPhases` any applicable profile imposes — the Tx-layer profile and the
+`ChargePointMaxProfile` are composed for phases **independently** of the watt
+cap, because they are independent constraints and the profile that supplies
+the lower wattage need not be the one that restricts the phases. A Tx profile
+holding a connector to one phase stays in force even when a three-phase
+station profile is what caps the watts. Under a profile restricting
 a 3-phase connector to one or two phases, only the aggregate is reported: the
 station must not claim consumption on phases the CSMS said it may not use, and
 because OCPP's `numberPhases` says how _many_ phases, never _which_, naming a
@@ -509,6 +520,20 @@ instead, exactly as it already did for `Power.Factor`, `SoC`, `Frequency` and
 the Offered measurands gets no power sample at all, which is a smaller loss
 than two answers to the same question. Every other version keeps both.
 
+**A MeterValues request with no samples is never sent.** When every measurand
+a connector is configured to sample is one its OCPP version does not define —
+a 1.5 connector sampling only `Power.Offered` and `Current.Offered` is the
+reachable case — the request would carry an empty value list, which OCPP
+requires not to be empty and a conforming CSMS rejects. The send is skipped
+and a warning names the version and the configured measurands, because from
+the CSMS side "no MeterValues at all" and "MeterValues the CP could not
+express" look identical, so the reason has to be visible locally. Relabelling
+an Offered sample onto `Power.Active.Import` to have something to send would
+be worse: it is the aliasing that was removed above, and here it would report
+the EVSE's offer as the station's consumption with nothing to reveal the
+substitution. Nothing is lost that was not already unavailable — as soon as
+one supported measurand is configured, the request goes out with it.
+
 **The curve is evaluated at the transaction's (or EV settings') `initialSoc`
 before the first synced SoC, not 0%.** `connector.soc` is `null` until the
 first synced meter tick — the normal state for a `Transaction.Begin` sample,
@@ -524,6 +549,16 @@ The Settings page's "Default EV Settings" panel and the scenario editor's
 pre-1.2 fields — the v1.2 fields are not JSON/RPC-only. Both clamp
 `powerFactor` to `[0.01, 1]`; the scenario editor's field left empty means
 "inherit the default", not zero.
+
+**The Settings page saves the electrical model it displays.** Its four
+electrical controls always render a specific value — AC, single-phase, 230 V,
+cos φ 1 when nothing is set — so Apply writes those values rather than leaving
+the fields absent. Absent fields mean "no electrical model", which selects the
+pre-1.2 A → W conversion at three phases, and the page would then have been
+showing single-phase while the connector metered as three: a 16 A profile
+reported as 48 A. The scenario editor's panel is different by design — a field
+left empty there means "inherit", and it displays empty rather than a value it
+does not hold.
 
 ## Changelog
 

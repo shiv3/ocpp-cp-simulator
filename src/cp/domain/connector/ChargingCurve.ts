@@ -85,6 +85,10 @@ export function withNormalizedChargingCurve<
  * a curve that starts at 20% says nothing about 10%, and extrapolating there
  * would invent a number rather than admit the curve does not cover it.
  *
+ * A curve may repeat a SoC to step: at a SoC the curve names more than once,
+ * the **last** point at that SoC is the answer, so the value after the step is
+ * what a battery sitting exactly on it sees.
+ *
  * Returns 1 for an empty curve, which is the historical flat behaviour.
  */
 export function powerFractionAtSoc(
@@ -93,6 +97,21 @@ export function powerFractionAtSoc(
 ): number {
   if (curve.length === 0) return 1;
   const soc = Number.isFinite(socPercent) ? socPercent : 0;
+
+  // An exact hit on a SoC the curve names: the last point at that SoC wins.
+  // This is what makes a step work. For 0/1.0, 50/1.0, 50/0.0, 100/0.0,
+  // evaluating exactly 50 has to give 0.0 — the value after the step — but
+  // interpolation reaches the *first* 50 point first, where t = 1 lands on
+  // 1.0, so a battery pinned exactly at the step stayed at full power instead
+  // of pausing (#301). Duplicates are not coalesced at normalization because
+  // both points carry meaning: the earlier one ends the ramp into the step,
+  // the later one begins the run after it.
+  for (let i = curve.length - 1; i >= 0; i--) {
+    const point = curve[i]!;
+    if (point.socPercent === soc) return point.powerFraction;
+    if (point.socPercent < soc) break;
+  }
+
   const first = curve[0]!;
   const last = curve[curve.length - 1]!;
   if (soc <= first.socPercent) return first.powerFraction;
@@ -103,8 +122,8 @@ export function powerFractionAtSoc(
     const hi = curve[i]!;
     if (soc > hi.socPercent) continue;
     const span = hi.socPercent - lo.socPercent;
-    // Two points at the same SoC: take the later one rather than dividing by
-    // zero. A curve is allowed to step.
+    // Unreachable for an exact match, which the scan above already answered;
+    // kept so an interpolation step can never divide by zero.
     if (span <= 0) return hi.powerFraction;
     const t = (soc - lo.socPercent) / span;
     return lo.powerFraction + t * (hi.powerFraction - lo.powerFraction);

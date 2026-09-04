@@ -24,7 +24,10 @@ import {
 } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
 import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
-import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
+import {
+  resolveEffectiveLimitWatts,
+  resolveEffectivePhaseLimit,
+} from "./ChargingScheduleResolver";
 import {
   effectiveChargingPowerW,
   electricalModelOf,
@@ -338,32 +341,32 @@ export class Connector {
 
   /**
    * How many phases this connector is delivering on right now: its own wiring
-   * (1 for DC), narrowed by the active charging profile period's
-   * `numberPhases`.
+   * (1 for DC), narrowed by the tightest `numberPhases` any applicable
+   * charging profile imposes.
    *
-   * The same count that produced the watt cap in
-   * {@link currentScheduleLimitWatts}, so the per-phase MeterValues samples
-   * cannot claim consumption on a phase the CSMS excluded while the cap says
-   * that phase is unavailable (#301). Unlike `currentScheduleLimitWatts` this
-   * has no side effects — it never emits `scheduleLimitChange` — because it is
-   * called while building a sample set, not while driving the meter.
+   * The restriction is composed across the Tx-layer profile and the
+   * `ChargePointMaxProfile` **independently** of the watt cap, because they
+   * are independent constraints: the profile that supplies the lower wattage
+   * need not be the one that restricts the phases, and a restriction still in
+   * force must not be dropped merely because the other profile won on watts
+   * (#301). The per-phase MeterValues samples read this, so they cannot claim
+   * consumption on a phase the CSMS excluded.
+   *
+   * Unlike {@link currentScheduleLimitWatts} this has no side effects — it
+   * never emits `scheduleLimitChange` — because it is called while building a
+   * sample set, not while driving the meter.
    */
   activePhaseCount(): number {
     const stationMax =
       this.stationProfilesProvider()?.getActive(
         ChargingProfilePurposeType.ChargePointMaxProfile,
       ) ?? null;
-    const resolved = resolveEffectiveLimitWatts(
+    const limitPhases = resolveEffectivePhaseLimit(
       this.getActiveChargingProfile(),
       stationMax,
       this.transactionValue?.startTime ?? null,
-      new Date(),
-      electricalModelOf(this._evSettings),
     );
-    return resolveActivePhases(
-      this._evSettings,
-      resolved.limitNumberPhases ?? undefined,
-    );
+    return resolveActivePhases(this._evSettings, limitPhases ?? undefined);
   }
 
   /** Snapshot of the last resolved "paused" state, used to detect crossings

@@ -10,6 +10,7 @@ import {
 } from "../../types/OcppTypes";
 import { buildSampledValues } from "../MeterValueBuilder";
 import type { Transaction } from "../Transaction";
+import { ChargingProfileStore } from "../../charge-point/ChargingProfileStore";
 
 function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
@@ -242,5 +243,96 @@ describe("the resolved phase count reaches the per-phase samples (#301)", () => 
     connector.addChargingProfile(ampProfile(200, 3));
     expect(connector.activePhaseCount()).toBe(1);
     expect(phasedSamples(connector)).toEqual([]);
+  });
+});
+
+describe("the phase restriction composes across both profiles (#301)", () => {
+  /**
+   * The watt cap and the phase restriction are independent constraints. A Tx
+   * profile can restrict the connector to one phase while a three-phase
+   * `ChargePointMaxProfile` supplies the lower wattage; reading the phase
+   * count off whichever profile won on watts dropped the Tx restriction and
+   * put L1/L2/L3 back on the wire while it was still in force.
+   */
+  function stationMaxProfile(
+    limitWatts: number,
+    numberPhases?: number,
+  ): ActiveChargingProfile {
+    return {
+      chargingProfileId: 302,
+      connectorId: 0,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [
+        {
+          startPeriod: 0,
+          limit: limitWatts,
+          ...(numberPhases ? { numberPhases } : {}),
+        },
+      ],
+    };
+  }
+
+  function connectorWithStationProfile(
+    stationProfile: ActiveChargingProfile | null,
+  ): Connector {
+    const store = new ChargingProfileStore();
+    if (stationProfile) store.add(stationProfile);
+    const connector = new Connector(1, new Logger(LogLevel.ERROR), () => store);
+    connector.evSettings = {
+      ...connector.evSettings,
+      currentType: "AC",
+      phases: 3,
+    };
+    armCharging(connector);
+    return connector;
+  }
+
+  function phasedSamples(connector: Connector): (string | undefined)[] {
+    return buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    )
+      .filter((s) => s.phase !== undefined)
+      .map((s) => s.phase);
+  }
+
+  it("keeps a Tx single-phase restriction when the station profile wins on watts", () => {
+    // Tx: 32 A on one phase = 7360 W. Station max: 3000 W on three phases —
+    // the tighter wattage, so it is what `resolveEffectiveLimitWatts` returns,
+    // and its metadata used to be the only phase count anyone saw.
+    const connector = connectorWithStationProfile(stationMaxProfile(3000, 3));
+    connector.addChargingProfile(ampProfile(32, 1));
+
+    expect(connector.currentScheduleLimitWatts()).toBe(3000);
+    expect(connector.activePhaseCount()).toBe(1);
+    expect(phasedSamples(connector)).toEqual([]);
+  });
+
+  it("keeps a station single-phase restriction when the Tx profile wins on watts", () => {
+    const connector = connectorWithStationProfile(stationMaxProfile(50_000, 1));
+    connector.addChargingProfile(ampProfile(10, 3));
+
+    // The Tx side is the tighter wattage here; the station side still names
+    // the tighter phase count.
+    expect(connector.currentScheduleLimitWatts()).toBeLessThan(50_000);
+    expect(connector.activePhaseCount()).toBe(1);
+    expect(phasedSamples(connector)).toEqual([]);
+  });
+
+  it("takes the tighter of two restrictions", () => {
+    const connector = connectorWithStationProfile(stationMaxProfile(50_000, 2));
+    connector.addChargingProfile(ampProfile(10, 3));
+    expect(connector.activePhaseCount()).toBe(2);
+  });
+
+  it("still emits three phases when neither profile restricts them", () => {
+    const connector = connectorWithStationProfile(stationMaxProfile(50_000));
+    connector.addChargingProfile(ampProfile(10, 3));
+    expect(connector.activePhaseCount()).toBe(3);
+    expect(phasedSamples(connector)).toEqual(["L1", "L2", "L3"]);
   });
 });

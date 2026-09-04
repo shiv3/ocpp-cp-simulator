@@ -14,9 +14,34 @@ import {
   defaultEVSettings,
 } from "../cp/domain/connector/EVSettings";
 import {
+  DEFAULT_VOLTAGE_V,
   MIN_UI_POWER_FACTOR,
   withNormalizedChargingCurve,
 } from "../cp/domain/connector/ChargingCurve";
+
+/**
+ * The electrical values the Default EV Settings controls are showing, filled
+ * in wherever the draft leaves one `undefined`.
+ *
+ * Each control renders a fallback — `currentType ?? "AC"`, `phases ?? 1`,
+ * `voltageV ?? 230`, `powerFactor ?? 1` — so a user who never touches them
+ * still sees a complete, specific electrical model. Saving that model is the
+ * only reading of Apply that matches the page; leaving the fields unset would
+ * silently select the legacy conversion instead (#301).
+ *
+ * `phases` and `powerFactor` are meaningless on DC and the controls for them
+ * are disabled there, but the values displayed are saved anyway so that the
+ * stored settings and the page never disagree; `resolveActivePhases` and
+ * `effectivePowerFactor` both ignore them on DC.
+ */
+function displayedElectricalDefaults(draft: EVSettings): Partial<EVSettings> {
+  return {
+    currentType: draft.currentType ?? "AC",
+    phases: draft.phases ?? 1,
+    voltageV: draft.voltageV ?? DEFAULT_VOLTAGE_V,
+    powerFactor: draft.powerFactor ?? 1,
+  };
+}
 
 const Settings: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
@@ -98,7 +123,20 @@ const Settings: React.FC = () => {
     // Normalized here rather than relied on downstream: a fresh Connector
     // reads `getDefaultEVSettings()` straight into its field initializer,
     // bypassing the `evSettings` setter's normalization (#301).
-    setDefaultEvSettings(withNormalizedChargingCurve({ ...draftEv }));
+    //
+    // The four electrical fields are also materialized to exactly what the
+    // controls display. Left `undefined` they made the form save something
+    // other than what it showed: the panel reads "AC, single-phase, 230 V,
+    // 1.0", but `electricalModelOf` saw no model at all and the domain fell
+    // back to the pre-1.2 conversion, which reads an amp-based profile limit
+    // as three-phase. A 16 A profile then metered as 48 A while the page
+    // claimed single-phase. Apply now means what the page says (#301).
+    setDefaultEvSettings(
+      withNormalizedChargingCurve({
+        ...draftEv,
+        ...displayedElectricalDefaults(draftEv),
+      }),
+    );
     setSuccess(
       "Default EV settings saved. New connectors will start with these values.",
     );

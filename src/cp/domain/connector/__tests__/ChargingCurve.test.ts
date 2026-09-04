@@ -74,15 +74,56 @@ describe("powerFractionAtSoc (#301)", () => {
     expect(powerFractionAtSoc([], 99)).toBe(1);
   });
 
-  it("steps rather than dividing by zero on a repeated SoC", () => {
+  it("steps to the later point on a repeated SoC, not the earlier one", () => {
+    // The last point at a repeated SoC is the answer — the value *after* the
+    // step, which is what the function has always documented. This assertion
+    // used to demand the earlier point's 1, encoding the defect it was
+    // supposed to guard: interpolation reaches the first 50 and lands on t=1
+    // there before the loop ever sees the duplicate (#301).
     const stepped = [
       { socPercent: 0, powerFraction: 1 },
       { socPercent: 50, powerFraction: 1 },
       { socPercent: 50, powerFraction: 0.2 },
       { socPercent: 100, powerFraction: 0.2 },
     ];
-    expect(powerFractionAtSoc(stepped, 50)).toBe(1);
+    expect(powerFractionAtSoc(stepped, 50)).toBe(0.2);
+    // The ramp into the step still ends at the earlier point's value, so the
+    // step is vertical rather than a taper that starts early.
+    expect(powerFractionAtSoc(stepped, 49.9)).toBeCloseTo(1, 2);
     expect(powerFractionAtSoc(stepped, 60)).toBeCloseTo(0.2);
+  });
+
+  it("pauses a battery pinned exactly on a step down to zero", () => {
+    // The finding's own case: a curve that cuts acceptance to nothing at 50%
+    // must give 0 at exactly 50, or a battery sitting there charges at full
+    // power forever.
+    const cliff = [
+      { socPercent: 0, powerFraction: 1 },
+      { socPercent: 50, powerFraction: 1 },
+      { socPercent: 50, powerFraction: 0 },
+      { socPercent: 100, powerFraction: 0 },
+    ];
+    expect(powerFractionAtSoc(cliff, 50)).toBe(0);
+  });
+
+  it("takes the last point when a SoC is repeated at either end", () => {
+    const atZero = [
+      { socPercent: 0, powerFraction: 1 },
+      { socPercent: 0, powerFraction: 0.3 },
+      { socPercent: 100, powerFraction: 0.3 },
+    ];
+    expect(powerFractionAtSoc(atZero, 0)).toBe(0.3);
+    const atFull = [
+      { socPercent: 0, powerFraction: 1 },
+      { socPercent: 100, powerFraction: 0.4 },
+      { socPercent: 100, powerFraction: 0.1 },
+    ];
+    expect(powerFractionAtSoc(atFull, 100)).toBe(0.1);
+  });
+
+  it("still returns the named value at a SoC that appears exactly once", () => {
+    expect(powerFractionAtSoc(TAPER, 80)).toBe(0.4);
+    expect(powerFractionAtSoc(TAPER, 0)).toBe(1);
   });
 
   it("survives a non-finite SoC", () => {

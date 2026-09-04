@@ -212,11 +212,17 @@ interface ClientWireProfile {
     },
   ): SoapPayload;
 
+  /**
+   * Build the MeterValues request for this dialect, or `null` when the dialect
+   * supports none of the configured measurands and the request would therefore
+   * carry no samples at all. OCPP requires at least one, so the caller skips
+   * the send rather than putting an empty request on the wire (#301).
+   */
   toMeterValuesRequest(
     connectorId: number,
     transactionId: number | undefined,
     sampledValues: SampledValue[],
-  ): SoapPayload;
+  ): SoapPayload | null;
 
   toStartTransactionRequest(
     transaction: Transaction,
@@ -573,17 +579,18 @@ const OCPP15_WIRE_PROFILE: ClientWireProfile = {
   },
 
   toMeterValuesRequest(connectorId, transactionId, sampledValues) {
+    const value = sampledValues
+      .map(toOcpp15MeterSample)
+      .filter((sample): sample is Ocpp15MeterSample => sample !== null);
+    // Every configured measurand was one 1.5 does not define — a connector
+    // sampling only `Power.Offered` / `Current.Offered` is the reachable case
+    // (#301). A 1.5 MeterValues.req must carry at least one value, so an empty
+    // one would be rejected by a conforming CSMS; the caller skips the send.
+    if (value.length === 0) return null;
     const payload: Ocpp15MeterValuesRequest = {
       connectorId,
       ...(transactionId !== undefined ? { transactionId } : {}),
-      values: [
-        {
-          timestamp: new Date().toISOString(),
-          value: sampledValues
-            .map(toOcpp15MeterSample)
-            .filter((sample): sample is Ocpp15MeterSample => sample !== null),
-        },
-      ],
+      values: [{ timestamp: new Date().toISOString(), value }],
     };
     return soapPayload(payload);
   },
@@ -820,6 +827,19 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       transactionId,
       sampledValue,
     );
+    if (!payload) {
+      // The dialect defines none of the configured measurands, so the request
+      // would carry no samples — and an empty MeterValues.req is rejected
+      // outright, which is worse than not sending one. Warned rather than
+      // silent: from the CSMS side "no MeterValues at all" and "MeterValues
+      // the CP could not express" look identical, so the operator needs the
+      // reason here (#301).
+      this._logger.warn(
+        `MeterValues not sent for connector ${connectorId}: ${this._dialect.version} supports none of the configured measurands (${measurands.join(", ")})`,
+        LogType.METER_VALUE,
+      );
+      return;
+    }
     this.enqueueRequest("MeterValues", payload, (env) => {
       new MeterValuesResultHandler(payload).handle(
         env.payload as MeterValuesResponseV16,

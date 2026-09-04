@@ -229,6 +229,32 @@ export function resolveEffectiveLimitWatts(
   return tx;
 }
 
+/**
+ * The tightest `numberPhases` restriction in force across both applicable
+ * profiles, or `null` when neither restricts the phase count.
+ *
+ * Resolved independently of {@link resolveEffectiveLimitWatts}, because the
+ * watt cap and the phase restriction are independent constraints and the
+ * profile that supplies one need not be the profile that supplies the other
+ * (#301). Reading `limitNumberPhases` off the watt winner meant a Tx profile
+ * restricting a connector to one phase was ignored whenever a three-phase
+ * `ChargePointMaxProfile` happened to name the lower wattage — and the
+ * MeterValues then claimed consumption on two phases the Tx profile had
+ * excluded, while that restriction was still in force.
+ */
+export function resolveEffectivePhaseLimit(
+  txProfile: ActiveChargingProfile | null,
+  chargePointMaxProfile: ActiveChargingProfile | null,
+  transactionStart: Date | null,
+  now: Date = new Date(),
+): number | null {
+  const limits = [txProfile, chargePointMaxProfile]
+    .map((p) => resolveScheduleLimitWatts(p, transactionStart, now))
+    .map((r) => r.limitNumberPhases)
+    .filter((n): n is number => n !== null);
+  return limits.length === 0 ? null : Math.min(...limits);
+}
+
 // ─── Composite schedule (GetCompositeSchedule.req) ───────────────────────
 
 export interface CompositePeriod {

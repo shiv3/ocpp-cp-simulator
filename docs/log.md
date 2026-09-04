@@ -86,3 +86,9 @@ knowledge first entered the documentation, not wiki operations.
 - [Security profiles](concepts/security-profiles.md): transport column now reads "as configured" for Profile 1 and "`wss://` (upgraded)" for 2/3; new "Transport scheme rule" section (upgrade-only, warnings, pre-#277 behaviour, A00.FR.206 rationale); Profile-1-behind-a-TLS-proxy example added.
 - [GitHub issues](sources/github-issues.md): #178 §1.2 / #277 row.
 - Code: `src/cp/infrastructure/transport/wsUrlWithBasic.ts` (scheme rule + warnings), `src/components/ChargePointConfigModal.tsx` (form mirrors the rule), `src/cli/main.ts` (`--help`).
+
+## [2026-09-04] ingest | `--tls-ca` semantics and the CSMS's vote on profile 2 (#289)
+
+- [Security profiles](concepts/security-profiles.md): two new sections. `--tls-ca` is optional — without it the system trust store verifies the CSMS, which is what a publicly-issued certificate needs — and passing it **replaces** the default roots rather than adding to them (verified on the daemon runtime: an unrelated CA fails a public `wss://` handshake). Separately, profiles 2/3 bind the station, not the CSMS: a CSMS behind a TLS-terminating proxy sees cleartext and may refuse a correct profile-2 station with `401`, so configure the CSMS before switching the station over.
+- Profile 2 example split into a public-certificate form (no TLS flag) and a private-CA form.
+- [GitHub issues](sources/github-issues.md): #289 row.

@@ -8,7 +8,10 @@ sources:
   - src/cp/application/verification/ScenarioAssertions.ts
   - src/scenario/scenarioSchemaValidator.ts
   - src/scenario/deepPartialMatch.ts
-  - "issues #214, #240, #247, #239"
+  - src/cp/domain/connector/ChargingCurve.ts
+  - src/cp/domain/connector/MeterValueBuilder.ts
+  - src/cp/domain/connector/Connector.ts
+  - "issues #214, #240, #247, #239, #301"
 related:
   - ../sources/scenario-json-schema.md
   - ../entities/scenario-templates.md
@@ -16,7 +19,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # Scenario File Format (v1.2)
@@ -314,25 +317,45 @@ next boot.
 (#301). Every field is optional and absence keeps the pre-1.2 behaviour: flat
 acceptance at `maxChargingPowerKw`, 230 V, single phase.
 
-| Field           | Meaning                                                                               |
-| --------------- | ------------------------------------------------------------------------------------- |
-| `chargingCurve` | `{ socPercent, powerFraction }[]` — piecewise-linear power acceptance against SoC.    |
-| `rampShape`     | `linear` (default) or `sigmoid`, for the climb from session start to full acceptance. |
-| `currentType`   | `AC` or `DC`. DC has no reactive component.                                           |
-| `phases`        | `1` (default) or `3`, AC only.                                                        |
-| `voltageV`      | **Phase-to-neutral** volts. Default 230.                                              |
-| `powerFactor`   | cos φ, AC only. Default 1.                                                            |
+| Field           | Meaning                                                                            |
+| --------------- | ---------------------------------------------------------------------------------- |
+| `chargingCurve` | `{ socPercent, powerFraction }[]` — piecewise-linear power acceptance against SoC. |
+| `currentType`   | `AC` or `DC`. DC has no reactive component.                                        |
+| `phases`        | `1` (default) or `3`, AC only.                                                     |
+| `voltageV`      | **Phase-to-neutral** volts. Default 230.                                           |
+| `powerFactor`   | cos φ, AC only. Default 1.                                                         |
+
+`chargingCurve` is normalized when it reaches a connector (sorted by
+`socPercent`, points outside `0-100` / `0-1` dropped) — a scenario file may
+list points in any order, and interpolation can otherwise assume a monotone
+axis. A curve is clamped to its first and last point rather than
+extrapolated: a curve that starts at 20% says nothing about 10%, and inventing
+a number there would be worse than admitting it.
 
 **Current is derived by type, not by one shared formula.** DC is `I = P / V`;
 AC is `I = P / (V × phases × cos φ)`. Applying `powerFactor` to DC would report
-a current the hardware could not draw.
+a current the hardware could not draw — `Power.Factor` itself always reports
+`1` on DC for the same reason, regardless of a configured `powerFactor`, and
+the configured value on AC (default `1`), so it never disagrees with the
+current derived from it in the same MeterValue.
 
-**The curve lowers demand and never raises it.** Effective power is
-`min(curve-derived power, ChargingScheduleResolver limit)`, so an active
-`SetChargingProfile` always wins — a curve cannot let a session draw above a
-limit the CSMS set. A curve is clamped to its first and last point rather than
-extrapolated: a curve that starts at 20% says nothing about 10%, and inventing
-a number there would be worse than admitting it.
+**The curve lowers demand and never raises it, for both the reported sample
+and the register it feeds.** Effective power is `min(curve-derived power,
+ChargingScheduleResolver limit)`, so an active `SetChargingProfile` always
+wins — a curve cannot let a session draw above a limit the CSMS set. With a
+curve configured, the energy register and derived SoC accumulate at that same
+effective power, not just `Power.Active.Import` — a `powerFraction: 0` point
+stops delivery outright rather than only zeroing the reported number.
+Without a curve, accumulation is unchanged from before v1.2: the
+increment/bezier trajectory a scenario configures is its own contract,
+independent of `maxChargingPowerKw`, and only the charging-profile limit caps
+it.
+
+`Power.Offered` / `Current.Offered` are the EVSE's own offer —
+`min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the
+curve says the battery accepts. A 100 kW charger still offers 100 kW to a
+nearly-full battery that the curve says only draws 10% of it; conflating the
+two would make a charger appear to shrink as a car fills up.
 
 On a 3-phase AC connector, `Current.Import` and `Power.Active.Import` are also
 reported per phase (`L1` / `L2` / `L3`), summing to the aggregate. Energy
@@ -341,11 +364,14 @@ registers are not split — a meter has one.
 ## Changelog
 
 - **v1.2**: Issue #301. Adds the charging-curve and electrical fields to
-  `evSettings` — `chargingCurve`, `rampShape`, `currentType`, `phases`,
-  `voltageV`, `powerFactor`. All optional: settings without a `chargingCurve`
-  keep flat acceptance at `maxChargingPowerKw`, which is what every file
-  written before this produced. Purely additive, so `1.1` and `1.0` files
-  remain valid.
+  `evSettings` — `chargingCurve`, `currentType`, `phases`, `voltageV`,
+  `powerFactor`. All optional: settings without a `chargingCurve` keep flat
+  acceptance at `maxChargingPowerKw`, which is what every file written before
+  this produced. Purely additive, so `1.1` and `1.0` files remain valid. (A
+  `rampShape` field — a ramp from session start to full acceptance — was
+  proposed alongside these but dropped before release: wiring it in needs a
+  ramp-duration setting `EVSettings` doesn't have, and inventing one would
+  make up a number rather than expose a real control; it never shipped.)
 - **v1.1**: Issue #240. Adds the `connectionTrigger` node type (waits for the
   WebSocket to connect/disconnect) and an optional `payload` deep-partial
   match condition on `csmsCallTrigger`. Both purely additive — files stamped

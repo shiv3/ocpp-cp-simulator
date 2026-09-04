@@ -6,9 +6,6 @@ export interface ChargingCurvePoint {
   powerFraction: number;
 }
 
-/** How the session ramps from zero to full acceptance. */
-export type EvRampShape = "linear" | "sigmoid";
-
 export interface EVSettings {
   modelName: string; // EV名/モデル
   batteryCapacityKwh: number; // バッテリー容量 (kWh)
@@ -28,8 +25,6 @@ export interface EVSettings {
    * monotone x-axis.
    */
   chargingCurve?: ChargingCurvePoint[];
-  /** Ramp from session start to full acceptance. Absent means `linear`. */
-  rampShape?: EvRampShape;
   /** `DC` has no reactive component; `AC` divides current by phases. */
   currentType?: "AC" | "DC";
   /** AC phases. 1 or 3; absent means 1. */

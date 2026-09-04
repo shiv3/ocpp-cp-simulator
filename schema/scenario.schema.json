@@ -124,7 +124,6 @@
             }
           }
         },
-        "rampShape": { "type": "string", "enum": ["linear", "sigmoid"] },
         "currentType": { "type": "string", "enum": ["AC", "DC"] },
         "phases": { "type": "number", "enum": [1, 3] },
         "voltageV": { "type": "number", "exclusiveMinimum": 0 },

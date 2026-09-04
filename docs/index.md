@@ -32,7 +32,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | Page                                                                     | Summary                                                                                                                    |
 | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | [Socket.IO control plane](concepts/control-plane.md)                     | The `rpc` / `event` contract: CP command methods, daemon methods, rooms and snapshots, error codes, end-to-end example     |
-| [Scenario file format (v1.1)](concepts/scenario-format.md)               | Node-graph JSON: 23 node types, triggers, assertions and the two-axis verdict, template instances, versioning, changelog   |
+| [Scenario file format (v1.2)](concepts/scenario-format.md)               | Node-graph JSON: 23 node types, triggers, assertions and the two-axis verdict, template instances, versioning, changelog   |
 | [OCPP trace format (v1.1)](concepts/trace-format.md)                     | Implementation-independent JSONL record per OCPP exchange; JSON Schema; producing records from logs                        |
 | [State persistence](concepts/state-persistence.md)                       | SQLite schema shared by daemon (`--state-db`) and browser (sql.js); table catalog; `state.reset`                           |
 | [Log format](concepts/log-format.md)                                     | One log-line shape across stderr, `logs` table, browser download and `logs.get`; newest-first `limit` windowing; retention |

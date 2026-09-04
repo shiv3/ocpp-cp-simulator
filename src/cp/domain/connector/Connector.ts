@@ -25,6 +25,10 @@ import {
 import { Transaction } from "./Transaction";
 import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
 import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
+import {
+  effectiveChargingPowerW,
+  normalizeChargingCurve,
+} from "./ChargingCurve";
 import type { ChargingProfileStore } from "../charge-point/ChargingProfileStore";
 
 export interface ChargingSchedulePeriod {
@@ -262,8 +266,14 @@ export class Connector {
           }
         },
         // Re-evaluated every tick so a schedule that crosses a period
-        // boundary mid-transaction is honored immediately.
-        getScheduleLimitWatts: () => this.currentScheduleLimitWatts(),
+        // boundary mid-transaction is honored immediately. Also folds in the
+        // charging curve (#301): without one this returns exactly the
+        // profile limit, unchanged from before the curve existed — with one,
+        // the register and SoC advance at the same effective power
+        // `MeterValueBuilder` reports, instead of the curve only ever
+        // affecting the *reported* number while the register kept climbing
+        // on its original trajectory.
+        getScheduleLimitWatts: () => this.effectiveMeterCapWatts(),
       },
       this.logger,
     );
@@ -311,6 +321,37 @@ export class Connector {
    *  of the limit=0 boundary across schedule periods. `null` means we
    *  haven't seen a capped schedule yet (or it was cleared). */
   private lastSchedulePaused: boolean | null = null;
+
+  /**
+   * The cap the meter scheduler should accumulate energy against: the
+   * charging-profile limit ({@link currentScheduleLimitWatts}), additionally
+   * narrowed by the battery-acceptance curve when one is configured (#301).
+   *
+   * Deliberately a no-op when there is no curve, or `maxChargingPowerKw` is
+   * unconfigured — a fraction of an unknown ceiling isn't a wattage, and a
+   * scenario with no curve must accumulate exactly as it did before this
+   * field existed (its increment/bezier trajectory is its own contract, not
+   * bounded by `maxChargingPowerKw`). This intentionally does not use
+   * {@link effectiveChargingPowerW}'s "0 when both ceilings are infinite"
+   * fallback for that no-curve case — that fallback is fine for a *reported*
+   * sample but would freeze the register for any curve-less connector with
+   * no active profile.
+   */
+  private effectiveMeterCapWatts(): number {
+    const scheduleW = this.currentScheduleLimitWatts();
+    const curve = this._evSettings.chargingCurve;
+    const maxKw = this._evSettings.maxChargingPowerKw ?? 0;
+    const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
+    if (!curve || curve.length === 0 || !Number.isFinite(evMaxW)) {
+      return scheduleW;
+    }
+    return effectiveChargingPowerW({
+      evMaxW,
+      curve,
+      socPercent: this.soc,
+      scheduleLimitWatts: scheduleW,
+    });
+  }
 
   private socFromMeterValue(meterValueWh: number): number | null {
     const transactionCapacity = this.transactionValue?.batteryCapacityKwh;
@@ -496,7 +537,16 @@ export class Connector {
   }
 
   set evSettings(settings: EVSettings) {
-    this._evSettings = { ...settings };
+    // Normalized here, at the one boundary every write to evSettings passes
+    // through (the setter, `applyEvSettingsOverride` and
+    // `applyDefaultEvSettings` all funnel here) — so every reader
+    // (`powerFractionAtSoc`, the meter scheduler) can assume an
+    // already-sorted, already-validated curve rather than re-normalizing
+    // per sample (#301).
+    const chargingCurve = settings.chargingCurve
+      ? normalizeChargingCurve(settings.chargingCurve)
+      : settings.chargingCurve;
+    this._evSettings = { ...settings, chargingCurve };
     this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
   }
 

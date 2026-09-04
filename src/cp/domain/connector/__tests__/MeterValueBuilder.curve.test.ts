@@ -98,6 +98,104 @@ describe("MeterValueBuilder with a charging curve (#301)", () => {
   });
 });
 
+describe("Power.Offered / Current.Offered (#301)", () => {
+  it("offers the full EVSE ceiling even when the curve tapers acceptance", () => {
+    // A 100 kW charger still *offers* 100 kW to a nearly-full battery that
+    // the curve says only accepts 10% of it — the curve describes the
+    // battery, not the EVSE.
+    const nearlyFull = connectorStub({
+      soc: 100,
+      evSettings: { chargingCurve: TAPER },
+    });
+    expect(valueOf(nearlyFull, "Power.Active.Import")).toBe(10_000);
+    expect(valueOf(nearlyFull, "Power.Offered")).toBe(100_000);
+  });
+
+  it("still caps the offer at an active charging profile", () => {
+    // The profile is the EVSE's own limit (set by the CSMS), unlike the
+    // curve, which is a battery-acceptance concern.
+    const capped = connectorStub({
+      soc: 100,
+      evSettings: { chargingCurve: TAPER },
+      scheduleLimitW: 50_000,
+    });
+    expect(valueOf(capped, "Power.Offered")).toBe(50_000);
+  });
+
+  it("matches Power.Active.Import when there is no curve", () => {
+    const flat = connectorStub({ soc: 50 });
+    expect(valueOf(flat, "Power.Offered")).toBe(
+      valueOf(flat, "Power.Active.Import"),
+    );
+  });
+
+  it("derives Current.Offered from the offered power, not the accepted one", () => {
+    const dc = connectorStub({
+      soc: 100,
+      evSettings: {
+        chargingCurve: TAPER,
+        maxChargingPowerKw: 100,
+        currentType: "DC",
+        voltageV: 400,
+      },
+    });
+    // Offered: 100_000 W / 400 V = 250 A. Accepted (Current.Import): 10_000 W
+    // / 400 V = 25 A. They must differ, or Offered is just aliasing Import.
+    expect(valueOf(dc, "Current.Offered")).toBeCloseTo(250, 0);
+    expect(valueOf(dc, "Current.Import")).toBeCloseTo(25, 0);
+  });
+});
+
+describe("Power.Factor (#301)", () => {
+  it("reports the configured value on AC", () => {
+    const ac = connectorStub({
+      soc: 0,
+      evSettings: { currentType: "AC", powerFactor: 0.98 },
+    });
+    expect(valueOf(ac, "Power.Factor")).toBeCloseTo(0.98);
+  });
+
+  it("is consistent with the current it implies in the same sample set", () => {
+    const ac = connectorStub({
+      soc: 0,
+      evSettings: {
+        maxChargingPowerKw: 22,
+        currentType: "AC",
+        voltageV: 230,
+        powerFactor: 0.9,
+      },
+    });
+    const samples = buildSampledValues(
+      ac,
+      ["Current.Import", "Power.Factor"],
+      "Sample.Periodic",
+    );
+    const currentA = Number(
+      samples.find((s) => s.measurand === "Current.Import")?.value,
+    );
+    const pf = Number(
+      samples.find((s) => s.measurand === "Power.Factor")?.value,
+    );
+    expect(pf).toBeCloseTo(0.9);
+    expect(currentA).toBeCloseTo(22_000 / (230 * pf), 1);
+  });
+
+  it("is always 1 on DC, regardless of a configured value", () => {
+    // DC has no reactive component — reporting the configured AC-style value
+    // here would make Power.Factor disagree with the P/V current derivation.
+    const dc = connectorStub({
+      soc: 0,
+      evSettings: { currentType: "DC", voltageV: 400, powerFactor: 0.5 },
+    });
+    expect(valueOf(dc, "Power.Factor")).toBe(1);
+  });
+
+  it("defaults to unity when unconfigured", () => {
+    const flat = connectorStub({ soc: 0 });
+    expect(valueOf(flat, "Power.Factor")).toBe(1);
+  });
+});
+
 describe("MeterValueBuilder electrical derivation (#301)", () => {
   it("derives DC current from P / V", () => {
     const dc = connectorStub({

@@ -2,7 +2,8 @@ import type { Connector } from "./Connector";
 import {
   currentAmpsFor,
   DEFAULT_VOLTAGE_V,
-  powerFractionAtSoc,
+  effectiveChargingPowerW,
+  effectivePowerFactor,
 } from "./ChargingCurve";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
@@ -55,13 +56,18 @@ export function buildSampledValues(
   const samples: SampledValue[] = [];
   const meterWh = connector.meterValue;
   const soc = connector.soc;
-  // Power.Active.Import — derived from auto-meter increment if active,
-  // else 0. We don't have a true instantaneous-power model so use the
-  // most recently observed configuration where possible.
+  // Power.Active.Import — what the battery actually accepts right now,
+  // curve included — and Power.Offered — what the EVSE/profile makes
+  // available, independent of the battery's own acceptance (#301: a 100 kW
+  // charger still *offers* 100 kW to a nearly-full battery that only draws
+  // 10 kW of it).
   const powerW = derivedInstantaneousPowerW(connector);
+  const offeredW = derivedOfferedPowerW(connector);
   const settings = connector.evSettings;
   const currentA = currentAmpsFor(powerW, settings ?? {});
+  const offeredCurrentA = currentAmpsFor(offeredW, settings ?? {});
   const voltageV = settings?.voltageV ?? DEFAULT_VOLTAGE_V;
+  const powerFactor = effectivePowerFactor(settings ?? {});
   const phases = settings?.currentType === "DC" ? 1 : (settings?.phases ?? 1);
 
   for (const measurand of measurands) {
@@ -70,7 +76,10 @@ export function buildSampledValues(
       soc,
       powerW,
       currentA,
+      offeredW,
+      offeredCurrentA,
       voltageV,
+      powerFactor,
     });
     if (sample) samples.push(sample);
     // Per-phase current on a 3-phase AC connector: the aggregate above is the
@@ -82,7 +91,10 @@ export function buildSampledValues(
           soc,
           powerW: powerW / 3,
           currentA,
+          offeredW: offeredW / 3,
+          offeredCurrentA,
           voltageV,
+          powerFactor,
         });
         if (perPhase) samples.push({ ...perPhase, phase });
       }
@@ -96,7 +108,11 @@ interface MeasurandInputs {
   soc: number | null;
   powerW: number;
   currentA: number;
+  /** What the EVSE/profile offers, independent of battery acceptance. */
+  offeredW: number;
+  offeredCurrentA: number;
   voltageV: number;
+  powerFactor: number;
 }
 
 /**
@@ -137,7 +153,7 @@ function buildSingleSample(
       };
     case "Current.Offered":
       return {
-        value: inputs.currentA.toFixed(1),
+        value: inputs.offeredCurrentA.toFixed(1),
         context,
         measurand,
         unit: "A",
@@ -151,13 +167,17 @@ function buildSingleSample(
       };
     case "Power.Offered":
       return {
-        value: String(Math.round(inputs.powerW)),
+        value: String(Math.round(inputs.offeredW)),
         context,
         measurand,
         unit: "W",
       };
     case "Power.Factor":
-      return { value: "1.0", context, measurand };
+      return {
+        value: inputs.powerFactor.toFixed(2),
+        context,
+        measurand,
+      };
     case "SoC":
       if (inputs.soc === null) return null;
       return {
@@ -206,6 +226,13 @@ function buildSingleSample(
  * scheduler is currently driving. We don't expose the scheduler's tick
  * delta, so we fall back to the EV-settings max charging power when
  * charging, or 0 when not. Good enough for CSMS-side parser testing.
+ *
+ * This is what the battery actually *accepts* — the charging curve lowers
+ * demand here (#301) — and it is also the same effective power
+ * {@link Connector}'s meter scheduler accumulates the energy register
+ * against, via `effectiveChargingPowerW` (see `Connector.ts`). A billing
+ * MeterValue built from this module and the register it reads therefore
+ * always agree with each other.
  */
 function derivedInstantaneousPowerW(connector: Connector): number {
   // `OCPPStatus.Charging` import is avoided here to keep this module free
@@ -214,25 +241,32 @@ function derivedInstantaneousPowerW(connector: Connector): number {
   const settings = connector.evSettings;
   const maxKw = settings?.maxChargingPowerKw ?? 0;
   const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
+  return effectiveChargingPowerW({
+    evMaxW,
+    curve: settings?.chargingCurve,
+    socPercent: connector.soc,
+    scheduleLimitWatts: connector.currentScheduleLimitWatts(),
+  });
+}
 
-  // The charging curve lowers demand; it never raises it (#301). A battery
-  // near full accepts less than the connector could deliver, so the curve
-  // scales the EV's own ceiling before the profile is considered.
-  const curve = settings?.chargingCurve;
-  const acceptedW =
-    curve && curve.length > 0 && Number.isFinite(evMaxW)
-      ? evMaxW * powerFractionAtSoc(curve, connector.soc ?? 0)
-      : evMaxW;
-
-  // The OCPP charging profile (if any) is the real ceiling — surface it on
-  // Power.Active.Import so a CSMS that's verifying its SetChargingProfile
-  // landed can read it back here. `min(curve, profile)`: the profile always
-  // wins, so a curve can never let a session draw above an active limit.
-  const scheduleW = connector.currentScheduleLimitWatts();
-  const effective = Math.min(acceptedW, scheduleW);
-  return Number.isFinite(effective)
-    ? effective
-    : acceptedW === Infinity
-      ? 0
-      : acceptedW;
+/**
+ * What the EVSE offers right now — `Power.Offered` / `Current.Offered` — as
+ * distinct from what the battery accepts (#301). The charging curve
+ * describes battery acceptance, not EVSE capability: a 100 kW charger still
+ * *offers* 100 kW to a nearly-full battery even though the battery only
+ * draws a fraction of it, so the curve is deliberately not passed here.
+ * Still capped by the active charging profile — that cap is the EVSE's own
+ * limit, set by the CSMS, not a battery-acceptance concern.
+ */
+function derivedOfferedPowerW(connector: Connector): number {
+  if (connector.status !== "Charging") return 0;
+  const settings = connector.evSettings;
+  const maxKw = settings?.maxChargingPowerKw ?? 0;
+  const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
+  return effectiveChargingPowerW({
+    evMaxW,
+    curve: undefined,
+    socPercent: connector.soc,
+    scheduleLimitWatts: connector.currentScheduleLimitWatts(),
+  });
 }

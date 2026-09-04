@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   currentAmpsFor,
   DEFAULT_VOLTAGE_V,
+  effectiveChargingPowerW,
+  effectivePowerFactor,
   normalizeChargingCurve,
   powerFractionAtSoc,
-  rampFactor,
 } from "../ChargingCurve";
 
 const TAPER = [
@@ -128,28 +129,72 @@ describe("currentAmpsFor (#301)", () => {
   });
 });
 
-describe("rampFactor (#301)", () => {
-  it("is the identity for linear", () => {
-    expect(rampFactor(0.25, "linear")).toBe(0.25);
-    expect(rampFactor(0.75, undefined)).toBe(0.75);
+describe("effectiveChargingPowerW (#301)", () => {
+  const TAPER_W = [
+    { socPercent: 0, powerFraction: 1 },
+    { socPercent: 80, powerFraction: 0.5 },
+    { socPercent: 100, powerFraction: 0.1 },
+  ];
+
+  it("scales the EV ceiling by the curve fraction at the given SoC", () => {
+    expect(
+      effectiveChargingPowerW({
+        evMaxW: 100_000,
+        curve: TAPER_W,
+        socPercent: 100,
+        scheduleLimitWatts: Infinity,
+      }),
+    ).toBe(10_000);
   });
 
-  it("pins the sigmoid at both ends", () => {
-    // Otherwise the ramp would start above zero and never quite reach one.
-    expect(rampFactor(0, "sigmoid")).toBe(0);
-    expect(rampFactor(1, "sigmoid")).toBe(1);
+  it("lets the schedule limit win when it is lower than the curve", () => {
+    expect(
+      effectiveChargingPowerW({
+        evMaxW: 100_000,
+        curve: TAPER_W,
+        socPercent: 0,
+        scheduleLimitWatts: 7_000,
+      }),
+    ).toBe(7_000);
   });
 
-  it("is S-shaped: slower at the ends than in the middle", () => {
-    const s = (t: number) => rampFactor(t, "sigmoid");
-    expect(s(0.1)).toBeLessThan(0.1);
-    expect(s(0.9)).toBeGreaterThan(0.9);
-    expect(s(0.5)).toBeCloseTo(0.5, 3);
+  it("stays flat at evMaxW with no curve", () => {
+    expect(
+      effectiveChargingPowerW({
+        evMaxW: 100_000,
+        curve: undefined,
+        socPercent: 90,
+        scheduleLimitWatts: Infinity,
+      }),
+    ).toBe(100_000);
   });
 
-  it("clamps out-of-range progress", () => {
-    expect(rampFactor(-1, "linear")).toBe(0);
-    expect(rampFactor(2, "linear")).toBe(1);
-    expect(rampFactor(NaN, "linear")).toBe(1);
+  it("ignores the curve when evMaxW itself is unconfigured (Infinity)", () => {
+    expect(
+      effectiveChargingPowerW({
+        evMaxW: Infinity,
+        curve: TAPER_W,
+        socPercent: 100,
+        scheduleLimitWatts: Infinity,
+      }),
+    ).toBe(0);
+  });
+});
+
+describe("effectivePowerFactor (#301)", () => {
+  it("is always 1 for DC, regardless of a configured value", () => {
+    expect(effectivePowerFactor({ currentType: "DC", powerFactor: 0.5 })).toBe(
+      1,
+    );
+  });
+
+  it("uses the configured value for AC", () => {
+    expect(effectivePowerFactor({ currentType: "AC", powerFactor: 0.98 })).toBe(
+      0.98,
+    );
+  });
+
+  it("defaults to unity for AC when unconfigured", () => {
+    expect(effectivePowerFactor({ currentType: "AC" })).toBe(1);
   });
 });

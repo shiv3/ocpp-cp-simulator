@@ -3,6 +3,7 @@ title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
 updated: 2026-09-05
+updated: 2026-09-04
 ---
 
 # Log
@@ -548,3 +549,13 @@ Sixth review pass on PR #325.
 - [Scenario format](concepts/scenario-format.md#charging-curve-v12): records two rules. Current is derived **by type**: DC is `I = P / V`, AC is `I = P / (V × phases × cos φ)` with `voltageV` read as phase-to-neutral — one shared formula would report a DC current the hardware could not draw. And effective power is **`min(curve, ChargingScheduleResolver limit)`**, so a curve lowers demand and can never let a session exceed a `SetChargingProfile` the CSMS set.
 - [Scenario format](concepts/scenario-format.md#charging-curve-v12): a curve is clamped to its first and last point rather than extrapolated — a curve that starts at 20% says nothing about 10%. On 3-phase AC, `Current.Import` and `Power.Active.Import` are also reported per phase; energy registers are not split, because a meter has one.
 - [GitHub issues](sources/github-issues.md): #301 row.
+
+## [2026-09-04] ingest | Charging-curve EV model review fixes (#301)
+
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): six PR-review findings against the initial #301 landing, fixed together. The curve previously only changed the _reported_ `Power.Active.Import`; `Connector`'s meter scheduler now accumulates the energy register (and derived SoC) against the same effective power via one shared `effectiveChargingPowerW` — a `powerFraction: 0` point now stops delivery, not just the number. Without a curve, accumulation is unchanged (schedule-limit-only, as before v1.2) — `maxChargingPowerKw` still does not gate a curve-less scenario's own increment/bezier trajectory.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): `chargingCurve` is now normalized (sorted by `socPercent`, invalid points dropped) at the one place every write to `Connector.evSettings` passes through, so a curve given out of order — `normalizeChargingCurve` existed but nothing called it — no longer returns the wrong fraction below its first point.
+- `src/cp/application/scenario/ScenarioTypes.ts`: `SCENARIO_SCHEMA_VERSION` corrected from `"1.1"` to `"1.2"` — the v1.2 fields shipped in #301 but the exported-file stamp had not been bumped to match.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): `rampShape` **removed** from `EVSettings`, the JSON schema and the changelog entry — it was never wired into any power computation (dead since #301 landed), and wiring it in-PR would need a ramp-duration setting `EVSettings` doesn't have. Shipping an advertised field that does nothing was judged worse than not shipping it.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): `Power.Factor` now reports the configured value (1 on DC always, the configured `powerFactor` on AC, default 1) instead of a hardcoded `"1.0"` — it disagreed with the `Current.Import` an AC `powerFactor` actually produced in the same MeterValue.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): `Power.Offered` / `Current.Offered` now derive from the EVSE/profile limit (`min(maxChargingPowerKw, schedule)`), independent of the curve — they describe what the charger offers, not what the battery accepts, so a 100 kW charger no longer reports offering 10 kW to a nearly-full battery.
+- `docs/index.md`: `Scenario file format` row corrected from `(v1.1)` to `(v1.2)`, matching the page's own title (stale since the #301 ingest).

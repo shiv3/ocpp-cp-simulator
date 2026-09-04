@@ -356,6 +356,11 @@ voltageV?: number
 powerFactor?: number        // AC only
 ```
 
+(As shipped: `rampShape` was dropped before release — wiring a session-start
+ramp needs a ramp-duration setting this shape doesn't have, and shipping the
+field inert would be worse than not shipping it. See the [Charging curve
+section](../concepts/scenario-format.md#charging-curve-v12).)
+
 `MeterValueBuilder` then derives `Power.Active.Import` from the curve at the
 current SoC and current from the type-appropriate relation — DC has no
 reactive component, so `I = P / V`; AC is `I = P / (V × phases × powerFactor)`

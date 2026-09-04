@@ -61,26 +61,59 @@ export function powerFractionAtSoc(
 }
 
 /**
- * The ramp factor at `progress` (0-1) through the ramp window.
+ * The effective power a session draws right now, in watts.
  *
- * `linear` is the identity. `sigmoid` is a logistic curve pinned at f(0)=0 and
- * f(1)=1, which models the CCS/CHAdeMO handshake and pre-charge more faithfully
- * than a straight line: real sessions spend a moment near zero, climb quickly,
- * then settle.
+ * Combines two independent ceilings the same way for every caller — the
+ * battery's own acceptance (the curve, scaled off `evMaxW`) and the OCPP
+ * charging-schedule limit — so a reported sample and an accumulated register
+ * can never disagree about what "now" means. `min(curve, schedule)`: a curve
+ * lowers demand and never raises it, so an active `SetChargingProfile` always
+ * wins.
+ *
+ * `curve` is applied only when `evMaxW` is finite — a fraction of an unknown
+ * ceiling isn't a wattage — matching the historical (pre-curve) flat
+ * behaviour when no `maxChargingPowerKw` is configured.
+ *
+ * Returns 0 rather than `Infinity` when neither ceiling is finite (no
+ * `maxChargingPowerKw` and no active profile) — there is no sensible power
+ * number to report for an uncapped, curve-less session, and 0 is the
+ * historical fallback `derivedInstantaneousPowerW` used before this was
+ * factored out.
  */
-export function rampFactor(
-  progress: number,
-  shape: EVSettings["rampShape"],
+export function effectiveChargingPowerW(params: {
+  /** EV's own ceiling in watts, or `Infinity` when unconfigured. */
+  evMaxW: number;
+  /** Battery-acceptance curve, or `undefined`/empty for flat acceptance. */
+  curve: readonly ChargingCurvePoint[] | undefined;
+  socPercent: number | null;
+  /** Active OCPP charging-profile cap, or `Infinity` when uncapped. */
+  scheduleLimitWatts: number;
+}): number {
+  const { evMaxW, curve, socPercent, scheduleLimitWatts } = params;
+  const acceptedW =
+    curve && curve.length > 0 && Number.isFinite(evMaxW)
+      ? evMaxW * powerFractionAtSoc(curve, socPercent ?? 0)
+      : evMaxW;
+  const effective = Math.min(acceptedW, scheduleLimitWatts);
+  return Number.isFinite(effective)
+    ? effective
+    : acceptedW === Infinity
+      ? 0
+      : acceptedW;
+}
+
+/**
+ * The power factor (cos φ) actually used for the current derivation below —
+ * 1 for DC, which has no reactive component, else the configured value
+ * (default 1, unity). Exported so a reported `Power.Factor` sample can never
+ * name a different value than the one that produced `Current.Import` in the
+ * same message.
+ */
+export function effectivePowerFactor(
+  settings: Pick<EVSettings, "currentType" | "powerFactor">,
 ): number {
-  const t = Math.min(1, Math.max(0, Number.isFinite(progress) ? progress : 1));
-  if (shape !== "sigmoid") return t;
-  const k = 12;
-  const raw = (x: number) => 1 / (1 + Math.exp(-k * (x - 0.5)));
-  const lo = raw(0);
-  const hi = raw(1);
-  // Pinned, so the ramp genuinely starts at 0 and reaches 1 rather than
-  // asymptotically approaching them.
-  return (raw(t) - lo) / (hi - lo);
+  if (settings.currentType === "DC") return 1;
+  return clamp01(settings.powerFactor ?? 1) || 1;
 }
 
 /**
@@ -102,8 +135,7 @@ export function currentAmpsFor(
   if (powerW <= 0) return 0;
   if (settings.currentType === "DC") return powerW / voltage;
   const phases = settings.phases === 3 ? 3 : 1;
-  const powerFactor = clamp01(settings.powerFactor ?? 1) || 1;
-  return powerW / (voltage * phases * powerFactor);
+  return powerW / (voltage * phases * effectivePowerFactor(settings));
 }
 
 function positiveOr(value: number | undefined, fallback: number): number {

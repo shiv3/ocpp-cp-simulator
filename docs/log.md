@@ -115,3 +115,9 @@ knowledge first entered the documentation, not wiki operations.
 
 - [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#inbound-cscp-request-validation): new section. A CS→CP request on a 1.6-S charge point is validated against its vendored schema and a malformed one gets a Fault naming the missing element, where six operations previously answered a plausible OCPP status and one leaked a JavaScript TypeError. Records the 1.6-S scope and why coercion stays on every dialect.
 - [GitHub issues](sources/github-issues.md): #285 row.
+
+## [2026-09-04] query | Sequencing the fleet-scale, load and observability work
+
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): new page. Twelve items in six dependency-ordered phases — bulk CP creation and blueprints, multiple supervision URLs, a `/metrics` endpoint, an idTag pool and seeded background traffic, a charging-curve EV model, a measured scale ceiling, file hot-reload — each with the files and RPCs it touches, acceptance criteria and a size. Two design calls recorded: background traffic is a per-connector runtime behavior configured by RPC (mirroring `AutoMeterValueConfig` / `connector_settings.auto_meter.*`), not a scenario node type, because scenarios are deterministic and end in a verdict; and the worker/thread model is conditional on the ceiling phase 5a measures rather than assumed. `/metrics` defaults behind the Basic Auth gate (unlike `/v1/healthz`) and never labels by `cpId`. The charging-curve EV model needs a scenario-format version bump, and effective power is `min(curve, ChargingScheduleResolver limit)`. Records what is explicitly not planned: config-file-first operation, a performance-statistics storage backend, and any unseeded randomness.
+- [Index](index.md): analyses row.
+- [Daemon](entities/daemon.md#limits--roadmap): the Limits section points at the roadmap; `related:` both ways.

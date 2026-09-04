@@ -13,6 +13,7 @@ import {
   requireNumber,
   requireObject,
   requirePositiveInt,
+  optionalString,
   requireString,
 } from "../jsonMode";
 import type { CLIChargePointService } from "../service";
@@ -1426,7 +1427,10 @@ async function dispatchFacadeCpCommand(
         chargePointService.startTransaction(
           id,
           requirePositiveInt(params, "connector"),
-          requireString(params, "tagId"),
+          // Optional since #299: without one the charge point draws from its
+          // idTag pool. Requiring it here would have rejected the call before
+          // the pool could be consulted at all.
+          optionalString(params, "tagId"),
         ),
       );
       return handled(undefined);
@@ -1444,7 +1448,7 @@ async function dispatchFacadeCpCommand(
     case "authorize": {
       const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
-        chargePointService.authorize(id, requireString(params, "tagId")),
+        chargePointService.authorize(id, optionalString(params, "tagId")),
       );
       return handled(undefined);
     }

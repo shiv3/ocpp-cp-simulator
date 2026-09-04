@@ -444,6 +444,23 @@ export function requireNumber(
   return val;
 }
 
+/**
+ * A string parameter that may be absent, but must be a non-empty string when
+ * present. Used where the domain has its own fallback — `tagId`, which a
+ * charge point with an idTag pool fills in itself (#299).
+ */
+export function optionalString(
+  params: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const val = params[key];
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== "string" || val.length === 0) {
+    throw new Error(`Invalid parameter: ${key} (expected non-empty string)`);
+  }
+  return val;
+}
+
 export function requireString(
   params: Record<string, unknown>,
   key: string,

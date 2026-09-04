@@ -7,6 +7,7 @@ import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatab
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { parseCreateBody } from "../httpServer";
+import { RegistryChargePointService } from "../RegistryChargePointService";
 
 const tempFiles: string[] = [];
 
@@ -193,5 +194,58 @@ describe("the charge point draws from its pool (#299)", () => {
     } finally {
       registry.shutdownAll();
     }
+  });
+});
+
+describe("the pool survives the control-plane path (#299)", () => {
+  it("reaches the charge point instead of being dropped by the facade", async () => {
+    // The previous pool feature (#296) was inert for exactly this reason:
+    // `parseCreateBody` produced the config, `toInitOptions` did not copy it,
+    // and the create reported success with nothing wired up.
+    const registry = new CPRegistry(new EventBus());
+    const service = new RegistryChargePointService(registry);
+    try {
+      await service.createChargePoint(
+        parseCreateBody({
+          ...BASE,
+          cpId: "CP-FACADE",
+          idTagPool: { tags: ["F1", "F2"], distribution: "connector-affinity" },
+        }),
+      );
+      const init = registry.get("CP-FACADE")?.getInit();
+      expect(init?.idTags).toEqual(["F1", "F2"]);
+      expect(init?.idTagDistribution).toBe("connector-affinity");
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
+  it("clears the pool when an update omits it", async () => {
+    const registry = new CPRegistry(new EventBus());
+    const service = new RegistryChargePointService(registry);
+    try {
+      await service.createChargePoint(
+        parseCreateBody({
+          ...BASE,
+          cpId: "CP-CLEARTAGS",
+          idTagPool: { tags: ["F1"] },
+        }),
+      );
+      await service.updateChargePoint(
+        parseCreateBody({ ...BASE, cpId: "CP-CLEARTAGS" }),
+      );
+      expect(registry.get("CP-CLEARTAGS")?.getInit().idTags).toBeUndefined();
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});
+
+describe("a file cannot bypass the per-tag bound (#299)", () => {
+  it("rejects a tag longer than the inline form allows", () => {
+    const file = writeTagFile(JSON.stringify(["ok", "x".repeat(300)]));
+    expect(() => parseCreateBody({ ...BASE, idTagPool: { file } })).toThrow(
+      /longer than 256/,
+    );
   });
 });

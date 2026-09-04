@@ -741,6 +741,11 @@ function toInitOptions(
     // still failing over to the stale pool, and still persisting it.
     supervisionUrls: params.supervisionUrls,
     urlDistribution: params.urlDistribution,
+    // Same rule as the URLs above: `cp.update` fully specifies the pool, so
+    // there is no `existing` fallback — an update that drops `idTagPool`
+    // means the charge point no longer has one.
+    idTags: params.idTags,
+    idTagDistribution: params.idTagDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
     soapCallbackUrl: params.soapCallbackUrl ?? existing?.soapCallbackUrl,
     soapPath: params.soapPath ?? existing?.soapPath,

@@ -32,6 +32,7 @@ import {
   StopTransactionOptions,
   ScenarioExpectation,
 } from "./ScenarioTypes";
+import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {
   createScenarioMachine,
@@ -907,7 +908,7 @@ export class ScenarioExecutor {
         const tagId =
           this.remoteStartTagId ||
           data.tagId ||
-          this.chargePoint.nextIdTag(connectorId) ||
+          this.callbacks.onResolveIdTag?.() ||
           DEFAULT_ID_TAG;
         const options = this.remoteStartOptions;
         this.remoteStartTagId = null;

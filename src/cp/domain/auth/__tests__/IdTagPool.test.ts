@@ -88,3 +88,45 @@ describe("IdTagPool (#299)", () => {
     expect(DEFAULT_ID_TAG).toBe("123456");
   });
 });
+
+describe("the scenario executor draws through a callback (#299)", () => {
+  it("prefers a node's own tag, then the pool, then the default", async () => {
+    // The executor has no charge point and no connector of its own, so the
+    // pool reaches it as behaviour. An earlier draft referenced a
+    // `this.chargePoint` that does not exist — code that would have thrown on
+    // the first transaction node of any scenario.
+    const { ScenarioExecutor } =
+      await import("../../../application/scenario/ScenarioExecutor");
+    const started: string[] = [];
+    const scenario = {
+      id: "s",
+      name: "s",
+      nodes: [
+        { id: "start", type: "start", data: {} },
+        { id: "tx", type: "transaction", data: { action: "start" } },
+      ],
+      edges: [{ id: "e", source: "start", target: "tx" }],
+    };
+
+    const run = async (onResolveIdTag?: () => string | null) => {
+      started.length = 0;
+      const executor = new ScenarioExecutor(
+        scenario as never,
+        {
+          onResolveIdTag,
+          onStartTransaction: async (tagId: string) => {
+            started.push(tagId);
+          },
+        } as never,
+      );
+      await executor.start();
+      return started[0];
+    };
+
+    expect(await run(() => "POOLED")).toBe("POOLED");
+    // No pool: the historical literal, so a charge point without one is
+    // unchanged.
+    expect(await run(() => null)).toBe(DEFAULT_ID_TAG);
+    expect(await run(undefined)).toBe(DEFAULT_ID_TAG);
+  });
+});

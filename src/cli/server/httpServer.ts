@@ -755,6 +755,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  */
 const MAX_ID_TAGS = 1_000;
 
+/** Matches the inline form's `STR_256`, so `file` is not a way around it. */
+const MAX_ID_TAG_LENGTH = 256;
+
 /** Read an idTag file: a JSON array of non-empty strings. */
 function readIdTagsFile(filePath: string): string[] {
   let raw: string;
@@ -778,6 +781,15 @@ function readIdTagsFile(filePath: string): string[] {
   ) {
     throw new Error(
       `idTagPool.file "${filePath}" must hold a JSON array of non-empty strings`,
+    );
+  }
+  // The same per-tag bound the inline form gets from `STR_256`. Without it the
+  // file was a way around the identifier cap, persisting and presenting
+  // arbitrarily long tags.
+  const tooLong = parsed.find((t) => t.length > MAX_ID_TAG_LENGTH);
+  if (tooLong !== undefined) {
+    throw new Error(
+      `idTagPool.file "${filePath}" holds a tag longer than ${MAX_ID_TAG_LENGTH} characters`,
     );
   }
   return parsed;

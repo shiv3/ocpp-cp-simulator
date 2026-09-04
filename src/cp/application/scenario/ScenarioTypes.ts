@@ -701,6 +701,16 @@ export interface ScenarioExecutorCallbacks {
    * start without a thrown error — `void` return remains valid for any
    * implementation that doesn't need to report an outcome.
    */
+  /**
+   * The idTag to present when a transaction node names none (#299).
+   *
+   * A callback rather than a reference to the charge point: the executor is
+   * deliberately given behaviour, not the domain object, and it has no
+   * connector of its own — the runtime that wires this closes over the
+   * connector it is bound to. Returning `null` means "no pool", and the node
+   * falls back to the historical default tag.
+   */
+  onResolveIdTag?: () => string | null;
   onStartTransaction?: (
     tagId: string,
     batteryCapacityKwh?: number,

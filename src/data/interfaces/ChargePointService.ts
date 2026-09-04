@@ -24,6 +24,7 @@ import type {
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "../../cp/infrastructure/transport/SupervisionUrlPool";
+import type { IdTagDistribution } from "../../cp/domain/auth/IdTagPool";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
@@ -102,6 +103,14 @@ export interface CreateChargePointParams {
    */
   supervisionUrls?: readonly string[];
   urlDistribution?: UrlDistribution;
+  /**
+   * Resolved idTags (#299). Declared here because the facade is where the
+   * previous pool feature was silently dropped: `parseCreateBody` produced the
+   * list, `toInitOptions` did not copy it, and the create reported success
+   * with no pool at all.
+   */
+  idTags?: readonly string[];
+  idTagDistribution?: IdTagDistribution;
   centralSystemUrl?: string;
   soapCallbackUrl?: string;
   soapPath?: string;

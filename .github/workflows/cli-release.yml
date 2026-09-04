@@ -34,6 +34,16 @@ on:
 permissions:
   contents: write
 
+# Serialise CLI releases. The rolling `cli-latest` pointer is moved by a
+# read-then-write (read the version it holds, refuse to go backwards, then
+# clobber the asset), which is not atomic: two release runs finishing out of
+# order could interleave and leave the pointer serving the older package.
+# cancel-in-progress is deliberately false — a release run must finish
+# publishing its own `cli-v*` assets even when a newer one is queued behind it.
+concurrency:
+  group: cli-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -142,49 +152,20 @@ jobs:
             ```
 
       # ---------------------------------------------------------------------
-      # Rolling `cli-latest` pointer (#321).
-      #
-      # `releases/latest/download/...` is unusable here: GitHub resolves
-      # "latest" across every tag train in the repo, and this one has two
-      # (`v*` desktop, `cli-v*` CLI). Whenever the most recent release is a
-      # desktop one — which it is for roughly half of any release cycle — the
-      # documented install command 404s, because desktop releases carry no
-      # `.tgz`. That is the steady state, not a transient.
-      #
-      # So the project owns its own pointer instead: a `cli-latest` tag +
-      # release that this workflow force-moves to every CLI release and
-      # re-uploads the stable-named tarball to. Marked PRE-RELEASE on purpose
-      # — GitHub never resolves `releases/latest` to a pre-release, so this
-      # pointer cannot itself hijack the desktop train's "Latest" badge, while
-      # `releases/download/cli-latest/<asset>` keeps working normally.
-      #
-      # `cli-latest` matches neither the `v*` nor the `cli-v*` push trigger,
-      # so moving it starts no further workflow runs.
+      # Rolling `cli-latest` pointer (#321) — see scripts/roll-cli-latest.sh
+      # for what the pointer is for, why it is a pre-release, and why the move
+      # is guarded so it can only ever roll forward. Skipping the move (an
+      # older tag re-run) is a `::notice::`, not a failure: that run still
+      # published its own `cli-v*` assets correctly.
       - name: Move the rolling `cli-latest` pointer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_SLUG: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          git tag -f cli-latest
-          git push -f origin refs/tags/cli-latest
-          NOTES="Rolling pointer to the newest CLI release (currently **${{ steps.version.outputs.tag }}**).
-
-          \`\`\`sh
-          bun install -g https://github.com/${{ github.repository }}/releases/download/cli-latest/ocpp-cp-simulator.tgz
-          \`\`\`
-
-          Release notes and per-version tarballs live on the \`cli-v*\` releases.
-          Kept as a pre-release so it never becomes the repository's \"Latest\"
-          release — the desktop \`v*\` train owns that badge (#321)."
-          if gh release view cli-latest >/dev/null 2>&1; then
-            gh release edit cli-latest --prerelease \
-              --title "CLI (rolling latest)" --notes "$NOTES"
-            gh release upload cli-latest ocpp-cp-simulator.tgz --clobber
-          else
-            gh release create cli-latest --prerelease \
-              --title "CLI (rolling latest)" --notes "$NOTES" \
-              ocpp-cp-simulator.tgz
-          fi
+          ./scripts/roll-cli-latest.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${{ steps.version.outputs.tag }}" \
+            ocpp-cp-simulator.tgz
 
       # The documented install command, executed. Everything above verifies a
       # LOCAL tarball; this is the only step that proves the URL README.md and

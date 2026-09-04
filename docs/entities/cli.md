@@ -7,6 +7,8 @@ sources:
   - src/cli/types.ts
   - package.json (`bin`, `files`)
   - scripts/verify-cli-tarball.sh
+  - scripts/verify-install-urls.sh
+  - scripts/roll-cli-latest.sh
   - .github/workflows/cli-release.yml
   - "issue #320"
   - "issue #321"
@@ -54,9 +56,6 @@ installed:
 
 ```bash
 # Prebuilt release tarball (recommended) — ships the web-console dist/
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
-
-# Or pin to a specific CLI release
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.3.1/ocpp-cp-simulator-0.3.1.tgz
 
 # From a local checkout (dev)
@@ -76,27 +75,56 @@ ocpp-cp-sim --daemon
 
 ### Why `cli-latest` and not `releases/latest`
 
-`cli-latest` is a **rolling pre-release** that the `Release CLI` workflow
-force-moves onto every CLI release and re-uploads the stable-named
-`ocpp-cp-simulator.tgz` to. It is the URL to publish, share and script
-against.
-
 GitHub's own `releases/latest/download/…` is **not usable in this repository**
 and must not be reintroduced (#321). The repo has two independent tag trains —
 `v*` for the [desktop app](desktop-app.md) and `cli-v*` for the CLI — and
 `releases/latest` resolves across both. Whenever the newest release is a
 desktop one, which is the case for roughly half of any release cycle, the URL
 redirects to a release that carries no `.tgz` and the install command fails
-with a 404. That is the steady state, not a transient. The rolling tag is
-scoped to the CLI train, so it is always right without anyone remembering to
-update a version number. `cli-latest` is kept a pre-release precisely so it
-can never itself become the repository's "Latest" release, which the desktop
-train owns.
+with a 404. That is the steady state, not a transient.
 
-CI asserts that this page, [`README.md`](../../README.md) and the release
-notes `cli-release.yml` generates all carry the same URL, and that no
-`releases/latest/download` install command has crept back in; the release
-workflow then downloads that exact URL after publishing and installs from it.
+The replacement is **`cli-latest`**, a rolling pre-release that
+`scripts/roll-cli-latest.sh` moves onto every CLI release from
+`cli-release.yml`, re-uploading the stable-named `ocpp-cp-simulator.tgz`:
+
+```
+https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
+```
+
+It is scoped to the CLI train, so it stays correct without anyone remembering
+to bump a version number, and it is kept a pre-release precisely so it can
+never itself become the repository's "Latest" release, which the desktop train
+owns.
+
+**Rollout status.** That release does not exist yet — the workflow creates it
+on the next `cli-v*` push — so this page and [`README.md`](../../README.md)
+advertise the pinned `cli-v0.3.1` URL, which resolves today. Documenting a URL
+before it exists would reproduce the very defect #321 is about: a quick-start
+command that 404s. The CLI release that first creates the pointer is the one
+that swaps the pinned URLs for it. A maintainer with release rights can close
+the gap sooner by cutting a `cli-v*` release; nothing in the repository can do
+it, and no tag or release was created by the change that introduced the
+pointer.
+
+**The pointer only moves forward.** The move used to be an unconditional
+force-push plus `--clobber`, which meant re-running an older tag's workflow, or
+two release jobs finishing out of order, would silently leave `cli-latest`
+serving an _older_ package under the URL the docs call the newest.
+`roll-cli-latest.sh` reads the version the pointer currently holds from a
+machine-readable marker in its release body and refuses to move backwards
+(re-running the same version is allowed, so a failed upload can be retried);
+`cli-release.yml` additionally serialises release runs with a `concurrency:`
+group, because that read-then-write is not atomic on its own.
+
+CI runs `scripts/verify-install-urls.sh` on every pull request. It **fetches**
+every install command this page and `README.md` advertise and fails if one does
+not return 200 — an earlier version of the guard only checked that the places
+restating the command agreed with each other, which is no guard at all, since
+several places agreeing on a broken URL is precisely the state #321 describes.
+It also refuses any `releases/latest/download` install command, and asserts
+that `cli-release.yml` still advertises the rolling URL and still moves it
+through the roll script. Prose that merely names a URL (such as the block
+above) is exempt: it is not an instruction a reader will paste.
 
 ### What the package ships
 

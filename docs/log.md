@@ -258,6 +258,7 @@ fixes:
 - [Testing strategy](analyses/testing-strategy.md): new section "Does anything actually launch the desktop daemon?". CI compiled the sidecar but never ran it, which is precisely why #319 survived 30 releases. `src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` now compiles and launches it on every PR under `test:bun`, parsing the arguments out of `lib.rs`'s `DAEMON_ARGS` and the readiness budget out of `splash.html` so neither copy can drift.
 - [GitHub issues](sources/github-issues.md): #319 indexed.
 - Left as-is, reported not fixed: `dist/` is now bundled twice on the desktop (embedded in the Rust binary for `splash.html`, and as a resource for the daemon). Deduplicating it would mean serving the console over `tauri://` instead of HTTP, which is a different architecture, not a doc fix.
+
 ## [2026-09-05] ingest | The CLI distribution was broken twice over (#320, #321)
 
 Both defects are the same surface — how the CLI reaches a user — so they were
@@ -302,3 +303,38 @@ fixed and ingested together.
   consistency guard now run on every pull request — previously no CI job
   touched the tarball at all, which is why a July regression would only have
   surfaced at the next release).
+
+## [2026-09-05] ingest | The install URL must resolve, and the pointer must not roll back (#320, #321)
+
+Follow-up to the same-day ingest above, from review on PR #325.
+
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  rewritten. The previous revision documented
+  `releases/download/cli-latest/ocpp-cp-simulator.tgz` as the primary install
+  command, but the rolling release it names is created by `cli-release.yml` on
+  the next `cli-v*` push and does not exist yet — so a change whose purpose was
+  fixing a 404 in the quick start would have merged with the quick start still
+  404ing, for a new reason. The pinned `cli-v0.3.1` URL (verified HTTP 200) is
+  primary until then; the page carries a **Rollout status** paragraph saying
+  who can close the gap (a maintainer with release rights, by cutting a
+  `cli-v*` release) and that the CLI release which first creates the pointer is
+  the one that swaps the URLs.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): documents that
+  the pointer only ever moves forward. The move was an unconditional
+  force-push plus `gh release upload --clobber`, so re-running an older tag's
+  workflow — or two release jobs finishing out of order — would have left
+  `cli-latest` serving an older package under the URL the docs call the newest.
+- [`README.md`](../README.md): the two quick-start commands now use the pinned
+  URL, with the rolling form named in prose rather than advertised as a
+  runnable command.
+- Raw sources changed in the same commit: new `scripts/verify-install-urls.sh`
+  (**fetches** every advertised install command and fails on anything but 200;
+  the previous guard only checked that the places restating the URL agreed with
+  each other, which is no guard at all — several places agreeing on a broken
+  URL is precisely the reported defect); new `scripts/roll-cli-latest.sh`
+  (reads the version the pointer holds from a machine-readable marker in its
+  release body and refuses to move backwards, re-running the same version still
+  allowed so a failed upload can be retried); `.github/workflows/cli-release.yml`
+  (calls the roll script, and a workflow-level `concurrency:` group serialises
+  release runs because the read-then-write is not atomic on its own);
+  `.github/workflows/ci.yml` (runs the URL guard on every pull request).

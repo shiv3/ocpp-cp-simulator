@@ -3,6 +3,7 @@ import type {
   OcppTlsOptions,
 } from "../cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "../cp/infrastructure/transport/SupervisionUrlPool";
+import type { IdTagDistribution } from "../cp/domain/auth/IdTagPool";
 
 export interface CLIOptions {
   readonly wsUrl: string;
@@ -147,6 +148,14 @@ export interface ChargePointInitOptions {
   /** All supervision URLs, when more than one was given. OCPP-J only. */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /**
+   * Resolved idTags this charge point draws from when a call names none. The
+   * `file` form is read once at creation, so what is stored and persisted is
+   * always the list itself — a file that changes later does not silently
+   * change a running charge point.
+   */
+  readonly idTags?: readonly string[];
+  readonly idTagDistribution?: IdTagDistribution;
   readonly connectors: number;
   readonly vendor: string;
   readonly model: string;

@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -110,6 +110,11 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- which would otherwise be silently lost on a daemon restart.
   supervision_urls TEXT,
   url_distribution TEXT,
+  -- Resolved idTags as a JSON array (#299), plus how the charge point picks
+  -- among them. Resolved at creation, so a \`file\` that changes later cannot
+  -- silently change a running charge point.
+  id_tags TEXT,
+  id_tag_distribution TEXT,
   connectors     INTEGER NOT NULL,
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
@@ -343,6 +348,20 @@ export function runMigrations(db: Database): void {
         "id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, " +
         "definition TEXT NOT NULL, updated_at TEXT NOT NULL)",
     );
+  }
+
+  // v8 → v9: the idTag pool (#299). Without these a charge point created with
+  // a pool came back from `--state-db` drawing nothing, silently falling back
+  // to the hard-coded literal.
+  if (stored < 9) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("id_tags")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN id_tags TEXT");
+    }
+    if (!have.has("id_tag_distribution")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN id_tag_distribution TEXT");
+    }
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

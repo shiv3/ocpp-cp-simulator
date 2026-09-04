@@ -1,4 +1,5 @@
 import type { Server } from "bun";
+import * as fs from "fs";
 import * as path from "path";
 import type { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
@@ -747,6 +748,41 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+/**
+ * How many idTags one pool may hold. Bounded because the list is persisted as
+ * JSON on the charge point row and drawn from on a hot path; a tag file is an
+ * operator-supplied input like any other.
+ */
+const MAX_ID_TAGS = 1_000;
+
+/** Read an idTag file: a JSON array of non-empty strings. */
+function readIdTagsFile(filePath: string): string[] {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    throw new Error(
+      `idTagPool.file "${filePath}" could not be read: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`idTagPool.file "${filePath}" is not valid JSON`);
+  }
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every((t) => typeof t === "string" && t.length > 0)
+  ) {
+    throw new Error(
+      `idTagPool.file "${filePath}" must hold a JSON array of non-empty strings`,
+    );
+  }
+  return parsed;
+}
+
 /** Whether a string parses as a `ws:` / `wss:` URL. */
 function isWebSocketUrl(value: string): boolean {
   try {
@@ -852,6 +888,43 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
     }
   }
 
+  // The `file` form is resolved here, once, so what the charge point stores
+  // and persists is always the list itself: a file edited later cannot
+  // silently change a running charge point, and a bad path fails the create
+  // rather than the first transaction.
+  let idTags: readonly string[] | undefined;
+  let idTagDistribution: ChargePointInitOptions["idTagDistribution"];
+  if (isRecord(body.idTagPool)) {
+    const pool = body.idTagPool;
+    if (
+      pool.distribution === "round-robin" ||
+      pool.distribution === "random" ||
+      pool.distribution === "connector-affinity"
+    ) {
+      idTagDistribution = pool.distribution;
+    } else if (pool.distribution !== undefined) {
+      throw new Error(
+        'idTagPool.distribution must be "round-robin", "random" or "connector-affinity"',
+      );
+    }
+    if (Array.isArray(pool.tags)) {
+      idTags = pool.tags.filter(
+        (t): t is string => typeof t === "string" && t.length > 0,
+      );
+      if (idTags.length !== pool.tags.length) {
+        throw new Error("idTagPool.tags entries must be non-empty strings");
+      }
+    } else if (typeof pool.file === "string" && pool.file.length > 0) {
+      idTags = readIdTagsFile(pool.file);
+    }
+    if (!idTags || idTags.length === 0) {
+      throw new Error("idTagPool needs a non-empty tags array or a file");
+    }
+    if (idTags.length > MAX_ID_TAGS) {
+      throw new Error(`idTagPool holds at most ${MAX_ID_TAGS} tags`);
+    }
+  }
+
   let basicAuth: ChargePointInitOptions["basicAuth"] = null;
   if (isRecord(body.basicAuth)) {
     const username = body.basicAuth.username;
@@ -931,6 +1004,8 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       ? { supervisionUrls }
       : {}),
     ...(urlDistribution ? { urlDistribution } : {}),
+    ...(idTags ? { idTags } : {}),
+    ...(idTagDistribution ? { idTagDistribution } : {}),
     securityProfile,
     authorizationKey,
     cpoName,

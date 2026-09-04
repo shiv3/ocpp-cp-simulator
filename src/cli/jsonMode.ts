@@ -13,6 +13,7 @@ import type {
 } from "../cp/application/scenario/ScenarioTypes";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
+import type { AutoTrafficConfig } from "../cp/domain/connector/AutoTraffic";
 import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
 import {
   cleanupSingleCpTarget,
@@ -328,6 +329,21 @@ export async function handleJsonCommand(
     case "get_ev_settings": {
       const connectorId = requirePositiveInt(params, "connector");
       return ops.getEVSettings(connectorId);
+    }
+
+    case "set_auto_traffic_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const config = requireObject(
+        params,
+        "config",
+      ) as unknown as AutoTrafficConfig;
+      await ops.setAutoTrafficConfig(connectorId, config);
+      return undefined;
+    }
+
+    case "get_auto_traffic_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return ops.getAutoTrafficConfig(connectorId);
     }
 
     case "set_auto_meter_config": {

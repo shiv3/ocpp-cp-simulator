@@ -442,6 +442,14 @@ export const METHODS = {
     params: z.object({ connector: CONN_POS }),
     result: ANY,
   },
+  set_auto_traffic_config: {
+    params: z.object({ connector: CONN_POS, config: OBJ() }),
+    result: ANY,
+  },
+  get_auto_traffic_config: {
+    params: z.object({ connector: CONN_POS }),
+    result: ANY,
+  },
   set_auto_reset_to_available: {
     params: z.object({ connector: CONN_POS, enabled: z.boolean() }),
     result: ANY,
@@ -679,6 +687,14 @@ export const METHODS = {
     params: connectorSettingsParamsSchema.extend({ config: OBJ() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  "connector_settings.auto_traffic.get": {
+    params: connectorSettingsParamsSchema,
+    result: OBJ().nullable(),
+  },
+  "connector_settings.auto_traffic.save": {
+    params: connectorSettingsParamsSchema.extend({ config: OBJ() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "connector_settings.soc_meter_sync.get": {
     params: connectorSettingsParamsSchema,
     result: z.boolean(),
@@ -725,6 +741,8 @@ export const EXPLICIT_METHODS = [
   "scenario.definitions.delete",
   "connector_settings.auto_meter.get",
   "connector_settings.auto_meter.save",
+  "connector_settings.auto_traffic.get",
+  "connector_settings.auto_traffic.save",
   "connector_settings.soc_meter_sync.get",
   "connector_settings.soc_meter_sync.save",
   "ev_settings.apply_default",

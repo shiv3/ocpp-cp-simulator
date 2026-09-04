@@ -189,6 +189,66 @@ not bring the charge point back drawing nothing.
 
 An unrecognised `distribution` is refused rather than defaulted.
 
+##### Background traffic
+
+"Run plausible charging traffic against this CSMS for an hour" was
+unexpressible. [Scenarios](scenario-format.md) are deterministic node graphs
+that terminate in a verdict — exactly what makes them good for conformance and
+bad for open-ended load — so a non-terminating random construct does not belong
+inside them.
+
+Background traffic is instead a **per-connector runtime behaviour**, modelled
+on auto-meter: set by RPC, stored beside it, and independent of whether a
+scenario is loaded.
+
+| Method                                 | Params                          |
+| -------------------------------------- | ------------------------------- |
+| `connector_settings.auto_traffic.get`  | `{ cpId, connectorId }`         |
+| `connector_settings.auto_traffic.save` | `{ cpId, connectorId, config }` |
+| `set_auto_traffic_config` (CP command) | `{ connector, config }`         |
+| `get_auto_traffic_config` (CP command) | `{ connector }`                 |
+
+```jsonc
+{
+  "enabled": true,
+  "seed": 42,
+  "minDurationSec": 60,
+  "maxDurationSec": 300,
+  "minGapSec": 30,
+  "maxGapSec": 120,
+  "probabilityOfStart": 0.8,
+  "requireAuthorize": true,
+  "stopAfterSec": 3600,
+}
+```
+
+The loop is: wait a drawn gap, roll `probabilityOfStart`, optionally Authorize,
+start a session, wait a drawn duration, stop, repeat.
+
+**Seeded, and that is the point.** Every draw comes from the same PRNG
+[network simulation](network-simulation.md) uses, keyed on
+`seed:cpId:connectorId` so two connectors — and two charge points — do not step
+in lockstep. A CI failure that only shows up under an hour of background load
+is worthless if it cannot be replayed.
+
+The seed fixes the **draws, not the clock**: the timer path is `setTimeout` and
+`Date.now()`, so wall-clock timestamps still vary between runs. Assert on the
+drawn values, or on observed times within a stated tolerance — never on exact
+timestamps. The duration is drawn before the probability roll, so the sequence
+a seed produces does not depend on which attempts happened to fire.
+
+**A scenario taking control suspends it.** While any scenario is running the
+attempt is _skipped_, not queued: queuing would burst the moment the scenario
+ended, which is the interference the rule exists to prevent. A run's verdict
+must never depend on whether background traffic fired.
+
+Per-connector counters — attempted, started, skipped, rejected, completed — are
+the assertion surface for a load run. A refused Authorize or a failed start is
+counted and the loop continues; surviving those is what a load run is for.
+
+Config is persisted in `connector_settings.auto_traffic` (schema v10), and every
+runner's timers are stopped when the charge point is deleted.
+
 ##### Multiple supervision URLs
 
 `wsUrl` accepts a list so a charge point can survive one CSMS node going away.

@@ -151,9 +151,18 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   const blueprints = new BlueprintRepository(database);
 
   const bus = new EventBus();
-  const registry = new CPRegistry(bus, database, {
-    allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms,
-  });
+  // Passed so a restored charge point resumes the background traffic it was
+  // configured with (#300); the config lives in `connector_settings`, not the
+  // connector row, so it needs its own restore.
+  const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
+    database,
+  );
+  const registry = new CPRegistry(
+    bus,
+    database,
+    { allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms },
+    connectorSettingsRepository,
+  );
   // Create network simulation manager and wire it to the registry BEFORE
   // restoring CPs so they get their config attached before connect().
   const networkSimManager = new NetworkSimManager(database, {
@@ -173,9 +182,6 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 
   const configRepository = createSocketConfigRepository(database);
   const scenarioRepository = new SqliteScenarioRepository(database);
-  const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
-    database,
-  );
   const chargePointService = new RegistryChargePointService(registry, {
     database,
     configRepository,

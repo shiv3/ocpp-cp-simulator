@@ -1,3 +1,4 @@
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { OCPPAvailability } from "../../cp/domain/types/OcppTypes";
@@ -17,6 +18,17 @@ export interface ConnectorSettingsRepository {
     connectorId: number,
   ): Promise<void>;
   clearAllAutoMeterValueConfigs(chargePointId: string): Promise<void>;
+
+  /** Seeded background traffic (#300), stored beside the auto-meter config. */
+  loadAutoTrafficConfig(
+    chargePointId: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null>;
+  saveAutoTrafficConfig(
+    chargePointId: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void>;
 
   loadChargingProfiles(
     chargePointId: string,

@@ -15,6 +15,16 @@ import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServ
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
+import { LogType } from "../cp/shared/Logger";
+import { AutoTrafficRunner } from "../cp/application/services/AutoTrafficRunner";
+import {
+  AUTO_TRAFFIC_ID_TAG,
+  defaultAutoTrafficConfig,
+  emptyAutoTrafficCounters,
+  validateAutoTrafficConfig,
+  type AutoTrafficConfig,
+  type AutoTrafficCounters,
+} from "../cp/domain/connector/AutoTraffic";
 import { getGlobalMetricsRecorder } from "./server/metrics/MetricsRecorder";
 import {
   waitForBootAccepted,
@@ -263,6 +273,8 @@ export class CLIChargePointService {
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
+  private readonly _autoTraffic = new Map<number, AutoTrafficRunner>();
+  private readonly _autoTrafficConfigs = new Map<number, AutoTrafficConfig>();
   // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
   // Populated only when a caller actually opts in (run_scenario's
   // awaitArmed); resolved and cleared by the onStateChange hook in
@@ -765,6 +777,66 @@ export class CLIChargePointService {
 
   getAutoMeterValueConfig(connectorId: number): AutoMeterValueConfig {
     return this.requireConnector(connectorId).autoMeterValueConfig;
+  }
+
+  /**
+   * Seeded background traffic (#300).
+   *
+   * Modelled on the auto-meter config above: a per-connector runtime
+   * behaviour set by RPC, independent of whether a scenario is loaded. The
+   * runner is replaced rather than mutated so the seed takes effect — a
+   * reconfigure that kept the old stream would not be reproducible.
+   */
+  setAutoTrafficConfig(connectorId: number, config: AutoTrafficConfig): void {
+    this.requireConnector(connectorId);
+    const invalid = validateAutoTrafficConfig(config);
+    if (invalid) throw new Error(invalid);
+
+    this._autoTrafficConfigs.set(connectorId, config);
+    const existing = this._autoTraffic.get(connectorId);
+    if (existing) {
+      existing.reconfigure(config);
+      if (!config.enabled) this._autoTraffic.delete(connectorId);
+      return;
+    }
+    if (!config.enabled) return;
+
+    const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
+      // Awaited: a CSMS that refuses the tag must be counted as a refusal, not
+      // reported as a started session.
+      authorize: async () => {
+        const status =
+          await this._chargePoint.authorizeAndWait(AUTO_TRAFFIC_ID_TAG);
+        return status === "Accepted";
+      },
+      startTransaction: async (id) => {
+        this._chargePoint.startTransaction(AUTO_TRAFFIC_ID_TAG, id);
+      },
+      stopTransaction: async (id) => this.stopTransaction(id),
+      // A scenario owns the connector while any executor is running: a run's
+      // verdict must never depend on whether background traffic fired.
+      scenarioActive: () => this._executors.size > 0,
+      log: (message) =>
+        this._chargePoint.logger.info(message, LogType.TRANSACTION),
+    });
+    this._autoTraffic.set(connectorId, runner);
+    runner.start();
+  }
+
+  getAutoTrafficConfig(connectorId: number): AutoTrafficConfig {
+    this.requireConnector(connectorId);
+    return (
+      this._autoTrafficConfigs.get(connectorId) ?? {
+        ...defaultAutoTrafficConfig,
+      }
+    );
+  }
+
+  /** Per-connector counters, the assertion surface for a load run. */
+  getAutoTrafficCounters(connectorId: number): AutoTrafficCounters {
+    return (
+      this._autoTraffic.get(connectorId)?.counters ?? emptyAutoTrafficCounters()
+    );
   }
 
   setAutoResetToAvailable(connectorId: number, enabled: boolean): void {
@@ -1824,6 +1896,13 @@ export class CLIChargePointService {
     this._lastRunStatusByScenario.clear();
     // Permanent deletion uses dispose() to cancel controller timers;
     // non-permanent (update, shutdown) uses disconnect().
+    // Before the permanent/temporary split: `CPRegistry.update` cleans up with
+    // `permanent = false` and then replaces the service, so a runner left
+    // going here would keep generating wire work from a discarded instance,
+    // alongside its replacement.
+    for (const runner of this._autoTraffic.values()) runner.stop();
+    this._autoTraffic.clear();
+
     if (permanent) {
       this._chargePoint.dispose();
     } else {
@@ -2036,6 +2115,41 @@ export class CLIChargePointService {
    * Returns the number of connectors that had a stored snapshot
    * applied (i.e. were not at the default Available / 0 / null state).
    */
+  /**
+   * Restart background traffic that was configured before the last shutdown
+   * (#300).
+   *
+   * Separate from the runtime snapshot below because the config lives in
+   * `connector_settings`, not the connector row. Without this the row survived
+   * a restart and the charge point came back idle, with nothing to say the
+   * configuration had been dropped — the opposite of what "persisted" means
+   * for a feature whose whole job is to keep generating.
+   */
+  async restoreAutoTrafficFromDatabase(repository: {
+    loadAutoTrafficConfig(
+      cpId: string,
+      connectorId: number,
+    ): Promise<AutoTrafficConfig | null>;
+  }): Promise<number> {
+    if (!this.database) return 0;
+    let started = 0;
+    for (const connectorId of this._chargePoint.connectors.keys()) {
+      const config = await repository.loadAutoTrafficConfig(
+        this._init.cpId,
+        connectorId,
+      );
+      if (!config?.enabled) continue;
+      try {
+        this.setAutoTrafficConfig(connectorId, config);
+        started++;
+      } catch {
+        // A stored config that no longer validates must not stop the restore
+        // for every other connector.
+      }
+    }
+    return started;
+  }
+
   restoreConnectorRuntimeFromDatabase(): number {
     if (!this.database) return 0;
     let restored = 0;

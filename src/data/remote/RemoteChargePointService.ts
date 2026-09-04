@@ -18,6 +18,7 @@ import type {
 } from "../../cp/domain/types/OcppTypes";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
@@ -912,6 +913,40 @@ export class RemoteChargePointService implements ChargePointService {
     const snapshot = await this.getChargePoint(id);
     const connector = snapshot?.connectors.find((c) => c.id === connectorId);
     return connector?.autoMeterValueConfig ?? null;
+  }
+
+  async setAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    await this.runCpRpc(id, "set_auto_traffic_config", {
+      connector: connectorId,
+      config: config as unknown as Record<string, unknown>,
+    });
+  }
+
+  async getAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null> {
+    const data = await this.rpc("connector_settings.auto_traffic.get", {
+      cpId: id,
+      connectorId,
+    });
+    return (data as unknown as AutoTrafficConfig | null) ?? null;
+  }
+
+  async saveAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    await this.rpc("connector_settings.auto_traffic.save", {
+      cpId: id,
+      connectorId,
+      config: config as unknown as Record<string, unknown>,
+    });
   }
 
   async getAutoMeterConfig(

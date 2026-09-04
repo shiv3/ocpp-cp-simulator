@@ -1,3 +1,4 @@
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -411,6 +412,22 @@ export interface ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void>;
+  /** Seeded background traffic (#300). */
+  setAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void>;
+  getAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null>;
+  saveAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void>;
+
   setAutoResetToAvailable(
     id: string,
     connectorId: number,

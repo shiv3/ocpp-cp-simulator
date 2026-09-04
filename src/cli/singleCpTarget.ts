@@ -1,6 +1,10 @@
 import * as fs from "fs";
 
 import type { CLIChargePointService } from "./service";
+import {
+  defaultAutoTrafficConfig,
+  type AutoTrafficConfig,
+} from "../cp/domain/connector/AutoTraffic";
 import type {
   ChargePointService,
   ChargePointSnapshot,
@@ -46,6 +50,11 @@ export interface SingleCpCommandOps {
   disconnect(): Promise<void>;
   getStatus(): Promise<ChargePointStatus>;
   startTransaction(connectorId: number, tagId: string): Promise<void>;
+  setAutoTrafficConfig(
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void>;
+  getAutoTrafficConfig(connectorId: number): Promise<AutoTrafficConfig>;
   stopTransaction(connectorId: number): Promise<void>;
   setMeterValue(connectorId: number, value: number): Promise<void>;
   sendMeterValue(connectorId: number): Promise<void>;
@@ -188,6 +197,11 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     startTransaction: async (connectorId, tagId) => {
       service.startTransaction(connectorId, tagId);
     },
+    setAutoTrafficConfig: async (connectorId, config) => {
+      service.setAutoTrafficConfig(connectorId, config);
+    },
+    getAutoTrafficConfig: async (connectorId) =>
+      service.getAutoTrafficConfig(connectorId),
     stopTransaction: async (connectorId) => {
       service.stopTransaction(connectorId);
     },
@@ -311,6 +325,12 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     },
     startTransaction: (connectorId, tagId) =>
       service.startTransaction(cpId, connectorId, tagId),
+    setAutoTrafficConfig: (connectorId, config) =>
+      service.setAutoTrafficConfig(cpId, connectorId, config),
+    getAutoTrafficConfig: async (connectorId) =>
+      (await service.getAutoTrafficConfig(cpId, connectorId)) ?? {
+        ...defaultAutoTrafficConfig,
+      },
     stopTransaction: (connectorId) =>
       service.stopTransaction(cpId, connectorId),
     setMeterValue: (connectorId, value) =>

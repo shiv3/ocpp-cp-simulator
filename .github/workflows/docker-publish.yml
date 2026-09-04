@@ -102,6 +102,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build & push
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -127,22 +128,44 @@ jobs:
       #
       # Tag builds only: a branch build promises nobody anything, and `latest`
       # moving is not a claim in a release note.
-      - name: Verify the pushed tags resolve
-        if: startsWith(github.ref, 'refs/tags/')
+      #
+      # `!cancelled()` rather than the implicit `success()`: a step condition
+      # without it is skipped when an earlier step failed, which is precisely
+      # the v0.7.6 shape -- the one run where naming the missing tags is worth
+      # the most. The job is already red there; this makes it say which
+      # tags a consumer will not find.
+      #
+      # Existence is not the check. `X` and `X.Y` are moving tags that already
+      # point at the PREVIOUS release, and a re-run of an existing `X.Y.Z`
+      # resolves too, so `imagetools inspect` alone would pass while the
+      # aliases still served the old image. Each tag's manifest digest is
+      # compared against the digest this build produced.
+      - name: Verify the pushed tags resolve to this build
+        if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
         run: |
-          set -euo pipefail
-          missing=0
+          set -uo pipefail
+          expected='${{ steps.build.outputs.digest }}'
+          if [ -z "$expected" ]; then
+            echo "::error::the build produced no digest, so nothing was published for this tag"
+            exit 1
+          fi
+          echo "this build: $expected"
+          problems=0
           # steps.meta.outputs.tags is newline-separated, one image ref per line.
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
-            if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
-              echo "ok       $tag"
-            else
+            actual="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$tag" 2>/dev/null)"
+            if [ -z "$actual" ]; then
               echo "::error::$tag was not published -- the release notes promise it"
-              missing=$((missing + 1))
+              problems=$((problems + 1))
+            elif [ "$actual" != "$expected" ]; then
+              echo "::error::$tag resolves to $actual, not this build ($expected) -- the tag was not moved"
+              problems=$((problems + 1))
+            else
+              echo "ok       $tag"
             fi
           done <<< "${{ steps.meta.outputs.tags }}"
-          if [ "$missing" -ne 0 ]; then
-            echo "$missing tag(s) missing from the registry." >&2
+          if [ "$problems" -ne 0 ]; then
+            echo "$problems tag(s) missing from the registry or pointing elsewhere." >&2
             exit 1
           fi

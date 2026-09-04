@@ -167,7 +167,6 @@ knowledge first entered the documentation, not wiki operations.
 - [Control plane → idTag pool](concepts/control-plane.md#idtag-pool): new section. `idTagPool` gives a charge point tags to draw from when a call names none, with `round-robin` (default), `random` (seeded by the `cpId`, so a run replays and a fleet does not draw in lockstep) or `connector-affinity`. Records that an explicit `tagId` always wins — `start_transaction` and `authorize` take it as optional now, and a charge point with no pool keeps the historical `123456`, named as `DEFAULT_ID_TAG` so its two call sites cannot drift. Exactly one of `tags` or `file`; an unrecognised `distribution` is refused rather than defaulted.
 - [Control plane → idTag pool](concepts/control-plane.md#idtag-pool): `file` is resolved **once, at creation** — the list is what gets stored and persisted, so a file edited later cannot silently change a running charge point and a bad path fails the create rather than the first transaction.
 - [State persistence](concepts/state-persistence.md): `charge_points.id_tags` / `id_tag_distribution`, schema v9. Without them a charge point created with a pool came back drawing nothing.
-- [State persistence](concepts/state-persistence.md): `charge_points.id_tags` / `id_tag_distribution`, schema v8. Without them a charge point created with a pool came back drawing nothing.
 - [Control plane → idTag pool](concepts/control-plane.md#idtag-pool): the pool is carried through `CreateChargePointParams` and `toInitOptions` — the facade is exactly where #296's pool feature was silently dropped, and this one would have gone the same way. `cp.update` fully specifies the pool, so omitting `idTagPool` clears it. `start_transaction` / `authorize` forward an absent `tagId` instead of requiring one at the dispatcher, or the call was rejected before the pool could be consulted. A scenario reaches the pool through an `onResolveIdTag` callback the runtime binds to its connector — the executor has no charge point of its own. A `file` tag is bounded to 256 characters like the inline form, so the file is not a way around the identifier cap.
 - [GitHub issues](sources/github-issues.md): #299 row.
 
@@ -179,3 +178,66 @@ knowledge first entered the documentation, not wiki operations.
 - [State persistence](concepts/state-persistence.md): `connector_settings.auto_traffic`, schema v10.
 - [Control plane → Background traffic](concepts/control-plane.md#background-traffic): the wiring, not just the loop — the config reaches the running charge point through `SingleCpCommandOps`, the registry facade and the remote adapter, an enabled config is **resumed on restart** (it lives in `connector_settings`, not the connector row, so it needs its own restore), and `stop()` ends a session this runner started rather than leaving it charging. Runners are stopped on every cleanup, not only a permanent one: `CPRegistry.update` cleans up non-permanently and then replaces the service, so a surviving runner would generate wire work from a discarded instance alongside its replacement. Validation checks that every required field is present and finite — a partial config validated, produced NaN gaps, and `setTimeout(NaN)` turned the loop into a hot spin.
 - [GitHub issues](sources/github-issues.md): #300 row.
+
+## [2026-09-04] lint | Cross-page consistency after #295–#300
+
+Ran the CLAUDE.md lint workflow after the six fleet/load/observability PRs
+(#295–#300) plus the roadmap page landed in quick succession. Findings and
+fixes:
+
+- [Control plane](concepts/control-plane.md): the CP command table still
+  showed `start_transaction` / `authorize` requiring `tagId`, contradicting
+  the idTag-pool section's own claim (#299) that it is optional; marked both
+  `tagId?`. Added the `set_auto_traffic_config` / `get_auto_traffic_config`
+  CP commands (#300) and the `blueprint.list/.save/.delete` and
+  `connector_settings.auto_traffic.get/.save` daemon methods (#297, #300) to
+  their canonical tables — they existed in `EXPLICIT_METHODS` / `METHODS` and
+  in dedicated subsections, but not in the summary tables the other daemon
+  methods are listed in. Corrected the `cp.create_many` batch-fields table:
+  `idPattern` is required only when `blueprintId` is absent, not
+  unconditionally. Linked the bare `src/utils/blueprints/README.md` path.
+- [State persistence](concepts/state-persistence.md): the `## Tables` section
+  had two copies of the same table pasted back to back (a rebase artifact),
+  disagreeing with each other — only the second copy's `charge_points` row
+  mentioned the idTag-pool columns (v9, #299), and only the first copy had a
+  `blueprints` row at all. Merged into one table, folding in both facts, and
+  added a `connector_runtime` row that neither copy had (pre-existing table
+  the catalog had never listed). Updated the `.tables` example output to
+  match the current 12 tables.
+- [GitHub issues](sources/github-issues.md): `#298` was listed twice with
+  different link sets (once linking only the roadmap, once linking
+  `daemon.md#metrics` / `access-control.md#basic-auth-gate`); merged into one
+  row carrying all three links, at its numeric position. Added the roadmap
+  link to the `#295` row and a pointer from it to `daemon.md`'s `--cp-count`.
+- [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): "16
+  curated tools" was stale — `cp_create_many`, `blueprint_list` and
+  `blueprint_save` shipped since that count was written; the daemon and MCP
+  pages already said 19. Corrected to match.
+- [Daemon](entities/daemon.md#limits--roadmap): "Planned: fleet-scale
+  creation, a metrics endpoint, seeded background traffic…" was stale — all
+  three (plus supervision URLs and the idTag pool) have shipped. Reworded to
+  Shipped/Planned, matching the roadmap page's status column (left untouched,
+  per instructions).
+- This log: the idTag-pool ingest entry (`## [2026-09-04] ingest | idTag pool
+(#299)`) had the same schema-version bullet twice, once correctly saying
+  `schema v9` and once (a rebase artifact, same cause as the state-persistence
+  duplication above) saying `schema v8`. Deleted the incorrect duplicate
+  rather than leaving self-contradictory history; noted here since `log.md`
+  is otherwise append-only.
+- Clean: MCP tool count (19 curated + 3 network-sim, code / `mcp-endpoint.md`
+  / `index.md` agree); CLI flag table in `entities/cli.md` against every flag
+  parsed by `src/cli/main.ts` and against the daemon-only table in
+  `entities/daemon.md`; `SCHEMA_VERSION` (10) against every schema-version
+  claim once the above was fixed; scenario node types (23, `scenario-format.md`
+  vs `schema/scenario.schema.json`); template counts (6 general + 47 `cert16-*`
+  - 1 OCTT probe); Prometheus metric names (`entities/daemon.md` vs
+    `metrics/render.ts`); `--cp-id-pattern` default; broken links / anchors (the
+    CLAUDE.md checker script, 0 problems); orphans (every page has an inbound
+    link besides `index.md`); `index.md` catalog (bijective with pages on disk);
+    missing pages (no cross-cutting concept mentioned on 3+ pages without a
+    home).
+- Left alone: `analyses/fleet-load-and-observability-roadmap.md` status rows
+  (#301/#302 are in flight and own them); `src/utils/blueprints/README.md`
+  has no `docs/sources/` summary page yet, which is an ingest gap from #297
+  rather than a lint-fixable inconsistency — flagged for a human/ingest pass,
+  not created here.

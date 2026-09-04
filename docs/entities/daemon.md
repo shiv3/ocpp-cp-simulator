@@ -216,6 +216,8 @@ see [Docker image](docker-image.md).
   Unix-domain socket control listener.
 - Future: bearer token auth or mTLS can be added at the HTTP/socket boundary
   without changing CP command method names.
-- Planned: fleet-scale creation, a metrics endpoint, seeded background traffic
-  and a measured per-process ceiling are sequenced in
-  [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md).
+- Shipped: bulk CP creation, multiple supervision URLs, CP blueprints, the
+  metrics endpoint, an idTag pool and seeded background traffic (#295–#300).
+  Planned: a charging-curve EV model and a measured per-process ceiling. See
+  [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)
+  for the full sequencing.

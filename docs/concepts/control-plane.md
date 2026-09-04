@@ -128,9 +128,10 @@ bucket with the same numbers).
 
 #### `cp.create` parameters
 
-The full set, shared by `cp.create` and `cp.update` and — since #284 — by the
-MCP `cp_create` tool, which derives its input schema from this one rather than
-restating a subset.
+The full set, shared by `cp.create` and `cp.update`, by `cp.create_many` (which
+drops `cpId` and adds the batch fields), and — since #284 — by the MCP
+`cp_create` / `cp_create_many` tools, which derive their input schemas from this
+one rather than restating a subset.
 
 | Field                                             | Type                     | Notes                                                                                 |
 | ------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------- |
@@ -149,12 +150,62 @@ restating a subset.
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.
 
+##### `cp.create_many` — the batch fields
+
+`cp.create_many` takes the table above **without `cpId`** (ids are generated),
+plus:
+
+| Field        | Type                 | Notes                                                                            |
+| ------------ | -------------------- | -------------------------------------------------------------------------------- |
+| `count`      | number, **required** | How many to create. `1`–`200` (`CP_CREATE_MANY_MAX`), enforced by the schema.    |
+| `idPattern`  | string, **required** | Id template. `{n}` is the index, `{n:03}` zero-pads it — `CP{n:03}` → `CP001`, … |
+| `startIndex` | number               | First index substituted (default `1`).                                           |
+
+Two guarantees worth relying on:
+
+- **Partial success is the result, not an error.** One id that collides with an
+  existing CP, or a CSMS only some of them can reach, does not roll back the
+  rest. The ack is `{ created: string[], failed: { cpId, reason }[] }` and is
+  `ok: true` even when `failed` is non-empty; the call itself fails only when
+  the parameters are unusable. A `reason` falls back to the error code when the
+  daemon blanks the message (an "already exists" message could carry a CSMS
+  URL).
+- **Creation is sequential**, so `registry` events arrive in id order.
+
+The `count` ceiling is enforced rather than merely documented: this is the one
+control-plane method that allocates unbounded resources from a single request.
+The `{n:0W}` width is capped at two digits for the same reason, and — because a
+pattern may repeat the placeholder, so the width cap alone bounds nothing — each
+**expanded id** is capped at 256 characters. Every id and callback route in the
+batch is checked before the first charge point is created, so a bad pattern is
+refused outright rather than leaving a partial fleet behind.
+
+**SOAP batches need a placeholder in the callback URL too.** The daemon routes
+inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService` and advertises
+`soapCallbackUrl` verbatim, so one address shared across a batch would send
+every station's callbacks to the first station's route — while every create
+reported success. `cp.create_many` therefore parses each **expanded** `soapCallbackUrl` with the
+router's own pattern and requires the charge point segment to equal the
+generated id. A placeholder alone is not enough: `SOAP{n}` against ids
+generated as `SOAP{n:03}` registers `SOAP001` while advertising a route for
+`SOAP1`, and every inbound call 404s while all the creates report success.
+Matching the way the router does — rather than by substring — also accepts a
+percent-encoded id such as `/SITE%20A-1/` and rejects an extra path segment
+that would 404. Expanded URLs are capped at 2048 characters. The CLI applies
+the same rule to `--soap-callback-url`.
+
+A `failed[].reason` is truncated to 2000 characters. An error message that
+repeated a long input would otherwise push the batch's ack past the result
+schema and turn the promised per-item report into an opaque `internal` — after
+every charge point had already been created.
+
 ### Daemon methods
 
 | Method                                                         | Params                                                                               | Result / purpose                                                                                                                                                                             |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cp.list`                                                      | `{}`                                                                                 | Array of redacted CP registry items.                                                                                                                                                         |
 | `cp.create`                                                    | See [cp.create parameters](#cpcreate-parameters) below                               | Create a CP; `autoConnect: true` connects it after creation.                                                                                                                                 |
+| `cp.create_many`                                               | See [cp.create_many](#cpcreate_many--the-batch-fields) below                         | Create N CPs sharing every parameter but the generated id. Partial success is a normal result.                                                                                               |
 | `cp.update`                                                    | Same as `cp.create`                                                                  | Replace an existing CP config; `autoConnect: true` reconnects it after update.                                                                                                               |
 | `cp.delete`                                                    | `{ "cpId": string }`                                                                 | Remove a CP from the registry.                                                                                                                                                               |
 | `logs.get`                                                     | `{ "cpId": string, "limit"?: number, "offset"?: number, "order"?: "asc" \| "desc" }` | Return persisted logs, or the in-memory log buffer when no state DB is configured. `limit` takes the **most recent** N; see [Log format → Log windowing](log-format.md#log-windowing).       |

@@ -9,7 +9,15 @@ export * from "./limits";
 export * from "./errors";
 export * from "./events";
 export * from "./envelope";
-export { METHODS, EXPLICIT_METHODS, createParamsSchema } from "./methods";
+export {
+  METHODS,
+  EXPLICIT_METHODS,
+  createParamsSchema,
+  createManyParamsSchema,
+  expandIdPattern,
+  hasIdPatternPlaceholder,
+  MAX_GENERATED_CP_ID_LENGTH,
+} from "./methods";
 
 /** Every valid rpc method id. */
 export type RpcMethod = keyof typeof METHODS;

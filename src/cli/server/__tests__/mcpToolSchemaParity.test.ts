@@ -5,7 +5,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createMcpHandler } from "../mcp/mcpServer";
 import { createRuntimeDeps } from "../socketServer";
-import { createParamsSchema } from "../../../protocol";
+import { createManyParamsSchema, createParamsSchema } from "../../../protocol";
 
 /**
  * #284 — the typed tool must not be narrower than the method it wraps.
@@ -120,7 +120,7 @@ describe("MCP cp_create schema parity (#284)", () => {
     }
   });
 
-  it("adds only autoConnect, which is the tool's own", async () => {
+  it("invents nothing of its own", async () => {
     const canonical = new Set(
       Object.keys(
         (createParamsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
@@ -131,8 +131,55 @@ describe("MCP cp_create schema parity (#284)", () => {
     );
 
     // A field the tool invents is a field `cp.create` will ignore, so the
-    // list is worth pinning rather than leaving open.
-    expect(extra).toEqual(["autoConnect"]);
+    // list is worth pinning rather than leaving open. It used to hold
+    // `autoConnect`, which the handler honoured while no schema declared it;
+    // that field now lives on `createParamsSchema`, so the tool adds nothing.
+    expect(extra).toEqual([]);
+  });
+
+  it("declares autoConnect on the method, not just the tool", () => {
+    // The handler has always read `autoConnect` off the raw params. Declaring
+    // it means socket.io callers and `list_methods` see it too, instead of
+    // it existing only in a hand-written tool schema.
+    const shape = (createParamsSchema as unknown as z.ZodObject<z.ZodRawShape>)
+      .shape;
+    expect(Object.keys(shape)).toContain("autoConnect");
+  });
+});
+
+describe("MCP cp_create_many schema parity (#295)", () => {
+  it("exposes every parameter cp.create_many accepts", async () => {
+    const canonical = Object.keys(
+      (createManyParamsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
+    ).sort();
+    const exposed = await toolProperties("cp_create_many");
+
+    const missing = canonical.filter((key) => !exposed.includes(key));
+    expect(missing).toEqual([]);
+  });
+
+  it("shares cp.create's fields but not its cpId", async () => {
+    const exposed = await toolProperties("cp_create_many");
+
+    // The batch shares everything but the id, so the SOAP and security
+    // fields have to survive the .omit() — the same failure #284 was about,
+    // one method along.
+    for (const field of [
+      "wsUrl",
+      "centralSystemUrl",
+      "soapPath",
+      "securityProfile",
+      "authorizationKey",
+      "basicAuth",
+      "autoConnect",
+    ]) {
+      expect(exposed).toContain(field);
+    }
+    for (const field of ["count", "idPattern", "startIndex"]) {
+      expect(exposed).toContain(field);
+    }
+    // `cpId` is generated from `idPattern`; accepting one would be ambiguous.
+    expect(exposed).not.toContain("cpId");
   });
 });
 

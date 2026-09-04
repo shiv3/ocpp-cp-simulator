@@ -6,6 +6,24 @@ import type {
 export interface CLIOptions {
   readonly wsUrl: string;
   readonly cpId: string | null;
+  /**
+   * How many charge points `--cp-id` stands for. 1 (the default) keeps the
+   * historical single-CP behaviour; above 1 the daemon bootstraps a fleet
+   * whose ids come from `cpIdPattern`.
+   */
+  readonly cpCount: number;
+  /**
+   * Id template for a fleet, e.g. `CP{n:03}`. Defaults to `<cpId>{n:03}` so
+   * `--cp-id CP --cp-count 3` yields CP001..CP003.
+   */
+  readonly cpIdPattern: string | null;
+  /**
+   * `--soap-callback-url` as given, before `resolveSoapCallbackUrl` folded it
+   * together with the public base. A fleet has to re-derive the callback per
+   * charge point, so it needs the inputs, not just the resolved result.
+   */
+  readonly soapCallbackUrlExplicit: string | null;
+  readonly soapPublicBaseUrl: string | null;
   readonly connectors: number;
   readonly jsonMode: boolean;
   readonly daemon: boolean;

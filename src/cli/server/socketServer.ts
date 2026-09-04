@@ -25,6 +25,9 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
+  createManyParamsSchema,
+  expandIdPattern,
+  MAX_GENERATED_CP_ID_LENGTH,
   isRpcMethod,
   redactSimulatorConfig,
   registryCpToWire,
@@ -64,6 +67,7 @@ import {
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
+import { SOAP_CHARGE_POINT_SERVICE_ROUTE } from "../soapPath";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
@@ -348,6 +352,8 @@ export async function dispatchRpcCore(
       return listCps(deps.chargePointService);
     case "cp.create":
       return createCp(deps, rawParams);
+    case "cp.create_many":
+      return createManyCps(deps, rawParams);
     case "cp.update":
       return updateCp(deps, rawParams);
     case "cp.delete":
@@ -482,10 +488,18 @@ async function listCps(
   );
 }
 
-async function createCp(
+/**
+ * Create exactly one charge point from an already-shaped params object.
+ *
+ * Split out of `createCp` so `cp.create_many` runs the identical path — the
+ * SOAP callback warning, the facade error classification and the fire-and-
+ * forget autoConnect included. A bulk-created charge point that behaved even
+ * slightly differently from a singly-created one would be a trap.
+ */
+async function createOneCp(
   deps: RuntimeSocketIoDeps,
   rawParams: unknown,
-): Promise<{ cpId: string }> {
+): Promise<string> {
   const init = parseCreateInput(rawParams);
   if (isSoapVersion(init.ocppVersion) && init.soapCallbackUrl) {
     const suffixWarning = soapCallbackUrlSuffixWarning(init.soapCallbackUrl);
@@ -505,7 +519,168 @@ async function createCp(
       );
     });
   }
-  return { cpId: init.cpId };
+  return init.cpId;
+}
+
+async function createCp(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{ cpId: string }> {
+  return { cpId: await createOneCp(deps, rawParams) };
+}
+
+/**
+ * `cp.create_many` — one call, N charge points sharing every parameter but the
+ * generated id.
+ *
+ * Two behaviours worth naming because they are contracts, not incidentals:
+ *
+ * - **Partial success is the result.** A CSMS URL that only some ids can reach,
+ *   or an id that collides with an existing charge point, must not discard the
+ *   ones that came up. Failures are collected per id and returned; the call
+ *   itself only fails when the parameters are unusable.
+ * - **Creation is sequential.** Registry `event` pushes therefore arrive in id
+ *   order, which a subscriber can rely on. Bulk creation is not on a hot path,
+ *   so there is nothing to win by racing them.
+ */
+/**
+ * Why one charge point in a batch could not be created, in a form safe to send
+ * back over the control plane.
+ *
+ * `classifyFacadeError` deliberately blanks the message for the failures whose
+ * text could carry a CSMS URL — an "already exists" collision among them — so
+ * falling back to the error code is what keeps the row from being an empty
+ * string. Terse, but paired with the `cpId` it is enough to act on, and it
+ * leaks nothing. Anything else goes through the same redaction the log lines
+ * use, since a create can fail on a URL carrying Basic Auth credentials.
+ */
+function createFailureReason(err: unknown): string {
+  const reason =
+    err instanceof RpcFailure ? err.message || err.code : safeLogMessage(err);
+  // Bounded to the result schema's own limit. A failure whose message repeats a
+  // long input — a 40 KB `tlsCaPath` that does not exist, say — would otherwise
+  // make the *whole batch's* ack fail result validation and answer `internal`,
+  // discarding the per-item report this method exists to give.
+  return reason.length > MAX_FAILURE_REASON_LENGTH
+    ? reason.slice(0, MAX_FAILURE_REASON_LENGTH - 1) + "\u2026"
+    : reason;
+}
+
+/** Fits inside the result schema's `STR_64K`, with room for the ellipsis. */
+const MAX_FAILURE_REASON_LENGTH = 2_000;
+
+/** Bounds an expanded `soapCallbackUrl`; generous for a real URL. */
+const MAX_SOAP_CALLBACK_URL_LENGTH = 2_048;
+
+/**
+ * The charge point id a callback URL's path would route to, or `null` if the
+ * path is not a `ChargePointService` route at all. Uses the router's own
+ * pattern and percent-decoding so this check and the router cannot disagree.
+ */
+export function soapCallbackRouteCpId(callbackUrl: string): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(callbackUrl).pathname;
+  } catch {
+    return null;
+  }
+  const match = SOAP_CHARGE_POINT_SERVICE_ROUTE.exec(pathname);
+  if (!match?.[2]) return null;
+  try {
+    return decodeURIComponent(match[2]);
+  } catch {
+    return null;
+  }
+}
+
+async function createManyCps(
+  deps: RuntimeSocketIoDeps,
+  rawParams: unknown,
+): Promise<{
+  created: string[];
+  failed: Array<{ cpId: string; reason: string }>;
+}> {
+  const parsed = createManyParamsSchema.safeParse(rawParams);
+  if (!parsed.success) {
+    throw new RpcFailure(
+      "invalid_params",
+      parsed.error.issues[0]?.message ?? "",
+    );
+  }
+  const { count, idPattern, startIndex, ...shared } = parsed.data;
+  const first = startIndex ?? 1;
+
+  const soapCallbackUrl = shared.soapCallbackUrl;
+
+  // Expand every id first and check the batch as a whole. Creating as we go
+  // and failing partway would leave charge points registered under ids the
+  // result cannot even report — the schema caps the result strings — so the
+  // parameters are rejected outright instead, before any side effect.
+  const plan: Array<{ cpId: string; soapCallbackUrl?: string }> = [];
+  for (let i = 0; i < count; i++) {
+    const index = first + i;
+    const cpId = expandIdPattern(idPattern, index);
+    if (cpId.length > MAX_GENERATED_CP_ID_LENGTH) {
+      // The pad-width cap does not bound this on its own: a pattern may repeat
+      // the placeholder, and a few KB of input expands to a huge id.
+      throw new RpcFailure(
+        "invalid_params",
+        `idPattern expands to a charge point id longer than ${MAX_GENERATED_CP_ID_LENGTH} characters`,
+      );
+    }
+    if (!soapCallbackUrl) {
+      plan.push({ cpId });
+      continue;
+    }
+    // A SOAP charge point advertises the address the CSMS calls back on, and
+    // the daemon routes those calls by the cpId embedded in it
+    // (`<soapPath>/<cpId>/ChargePointService`). One URL shared across a batch
+    // would point every station at the first station's route; so would a URL
+    // whose placeholder is spelled differently from `idPattern`'s, e.g.
+    // `SOAP{n}` against ids generated as `SOAP{n:03}` — the station registers
+    // as SOAP001 while advertising SOAP1, and every inbound call 404s. Both
+    // creates succeed either way, so the check has to be here.
+    const expanded = expandIdPattern(soapCallbackUrl, index);
+    // Bounded for the same reason the id is: a template repeating the
+    // placeholder expands far past what any string limit allows, and this
+    // value is retained and persisted per charge point.
+    if (expanded.length > MAX_SOAP_CALLBACK_URL_LENGTH) {
+      throw new RpcFailure(
+        "invalid_params",
+        `soapCallbackUrl expands to more than ${MAX_SOAP_CALLBACK_URL_LENGTH} characters`,
+      );
+    }
+    if (soapCallbackRouteCpId(expanded) !== cpId) {
+      // Checked through the router's own pattern and percent-decoding rather
+      // than by substring: an id like "SITE A-1" is advertised as
+      // "/SITE%20A-1/" and would fail a raw match, while
+      // "/SITE A-1/extra/ChargePointService" would pass one and still 404.
+      throw new RpcFailure(
+        "invalid_params",
+        `soapCallbackUrl must expand to a route whose charge point segment is "${cpId}" and which ends in /ChargePointService; the daemon routes inbound SOAP calls by that segment`,
+      );
+    }
+    plan.push({ cpId, soapCallbackUrl: expanded });
+  }
+
+  const created: string[] = [];
+  const failed: Array<{ cpId: string; reason: string }> = [];
+  for (const entry of plan) {
+    try {
+      created.push(
+        await createOneCp(deps, {
+          ...shared,
+          cpId: entry.cpId,
+          ...(entry.soapCallbackUrl
+            ? { soapCallbackUrl: entry.soapCallbackUrl }
+            : {}),
+        }),
+      );
+    } catch (err) {
+      failed.push({ cpId: entry.cpId, reason: createFailureReason(err) });
+    }
+  }
+  return { created, failed };
 }
 
 async function updateCp(

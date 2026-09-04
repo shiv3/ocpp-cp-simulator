@@ -24,6 +24,9 @@ import type { Database } from "../../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
+import { expandIdPattern } from "../../protocol";
+import { resolveSoapCallbackUrl } from "../soapCallbackUrl";
+import { soapCallbackRouteCpId } from "./socketServer";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -51,6 +54,21 @@ export interface ServerOptions {
   readonly httpHost: string;
   readonly pidPath: string | null;
   readonly bootstrap: ChargePointInitOptions | null;
+  /**
+   * Number of charge points to bootstrap from `bootstrap`. Above 1 the `cpId`
+   * is replaced by `bootstrapIdPattern` expanded per index; the rest of the
+   * options are shared. Mirrors the `cp.create_many` RPC so a CI job gets the
+   * same fleet from a flag as from the control plane.
+   */
+  readonly bootstrapCount?: number;
+  readonly bootstrapIdPattern?: string;
+  /**
+   * SOAP callback inputs, kept unresolved so a fleet can derive one address
+   * per charge point. `bootstrap.soapCallbackUrl` is already resolved for the
+   * single-CP case and stays authoritative there.
+   */
+  readonly soapCallbackUrlExplicit?: string | null;
+  readonly soapPublicBaseUrl?: string | null;
   readonly autoConnect: boolean;
   readonly startupScenario: {
     readonly scenario: string | null;
@@ -277,47 +295,150 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 
   lifecycle.installSignalHandlers();
 
-  if (opts.bootstrap) {
+  const fleet = expandBootstrap(opts);
+  const hasExplicitStartupScenario =
+    !!opts.startupScenario &&
+    (!!opts.startupScenario.scenario ||
+      !!opts.startupScenario.scenarioTemplate ||
+      !!opts.startupScenario.scenarioTemplateFile);
+  const seedDefault = !hasExplicitStartupScenario;
+
+  // Register the whole fleet first. Creation is synchronous, so every charge
+  // point is in the registry — and answering `cp.list` — before anything waits
+  // on a network. Connecting inside the loop instead meant an unreachable CSMS
+  // serialised a 30s connect (and up to another 30s of boot wait in a startup
+  // scenario) per charge point, so a 20-CP bootstrap could take 20 minutes
+  // before the last one existed at all.
+  const started: Array<{
+    svc: ReturnType<CPRegistry["create"]>;
+    init: ChargePointInitOptions;
+  }> = [];
+  for (const init of fleet) {
     // The same cpId can already exist when --state-db restored it above.
     // Reuse the restored instance in that case — re-creating would throw
     // and we'd lose all of its persisted state. Skip the auto-seed for
     // bootstrap CPs that arrive together with an explicit startup
     // scenario; otherwise both would land on the connector and race for
     // the auto-start slot.
-    const existing = registry.get(opts.bootstrap.cpId);
-    const hasExplicitStartupScenario =
-      !!opts.startupScenario &&
-      (!!opts.startupScenario.scenario ||
-        !!opts.startupScenario.scenarioTemplate ||
-        !!opts.startupScenario.scenarioTemplateFile);
-    const seedDefault = !hasExplicitStartupScenario;
-    const svc = existing ?? registry.create(opts.bootstrap, { seedDefault });
+    const existing = registry.get(init.cpId);
+    const svc = existing ?? registry.create(init, { seedDefault });
     if (existing) {
-      serverLog(
-        `Bootstrap matches restored CP "${opts.bootstrap.cpId}"; reusing`,
-      );
+      serverLog(`Bootstrap matches restored CP "${init.cpId}"; reusing`);
     } else {
-      serverLog(`Bootstrapped CP "${opts.bootstrap.cpId}"`);
+      serverLog(`Bootstrapped CP "${init.cpId}"`);
     }
-    if (opts.autoConnect) {
-      serverLog("Connecting to CSMS...");
-      try {
-        await svc.connect();
-        serverLog("Connected.");
-      } catch (err) {
-        serverLog(
-          `Connection failed: ${err instanceof Error ? err.message : err}`,
-        );
+    started.push({ svc, init });
+  }
+
+  if (!opts.autoConnect && !opts.startupScenario) return;
+
+  // Bounded rather than unbounded: a fleet all dialling at once is a thundering
+  // herd at the CSMS, and the point here is only that one slow connect must not
+  // block the next.
+  await forEachBounded(
+    started,
+    BOOTSTRAP_CONCURRENCY,
+    async ({ svc, init }) => {
+      if (opts.autoConnect) {
+        serverLog(`Connecting ${init.cpId} to CSMS...`);
+        try {
+          await svc.connect();
+          serverLog(`Connected ${init.cpId}.`);
+        } catch (err) {
+          serverLog(
+            `Connection failed for ${init.cpId}: ${err instanceof Error ? err.message : err}`,
+          );
+        }
       }
-    }
-    if (opts.startupScenario) {
-      await runStartupScenario(
-        svc,
-        opts.startupScenario,
-        opts.bootstrap.connectors,
+      if (opts.startupScenario) {
+        await runStartupScenario(svc, opts.startupScenario, init.connectors);
+      }
+    },
+  );
+}
+
+/** How many bootstrap charge points connect at once. */
+const BOOTSTRAP_CONCURRENCY = 8;
+
+async function forEachBounded<T>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      for (let i = next++; i < items.length; i = next++) {
+        await run(items[i]!);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
+/**
+ * The charge points `--cp-id` (plus `--cp-count` / `--cp-id-pattern`) asks for.
+ *
+ * One without a count, N with one — sequential, so the log and the registry
+ * events read in id order. Everything but `cpId` is shared, exactly as
+ * `cp.create_many` shares it.
+ */
+function expandBootstrap(
+  opts: ServerOptions,
+): readonly ChargePointInitOptions[] {
+  if (!opts.bootstrap) return [];
+  const count = opts.bootstrapCount ?? 1;
+  if (count <= 1) return [opts.bootstrap];
+  const pattern = opts.bootstrapIdPattern ?? `${opts.bootstrap.cpId}{n:03}`;
+  const fleet: ChargePointInitOptions[] = [];
+  for (let i = 1; i <= count; i++) {
+    const cpId = expandIdPattern(pattern, i);
+    fleet.push({
+      ...opts.bootstrap,
+      cpId,
+      soapCallbackUrl: fleetSoapCallbackUrl(opts, cpId, i),
+    });
+  }
+  return fleet;
+}
+
+/**
+ * The SOAP callback address for one charge point in a fleet.
+ *
+ * The daemon routes inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService`
+ * and advertises this URL verbatim, so a fleet sharing one address would send
+ * every station's callbacks to the first station's route. `--soap-public-base-url`
+ * is therefore re-derived per generated id rather than reused from the resolved
+ * single-CP value, and an explicit `--soap-callback-url` carries the same `{n}`
+ * placeholder as the id pattern (the CLI refuses one that does not).
+ */
+function fleetSoapCallbackUrl(
+  opts: ServerOptions,
+  cpId: string,
+  index: number,
+): string | undefined {
+  const explicit = opts.soapCallbackUrlExplicit?.trim();
+  if (explicit) {
+    const expanded = expandIdPattern(explicit, index);
+    // Same rule the RPC enforces, checked the same way — through the router's
+    // own pattern and percent-decoding, so the two cannot disagree about an id
+    // that needs encoding or a path with an extra segment.
+    if (soapCallbackRouteCpId(expanded) !== cpId) {
+      throw new Error(
+        `--soap-callback-url expands to "${expanded}", whose charge point route segment is not "${cpId}". ` +
+          `The daemon routes inbound SOAP calls by that segment, so the CSMS would get 404s.`,
       );
     }
+    return expanded;
   }
+  const resolved = resolveSoapCallbackUrl({
+    explicitCallbackUrl: null,
+    publicBaseUrl: opts.soapPublicBaseUrl ?? null,
+    cpId,
+    soapPath: opts.bootstrap?.soapPath,
+  });
+  return resolved ?? undefined;
 }
 
 /**

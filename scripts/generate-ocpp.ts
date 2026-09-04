@@ -349,15 +349,33 @@ const strictAjvOptions = { ...ajvOptions, validateFormats: true };
 
 type FormatCheck = (value: string) => boolean;
 
+const DATE_TIME_SHAPE =
+  /^(\\d{4})-(\\d{2})-(\\d{2})[Tt](\\d{2}):(\\d{2}):(\\d{2})(\\.\\d+)?([Zz]|[+-]\\d{2}:\\d{2})$/;
+
+function isRealCalendarInstant(value: string): boolean {
+  const match = DATE_TIME_SHAPE.exec(value);
+  if (!match) return false;
+  const [, y, mo, d, h, mi, sec] = match.map(Number);
+  if (mo < 1 || mo > 12) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  // Deliberately not Date.parse: it NORMALISES, so 2026-02-30 becomes March 2
+  // and reports success, and it rejects the leap second RFC 3339 allows.
+  if (d < 1 || d > days[mo - 1]) return false;
+  if (h > 23 || mi > 59) return false;
+  return sec <= 60;
+}
+
 const OCPP_FORMATS: Record<string, FormatCheck> = {
-  // RFC 3339, which is what OCPP means by dateTime, and a real instant.
-  "date-time": (value) =>
-    /^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?([Zz]|[+-]\\d{2}:\\d{2})$/.test(
-      value,
-    ) && !Number.isNaN(Date.parse(value)),
+  // RFC 3339, which is what OCPP means by dateTime.
+  "date-time": isRealCalendarInstant,
   // Absolute only: OCPP uses these for firmware and diagnostics locations,
-  // which a charge point has to reach on its own.
+  // which a charge point has to reach on its own. \`new URL()\` alone is too
+  // permissive -- it accepts a space and a dangling percent by normalising
+  // them -- so the RFC 3986 character rules are checked first.
   uri: (value) => {
+    if (/[\\s<>"{}|\\\\^\`]/.test(value)) return false;
+    if (/%(?![0-9A-Fa-f]{2})/.test(value)) return false;
     try {
       return Boolean(new URL(value).protocol);
     } catch {

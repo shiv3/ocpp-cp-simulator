@@ -154,6 +154,37 @@ partially, so `N` is the number of charge points that actually exist and
 Reporting the requested size attributed a row's latency to a fleet that never
 existed.
 
+**The stop waits for the assigned transaction id.** On OCPP 1.6
+`transaction_started` is emitted twice — locally with the placeholder id `0`,
+then again when `StartTransaction.conf` supplies the real one — and each waiter
+is bound to its own cycle so a straggling conf from the previous cycle is
+ignored while this cycle's own id is still waited for. Taking only the first
+emission satisfied the first requirement and broke the second:
+`sendStopTransaction` snapshots the id immediately, so a conf slower than the
+hold sent `0` and produced CALLERRORs and corrupted connector state, near the
+latency knee the tool exists to find. Bounded at the authorization wait plus the
+per-CALL watchdog, past which no id is ever coming; OCPP 2.x assigns no numeric
+id, so nothing is waited for there.
+
+**The stop waits for the assigned transaction id.** On OCPP 1.6
+`transaction_started` is emitted twice — locally with the placeholder id `0`,
+then again when `StartTransaction.conf` supplies the real one — and each waiter
+is bound to its own cycle, so a straggling conf from the previous cycle is
+ignored while this cycle's own id is still waited for. Taking only the first
+emission satisfied that first requirement and broke the second:
+`sendStopTransaction` snapshots the id immediately, so a conf slower than the
+hold sent `0` and produced CALLERRORs and corrupted connector state, near the
+latency knee the tool exists to find. Bounded at the authorization wait plus the
+per-CALL watchdog, past which no id is ever coming; OCPP 2.x assigns no numeric
+id, so nothing is waited for there.
+
+**SIGINT waits for creation to stop before deleting.** An interrupt landing
+while `growFleet` awaited one batch of a multi-batch step used to snapshot the
+cleanup id list at once; the outstanding batch then finished and later batches
+were created behind the snapshot. An abort flag is now set first, the sweep is
+awaited, and only then is the list read. A second Ctrl-C exits immediately and
+names what may be left behind.
+
 **The hold starts when the transaction does.** `start_transaction`'s
 control-plane ack returns while `ChargePoint.startTransaction` is still awaiting
 `Authorize.conf` (`AuthorizeBeforeLocalStart` defaults to **true**), so timing

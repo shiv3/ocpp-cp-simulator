@@ -22,6 +22,7 @@ import {
   TokenBucket,
   answeredAfterWatchdog,
   assertDaemonEmpty,
+  ASSIGNED_ID_TIMEOUT_MS,
   AUTHORIZE_WAIT_SEC,
   benchCpId,
   cleanupIdsAfterBatch,
@@ -1128,26 +1129,85 @@ describe("a step's reported row (#302)", () => {
 });
 
 describe("transaction-start tracking (#302)", () => {
-  it("resolves an armed waiter when its charge point confirms", () => {
+  it("resolves an armed waiter when its charge point confirms", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000);
-    starts.confirm("CP-A");
-    return expect(armed).resolves.toBe(true);
+    const armed = starts.arm("CP-A", 5_000, false);
+    starts.confirm("CP-A", 0);
+    expect(await armed).toEqual({ started: true, transactionId: 0 });
   });
 
-  it("resolves false when no confirmation arrives in time", async () => {
+  it("resolves unstarted when no confirmation arrives in time", async () => {
     const starts = new TransactionStarts();
-    expect(await starts.arm("CP-A", 10)).toBe(false);
+    expect(await starts.arm("CP-A", 10, false)).toEqual({
+      started: false,
+      transactionId: null,
+    });
+  });
+
+  it("waits for the CSMS-assigned id before letting the cycle proceed", async () => {
+    // The round-nine finding. Taking only the first emission kept a straggling
+    // conf from confirming a newer cycle, but discarded the assigned id — so a
+    // conf slower than the hold left `stop_transaction` carrying the
+    // placeholder 0, which `sendStopTransaction` snapshots immediately and the
+    // CSMS rejects. That happens near the latency knee, which is exactly where
+    // the measurement matters.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 0); // local start; not enough on its own
+    let settled = false;
+    void armed.then(() => {
+      settled = true;
+    });
+    await sleep(20);
+    expect(settled).toBe(false);
+    starts.confirm("CP-A", 4242); // StartTransaction.conf
+    expect(await armed).toEqual({ started: true, transactionId: 4242 });
+  });
+
+  it("ignores a previous cycle's late conf instead of confirming this one", async () => {
+    // The round-three requirement, which the fix above must not undo: a
+    // non-zero id arriving before this waiter has seen its own local start can
+    // only belong to an earlier cycle.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 99); // straggler from the cycle before
+    let settled = false;
+    void armed.then(() => {
+      settled = true;
+    });
+    await sleep(20);
+    expect(settled).toBe(false);
+    // This cycle's own pair still settles it, with its own id.
+    starts.confirm("CP-A", 0);
+    starts.confirm("CP-A", 7);
+    expect(await armed).toEqual({ started: true, transactionId: 7 });
+  });
+
+  it("reports a start whose id never arrived, rather than calling it unstarted", async () => {
+    // A CSMS that never assigns an id must not hang the cycle, and the caller
+    // needs to tell "never started" from "started, no id" — the second still
+    // has a transaction to stop.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 30, true);
+    starts.confirm("CP-A", 0);
+    expect(await armed).toEqual({ started: true, transactionId: 0 });
+  });
+
+  it("does not wait for an id on a version that never assigns one", async () => {
+    // OCPP 2.x never sets the numeric id, so waiting would time out every
+    // cycle and stretch the cadence for an id that is not coming.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, false);
+    starts.confirm("CP-A", 0);
+    expect(await armed).toEqual({ started: true, transactionId: 0 });
   });
 
   it("ignores a confirmation for a charge point nobody is waiting on", async () => {
-    // 1.6 emits transaction_started a second time once StartTransaction.conf
-    // supplies the real id, after the waiter is long gone.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000);
-    starts.confirm("CP-A");
-    expect(await armed).toBe(true);
-    starts.confirm("CP-A");
+    const armed = starts.arm("CP-A", 5_000, false);
+    starts.confirm("CP-A", 0);
+    expect((await armed).started).toBe(true);
+    starts.confirm("CP-A", 0);
     expect(starts.isAvailable).toBe(true);
   });
 
@@ -1159,16 +1219,27 @@ describe("transaction-start tracking (#302)", () => {
     const starts = new TransactionStarts();
     starts.lose("socket dropped");
     const startedAt = Date.now();
-    expect(await starts.arm("CP-A", 3_000)).toBe(false);
+    expect((await starts.arm("CP-A", 3_000, true)).started).toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(250);
     expect(starts.isAvailable).toBe(false);
   });
 
   it("fails the waiters that were already armed when the stream was lost", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000);
+    const armed = starts.arm("CP-A", 5_000, true);
     starts.lose("socket dropped");
-    expect(await armed).toBe(false);
+    expect((await armed).started).toBe(false);
+  });
+
+  it("bounds the assigned-id wait by the point the daemon itself gives up", () => {
+    // Same reasoning as START_CONFIRM_TIMEOUT_MS: once StartTransaction has
+    // been abandoned by the per-CALL watchdog, its conf will never arrive, so
+    // waiting past that buys nothing.
+    expect(ASSIGNED_ID_TIMEOUT_MS).toBeGreaterThan(START_CONFIRM_TIMEOUT_MS);
+    expect(ASSIGNED_ID_TIMEOUT_MS).toBe(
+      (AUTHORIZE_WAIT_SEC + CALL_WATCHDOG_SEC + START_CONFIRM_MARGIN_SEC) *
+        1000,
+    );
   });
 
   it("aborts the waits raced against it, naming the reason", async () => {
@@ -1193,10 +1264,10 @@ describe("transaction-start tracking (#302)", () => {
     // report a failure it did not have — nor abort whatever the SIGINT path is
     // still awaiting.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000);
+    const armed = starts.arm("CP-A", 5_000, false);
     starts.close();
     starts.lose("the socket disconnected because we closed it");
-    expect(await armed).toBe(false);
+    expect((await armed).started).toBe(false);
     expect(starts.isAvailable).toBe(false);
     const outcome = await Promise.race([
       starts.lost(sleep(30)).then(() => "resolved"),

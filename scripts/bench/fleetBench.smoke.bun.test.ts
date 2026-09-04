@@ -46,6 +46,28 @@ const DAEMON_SCRIPT = join(
 
 // ---------------------------------------------------------------------------
 // A mock CSMS that answers the whole transaction cycle.
+//
+// READ THIS BEFORE TRUSTING A PASS HERE. This mock is deliberately far more
+// forgiving than a real CSMS, and a green run says nothing about the things it
+// does not enforce:
+//
+//   * **No subprotocol negotiation.** `srv.upgrade(req)` accepts any client and
+//     echoes no `Sec-WebSocket-Protocol`, where gocpp uses
+//     `WithSubProtocols("ocpp1.6")` and rejects a mismatch. So the failure the
+//     README warns about most loudly — pointing a 1.6J fleet at a 2.x-only
+//     CSMS, which shows up as an unsettled fleet and an empty table — **cannot
+//     be reproduced here**. Against gocpp that fleet reports `Unavailable`;
+//     against this mock it reports `Available`. Version and handshake
+//     behaviour must be checked against a real CSMS, not against this file.
+//   * **No schema validation, and never a CALLERROR.** Every CALL is acked, so
+//     the table's `errors` column is structurally untestable here — it can only
+//     ever read 0, whatever the payload.
+//   * **Unknown actions get `{}`.** A CALL this mock has never heard of still
+//     succeeds, so a wrong or misspelled action passes silently.
+//
+// What it is good for is the two classes this file exists to cover: that the
+// run terminates, and that it composes correctly across sweep steps and
+// against pre-existing daemon state. Neither needs a strict CSMS.
 // ---------------------------------------------------------------------------
 
 interface MockCsms {
@@ -371,6 +393,120 @@ describe("fleet-bench end to end (#302)", () => {
         rpc("cp.delete", { cpId: bystander }),
       ).catch(() => undefined);
     }
+  }, 240_000);
+
+  it("runs the active axis, the one #302 calls the one that matters", async () => {
+    // The other cases all run `--tx-interval 0`, so they exercise none of the
+    // active axis: the dedicated event socket and its `events.subscribe`, the
+    // transaction cycle, the epoch-anchored stagger, and the `unconf.tx`
+    // accounting. Every one of those was a source of findings, and all of them
+    // are run-level rather than function-level.
+    const outFile = join(outDir, "active.json");
+    const run = await runBench([
+      "--csms-url",
+      csms.wsUrl,
+      "--daemon-url",
+      daemon.url,
+      "--counts",
+      "2",
+      "--tx-interval",
+      "2",
+      "--duration",
+      "6",
+      "--heartbeat-interval",
+      "1",
+      "--warmup",
+      "0",
+      "--settle-timeout",
+      "10",
+      "--out",
+      outFile,
+    ]);
+
+    expect(run.timedOut).toBe(false);
+    expect(run.exitCode).toBe(0);
+
+    const report = JSON.parse(readFileSync(outFile, "utf8")) as {
+      results: {
+        n: number;
+        calls: number;
+        unconfirmedTransactionStarts: number;
+      }[];
+    };
+    expect(report.results).toHaveLength(1);
+    const step = report.results[0]!;
+    expect(step.n).toBe(2);
+    // Transactions really ran: a start/stop pair is several CALLs beyond the
+    // heartbeats an idle fleet would produce.
+    expect(step.calls).toBeGreaterThan(0);
+    // Every start was confirmed off the event socket. A non-zero count here
+    // would mean the watcher never saw `transaction_started` — the run would
+    // still pass its other assertions while applying less load than asked for.
+    expect(step.unconfirmedTransactionStarts).toBe(0);
+    // The event socket was opened, and closed again with the rest of teardown.
+    expect(await listCpIds(daemon.url)).toEqual([]);
+  }, 240_000);
+
+  it("still terminates when the daemon dies underneath it", async () => {
+    // The control plane going away mid-run is the other half of the
+    // never-exits class, and the one the socket pool touches: Socket.IO
+    // buffers an emit issued on a disconnected socket and flushes it on
+    // reconnect, so a pool that keeps emitting into a dead daemon has RPCs
+    // that neither complete nor fail promptly. A dedicated daemon, because
+    // this test kills it.
+    const doomed = await startDaemon();
+    const outFile = join(outDir, "daemon-death.json");
+    const startedAt = Date.now();
+    const proc = Bun.spawn(
+      [
+        "bun",
+        BENCH_SCRIPT,
+        "--csms-url",
+        csms.wsUrl,
+        "--daemon-url",
+        doomed.url,
+        "--counts",
+        "2",
+        "--duration",
+        "30",
+        "--heartbeat-interval",
+        "1",
+        "--warmup",
+        "0",
+        "--settle-timeout",
+        "10",
+        "--out",
+        outFile,
+      ],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: join(import.meta.dir, "..", ".."),
+      },
+    );
+    let timedOut = false;
+    const killer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGKILL");
+    }, RUN_BUDGET_MS);
+    // Let the sweep get properly under way, then pull the daemon out from
+    // under it, mid-measurement-window.
+    await Bun.sleep(5_000);
+    doomed.stop();
+
+    const exitCode = await proc.exited;
+    clearTimeout(killer);
+    // Drain the pipes so the subprocess is not left blocked on a full buffer.
+    await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+
+    expect(timedOut).toBe(false);
+    expect(Date.now() - startedAt).toBeLessThan(RUN_BUDGET_MS);
+    // It must end, and end as a failure rather than reporting a sweep it did
+    // not finish. Which exit path it takes is not the point; not hanging is.
+    expect(exitCode).not.toBe(0);
   }, 240_000);
 
   it("still terminates when the CSMS stops answering", async () => {

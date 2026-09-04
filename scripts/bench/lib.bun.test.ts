@@ -25,6 +25,7 @@ import {
   AUTHORIZE_WAIT_SEC,
   benchCpId,
   cleanupIdsAfterBatch,
+  createFailureHint,
   cyclePeriodSec,
   daemonIsLocal,
   droppedDuringWindow,
@@ -1460,5 +1461,92 @@ describe("credentials never reach stderr (#302)", () => {
     });
     expect(report).not.toContain("hunter2");
     expect(report).toContain("***");
+  });
+});
+
+describe("the in-flight semaphore (#302)", () => {
+  it("never lets a late acquire barge a permit meant for a waiter", async () => {
+    // The bug, exactly: `release()` used to publish the permit (`available++`)
+    // and only then wake the waiter, whose continuation runs a microtask
+    // later. An `acquire()` arriving inside that gap took the published permit,
+    // and the woken waiter decremented as well — so both ran, `available` went
+    // negative and stayed wrong, and concurrency exceeded the cap that exists
+    // to keep this script under the daemon's INFLIGHT_CAP.
+    const sem = new Semaphore(1);
+    const releaseFirst = await sem.acquire();
+
+    let waiterHasPermit = false;
+    void sem.acquire().then(() => {
+      waiterHasPermit = true;
+    });
+
+    // Release, then barge in the same tick — before the waiter's continuation
+    // has had a chance to run.
+    releaseFirst();
+    let bargerHasPermit = false;
+    void sem.acquire().then(() => {
+      bargerHasPermit = true;
+    });
+
+    await sleep(20);
+    // One permit exists, so exactly one of them may hold it.
+    expect([waiterHasPermit, bargerHasPermit].filter(Boolean)).toHaveLength(1);
+    // And it is the waiter's, because the queue is FIFO.
+    expect(waiterHasPermit).toBe(true);
+  });
+
+  it("holds concurrency at the limit under sustained contention", async () => {
+    const limit = 3;
+    const sem = new Semaphore(limit);
+    let live = 0;
+    let peak = 0;
+    const task = async (): Promise<void> => {
+      const release = await sem.acquire();
+      live++;
+      peak = Math.max(peak, live);
+      await sleep(2);
+      live--;
+      release();
+    };
+    // Started in waves rather than all at once, so acquisitions keep arriving
+    // while releases are happening — the condition the barge needs.
+    const running: Promise<void>[] = [];
+    for (let wave = 0; wave < 6; wave++) {
+      for (let i = 0; i < 5; i++) running.push(task());
+      await sleep(1);
+    }
+    await Promise.all(running);
+    expect(peak).toBeLessThanOrEqual(limit);
+    expect(live).toBe(0);
+    // The pool is reusable afterwards: a leaked or negative permit count would
+    // either hang this or admit instantly past the limit.
+    const release = await sem.acquire();
+    release();
+  });
+});
+
+describe("explaining a create failure (#302)", () => {
+  it("names the candidate causes when the daemon gives only a code", () => {
+    // `createFailureReason` answers `err.message || err.code`, and the
+    // already-exists collision carries no message. After a line that also says
+    // "this run did not create it", a bare `invalid_params` reads like a
+    // collision even when it was a bad --csms-url.
+    const hint = createFailureHint("invalid_params");
+    expect(hint).toContain("already exists");
+    expect(hint).toContain("--csms-url");
+    expect(hint).toContain("--ocpp-version");
+  });
+
+  it("stays quiet when the daemon gave real text", () => {
+    expect(createFailureHint("tlsCaPath does not exist: /etc/nope.pem")).toBe(
+      "",
+    );
+    expect(createFailureHint("charge point already exists")).toBe("");
+  });
+
+  it("covers the other bare codes the control plane returns", () => {
+    for (const code of ["not_found", "internal", "timeout"]) {
+      expect(createFailureHint(code)).not.toBe("");
+    }
   });
 });

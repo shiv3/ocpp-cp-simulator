@@ -521,9 +521,20 @@ a spare machine and a CSMS.
   terminates inside a hard wall-clock bound, that both sweep steps are reported
   with the fleet size they describe, that the daemon is left empty, that a
   pre-existing charge point survives an `--allow-existing` run, and that a
-  black-holing CSMS still ends the run. It runs under `bun run test:bun`, so
-  CI gates on it; it roughly doubles that suite's wall time, which is the price
-  of covering the thing that actually broke.
+  black-holing CSMS still ends the run. It covers the **active axis** too, so
+  the event socket, the transaction cycle and `unconf.tx` are exercised and not
+  only the idle heartbeat path, and it kills the daemon mid-run to check the
+  pool does not hang on a control plane that has gone away. It runs under
+  `bun run test:bun`, so CI gates on it; it is the slowest file in that suite,
+  which is the price of covering the thing that actually broke.
+
+  **Its mock CSMS is far more forgiving than a real one, and the test file says
+  so at length.** It does no subprotocol negotiation, no schema validation and
+  never emits a CALLERROR, and it acks unknown actions — so the very failure
+  this README warns about hardest, a 1.6J fleet against a 2.x-only CSMS,
+  _cannot_ be reproduced there: gocpp reports that fleet `Unavailable` while
+  the mock reports it `Available`, and the `errors` column can only ever read 0. Version and handshake behaviour must be checked against a real CSMS.
+
 - `fleet-bench.ts` — the CLI entry point / orchestrator.
 - `lib.ts` — pure logic: flag validation, the Prometheus exposition parser,
   before/after histogram diffing, quantile interpolation, table formatting,

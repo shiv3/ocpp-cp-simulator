@@ -92,3 +92,8 @@ knowledge first entered the documentation, not wiki operations.
 - [Security profiles](concepts/security-profiles.md): two new sections. `--tls-ca` is optional — without it the runtime's own bundled Mozilla root set verifies the CSMS — not the OS trust store, so a private root installed only in the OS keychain still needs `--tls-ca` — and passing it **replaces** the default roots rather than adding to them (verified on the daemon runtime: an unrelated CA fails a public `wss://` handshake). Separately, profiles 2/3 bind the station, not the CSMS: a CSMS behind a TLS-terminating proxy sees cleartext and may refuse a correct profile-2 station with `401`, so configure the CSMS before switching the station over.
 - Profile 2 example split into a public-certificate form (no TLS flag) and a private-CA form.
 - [GitHub issues](sources/github-issues.md): #289 row.
+
+## [2026-09-04] ingest | A tag build verifies its own publish (#281, #287)
+
+- [Docker image](entities/docker-image.md): the release-tag build now asks the registry for every tag it pushed and fails when one is missing, so a release note's image line cannot outlive the image. Context: `0.7.6` published notes for an image whose build had failed, and `0.7.1` was never republished.
+- [GitHub issues](sources/github-issues.md): #281 / #287 row.

@@ -50,15 +50,16 @@ for the record, and **not the #302 result**; see "Recording a result"
 below):
 
 ```
-N    uncreated  connected  dropped  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx
----  ---------  ---------  -------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------
-50   0          50         0        0          150    6ms  21ms  6ms     21ms    0         0         0       0           0
-250  0          250        0        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0
-450  0          450        0        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0
+N    uncreated  connected  dropped  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx  late hold  retired
+---  ---------  ---------  -------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------  ---------  -------
+50   0          50         0        0          150    6ms  21ms  6ms     21ms    0         0         0       0           0          0          0
+250  0          250        0        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0          0          0
+450  0          450        0        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0          0          0
 ```
 
 (The header has changed since that run — `timeouts` / `late>30s` replaced a
-single `>30s` column, and `uncreated`, `unconf.tx` and `dropped` were added.
+single `>30s` column, and `uncreated`, `unconf.tx`, `dropped`, `late hold` and
+`retired` were added.
 Every added column was zero in this run, so the numbers above are still the
 run's own.)
 
@@ -252,6 +253,34 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    and got 8 used to print `N=10, connected=8, unsettled=0` — latency
    attributed to a fleet that never existed. Now it prints `N=8, uncreated=2`.
 
+   **The hold runs from when the transaction began**, not from when its id was
+   confirmed. On OCPP 1.6 the cycle waits for the **CSMS-assigned** transaction
+   id before stopping, because `OCPPMessageHandler.sendStopTransaction`
+   snapshots the id immediately and stopping on the placeholder `0` produces
+   CALLERRORs and corrupted connector state — near the knee, where a conf
+   routinely outlasts a hold. But starting the hold timer once that id arrived
+   added the whole `StartTransaction.conf` latency to every transaction's
+   on-time, so the duty cycle silently stopped matching the configuration. The
+   remaining hold is therefore measured from the local start; if it has already
+   elapsed the transaction is stopped at once and counted in **`late hold`**,
+   because a row whose duty cycle slipped must say so rather than imply the
+   cadence held. OCPP 2.x assigns no numeric id, so nothing is waited for
+   there.
+
+   **`retired`** counts charge points withdrawn from the transaction cycle
+   because no id arrived inside the bound (45s: the authorization wait plus a
+   full CALL watchdog, past which `StartTransaction` has been abandoned and no
+   conf is coming). Withdrawing them is not tidiness. A conf that arrives later
+   would land during a _later_ cycle, after that cycle's own placeholder
+   emission, and be accepted as that cycle's id — and the simulator would apply
+   the stale id to the current connector transaction, so the next stop and the
+   cadence would both use the wrong one. The event carries only a charge point
+   id and a transaction id, so no generation can be read off the wire and a
+   stale conf is indistinguishable by content from a fresh one; never arming
+   that charge point again is what makes the confusion impossible rather than
+   merely unlikely. The fleet's offered load falls accordingly, which is why
+   the column exists.
+
    **`unconf.tx`** counts transaction starts this step could not confirm: the
    `start_transaction` ack returns while the charge point is still waiting on
    `Authorize.conf`, so the script waits for the daemon's `transaction_started`
@@ -299,6 +328,20 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    daemon did not register it: `createOneCp` throws before creating anything on
    an id collision, and the blueprint-defaults path rolls the charge point back
    before reporting it.
+
+   **SIGINT is a third route to the same leak, and is handled the same way.**
+   An interrupt landing while `growFleet` awaited one batch of a multi-batch
+   step used to snapshot the id list at once; the outstanding batch then
+   finished and later batches were offered and created _behind_ the snapshot,
+   so the handler exited having deleted only the earlier ids. Cleanup now
+   raises an abort flag, waits for the sweep to unwind, and only then reads the
+   list. The flag alone was not enough: it is read between steps and between
+   create batches, so an interrupt during a settle, warmup or measurement wait
+   — up to an hour at the permitted maximum — would have held every deletion
+   until that wait ended on its own. Those waits are raced against the
+   interrupt as well as against a dropped event socket, so the sweep unwinds
+   immediately. A second Ctrl-C exits at once and names the charge points that
+   may be left behind.
 
    That second rule is not a nicety. Under `--allow-existing`, a charge point
    somebody else created that already held an offered id was reported as failed

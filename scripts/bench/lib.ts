@@ -1114,6 +1114,15 @@ export interface StepResult {
   readonly errors: number;
   readonly reconnects: number;
   readonly unconfirmedStarts: number;
+  /** Transactions whose confirmation alone outlasted the configured hold, so
+   *  they were already on longer than asked for by the time they could be
+   *  stopped. A non-zero value means this row's duty cycle is not the
+   *  configured one. */
+  readonly lateHolds: number;
+  /** Charge points withdrawn from the transaction cycle because the CSMS never
+   *  assigned a transaction id inside the bound. The fleet's offered load
+   *  falls by this much from then on. */
+  readonly retired: number;
 }
 
 /** Calls that *answered* later than the last finite bucket edge (30s) — the
@@ -1162,6 +1171,8 @@ export function row(r: StepResult): string[] {
     String(r.errors),
     String(r.reconnects),
     String(r.unconfirmedStarts),
+    String(r.lateHolds),
+    String(r.retired),
   ];
 }
 
@@ -1183,6 +1194,8 @@ export const STEP_COLUMNS = [
   "errors",
   "reconnects",
   "unconf.tx",
+  "late hold",
+  "retired",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -1225,10 +1238,21 @@ export interface TransactionStartOutcome {
    *  `0` means the local start was seen but the id is still the placeholder;
    *  `null` means nothing was confirmed. */
   readonly transactionId: number | null;
+  /** When the transaction began *locally*, from the placeholder emission.
+   *
+   *  The hold is measured from here, never from when the id was confirmed.
+   *  Starting the hold timer after the assigned id arrived added the whole
+   *  `StartTransaction.conf` latency to every transaction's on-time — near the
+   *  knee, seconds on top of a configured one-second hold — so the duty cycle
+   *  stopped matching the configuration and the active-axis numbers described
+   *  a load nobody asked for. `null` when no local start was seen. */
+  readonly localStartAtMs: number | null;
 }
 
 interface StartWaiter {
   settle(outcome: TransactionStartOutcome): void;
+  /** `Date.now()` at the placeholder emission, or `null` before it. */
+  localStartAtMs: number | null;
   /** Whether this waiter has seen the local start (`transactionId` 0) of the
    *  cycle that armed it. Until it has, a non-zero id can only belong to an
    *  *earlier* cycle, and accepting it would confirm this cycle off the back
@@ -1237,6 +1261,13 @@ interface StartWaiter {
   /** Whether this cycle must wait for the assigned id before proceeding. */
   readonly awaitAssignedId: boolean;
 }
+
+/** Nothing was observed: no local start, no id. */
+const UNCONFIRMED: TransactionStartOutcome = {
+  started: false,
+  transactionId: null,
+  localStartAtMs: null,
+};
 
 export class TransactionStarts {
   private readonly waiters = new Map<string, StartWaiter>();
@@ -1292,21 +1323,28 @@ export class TransactionStarts {
     awaitAssignedId: boolean,
   ): Promise<TransactionStartOutcome> {
     if (!this.available) {
-      return Promise.resolve({ started: false, transactionId: null });
+      return Promise.resolve(UNCONFIRMED);
     }
     return new Promise<TransactionStartOutcome>((resolve) => {
       const timer = setTimeout(() => {
         if (this.waiters.get(cpId) === waiter) this.waiters.delete(cpId);
         // A local start seen but no id is still a start — report it, so the
         // caller can tell "never started" from "started, id never assigned".
+        // The two need different handling: the second leaves a conf that may
+        // still arrive, the first leaves nothing behind.
         resolve(
           waiter.sawLocalStart
-            ? { started: true, transactionId: 0 }
-            : { started: false, transactionId: null },
+            ? {
+                started: true,
+                transactionId: 0,
+                localStartAtMs: waiter.localStartAtMs,
+              }
+            : UNCONFIRMED,
         );
       }, timeoutMs);
       const waiter: StartWaiter = {
         sawLocalStart: false,
+        localStartAtMs: null,
         awaitAssignedId,
         settle: (outcome) => {
           clearTimeout(timer);
@@ -1316,7 +1354,7 @@ export class TransactionStarts {
       // One connector per benchmarked charge point and one cycle at a time, so
       // a second armed waiter for the same id can only be a bug; drop the older
       // one rather than leaking it.
-      this.waiters.get(cpId)?.settle({ started: false, transactionId: null });
+      this.waiters.get(cpId)?.settle(UNCONFIRMED);
       this.waiters.set(cpId, waiter);
     });
   }
@@ -1328,14 +1366,19 @@ export class TransactionStarts {
    * arriving with `StartTransaction.conf`. An unknown charge point is ignored —
    * a confirmation with no waiter is a normal race, not an error.
    */
-  confirm(cpId: string, transactionId: number): void {
+  confirm(cpId: string, transactionId: number, nowMs = Date.now()): void {
     const waiter = this.waiters.get(cpId);
     if (!waiter) return;
     if (transactionId === 0) {
       waiter.sawLocalStart = true;
+      waiter.localStartAtMs ??= nowMs;
       if (waiter.awaitAssignedId) return; // keep waiting for the real id
       this.waiters.delete(cpId);
-      waiter.settle({ started: true, transactionId: 0 });
+      waiter.settle({
+        started: true,
+        transactionId: 0,
+        localStartAtMs: waiter.localStartAtMs,
+      });
       return;
     }
     // A non-zero id before this cycle's own local start belongs to an earlier
@@ -1343,7 +1386,11 @@ export class TransactionStarts {
     // straggler from confirming a newer cycle.
     if (!waiter.sawLocalStart) return;
     this.waiters.delete(cpId);
-    waiter.settle({ started: true, transactionId });
+    waiter.settle({
+      started: true,
+      transactionId,
+      localStartAtMs: waiter.localStartAtMs,
+    });
   }
 
   /** The event stream is gone and cannot come back. Idempotent. */
@@ -1368,9 +1415,7 @@ export class TransactionStarts {
   }
 
   private failAll(): void {
-    for (const waiter of this.waiters.values()) {
-      waiter.settle({ started: false, transactionId: null });
-    }
+    for (const waiter of this.waiters.values()) waiter.settle(UNCONFIRMED);
     this.waiters.clear();
   }
 }

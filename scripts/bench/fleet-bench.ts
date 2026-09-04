@@ -700,11 +700,13 @@ function armLoad(
   stop: () => void;
   ready: Promise<void>;
   unconfirmedStarts: () => number;
-  unassignedIds: () => number;
+  lateHolds: () => number;
+  retired: () => number;
 } {
   let stopped = false;
   let unconfirmedStarts = 0;
-  let unassignedIds = 0;
+  let lateHolds = 0;
+  let retired = 0;
   // Only OCPP 1.6 assigns a numeric transaction id — 2.x never sets one, so
   // waiting for it there would time out every cycle and stretch the cadence
   // for an id that is not coming.
@@ -793,6 +795,7 @@ function armLoad(
       : Promise.resolve<TransactionStartOutcome>({
           started: true,
           transactionId: null,
+          localStartAtMs: null,
         });
     try {
       await pool.rpc("start_transaction", { connector: 1 }, cpId);
@@ -821,49 +824,95 @@ function armLoad(
     // stopped.
     const outcome = await started;
     if (!outcome.started) unconfirmedStarts++;
-    else if (awaitAssignedId && !outcome.transactionId) {
-      // Started, but the CSMS never assigned an id inside the bound. The stop
-      // below will carry the placeholder, which the 1.6 handler rejects — say
-      // so rather than letting a CALLERROR be the only trace.
-      unassignedIds++;
+
+    // Started, but the CSMS never assigned an id inside the bound. Its
+    // `StartTransaction` has been abandoned by the daemon's own per-CALL
+    // watchdog, so the conf may still arrive — and if it did, it would land
+    // during a *later* cycle, after that cycle's own placeholder emission, and
+    // be accepted as that cycle's id. The simulator would then apply a stale
+    // id to the current connector transaction and both the next stop and the
+    // cadence would use the wrong one.
+    //
+    // Correlating by generation is not possible: the event carries only the
+    // charge point id and the transaction id, so a stale conf is
+    // indistinguishable by content from a fresh one. So this charge point
+    // stops cycling instead. Reaching this at all means the CSMS took longer
+    // than the authorization wait plus a full CALL watchdog to answer, which
+    // is past the ceiling the sweep is looking for; continuing would keep
+    // generating load whose accounting cannot be trusted. The retirement is
+    // reported per step, so the row shows the fleet's load falling rather than
+    // hiding it.
+    //
+    // This is also what makes the stale-conf hazard impossible rather than
+    // merely unlikely: a stale id can only exist after a confirmation timeout,
+    // and after one this charge point is never armed again.
+    const retiring =
+      awaitAssignedId && outcome.started && !outcome.transactionId;
+    if (retiring) {
+      retired++;
       process.stderr.write(
         `[bench] ${cpId}: transaction started but no id was assigned within ` +
-          `${confirmTimeoutMs / 1000}s; the stop will carry the placeholder\n`,
+          `${confirmTimeoutMs / 1000}s. Stopping it and retiring this charge ` +
+          `point from the transaction cycle — a conf arriving now would be ` +
+          `taken for a later cycle's.\n`,
       );
     }
+
     // The awaits above can span a `stop()`; without this check the callback
     // installs a timer after cleanup already cleared the set, keeping the
     // process alive for up to half a --tx-interval.
     if (stopped) return;
-    schedule(() => {
-      void (async () => {
-        // Sent even when the start was never confirmed: a start that was only
-        // slow still has to be cleared, or the connector stays occupied and
-        // every later cycle for this charge point is refused as a duplicate.
-        try {
-          await pool.rpc("stop_transaction", { connector: 1 }, cpId);
-        } catch (err) {
-          process.stderr.write(
-            `[bench] stop_transaction failed for ${cpId}: ${String(err)}\n`,
-          );
-        }
-        if (stopped) return;
-        // Next start one full period after this one *started*, not one hold
-        // after this one stopped: the cycle period stays exactly
-        // --tx-interval while the CSMS keeps up, and stretches only when it
-        // genuinely cannot.
-        schedule(
-          () => void cycle(cpId),
-          Math.max(0, cycleStartedAtMs + periodMs - Date.now()),
+
+    // The hold runs from when the transaction actually began, never from when
+    // its id was confirmed. Waiting for the assigned id and *then* starting
+    // the timer added the whole `StartTransaction.conf` latency to every
+    // transaction's on-time — near the knee, seconds on top of a configured
+    // one-second hold — so the duty cycle silently stopped matching the
+    // configuration.
+    const heldForMs =
+      outcome.localStartAtMs === null ? 0 : Date.now() - outcome.localStartAtMs;
+    const holdRemainingMs = holdMs - heldForMs;
+    if (holdRemainingMs <= 0 && !retiring) {
+      // The confirmation alone outlasted the hold, so this transaction has
+      // already been on longer than configured. Stop now and record it; the
+      // alternative is to hold anyway and report a duty cycle the run did not
+      // have.
+      lateHolds++;
+    }
+
+    const stopAndContinue = async (): Promise<void> => {
+      // Sent even when the start was never confirmed: a start that was only
+      // slow still has to be cleared, or the connector stays occupied and
+      // every later cycle for this charge point is refused as a duplicate.
+      try {
+        await pool.rpc("stop_transaction", { connector: 1 }, cpId);
+      } catch (err) {
+        process.stderr.write(
+          `[bench] stop_transaction failed for ${cpId}: ${String(err)}\n`,
         );
-      })();
-    }, holdMs);
+      }
+      if (stopped || retiring) return;
+      // Next start one full period after this one *started*, not one hold
+      // after this one stopped: the cycle period stays exactly --tx-interval
+      // while the CSMS keeps up, and stretches only when it genuinely cannot.
+      schedule(
+        () => void cycle(cpId),
+        Math.max(0, cycleStartedAtMs + periodMs - Date.now()),
+      );
+    };
+
+    if (holdRemainingMs <= 0) {
+      void stopAndContinue();
+      return;
+    }
+    schedule(() => void stopAndContinue(), holdRemainingMs);
   }
 
   return {
     ready,
     unconfirmedStarts: () => unconfirmedStarts,
-    unassignedIds: () => unassignedIds,
+    lateHolds: () => lateHolds,
+    retired: () => retired,
     stop: () => {
       stopped = true;
       for (const t of live) clearTimeout(t);
@@ -1044,7 +1093,8 @@ async function main(): Promise<void> {
   const stopLoads: Array<() => void> = [];
   const loads: Array<{
     unconfirmedStarts: () => number;
-    unassignedIds: () => number;
+    lateHolds: () => number;
+    retired: () => number;
   }> = [];
 
   // Runs once: the `finally` below and the SIGINT handler can both reach it,
@@ -1054,6 +1104,25 @@ async function main(): Promise<void> {
   // `growFleet` between batches. Creation must *stop* before cleanup reads the
   // id list, or the list is read too early — see below.
   const abort = { requested: false };
+  // The abort *signal*, as opposed to the flag. The flag alone was only read
+  // between steps and between create batches, so an interrupt during a
+  // measurement or settle wait — up to an hour at the permitted maximum — held
+  // every deletion until that wait finished on its own, and the only escape
+  // was a second Ctrl-C, which explicitly leaks the fleet. Racing the long
+  // waits against this lets the sweep unwind at once: the same shape
+  // `untilLost` already uses for a dropped event socket.
+  let signalAbort: () => void = () => {};
+  const abortSignal = new Promise<never>((_resolve, reject) => {
+    signalAbort = () =>
+      reject(
+        new BenchAbortError(
+          "interrupted: stopping the sweep so the fleet can be deleted",
+        ),
+      );
+  });
+  // Nothing may be racing it at the instant it rejects, and an unobserved
+  // rejection would be an unhandled-rejection crash carrying the wrong story.
+  abortSignal.catch(() => undefined);
   /** Resolves when the sweep loop has unwound. Assigned as soon as the loop
    *  starts so the signal handler can await it. */
   let sweepSettled: Promise<unknown> = Promise.resolve();
@@ -1068,6 +1137,7 @@ async function main(): Promise<void> {
       // created *after* the snapshot, so the handler exited having deleted
       // only the earlier ids and left BENCH-* charge points registered.
       abort.requested = true;
+      signalAbort();
       for (const stop of stopLoads) stop();
       await sweepSettled.catch(() => undefined);
       watcher?.close();
@@ -1112,8 +1182,10 @@ async function main(): Promise<void> {
       // Every long wait below is raced against the event socket's loss, so a run
       // that can no longer confirm transaction starts stops and says why instead
       // of printing rows whose load is no longer the load they claim.
+      // Every long wait is raced against both the event socket's loss and the
+      // interrupt, so neither has to wait out a measurement window.
       const untilLost = <T>(p: Promise<T>): Promise<T> =>
-        watcher ? watcher.lost(p) : p;
+        Promise.race([watcher ? watcher.lost(p) : p, abortSignal]);
 
       // One origin for every cohort's stagger, fixed before the first charge
       // point exists. See `firstCycleDelayMs`.
@@ -1122,6 +1194,8 @@ async function main(): Promise<void> {
       // Cumulative across steps, like the daemon's counters: each row reports
       // its own delta.
       let unconfirmedStartsBefore = 0;
+      let lateHoldsBefore = 0;
+      let retiredBefore = 0;
       for (const n of opts.counts) {
         if (abort.requested) return;
         const toCreate = n - allCpIds.length;
@@ -1242,6 +1316,8 @@ async function main(): Promise<void> {
           (sum, l) => sum + l.unconfirmedStarts(),
           0,
         );
+        const lateHolds = loads.reduce((sum, l) => sum + l.lateHolds(), 0);
+        const retired = loads.reduce((sum, l) => sum + l.retired(), 0);
 
         // Read from the *final* scrape, not from the settle poll: a charge point
         // that dropped during the warmup or the window would otherwise still be
@@ -1279,8 +1355,12 @@ async function main(): Promise<void> {
           errors: Math.max(0, errorsAfter - errorsBefore),
           reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
           unconfirmedStarts: unconfirmedStarts - unconfirmedStartsBefore,
+          lateHolds: lateHolds - lateHoldsBefore,
+          retired: retired - retiredBefore,
         });
         unconfirmedStartsBefore = unconfirmedStarts;
+        lateHoldsBefore = lateHolds;
+        retiredBefore = retired;
       }
     })();
     sweepSettled = sweep;
@@ -1336,6 +1416,8 @@ async function main(): Promise<void> {
           errors: r.errors,
           reconnects: r.reconnects,
           unconfirmedTransactionStarts: r.unconfirmedStarts,
+          lateHolds: r.lateHolds,
+          retiredChargePoints: r.retired,
         })),
       },
       null,

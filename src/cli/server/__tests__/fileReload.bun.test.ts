@@ -11,6 +11,9 @@ import {
   type MockCsms,
   type OcppFrame,
 } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
+import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
+import { ARRAY_MAX_ITEMS } from "../../../protocol/limits";
+import { rememberWatchedScenarioFile } from "../watchedScenarioFiles";
 import type { WatchFactory } from "../FileWatcher";
 import {
   connectTestClient,
@@ -2055,6 +2058,171 @@ describe("a watch row does not depend on --watch to be cleaned up (#314)", () =>
     backend.save(file, scenario("flagless", 44));
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(loadedDelay(third, "CP-FLAGLESS", "flagless")).toBe(33);
+  });
+});
+
+describe("the envelope bound is checked against the whole snapshot (#314)", () => {
+  it("refuses an edit a sibling scenario would push over the size cap", async () => {
+    // The reloaded file is well inside 256 KiB; the *push* is not.
+    // `scenario-definitions-changed` carries every definition on the connector,
+    // so validating only the edited one leaves the same failure one door along:
+    // the reload lands, is reported `applied`, and the push that would tell the
+    // editor about it throws and is swallowed.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("small", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-SIBLING",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-SIBLING");
+
+    // Loaded on the service directly, because the RPC caps a single definition
+    // at the same bound — a connector only reaches this state from inside, out
+    // of a template fan-out or a definition that grew after it was loaded.
+    const service = server.registry.get("CP-SIBLING");
+    if (!service) throw new Error("CP-SIBLING missing");
+    const sibling = JSON.parse(scenario("sibling-big", 1)) as {
+      description?: string;
+    };
+    sibling.description = "x".repeat(300_000);
+    service.loadScenario(1, sibling as unknown as ScenarioDefinition);
+
+    backend.save(file, scenario("small", 22));
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+    expect(events[0]?.error).toContain("sibling-big");
+    expect(loadedDelay(server, "CP-SIBLING", "small")).toBe(11);
+
+    // Drop the sibling and the very same edit goes through — proof the refusal
+    // was about the snapshot, not about the file.
+    await rpc(
+      socket,
+      "remove_scenario",
+      { connector: 1, scenarioId: "sibling-big" },
+      "CP-SIBLING",
+    );
+    backend.save(file, scenario("small", 33));
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the edit to land once the oversized sibling is gone",
+    );
+    expect(loadedDelay(server, "CP-SIBLING", "small")).toBe(33);
+  });
+
+  it("refuses an edit when the connector holds more scenarios than fit", async () => {
+    // The other half of the same envelope: `definitions` is capped at
+    // ARRAY_MAX_ITEMS entries. A per-definition size check says nothing about
+    // how many of them there are.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("crowded", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-CROWDED",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-CROWDED");
+
+    const service = server.registry.get("CP-CROWDED");
+    if (!service) throw new Error("CP-CROWDED missing");
+    // One past the cap counting the watched scenario itself.
+    for (let i = 0; i < ARRAY_MAX_ITEMS; i += 1) {
+      service.loadScenario(
+        1,
+        JSON.parse(scenario(`filler-${i}`, 1)) as ScenarioDefinition,
+      );
+    }
+
+    backend.save(file, scenario("crowded", 22));
+    await waitFor(() => events.length > 0, "a rejection event");
+    expect(events[0]?.outcome).toBe("rejected");
+    expect(events[0]?.error).toContain(`${ARRAY_MAX_ITEMS}`);
+    expect(loadedDelay(server, "CP-CROWDED", "crowded")).toBe(11);
+  });
+});
+
+describe("watch rows are simulator state, not watcher state (#314)", () => {
+  it("cp.delete drops them on a daemon started without --watch", async () => {
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("doomed", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+
+    const watching = await startWatchingServer(new TestWatchBackend(), db);
+    const firstSocket = await openClient(watching);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-DOOMED",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-DOOMED",
+    );
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(1);
+    firstSocket.disconnect();
+    await watching.close();
+    servers.pop();
+
+    // Restarted without the flag; the operator deletes the charge point. The
+    // row used to survive, so re-creating the same cpId later under `--watch`
+    // reattached a file that charge point was never loaded from.
+    const plain = await startTestServer({ database: db });
+    servers.push(plain);
+    const socket = await openClient(plain);
+    expect(plain.fileReload).toBeNull();
+    await rpc(socket, "cp.delete", { cpId: "CP-DOOMED" });
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(0);
+  });
+
+  it("state.reset truncates them, including rows no live CP owns", async () => {
+    // `state.reset` promises to truncate every simulator-owned table. The
+    // discriminating row is an orphan: reset removes the live charge points
+    // first, and `cp.delete`'s cascade would clear anything they still owned.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("kept", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+
+    const watching = await startWatchingServer(new TestWatchBackend(), db);
+    const firstSocket = await openClient(watching);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-RESETME",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      firstSocket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-RESETME",
+    );
+    firstSocket.disconnect();
+    await watching.close();
+    servers.pop();
+
+    // Left behind by an earlier run whose charge point is long gone.
+    rememberWatchedScenarioFile(db, "CP-VANISHED", 1, "ghost", file);
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(2);
+
+    const plain = await startTestServer({ database: db });
+    servers.push(plain);
+    const socket = await openClient(plain);
+    expect(plain.fileReload).toBeNull();
+    await rpc(socket, "state.reset", {});
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(0);
   });
 });
 

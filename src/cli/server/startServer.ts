@@ -725,6 +725,12 @@ export async function runStartupScenario(
           scenarioId,
           prepare: (definition) => instantiateTemplate(definition, connectorId),
           loadedText: templateText,
+          // Not persisted: a row cannot carry `prepare`, and this bootstrap
+          // runs again on every boot with a fresh instance id per connector.
+          // Persisting it left the next `--state-db` start with the previous
+          // run's watches restored prepare-less, reloading the file's own
+          // target over the prepared copies (#314).
+          persist: false,
         });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
@@ -781,6 +787,9 @@ export async function runStartupScenario(
           scenarioId,
           prepare,
           loadedText: scenarioText,
+          // As above: `prepare` decides per reload whether the file already
+          // targets this connector, and no persisted row can replay that.
+          persist: false,
         });
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(

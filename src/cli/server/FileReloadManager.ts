@@ -13,7 +13,7 @@ import {
   rememberWatchedScenarioFile,
 } from "./watchedScenarioFiles";
 import { parseIdTagsFile } from "./idTagFile";
-import { SCENARIO_MAX_BYTES } from "../../protocol/limits";
+import { ARRAY_MAX_ITEMS, SCENARIO_MAX_BYTES } from "../../protocol/limits";
 
 /** What kind of file was reloaded. */
 export type FileReloadTarget = "id-tags" | "scenario";
@@ -86,6 +86,21 @@ export interface ScenarioFileRegistration {
    * than adopted as already-seen.
    */
   readonly loadedText?: string | null;
+  /**
+   * Whether this registration is durable — recorded in `watched_scenario_files`
+   * so a `--state-db` restart re-establishes the watch. Defaults to `true`.
+   *
+   * `false` for the startup flags (`--scenario`, `--scenario-template-file`).
+   * They re-register themselves on every boot, and only they know how to: the
+   * per-connector rewrite lives in a `prepare` callback that no row can carry.
+   * A persisted startup registration is therefore restored *without* it, so the
+   * next boot would reload the raw file's own `targetId` over the prepared
+   * instance — and, for a template fanned out across connectors, would do it
+   * under the previous run's scenario ids, leaving a stale watch per connector
+   * alongside the fresh one (#314). Not persisting is the whole fix: the
+   * bootstrap is the only thing that can restore these, and it always runs.
+   */
+  readonly persist?: boolean;
 }
 
 interface ScenarioEntry extends ScenarioFileRegistration {
@@ -386,6 +401,7 @@ export class FileReloadManager {
   }
 
   private rememberScenarioFile(entry: ScenarioEntry): void {
+    if (entry.persist === false) return;
     rememberWatchedScenarioFile(
       this.database,
       entry.cpId,
@@ -669,20 +685,23 @@ export class FileReloadManager {
     // this feature has been bitten by twice: the reload lands, is reported
     // `applied`, and then the push that tells every subscriber about it fails
     // envelope validation and is merely logged — leaving an editor drawing a
-    // graph the daemon has stopped executing. A scenario file has no size bound
-    // of its own, but the `scenario-definitions-changed` envelope caps a
-    // definition at `SCENARIO_MAX_BYTES`, so anything past that is refused here
-    // and reported as `rejected`, with the previous good definition left in
-    // place — the same contract a malformed file gets.
-    const serialized = JSON.stringify(definition).length;
-    if (serialized > SCENARIO_MAX_BYTES) {
-      this.rejectScenario(
-        entry,
-        new Error(
-          `scenario is ${serialized} bytes, over the ${SCENARIO_MAX_BYTES}-byte limit the control plane can carry; ` +
-            "the previous definition is still loaded",
-        ),
-      );
+    // graph the daemon has stopped executing.
+    //
+    // What is validated is the *resulting snapshot*, not the edited definition.
+    // `scenario-definitions-changed` carries every scenario on the connector, so
+    // the edited file fitting `SCENARIO_MAX_BYTES` on its own proves nothing: an
+    // oversized sibling, or a connector already holding more than
+    // `ARRAY_MAX_ITEMS` scenarios, fails the same envelope through a different
+    // door. Rejected here means the previous definition is still loaded and the
+    // operator is told — the same contract a malformed file gets. Re-checked on
+    // every apply rather than once at hold time, because a held edit drains
+    // later and the siblings may have changed in between.
+    const overflow = describeSnapshotOverflow(
+      projectSnapshot(service, entry, definition),
+      entry.scenarioId,
+    );
+    if (overflow) {
+      this.rejectScenario(entry, new Error(overflow));
       return false;
     }
     if (
@@ -840,7 +859,75 @@ function scenarioKey(
   connectorId: number,
   scenarioId: string,
 ): string {
-  return `${cpId} ${connectorId} ${scenarioId}`;
+  return `${cpId}\u0000${connectorId}\u0000${scenarioId}`;
+}
+
+/**
+ * The definition list a `scenario-definitions-changed` push would carry if this
+ * reload were applied: the connector's current scenarios with the reloaded one
+ * swapped in under the id it was loaded under.
+ *
+ * Appends rather than assuming the id is present. `applyOrDefer` only gets here
+ * once `stillLoaded` has passed, so the swap is the live case — but a snapshot
+ * that silently dropped the incoming definition would under-count and let an
+ * over-cap edit through, which is the failure this exists to catch.
+ */
+function projectSnapshot(
+  service: {
+    snapshotScenarios(): ReadonlyArray<{
+      readonly connectorId: number;
+      readonly definition: ScenarioDefinition;
+    }>;
+  },
+  entry: ScenarioEntry,
+  definition: ScenarioDefinition,
+): ScenarioDefinition[] {
+  let swapped = false;
+  const projected = service
+    .snapshotScenarios()
+    .filter((loaded) => loaded.connectorId === entry.connectorId)
+    .map((loaded) => {
+      if (loaded.definition.id !== entry.scenarioId) return loaded.definition;
+      swapped = true;
+      return definition;
+    });
+  if (!swapped) projected.push(definition);
+  return projected;
+}
+
+/**
+ * Why the given snapshot could not be pushed, or `null` if it can.
+ *
+ * The two bounds are the envelope's own — `ARRAY_MAX_ITEMS` definitions, each
+ * at most `SCENARIO_MAX_BYTES` serialized — read from `protocol/limits` rather
+ * than restated, because a producer that hard-codes a bound is exactly how the
+ * two drift. The message names the offending scenario id but never any of the
+ * file's contents, the same rule `parseScenario` follows.
+ */
+function describeSnapshotOverflow(
+  snapshot: readonly ScenarioDefinition[],
+  reloadedId: string,
+): string | null {
+  if (snapshot.length > ARRAY_MAX_ITEMS) {
+    return (
+      `connector already holds ${snapshot.length} scenarios, over the ` +
+      `${ARRAY_MAX_ITEMS} the control plane can carry in one update; ` +
+      "the previous definition is still loaded"
+    );
+  }
+  for (const definition of snapshot) {
+    const size = JSON.stringify(definition).length;
+    if (size <= SCENARIO_MAX_BYTES) continue;
+    const which =
+      definition.id === reloadedId
+        ? "scenario"
+        : `scenario "${definition.id}" on this connector`;
+    return (
+      `${which} is ${size} bytes, over the ${SCENARIO_MAX_BYTES}-byte limit ` +
+      "the control plane can carry; the previous definition is still loaded"
+    );
+  }
+  return null;
 }
 
 /** Order-sensitive: an idTag pool's order is its draw order under

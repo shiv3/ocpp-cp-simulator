@@ -61,6 +61,19 @@ export function forgetWatchedConnectorScenarioFiles(
   );
 }
 
+/**
+ * Drop every row for a charge point. Called from `CPRegistry.persistRemove`, so
+ * a `cp.delete` cascades here the way it already does to `scenarios` and
+ * `connector_runtime`: without it a re-created charge point reusing the same id
+ * would inherit watches on files it was never loaded from.
+ */
+export function forgetWatchedChargePointFiles(
+  database: Database | null | undefined,
+  cpId: string,
+): void {
+  database?.run("DELETE FROM watched_scenario_files WHERE cp_id = ?", [cpId]);
+}
+
 export function listWatchedScenarioFiles(
   database: Database | null | undefined,
 ): WatchedScenarioFileRow[] {

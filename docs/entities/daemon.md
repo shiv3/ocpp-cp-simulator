@@ -251,11 +251,15 @@ The rules, in the order they bite:
   than mutate-then-roll-back: a rollback would expose a window in which a
   concurrent draw presents a tag that is not durable.) A file that fails them is
   logged, reported as `rejected`, and the previous good copy stays in place — a half-saved file
-  never leaves a charge point with half a configuration. A scenario larger than
-  the control plane can carry (256 KiB serialized, the
-  `scenario-definitions-changed` envelope's per-definition cap) is refused the
-  same way and for the same reason: applying it would leave every subscriber on
-  the previous graph with nothing to say so.
+  never leaves a charge point with half a configuration. A reload the control
+  plane could not announce is refused the same way and for the same reason:
+  applying it would leave every subscriber on the previous graph with nothing to
+  say so. What is checked is the **resulting `scenario-definitions-changed`
+  snapshot**, not the edited file — that envelope carries every definition on the
+  connector, capped at 1 000 entries of at most 256 KiB serialized each, so an
+  oversized _sibling_ scenario, or a connector already holding more scenarios
+  than fit, refuses the edit even when the edited file is small. The rejection
+  names the scenario id at fault.
 - **A reload never mutates a charge point mid-session.** A scenario reload for a
   connector with an open transaction, or for a scenario whose run is in flight,
   is _held_ — not dropped — and installed when that session ends. An in-flight
@@ -337,6 +341,18 @@ snapshot of a file it believes it is watching. The path is **resolved to an
 absolute path when the charge point is created** and stored that way, so a
 daemon restarted from a different working directory still watches the file the
 operator meant. See [State persistence](../concepts/state-persistence.md).
+
+A **scenario** loaded over the control plane persists its source path the same
+way (`watched_scenario_files`, schema v12), so a restarted `--watch` daemon
+re-establishes that watch and reconciles an edit made while it was down. The
+startup flags are the deliberate exception: `--scenario` and
+`--scenario-template-file` are **not** written down, because the per-connector
+rewrite that a fan-out depends on lives in a callback no row can carry, and the
+bootstrap that owns it runs again on every boot. Persisting them would restore a
+second, rewrite-less watch per connector alongside the fresh instances, under
+the previous run's scenario ids. The rows are simulator-owned state, so
+`cp.delete` cascades to them and `state.reset` truncates them, with or without
+`--watch`.
 
 Both watched kinds establish the watch **before** reading the copy they compare
 against, so an edit landing between a file being loaded and its watch starting

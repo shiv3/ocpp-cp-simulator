@@ -837,3 +837,35 @@ Sixth review pass on PR #325.
   records what actually landed, so a failed apply clears it and the operator's
   next save of the same bytes is judged afresh. Making them consistent would
   break one of them.
+
+## [2026-09-05] ingest | `--watch`: the envelope's real bound, and watch rows as simulator state (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — the size refusal is restated as what it always
+  had to be: the check is on the **resulting `scenario-definitions-changed`
+  snapshot**, not on the edited definition. That envelope carries every
+  definition on the connector (≤ 1 000 entries, ≤ 256 KiB each), so an oversized
+  _sibling_, or a connector already holding more scenarios than fit, reached the
+  same failure through a different door — the reload applied, reported
+  `applied`, and the push that would have told the editor swallowed. The
+  producer now reads `ARRAY_MAX_ITEMS` and `SCENARIO_MAX_BYTES` from
+  `protocol/limits`, so it cannot drift from the schema that enforces them.
+- [State persistence](concepts/state-persistence.md) — `watched_scenario_files`
+  joins `cp.delete`'s cascade and `state.reset`'s truncate list. It is
+  simulator-owned state, so leaving it out both stranded rows an id reuse could
+  reattach and made `state.reset` stop fulfilling its documented promise to
+  truncate every simulator-owned table. Same shape as the previous round's
+  "cleanup must not depend on an active watcher", one layer out: the table
+  belongs in the paths that own simulator state, not only in the ones that own
+  watches.
+- The startup flags no longer persist their registrations, and both pages now
+  say so. A row carries a path and an id, never the `prepare` callback that
+  rewrites a template per connector, so a persisted `--scenario-template-file`
+  came back on the next `--state-db` boot as a rewrite-less watch per connector
+  under the _previous_ run's scenario ids, ready to reload the file's own
+  `targetId` over the prepared instances the bootstrap was building alongside
+  them. The bootstrap runs on every boot and is the only thing that can restore
+  these correctly.
+- Flagged, not fixed: `connector_runtime` and `blueprints` are also absent from
+  `resetSimulatorState` while [State persistence](concepts/state-persistence.md)
+  lists them as simulator-owned. Pre-existing, unrelated to #314, and left for a
+  maintainer to decide — the reset list may be pinned by a test.

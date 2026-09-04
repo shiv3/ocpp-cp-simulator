@@ -59,34 +59,82 @@ const LOADABLE_SCENARIO_OBJ = () =>
     }),
   );
 
+/**
+ * Every field `cp.create` / `cp.update` accept, described in place.
+ *
+ * The descriptions are here rather than at a call site because the MCP
+ * `cp_create` tool builds its input schema from this object (#284). It used
+ * to declare its own eight-field copy, which drifted: an agent could not
+ * create a SOAP charge point at all, and `securityProfile` /
+ * `authorizationKey` were silently dropped — the tool answered success and
+ * the station authenticated differently from what was asked. Deriving the
+ * tool from this schema is what stops the two from disagreeing again.
+ */
 const cpParamsBaseSchema = z.object({
-  cpId: STR_64K,
-  wsUrl: STR_64K,
-  centralSystemUrl: STR_64K.optional(),
-  soapCallbackUrl: STR_64K.optional(),
-  soapPath: STR_64K.optional(),
-  ocppVersion: STR_64K.optional(),
-  connectors: z.number().int().min(1).optional(),
-  vendor: STR_64K.optional(),
-  model: STR_64K.optional(),
+  cpId: STR_64K.describe("Charge point identifier"),
+  wsUrl: STR_64K.describe(
+    "CSMS endpoint: ws(s):// for OCPP-J, http(s):// for the SOAP versions",
+  ),
+  centralSystemUrl: STR_64K.optional().describe(
+    "SOAP only: the Central System service URL, when it differs from wsUrl",
+  ),
+  soapCallbackUrl: STR_64K.optional().describe(
+    "SOAP only: the full public URL the CSMS calls back on, e.g. http://host:9700/ocpp/soap/<cpId>/ChargePointService",
+  ),
+  soapPath: STR_64K.optional().describe(
+    "SOAP only: path prefix this daemon serves the ChargePointService under (default /ocpp/soap)",
+  ),
+  ocppVersion: STR_64K.optional().describe(
+    'OCPP version: "OCPP-1.6J" (default), "OCPP-2.0.1", "OCPP-2.1", "OCPP-1.2", "OCPP-1.5", or "OCPP-1.6S"',
+  ),
+  connectors: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe("Number of connectors"),
+  vendor: STR_64K.optional().describe("Vendor name"),
+  model: STR_64K.optional().describe("Model name"),
   securityProfile: z
     .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
-    .optional(),
-  authorizationKey: STR_64K.optional(),
-  cpoName: STR_64K.optional(),
-  tlsCaPath: STR_64K.optional(),
-  tlsCertPath: STR_64K.optional(),
-  tlsKeyPath: STR_64K.optional(),
+    .optional()
+    .describe(
+      "OCPP 1.6 security profile. 0 leaves transport/auth as configured; 1 adds AuthorizationKey Basic Auth and keeps the configured scheme; 2/3 require wss://. Profiles 1 and 2 need authorizationKey",
+    ),
+  authorizationKey: STR_64K.optional().describe(
+    "AuthorizationKey used as the Basic Auth password for security profiles 1 and 2 (the username is the cpId)",
+  ),
+  cpoName: STR_64K.optional().describe(
+    "CPO name used when generating certificate signing requests",
+  ),
+  tlsCaPath: STR_64K.optional().describe(
+    "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
+  ),
+  tlsCertPath: STR_64K.optional().describe(
+    "Path to the PEM client certificate for security profile 3 mutual TLS",
+  ),
+  tlsKeyPath: STR_64K.optional().describe(
+    "Path to the PEM client private key for security profile 3 mutual TLS",
+  ),
   tls: z
     .object({
-      ca: STR_64K.optional(),
-      cert: STR_64K.optional(),
-      key: STR_64K.optional(),
-      rejectUnauthorized: z.boolean().optional(),
-      serverName: STR_64K.optional(),
+      ca: STR_64K.optional().describe("CA bundle, inline PEM"),
+      cert: STR_64K.optional().describe("Client certificate, inline PEM"),
+      key: STR_64K.optional().describe("Client private key, inline PEM"),
+      rejectUnauthorized: z
+        .boolean()
+        .optional()
+        .describe(
+          "Defaults to true. Setting it false disables certificate verification and logs a warning; local development only",
+        ),
+      serverName: STR_64K.optional().describe("SNI server name override"),
     })
-    .optional(),
-  bootNotification: OBJ().nullable().optional(),
+    .optional()
+    .describe("Inline TLS material, as an alternative to the tls*Path fields"),
+  bootNotification: OBJ()
+    .nullable()
+    .optional()
+    .describe("Overrides for the BootNotification payload"),
 });
 
 const scenarioTemplateInfoSchema = z.object({
@@ -101,11 +149,17 @@ const connectorSettingsParamsSchema = z.object({
 });
 
 /** create CP — password is accepted here as WRITE-ONLY input. */
-const createParamsSchema = cpParamsBaseSchema.extend({
+export const createParamsSchema = cpParamsBaseSchema.extend({
   basicAuth: z
-    .object({ username: STR_64K, password: STR_64K })
+    .object({
+      username: STR_64K.describe("Basic auth username"),
+      password: STR_64K.describe("Basic auth password"),
+    })
     .nullable()
-    .optional(),
+    .optional()
+    .describe(
+      "Basic auth credentials for the CSMS link. Prefer securityProfile + authorizationKey for OCPP 1.6 security profiles",
+    ),
 });
 
 /** update CP — redacted snapshots may omit password; server preserves it. */

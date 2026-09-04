@@ -11,7 +11,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/network-simulation.md
   - ../analyses/driving-from-an-ai-agent.md
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -38,24 +38,24 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 The endpoint exposes 16 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
-| Tool                    | RPC Method                | Params                                                                                                                             |
-| ----------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `cp_list`               | `cp.list`                 | —                                                                                                                                  |
-| `cp_create`             | `cp.create`               | `cpId`, `wsUrl`, `ocppVersion?`, `connectors?`, `vendor?`, `model?`, `basicAuth?`, `autoConnect?`                                  |
-| `cp_delete`             | `cp.delete`               | `cpId`                                                                                                                             |
-| `cp_connect`            | `connect`                 | `cpId`                                                                                                                             |
-| `cp_disconnect`         | `disconnect`              | `cpId`                                                                                                                             |
-| `cp_status`             | `status`                  | `cpId`                                                                                                                             |
-| `start_transaction`     | `start_transaction`       | `cpId`, `connector`, `tagId`                                                                                                       |
-| `stop_transaction`      | `stop_transaction`        | `cpId`, `connector`                                                                                                                |
-| `authorize`             | `authorize`               | `cpId`, `tagId`                                                                                                                    |
-| `set_connector_status`  | `update_connector_status` | `cpId`, `connector`, `status`, `errorCode?`                                                                                        |
-| `set_meter_value`       | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                       |
-| `send_meter_value`      | `send_meter_value`        | `cpId`, `connector`                                                                                                                |
-| `scenario_templates`    | `scenario.templates`      | —                                                                                                                                  |
-| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`                                                                                                  |
-| `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                                                  |
-| `get_logs`              | `logs.get`                | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing)) |
+| Tool                    | RPC Method                | Params                                                                                                                                                                                        |
+| ----------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cp_list`               | `cp.list`                 | —                                                                                                                                                                                             |
+| `cp_create`             | `cp.create`               | Every `cp.create` parameter plus `autoConnect?` — the schema is derived from the method's, so the two cannot drift ([cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)) |
+| `cp_delete`             | `cp.delete`               | `cpId`                                                                                                                                                                                        |
+| `cp_connect`            | `connect`                 | `cpId`                                                                                                                                                                                        |
+| `cp_disconnect`         | `disconnect`              | `cpId`                                                                                                                                                                                        |
+| `cp_status`             | `status`                  | `cpId`                                                                                                                                                                                        |
+| `start_transaction`     | `start_transaction`       | `cpId`, `connector`, `tagId`                                                                                                                                                                  |
+| `stop_transaction`      | `stop_transaction`        | `cpId`, `connector`                                                                                                                                                                           |
+| `authorize`             | `authorize`               | `cpId`, `tagId`                                                                                                                                                                               |
+| `set_connector_status`  | `update_connector_status` | `cpId`, `connector`, `status`, `errorCode?`                                                                                                                                                   |
+| `set_meter_value`       | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                                                                                  |
+| `send_meter_value`      | `send_meter_value`        | `cpId`, `connector`                                                                                                                                                                           |
+| `scenario_templates`    | `scenario.templates`      | —                                                                                                                                                                                             |
+| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`                                                                                                                                                             |
+| `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                                                                                                             |
+| `get_logs`              | `logs.get`                | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                            |
 
 ### Network-simulation tools
 

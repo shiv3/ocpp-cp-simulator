@@ -1405,6 +1405,84 @@ describe("the RPCs hand the watcher the text they loaded (#314)", () => {
   });
 });
 
+describe("a held reload lands even with auto-reset-to-Available off (#314)", () => {
+  it("applies when the transaction is cleared, not when it is announced", async () => {
+    // `ChargePoint.stopTransaction` emits `transaction_stopped` and the
+    // `Finishing` status *before* `connector.stopTransaction()` clears the
+    // transaction, so a drain keyed on either still sees `hasOpenTransaction()`
+    // true. With auto-reset off there is no later `Available` to retry on, and
+    // the valid definition used to sit deferred forever.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("no-reset", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-NORESET");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-NORESET");
+
+    await rpc(
+      socket,
+      "set_auto_reset_to_available",
+      { connector: 1, enabled: false },
+      "CP-NORESET",
+    );
+    const service = server.registry.get("CP-NORESET");
+    if (!service) throw new Error("CP-NORESET missing");
+    // Guard the guard: with auto-reset still on, the connector would go
+    // Available after the stop and the `connector_status` backstop would drain,
+    // hiding the defect this test exists for.
+    expect(service.getStatus().connectors[0]?.autoResetToAvailable).toBe(false);
+
+    expect(await openSession(server, "CP-NORESET", "TAG-NR")).toBe("TAG-NR");
+    backend.save(file, scenario("no-reset", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+    expect(loadedDelay(server, "CP-NORESET", "no-reset")).toBe(11);
+
+    await closeSession(server, "CP-NORESET");
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held reload to land once the transaction was actually cleared",
+    );
+    expect(loadedDelay(server, "CP-NORESET", "no-reset")).toBe(22);
+  });
+
+  it("applies when reset_scenario drops the transaction", async () => {
+    // `resetScenario` clears the transaction through the setter, which emits no
+    // `transactionChange` at all — so it needs its own announcement or a reload
+    // held behind that transaction has nothing to release it.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("reset-drop", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-RESET");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-RESET");
+
+    const service = server.registry.get("CP-RESET");
+    if (!service) throw new Error("CP-RESET missing");
+    expect(await openSession(server, "CP-RESET", "TAG-RS")).toBe("TAG-RS");
+    backend.save(file, scenario("reset-drop", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "a deferral event",
+    );
+
+    service.resetScenario(1, "reset-drop");
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held reload to land after the reset",
+    );
+    expect(loadedDelay(server, "CP-RESET", "reset-drop")).toBe(22);
+  });
+});
+
 /** The `delaySeconds` of the loaded definition's delay node. */
 function loadedDelaySeconds(
   server: TestServer,

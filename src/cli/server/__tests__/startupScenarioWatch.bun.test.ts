@@ -102,9 +102,8 @@ describe("--watch over a startup scenario file (#314)", () => {
   it("re-reads --scenario-template-file and reinstantiates it per connector", async () => {
     const csms = startMockCsms();
     const registry = new CPRegistry(new EventBus());
-    const bus = new EventBus();
     const backend = new TestWatchBackend();
-    const fileReload = new FileReloadManager(registry, bus, {
+    const fileReload = new FileReloadManager(registry, {
       watcher: new FileWatcher({
         debounceMs: 5,
         watchFactory: backend.factory,
@@ -127,6 +126,11 @@ describe("--watch over a startup scenario file (#314)", () => {
 
     try {
       await svc.connect();
+      // Nothing is watched until `runStartupScenario` registers, which happens
+      // inside the bootstrap loop. The startup summary used to be logged before
+      // that loop, so a daemon whose only watched file was its `--scenario`
+      // reported "0 file(s)" and then watched one (#314).
+      expect(fileReload.watchedPaths()).toEqual([]);
       const boot = await csms.waitForCall("BootNotification");
       const runPromise = runStartupScenario(
         svc,

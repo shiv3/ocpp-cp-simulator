@@ -194,7 +194,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // RPC layer can hand it the scenario files it loads. Its push sink is set
   // once the socket.io bridge exists.
   const fileReload = opts.watch
-    ? new FileReloadManager(registry, bus, { log: serverLog })
+    ? new FileReloadManager(registry, { log: serverLog })
     : null;
   if (fileReload) {
     registry.onInitChange(() => fileReload.syncFromRegistry());
@@ -421,18 +421,12 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     started.push({ svc, init });
   }
 
-  if (fileReload) {
-    // Logged after the fleet exists, so an operator who sees nothing reload
-    // can tell "--watch is off" from "--watch is on and no file is behind any
-    // of this daemon's state". A filesystem that cannot watch reports itself
-    // separately, once, from FileWatcher.
-    fileReload.syncFromRegistry();
-    serverLog(
-      `Watch: enabled — re-reading ${fileReload.watchedPaths().length} loaded file(s) on change (#314)`,
-    );
-  }
+  fileReload?.syncFromRegistry();
 
-  if (!opts.autoConnect && !opts.startupScenario) return;
+  if (!opts.autoConnect && !opts.startupScenario) {
+    logWatchSummary(fileReload, serverLog);
+    return;
+  }
 
   // Bounded rather than unbounded: a fleet all dialling at once is a thundering
   // herd at the CSMS, and the point here is only that one slow connect must not
@@ -461,6 +455,29 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         );
       }
     },
+  );
+
+  logWatchSummary(fileReload, serverLog);
+}
+
+/**
+ * Report what `--watch` ended up watching.
+ *
+ * Logged after the fleet exists *and* after `runStartupScenario` has registered
+ * whatever `--scenario` / `--scenario-template-file` loaded — those register
+ * inside the bootstrap loop, so counting before it told an operator "0 file(s)"
+ * about a daemon that was watching a scenario file (#314). An operator who sees
+ * nothing reload can then tell "--watch is off" from "--watch is on and no file
+ * is behind any of this daemon's state". A filesystem that cannot watch reports
+ * itself separately, once, from FileWatcher.
+ */
+function logWatchSummary(
+  fileReload: FileReloadManager | null,
+  serverLog: (message: string) => void,
+): void {
+  if (!fileReload) return;
+  serverLog(
+    `Watch: enabled — re-reading ${fileReload.watchedPaths().length} loaded file(s) on change (#314)`,
   );
 }
 

@@ -4,7 +4,6 @@ import * as path from "path";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { CPRegistry } from "./CPRegistry";
-import type { EventBus } from "./eventBus";
 import { FileWatcher } from "./FileWatcher";
 import { parseIdTagsFile } from "./idTagFile";
 
@@ -84,23 +83,24 @@ interface ScenarioEntry extends ScenarioFileRegistration {
 }
 
 /**
- * Bus events after which a deferred reload is worth retrying.
+ * Why there is no bus-event drain here.
  *
- * `transaction_stopped` is the one the mid-session rule is written around, and
- * `connector_status` is a cheap backstop for the paths that end a session
- * without it (a hard reset, a disconnect mid-charge). Draining re-evaluates the
- * gate, so an extra attempt is never an early one.
+ * Every lifecycle event this daemon publishes announces the end of something
+ * from inside the code that is ending it, while the state it announces is still
+ * set. `scenario_completed` fires from the executor's state hook with the
+ * executor still in `_executors`. `transaction_stopped` and the `Finishing`
+ * status fire from `ChargePoint.stopTransaction` several statements before
+ * `connector.stopTransaction()` clears the transaction. A drain keyed on any of
+ * them therefore re-checks a gate that is still shut, defers again, and waits
+ * for a notification that never comes — three separate stranded-reload bugs in
+ * this feature had exactly that shape, and a `connector_status` backstop only
+ * hid which of them were real.
  *
- * The scenario-run terminators are deliberately **not** here.
- * `scenario_completed` and `scenario_error` are emitted from the executor's own
- * state hooks — synchronously, while the executor is still registered and
- * `isScenarioRunning` still answers `true`. Draining on them re-deferred every
- * reload held behind a run and then waited for a further event that a run
- * ending normally never produces, so the held definition was silently dropped.
- * `CPRegistry.onScenarioRunSettled` (fired after the run's cleanup) is the
- * authoritative terminator instead.
+ * `CPRegistry.onSessionSettled` replaces the lot. It fires from the points
+ * where the two gate conditions actually clear — `runScenario`'s cleanup, the
+ * connector's `transactionChange` to null, and `resetScenario`'s setter-based
+ * drop — and always after they have cleared.
  */
-const DRAIN_EVENTS = new Set(["transaction_stopped", "connector_status"]);
 
 /**
  * Re-reads the files the daemon loaded, when it was started with `--watch`
@@ -129,14 +129,12 @@ export class FileReloadManager {
   private readonly scenarios = new Map<string, ScenarioEntry>();
   private sink: FileReloadSink | null = null;
   private definitionsSink: ScenarioDefinitionsChangedSink | null = null;
-  private unsubscribeBus: (() => void) | null = null;
   private unsubscribeRunSettled: (() => void) | null = null;
   private closed = false;
   private readonly log: (message: string) => void;
 
   constructor(
     private readonly registry: CPRegistry,
-    bus: EventBus,
     options: {
       readonly watcher?: FileWatcher;
       readonly log?: (message: string) => void;
@@ -144,17 +142,10 @@ export class FileReloadManager {
   ) {
     this.log = options.log ?? ((m) => process.stderr.write(`${m}\n`));
     this.watcher = options.watcher ?? new FileWatcher({ log: this.log });
-    this.unsubscribeBus = bus.subscribe("*", (env) => {
-      // Cheapest possible early-out: this sink sees every charge point event.
-      if (this.scenarios.size === 0) return;
-      if (!DRAIN_EVENTS.has(env.evt.event)) return;
-      this.drainPending(env.cpId);
-    });
-    // The other half of the drain, and the load-bearing one for a scenario that
-    // simply runs to its end: by the time this fires the executor is gone, so
-    // the held definition actually lands instead of being deferred a second
-    // time and forgotten.
-    this.unsubscribeRunSettled = this.registry.onScenarioRunSettled((cpId) => {
+    // The only drain trigger, by design — see the note above `FileReloadManager`
+    // on why no bus event can serve. By the time this fires the executor is
+    // gone, or the transaction is cleared, so a held definition actually lands.
+    this.unsubscribeRunSettled = this.registry.onSessionSettled((cpId) => {
       if (this.scenarios.size === 0) return;
       this.drainPending(cpId);
     });
@@ -313,8 +304,6 @@ export class FileReloadManager {
   close(): void {
     this.closed = true;
     this.definitionsSink = null;
-    this.unsubscribeBus?.();
-    this.unsubscribeBus = null;
     this.unsubscribeRunSettled?.();
     this.unsubscribeRunSettled = null;
     this.watcher.close();

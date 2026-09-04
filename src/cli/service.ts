@@ -239,13 +239,20 @@ export type CLIEvent =
 
 type EventHandler = (evt: CLIEvent) => void;
 
-/** Which run has finished settling. See {@link CLIChargePointService.onScenarioRunSettled}. */
-export interface ScenarioRunSettledInfo {
+/**
+ * Something that could have been holding a `--watch` reload back has finished,
+ * and the state it was blocking on is *already cleared* by the time this is
+ * reported. See {@link CLIChargePointService.onSessionSettled}.
+ *
+ * `scenarioId` names the run that wound up, or is null when what settled was a
+ * connector's transaction rather than a scenario run.
+ */
+export interface SessionSettledInfo {
   readonly connectorId: number;
-  readonly scenarioId: string;
+  readonly scenarioId: string | null;
 }
 
-type ScenarioRunSettledHandler = (info: ScenarioRunSettledInfo) => void;
+type SessionSettledHandler = (info: SessionSettledInfo) => void;
 
 /**
  * #179: mint a stable, human-legible run id for one scenario execution.
@@ -275,16 +282,21 @@ export class CLIChargePointService {
   private readonly _soapServer: OCPPSoapServer | null;
   private readonly _handlers: Set<EventHandler> = new Set();
   /**
-   * #314: notified once a scenario run has finished *and been cleaned up*.
+   * #314: notified once something that can block a reload has *actually*
+   * cleared — a scenario run wound up, or a connector's transaction was
+   * dropped.
    *
-   * Deliberately not a `CLIEvent`: `scenario_completed` / `scenario_error` are
-   * emitted from the executor's state hooks, which run while the executor is
-   * still in `_executors` and the run is still being finalized. A listener that
-   * needs to know the run is really over — `--watch`'s held-reload drain — has
-   * to be told after that cleanup, or it re-checks a gate that is still closed
-   * and waits forever for a second notification that never comes.
+   * Deliberately not `CLIEvent`s. Every lifecycle event on the bus announces
+   * the end of a thing from *inside* the code that is ending it, while the
+   * state it announces is still set: `scenario_completed` fires from the
+   * executor's own state hook with the executor still in `_executors`, and
+   * `transaction_stopped` fires from `ChargePoint.stopTransaction` several
+   * statements before `connector.stopTransaction()` clears the transaction. A
+   * listener that re-checks the gate on those events always finds it shut, and
+   * then waits forever for a second notification that never comes. These
+   * handlers run after the state is gone, which is the whole point.
    */
-  private readonly _runSettledHandlers: Set<ScenarioRunSettledHandler> =
+  private readonly _sessionSettledHandlers: Set<SessionSettledHandler> =
     new Set();
   private _unsubscribes: Array<() => void> = [];
   private _connectorUnsubscribes: Array<() => void> = [];
@@ -557,17 +569,24 @@ export class CLIChargePointService {
   }
 
   /**
-   * Subscribe to "a scenario run has ended and its cleanup is complete" (#314).
+   * Subscribe to "a reload gate has actually opened" (#314).
    *
-   * Fires last in {@link runScenario}'s `finally`, after the executor has been
-   * dropped from `_executors` and the run finalized, so a handler that asks
-   * {@link isScenarioRunning} gets `false` — which is the whole point. Fires
-   * for every run that started, whether it completed, errored or was stopped.
+   * Fires from exactly the points where the two things `--watch` defers on stop
+   * being true, and always after they have stopped being true:
+   *
+   * - last in {@link runScenario}'s `finally`, once the executor has been
+   *   dropped from `_executors` and the run finalized, so a handler asking
+   *   {@link isScenarioRunning} gets `false`;
+   * - on a connector's `transactionChange` to null — the one place
+   *   `Connector.stopTransaction` clears the transaction — so a handler asking
+   *   {@link hasOpenTransaction} gets `false`;
+   * - from {@link resetScenario}, which drops the transaction through the
+   *   setter and so produces no `transactionChange` of its own.
    */
-  onScenarioRunSettled(handler: ScenarioRunSettledHandler): () => void {
-    this._runSettledHandlers.add(handler);
+  onSessionSettled(handler: SessionSettledHandler): () => void {
+    this._sessionSettledHandlers.add(handler);
     return () => {
-      this._runSettledHandlers.delete(handler);
+      this._sessionSettledHandlers.delete(handler);
     };
   }
 
@@ -1512,20 +1531,18 @@ export class CLIChargePointService {
       // can auto-start a fresh run of the same scenario. Announcing the settle
       // any earlier would let that new run install its transcript and run id
       // and then have this cleanup tear them down again.
-      this.notifyScenarioRunSettled({ connectorId, scenarioId });
+      this.notifySessionSettled({ connectorId, scenarioId });
     });
   }
 
-  /** Tell {@link onScenarioRunSettled} subscribers a run is fully wound up.
-   *  A throwing handler is logged and never breaks the cleanup path. */
-  private notifyScenarioRunSettled(info: ScenarioRunSettledInfo): void {
-    for (const handler of this._runSettledHandlers) {
+  /** Tell {@link onSessionSettled} subscribers a gate has opened. A throwing
+   *  handler is logged and never breaks the path it was called from. */
+  private notifySessionSettled(info: SessionSettledInfo): void {
+    for (const handler of this._sessionSettledHandlers) {
       try {
         handler(info);
       } catch (err) {
-        process.stderr.write(
-          `[CLI] Scenario run settled handler error: ${err}\n`,
-        );
+        process.stderr.write(`[CLI] Session settled handler error: ${err}\n`);
       }
     }
   }
@@ -1910,6 +1927,10 @@ export class CLIChargePointService {
     if (!connector) return;
 
     connector.transaction = null;
+    // The setter does not emit `transactionChange`, so the forwarder above
+    // cannot see this one (#314). Announce it here or a reload held behind this
+    // transaction has nothing to release it.
+    this.notifySessionSettled({ connectorId, scenarioId: null });
 
     const reservation =
       this._chargePoint.reservationManager.getReservationForConnector(
@@ -2020,7 +2041,7 @@ export class CLIChargePointService {
     }
     this._unsubscribes = [];
     this._handlers.clear();
-    this._runSettledHandlers.clear();
+    this._sessionSettledHandlers.clear();
   }
 
   private emit(evt: CLIEvent): void {
@@ -2303,6 +2324,18 @@ export class CLIChargePointService {
       );
       this._connectorUnsubscribes.push(
         connector.events.on("transactionChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("transactionChange", ({ transaction }) => {
+          // #314: `Connector.stopTransaction` nulls the field and *then* emits,
+          // so by here `hasOpenTransaction` already answers false. The bus's
+          // `transaction_stopped` fires several statements earlier, while the
+          // transaction is still set — which is why a reload held behind it
+          // cannot be released from there.
+          if (transaction === null) {
+            this.notifySessionSettled({ connectorId, scenarioId: null });
+          }
+        }),
       );
       this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", persist),

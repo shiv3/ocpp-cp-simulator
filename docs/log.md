@@ -709,3 +709,32 @@ Sixth review pass on PR #325.
   caller reading a file and the watch starting is no longer lost permanently —
   the caller hands over the text it loaded, and the registration reconciles
   against the file once the watch exists.
+
+## [2026-09-04] ingest | `--watch`: the third stranded-reload bug, and the pattern behind all three (#314, PR #317)
+
+- [Daemon](entities/daemon.md) and [Scenario file format](concepts/scenario-format.md)
+  — the held-reload rule now says a definition is released when the blocking
+  state is **cleared**, never when it is _announced_, and names the consequence:
+  it lands with `set_auto_reset_to_available` off, where no later `Available`
+  status would arrive to retry on.
+- The pattern, recorded because it caught this feature three times: every
+  lifecycle event this daemon publishes is emitted from inside the code that is
+  ending the thing, while the state it announces is still set —
+  `scenario_completed` with the executor still registered, `transaction_stopped`
+  and `Finishing` several statements before `connector.stopTransaction()` clears
+  the transaction, and `instantiate()`'s init-change ping before a `cp.update`
+  re-attaches its scenarios. A listener that re-checks a condition on such an
+  event always finds it unchanged.
+- `FileReloadManager` no longer subscribes to the event bus at all — the
+  constructor's `EventBus` parameter is gone, so the property is structural
+  rather than a comment. `CPRegistry.onSessionSettled` (renamed from
+  `onScenarioRunSettled`, since it now covers transactions too) is the single
+  trigger, fired from the three points where a gate genuinely opens: a scenario
+  run's cleanup, a connector's `transactionChange` to null, and
+  `resetScenario`'s setter-based drop, which emits no `transactionChange` of its
+  own. The `connector_status` backstop was removed with the rest: it covered
+  nothing the hooks do not, and it was what made two of the three bugs look
+  handled.
+- `--watch`'s startup summary is logged after the bootstrap loop rather than
+  before it, so a daemon whose only watched file is its `--scenario` no longer
+  reports "0 file(s)" and then watches one.

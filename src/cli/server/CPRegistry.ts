@@ -1,7 +1,7 @@
 import * as fs from "fs";
 
 import { CLIChargePointService } from "../service";
-import type { ScenarioRunSettledInfo } from "../service";
+import type { SessionSettledInfo } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
@@ -24,10 +24,11 @@ export interface RegistryMembershipEvent {
 
 export type RegistryMembershipSink = (event: RegistryMembershipEvent) => void;
 
-/** #314: "a scenario run on this charge point has ended and been cleaned up". */
-export type ScenarioRunSettledSink = (
+/** #314: "something that could hold a reload back on this charge point has
+ *  actually cleared" — a scenario run wound up, or a transaction was dropped. */
+export type SessionSettledSink = (
   cpId: string,
-  info: ScenarioRunSettledInfo,
+  info: SessionSettledInfo,
 ) => void;
 
 interface ChargePointRow {
@@ -68,9 +69,9 @@ export class CPRegistry {
    *  behind one, changes. `--watch` uses it to keep its watched-file set in
    *  step without every mutation path having to know the watcher exists. */
   private readonly initChangeSinks = new Set<() => void>();
-  /** #314: fan-in of every live service's `onScenarioRunSettled`, so a
-   *  fleet-wide listener subscribes once instead of tracking memberships. */
-  private readonly runSettledSinks = new Set<ScenarioRunSettledSink>();
+  /** #314: fan-in of every live service's `onSessionSettled`, so a fleet-wide
+   *  listener subscribes once instead of tracking memberships. */
+  private readonly runSettledSinks = new Set<SessionSettledSink>();
   private networkSimManager: NetworkSimManager | null = null;
 
   constructor(
@@ -294,31 +295,29 @@ export class CPRegistry {
   }
 
   /**
-   * Subscribe to "a scenario run finished and its cleanup completed" across
-   * the whole fleet (#314).
+   * Subscribe to "a reload gate has opened" across the whole fleet (#314).
    *
-   * The bus's `scenario_completed` / `scenario_error` events are emitted from
-   * inside the run, while the executor is still registered, so they cannot be
-   * used to decide that a scenario is free to be swapped. This forwards each
-   * service's post-cleanup hook instead.
+   * The bus's lifecycle events all announce the end of something from inside
+   * the code that is ending it, while the state they announce is still set —
+   * `scenario_completed` with the executor still registered,
+   * `transaction_stopped` before the transaction is cleared — so none of them
+   * can be used to decide that a charge point is free to be mutated. This
+   * forwards each service's post-clear hook instead.
    */
-  onScenarioRunSettled(handler: ScenarioRunSettledSink): () => void {
+  onSessionSettled(handler: SessionSettledSink): () => void {
     this.runSettledSinks.add(handler);
     return () => {
       this.runSettledSinks.delete(handler);
     };
   }
 
-  private notifyScenarioRunSettled(
-    cpId: string,
-    info: ScenarioRunSettledInfo,
-  ): void {
+  private notifySessionSettled(cpId: string, info: SessionSettledInfo): void {
     for (const sink of this.runSettledSinks) {
       try {
         sink(cpId, info);
       } catch (err) {
         console.error(
-          `[CPRegistry] scenario-run-settled sink error for "${cpId}":`,
+          `[CPRegistry] session-settled sink error for "${cpId}":`,
           err,
         );
       }
@@ -361,8 +360,8 @@ export class CPRegistry {
       throw new Error(`cpId already exists: ${init.cpId}`);
     }
     const unsub = service.onEvent((evt) => this.bus.publish(init.cpId, evt));
-    const unsubSettled = service.onScenarioRunSettled((info) =>
-      this.notifyScenarioRunSettled(init.cpId, info),
+    const unsubSettled = service.onSessionSettled((info) =>
+      this.notifySessionSettled(init.cpId, info),
     );
     this.services.set(init.cpId, service);
     this.unsubscribes.set(init.cpId, () => {
@@ -478,8 +477,8 @@ export class CPRegistry {
   private instantiate(init: ChargePointInitOptions): CLIChargePointService {
     const svc = new CLIChargePointService(init, this.database);
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
-    const unsubSettled = svc.onScenarioRunSettled((info) =>
-      this.notifyScenarioRunSettled(init.cpId, info),
+    const unsubSettled = svc.onSessionSettled((info) =>
+      this.notifySessionSettled(init.cpId, info),
     );
     this.services.set(init.cpId, svc);
     this.unsubscribes.set(init.cpId, () => {

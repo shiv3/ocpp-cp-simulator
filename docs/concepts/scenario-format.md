@@ -309,9 +309,12 @@ all of them contracts:
   transaction, or with a run of that scenario in flight, the new definition is
   _held_ and installed when the session ends — an in-flight run always finishes
   on the graph it started with. Held, never dropped: the definition lands when
-  the transaction stops, when the run's cleanup completes (including a run
-  that simply reaches the end of its graph), or when a `cp.update` rebuilds the
-  charge point out from under the session.
+  the transaction is actually cleared, when the run's cleanup completes
+  (including a run that simply reaches the end of its graph), or when a
+  `cp.update` rebuilds the charge point out from under the session. "Cleared",
+  not "announced": the `transaction_stopped` event fires before the transaction
+  is dropped, so a reload released on it would still see the connector busy —
+  which is why this holds with `set_auto_reset_to_available` off too.
 - The reloaded definition keeps **the scenario id it was loaded under**, even if
   the file's own `id` was edited. Honouring a changed id would load a second
   scenario and leave the first one running on the old graph.

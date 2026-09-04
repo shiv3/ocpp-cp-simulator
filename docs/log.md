@@ -377,3 +377,40 @@ verify-install-urls.sh` (also asserts that `cli-release.yml` carries no
   into an uncancellable `release` job and a serialised `roll-pointer` job that
   downloads the tarball back off the release it just published, so the bytes
   the pointer serves are provably the bytes that release published).
+
+## [2026-09-05] ingest | `cli-latest` converges on the highest published release (#320, #321)
+
+Third review pass on PR #325, two P1s, one answer.
+
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  the pointer's rule is now stated as a contract — **`cli-latest` always serves
+  the highest published `cli-vX.Y.Z` release, and never a lower one, whatever
+  order the pointer jobs run in or fail in** — with its two carve-outs
+  (prerelease-tagged CLI releases are ineligible; a deleted highest release
+  makes the pointer follow the new highest down, warned) written down rather
+  than left implicit.
+- The design that contract replaced moved the pointer to the version that
+  triggered the run and used a marker in the pointer's body to refuse
+  roll-backs. Two ways that failed, both real: GitHub keeps one pending job per
+  concurrency group and replaces it with the most recently **queued** one, and
+  queue order is release-completion order, so a slow rerun of 1.2 evicts 1.3's
+  pending job, 1.2 advances the pointer from 1.1, and the published 1.3 is
+  never served; and because uploading the asset and writing the marker are two
+  API calls, an upload that lands with a failed write leaves the URL serving
+  new bytes under an old marker, which a later older run then passes its
+  comparison against and rolls the bytes backwards. Reversing the two calls
+  only swaps which direction is wrong — it was the mirror of the ordering bug
+  fixed in the previous pass.
+- Every pointer run now asks which `cli-v*` release is highest and rolls to
+  that. Queue order stops mattering, a cancelled job costs nothing because the
+  next one reaches the same state, and the marker is demoted to a record of
+  what is served. One hole the rewrite had to close on its own: the release
+  listing is eventually consistent, so the triggering version is used as a
+  floor and the listing is retried until it shows the triggering tag —
+  otherwise a lagging listing could strand the newest release with no later job
+  to correct it.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh`
+  (rewritten around the contract; also fails closed on an unreadable listing,
+  excludes drafts, and refuses a target release whose asset is missing or
+  empty); `.github/workflows/cli-release.yml` (the pointer job no longer
+  pre-fetches a tarball — the script downloads the target release's own asset).

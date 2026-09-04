@@ -1,68 +1,93 @@
 #!/usr/bin/env bash
 #
-# Move the rolling `cli-latest` pointer onto a freshly published CLI release.
+# Point `cli-latest` at the highest published CLI release.
 #
-# Usage: scripts/roll-cli-latest.sh <version> <tag> <asset-path>
-#   e.g. scripts/roll-cli-latest.sh 0.4.0 cli-v0.4.0 ocpp-cp-simulator.tgz
+# Usage: scripts/roll-cli-latest.sh <triggering-version> <triggering-tag>
+#   e.g. scripts/roll-cli-latest.sh 0.4.0 cli-v0.4.0
 #
 # Env:
 #   GH_TOKEN   required by `gh` (the workflow passes ${{ secrets.GITHUB_TOKEN }})
 #   REPO_SLUG  owner/name to act on (default: shiv3/ocpp-cp-simulator)
-#   DRY_RUN=1  print the mutating commands instead of running them, so the
-#              logic below can be exercised without a real release
+#   DRY_RUN=1  print the mutating commands instead of running them
 #
-# Why a pointer at all (#321): GitHub's `releases/latest` resolves across every
-# tag train in the repo, and this one has two — `v*` (desktop) and `cli-v*`
-# (CLI). Whenever the newest release is a desktop one, which is the case for
-# roughly half of any release cycle, `releases/latest/download/*.tgz` 404s
-# because desktop releases carry no tarball. `cli-latest` is scoped to the CLI
-# train, so it is always right. It is kept a PRE-RELEASE deliberately: GitHub
-# never resolves `releases/latest` to a pre-release, so the pointer cannot
-# itself hijack the desktop train's "Latest" badge, while
-# `releases/download/cli-latest/<asset>` keeps working normally.
+# ---------------------------------------------------------------------------
+# THE CONTRACT
 #
-# THIS SCRIPT IS A GUARD, SO EVERY FAILURE MODE IN IT MUST POINT THE SAFE WAY.
-# A guard that fails open, aborts, or cancels the thing it protects is worse
-# than no guard, because it is trusted. Specifically:
+#   `cli-latest` always serves the highest published `cli-vX.Y.Z` release, and
+#   never a lower one, whatever order the pointer jobs run in or fail in.
 #
-#   * The move only ever rolls FORWARD. It used to be an unconditional
-#     `git push -f` + `gh release upload --clobber`, so re-running an older
-#     tag's workflow, or two release jobs finishing out of order, would quietly
-#     serve an older package under the URL the docs call the newest. The run
-#     reads the version the pointer holds from a machine-readable marker in its
-#     release body and refuses to go backwards. Re-running the SAME version is
-#     allowed — that is how a failed upload is recovered.
-#   * Looking up the pointer FAILS CLOSED. Only a confirmed HTTP 404 means
-#     "does not exist yet"; any other lookup failure (auth, rate limit,
-#     network, a 5xx) aborts the run rather than being read as "absent", which
-#     would skip the rollback check entirely and force-move the tag.
-#   * Versions are compared NUMERICALLY, field by field, not with `sort -V`.
-#     `sort -V` is not SemVer: it orders `1.0.0-rc.1` AFTER `1.0.0`, so
-#     re-running a prerelease after the stable release would pass the check and
-#     roll the pointer backwards — the exact bug the check exists for.
-#     Prerelease and build-metadata versions are refused outright instead, with
-#     an error that says why; the CLI train has only ever cut `X.Y.Z` tags.
-#   * A pointer release with no marker (hand-created, or from before the marker
-#     existed) INITIALISES the marker instead of aborting. Under `set -o
-#     pipefail` a `grep` that matches nothing fails the whole assignment, which
-#     used to kill the script in exactly the migration case this has to
-#     survive. It is a `::warning::`, not silence: the rollback check genuinely
-#     cannot be applied that one time.
-#   * The asset is uploaded BEFORE the marker is written and before the tag
-#     moves. If a step fails midway, the marker still names the version the
-#     pointer actually serves; the other order would leave the marker claiming
-#     a version whose asset never landed, and the guard would then trust it.
-#   * The workflow serialises only the job that runs this script, never the
-#     job that publishes the per-tag `cli-v*` assets — see cli-release.yml.
+# Two carve-outs, deliberate and stated rather than accidental:
+#   * A CLI release tagged with a SemVer prerelease or build-metadata suffix
+#     (`cli-v1.0.0-rc.1`) is not eligible to own the pointer and is ignored
+#     when picking the highest. Install those by their pinned URL.
+#   * If the highest release is later deleted, the pointer follows the new
+#     highest downwards. "Never a lower one" is relative to what is published,
+#     and an unpublished release cannot be the thing the pointer serves. That
+#     case emits a `::warning::`.
+# ---------------------------------------------------------------------------
+#
+# WHY IT ROLLS TO THE HIGHEST PUBLISHED RELEASE RATHER THAN TO ITS OWN
+#
+# The obvious design — each run moves the pointer to the version that triggered
+# it, refusing if a marker in the pointer's release body names something newer
+# — fails two ways, and both were shipped before this rewrite:
+#
+#   1. The queue is not ordered by version. GitHub keeps exactly ONE pending
+#      job per concurrency group and replaces it with the most recently queued
+#      one; queue order is release-job completion order. So with 1.1 running,
+#      1.3 pending and a slow rerun of 1.2 arriving, 1.2's job evicts 1.3's,
+#      1.2 advances the pointer from 1.1, and the already-published 1.3 is
+#      never served at all.
+#   2. The marker is not trustworthy as an ordering authority. Upload and
+#      marker-write are two API calls: if the upload lands and the write does
+#      not, the URL immediately serves the new asset while the body still names
+#      the old version — and a later older run then passes the comparison
+#      against that stale marker and rolls the served bytes backwards.
+#      Reversing the two calls only swaps which direction is wrong.
+#
+# Converging on the highest published release removes both, because it removes
+# the two things that were being trusted. Queue order stops mattering: whatever
+# job survives reaches the same state. A cancelled job costs nothing, because
+# the next one to run reaches that same state. And a stale — or hand-edited —
+# marker cannot authorise anything, because the decision is made against the
+# published releases, not against the marker.
+#
+# The marker is kept, but only as a RECORD of what is served, for humans and
+# for `gh release view cli-latest`. It is deliberately NOT used to short-
+# circuit the upload: doing so would put it back on the trusted path, and a
+# marker that over-claims (a hand edit) would then skip an upload that was
+# actually needed. Re-uploading an identical 2 MB asset is the cheaper mistake.
+#
+# ---------------------------------------------------------------------------
+# OTHER FAILURE DIRECTIONS
+#
+#   * Listing the releases FAILS CLOSED. There is no "assume empty" path: if
+#     the list cannot be read, the highest release is unknown and the pointer
+#     is left alone.
+#   * The release list is eventually consistent, and a listing taken moments
+#     after a release is published can omit it. The triggering release is known
+#     to be published — its publish job finished, which is what queued this one
+#     — so the listing is retried until it appears, and the triggering version
+#     is then used as a floor regardless. Without that floor a lagging listing
+#     could roll the pointer to an older release with no later job to correct
+#     it, which would break the contract in the one case nothing else covers.
+#   * The asset is taken from the target RELEASE, not from the workspace, so
+#     the bytes the pointer serves are provably the bytes that release
+#     published.
+#   * Asset first, then the marker, then the tag. A partial failure can only
+#     leave the marker naming something lower than the bytes, which is now
+#     inert (nothing reads it to decide), and the next run rewrites both.
 set -euo pipefail
 
-VERSION="${1:?usage: roll-cli-latest.sh <version> <tag> <asset-path>}"
-TAG="${2:?usage: roll-cli-latest.sh <version> <tag> <asset-path>}"
-ASSET="${3:?usage: roll-cli-latest.sh <version> <tag> <asset-path>}"
+VERSION="${1:?usage: roll-cli-latest.sh <triggering-version> <triggering-tag>}"
+TAG="${2:?usage: roll-cli-latest.sh <triggering-version> <triggering-tag>}"
 REPO_SLUG="${REPO_SLUG:-shiv3/ocpp-cp-simulator}"
 DRY_RUN="${DRY_RUN:-0}"
 POINTER_TAG="cli-latest"
+ASSET_NAME="ocpp-cp-simulator.tgz"
 MARKER_PREFIX="<!-- cli-latest-version:"
+LIST_ATTEMPTS="${LIST_ATTEMPTS:-6}"
+LIST_BACKOFF="${LIST_BACKOFF:-5}"
 
 run() {
   if [ "$DRY_RUN" = 1 ]; then
@@ -77,21 +102,19 @@ die() {
   exit 1
 }
 
-# ---------------------------------------------------------------------------
-# Versions. Only plain `X.Y.Z` is accepted, so the numeric comparison below is
-# total and exact over the whole accepted domain.
-# ---------------------------------------------------------------------------
+# Only plain X.Y.Z, so the numeric comparison below is total and exact over the
+# whole accepted domain. `sort -V` is deliberately not used anywhere: it is not
+# SemVer-aware and orders 1.0.0-rc.1 AFTER 1.0.0.
 is_release_version() {
   case "$1" in
     *[!0-9.]* | .* | *. | *..*) return 1 ;;
   esac
-  # exactly three numeric fields
   [ "$(printf '%s' "$1" | awk -F. '{print NF}')" = 3 ]
 }
 
 # 0 when $1 is strictly newer than $2.
 version_gt() {
-  awk -F. -v a="$1" -v b="$2" '
+  awk -v a="$1" -v b="$2" '
     BEGIN {
       na = split(a, x, ".");
       nb = split(b, y, ".");
@@ -106,14 +129,64 @@ version_gt() {
 }
 
 if ! is_release_version "$VERSION"; then
-  die "refusing to move ${POINTER_TAG} to '${VERSION}': only plain X.Y.Z releases may own the rolling pointer. A SemVer prerelease or build-metadata version (1.0.0-rc.1, 1.0.0+build) cannot be ordered against a stable one by this script, and ordering it wrongly would roll the pointer backwards — which is the failure this guard exists to prevent. Publish it as a pinned cli-v* release only."
+  die "refusing to move ${POINTER_TAG} for '${VERSION}': only plain X.Y.Z releases may own the rolling pointer. A SemVer prerelease or build-metadata version (1.0.0-rc.1, 1.0.0+build) cannot be ordered against a stable one, and ordering it wrongly would move the pointer backwards. Publish it as a pinned ${TAG} release only."
 fi
 
 # ---------------------------------------------------------------------------
-# What does the pointer hold now? Fail CLOSED: only a confirmed 404 counts as
-# "not created yet". `gh api` is used rather than `gh release view` because it
-# reports the HTTP status verbatim, so a 404 can be told apart from a 401, a
-# 403 rate limit, a 5xx or a DNS failure.
+# Which release should the pointer serve? The highest published cli-vX.Y.Z,
+# with the triggering version as a floor (see the eventual-consistency note in
+# the header). Fails closed: a listing that cannot be read stops the run.
+# ---------------------------------------------------------------------------
+TARGET="$VERSION"
+LISTING=""
+attempt=1
+while :; do
+  if ! LISTING="$(gh release list --repo "$REPO_SLUG" --limit 200 \
+      --json tagName,isDraft --jq '.[] | select(.isDraft | not) | .tagName' 2>/tmp/roll-gh-err.$$)"; then
+    GH_ERR="$(cat /tmp/roll-gh-err.$$ 2>/dev/null || true)"
+    rm -f /tmp/roll-gh-err.$$
+    die "could not list the releases of ${REPO_SLUG}, so the highest published CLI release is unknown and ${POINTER_TAG} must not be moved. Underlying error: ${GH_ERR}"
+  fi
+  rm -f /tmp/roll-gh-err.$$
+  # The triggering release is published by definition; if the listing does not
+  # show it yet, it is stale.
+  if printf '%s\n' "$LISTING" | grep -qxF "$TAG"; then
+    break
+  fi
+  if [ "$attempt" -ge "$LIST_ATTEMPTS" ]; then
+    echo "::warning::the release listing still does not show ${TAG} after ${LIST_ATTEMPTS} attempts; continuing with ${VERSION} as the floor"
+    break
+  fi
+  echo "release listing does not show ${TAG} yet (attempt ${attempt}/${LIST_ATTEMPTS}); retrying"
+  sleep "$LIST_BACKOFF"
+  attempt=$((attempt + 1))
+done
+
+while IFS= read -r tag; do
+  case "$tag" in
+    cli-v*) candidate="${tag#cli-v}" ;;
+    *) continue ;;
+  esac
+  is_release_version "$candidate" || continue
+  if version_gt "$candidate" "$TARGET"; then
+    TARGET="$candidate"
+  fi
+done <<EOF
+$LISTING
+EOF
+
+TARGET_TAG="cli-v${TARGET}"
+if [ "$TARGET" = "$VERSION" ]; then
+  echo "highest published CLI release is ${TARGET_TAG} (the release that triggered this run)"
+else
+  echo "::notice::${TAG} triggered this run, but ${TARGET_TAG} is the highest published CLI release; pointing ${POINTER_TAG} at ${TARGET_TAG}"
+fi
+
+# ---------------------------------------------------------------------------
+# What does the pointer say it serves? Informational only — it cannot veto the
+# target, and a stale or hand-edited value therefore cannot authorise a
+# rollback. Fails closed on anything but a confirmed 404 all the same, because
+# the create-vs-edit branch below depends on the answer.
 # ---------------------------------------------------------------------------
 POINTER_EXISTS=0
 BODY=""
@@ -123,75 +196,76 @@ else
   GH_ERR="$(cat /tmp/roll-gh-err.$$ 2>/dev/null || true)"
   case "$GH_ERR" in
     *"HTTP 404"* | *"Not Found"*)
-      echo "${POINTER_TAG} does not exist yet (HTTP 404); it will be created at ${VERSION}"
+      echo "${POINTER_TAG} does not exist yet (HTTP 404); it will be created at ${TARGET}"
       ;;
     *)
       rm -f /tmp/roll-gh-err.$$
-      die "could not read ${POINTER_TAG} and it was not a 404, so it is unknown whether the pointer already holds a newer release. Refusing to move it. Underlying error: ${GH_ERR}"
+      die "could not read ${POINTER_TAG}, and it was not a 404, so it is unknown whether it must be created or updated. Refusing to touch it. Underlying error: ${GH_ERR}"
       ;;
   esac
 fi
 rm -f /tmp/roll-gh-err.$$
 
-# ---------------------------------------------------------------------------
-# The rollback check. `|| true` on the extraction: under `set -o pipefail` a
-# grep that matches nothing fails the assignment and would abort the script
-# before the "no marker yet" branch could run — which is precisely the state a
-# hand-created pointer release is in.
-# ---------------------------------------------------------------------------
 CURRENT=""
 if [ "$POINTER_EXISTS" = 1 ]; then
+  # `|| true`: under `set -o pipefail` a grep that matches nothing would fail
+  # the assignment and kill the script — which is exactly the state a
+  # hand-created pointer release is in.
   CURRENT="$(printf '%s\n' "$BODY" \
     | grep -oE "$MARKER_PREFIX [^ ]+ -->" \
     | head -n 1 \
     | sed -E "s/^.*: (.+) -->$/\1/" || true)"
 fi
 
-if [ -n "$CURRENT" ]; then
-  if ! is_release_version "$CURRENT"; then
-    die "${POINTER_TAG}'s version marker reads '${CURRENT}', which is not a plain X.Y.Z version. Refusing to guess whether ${VERSION} is newer. Fix the marker on the ${POINTER_TAG} release, then re-run."
-  fi
-  if [ "$CURRENT" = "$VERSION" ]; then
-    echo "${POINTER_TAG} already holds ${VERSION}; re-publishing the same version (this is how a failed upload is retried)"
-  elif version_gt "$VERSION" "$CURRENT"; then
-    echo "${POINTER_TAG} currently holds ${CURRENT}; rolling forward to ${VERSION}"
-  else
-    echo "::notice::${POINTER_TAG} already points at ${CURRENT}; refusing to roll it back to ${VERSION}"
-    exit 0
-  fi
+if [ -n "$CURRENT" ] && ! is_release_version "$CURRENT"; then
+  echo "::warning::${POINTER_TAG}'s version marker reads '${CURRENT}', which is not a plain X.Y.Z version. It is a record, not an authority, so this does not block the move; overwriting it with ${TARGET}."
+elif [ -n "$CURRENT" ] && version_gt "$CURRENT" "$TARGET"; then
+  echo "::warning::${POINTER_TAG} records ${CURRENT}, which is higher than the highest published CLI release (${TARGET}). A release was probably deleted, or the marker was hand-edited. Following the published releases down to ${TARGET}, because that is what the contract is about."
+elif [ -n "$CURRENT" ]; then
+  echo "${POINTER_TAG} currently records ${CURRENT}; setting it to ${TARGET}"
 elif [ "$POINTER_EXISTS" = 1 ]; then
-  echo "::warning::${POINTER_TAG} exists but carries no version marker, so the roll-back check cannot be applied this once. Moving it to ${VERSION} and writing the marker; subsequent runs are guarded."
+  echo "::warning::${POINTER_TAG} exists but carries no version marker; writing one at ${TARGET}"
 fi
 
-NOTES="Rolling pointer to the newest CLI release (currently **${TAG}**).
+# ---------------------------------------------------------------------------
+# Take the asset from the target release itself.
+# ---------------------------------------------------------------------------
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/roll-cli-latest.XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
+run gh release download "$TARGET_TAG" --repo "$REPO_SLUG" \
+  --pattern "$ASSET_NAME" --dir "$WORKDIR" --clobber
+if [ "$DRY_RUN" = 1 ]; then
+  printf 'dry-run placeholder\n' > "$WORKDIR/$ASSET_NAME"
+fi
+[ -s "$WORKDIR/$ASSET_NAME" ] \
+  || die "${TARGET_TAG} does not carry a non-empty ${ASSET_NAME}; refusing to point ${POINTER_TAG} at a release whose asset cannot be served."
+
+NOTES="Rolling pointer to the highest published CLI release (currently **${TARGET_TAG}**).
 
 \`\`\`sh
-bun install -g https://github.com/${REPO_SLUG}/releases/download/${POINTER_TAG}/${ASSET##*/}
+bun install -g https://github.com/${REPO_SLUG}/releases/download/${POINTER_TAG}/${ASSET_NAME}
 \`\`\`
 
 Release notes and per-version tarballs live on the \`cli-v*\` releases.
 Kept as a pre-release so it never becomes the repository's \"Latest\" release —
 the desktop \`v*\` train owns that badge (#321).
 
-${MARKER_PREFIX} ${VERSION} -->"
+${MARKER_PREFIX} ${TARGET} -->"
 
-# Asset first, then the marker, then the tag: see the header. POINTER_EXISTS is
-# the single lookup made above rather than a second `gh release view`, so the
-# two cannot disagree between the check and the write.
 if [ "$POINTER_EXISTS" = 1 ]; then
-  run gh release upload "$POINTER_TAG" "$ASSET" --repo "$REPO_SLUG" --clobber
+  run gh release upload "$POINTER_TAG" "$WORKDIR/$ASSET_NAME" --repo "$REPO_SLUG" --clobber
   run gh release edit "$POINTER_TAG" --repo "$REPO_SLUG" --prerelease \
     --title "CLI (rolling latest)" --notes "$NOTES"
 else
   run gh release create "$POINTER_TAG" --repo "$REPO_SLUG" --prerelease \
-    --title "CLI (rolling latest)" --notes "$NOTES" "$ASSET"
+    --title "CLI (rolling latest)" --notes "$NOTES" "$WORKDIR/$ASSET_NAME"
 fi
 
 # The git tag is not what makes the download URL work (assets hang off the
 # release, not the tag), but leaving it on an old commit is misleading.
 # `cli-latest` matches neither the `v*` nor the `cli-v*` push trigger, and in
-# any case a push made with GITHUB_TOKEN does not start new workflow runs.
+# any case a push made with GITHUB_TOKEN starts no new workflow runs.
 run git tag -f "$POINTER_TAG"
 run git push -f origin "refs/tags/${POINTER_TAG}"
 
-echo "${POINTER_TAG} now serves ${VERSION} (${TAG})"
+echo "${POINTER_TAG} now serves ${TARGET} (${TARGET_TAG})"

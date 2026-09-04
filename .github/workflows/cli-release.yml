@@ -155,17 +155,19 @@ jobs:
                         --ws-url wss://example.com/chargepoint/
             ```
 
-  # Moves the rolling `cli-latest` pointer onto the release the job above just
-  # published, then installs from the URL the documentation advertises.
+  # Points `cli-latest` at the highest published CLI release, then installs
+  # from the URL the documentation advertises.
   #
-  # Serialised, because scripts/roll-cli-latest.sh is a read-then-write (read
-  # the version the pointer holds, refuse to go backwards, write the asset and
-  # the marker) and two of these interleaving could leave the pointer serving
-  # the older package. Unlike the publish job, cancelling this one is harmless
-  # and in fact correct: a pointer move superseded by a newer release's pointer
-  # move had nothing to contribute — the rollback guard in the script would
-  # have refused it anyway. `cancel-in-progress: false` so a move already
-  # under way still finishes rather than leaving a half-written pointer.
+  # Serialised only to stop two `--clobber` uploads of the same asset from
+  # interleaving. It is NOT what makes the pointer correct, and it must not be:
+  # GitHub keeps one pending job per group and replaces it with the most
+  # recently QUEUED one, and queue order here is release-completion order, not
+  # version order — so a slow rerun of an older tag can evict a newer tag's
+  # pending job. That is survivable only because the script converges on the
+  # highest published release rather than on the version that triggered it:
+  # whichever job survives reaches the same state, and a cancelled one costs
+  # nothing. `cancel-in-progress: false` so a move already under way finishes
+  # rather than leaving a half-written pointer.
   roll-pointer:
     needs: release
     runs-on: ubuntu-latest
@@ -185,23 +187,11 @@ jobs:
         with:
           node-version: lts/*
 
-      # Taken from the release the previous job published rather than passed
-      # between jobs as an artifact: this way the bytes the pointer serves are
-      # provably the bytes that release published.
-      - name: Fetch the published tarball
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh release download "${{ needs.release.outputs.tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern ocpp-cp-simulator.tgz --clobber
-          ls -lh ocpp-cp-simulator.tgz
-
-      # See scripts/roll-cli-latest.sh for what the pointer is for, why it is a
-      # pre-release, and why every failure mode in it points the safe way.
-      # Skipping the move (an older tag re-run) is a `::notice::`, not a
-      # failure: that run still published its own `cli-v*` assets correctly.
+      # The script decides which release the pointer should serve (the highest
+      # published cli-vX.Y.Z, not necessarily the one that triggered this run)
+      # and downloads that release's own asset, so the bytes the pointer serves
+      # are provably the bytes that release published. See its header for the
+      # contract and for why every failure mode in it points the safe way.
       - name: Move the rolling `cli-latest` pointer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -209,8 +199,7 @@ jobs:
         run: |
           ./scripts/roll-cli-latest.sh \
             "${{ needs.release.outputs.version }}" \
-            "${{ needs.release.outputs.tag }}" \
-            ocpp-cp-simulator.tgz
+            "${{ needs.release.outputs.tag }}"
 
       # The documented install command, executed. Everything in the publish job
       # verifies a LOCAL tarball; this is the only step that proves the URL

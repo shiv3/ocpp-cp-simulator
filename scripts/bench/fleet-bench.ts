@@ -14,7 +14,6 @@ import { io, type Socket } from "socket.io-client";
 
 import { CP_CREATE_MANY_MAX } from "../../src/protocol/limits.ts";
 import {
-  BENCH_ID_PATTERN,
   BENCH_OCPP_VERSIONS,
   BenchAbortError,
   BenchValidationError,
@@ -24,7 +23,10 @@ import {
   TokenBucket,
   answeredAfterWatchdog,
   assertDaemonEmpty,
+  BENCH_ID_ROOT,
   benchCpId,
+  benchIdPattern,
+  cleanupIdsAfterBatch,
   cyclePeriodSec,
   daemonIsLocal,
   diffHistogram,
@@ -37,10 +39,12 @@ import {
   machineReport,
   maxSustainableFleet,
   mergeHistogramDeltas,
+  newRunId,
   parseArgv,
   parseExposition,
   recommendedWarmupSec,
   redactOptions,
+  redactUrlUserinfo,
   requiredRpcPerSec,
   row,
   sleep,
@@ -50,6 +54,7 @@ import {
   TransactionStarts,
   STEP_COLUMNS,
   sustainableRpcPerSec,
+  unpredictedCreatedIds,
   validateOptions,
   type BenchOptions,
   type FleetGauge,
@@ -68,6 +73,44 @@ const PENDING_EVICTIONS_METRIC = "ocppcp_ocpp_pending_calls_evicted_total";
 // sustain (see the README's "Why a socket pool" section).
 const INFLIGHT_PER_SOCKET = 48;
 const RPC_TIMEOUT_MS = 35_000;
+
+/** Deadline for every HTTP request this script makes (health, `/metrics`).
+ *
+ *  `fetch` has no timeout of its own, so a daemon that accepts the connection
+ *  and then stalls while serving `/metrics` — precisely the condition at the
+ *  top of a sweep, which is what this tool exists to reach — used to hang the
+ *  run forever: `--settle-timeout` never fired, the measurement never
+ *  finished, and the `finally` that deletes the fleet never ran. Generous
+ *  relative to a healthy scrape and in the same range as
+ *  {@link RPC_TIMEOUT_MS}, so it bounds a hang without failing a slow but
+ *  working daemon. */
+const HTTP_TIMEOUT_MS = 30_000;
+
+/** `fetch` with a deadline, and with the URL redacted out of any error it
+ *  raises — `--daemon-url` may carry userinfo and these messages reach
+ *  stderr, which commonly reaches a CI log. */
+async function fetchWithDeadline(
+  url: string,
+  init: RequestInit,
+  what: string,
+): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    throw new Error(
+      timedOut
+        ? `${what} did not answer within ${HTTP_TIMEOUT_MS / 1000}s (${redactUrlUserinfo(url)}). ` +
+            `A daemon that accepts the connection and then stalls under load would ` +
+            `otherwise hang this run forever.`
+        : `${what} failed (${redactUrlUserinfo(url)}): ${String(err)}`,
+      { cause: err },
+    );
+  }
+}
 
 /** Overall budget for the best-effort `cp.delete` sweep at the end of a run
  *  (and on Ctrl-C). Cleanup used to delete sequentially with the full
@@ -352,7 +395,11 @@ async function fetchMetrics(
       "Basic " +
       Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
   }
-  const res = await fetch(`${daemonUrl}/metrics`, { headers });
+  const res = await fetchWithDeadline(
+    `${daemonUrl}/metrics`,
+    { headers },
+    "GET /metrics",
+  );
   if (!res.ok) {
     throw new Error(`GET /metrics -> ${res.status} ${res.statusText}`);
   }
@@ -367,7 +414,10 @@ interface Preflight {
   readonly baseline: FleetGauge;
 }
 
-async function preflight(opts: BenchOptions): Promise<Preflight> {
+async function preflight(
+  opts: BenchOptions,
+  runId: string,
+): Promise<Preflight> {
   const headers: Record<string, string> = {};
   if (opts.daemonBasicAuth) {
     headers.Authorization =
@@ -376,13 +426,11 @@ async function preflight(opts: BenchOptions): Promise<Preflight> {
         `${opts.daemonBasicAuth.username}:${opts.daemonBasicAuth.password}`,
       ).toString("base64");
   }
-  const healthRes = await fetch(`${opts.daemonUrl}${opts.healthPath}`, {
-    headers,
-  }).catch((err: unknown) => {
-    throw new Error(
-      `could not reach the daemon at ${opts.daemonUrl}${opts.healthPath}: ${String(err)}`,
-    );
-  });
+  const healthRes = await fetchWithDeadline(
+    `${opts.daemonUrl}${opts.healthPath}`,
+    { headers },
+    "the daemon health check",
+  );
   if (!healthRes.ok) {
     throw new Error(
       `daemon health check failed: ${healthRes.status} ${healthRes.statusText}`,
@@ -393,7 +441,11 @@ async function preflight(opts: BenchOptions): Promise<Preflight> {
     throw new Error(`daemon health check returned ok:false`);
   }
 
-  const metricsRes = await fetch(`${opts.daemonUrl}/metrics`, { headers });
+  const metricsRes = await fetchWithDeadline(
+    `${opts.daemonUrl}/metrics`,
+    { headers },
+    "GET /metrics",
+  );
   if (metricsRes.status === 404) {
     throw new Error(
       "GET /metrics -> 404. Start the daemon with --metrics " +
@@ -419,7 +471,11 @@ async function preflight(opts: BenchOptions): Promise<Preflight> {
     process.stderr.write(
       `[bench] WARNING: --allow-existing: ${preExisting} pre-existing charge ` +
         `point(s) are on this daemon. Their OCPP traffic is inside every ` +
-        `measurement window below; N counts only this run's fleet.\n`,
+        `measurement window below; N counts only this run's fleet. They cannot ` +
+        `collide with it — this run's charge points are named ` +
+        `${BENCH_ID_ROOT}-${runId}-* — and teardown deletes only that fleet. If any of ` +
+        `them are ${BENCH_ID_ROOT}-* they are an earlier run's leftovers, and deleting ` +
+        `them by hand is what the preflight is asking for.\n`,
     );
   }
   return {
@@ -462,20 +518,23 @@ interface IdCursor {
  *  excluded rather than retried, matching `cp.create_many`'s own
  *  partial-success contract.
  *
- *  Every id a chunk *offers* is pushed into `cleanupIds` before the RPC is
- *  awaited, not after it answers. An RPC deadline or a dropped connection
- *  rejects the call without cancelling the server-side work, so the daemon can
- *  hold charge points whose ids never reached this process — and the cleanup
- *  sweep would then leave them registered, which is exactly what the next
- *  run's `assertDaemonEmpty` preflight refuses a daemon for. `cp.delete`
- *  answering `not_found` for an id that was never created is already treated
- *  as success, so over-listing costs nothing. */
+ *  Every id a chunk *offers* enters `cleanupIds` before the RPC is awaited,
+ *  and the ids the ack **names as failures leave it again**. See
+ *  {@link cleanupIdsAfterBatch} for why those two rules are not in tension:
+ *  the first covers the indeterminate case (an RPC deadline does not cancel
+ *  the server-side work, so the daemon may hold charge points whose ids never
+ *  reached this process), while the second covers the determinate one — a
+ *  reported failure is positive evidence the charge point is not ours, and
+ *  under `--allow-existing` an id collision with someone else's charge point
+ *  is reported exactly that way. Deleting on that evidence destroyed fleets
+ *  this run never created. */
 async function growFleet(
   pool: SocketPool,
   opts: BenchOptions,
+  runId: string,
   cursor: IdCursor,
   count: number,
-  cleanupIds: string[],
+  cleanupIds: Set<string>,
 ): Promise<string[]> {
   const created: string[] = [];
   let remaining = count;
@@ -487,8 +546,11 @@ async function growFleet(
     const index = cursor.nextIndex;
     cursor.nextIndex += chunk;
     const offered: string[] = [];
-    for (let i = 0; i < chunk; i++) offered.push(benchCpId(index + i));
-    cleanupIds.push(...offered);
+    for (let i = 0; i < chunk; i++) offered.push(benchCpId(runId, index + i));
+    // Provisional, and deliberately added before the await: if this call
+    // throws, the ids stay listed, because an RPC deadline does not tell the
+    // daemon to stop and it may hold every one of them.
+    for (const id of offered) cleanupIds.add(id);
     const result = await pool.rpc<{
       created: string[];
       failed: { cpId: string; reason: string }[];
@@ -503,16 +565,19 @@ async function growFleet(
       model: "fleet-bench",
       autoConnect: true,
       count: chunk,
-      idPattern: BENCH_ID_PATTERN,
+      idPattern: benchIdPattern(runId),
       startIndex: index,
     });
+    // Determinate. Re-derive this batch's cleanup membership from the ack:
+    // failures drop out, unpredicted creations come in.
+    for (const id of offered) cleanupIds.delete(id);
+    for (const id of cleanupIdsAfterBatch(offered, result)) cleanupIds.add(id);
+
     // The daemon expands `idPattern` itself, so this is the check that keeps
     // the local copy honest: an id it created that this process did not
     // predict is an id cleanup would miss.
-    const predicted = new Set(offered);
-    const unpredicted = result.created.filter((id) => !predicted.has(id));
+    const unpredicted = unpredictedCreatedIds(offered, result.created);
     if (unpredicted.length > 0) {
-      cleanupIds.push(...unpredicted);
       process.stderr.write(
         `[bench] WARNING: cp.create_many returned ${unpredicted.length} id(s) this ` +
           `script did not predict (e.g. ${unpredicted[0]}). benchCpId() has drifted ` +
@@ -522,7 +587,8 @@ async function growFleet(
     created.push(...result.created);
     for (const f of result.failed) {
       process.stderr.write(
-        `[bench] create failed for ${f.cpId}: ${f.reason}\n`,
+        `[bench] create failed for ${f.cpId} (not deleted at teardown: this run ` +
+          `did not create it): ${f.reason}\n`,
       );
     }
     remaining -= chunk;
@@ -727,15 +793,16 @@ function armLoad(
  *  preflight will refuse this daemon over it (`assertDaemonEmpty`). */
 async function deleteFleet(
   pool: SocketPool,
+  runId: string,
   cpIds: readonly string[],
 ): Promise<void> {
   if (cpIds.length === 0) return;
   if (!pool.anyConnected()) {
     process.stderr.write(
       `[bench] skipping cleanup: no control-plane socket is connected, so ` +
-        `${cpIds.length} charge point(s) remain on the daemon. Restart it, or ` +
-        `delete them before the next run — the preflight refuses a daemon that ` +
-        `already holds charge points.\n`,
+        `${cpIds.length} charge point(s) named ${BENCH_ID_ROOT}-${runId}-* remain on ` +
+        `the daemon. Restart it, or delete them before the next run — the ` +
+        `preflight refuses a daemon that already holds charge points.\n`,
     );
     return;
   }
@@ -781,7 +848,8 @@ async function deleteFleet(
   const left = cpIds.length - deleted;
   if (left > 0) {
     process.stderr.write(
-      `[bench] cleanup gave up with ${left} charge point(s) still registered` +
+      `[bench] cleanup gave up with ${left} charge point(s) still registered ` +
+        `(they are the ones named ${BENCH_ID_ROOT}-${runId}-*)` +
         `${daemonUnresponsive ? " (the daemon stopped answering)" : ""}. The next ` +
         `run's preflight will refuse this daemon until they are gone.\n`,
     );
@@ -802,10 +870,19 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  // Fixed once per process, before anything is created. Every charge point
+  // this run makes is named under it, so a pre-existing charge point cannot
+  // collide with an id this run offers — which is what makes "the benchmark
+  // deleted something it did not create" unrepresentable rather than merely
+  // guarded against.
+  const runId = newRunId(Date.now());
   process.stderr.write(
-    `[bench] preflight: health + /metrics on ${opts.daemonUrl}\n`,
+    `[bench] preflight: health + /metrics on ${redactUrlUserinfo(opts.daemonUrl)}\n`,
   );
-  const { daemonVersion, baseline } = await preflight(opts);
+  process.stderr.write(
+    `[bench] run id ${runId}: charge points are created as ${benchIdPattern(runId)}\n`,
+  );
+  const { daemonVersion, baseline } = await preflight(opts, runId);
 
   process.stderr.write(machineInfo(opts.daemonUrl, daemonVersion) + "\n");
   process.stderr.write(
@@ -868,7 +945,7 @@ async function main(): Promise<void> {
   // those of a batch whose RPC never answered. Cleanup sweeps this, so an
   // indeterminate create cannot leave charge points behind for the next run's
   // preflight to trip over.
-  const cleanupIds: string[] = [];
+  const cleanupIds = new Set<string>();
   const results: StepResult[] = [];
   // One stop handle per step's `armLoad` call — steps only ever *add* CPs, so
   // each step arms just the CPs it created and earlier steps' handles keep
@@ -886,7 +963,7 @@ async function main(): Promise<void> {
     cleanupStarted ??= (async () => {
       for (const stop of stopLoads) stop();
       watcher?.close();
-      await deleteFleet(pool, cleanupIds);
+      await deleteFleet(pool, runId, [...cleanupIds]);
       await pool.closeAll();
     })();
     return cleanupStarted;
@@ -923,7 +1000,7 @@ async function main(): Promise<void> {
       const toCreate = n - allCpIds.length;
       process.stderr.write(`[bench] N=${n}: creating ${toCreate} more CP(s)\n`);
       const created = await untilLost(
-        growFleet(pool, opts, cursor, toCreate, cleanupIds),
+        growFleet(pool, opts, runId, cursor, toCreate, cleanupIds),
       );
       allCpIds.push(...created);
       const notCreated = n - allCpIds.length;
@@ -1088,6 +1165,9 @@ async function main(): Promise<void> {
         // and pasted into a doc, so the daemon's Basic Auth password and any
         // userinfo embedded in a URL must not travel with it.
         options: redactOptions(opts),
+        // Recorded so a leftover fleet can be traced back to the run that made
+        // it, and so two result files are never confused.
+        runId,
         preExistingChargePoints: baseline.total,
         // Says whose hardware it is; `daemonHostIsRunner` makes that
         // machine-readable, so a collected result can be filtered rather than
@@ -1174,20 +1254,25 @@ See scripts/bench/README.md for a worked example and what to record.
 `);
 }
 
-main().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  // An abort is a run that stopped on purpose, not a crash — say so, because
-  // the difference decides whether the operator looks for a bug or for a
-  // daemon that went away.
-  process.stderr.write(
-    `${err instanceof BenchAbortError ? "Aborted" : "Error"}: ${message}\n`,
-  );
-  // `process.exit`, not `exitCode`, and for the same reason the SIGINT handler
-  // uses it. `Promise.race` does not cancel the loser, so an abort that
-  // interrupted the measurement sleep leaves that timer armed — up to
-  // `--duration` or `--warmup`, an hour each at their caps — and an in-flight
-  // `pool.rpc` leaves its own. The message would print at once and the process
-  // would then sit there, which is not a stop. `main`'s `finally` has already
-  // awaited `cleanup()` by the time this runs, so nothing is cut short.
-  process.exit(1);
-});
+// Guarded the way `src/cli/main.ts` and `scripts/steve-verify/runner/main.ts`
+// guard theirs, so importing this module — from a test, or from a tool that
+// wants one of its helpers — does not start a benchmark run.
+if (import.meta.main) {
+  main().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    // An abort is a run that stopped on purpose, not a crash — say so, because
+    // the difference decides whether the operator looks for a bug or for a
+    // daemon that went away.
+    process.stderr.write(
+      `${err instanceof BenchAbortError ? "Aborted" : "Error"}: ${message}\n`,
+    );
+    // `process.exit`, not `exitCode`, and for the same reason the SIGINT handler
+    // uses it. `Promise.race` does not cancel the loser, so an abort that
+    // interrupted the measurement sleep leaves that timer armed — up to
+    // `--duration` or `--warmup`, an hour each at their caps — and an in-flight
+    // `pool.rpc` leaves its own. The message would print at once and the process
+    // would then sit there, which is not a stop. `main`'s `finally` has already
+    // awaited `cleanup()` by the time this runs, so nothing is cut short.
+    process.exit(1);
+  });
+}

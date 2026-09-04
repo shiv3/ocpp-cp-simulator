@@ -55,16 +55,58 @@ export const MAX_WARMUP_SEC = MAX_INTERVAL_SEC + CALL_WATCHDOG_SEC;
 export const BENCH_OCPP_VERSIONS: readonly OcppVersion[] =
   SUPPORTED_OCPP_VERSIONS.filter((v) => !isSoapVersion(v));
 
-/** The `idPattern` every benchmarked charge point is created under.
- *
- *  Kept here beside {@link benchCpId} because the run must be able to name the
- *  ids of a batch whose `cp.create_many` never answered: an RPC deadline or a
- *  dropped connection can reject the call *after* the daemon created the
- *  charge points, and ids that never reach the client are ids the cleanup
- *  sweep cannot delete — leaving a daemon the next run's preflight refuses. */
-export const BENCH_ID_PATTERN = "BENCH{n:06}";
+/** Prefix shared by every charge point this tool has ever created. Used to
+ *  recognise leftovers from an earlier run, which is the one thing a run id
+ *  cannot do for itself. */
+export const BENCH_ID_ROOT = "BENCH";
 
-/** Expand {@link BENCH_ID_PATTERN} for one index.
+/**
+ * A fresh run id: `<base36 ms>-<4 random base36>`.
+ *
+ * **This is the primary defence against deleting somebody else's charge
+ * points**, and it is a stronger one than reasoning about acks correctly.
+ * Every run creates its charge points under ids no other run can have offered,
+ * so a pre-existing charge point *cannot* collide with an id this run offers,
+ * and "the benchmark deleted something it did not create" stops being a case
+ * that has to be got right and becomes one that cannot arise. The cleanup
+ * bookkeeping in {@link cleanupIdsAfterBatch} stays honest as a second line,
+ * not as the only one.
+ *
+ * Randomness here is *identity*, not behaviour: it names charge points and
+ * never influences the traffic pattern, so the project's "seeded and
+ * replayable" rule is untouched — the stagger, the cycle and every other
+ * observable remain deterministic. The value is printed on stderr and recorded
+ * in `--out` so a leftover fleet can always be traced back to the run that
+ * made it. The timestamp keeps ids sorting in run order; the random tail
+ * covers two runs starting in the same millisecond.
+ */
+export function newRunId(
+  nowMs: number,
+  random: () => number = Math.random,
+): string {
+  const stamp = Math.floor(nowMs).toString(36);
+  let tail = "";
+  for (let i = 0; i < 4; i++) {
+    tail += Math.floor(random() * 36)
+      .toString(36)
+      .slice(-1);
+  }
+  return `${stamp}-${tail}`;
+}
+
+/** The `idPattern` a run creates its charge points under, e.g.
+ *  `BENCH-m1a2b3c-9f2x-{n:06}`.
+ *
+ *  The run id sits in the pattern rather than being appended after the index
+ *  so that the daemon's own `expandIdPattern` produces exactly what
+ *  {@link benchCpId} predicts — the run must be able to name the ids of a
+ *  batch whose `cp.create_many` never answered, since an RPC deadline can
+ *  reject the call *after* the daemon created the charge points. */
+export function benchIdPattern(runId: string): string {
+  return `${BENCH_ID_ROOT}-${runId}-{n:06}`;
+}
+
+/** Expand {@link benchIdPattern} for one index.
  *
  *  A deliberate local copy of what `expandIdPattern` in
  *  `src/protocol/methods.ts` does for this one pattern: importing that module
@@ -72,8 +114,8 @@ export const BENCH_ID_PATTERN = "BENCH{n:06}";
  *  point is to be dependency-free. The authority is still the daemon, so
  *  `growFleet` compares every answered batch's real ids against the predicted
  *  ones and says so loudly if they ever diverge. */
-export function benchCpId(index: number): string {
-  return `BENCH${String(index).padStart(6, "0")}`;
+export function benchCpId(runId: string, index: number): string {
+  return `${BENCH_ID_ROOT}-${runId}-${String(index).padStart(6, "0")}`;
 }
 
 /** Control-plane RPC budget per pooled socket, per second.
@@ -1298,11 +1340,13 @@ export function machineReport(facts: MachineFacts): string {
       versions,
     ].join("\n");
   }
-  let host = facts.daemonUrl;
+  let host = redactUrlUserinfo(facts.daemonUrl);
   try {
+    // `URL.host` already excludes userinfo; the redaction covers the fallback,
+    // since this block is printed to stderr and stderr reaches CI logs.
     host = new URL(facts.daemonUrl).host;
   } catch {
-    // Keep the raw string; it is only ever quoted back at the operator.
+    // Keep the (redacted) raw string; it is only quoted back at the operator.
   }
   return [
     `benchmark client, NOT the daemon host: ${hardware}`,
@@ -1311,4 +1355,74 @@ export function machineReport(facts: MachineFacts): string {
       `above is this runner's and says nothing about the machine under test. ` +
       `Record the daemon host's CPU/RAM/OS by hand before publishing a ceiling.`,
   ].join("\n");
+}
+
+/** What `cp.create_many` answers: a partial batch is a normal result, so both
+ *  lists matter. */
+export interface CreateManyAck {
+  readonly created: readonly string[];
+  readonly failed: readonly {
+    readonly cpId: string;
+    /** Carried for the operator's benefit only. The decision below turns on
+     *  the ack naming the id at all, never on why. */
+    readonly reason?: string;
+  }[];
+}
+
+/**
+ * Which of a batch's offered ids the run may still delete at teardown.
+ *
+ * The two cases are genuinely different and were wrongly treated alike:
+ *
+ * - **`ack === null` — indeterminate.** The RPC hit its deadline or lost its
+ *   connection. The daemon was never told to stop, so it may hold charge
+ *   points whose ids never reached this process. Every offered id stays: an
+ *   id we did not create answers `not_found` on delete, which cleanup already
+ *   counts as success, so over-listing costs nothing while under-listing
+ *   leaves charge points the next run's preflight refuses.
+ *
+ * - **An ack naming failures — determinate.** Now we *know*. A `failed` entry
+ *   means the daemon did not register that charge point: `createOneCp` throws
+ *   before creating anything on an id collision, and the blueprint-defaults
+ *   path rolls the charge point back with `removeChargePoint` before reporting
+ *   it. Keeping such an id was **destructive**: under `--allow-existing`, a
+ *   pre-existing charge point already holding an offered id like
+ *   `BENCH000001` is reported as failed *because it already exists*, and
+ *   deleting it at teardown destroys a fleet this run never created.
+ *
+ * The asymmetry is deliberate. Keeping an id we did not create risks a leak,
+ * which is recoverable — the preflight refuses the daemon and an operator
+ * deletes it. Deleting a charge point we did not create is not recoverable.
+ * So an id leaves this set only on positive evidence that it was never ours,
+ * and the one sliver where that evidence could be wrong (a rollback whose own
+ * `removeChargePoint` failed) is left to leak rather than to delete.
+ *
+ * Ids the daemon reports as created but this run did not predict are added:
+ * cleanup must cover them, and their appearance means `benchCpId` has drifted
+ * from the daemon's own `expandIdPattern`.
+ */
+export function cleanupIdsAfterBatch(
+  offered: readonly string[],
+  ack: CreateManyAck | null,
+): string[] {
+  if (ack === null) return [...offered];
+  const notOurs = new Set(ack.failed.map((f) => f.cpId));
+  const keep = offered.filter((id) => !notOurs.has(id));
+  const predicted = new Set(offered);
+  for (const id of ack.created) {
+    // A created id is ours whatever we predicted — and `notOurs` must never
+    // veto it, since "created" is the stronger evidence.
+    if (!predicted.has(id)) keep.push(id);
+  }
+  return keep;
+}
+
+/** Ids `cp.create_many` reported creating that this run never offered — proof
+ *  that {@link benchCpId} and the daemon's `expandIdPattern` disagree. */
+export function unpredictedCreatedIds(
+  offered: readonly string[],
+  created: readonly string[],
+): string[] {
+  const predicted = new Set(offered);
+  return created.filter((id) => !predicted.has(id));
 }

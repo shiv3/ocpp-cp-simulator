@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import type { EVSettings } from "../EVSettings";
 import {
   currentAmpsFor,
+  effectiveVoltageV,
+  withNormalizedChargingCurve,
   electricalModelOf,
   powerWattsForCurrent,
   DEFAULT_VOLTAGE_V,
@@ -361,5 +364,94 @@ describe("electricalModelOf (#301)", () => {
 
   it("returns undefined for absent settings", () => {
     expect(electricalModelOf(undefined)).toBeUndefined();
+  });
+});
+
+describe("normalizeChargingCurve discards malformed input (#301)", () => {
+  // `src/protocol/methods.ts` types `evSettings` as an opaque object and
+  // validates none of its fields, and scenario-file schema validation is
+  // advisory — the file loads past the warning — so these shapes genuinely
+  // arrive from `set_ev_settings`, a hand-written scenario file or a browser
+  // import. Every one of them must be discarded, not thrown on.
+  it("returns an empty curve when the value is not an array", () => {
+    expect(normalizeChargingCurve({})).toEqual([]);
+    expect(normalizeChargingCurve("nope")).toEqual([]);
+    expect(normalizeChargingCurve(null)).toEqual([]);
+    expect(normalizeChargingCurve(undefined)).toEqual([]);
+    expect(normalizeChargingCurve(42)).toEqual([]);
+  });
+
+  it("drops entries that are not point objects, keeping the valid ones", () => {
+    expect(
+      normalizeChargingCurve([
+        null,
+        undefined,
+        "80",
+        42,
+        [],
+        { socPercent: 50 },
+        { powerFraction: 0.5 },
+        { socPercent: "50", powerFraction: "0.5" },
+        { socPercent: 20, powerFraction: 0.8 },
+      ]),
+    ).toEqual([{ socPercent: 20, powerFraction: 0.8 }]);
+  });
+
+  it("survives an array made only of nulls", () => {
+    expect(normalizeChargingCurve([null])).toEqual([]);
+  });
+});
+
+describe("withNormalizedChargingCurve (#301)", () => {
+  const base = {
+    modelName: "Generic EV",
+    batteryCapacityKwh: 75,
+    maxChargingPowerKw: 150,
+    initialSoc: 20,
+    targetSoc: 80,
+  };
+
+  it("normalizes a malformed curve instead of throwing", () => {
+    const settings = {
+      ...base,
+      chargingCurve: [null],
+    } as unknown as EVSettings;
+    expect(withNormalizedChargingCurve(settings).chargingCurve).toEqual([]);
+  });
+
+  it("sorts a valid curve", () => {
+    const settings = {
+      ...base,
+      chargingCurve: [
+        { socPercent: 80, powerFraction: 0.4 },
+        { socPercent: 0, powerFraction: 1 },
+      ],
+    };
+    expect(
+      withNormalizedChargingCurve(settings).chargingCurve?.map(
+        (p) => p.socPercent,
+      ),
+    ).toEqual([0, 80]);
+  });
+
+  it("returns settings with no curve unchanged, without adding the key", () => {
+    const settings: EVSettings = { ...base };
+    const result = withNormalizedChargingCurve(settings);
+    expect(result).toBe(settings);
+    expect("chargingCurve" in result).toBe(false);
+  });
+});
+
+describe("effectiveVoltageV (#301)", () => {
+  it("uses the configured voltage when it is positive and finite", () => {
+    expect(effectiveVoltageV({ voltageV: 400 })).toBe(400);
+  });
+
+  it("falls back to 230 for absent, zero, negative or non-finite volts", () => {
+    expect(effectiveVoltageV({})).toBe(230);
+    expect(effectiveVoltageV({ voltageV: 0 })).toBe(230);
+    expect(effectiveVoltageV({ voltageV: -400 })).toBe(230);
+    expect(effectiveVoltageV({ voltageV: NaN })).toBe(230);
+    expect(effectiveVoltageV({ voltageV: Infinity })).toBe(230);
   });
 });

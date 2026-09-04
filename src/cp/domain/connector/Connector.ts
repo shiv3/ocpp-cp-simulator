@@ -28,8 +28,8 @@ import { resolveEffectiveLimitWatts } from "./ChargingScheduleResolver";
 import {
   effectiveChargingPowerW,
   electricalModelOf,
-  normalizeChargingCurve,
   resolveSocForCurve,
+  withNormalizedChargingCurve,
 } from "./ChargingCurve";
 import type { ChargingProfileStore } from "../charge-point/ChargingProfileStore";
 
@@ -565,10 +565,7 @@ export class Connector {
     // (`powerFractionAtSoc`, the meter scheduler) can assume an
     // already-sorted, already-validated curve rather than re-normalizing
     // per sample (#301).
-    const chargingCurve = settings.chargingCurve
-      ? normalizeChargingCurve(settings.chargingCurve)
-      : settings.chargingCurve;
-    this._evSettings = { ...settings, chargingCurve };
+    this._evSettings = withNormalizedChargingCurve({ ...settings });
     this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
   }
 

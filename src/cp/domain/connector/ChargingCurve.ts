@@ -18,22 +18,64 @@ export type ElectricalSettings = Pick<
  *
  * Done once, at the boundary, so every evaluation can assume a monotone x-axis
  * rather than re-sorting per sample.
+ *
+ * Takes `unknown` deliberately. `src/protocol/methods.ts` types `evSettings`
+ * as an opaque object and validates none of its fields, and scenario-file
+ * schema validation is advisory (the file loads past the warning), so a
+ * `chargingCurve` that is not an array — or an array of nulls, strings or
+ * objects missing `socPercent` — genuinely reaches this function from
+ * `set_ev_settings`, a hand-written scenario file or a browser import. Every
+ * such value is **discarded**, exactly like a point that fails the range
+ * checks; none of them throws. An empty result is flat acceptance at
+ * `maxChargingPowerKw`, the same as no curve at all.
  */
-export function normalizeChargingCurve(
-  points: readonly ChargingCurvePoint[],
-): ChargingCurvePoint[] {
+export function normalizeChargingCurve(points: unknown): ChargingCurvePoint[] {
+  if (!Array.isArray(points)) return [];
   return points
-    .filter(
-      (p) =>
-        Number.isFinite(p.socPercent) &&
-        Number.isFinite(p.powerFraction) &&
-        p.socPercent >= 0 &&
-        p.socPercent <= 100 &&
-        p.powerFraction >= 0 &&
-        p.powerFraction <= 1,
-    )
-    .slice()
+    .filter(isChargingCurvePoint)
     .sort((a, b) => a.socPercent - b.socPercent);
+}
+
+/** A curve entry we can interpolate: an object with two in-range numbers. */
+function isChargingCurvePoint(value: unknown): value is ChargingCurvePoint {
+  if (typeof value !== "object" || value === null) return false;
+  const { socPercent, powerFraction } = value as Record<string, unknown>;
+  return (
+    typeof socPercent === "number" &&
+    typeof powerFraction === "number" &&
+    Number.isFinite(socPercent) &&
+    Number.isFinite(powerFraction) &&
+    socPercent >= 0 &&
+    socPercent <= 100 &&
+    powerFraction >= 0 &&
+    powerFraction <= 1
+  );
+}
+
+/**
+ * EV settings with their `chargingCurve` normalized — the one guard every
+ * boundary that accepts settings from outside the domain uses.
+ *
+ * Applied at each place untrusted settings enter: `Connector`'s `evSettings`
+ * setter (and therefore `applyEvSettingsOverride` / `applyDefaultEvSettings`),
+ * {@link setUserDefaultEVSettings} (which `getDefaultEVSettings` feeds
+ * straight into a fresh `Connector`'s field initializer, bypassing that
+ * setter), and the browser panels that hydrate a scenario's `evSettings` from
+ * an imported file. One validator, several call sites — a second one would
+ * drift.
+ *
+ * Settings with no curve are returned unchanged, object identity included, so
+ * this never adds a `chargingCurve: undefined` key that an `Object.entries`
+ * walk over a partial would then treat as a field the user filled in.
+ */
+export function withNormalizedChargingCurve<
+  T extends { chargingCurve?: ChargingCurvePoint[] },
+>(settings: T): T {
+  if (settings.chargingCurve == null) return settings;
+  return {
+    ...settings,
+    chargingCurve: normalizeChargingCurve(settings.chargingCurve),
+  };
 }
 
 /**
@@ -178,6 +220,24 @@ export function effectivePowerFactor(
 }
 
 /**
+ * The phase-to-neutral voltage actually used for the derivations below —
+ * the configured `voltageV`, or 230 V when it is absent, zero, negative or
+ * non-finite.
+ *
+ * This is the single source of truth for both the derivation and the reported
+ * `Voltage` sample, for the same reason `effectivePowerFactor` is: a
+ * `voltageV: 0` used to put `Voltage = 0` on the wire next to a
+ * `Current.Import` derived from 230 V, two numbers in one MeterValue that
+ * cannot both be true. The substitution is not silent — the sample names the
+ * 230 that produced the current (#301).
+ */
+export function effectiveVoltageV(
+  settings: Pick<EVSettings, "voltageV">,
+): number {
+  return positiveOr(settings.voltageV, DEFAULT_VOLTAGE_V);
+}
+
+/**
  * Current for a given real power, by current type.
  *
  * DC has no reactive component, so `I = P / V`. AC divides across phases and
@@ -189,7 +249,7 @@ export function currentAmpsFor(
   powerW: number,
   settings: ElectricalSettings,
 ): number {
-  const voltage = positiveOr(settings.voltageV, DEFAULT_VOLTAGE_V);
+  const voltage = effectiveVoltageV(settings);
   if (powerW <= 0) return 0;
   if (settings.currentType === "DC") return powerW / voltage;
   return (
@@ -227,7 +287,7 @@ export function powerWattsForCurrent(
   limitPhases?: number,
 ): number {
   if (amps <= 0) return 0;
-  const voltage = positiveOr(settings.voltageV, DEFAULT_VOLTAGE_V);
+  const voltage = effectiveVoltageV(settings);
   if (settings.currentType === "DC") return amps * voltage;
   const connectorPhases = acPhases(settings);
   // Any non-negative integer, not just 1 or 3: OCPP allows `numberPhases: 2`,

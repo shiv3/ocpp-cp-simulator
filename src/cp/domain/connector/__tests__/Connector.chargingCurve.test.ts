@@ -4,6 +4,11 @@ import { Logger, LogLevel } from "../../../shared/Logger";
 import { OCPPStatus } from "../../types/OcppTypes";
 import { buildSampledValues } from "../MeterValueBuilder";
 import type { Transaction } from "../Transaction";
+import {
+  defaultEVSettings,
+  setUserDefaultEVSettings,
+  type EVSettings,
+} from "../EVSettings";
 
 function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
@@ -306,5 +311,75 @@ describe("a tapering curve still advances the register (#301)", () => {
 
     expect(seen.length).toBeGreaterThan(0);
     for (const value of seen) expect(Number.isInteger(value)).toBe(true);
+  });
+});
+
+describe("a malformed chargingCurve is discarded at every boundary (#301)", () => {
+  // `src/protocol/methods.ts` validates no `evSettings` field, and scenario
+  // schema validation is advisory, so these shapes reach the domain.
+  const malformed = { chargingCurve: [null] } as unknown as Partial<EVSettings>;
+
+  it("does not throw when the evSettings setter is handed a bad curve", () => {
+    const connector = makeConnector();
+    expect(() => {
+      connector.evSettings = {
+        ...connector.evSettings,
+        ...malformed,
+      } as EVSettings;
+    }).not.toThrow();
+    expect(connector.evSettings.chargingCurve).toEqual([]);
+  });
+
+  it("does not throw when the curve is not an array at all", () => {
+    const connector = makeConnector();
+    expect(() => {
+      connector.evSettings = {
+        ...connector.evSettings,
+        ...({ chargingCurve: {} } as unknown as Partial<EVSettings>),
+      } as EVSettings;
+    }).not.toThrow();
+    expect(connector.evSettings.chargingCurve).toEqual([]);
+  });
+
+  it("also survives applyEvSettingsOverride, the scenario/RPC path", () => {
+    const connector = makeConnector();
+    expect(() => connector.applyEvSettingsOverride(malformed)).not.toThrow();
+    expect(connector.evSettings.chargingCurve).toEqual([]);
+  });
+
+  it("survives a bad curve restored into the user default, which bypasses the setter", () => {
+    // `getDefaultEVSettings()` is read straight into a fresh Connector's field
+    // initializer, so the `evSettings` setter's guard never runs on it. A
+    // curve restored from localStorage has to be normalized on write.
+    try {
+      setUserDefaultEVSettings({
+        ...defaultEVSettings,
+        ...malformed,
+      } as EVSettings);
+      const connector = makeConnector();
+      expect(connector.evSettings.chargingCurve).toEqual([]);
+      connector.socMeterSyncEnabled = false;
+      connector.soc = 50;
+      connector.status = OCPPStatus.Charging;
+      connector.beginTransaction(transaction(0));
+      // The first meter tick evaluates the curve; a raw `[null]` throws here.
+      expect(() =>
+        connector.startManualMeterStrategy({
+          kind: "increment",
+          intervalSeconds: 1,
+          incrementValue: 100,
+        }),
+      ).not.toThrow();
+      expect(() =>
+        buildSampledValues(
+          connector,
+          ["Power.Active.Import"],
+          "Sample.Periodic",
+        ),
+      ).not.toThrow();
+      connector.stopAutoMeterValue();
+    } finally {
+      setUserDefaultEVSettings(null);
+    }
   });
 });

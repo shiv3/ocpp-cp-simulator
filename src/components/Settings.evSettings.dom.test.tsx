@@ -52,6 +52,20 @@ function findLabeledInput(
   return input as HTMLInputElement;
 }
 
+/**
+ * The control a <label> is actually associated with, via `htmlFor`/`id` or by
+ * wrapping. `HTMLLabelElement.control` is what an assistive technology
+ * follows, so asserting on it tests the accessible name rather than the DOM
+ * layout that `findLabeledInput` happens to rely on.
+ */
+function controlFor(container: HTMLElement, text: string): HTMLElement | null {
+  const label = Array.from(container.querySelectorAll("label")).find(
+    (l) => l.textContent?.trim() === text,
+  );
+  if (!label) throw new Error(`No label reading "${text}"`);
+  return (label as HTMLLabelElement).control as HTMLElement | null;
+}
+
 function findButton(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll("button")).find((b) =>
     b.textContent?.includes(text),
@@ -169,5 +183,56 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
     const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
     expect(applied.powerFactor).toBe(0.01);
+  });
+});
+
+describe("Settings electrical controls have accessible names (#301)", () => {
+  // The four controls this PR added to the Default EV Settings panel. Their
+  // labels carried no `htmlFor`, so a screen reader announced four unnamed
+  // controls. The five pre-1.2 fields above them have the same gap; fixing
+  // those is a separate accessibility pass, not this PR's change.
+  let cleanup: (() => Promise<void>) | null = null;
+
+  beforeAll(() => {
+    (
+      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(async () => {
+    if (cleanup) {
+      await cleanup();
+      cleanup = null;
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("associates each of Current Type, Phases, Voltage and Power Factor with its input", async () => {
+    setDefaultEvSettings = vi.fn();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Settings />
+        </MemoryRouter>,
+      );
+    });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const expected: [string, string][] = [
+      ["Current Type", "SELECT"],
+      ["Phases", "SELECT"],
+      ["Voltage (V)", "INPUT"],
+      ["Power Factor", "INPUT"],
+    ];
+    for (const [text, tag] of expected) {
+      const control = controlFor(container, text);
+      expect(control, `"${text}" label names no control`).not.toBeNull();
+      expect(control!.tagName).toBe(tag);
+    }
   });
 });

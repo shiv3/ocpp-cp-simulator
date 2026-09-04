@@ -1,8 +1,8 @@
 import type { Connector } from "./Connector";
 import {
   currentAmpsFor,
-  DEFAULT_VOLTAGE_V,
   effectiveChargingPowerW,
+  effectiveVoltageV,
   effectivePowerFactor,
   resolveSocForCurve,
 } from "./ChargingCurve";
@@ -67,7 +67,11 @@ export function buildSampledValues(
   const settings = connector.evSettings;
   const currentA = currentAmpsFor(powerW, settings ?? {});
   const offeredCurrentA = currentAmpsFor(offeredW, settings ?? {});
-  const voltageV = settings?.voltageV ?? DEFAULT_VOLTAGE_V;
+  // The voltage that actually produced `currentA`, not the raw configured
+  // value: a `voltageV` of 0, negative or non-finite falls back to 230 in the
+  // derivation, and reporting the raw number here would put a `Voltage` sample
+  // on the wire that the `Current.Import` beside it contradicts (#301).
+  const voltageV = effectiveVoltageV(settings ?? {});
   const powerFactor = effectivePowerFactor(settings ?? {});
   const phases = settings?.currentType === "DC" ? 1 : (settings?.phases ?? 1);
 

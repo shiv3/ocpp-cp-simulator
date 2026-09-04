@@ -1,3 +1,5 @@
+import { withNormalizedChargingCurve } from "./ChargingCurve";
+
 /** A point on the piecewise-linear charging curve. */
 export interface ChargingCurvePoint {
   /** State of charge this point applies at, 0-100. */
@@ -59,8 +61,15 @@ export function getDefaultEVSettings(): EVSettings {
     : { ...defaultEVSettings };
 }
 
+/**
+ * Normalized on write (#301). `getDefaultEVSettings()` is read straight into
+ * a fresh `Connector`'s field initializer, which bypasses the `evSettings`
+ * setter and its guard — so a `chargingCurve` restored from localStorage, or
+ * saved from the Settings panel, has to be validated here or it reaches
+ * `powerFractionAtSoc` on the first meter tick.
+ */
 export function setUserDefaultEVSettings(s: EVSettings | null): void {
-  userDefaultEVSettings = s ? { ...s } : null;
+  userDefaultEVSettings = s ? withNormalizedChargingCurve({ ...s }) : null;
 }
 
 export function getUserDefaultEVSettings(): EVSettings | null {

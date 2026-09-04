@@ -15,7 +15,7 @@ import {
 } from "../cp/domain/connector/EVSettings";
 import {
   MIN_UI_POWER_FACTOR,
-  normalizeChargingCurve,
+  withNormalizedChargingCurve,
 } from "../cp/domain/connector/ChargingCurve";
 
 const Settings: React.FC = () => {
@@ -98,12 +98,7 @@ const Settings: React.FC = () => {
     // Normalized here rather than relied on downstream: a fresh Connector
     // reads `getDefaultEVSettings()` straight into its field initializer,
     // bypassing the `evSettings` setter's normalization (#301).
-    setDefaultEvSettings({
-      ...draftEv,
-      chargingCurve: draftEv.chargingCurve
-        ? normalizeChargingCurve(draftEv.chargingCurve)
-        : draftEv.chargingCurve,
-    });
+    setDefaultEvSettings(withNormalizedChargingCurve({ ...draftEv }));
     setSuccess(
       "Default EV settings saved. New connectors will start with these values.",
     );
@@ -409,10 +404,14 @@ const Settings: React.FC = () => {
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold mb-1">
+                <label
+                  htmlFor="default-ev-current-type"
+                  className="block text-xs font-semibold mb-1"
+                >
                   Current Type
                 </label>
                 <select
+                  id="default-ev-current-type"
                   value={draftEv.currentType ?? "AC"}
                   onChange={(e) => {
                     const currentType = e.target.value as "AC" | "DC";
@@ -431,10 +430,14 @@ const Settings: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1">
+                <label
+                  htmlFor="default-ev-phases"
+                  className="block text-xs font-semibold mb-1"
+                >
                   Phases
                 </label>
                 <select
+                  id="default-ev-phases"
                   value={String(draftEv.phases ?? 1)}
                   disabled={draftEv.currentType === "DC"}
                   onChange={(e) =>
@@ -450,10 +453,14 @@ const Settings: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1">
+                <label
+                  htmlFor="default-ev-voltage"
+                  className="block text-xs font-semibold mb-1"
+                >
                   Voltage (V)
                 </label>
                 <input
+                  id="default-ev-voltage"
                   type="number"
                   min={1}
                   step={1}
@@ -468,10 +475,14 @@ const Settings: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1">
+                <label
+                  htmlFor="default-ev-power-factor"
+                  className="block text-xs font-semibold mb-1"
+                >
                   Power Factor
                 </label>
                 <input
+                  id="default-ev-power-factor"
                   type="number"
                   min={MIN_UI_POWER_FACTOR}
                   max={1}

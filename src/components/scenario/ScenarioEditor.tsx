@@ -65,7 +65,10 @@ import {
   type EVSettings,
   EV_PRESETS,
 } from "../../cp/domain/connector/EVSettings";
-import { MIN_UI_POWER_FACTOR } from "../../cp/domain/connector/ChargingCurve";
+import {
+  MIN_UI_POWER_FACTOR,
+  withNormalizedChargingCurve,
+} from "../../cp/domain/connector/ChargingCurve";
 
 // Dynamic import for heavy component (bundle-dynamic-imports)
 const MeterValueCurveModal = lazy(() => import("../MeterValueCurveModal"));
@@ -318,7 +321,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // written; the others keep the connector's current values.
   const [scenarioEvSettings, setScenarioEvSettings] = useState<
     Partial<EVSettings>
-  >(scenario.evSettings ?? {});
+  >(() => withNormalizedChargingCurve({ ...(scenario.evSettings ?? {}) }));
   const [isEvSettingsExpanded, setIsEvSettingsExpanded] = useState(true);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
@@ -449,7 +452,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setScenarioDescription(scenarioProp.description || "");
       setDefaultExecutionMode(scenarioProp.defaultExecutionMode || "oneshot");
       setScenarioEnabled(scenarioProp.enabled !== false);
-      setScenarioEvSettings(scenarioProp.evSettings ?? {});
+      setScenarioEvSettings(
+        withNormalizedChargingCurve({ ...(scenarioProp.evSettings ?? {}) }),
+      );
       // #101 fix C: a scenario just hydrated from the daemon is already
       // persisted verbatim — suppress the autosave this state change would
       // otherwise trigger. Without this, re-hydrating a scenario re-saves it
@@ -490,7 +495,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           setScenarioDescription(found.description || "");
           setDefaultExecutionMode(found.defaultExecutionMode || "oneshot");
           setScenarioEnabled(found.enabled !== false);
-          setScenarioEvSettings(found.evSettings ?? {});
+          setScenarioEvSettings(
+            withNormalizedChargingCurve({ ...(found.evSettings ?? {}) }),
+          );
           resetHistory();
         });
       return () => {
@@ -1304,7 +1311,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           scenarioToPersist.defaultExecutionMode || "oneshot",
         );
         setScenarioEnabled(scenarioToPersist.enabled !== false);
-        setScenarioEvSettings(scenarioToPersist.evSettings ?? {});
+        setScenarioEvSettings(
+          withNormalizedChargingCurve({
+            ...(scenarioToPersist.evSettings ?? {}),
+          }),
+        );
 
         // Persist through the replace boundary so stale connector siblings are
         // pruned and reload selects the imported scenario (#101).
@@ -1367,7 +1378,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         scenarioWithSerialized.defaultExecutionMode || "oneshot",
       );
       setScenarioEnabled(scenarioWithSerialized.enabled !== false);
-      setScenarioEvSettings(scenarioWithSerialized.evSettings ?? {});
+      setScenarioEvSettings(
+        withNormalizedChargingCurve({
+          ...(scenarioWithSerialized.evSettings ?? {}),
+        }),
+      );
 
       // Same mode-aware persistence as the file-upload path: remote mode pushes
       // through the daemon and prunes stale scenarios; local mode upserts into

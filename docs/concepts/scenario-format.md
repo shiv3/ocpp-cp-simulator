@@ -326,15 +326,30 @@ acceptance at `maxChargingPowerKw`, 230 V, single phase.
 | `chargingCurve` | `{ socPercent, powerFraction }[]` — piecewise-linear power acceptance against SoC. |
 | `currentType`   | `AC` or `DC`. DC has no reactive component.                                        |
 | `phases`        | `1` (default) or `3`, AC only.                                                     |
-| `voltageV`      | **Phase-to-neutral** volts. Default 230.                                           |
+| `voltageV`      | **Phase-to-neutral** volts. Default 230; see below for a non-positive value.       |
 | `powerFactor`   | cos φ, AC only. Range `(0, 1]`; default 1.                                         |
 
-`chargingCurve` is normalized when it reaches a connector (sorted by
-`socPercent`, points outside `0-100` / `0-1` dropped) — a scenario file may
+`chargingCurve` is normalized at every boundary it can enter through (sorted
+by `socPercent`, points outside `0-100` / `0-1` dropped) — a scenario file may
 list points in any order, and interpolation can otherwise assume a monotone
 axis. A curve is clamped to its first and last point rather than
 extrapolated: a curve that starts at 20% says nothing about 10%, and inventing
 a number there would be worse than admitting it.
+
+**A malformed `chargingCurve` is discarded, never thrown on.** A value that is
+not an array, or whose entries are not objects with numeric `socPercent` and
+`powerFraction`, is dropped exactly like a point that fails the range checks;
+the result is an empty curve, which is flat acceptance at
+`maxChargingPowerKw` — the same as no curve at all. That disposition matters
+because such a value really does arrive: `src/protocol/methods.ts` types
+`evSettings` as an opaque object and validates none of its fields, so
+`set_ev_settings` accepts anything, and schema validation of a scenario file
+is [advisory](#status--scope) — the file loads past the warning. The guard
+runs on the connector's `evSettings` setter (and so on the scenario/RPC
+override path), on the stored browser default that a fresh connector reads
+before that setter ever runs, and at the editor's import/hydration points, so
+neither a meter tick nor the settings dialog can be handed a curve it cannot
+walk.
 
 **Current is derived by type, not by one shared formula.** DC is `I = P / V`;
 AC is `I = P / (V × phases × cos φ)`. Applying `powerFactor` to DC would report
@@ -366,6 +381,15 @@ electrics, and every scenario written before v1.2 is byte-identical.
 `GetCompositeSchedule` is deliberately outside it too: that response restates
 the CSMS's own profiles rather than metering a connector, so both directions
 there stay on the 230 V reference and remain each other's inverse.
+
+**A `Voltage` sample names the volts that produced `Current.Import`.** A
+`voltageV` of zero, negative or non-finite is out of contract and is treated
+as 230 V in the current derivation; the sample reports that 230, not the
+configured number. Reporting the raw value put two numbers in one MeterValue
+that could not both be true — `Voltage = 0` beside a current divided by 230 —
+which is the same defect the `Power.Factor` rule below fixes, and gets the
+same answer: report what was used, so the substitution is on the wire rather
+than silent.
 
 **A `Power.Factor` sample is never rounded.** It names the exact number that
 produced `Current.Import` in the same message, so `powerFactor: 0.004` reports

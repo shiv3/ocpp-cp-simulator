@@ -377,3 +377,39 @@ describe("MeterValueBuilder electrical derivation (#301)", () => {
     expect(samples.filter((s) => s.phase !== undefined)).toHaveLength(0);
   });
 });
+
+describe("the Voltage sample names the volts that produced the current (#301)", () => {
+  // Same defect the `Power.Factor` fix addressed: two numbers in one
+  // MeterValue that cannot both be true. `currentAmpsFor` falls back to 230 V
+  // for a non-positive or non-finite `voltageV`, so the sample must say 230.
+  const at = (voltageV: number) =>
+    connectorStub({
+      soc: 50,
+      evSettings: { maxChargingPowerKw: 23, currentType: "AC", voltageV },
+    });
+
+  it("reports 230 when voltageV is zero, and derives the current from it", () => {
+    const connector = at(0);
+    expect(valueOf(connector, "Voltage")).toBe(230);
+    // 23 kW / 230 V / 1 phase / cos φ 1 = 100 A.
+    expect(valueOf(connector, "Current.Import")).toBeCloseTo(100, 1);
+  });
+
+  it("reports 230 for a negative or non-finite voltageV", () => {
+    expect(valueOf(at(-400), "Voltage")).toBe(230);
+    expect(valueOf(at(NaN), "Voltage")).toBe(230);
+  });
+
+  it("still reports a configured positive voltage verbatim", () => {
+    const connector = connectorStub({
+      soc: 50,
+      evSettings: {
+        maxChargingPowerKw: 40,
+        currentType: "DC",
+        voltageV: 400,
+      },
+    });
+    expect(valueOf(connector, "Voltage")).toBe(400);
+    expect(valueOf(connector, "Current.Import")).toBeCloseTo(100, 1);
+  });
+});

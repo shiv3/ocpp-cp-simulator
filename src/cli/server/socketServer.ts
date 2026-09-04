@@ -77,8 +77,9 @@ import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/ne
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import {
-  BUILT_IN_BLUEPRINTS,
+  builtInBlueprints,
   isBuiltInBlueprint,
+  MAX_STORED_BLUEPRINTS,
 } from "../../utils/blueprints";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
@@ -414,7 +415,7 @@ export async function dispatchRpcCore(
     case "blueprint.list":
       // Built-ins first, then stored ones. Ids are unique across both because
       // `blueprint.save` refuses a built-in id.
-      return [...BUILT_IN_BLUEPRINTS, ...deps.blueprints.list()];
+      return [...builtInBlueprints(), ...deps.blueprints.list()];
     case "blueprint.save":
       return saveBlueprint(deps, rawParams);
     case "blueprint.delete":
@@ -649,6 +650,19 @@ function saveBlueprint(
       `"${blueprint.id}" is a built-in blueprint and cannot be replaced; choose another id`,
     );
   }
+  // Checked before the write: the list result carries the built-ins too, so an
+  // unbounded store would make `blueprint.list` fail validation for everyone
+  // rather than refuse the one save that crossed the line.
+  const stored = deps.blueprints.list();
+  if (
+    stored.length >= MAX_STORED_BLUEPRINTS &&
+    !stored.some((b) => b.id === blueprint.id)
+  ) {
+    throw new RpcFailure(
+      "invalid_params",
+      `at most ${MAX_STORED_BLUEPRINTS} blueprints can be stored; delete one first`,
+    );
+  }
   deps.blueprints.save(blueprint);
   return { id: blueprint.id };
 }
@@ -748,7 +762,7 @@ async function createManyCps(
   let defaults: Pick<Blueprint, "evSettings" | "scenarioTemplateId"> = {};
   if (blueprintId !== undefined) {
     const blueprint =
-      BUILT_IN_BLUEPRINTS.find((b) => b.id === blueprintId) ??
+      builtInBlueprints().find((b) => b.id === blueprintId) ??
       deps.blueprints.get(blueprintId);
     if (!blueprint) {
       throw new RpcFailure("not_found", `no blueprint "${blueprintId}"`);
@@ -763,7 +777,13 @@ async function createManyCps(
       scenarioTemplateId: blueprint.scenarioTemplateId,
     };
   }
-  const validated = createManyParamsSchema.safeParse(merged);
+  // A blueprint batch may omit `idPattern`; derive one from the blueprint id so
+  // `{ blueprintId, count }` is a complete call rather than a validation error.
+  const withPattern =
+    merged.idPattern === undefined && blueprintId !== undefined
+      ? { ...merged, idPattern: `${blueprintId}-{n:03}` }
+      : merged;
+  const validated = createManyParamsSchema.safeParse(withPattern);
   if (!validated.success) {
     throw new RpcFailure(
       "invalid_params",
@@ -838,7 +858,18 @@ async function createManyCps(
           ? { soapCallbackUrl: entry.soapCallbackUrl }
           : {}),
       });
-      await applyBlueprintDefaults(deps, cpId, connectors, defaults);
+      try {
+        await applyBlueprintDefaults(deps, cpId, connectors, defaults);
+      } catch (err) {
+        // Roll the charge point back. `createOneCp` has already registered and
+        // persisted it, so reporting the id in `failed` while leaving it
+        // behind would put a half-configured station in `cp.list` and make the
+        // obvious retry fail with an already-exists error.
+        await deps.chargePointService
+          .removeChargePoint(cpId)
+          .catch(() => undefined);
+        throw err;
+      }
       created.push(cpId);
     } catch (err) {
       failed.push({ cpId: entry.cpId, reason: createFailureReason(err) });
@@ -879,6 +910,10 @@ async function applyBlueprintDefaults(
           cpId,
           defaults.scenarioTemplateId as string,
           connectorId,
+          // The blueprint's EV settings again, as the override: a template
+          // carries its own and applies them when it starts, so without this
+          // the scenario would quietly undo the settings applied above.
+          defaults.evSettings as never,
         ),
       );
     }

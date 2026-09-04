@@ -4,7 +4,10 @@ import type { Socket } from "socket.io-client";
 
 import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
 import { BlueprintRepository } from "../../../cp/domain/persistence/BlueprintRepository";
-import { BUILT_IN_BLUEPRINTS } from "../../../utils/blueprints";
+import {
+  builtInBlueprints,
+  MAX_STORED_BLUEPRINTS,
+} from "../../../utils/blueprints";
 import { blueprintSchema } from "../../../protocol";
 import {
   connectTestClient,
@@ -95,7 +98,7 @@ describe("blueprints (#297)", () => {
     try {
       const list = await rpc(socket, "blueprint.list", {});
       const ids = (list.result as Array<{ id: string }>).map((b) => b.id);
-      for (const built of BUILT_IN_BLUEPRINTS) {
+      for (const built of builtInBlueprints()) {
         expect(ids).toContain(built.id);
       }
     } finally {
@@ -282,18 +285,18 @@ describe("BlueprintRepository (#297)", () => {
 
 describe("built-in blueprints (#297)", () => {
   it("all validate against the schema", () => {
-    for (const blueprint of BUILT_IN_BLUEPRINTS) {
+    for (const blueprint of builtInBlueprints()) {
       expect(blueprintSchema.safeParse(blueprint).success).toBe(true);
     }
   });
 
   it("have unique ids", () => {
-    const ids = BUILT_IN_BLUEPRINTS.map((b) => b.id);
+    const ids = builtInBlueprints().map((b) => b.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("carry no wsUrl, since the CSMS belongs to the run", () => {
-    for (const blueprint of BUILT_IN_BLUEPRINTS) {
+    for (const blueprint of builtInBlueprints()) {
       expect(blueprint.params.wsUrl).toBeUndefined();
     }
   });
@@ -368,5 +371,140 @@ describe("blueprint ids are non-empty (#297)", () => {
     expect(blueprintSchema.safeParse({ ...BLUEPRINT, name: "" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("blueprint batches without an idPattern (#297)", () => {
+  it("defaults the pattern from the blueprint id", async () => {
+    // `{ blueprintId, count }` used to fail validation before the handler
+    // could default anything, so the shortest useful call did not work.
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await rpc(socket, "cp.create_many", {
+        blueprintId: "dc-50kw",
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 2,
+      });
+      expect(ack.ok).toBe(true);
+      expect(ack.result.created).toEqual(["dc-50kw-001", "dc-50kw-002"]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("still requires an idPattern without a blueprint", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await rpc(socket, "cp.create_many", {
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 2,
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("refuses an empty blueprintId as invalid_params, not not_found", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const ack = await rpc(socket, "cp.create_many", {
+        blueprintId: "",
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 1,
+        idPattern: "E{n}",
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("the built-in catalogue is immutable (#297)", () => {
+  it("hands out copies, so a consumer cannot change later results", () => {
+    // `cp.create_many` passes a built-in's `evSettings` straight to
+    // `setEVSettings`; sharing the object would let one caller change what
+    // every later one gets.
+    const first = builtInBlueprints();
+    (first[0] as { name: string }).name = "MUTATED";
+    (first[0].evSettings as Record<string, unknown>).maxChargingPowerKw = 1;
+
+    const second = builtInBlueprints();
+    expect(second[0]?.name).not.toBe("MUTATED");
+    expect(
+      (second[0]?.evSettings as Record<string, unknown> | undefined)
+        ?.maxChargingPowerKw,
+    ).not.toBe(1);
+  });
+});
+
+describe("the stored blueprint count is bounded (#297)", () => {
+  it("leaves room for the built-ins in the list result", () => {
+    // The result carries both, under one cap. Without a ceiling on the store,
+    // `blueprint.list` would fail validation for everyone.
+    expect(
+      MAX_STORED_BLUEPRINTS + builtInBlueprints().length,
+    ).toBeLessThanOrEqual(1_000);
+  });
+});
+
+describe("a malformed stored row is skipped (#297)", () => {
+  it("does not fail the whole list", () => {
+    // Valid JSON that no longer matches the schema would otherwise be returned
+    // unchecked and fail `blueprint.list`'s result validation.
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new BlueprintRepository(db);
+      repo.save(BLUEPRINT);
+      db.run(
+        "INSERT INTO blueprints (id, name, description, definition, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ["shape", "Shape", null, JSON.stringify({ id: "shape" }), "t"],
+      );
+      expect(repo.list().map((b) => b.id)).toEqual(["site-a"]);
+      expect(repo.get("shape")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("a failed blueprint default rolls the charge point back (#297)", () => {
+  it("leaves nothing half-configured in the registry", async () => {
+    // `createOneCp` registers and persists before the defaults run. Reporting
+    // the id in `failed` and leaving it behind would put a half-configured
+    // station in `cp.list` and make the obvious retry fail already-exists.
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      await rpc(socket, "blueprint.save", {
+        blueprint: {
+          ...BLUEPRINT,
+          id: "bad-template",
+          scenarioTemplateId: "no-such-template",
+        },
+      });
+      const ack = await rpc(socket, "cp.create_many", {
+        blueprintId: "bad-template",
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 1,
+        idPattern: "RB{n}",
+      });
+
+      expect(ack.ok).toBe(true);
+      expect(ack.result.created).toEqual([]);
+      expect(ack.result.failed).toHaveLength(1);
+      expect(ack.result.failed[0].cpId).toBe("RB1");
+
+      // Nothing left behind, so the retry is not poisoned.
+      expect((await rpc(socket, "cp.list", {})).result).toHaveLength(0);
+    } finally {
+      socket.disconnect();
+    }
   });
 });

@@ -19,6 +19,19 @@ editing an instantiated charge point never mutates the built-in. Saving a
 blueprint whose id matches a built-in is refused rather than silently shadowing
 it, since `blueprint.delete` could then never restore the original.
 
-`wsUrl` is deliberately absent: a blueprint describes hardware, and the CSMS a
-fleet points at is a property of the run. `cp.create_many` requires it
-alongside `blueprintId`.
+## `wsUrl` precedence
+
+`wsUrl` is **optional on a blueprint** and required by the time a charge point
+is created. A blueprint describes hardware; the CSMS a fleet points at is a
+property of the run, so none of the built-ins carry one.
+
+Precedence, highest first:
+
+1. a `wsUrl` passed to `cp.create_many` alongside `blueprintId`;
+2. the blueprint's own `params.wsUrl`, if it has one;
+3. otherwise the call fails `invalid_params` — the merged parameters are
+   validated against `cp.create_many`'s own schema, so a blueprint without a
+   URL cannot produce a charge point without one.
+
+`idPattern` is optional for a blueprint batch and defaults to
+`<blueprintId>-{n:03}`.

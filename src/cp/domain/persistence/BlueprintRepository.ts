@@ -1,4 +1,4 @@
-import type { Blueprint } from "../../../protocol";
+import { blueprintSchema, type Blueprint } from "../../../protocol";
 import type { Database } from "./Database";
 
 interface BlueprintRow {
@@ -84,10 +84,21 @@ export class BlueprintRepository {
   }
 }
 
+/**
+ * Parse a stored row, and check its shape.
+ *
+ * Valid JSON is not enough: a row written by an older version, or edited by
+ * hand, can parse and still fail `blueprintSchema`. Returned unchecked it
+ * would fail `blueprint.list`'s *result* validation, so one bad row would make
+ * the whole call answer `internal` instead of returning every good one.
+ */
 function safeParse(definition: string): Blueprint | null {
+  let parsed: unknown;
   try {
-    return JSON.parse(definition) as Blueprint;
+    parsed = JSON.parse(definition);
   } catch {
     return null;
   }
+  const checked = blueprintSchema.safeParse(parsed);
+  return checked.success ? checked.data : null;
 }

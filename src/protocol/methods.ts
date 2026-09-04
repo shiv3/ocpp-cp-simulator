@@ -311,11 +311,15 @@ export type Blueprint = z.infer<typeof blueprintSchema>;
  * refinement that one of the two must be present.
  */
 export const createManyToolSchema = createManyParamsSchema
-  .partial({ wsUrl: true })
+  // `idPattern` joins `wsUrl` in being optional: `{ blueprintId, count }`
+  // otherwise failed validation before the handler could default it.
+  .partial({ wsUrl: true, idPattern: true })
   .extend({
-    blueprintId: STR_256.optional().describe(
-      "Blueprint to instantiate. Any parameter given alongside it overrides the blueprint's. Either this or wsUrl is required",
-    ),
+    blueprintId: STR_256.min(1)
+      .optional()
+      .describe(
+        "Blueprint to instantiate. Any parameter given alongside it overrides the blueprint's. Either this or wsUrl is required",
+      ),
   });
 
 /**
@@ -566,6 +570,9 @@ export const METHODS = {
   // Partial success is the result, not an error: one unreachable CSMS URL must
   // not roll back the charge points that came up fine, so failures are
   // reported per id instead of thrown.
+  // The result carries the built-ins as well as the stored ones, so the cap
+  // has to leave room for them — `blueprint.save` enforces the matching
+  // ceiling on stored blueprints rather than letting the list outgrow this.
   "blueprint.list": { params: EMPTY, result: ARRAY_1000(blueprintSchema) },
   "blueprint.save": {
     params: z.object({ blueprint: blueprintSchema }),

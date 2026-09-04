@@ -8,7 +8,7 @@ import type { Blueprint } from "../../protocol";
  * a fleet points at is a property of the run, not of the charge point model.
  * `cp.create_many` requires one alongside `blueprintId`.
  */
-export const BUILT_IN_BLUEPRINTS: readonly Blueprint[] = [
+const CATALOGUE: readonly Blueprint[] = [
   {
     id: "ac-22kw",
     name: "AC 22 kW wallbox",
@@ -46,9 +46,29 @@ export const BUILT_IN_BLUEPRINTS: readonly Blueprint[] = [
   },
 ] as const;
 
-const BUILT_IN_IDS = new Set(BUILT_IN_BLUEPRINTS.map((b) => b.id));
+const BUILT_IN_IDS = new Set(CATALOGUE.map((b) => b.id));
+
+/**
+ * The built-in catalogue, deep-copied.
+ *
+ * The catalogue is module state: handing out the same nested objects would let
+ * one consumer mutate `evSettings` — which `cp.create_many` passes straight to
+ * `setEVSettings` — and change what every later caller gets.
+ */
+export function builtInBlueprints(): Blueprint[] {
+  return CATALOGUE.map((b) => structuredClone(b) as Blueprint);
+}
 
 /** Whether an id names a built-in, which may not be overwritten or deleted. */
 export function isBuiltInBlueprint(id: string): boolean {
   return BUILT_IN_IDS.has(id);
 }
+
+/**
+ * How many blueprints a daemon may store.
+ *
+ * `blueprint.list` returns the built-ins *and* the stored ones under one
+ * 1000-item result cap, so without this ceiling 996 stored blueprints would
+ * make the whole call fail result validation rather than return anything.
+ */
+export const MAX_STORED_BLUEPRINTS = 1_000 - CATALOGUE.length;

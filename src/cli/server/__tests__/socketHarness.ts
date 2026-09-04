@@ -98,7 +98,7 @@ export async function startTestServer(
   // afterwards would only ever exercise a single sync over the whole fleet —
   // and would not reproduce what the daemon does at boot.
   const fileReload = watchOptions
-    ? new FileReloadManager(registry, bus, {
+    ? new FileReloadManager(registry, {
         watcher: new FileWatcher({
           debounceMs: watchOptions.debounceMs ?? 20,
           watchFactory: watchOptions.watchFactory,

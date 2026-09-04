@@ -254,9 +254,16 @@ The rules, in the order they bite:
   A held definition is applied when the transaction stops **or when the run's
   cleanup completes**, whichever released the gate — whether the run reached the
   end of its graph, errored, or was stopped by hand with `stop_scenario`. The
-  daemon waits for the run to be wound up rather than for the
-  `scenario_completed` event, which is emitted from inside the run while the
-  executor is still registered. A `cp.update` that rebuilds the charge point
+  The daemon waits for the blocking state to actually clear, never for the
+  lifecycle event that announces it: every such event on the control plane is
+  published from inside the code that is ending the thing, while the state it
+  announces is still set — `scenario_completed` with the run's executor still
+  registered, `transaction_stopped` and `Finishing` several statements before
+  the transaction is cleared. A held reload is therefore released from the three
+  points where a gate genuinely opens (a run's cleanup, a connector's
+  transaction being dropped, and `reset_scenario`), which is why it lands even
+  with `set_auto_reset_to_available` off, where no later `Available` status
+  would arrive to retry on. A `cp.update` that rebuilds the charge point
   releases it too: the rebuild ends the session, and the held definition is
   applied to the replacement once its scenarios are back.
   An idTag pool is exempt by construction: it is drawn from once per session, so

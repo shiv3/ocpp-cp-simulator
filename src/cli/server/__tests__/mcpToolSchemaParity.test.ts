@@ -22,7 +22,10 @@ import { createParamsSchema } from "../../../protocol";
  * through the tool fails here rather than in someone's campaign.
  */
 
-async function toolProperties(name: string): Promise<string[]> {
+async function toolInputSchema(name: string): Promise<{
+  properties: Record<string, unknown>;
+  required: string[];
+}> {
   const deps = createRuntimeDeps({
     registry: new CPRegistry(),
     eventBus: new EventBus(),
@@ -51,14 +54,39 @@ async function toolProperties(name: string): Promise<string[]> {
       result: {
         tools: Array<{
           name: string;
-          inputSchema: { properties?: Record<string, unknown> };
+          inputSchema: {
+            properties?: Record<string, unknown>;
+            required?: string[];
+          };
         }>;
       };
     }
   ).result.tools;
   const tool = tools.find((entry) => entry.name === name);
   if (!tool) throw new Error(`no MCP tool named ${name}`);
-  return Object.keys(tool.inputSchema.properties ?? {}).sort();
+  return {
+    properties: tool.inputSchema.properties ?? {},
+    required: (tool.inputSchema.required ?? []).slice().sort(),
+  };
+}
+
+async function toolProperties(name: string): Promise<string[]> {
+  return Object.keys((await toolInputSchema(name)).properties).sort();
+}
+
+/** The JSON Schema the tool WOULD advertise for the canonical parameters. */
+function canonicalInputSchema(): {
+  properties: Record<string, unknown>;
+  required: string[];
+} {
+  const json = z.toJSONSchema(createParamsSchema) as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  return {
+    properties: json.properties ?? {},
+    required: (json.required ?? []).slice().sort(),
+  };
 }
 
 describe("MCP cp_create schema parity (#284)", () => {
@@ -105,5 +133,27 @@ describe("MCP cp_create schema parity (#284)", () => {
     // A field the tool invents is a field `cp.create` will ignore, so the
     // list is worth pinning rather than leaving open.
     expect(extra).toEqual(["autoConnect"]);
+  });
+});
+
+describe("MCP cp_create field-level parity (#284)", () => {
+  // Names alone would pass a field that kept its name and changed type,
+  // requiredness or nested shape — which is the drift that produced the
+  // silent security-profile drop in the first place, one level down.
+  it("advertises each parameter with the schema cp.create declares", async () => {
+    const canonical = canonicalInputSchema();
+    const advertised = await toolInputSchema("cp_create");
+
+    for (const [field, schema] of Object.entries(canonical.properties)) {
+      expect(advertised.properties[field]).toEqual(schema);
+    }
+  });
+
+  it("keeps the same fields mandatory", async () => {
+    const canonical = canonicalInputSchema();
+    const advertised = await toolInputSchema("cp_create");
+
+    // autoConnect is optional, so the required sets should be identical.
+    expect(advertised.required).toEqual(canonical.required);
   });
 });

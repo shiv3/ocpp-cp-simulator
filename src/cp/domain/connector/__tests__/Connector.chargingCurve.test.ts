@@ -866,3 +866,114 @@ describe("an explicit SoC belongs to one session only (#301)", () => {
     expect(restored.soc).toBe(20);
   });
 });
+
+describe("a curve is offset by its own start, not by the register (#301)", () => {
+  /**
+   * "Session-relative" means the curve's first point lands on the register
+   * the session starts from. Adding the register alone assumed every curve
+   * begins at zero — an assumption every curve written so far happens to
+   * satisfy, which is why it read as correct. A curve is free to begin
+   * anywhere: `CurvePoint` forbids no ordinate and the editor allows any, so
+   * a connector at 5 kWh running a 5→6 kWh curve would jump to 10 kWh and
+   * deliver twice what the curve describes.
+   */
+  function runCurve(
+    connector: Connector,
+    startWh: number,
+    points: { time: number; value: number }[],
+    forSeconds: number,
+  ): number[] {
+    const seen: number[] = [];
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.meterValue = startWh;
+    connector.beginTransaction(transaction(startWh));
+    connector.events.on("meterValueChange", ({ meterValue }) =>
+      seen.push(meterValue),
+    );
+    connector.startManualMeterStrategy({
+      kind: "curve",
+      config: {
+        enabled: true,
+        curvePoints: points,
+        intervalSeconds: 1,
+        autoCalculateInterval: false,
+      },
+    });
+    vi.advanceTimersByTime(forSeconds * 1000);
+    connector.stopAutoMeterValue();
+    return seen;
+  }
+
+  it("delivers the curve's own span, not the curve's absolute value", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    // 5 → 6 kWh over ten seconds: one kilowatt-hour of delivery, whatever the
+    // register happens to read.
+    const seen = runCurve(
+      connector,
+      5_000,
+      [
+        { time: 0, value: 5 },
+        { time: 10, value: 6 },
+      ],
+      10,
+    );
+
+    expect(seen.length).toBeGreaterThan(0);
+    // The first tick continues from the register; it does not jump by 5 kWh.
+    expect(seen[0]).toBeLessThan(5_200);
+    expect(connector.meterValue).toBe(6_000);
+    expect(connector.meterValue - 5_000).toBe(1_000);
+  });
+
+  it("keeps the register monotonic and inside the session's own span", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    const seen = runCurve(
+      connector,
+      5_000,
+      [
+        { time: 0, value: 5 },
+        { time: 10, value: 6 },
+      ],
+      10,
+    );
+    for (let i = 0; i < seen.length; i++) {
+      expect(seen[i]).toBeGreaterThanOrEqual(5_000);
+      expect(seen[i]).toBeLessThanOrEqual(6_000);
+      if (i > 0) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]!);
+    }
+  });
+
+  it("still behaves as before for a zero-based curve", () => {
+    // The case every existing curve is: offset and register coincide.
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    runCurve(
+      connector,
+      5_000,
+      [
+        { time: 0, value: 0 },
+        { time: 10, value: 1 },
+      ],
+      10,
+    );
+    expect(connector.meterValue).toBe(6_000);
+  });
+
+  it("is unchanged for a zero-based curve on an empty register", () => {
+    vi.useFakeTimers();
+    const connector = makeConnector();
+    runCurve(
+      connector,
+      0,
+      [
+        { time: 0, value: 0 },
+        { time: 10, value: 1 },
+      ],
+      10,
+    );
+    expect(connector.meterValue).toBe(1_000);
+  });
+});

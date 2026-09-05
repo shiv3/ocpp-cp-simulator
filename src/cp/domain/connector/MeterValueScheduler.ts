@@ -62,26 +62,36 @@ export class MeterValueScheduler {
   private carryWh = 0;
 
   /**
-   * The energy register at the instant the curve strategy started — the
-   * baseline its trajectory is added to (#301).
+   * What to add to the curve's ordinate so that its first point lands on the
+   * register the session started from: `register at start − curve value at
+   * start` (#301).
    *
-   * `getMeterValueAtTime` returns an absolute value on a curve that starts at
-   * zero, while `Energy.Active.Import.Register` is cumulative across the whole
-   * life of the connector: OCPP never resets it, and `StartTransaction`
-   * records `meterStart` as whatever it already reads. Treating the curve's
-   * output as the register itself was therefore only ever right for a
-   * connector's *first* session. On the second, the uncapped branch assigned a
-   * value below `meterStart` — a register running backwards, which no meter
-   * does and which makes `meterStop < meterStart` — and the capped branch saw
-   * a negative delta, clamped it away and froze delivery until the curve
-   * climbed back past the old register, or forever once the register passed
-   * the curve's maximum.
+   * `Energy.Active.Import.Register` is cumulative across the whole life of the
+   * connector — OCPP never resets it, and `StartTransaction` records
+   * `meterStart` as whatever it already reads — while a curve describes one
+   * session. Treating the curve's output as the register itself was only ever
+   * right for a connector's *first* session: on the second, the uncapped
+   * branch assigned a value below `meterStart`, a register running backwards
+   * that makes `meterStop < meterStart`, and the capped branch saw a negative
+   * delta, clamped it away and froze delivery until the curve climbed back
+   * past the old register — or forever, once the register had passed the
+   * curve's maximum.
    *
-   * With the baseline, the curve means "energy delivered in this session",
-   * which is what `meterStop − meterStart` already means. A session that
-   * starts from an empty register is unchanged, since the baseline is then 0.
+   * Subtracting the curve's own starting ordinate is the other half of that.
+   * Adding the register alone assumed every curve begins at zero; a curve is
+   * free not to — the editor allows any ordinate and `CurvePoint` forbids
+   * none — and a connector at 50 kWh running a 50→60 kWh curve would jump
+   * straight to 100 kWh and deliver twice the energy the curve describes.
+   * "Session-relative" means offset by the curve's value at session start, not
+   * by the register; the two coincide only for a zero-based curve, which is
+   * why the missing half went unnoticed.
+   *
+   * With the offset, the curve means "energy delivered in this session",
+   * which is what `meterStop − meterStart` already means, and its shape is
+   * preserved wherever its ordinates begin. A zero-based curve on an empty
+   * register is unchanged, since the offset is then 0.
    */
-  private curveBaselineWh = 0;
+  private curveOffsetWh = 0;
 
   constructor(
     private readonly connectorId: number,
@@ -93,11 +103,13 @@ export class MeterValueScheduler {
     this.stop();
     this.strategy = strategy;
     this.carryWh = 0;
-    // Captured before the first tick: the curve describes this session's
-    // delivery, added on top of whatever the cumulative register already
-    // reads (#301).
-    this.curveBaselineWh =
-      strategy.kind === "curve" ? this.callbacks.getCurrentValue() : 0;
+    // Captured before the first tick: what the curve's first point has to be
+    // shifted by to land on the register this session starts from (#301).
+    this.curveOffsetWh =
+      strategy.kind === "curve"
+        ? this.callbacks.getCurrentValue() -
+          getMeterValueAtTime(0, strategy.config) * 1000
+        : 0;
 
     if (strategy.kind === "curve") {
       const { config } = strategy;
@@ -233,7 +245,7 @@ export class MeterValueScheduler {
     this.startTimestamp = null;
     this.strategy = null;
     this.carryWh = 0;
-    this.curveBaselineWh = 0;
+    this.curveOffsetWh = 0;
   }
 
   isActive(): boolean {
@@ -249,11 +261,13 @@ export class MeterValueScheduler {
 
     const elapsedMs = Date.now() - this.startTimestamp;
     const elapsedSeconds = elapsedMs / 1000;
-    // The trajectory this session delivers, on top of the register it started
-    // from. Without the baseline this is an absolute value, which rewinds a
-    // cumulative register on every session after the first (#301).
+    // The trajectory this session delivers, shifted so the curve's own first
+    // point sits on the register the session started from. Without the shift
+    // the curve is an absolute value, which rewinds a cumulative register on
+    // every session after the first — and shifting by the register alone
+    // double-counts a curve whose ordinates do not begin at zero (#301).
     const idealWh =
-      this.curveBaselineWh + getMeterValueAtTime(elapsedSeconds, config) * 1000;
+      this.curveOffsetWh + getMeterValueAtTime(elapsedSeconds, config) * 1000;
     let rawNext = idealWh;
 
     // Apply the OCPP charging profile cap by clamping the per-tick delta. The

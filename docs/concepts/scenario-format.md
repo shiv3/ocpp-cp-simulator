@@ -476,13 +476,22 @@ stops delivery outright rather than only zeroing the reported number.
 Without a curve, accumulation is unchanged from before v1.2: the
 increment/bezier trajectory a scenario configures is its own contract,
 independent of `maxChargingPowerKw`, and only the charging-profile limit caps
-it. That trajectory describes the energy delivered **in the session**, added
-to whatever the register already reads when the session starts —
-`Energy.Active.Import.Register` is cumulative for the life of the connector,
-`StartTransaction` records `meterStart` as whatever it already reads, and
-nothing ever resets it. So the register never moves backwards between
-sessions, and a curve whose maximum is below the current register still
-delivers.
+it. That trajectory describes the energy delivered **in the session**, and is
+shifted so that its **own first point** lands on whatever the register already
+reads when the session starts — `Energy.Active.Import.Register` is cumulative
+for the life of the connector, `StartTransaction` records `meterStart` as
+whatever it already reads, and nothing ever resets it. So the register never
+moves backwards between sessions, and a curve whose maximum is below the
+current register still delivers.
+
+The shift is by the curve's own starting ordinate, not by the register alone.
+A curve may legitimately begin above zero — nothing forbids it, and the editor
+allows any ordinate — and adding the register to such a curve would deliver
+twice what it describes: a connector at 50 kWh running a 50→60 kWh curve would
+jump to 100 kWh. What a curve fixes is the **shape** of a session's delivery;
+where its ordinates start says nothing about where the register is. The two
+readings coincide for a zero-based curve, which is every curve written so
+far.
 
 **A tapering curve slows the energy register; it never freezes it.** The
 register is integer watt-hours — a fractional `meterStop` is rejected by a

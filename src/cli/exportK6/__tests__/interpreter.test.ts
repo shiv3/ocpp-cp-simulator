@@ -452,7 +452,13 @@ describe("k6 auto-meter curve is session-relative (#301)", () => {
    * which is the pre-#301 daemon behaviour: on any session after the first the
    * meter rewound, and a `meterStop` could land below its own `meterStart`.
    */
-  function curveScenario(startValueWh: number) {
+  function curveScenario(
+    startValueWh: number,
+    points: Array<{ time: number; value: number }> = [
+      { time: 0, value: 0 },
+      { time: 3, value: 3 },
+    ],
+  ) {
     return scenario(
       [
         { id: "a", type: "start" },
@@ -472,10 +478,7 @@ describe("k6 auto-meter curve is session-relative (#301)", () => {
             autoIncrement: true,
             incrementInterval: 1,
             useCurve: true,
-            curvePoints: [
-              { time: 0, value: 0 },
-              { time: 3, value: 3 },
-            ],
+            curvePoints: points,
           },
         },
         { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
@@ -630,5 +633,93 @@ describe("k6 puts an integral energy register on the wire (#301)", () => {
     expect(values().slice(0, 6)).toEqual(["0", "0", "1", "1", "2", "2"]);
     const stop = host.sent.find((c) => c.action === "StopTransaction");
     expect(Number.isInteger(Number(stop!.payload.meterStop))).toBe(true);
+  });
+});
+
+describe("k6 offsets a curve by its own start, not by the register (#301)", () => {
+  /**
+   * The same defect the daemon carried: adding the register alone assumes a
+   * zero-based curve, so a run at 5 kWh on a 5→8 kWh curve jumps to 10 kWh
+   * and delivers twice what the curve describes.
+   */
+  function nonZeroCurveScenario(startValueWh: number) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            useCurve: true,
+            // 5 → 8 kWh: three kilowatt-hours of delivery, whatever the
+            // register happens to read.
+            curvePoints: [
+              { time: 0, value: 5 },
+              { time: 3, value: 8 },
+            ],
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  function samples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  it("delivers the curve's own span rather than its absolute value", async () => {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const run = runScenario(host, wire16, nonZeroCurveScenario(5000));
+    await vi.waitFor(() => expect(samples(host).length).toBeGreaterThan(3));
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const seen = samples(host);
+    // Never jumps by the curve's own 5 kWh ordinate…
+    for (const value of seen) {
+      expect(value).toBeGreaterThanOrEqual(5000);
+      expect(value).toBeLessThanOrEqual(8000);
+    }
+    // …and delivers exactly the 3 kWh the curve spans.
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    expect(
+      Number(stop!.payload.meterStop) - Number(start!.payload.meterStart),
+    ).toBe(3000);
   });
 });

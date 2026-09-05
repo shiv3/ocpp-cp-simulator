@@ -350,6 +350,12 @@ function startAutoMeter(
     ? ((d.curvePoints as CurvePointJson[] | undefined) ?? [])
     : null;
   const startWh = ctx.meterWh;
+  // What the curve's first point has to be shifted by to land on the register
+  // this run starts from. Shifting by the register alone would double-count a
+  // curve whose ordinates do not begin at zero — a run at 50 kWh on a
+  // 50→60 kWh curve would jump to 100 kWh (#301).
+  const curveOffsetWh =
+    curve && curve.length > 0 ? startWh - curveStartKwh(curve) * 1000 : 0;
   const send = bool(d.sendMessage) ?? false;
 
   const task = (async () => {
@@ -359,14 +365,17 @@ function startAutoMeter(
       if (stopped) return;
       elapsedSec += intervalSec;
       if (curve && curve.length > 0) {
-        // Offset by the register the run started from. The curve describes
-        // energy delivered in this session, while the register is cumulative
-        // for the life of the connector — assigning the curve value outright
-        // rewound the meter on any session after the first, and could send a
-        // `meterStop` below its own `meterStart` (#301). Unrounded here; the
-        // wire builders round, so a sub-watt-hour step accumulates rather than
+        // Shifted so the curve's own first point sits on the register the run
+        // started from. The curve describes energy delivered in this session,
+        // while the register is cumulative for the life of the connector —
+        // assigning the curve value outright rewound the meter on any session
+        // after the first and could send a `meterStop` below its own
+        // `meterStart`, and shifting by the register alone would double-count
+        // a curve that does not begin at zero (#301). Unrounded here; the wire
+        // builders round, so a sub-watt-hour step accumulates rather than
         // being discarded.
-        ctx.meterWh = startWh + interpolateCurveKwh(curve, elapsedSec) * 1000;
+        ctx.meterWh =
+          curveOffsetWh + interpolateCurveKwh(curve, elapsedSec) * 1000;
       } else {
         ctx.meterWh += incrementWh;
       }
@@ -410,6 +419,13 @@ function shouldStop(
   if (maxTime > 0 && elapsedSec >= maxTime) return true;
   if (maxValue > 0 && meterWh >= maxValue) return true;
   return false;
+}
+
+/** The curve's ordinate at its own first point — what "session start" means
+ *  for a curve, wherever its abscissa begins. `interpolateCurveKwh` clamps
+ *  below the first point, so asking for -infinity is asking for that point. */
+function curveStartKwh(curve: CurvePointJson[]): number {
+  return interpolateCurveKwh(curve, Number.NEGATIVE_INFINITY);
 }
 
 function interpolateCurveKwh(curve: CurvePointJson[], atSec: number): number {

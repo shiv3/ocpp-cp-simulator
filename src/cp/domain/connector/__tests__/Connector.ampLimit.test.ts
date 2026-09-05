@@ -986,3 +986,108 @@ describe("a pause crossing is not latched where nothing can act on it (#301)", (
     expect(events[1]!.paused).toBe(false);
   });
 });
+
+describe("clearing a profile disarms the latch in any status (#301)", () => {
+  /**
+   * The status guard is right about *what* it suppresses and was wrong about
+   * *where* it returned: not announcing outside Charging/SuspendedEVSE is
+   * correct, not disarming is not. A `paused` latched by a previous
+   * transaction survived the gap between sessions, and the first resolve of
+   * the next one matched the stale value and stayed silent — the meter capped
+   * at zero while the connector reported Charging.
+   */
+  function zeroLimitProfile(id = 309): ActiveChargingProfile {
+    return {
+      chargingProfileId: id,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 0 }],
+    };
+  }
+
+  function sample(connector: Connector): void {
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+  }
+
+  function armed(): {
+    connector: Connector;
+    events: { paused: boolean; watts: number }[];
+  } {
+    const connector = makeConnector();
+    connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: 350 };
+    const events: { paused: boolean; watts: number }[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+    return { connector, events };
+  }
+
+  it("announces the next pause after an uncapped sample seen while Preparing", () => {
+    const { connector, events } = armed();
+
+    // A session that ends paused: the latch is left at `true`.
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    connector.addChargingProfile(zeroLimitProfile());
+    sample(connector);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.paused).toBe(true);
+    connector.stopTransaction();
+
+    // Its profile is cleared, and the next transaction's first MeterValue
+    // lands while the connector is still Preparing. Nothing is announced
+    // there — but the latch has to be disarmed, or the stale `true` outlives
+    // the session that set it.
+    connector.setChargingProfiles([]);
+    connector.status = OCPPStatus.Preparing;
+    connector.beginTransaction(transaction());
+    sample(connector);
+    expect(events).toHaveLength(1);
+
+    // A zero-limit profile arrives before StartTransaction is accepted, then
+    // the connector reaches Charging. This pause must be announced.
+    connector.addChargingProfile(zeroLimitProfile(310));
+    connector.status = OCPPStatus.Charging;
+    sample(connector);
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(true);
+  });
+
+  it("disarms while Preparing even with no transaction attached", () => {
+    // The same disarm, reached with the connector fully idle.
+    const { connector, events } = armed();
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    connector.addChargingProfile(zeroLimitProfile());
+    sample(connector);
+    expect(events).toHaveLength(1);
+
+    connector.stopTransaction();
+    connector.setChargingProfiles([]);
+    connector.status = OCPPStatus.Available;
+    sample(connector);
+
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    connector.addChargingProfile(zeroLimitProfile(311));
+    sample(connector);
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(true);
+  });
+
+  it("still does not announce the disarm itself", () => {
+    // Clearing a profile is bookkeeping: it emits nothing, in any status.
+    const { connector, events } = armed();
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    connector.addChargingProfile(zeroLimitProfile());
+    sample(connector);
+    expect(events).toHaveLength(1);
+
+    connector.setChargingProfiles([]);
+    sample(connector);
+    sample(connector);
+    expect(events).toHaveLength(1);
+  });
+});

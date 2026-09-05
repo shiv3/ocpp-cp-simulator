@@ -446,14 +446,27 @@ export class Connector {
    *  {@link currentScheduleLimitWatts}'s note on why repeated calls at one
    *  boundary state emit once. */
   private announceScheduleCrossing(watts: number): void {
-    // Only while the connector is in a state the crossing can move it out of.
+    // No profile in force: disarm, whatever the connector's status. This is
+    // bookkeeping, not an announcement — it emits nothing — so it deliberately
+    // runs before the status guard below. Skipping it outside
+    // Charging/SuspendedEVSE left a `paused` latched by a previous
+    // transaction alive across the gap: the profile is cleared, an uncapped
+    // sample is built while the next transaction is still Preparing, a
+    // zero-limit profile arrives before acceptance, and the first resolve in
+    // Charging then matches the stale latch and stays silent — the meter
+    // capped at zero while the connector reports Charging (#301).
+    if (watts === Infinity) {
+      this.lastSchedulePaused = null;
+      return;
+    }
+
+    // The status guard gates **the announcement only**, not the disarm above.
     // The ChargePoint listener toggles Charging ↔ SuspendedEVSE and does
     // nothing otherwise, so latching a crossing seen while `Preparing` — a
     // scenario's first MeterValue lands there, before StartTransaction is
     // accepted — consumed the one edge that would ever be reported: every
-    // later resolve found the latch already set and stayed silent, leaving the
-    // connector reporting Charging with its meter paused. The latch is
-    // idempotent against repetition (see {@link currentScheduleLimitWatts}),
+    // later resolve found the latch already set and stayed silent. The latch
+    // is idempotent against repetition (see {@link currentScheduleLimitWatts}),
     // which is a different thing from being safe against a crossing nobody
     // could act on. Leaving the latch untouched here means the first resolve
     // that *can* act announces it (#301).
@@ -463,17 +476,14 @@ export class Connector {
     ) {
       return;
     }
+
     const paused = watts === 0;
-    const isCapped = watts !== Infinity;
     if (
-      isCapped &&
-      (this.lastSchedulePaused === null || paused !== this.lastSchedulePaused)
+      this.lastSchedulePaused === null ||
+      paused !== this.lastSchedulePaused
     ) {
       this.lastSchedulePaused = paused;
       this.eventsEmitter.emit("scheduleLimitChange", { paused, watts });
-    } else if (!isCapped && this.lastSchedulePaused !== null) {
-      // Profile cleared — reset so we re-arm on the next SetChargingProfile.
-      this.lastSchedulePaused = null;
     }
   }
 

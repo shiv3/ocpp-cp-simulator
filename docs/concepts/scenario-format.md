@@ -600,6 +600,18 @@ the EVSE's offer as the station's consumption with nothing to reveal the
 substitution. Nothing is lost that was not already unavailable — as soon as
 one supported measurand is configured, the request goes out with it.
 
+**A `limit: 0` period moves the connector to `SuspendedEVSE`, once per
+crossing.** A charging profile whose active period allows nothing pauses
+delivery, and the connector reports that by moving between `Charging` and
+`SuspendedEVSE`; resuming moves it back. The transition is edge-triggered, so
+repeated samples at one limit report it once — but it is announced from the
+first resolve made in a state that can act on it, not from the first resolve of
+any kind. A crossing seen while the connector is still `Preparing`, which is
+where a scenario's first MeterValue lands, would otherwise be the only edge
+ever reported and would be discarded unheard. Clearing the profile disarms the
+detection in **every** status, so a pause latched by one session can never
+outlive it and silence the next session's.
+
 **Every sample in one MeterValue describes one instant.** The watt cap and the
 active phase count are both derived from the charging schedule, and each used
 to resolve against its own clock reading: a period boundary falling between

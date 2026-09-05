@@ -2242,6 +2242,87 @@ describe("the origin is stored state, not watcher state (#314)", () => {
   });
 });
 
+describe("bookkeeping never fails the RPC that already happened (#314)", () => {
+  it("loads the scenario even when the origin row cannot be written", async () => {
+    // The row is written after the load, because it keys on the scenario id the
+    // load returns — so unlike the idTag pool this one cannot be persisted
+    // first. A `SQLITE_BUSY` or a full disk propagating from here would return
+    // an error for an RPC whose effect has already happened: the caller told
+    // nothing was loaded while the charge point runs it. The write is
+    // best-effort and loud instead.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("bookkeep", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, db);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-BOOKKEEP",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+
+    // The database goes away between the create and the load.
+    db.close();
+
+    const loaded = await rpc(
+      socket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-BOOKKEEP",
+    );
+    expect(loaded.scenarioId).toBe("bookkeep");
+    // The RPC succeeded and the definition really is live…
+    expect(loadedDelay(server, "CP-BOOKKEEP", "bookkeep")).toBe(11);
+    // …and the watch still works for this run; only its durability was lost.
+    expect(server.fileReload?.watchedPaths()).toContain(path.resolve(file));
+  });
+});
+
+describe("a restored charge point dials on the current file (#314)", () => {
+  it("re-establishes the watch before the fleet is allowed to connect", async () => {
+    // `restoreFromDatabase` used to dial inside its own loop, so a restored
+    // charge point's persisted connect-triggered scenario could start before
+    // `--watch` had re-read the file — running the graph as it was when the
+    // daemon stopped, with the reload then deferred behind that stale run.
+    // The rebuild and the dial are now separate calls with the restore in
+    // between.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("dial", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+
+    const first = await startWatchingServer(new TestWatchBackend(), db);
+    const firstSocket = await openClient(first);
+    await rpc(firstSocket, "cp.create", {
+      cpId: "CP-DIAL",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(firstSocket, "load_scenario", { connector: 1, file }, "CP-DIAL");
+    firstSocket.disconnect();
+    await first.close();
+    servers.pop();
+
+    // Edited while the daemon was down.
+    fs.writeFileSync(file, scenario("dial", 22));
+
+    // The daemon's own sequence: rebuild without dialling, restore the
+    // watches, then dial.
+    const backend = new TestWatchBackend();
+    const second = await startTestServer({
+      database: db,
+      watch: { debounceMs: 5, watchFactory: backend.factory },
+      deferRestoredConnect: true,
+    });
+    servers.push(second);
+    // Before anything connects, the connector already holds the edited graph.
+    expect(loadedDelay(second, "CP-DIAL", "dial")).toBe(22);
+    second.connectRestored();
+  });
+});
+
 describe("every path that removes a definition drops its watch (#314)", () => {
   it("scenario.definitions.delete stops the file putting the definition back", async () => {
     // The third door into the same room: `remove_scenario` and

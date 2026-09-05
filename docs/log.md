@@ -1008,3 +1008,33 @@ Sixth review pass on PR #325.
   registers a file the way a mid-bootstrap RPC would and asserts the restore
   emits nothing at all — the mutation that removes the guard reports one
   `applied`.
+
+## [2026-09-05] ingest | `--watch`: the restore splits in two, and the three constraints written down (#314, PR #317)
+
+- The answer is yes: the restore splits. Three constraints have to hold at once
+  and no single position in the boot sequence satisfies all three, which is why
+  the last three rounds each moved the call and met a fourth problem. They are
+  now stated together above `finishWatchSetup` and in
+  [Daemon](entities/daemon.md):
+  1. a restored charge point must not run a stale graph — its persisted
+     connect-triggered scenarios start as soon as its boot gate opens;
+  2. a startup flag must own its keys before its rows are read;
+  3. a restored row must not overwrite a live registration.
+- Constraints 1 and 2 want the restore at different points relative to
+  _different_ events, so they get a pass each: `restoreFromDatabase` now takes
+  `{ connect: false }` and the daemon dials separately through
+  `connectRestored`, with the first pass in between; that pass skips the
+  bootstrap charge points, and a second pass after `runStartupScenario` picks up
+  what the flags did not claim. Constraint 3 is deliberately **not** an ordering
+  rule — both passes skip keys the reloader already holds — and taking it out of
+  the sequence is what lets the other two be satisfied independently.
+- Origin bookkeeping is best-effort. The row keys on the scenario id the load
+  returns, so unlike the idTag pool it cannot be written before the mutation:
+  by the time there is a row to write, `load_scenario { file }` has loaded the
+  definition and `run_scenario_file` has already started it. Letting
+  `SQLITE_BUSY` or a full disk propagate returned an error for an RPC whose
+  effect had happened — the caller told nothing was loaded while the charge
+  point ran it. The write is now wrapped and logged loudly; what is lost is the
+  watch's durability, not its correctness this run. Persist-first, chosen for
+  `replaceIdTags`, is simply not available here, and that difference is now
+  recorded rather than left to be re-derived.

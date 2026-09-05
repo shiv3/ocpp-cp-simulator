@@ -628,9 +628,11 @@ transaction with no `initialSoc` of its own falls back to
 `evSettings.initialSoc` like any other. What decides is whether a transaction
 was running when the value was written, not where the value came from: written
 mid-session it describes the car then charging, and is replaced when the next
-session begins. That rule survives a restart, where an explicit SoC restored
-alongside an active transaction belongs to that transaction and one restored
-with no transaction is still waiting for the next.
+session begins. Whether a value is still waiting is
+**persisted with it** (`connector_runtime.soc_awaits_next_transaction`, schema
+v12) rather than inferred on restore: a session that has ended leaves a value
+that is session-owned and transaction-less, which nothing else in the snapshot
+distinguishes from one set while the connector was idle.
 
 **The curve is evaluated at the transaction's (or EV settings') `initialSoc`
 before the first synced SoC, not 0%.** `connector.soc` is `null` until the

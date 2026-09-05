@@ -14,8 +14,8 @@ interface ConnectorRuntimeRow {
   transaction_json: string | null;
   meter_value_wh: number;
   soc_percent: number | null;
-  /** 1 / 0; `null` on rows written before the v11 migration added it. */
-  soc_is_meter_derived: number | null;
+  /** 1 / 0; `null` on rows written before the v12 migration added it. */
+  soc_awaits_next_transaction: number | null;
   last_auto_started_scenario_key: string | null;
   scenario_position_json: string | null;
 }
@@ -32,7 +32,7 @@ export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeReposit
   load(cpId: string, connectorId: number): ConnectorRuntimeSnapshot | null {
     const row = this.database.get<ConnectorRuntimeRow>(
       "SELECT status, availability, scheduled_availability, transaction_json, " +
-        "meter_value_wh, soc_percent, soc_is_meter_derived, " +
+        "meter_value_wh, soc_percent, soc_awaits_next_transaction, " +
         "last_auto_started_scenario_key, scenario_position_json " +
         "FROM connector_runtime WHERE cp_id = ? AND connector_id = ?",
       [cpId, connectorId],
@@ -48,8 +48,8 @@ export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeReposit
       transaction: deserializeTransaction(row.transaction_json),
       meterValueWh: row.meter_value_wh,
       socPercent: row.soc_percent,
-      // SQLite has no boolean; pre-v11 rows have NULL here and mean `false`.
-      socIsMeterDerived: row.soc_is_meter_derived === 1,
+      // SQLite has no boolean; pre-v12 rows have NULL here and mean `false`.
+      socAwaitsNextTransaction: row.soc_awaits_next_transaction === 1,
       lastAutoStartedScenarioKey: row.last_auto_started_scenario_key,
       scenarioPosition: deserializeScenarioPosition(row.scenario_position_json),
     };
@@ -64,7 +64,7 @@ export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeReposit
       "INSERT INTO connector_runtime " +
         "(cp_id, connector_id, status, availability, scheduled_availability, " +
         " transaction_json, meter_value_wh, soc_percent, " +
-        " soc_is_meter_derived, last_auto_started_scenario_key, " +
+        " soc_awaits_next_transaction, last_auto_started_scenario_key, " +
         " scenario_position_json, updated_at) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id, connector_id) DO UPDATE SET " +
@@ -74,7 +74,8 @@ export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeReposit
         "  transaction_json = excluded.transaction_json, " +
         "  meter_value_wh = excluded.meter_value_wh, " +
         "  soc_percent = excluded.soc_percent, " +
-        "  soc_is_meter_derived = excluded.soc_is_meter_derived, " +
+        "  soc_awaits_next_transaction = " +
+        "    excluded.soc_awaits_next_transaction, " +
         "  last_auto_started_scenario_key = " +
         "    excluded.last_auto_started_scenario_key, " +
         "  scenario_position_json = excluded.scenario_position_json, " +
@@ -88,7 +89,7 @@ export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeReposit
         serializeTransaction(snapshot.transaction),
         snapshot.meterValueWh,
         snapshot.socPercent,
-        snapshot.socIsMeterDerived ? 1 : 0,
+        snapshot.socAwaitsNextTransaction ? 1 : 0,
         snapshot.lastAutoStartedScenarioKey,
         serializeScenarioPosition(snapshot.scenarioPosition ?? null),
         new Date().toISOString(),

@@ -702,7 +702,9 @@ describe("the derived-SoC marker survives a restart (#301)", () => {
     const connector = chargedConnector();
     expect(connector.soc).toBeGreaterThan(20);
     const snapshot = connector.snapshotRuntime();
-    expect(snapshot.socIsMeterDerived).toBe(true);
+    // Meter-derived, so it describes the session that produced it and does not
+    // wait for the next one.
+    expect(snapshot.socAwaitsNextTransaction).toBe(false);
 
     const restored = makeConnector();
     restored.evSettings = { ...connector.evSettings };
@@ -716,11 +718,11 @@ describe("the derived-SoC marker survives a restart (#301)", () => {
     expect(restored.soc).toBe(20);
   });
 
-  it("marks an explicitly set SoC as not meter-derived in the snapshot", () => {
+  it("carries an idle-set SoC across a restart as still waiting", () => {
     const connector = makeConnector();
     connector.soc = 62;
     const snapshot = connector.snapshotRuntime();
-    expect(snapshot.socIsMeterDerived).toBe(false);
+    expect(snapshot.socAwaitsNextTransaction).toBe(true);
 
     const restored = makeConnector();
     restored.restoreRuntimeSnapshot(snapshot);
@@ -728,18 +730,18 @@ describe("the derived-SoC marker survives a restart (#301)", () => {
     expect(restored.soc).toBe(62);
   });
 
-  it("treats a snapshot without the field as not meter-derived", () => {
-    // Rows written before the v11 migration: absence means `false`, which is
-    // what those daemon builds behaved as.
+  it("treats a snapshot without the field as a leftover", () => {
+    // Rows written before the v12 migration: absence means `false`, so the
+    // restored value is replaced rather than inherited by the next session.
     const connector = makeConnector();
     const legacy = { ...connector.snapshotRuntime(), socPercent: 77 } as Omit<
       ReturnType<Connector["snapshotRuntime"]>,
-      "socIsMeterDerived"
-    > & { socIsMeterDerived?: boolean };
-    delete legacy.socIsMeterDerived;
+      "socAwaitsNextTransaction"
+    > & { socAwaitsNextTransaction?: boolean };
+    delete legacy.socAwaitsNextTransaction;
     connector.restoreRuntimeSnapshot(legacy);
     connector.beginTransaction(transaction(0));
-    expect(connector.soc).toBe(77);
+    expect(connector.soc).toBe(20);
   });
 });
 
@@ -850,7 +852,8 @@ describe("an explicit SoC belongs to one session only (#301)", () => {
     source.soc = 95;
     source.beginTransaction(transaction(0, 95));
     const snapshot = source.snapshotRuntime();
-    expect(snapshot.socIsMeterDerived).toBe(false);
+    // Claimed by the transaction that began, so it no longer waits.
+    expect(snapshot.socAwaitsNextTransaction).toBe(false);
     expect(snapshot.transaction).not.toBeNull();
 
     const restored = makeConnector();

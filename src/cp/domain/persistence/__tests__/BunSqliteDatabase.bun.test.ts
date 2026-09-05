@@ -306,7 +306,7 @@ describe("BunSqliteDatabase", () => {
   });
 });
 
-describe("connector_runtime.soc_is_meter_derived (#301)", () => {
+describe("connector_runtime.soc_awaits_next_transaction (#301)", () => {
   const base: ConnectorRuntimeSnapshot = {
     status: OCPPStatus.Charging,
     availability: "Operative",
@@ -317,15 +317,15 @@ describe("connector_runtime.soc_is_meter_derived (#301)", () => {
     lastAutoStartedScenarioKey: null,
   };
 
-  it("round-trips a meter-derived SoC marker", () => {
+  it("round-trips the waiting marker", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       const repo = new SqliteConnectorRuntimeRepository(db);
-      repo.save("cp-soc", 1, { ...base, socIsMeterDerived: true });
-      expect(repo.load("cp-soc", 1)?.socIsMeterDerived).toBe(true);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(true);
 
-      repo.save("cp-soc", 2, { ...base, socIsMeterDerived: false });
-      expect(repo.load("cp-soc", 2)?.socIsMeterDerived).toBe(false);
+      repo.save("cp-soc", 2, { ...base, socAwaitsNextTransaction: false });
+      expect(repo.load("cp-soc", 2)?.socAwaitsNextTransaction).toBe(false);
     } finally {
       db.close();
     }
@@ -335,15 +335,15 @@ describe("connector_runtime.soc_is_meter_derived (#301)", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       const repo = new SqliteConnectorRuntimeRepository(db);
-      repo.save("cp-soc", 1, { ...base, socIsMeterDerived: true });
-      repo.save("cp-soc", 1, { ...base, socIsMeterDerived: false });
-      expect(repo.load("cp-soc", 1)?.socIsMeterDerived).toBe(false);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: false });
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(false);
     } finally {
       db.close();
     }
   });
 
-  it("reads a pre-v11 row, which has no column value, as not meter-derived", () => {
+  it("reads a pre-v12 row, which has no column value, as not waiting", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       // Simulate the migrated-in column on a row written before it existed:
@@ -351,13 +351,13 @@ describe("connector_runtime.soc_is_meter_derived (#301)", () => {
       // fresh CREATE TABLE declares the column nullable for exactly that
       // reason — a fresh DB and a migrated one must not differ.
       const repo = new SqliteConnectorRuntimeRepository(db);
-      repo.save("cp-soc", 1, { ...base, socIsMeterDerived: true });
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
       db.run(
-        "UPDATE connector_runtime SET soc_is_meter_derived = NULL " +
+        "UPDATE connector_runtime SET soc_awaits_next_transaction = NULL " +
           "WHERE cp_id = ? AND connector_id = ?",
         ["cp-soc", 1],
       );
-      expect(repo.load("cp-soc", 1)?.socIsMeterDerived).toBe(false);
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(false);
     } finally {
       db.close();
     }
@@ -366,7 +366,7 @@ describe("connector_runtime.soc_is_meter_derived (#301)", () => {
   it("migrates an existing v10 database by adding the column", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
-      // Rebuild the pre-v11 shape: drop the column and stamp version 10.
+      // Rebuild the pre-v12 shape: drop the column and stamp version 10.
       db.exec("DROP TABLE connector_runtime");
       db.exec(
         "CREATE TABLE connector_runtime (" +
@@ -386,15 +386,15 @@ describe("connector_runtime.soc_is_meter_derived (#301)", () => {
       const cols = db.all<{ name: string }>(
         "PRAGMA table_info(connector_runtime)",
       );
-      expect(cols.map((c) => c.name)).toContain("soc_is_meter_derived");
+      expect(cols.map((c) => c.name)).toContain("soc_awaits_next_transaction");
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
       expect(Number(version?.value)).toBe(SCHEMA_VERSION);
 
       const repo = new SqliteConnectorRuntimeRepository(db);
-      repo.save("cp-soc", 1, { ...base, socIsMeterDerived: true });
-      expect(repo.load("cp-soc", 1)?.socIsMeterDerived).toBe(true);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(true);
     } finally {
       db.close();
     }

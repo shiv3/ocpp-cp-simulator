@@ -170,7 +170,8 @@ export class Connector {
   private meterValueWh = 0;
 
   /**
-   * Which session the current `socPercent` belongs to.
+   * Whether the current `socPercent` is waiting for the transaction that
+   * starts next, rather than describing one that has already run.
    *
    * `stopTransaction` deliberately leaves `socPercent` in place — the
    * disconnect/reconnect paths and post-boot StatusNotifications describe the
@@ -178,28 +179,29 @@ export class Connector {
    * the connector may belong to the car that just left. The charging curve is
    * evaluated against it from the first scheduler interval, the interval that
    * sets the session's opening power, and with meter/SoC sync off nothing
-   * would ever correct it. So the question at `beginTransaction` is not where
-   * the number came from but **whose it is** (#301):
+   * would ever correct it (#301).
    *
-   * - `"meter"` — derived from the energy register, so it describes the
-   *   battery whose meter produced it: the session that has just ended.
-   * - `"session"` — set while a transaction was active, so it describes that
-   *   transaction's car. Once that transaction ends it is a leftover too. A
-   *   `startTransaction` `initialSoc` becomes this the moment its own
-   *   transaction begins, which is what stops it leaking into the next one.
-   * - `"pending"` — set while the connector was idle, so it is a statement
-   *   about the car plugged in *now*, waiting for the session that is about to
-   *   start. Typing an SoC into the side panel before pressing Start is the
-   *   real use, and `ChargePoint.startTransaction` writes an `initialSoc`
-   *   through the same setter just before `beginTransaction`, so both arrive
-   *   here.
+   * Exactly one bit decides that, and it is set at the one place every SoC
+   * write passes through, by asking whether a transaction was running at the
+   * moment of the write:
    *
-   * `beginTransaction` keeps a `"pending"` value and claims it for the new
-   * session; anything else it replaces. Whether a transaction was active at
-   * the moment of the write is the whole distinction, and it is available at
-   * the one place every SoC write passes through.
+   * - Written while the connector was **idle** — typed into the side panel
+   *   before pressing Start, or handed to `startTransaction` as `initialSoc`,
+   *   which `ChargePoint` writes through the `soc` setter just before
+   *   `beginTransaction` — it is a statement about the car plugged in now, and
+   *   waits. `beginTransaction` keeps it and **claims** it, clearing the bit so
+   *   it cannot be claimed twice.
+   * - Written while a **session was running**, or derived from the energy
+   *   register, it describes that session's car. Once that session ends it is
+   *   a leftover, and `beginTransaction` replaces it with
+   *   `transaction.initialSoc ?? evSettings.initialSoc`.
+   *
+   * One bit, not three states: how the value arrived — meter or human — turned
+   * out never to change what happens to it, and a three-state model that only
+   * two states of collapsed cleanly onto the disk let a session-owned SoC come
+   * back from a restart looking like a pending one.
    */
-  private socOwner: "meter" | "session" | "pending" = "pending";
+  private socAwaitsNextTransaction = true;
   private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
 
@@ -232,7 +234,7 @@ export class Connector {
     transaction: Transaction | null;
     meterValueWh: number;
     socPercent: number | null;
-    socIsMeterDerived: boolean;
+    socAwaitsNextTransaction: boolean;
     lastAutoStartedScenarioKey: string | null;
   } {
     return {
@@ -242,10 +244,7 @@ export class Connector {
       transaction: this.transactionValue ? { ...this.transactionValue } : null,
       meterValueWh: this.meterValueWh,
       socPercent: this.socPercent,
-      // Persisted as the boolean the v11 column holds. "session" and "pending"
-      // both mean "not meter-derived"; which of the two is
-      // reconstructed on restore from whether a transaction was active.
-      socIsMeterDerived: this.socOwner === "meter",
+      socAwaitsNextTransaction: this.socAwaitsNextTransaction,
       lastAutoStartedScenarioKey: this.lastAutoStartedScenarioKeyValue,
     };
   }
@@ -270,7 +269,10 @@ export class Connector {
     socPercent: number | null;
     /** Absent in snapshots written before this field existed; `false` there,
      *  which is the behaviour those builds had. */
-    socIsMeterDerived?: boolean;
+    /** Absent in snapshots written before this field existed; `false` there,
+     *  so a restored value is treated as a leftover rather than inherited by
+     *  the next transaction. */
+    socAwaitsNextTransaction?: boolean;
     lastAutoStartedScenarioKey: string | null;
   }): void {
     this.statusValue = snapshot.status;
@@ -286,16 +288,12 @@ export class Connector {
     // transaction on that connector opened on the previous battery's charge
     // again — the defect this marker exists to prevent, reachable a second
     // time through persistence (#301).
-    // A restored SoC that was meter-derived still is. An explicit one belongs
-    // to the restored transaction when there is one, and is otherwise a
-    // value set while the connector was idle — still waiting for the
-    // next session, which is how it would have been treated had the
-    // daemon never stopped.
-    this.socOwner = snapshot.socIsMeterDerived
-      ? "meter"
-      : this.transactionValue
-        ? "session"
-        : "pending";
+    // Carried across the restart with the SoC it describes, not inferred from
+    // it. Reconstructing this from "does the snapshot carry a transaction?"
+    // could not see the case that matters: a session that has *ended* leaves a
+    // value that is session-owned and transaction-less, indistinguishable from
+    // one waiting for the next session (#301).
+    this.socAwaitsNextTransaction = snapshot.socAwaitsNextTransaction ?? false;
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
   }
 
@@ -627,7 +625,7 @@ export class Connector {
       const derived = this.socFromMeterValue(this.meterValueWh);
       if (derived !== null && this.socPercent !== derived) {
         this.socPercent = derived;
-        this.socOwner = "meter";
+        this.socAwaitsNextTransaction = false;
         this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }
@@ -655,11 +653,10 @@ export class Connector {
 
   set soc(value: number | null) {
     this.socPercent = value;
-    // Whose it is depends on whether a session is running: set while idle it
-    // is a statement about the car plugged in now and survives into the
-    // transaction about to start; set mid-session it describes that session's
-    // car and is replaced when the next one begins (#301).
-    this.socOwner = this.transactionValue ? "session" : "pending";
+    // Set while idle it is a statement about the car plugged in now and waits
+    // for the transaction about to start; set mid-session it describes that
+    // session's car and is replaced when the next one begins (#301).
+    this.socAwaitsNextTransaction = this.transactionValue === null;
     this.eventsEmitter.emit("socChange", { soc: value });
     this.checkAutoStop();
   }
@@ -984,13 +981,12 @@ export class Connector {
    * car.
    */
   private openSessionSoc(transaction: Transaction): void {
-    if (this.socOwner === "pending") {
-      this.socOwner = "session";
+    if (this.socAwaitsNextTransaction) {
+      this.socAwaitsNextTransaction = false;
       return;
     }
     const opening = transaction.initialSoc ?? this._evSettings.initialSoc;
     if (opening === undefined) return;
-    this.socOwner = "session";
     if (this.socPercent === opening) return;
     this.socPercent = opening;
     this.eventsEmitter.emit("socChange", { soc: opening });
@@ -1087,7 +1083,7 @@ export class Connector {
       const derived = this.socFromMeterValue(meterValueWh);
       if (derived !== null && this.socPercent !== derived) {
         this.socPercent = derived;
-        this.socOwner = "meter";
+        this.socAwaitsNextTransaction = false;
         this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }

@@ -35,15 +35,17 @@ export interface ConnectorRuntimeSnapshot {
   transaction: Transaction | null;
   meterValueWh: number;
   socPercent: number | null;
-  /** Whether `socPercent` was derived from the energy register rather than set
-   *  explicitly. Carried so a restored connector still knows the difference
-   *  between "this session synchronised it" and "the last session left it" —
-   *  the next transaction replaces the former and keeps the latter (#301).
+  /** Whether `socPercent` is waiting for the transaction that starts next,
+   *  rather than describing one that has already run. Carried rather than
+   *  inferred: a session that has ended leaves a value that is session-owned
+   *  and transaction-less, which no rule reading the rest of this snapshot can
+   *  tell from one set while the connector was idle (#301).
    *
-   *  Optional for the same reason as `scenarioPosition`: rows written by
-   *  older daemon builds do not carry it, and absence means `false`, which is
-   *  what those builds behaved as. */
-  socIsMeterDerived?: boolean;
+   *  Optional for the same reason as `scenarioPosition`: rows written by older
+   *  daemon builds do not carry it, and absence means `false` — the restored
+   *  value is treated as a leftover rather than inherited by the next
+   *  transaction. */
+  socAwaitsNextTransaction?: boolean;
   /** Mirror of {@link Connector.lastAutoStartedScenarioKey}: prevents
    *  the auto-start path from re-firing the same scenario after a
    *  restart, which would otherwise reset the connector to the

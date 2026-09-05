@@ -14,7 +14,11 @@ import {
   type WatchedScenarioFileRow,
 } from "./watchedScenarioFiles";
 import { parseIdTagsFile } from "./idTagFile";
-import { ARRAY_MAX_ITEMS, SCENARIO_MAX_BYTES } from "../../protocol/limits";
+import {
+  ARRAY_MAX_ITEMS,
+  SCENARIO_MAX_BYTES,
+  STR_64K_MAX,
+} from "../../protocol/limits";
 
 /** What kind of file was reloaded. */
 export type FileReloadTarget = "id-tags" | "scenario";
@@ -749,12 +753,25 @@ export class FileReloadManager {
     const live = this.registry
       .get(entry.cpId)
       ?.getScenario(entry.connectorId, entry.scenarioId);
-    return {
-      ...prepared,
-      id: entry.scenarioId,
-      targetType: live?.targetType ?? "connector",
-      targetId: live?.targetId ?? entry.connectorId,
-    };
+    const pinned = { ...prepared, id: entry.scenarioId } as ScenarioDefinition &
+      Record<string, unknown>;
+    if (!live) {
+      // No live definition to copy — only reachable if the scenario went away
+      // between `stillLoaded` and here. Fall back to the registration, which is
+      // the only target this manager can vouch for.
+      pinned.targetType = "connector";
+      pinned.targetId = entry.connectorId;
+      return pinned;
+    }
+    pinned.targetType = live.targetType;
+    // `undefined` is a value here, not a gap: a `chargePoint`-wide scenario has
+    // no `targetId` on purpose, and filling it in from the registration made
+    // the reload advertise connector-specific constraints for a definition that
+    // deliberately had none — and persisted that. "Absent on purpose" and
+    // "missing" are different, so the key is dropped rather than defaulted.
+    if (live.targetId === undefined) delete pinned.targetId;
+    else pinned.targetId = live.targetId;
+    return pinned;
   }
 
   /** Whether the definition was accepted — applied now, or held for a session
@@ -985,13 +1002,51 @@ export class FileReloadManager {
 
   private emit(event: FileReloadEvent): void {
     try {
-      this.sink?.(event);
+      // Clamped here, at the last point before the envelope, as well as where
+      // each message is composed. Composing carefully is what makes the text
+      // readable; clamping here is what makes the guarantee hold — an event
+      // that fails envelope validation is swallowed by the bridge, so an
+      // unbounded string anywhere in this object turns a correct rejection into
+      // silence. Three separate bugs in this feature have been exactly that
+      // (#314), so the bound is enforced on the object rather than trusted to
+      // every caller that builds one.
+      this.sink?.({
+        ...event,
+        path: truncate(event.path, ENVELOPE_STR_MAX),
+        error:
+          event.error === null ? null : truncate(event.error, ENVELOPE_STR_MAX),
+      });
     } catch (err) {
       this.log(
         `[watch] event sink error: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
+}
+
+/**
+ * The `file-reload` envelope's cap on `path` and `error` (`STR_64K`).
+ *
+ * Read here rather than restated, so the producer and the schema that rejects
+ * it cannot drift — the same discipline `ARRAY_MAX_ITEMS` follows on the
+ * definitions envelope.
+ */
+const ENVELOPE_STR_MAX = STR_64K_MAX;
+
+/**
+ * How much of a caller-supplied identifier a message may quote.
+ *
+ * A file-loaded definition gets only minimal shape validation, so its `id` is
+ * whatever the file says — and one over 64 KiB embedded whole into a rejection
+ * message pushed the envelope past its own bound, so the rejection was thrown
+ * away and the subscriber saw nothing at all. Short enough to identify the
+ * scenario, far short of anything that can overflow the field.
+ */
+const ID_IN_MESSAGE_MAX = 256;
+
+/** Clamp a string to `max`, marking it when something was dropped. */
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
 /** `cpId` + absolute path. NUL cannot appear in either, so the split is exact. */
@@ -1071,7 +1126,7 @@ function describeSnapshotOverflow(
     const which =
       definition.id === reloadedId
         ? "scenario"
-        : `scenario "${definition.id}" on this connector`;
+        : `scenario "${truncate(definition.id, ID_IN_MESSAGE_MAX)}" on this connector`;
     return (
       `${which} is ${size} bytes, over the ${SCENARIO_MAX_BYTES}-byte limit ` +
       "the control plane can carry; the previous definition is still loaded"

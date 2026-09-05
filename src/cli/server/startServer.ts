@@ -255,7 +255,24 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     skip: (row) =>
       startupClaimedByCp.get(row.cp_id)?.has(row.scenario_id) === true,
   });
-  registry.connectRestored(restored);
+  // Split, not just deferred. A charge point whose id a startup flag will claim
+  // must not dial here when the bootstrap loop is going to dial it anyway: the
+  // moment its boot gate opens, the *restored* copy of that scenario
+  // auto-starts, and dialling this early leaves the whole bootstrap loop —
+  // every other charge point's connect, which can be minutes against a slow
+  // CSMS — between that start and the flag's load. Held back, the dial and the
+  // load happen in the same iteration, one immediately after the other.
+  //
+  // Only when `--auto-connect` is on, because that is what makes the bootstrap
+  // loop dial. Without it nothing else would, and `runStartupScenario`'s
+  // `waitForBootAccepted` would spend its full 30s timeout per connector on a
+  // charge point this function had deliberately left unconnected (#314).
+  const dialLater = restoredDialsToDefer(
+    restored,
+    startupClaimedByCp,
+    opts.autoConnect === true,
+  );
+  registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
@@ -895,6 +912,33 @@ export async function runStartupScenario(
       }
     }
   }
+}
+
+/**
+ * Which restored charge points must wait for the bootstrap loop to dial them.
+ *
+ * A charge point whose id a startup flag will claim has a restored copy of that
+ * very scenario loaded, and it auto-starts the moment its boot gate opens.
+ * Dialling it during the restore leaves the entire bootstrap loop — every other
+ * charge point's connect, minutes against a slow CSMS — between that start and
+ * the flag's load. Held back, the two happen one after the other in the same
+ * iteration.
+ *
+ * Only when the bootstrap loop is actually going to dial (`--auto-connect`).
+ * Without it nothing else would, and `runStartupScenario`'s
+ * `waitForBootAccepted` would burn its full 30s timeout per connector on a
+ * charge point that was deliberately left unconnected — the boot-accepted wait
+ * broken by the very hold-back meant to protect it (#314).
+ */
+export function restoredDialsToDefer(
+  restored: readonly string[],
+  claimedByCp: ReadonlyMap<string, ReadonlySet<string>>,
+  autoConnect: boolean,
+): Set<string> {
+  if (!autoConnect) return new Set();
+  return new Set(
+    restored.filter((cpId) => (claimedByCp.get(cpId)?.size ?? 0) > 0),
+  );
 }
 
 /**

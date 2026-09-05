@@ -6,8 +6,19 @@
 
 import { z } from "zod";
 
+/**
+ * Max length of an `STR_64K` field.
+ *
+ * Exported as a number for the same reason as {@link ARRAY_MAX_ITEMS}: a
+ * producer has to be able to clamp a string *before* it builds an envelope,
+ * because a field that fails validation takes the whole event with it and the
+ * push is merely logged (#314). One constant, so the clamp and the schema
+ * cannot drift.
+ */
+export const STR_64K_MAX = 65_536;
+
 /** General-purpose string field: ≤ 64 KB. */
-export const STR_64K = z.string().max(65_536);
+export const STR_64K = z.string().max(STR_64K_MAX);
 
 /**
  * Identifier-sized string: ≤ 256 chars, the same cap the rpc envelope already

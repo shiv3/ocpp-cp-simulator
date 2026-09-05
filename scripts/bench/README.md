@@ -262,6 +262,16 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    whatever number it carries. "No id arrived" is reported as `null`, which `0`
    could not express, and `null` alone triggers retirement.
 
+   **Known limitation, and it is not fixable here.** Against a CSMS that
+   assigns `transactionId: 0` the second emission never arrives at all: the
+   daemon suppresses the `transactionIdChange` it would come from
+   (`src/cli/service.ts`, `if (transactionId === 0) return`). The cycle then
+   waits its full 45s and **retires the charge point despite a valid
+   confirmation**, so the offered load drops — visibly, in the `retired`
+   column, but for the wrong reason. Tracked as
+   [#328](https://github.com/shiv3/ocpp-cp-simulator/issues/328); the fix
+   belongs to the daemon's event contract, not to this script.
+
    **The hold runs from when the transaction began**, not from when its id was
    confirmed. On OCPP 1.6 the cycle waits for the **CSMS-assigned** transaction
    id before stopping, because `OCPPMessageHandler.sendStopTransaction`
@@ -363,6 +373,23 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    registered a moment later. And the wait for in-flight cycles uses _the
    cycle's own bound_ — the authorization timeout plus, on 1.6, the assigned-id
    timeout — never a smaller number chosen at the teardown site.
+
+   The same invariant governs the **bookkeeping**, not only the waiting. A
+   charge point leaves the open-transaction set when its stop is known to be on
+   the wire, not when the RPC acked — otherwise the set says "stopped" while
+   the wait says "queued", and teardown drops the charge point from the close
+   list and can delete it, and its serialized queue, before the CSMS sees the
+   stop. Acked-but-unverified stops are reconciled against the daemon's sent
+   counter at teardown and closed again if it has not caught up.
+
+   And the bound teardown waits for is now **complete**, enumerated stage by
+   stage rather than incremented when a gap is found. A cycle awaits in exactly
+   four places: the `start_transaction` RPC (35s, the pool's whole-call
+   deadline), the confirmation wait (15s on 2.x, 45s on 1.6), the hold, and the
+   `stop_transaction` RPC (35s again). Arming is synchronous and the next cycle
+   is scheduled after the body returns, so there is no fifth. The bound had
+   omitted both RPC stages, leaving it short by 70s — long enough for an
+   already-emitted start or stop to take effect after the fleet was deleted.
 
    These are all on the preventable side of the invariant split below: nothing
    can detect the violation afterwards, so only the ordering protects them.

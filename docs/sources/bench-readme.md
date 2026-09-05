@@ -176,8 +176,17 @@ a backlogged serializer has its queued CALL discarded with the charge point. A
 the `cp.create_many` still running rather than deleting provisional ids whose
 charge points appear a moment later. And the wait for in-flight cycles uses the
 cycle's own bound — the authorization timeout plus, on 1.6, the assigned-id
-timeout — never a smaller number chosen at the teardown site. All three are on
-the preventable side of the split below, so only the ordering protects them.
+timeout — never a smaller number chosen at the teardown site.
+
+The same invariant governs the bookkeeping as well as the waiting: a charge
+point leaves the open-transaction set when its stop is known to be on the wire,
+not when the RPC acked, because otherwise the set says "stopped" while the wait
+says "queued" and teardown can delete the charge point, and its serialized
+queue, before the CSMS sees the stop. And the bound is now enumerated rather
+than incremented — a cycle awaits in exactly four places (the start RPC, the
+confirmation wait, the hold, the stop RPC) and nowhere else, which is what
+makes it complete rather than merely larger than last time. All of this is on
+the preventable side of the split below, so only the ordering protects it.
 
 **Open transactions are closed before deletion, and that is a third
 invariant.** `stop()` only cancels timers, and roughly half an active fleet is
@@ -197,6 +206,16 @@ unrecognised — the cycle waited its full timeout and retired the charge point
 despite a valid confirmation. The first emission after arming is the local
 start, the second the assigned id whatever it carries, and "no id arrived" is
 `null`, which `0` could not express; `null` alone triggers retirement.
+
+**Known limitation, not fixable from the bench.** Against a CSMS that assigns
+`transactionId: 0` the second emission never arrives: `CLIChargePointService`
+suppresses the `transactionIdChange` it would come from
+(`src/cli/service.ts`, `if (transactionId === 0) return`). The cycle waits its
+full bound and retires the charge point despite a valid confirmation, so the
+offered load drops — visibly in the `retired` column, but for the wrong reason.
+Tracked as issue #328: the fix belongs to the daemon's event contract, and the
+`transactionIdChange` setter is reached only from the CALLRESULT handlers, so
+removing that guard would add an emission solely in the assigned-zero case.
 
 **The stop waits for the assigned transaction id.** On OCPP 1.6
 `transaction_started` is emitted twice — locally with the placeholder id `0`,

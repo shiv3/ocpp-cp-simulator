@@ -29,6 +29,7 @@ import {
   benchIdTag,
   cleanupIdsAfterBatch,
   createFailureHint,
+  cycleBoundMs,
   cyclePeriodSec,
   daemonIsLocal,
   diffHistogram,
@@ -474,6 +475,10 @@ interface Preflight {
    *  target and connected count is relative to it, so a run with
    *  `--allow-existing` still reports its own fleet rather than the daemon's. */
   readonly baseline: FleetGauge;
+  /** `StopTransaction` frames this daemon had already sent before the run
+   *  started. Teardown compares against it to tell whether every stop it had
+   *  acked has actually reached the wire. */
+  readonly stopsSentAtStart: number;
 }
 
 async function preflight(
@@ -543,6 +548,7 @@ async function preflight(
   return {
     daemonVersion: health.version ?? "unknown",
     baseline: fleetGauge(samples),
+    stopsSentAtStart: stopTransactionsSent(samples),
   };
 }
 
@@ -712,6 +718,10 @@ function armLoad(
   /** Charge points believed to have a transaction open right now. Teardown
    *  closes these before deleting anything — see {@link closeOpenTransactions}. */
   openTransactions: () => string[];
+  /** Charge points whose stop was acked but not yet seen on the wire. */
+  stopsAwaitingWire: () => string[];
+  /** Stops this handle has had acked, for the wire comparison. */
+  stopsAcked: () => number;
   /** The longest a single cycle of this handle may legitimately take. */
   cycleBoundMs: () => number;
   /** Wait, up to `budgetMs`, for cycles already in flight when `stop()` landed
@@ -729,6 +739,13 @@ function armLoad(
    *  whose ack never came may still have opened a transaction at the CSMS, and
    *  a redundant stop is a no-op while a missing one is a dangling session. */
   const openTransactions = new Set<string>();
+  /** Charge points whose `stop_transaction` was acked but whose
+   *  `StopTransaction` is not yet known to have reached the wire. Teardown
+   *  resolves these against the daemon's sent counter rather than assuming
+   *  the ack settled them. */
+  const stopsAwaitingWire = new Set<string>();
+  /** How many stops this handle has had acked, for that comparison. */
+  let stopsAcked = 0;
   /** Global index per charge point, for its idTag. */
   const idTagOf = new Map<string, string>(
     cpIds.map((cpId, i) => [cpId, benchIdTag(runId, startIndex + i)]),
@@ -929,7 +946,16 @@ function armLoad(
       // every later cycle for this charge point is refused as a duplicate.
       try {
         await pool.rpc("stop_transaction", { connector: 1 }, cpId);
+        // Moved, not dropped. The ack says the local service *queued*
+        // `StopTransaction`, not that it reached the CSMS — the same
+        // distinction the teardown wait already makes by watching the sent
+        // counter. Dropping the charge point here made the bookkeeping say
+        // "stopped" while the wait said "queued", so under the backlog this
+        // tool exists to create teardown could delete the charge point, and
+        // its serialized queue, before the CSMS ever saw the stop.
         openTransactions.delete(cpId);
+        stopsAwaitingWire.add(cpId);
+        stopsAcked++;
       } catch (err) {
         // Left in `openTransactions` on purpose: a stop that failed is a
         // transaction still open, and teardown must try again.
@@ -960,10 +986,12 @@ function armLoad(
     lateHolds: () => lateHolds,
     retired: () => retired,
     openTransactions: () => [...openTransactions],
-    /** The bound this handle's own cycles use, so teardown can wait exactly as
-     *  long as a cycle is allowed to take rather than inventing a smaller
-     *  number. See the teardown ordering invariant. */
-    cycleBoundMs: () => confirmTimeoutMs + holdMs,
+    stopsAwaitingWire: () => [...stopsAwaitingWire],
+    stopsAcked: () => stopsAcked,
+    /** The bound this handle's cycles work to, enumerated stage by stage in
+     *  `cycleBoundMs`. Teardown asks for it rather than choosing a number, so
+     *  the bound cannot drift from the operation it describes. */
+    cycleBoundMs: () => cycleBoundMs(confirmTimeoutMs, holdMs),
     settle: async (budgetMs: number): Promise<void> => {
       if (inFlight.size === 0) return;
       // Bounded: a cycle blocked on a confirmation that will never arrive must
@@ -1252,7 +1280,10 @@ async function main(): Promise<void> {
   process.stderr.write(
     `[bench] run id ${runId}: charge points are created as ${benchIdPattern(runId)}\n`,
   );
-  const { daemonVersion, baseline } = await preflight(opts, runId);
+  const { daemonVersion, baseline, stopsSentAtStart } = await preflight(
+    opts,
+    runId,
+  );
 
   process.stderr.write(machineInfo(opts.daemonUrl, daemonVersion) + "\n");
   process.stderr.write(
@@ -1328,6 +1359,8 @@ async function main(): Promise<void> {
     lateHolds: () => number;
     retired: () => number;
     openTransactions: () => string[];
+    stopsAwaitingWire: () => string[];
+    stopsAcked: () => number;
     cycleBoundMs: () => number;
     settle: (budgetMs: number) => Promise<void>;
   }> = [];
@@ -1408,9 +1441,31 @@ async function main(): Promise<void> {
       // Then close what is open. `stop()` cancelled the timers that would have
       // sent these, and a deleted charge point can no longer end its session,
       // so without this the CSMS is left holding them.
+      // Which charge points still need a closing stop. Never-acked ones
+      // always do. Acked-but-unverified ones do too *unless* the daemon's
+      // sent counter shows every stop this run acked has reached the wire —
+      // the bookkeeping and the wait now answer "stopped" the same way.
+      const ackedTotal = loads.reduce((sum, l) => sum + l.stopsAcked(), 0);
+      const sentNow = await stopsSentOrNaN(
+        opts.daemonUrl,
+        opts.daemonBasicAuth,
+      );
+      const ackedStopsAreOnTheWire =
+        !Number.isNaN(sentNow) && sentNow >= stopsSentAtStart + ackedTotal;
+      const needClosing = loads.flatMap((l) =>
+        ackedStopsAreOnTheWire
+          ? l.openTransactions()
+          : [...l.openTransactions(), ...l.stopsAwaitingWire()],
+      );
+      if (!ackedStopsAreOnTheWire && ackedTotal > 0) {
+        process.stderr.write(
+          `[bench] not every acked stop has reached the wire yet; closing the ` +
+            `unverified ones too rather than deleting over a queued CALL.\n`,
+        );
+      }
       await closeOpenTransactions(
         pool,
-        loads.flatMap((l) => l.openTransactions()),
+        needClosing,
         opts.daemonUrl,
         opts.daemonBasicAuth,
       );

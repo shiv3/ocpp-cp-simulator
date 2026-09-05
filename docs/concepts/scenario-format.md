@@ -332,7 +332,12 @@ acceptance at `maxChargingPowerKw`, 230 V, single phase.
 `chargingCurve` is normalized at every boundary it can enter through (sorted
 by `socPercent`, points outside `0-100` / `0-1` dropped) — a scenario file may
 list points in any order, and interpolation can otherwise assume a monotone
-axis. A curve is clamped to its first and last point rather than
+axis. "Every boundary" includes the **upload** path, not only the domain:
+`Connector`'s `evSettings` setter protects what the simulator runs on, but a
+scenario uploaded through the editor or the scenario library is written to
+storage — and re-exported from it — without passing that setter, so the
+normalization also runs where an upload is retargeted to its connector, the
+one function both upload paths share. A curve is clamped to its first and last point rather than
 extrapolated: a curve that starts at 20% says nothing about 10%, and inventing
 a number there would be worse than admitting it.
 
@@ -660,7 +665,13 @@ transaction with no `initialSoc` of its own falls back to
 `evSettings.initialSoc` like any other. What decides is whether a transaction
 was **running** when the value was written, not where the value came from:
 written mid-session it describes the car then charging, and is replaced when
-the next session begins. Running means begun and not yet stopped, which is not
+the next session begins. Replaced by the fallback when there is nothing to
+replace it with, too: if neither the transaction nor `evSettings` names an
+opening SoC, the leftover is cleared rather than kept, so the session opens on
+the same `0` that `socFromMeterValue` and the curve resolve an absent
+`initialSoc` to. Keeping it there was the leftover surviving by omission — for
+one scheduler interval with meter/SoC sync on, and for the whole session with
+it off. Running means begun and not yet stopped, which is not
 the same as a transaction object being attached — a rejected `StartTransaction`
 leaves one attached with a stop time already stamped, and the connector is idle
 from that moment, so an SoC entered before retrying by hand survives into the

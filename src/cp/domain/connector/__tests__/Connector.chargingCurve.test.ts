@@ -1186,3 +1186,117 @@ describe("a claimed pending SoC becomes the session's baseline (#301)", () => {
     expect(connector.soc).toBeCloseTo(21, 6);
   });
 });
+
+describe("a session with no opening SoC anywhere starts from the fallback (#301)", () => {
+  /**
+   * The sibling of the leftover-SoC rule above, for the case where there is
+   * nothing to replace the leftover *with*. `openSessionSoc` computed
+   * `transaction.initialSoc ?? evSettings.initialSoc` and returned when both
+   * were absent, keeping the previous session's SoC — while every other
+   * derivation resolves the absent case to `0`
+   * (`socFromMeterValue` and `resolveSocForCurve` both end `?? 0`). The curve
+   * and the auto-stop therefore ran on the finished session's battery: for one
+   * interval with meter/SoC sync on, and for the whole session with it off.
+   *
+   * `EVSettings.initialSoc` is typed `number`, so this state is reached the
+   * way production reaches it — `applyDefaultEvSettings`, which replaces the
+   * settings wholesale and is fed by the control plane's
+   * `ev_settings.apply_default` (validated only as `z.object({ settings:
+   * OBJ() })`). The cast below is the evidence that the type is not enforced
+   * at that boundary, not a convenience.
+   */
+  function settingsWithoutInitialSoc(connector: Connector): void {
+    const { initialSoc: _dropped, ...rest } = connector.evSettings;
+    void _dropped;
+    connector.applyDefaultEvSettings(
+      rest as unknown as typeof connector.evSettings,
+    );
+  }
+
+  it("clears a leftover SoC when neither the transaction nor the settings name one", () => {
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+
+    // A finished session leaves its SoC behind, as it is meant to.
+    connector.beginTransaction(transaction(0, 40));
+    connector.soc = 82;
+    connector.stopTransaction();
+    expect(connector.soc).toBe(82);
+
+    settingsWithoutInitialSoc(connector);
+    const socEvents: (number | null)[] = [];
+    connector.events.on("socChange", (e) => socEvents.push(e.soc));
+
+    // The next session names no SoC of its own, and neither do the settings.
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBeNull();
+    expect(socEvents).toContain(null);
+  });
+
+  it("evaluates the curve at the fallback, not at the finished session's SoC", () => {
+    // The behavioural consequence: a curve that has tapered to nothing above
+    // 90% must not throttle a new session that opens with no stated SoC.
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.evSettings = {
+      ...connector.evSettings,
+      batteryCapacityKwh: 50,
+      maxChargingPowerKw: 100,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0 },
+        { socPercent: 100, powerFraction: 0 },
+      ],
+    };
+    connector.status = OCPPStatus.Charging;
+
+    connector.beginTransaction(transaction(0, 40));
+    connector.soc = 95;
+    connector.stopTransaction();
+
+    settingsWithoutInitialSoc(connector);
+    connector.beginTransaction(transaction(0));
+
+    // At the fallback SoC of 0 the curve is wide open, so a full-power sample
+    // is reported. Left at 95 it would have been throttled to nothing.
+    const samples = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    );
+    const power = Number(
+      samples.find((s) => s.measurand === "Power.Active.Import")?.value ?? "0",
+    );
+    expect(power).toBeGreaterThan(0);
+  });
+
+  it("emits nothing when there was no leftover to clear", () => {
+    // Bookkeeping, not an announcement: a connector with no SoC stays at null
+    // and no `socChange` is published.
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    settingsWithoutInitialSoc(connector);
+
+    const socEvents: (number | null)[] = [];
+    connector.events.on("socChange", (e) => socEvents.push(e.soc));
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBeNull();
+    expect(socEvents).toHaveLength(0);
+  });
+
+  it("still honours an opening SoC when the settings do name one", () => {
+    // The guard must not swallow the normal path.
+    const connector = makeConnector();
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction(0, 40));
+    connector.soc = 82;
+    connector.stopTransaction();
+
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(connector.evSettings.initialSoc);
+  });
+});

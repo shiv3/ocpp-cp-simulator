@@ -1296,6 +1296,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           applied.nodes,
           applied.edges,
         );
+        // `evSettings` are already normalized here: the curve is validated by
+        // `retargetScenarioToConnector`, the one function every upload path
+        // passes through, so what is persisted below carries the same curve
+        // the editor state shows (#301).
         const scenarioToPersist: ScenarioDefinition = {
           ...applied,
           ...serializedGraph,

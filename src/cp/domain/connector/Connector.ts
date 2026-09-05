@@ -1103,7 +1103,36 @@ export class Connector {
       return;
     }
     const opening = transaction.initialSoc ?? this._evSettings.initialSoc;
-    if (opening === undefined) return;
+    if (opening === undefined) {
+      // No opening value anywhere, and the SoC on hand belongs to a session
+      // that has ended — so there is nothing to replace it *with*, and keeping
+      // it would open the transaction on the previous session's battery, which
+      // is exactly what this method exists to prevent. Every other derivation
+      // already treats the absent case as `0`: `socFromMeterValue` computes
+      // `transaction.initialSoc ?? evSettings.initialSoc ?? 0`, and
+      // `resolveSocForCurve` falls back the same way. Clearing to `null` makes
+      // the curve and the auto-stop read that same fallback from the first
+      // tick instead of the leftover — with meter/SoC sync on the leftover
+      // survived exactly one interval, the one that sets the opening power,
+      // and with sync off it survived the whole session (#301).
+      //
+      // `null`, not `0`: "not reported" is what we know, and every reader
+      // already resolves it to `0`. This also makes the `undefined` case agree
+      // with a JSON `null` `initialSoc`, which reaches the assignment below
+      // and clears the value already.
+      //
+      // `EVSettings.initialSoc` is typed `number`, so TypeScript believes this
+      // is unreachable. It is not: `applyDefaultEvSettings` replaces the
+      // settings wholesale, and the control plane's
+      // `ev_settings.apply_default` validates only `z.object({ settings:
+      // OBJ() })` before casting — so a client that omits `initialSoc` lands
+      // here. (`applyEvSettingsOverride` merges and cannot.)
+      if (this.socPercent !== null) {
+        this.socPercent = null;
+        this.eventsEmitter.emit("socChange", { soc: null });
+      }
+      return;
+    }
     if (this.socPercent === opening) return;
     this.socPercent = opening;
     this.eventsEmitter.emit("socChange", { soc: opening });

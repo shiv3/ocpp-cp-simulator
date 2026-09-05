@@ -361,7 +361,13 @@ export class Connector {
    * therefore sees one per real crossing, not one per sample. Contrast
    * {@link activePhaseCount} below, which is side-effect-free outright because
    * it has no boundary state to latch — the two are safe for the same reason
-   * stated two different ways (#301). Mid-tick crossings of a period
+   * stated two different ways (#301).
+   *
+   * Idempotent against *repetition* is not the same as safe in every state,
+   * and the difference cost a real defect: a crossing seen while the connector
+   * is `Preparing` cannot move it anywhere, so latching it there consumed the
+   * only edge that would ever be announced. The announcement is therefore
+   * skipped entirely outside `Charging` / `SuspendedEVSE`, latch included. Mid-tick crossings of a period
    * boundary inside a Recurring or Absolute profile are picked up this way
    * without needing an extra timer.
    */
@@ -440,6 +446,23 @@ export class Connector {
    *  {@link currentScheduleLimitWatts}'s note on why repeated calls at one
    *  boundary state emit once. */
   private announceScheduleCrossing(watts: number): void {
+    // Only while the connector is in a state the crossing can move it out of.
+    // The ChargePoint listener toggles Charging ↔ SuspendedEVSE and does
+    // nothing otherwise, so latching a crossing seen while `Preparing` — a
+    // scenario's first MeterValue lands there, before StartTransaction is
+    // accepted — consumed the one edge that would ever be reported: every
+    // later resolve found the latch already set and stayed silent, leaving the
+    // connector reporting Charging with its meter paused. The latch is
+    // idempotent against repetition (see {@link currentScheduleLimitWatts}),
+    // which is a different thing from being safe against a crossing nobody
+    // could act on. Leaving the latch untouched here means the first resolve
+    // that *can* act announces it (#301).
+    if (
+      this.statusValue !== OCPPStatus.Charging &&
+      this.statusValue !== OCPPStatus.SuspendedEVSE
+    ) {
+      return;
+    }
     const paused = watts === 0;
     const isCapped = watts !== Infinity;
     if (
@@ -1003,6 +1026,26 @@ export class Connector {
   private openSessionSoc(transaction: Transaction): void {
     if (this.socAwaitsNextTransaction) {
       this.socAwaitsNextTransaction = false;
+      // Keeping the value is not enough: it also has to become what this
+      // session computes from. `socFromMeterValue` derives SoC as
+      // `transaction.initialSoc ?? evSettings.initialSoc` plus delivered
+      // energy, so with meter/SoC sync on — the default — the very first meter
+      // update recomputed from the EV default and overwrote the operator's
+      // number. Owning the value and being the baseline are different
+      // questions, and answering only the first left the curve and the
+      // auto-stop running on a figure nobody entered (#301). Adopting it here
+      // makes every derivation agree by construction, and it rides along in
+      // the persisted transaction so a restart keeps the same answer.
+      // Unconditionally, not only when the transaction named none: a claimed
+      // pending value *is* this session's opening SoC, so the two must not be
+      // able to disagree. On the real path they never do —
+      // `ChargePoint.startTransaction` writes its `initialSoc` through the
+      // `soc` setter moments before this runs, so the assignment is a no-op —
+      // and where they could, the connector's own value is the later statement
+      // and the one the operator can see.
+      if (this.socPercent !== null) {
+        transaction.initialSoc = this.socPercent;
+      }
       return;
     }
     const opening = transaction.initialSoc ?? this._evSettings.initialSoc;

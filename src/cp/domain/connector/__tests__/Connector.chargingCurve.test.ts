@@ -1077,3 +1077,112 @@ describe("a rejected start leaves the connector idle for SoC purposes (#301)", (
     expect(connector.soc).toBe(20);
   });
 });
+
+describe("a claimed pending SoC becomes the session's baseline (#301)", () => {
+  /**
+   * Owning a value and being what the session computes from are different
+   * questions. `socFromMeterValue` derives SoC as
+   * `transaction.initialSoc ?? evSettings.initialSoc` plus delivered energy,
+   * so with meter/SoC sync on — the default — the first meter update
+   * recomputed from the EV default and overwrote the number the operator had
+   * typed, however correctly the ownership rules had kept it.
+   */
+  function syncedConnector(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      batteryCapacityKwh: 10,
+      maxChargingPowerKw: 100,
+      initialSoc: 20,
+      targetSoc: 100,
+    };
+    // Sync left ON: this is the default, and the path the defect lived on.
+    connector.status = OCPPStatus.Charging;
+    return connector;
+  }
+
+  function tick(connector: Connector, wh: number): void {
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: wh,
+    });
+    vi.advanceTimersByTime(1_000);
+    connector.stopAutoMeterValue();
+  }
+
+  it("survives the first synced meter update", () => {
+    vi.useFakeTimers();
+    const connector = syncedConnector();
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+
+    // 100 Wh into a 10 kWh battery is one percent.
+    tick(connector, 100);
+    expect(connector.soc).toBeCloseTo(96, 6);
+  });
+
+  it("records the claimed value on the transaction, so a restart keeps it", () => {
+    const connector = syncedConnector();
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+    expect(connector.transaction!.initialSoc).toBe(95);
+    expect(connector.snapshotRuntime().transaction?.initialSoc).toBe(95);
+  });
+
+  it("agrees with what the curve is evaluated at", () => {
+    // The point of adopting rather than merely keeping: every derivation now
+    // reads the same number.
+    vi.useFakeTimers();
+    const connector = syncedConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0 },
+        { socPercent: 100, powerFraction: 0 },
+      ],
+    };
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+    tick(connector, 100);
+
+    // Past the cliff on both readings, so power is zero either way round.
+    expect(connector.soc).toBeGreaterThan(90);
+    expect(
+      Number(
+        buildSampledValues(
+          connector,
+          ["Power.Active.Import"],
+          "Sample.Periodic",
+        ).find((s) => s.measurand === "Power.Active.Import")?.value ?? "0",
+      ),
+    ).toBe(0);
+  });
+
+  it("leaves an explicit initialSoc alone on the real start path", () => {
+    // `ChargePoint.startTransaction` writes its `initialSoc` through the `soc`
+    // setter and then begins, so the adoption is a no-op there.
+    vi.useFakeTimers();
+    const connector = syncedConnector();
+    connector.soc = 30;
+    connector.beginTransaction(transaction(0, 30));
+    expect(connector.transaction!.initialSoc).toBe(30);
+    tick(connector, 100);
+    expect(connector.soc).toBeCloseTo(31, 6);
+  });
+
+  it("still opens a leftover session on the EV default", () => {
+    // Nothing pending: the previous session's value is replaced, and the
+    // baseline is the EV default rather than anything adopted.
+    vi.useFakeTimers();
+    const connector = syncedConnector();
+    connector.beginTransaction(transaction(0));
+    connector.stopTransaction();
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+    tick(connector, 100);
+    expect(connector.soc).toBeCloseTo(21, 6);
+  });
+});

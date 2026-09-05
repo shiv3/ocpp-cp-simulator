@@ -607,25 +607,14 @@ the two took the cap from one period and the phase divisor from the next, so a
 10 A three-phase period capped at 6900 W and was then divided as one phase and
 reported as 30 A. They are resolved together from a single instant.
 
-**A transaction opens on its own SoC, never the previous session's — across a
-daemon restart too.** Whether the stored SoC was derived from the energy
-register or set explicitly is persisted alongside it (`connector_runtime`
-schema v11), because that distinction is what decides which of the two a new
-transaction replaces. Rows written before v11 carry no value and are read as
-"not derived", which is how those builds behaved. The auto-meter's own cursors
-are deliberately _not_ persisted: the sub-watt-hour carry is worth at most half
-a watt-hour and resets when a scheduler starts, and the curve baseline is
-re-captured from the restored register when the strategy restarts — storing a
-baseline against a register that has since moved would be worse than
-recomputing it.
-
 **A transaction opens on its own SoC, never the previous session's.** Stopping
 a transaction deliberately leaves `socPercent` in place — disconnect/reconnect
 paths and post-boot StatusNotifications describe the connector with it — so a
 connector that finished at 95% still reads 95% when the next car plugs in.
-Starting a transaction replaces a **meter-derived** SoC with this session's
-opening value, `transaction.initialSoc ?? evSettings.initialSoc`, which is
-what `socFromMeterValue` computes on the first meter tick anyway. Without that,
+Starting a transaction replaces any SoC that is **not waiting for it** —
+derived from the meter, or set while an earlier session was running — with this
+session's opening value, `transaction.initialSoc ?? evSettings.initialSoc`,
+which is what `socFromMeterValue` computes on the first meter tick anyway. Without that,
 the charging curve was evaluated against the previous battery for exactly one
 scheduler interval — the interval that sets the session's opening power — and
 for the whole session when meter/SoC sync is off, since nothing would correct
@@ -645,7 +634,24 @@ retry. Whether a value is still waiting is
 **persisted with it** (`connector_runtime.soc_awaits_next_transaction`, schema
 v12) rather than inferred on restore: a session that has ended leaves a value
 that is session-owned and transaction-less, which nothing else in the snapshot
-distinguishes from one set while the connector was idle.
+distinguishes from one set while the connector was idle. Rows written before
+v12 carry no value and are read as "not waiting", so the next transaction opens
+on its own SoC. The auto-meter's own cursors are deliberately _not_ persisted:
+the sub-watt-hour carry is worth at most half a watt-hour and resets when a
+scheduler starts, and the curve offset is re-derived when the strategy
+restarts — storing an offset against a register that has since moved would be
+worse than recomputing it.
+
+**A claimed SoC becomes the session's baseline, not just its value.** Keeping
+an idle-set SoC is only half of honouring it: `socFromMeterValue` derives SoC
+as `transaction.initialSoc ?? evSettings.initialSoc` plus delivered energy, so
+with meter/SoC sync on — the default — the first meter update would recompute
+from the EV default and overwrite the number the operator entered. Claiming a
+pending SoC therefore adopts it as the transaction's `initialSoc`, so every
+derivation reads one number: the meter-to-SoC conversion, its inverse used by
+the target-SoC auto-stop, and the SoC the charging curve is evaluated at. Being
+owned and being derived from are different questions, and answering only the
+first left the session running on a figure nobody entered.
 
 **The curve is evaluated at the transaction's (or EV settings') `initialSoc`
 before the first synced SoC, not 0%.** `connector.soc` is `null` until the

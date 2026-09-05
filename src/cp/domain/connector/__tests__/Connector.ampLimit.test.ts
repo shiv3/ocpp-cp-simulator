@@ -905,3 +905,84 @@ describe("the cap and the phase count come from one instant (#301)", () => {
     }
   });
 });
+
+describe("a pause crossing is not latched where nothing can act on it (#301)", () => {
+  /**
+   * The `scheduleLimitChange` listener toggles Charging ↔ SuspendedEVSE and
+   * does nothing in any other state. A scenario's first MeterValue lands while
+   * the connector is still `Preparing`, before StartTransaction is accepted —
+   * so a `limit: 0` profile already in force latched its crossing there, the
+   * listener could not act, and every later resolve found the latch set and
+   * stayed silent. The connector then reported Charging with its meter paused.
+   *
+   * Being idempotent against repetition, which the latch is, is a different
+   * property from being safe in a state where the edge cannot be used.
+   */
+  function pausedProfile(): ActiveChargingProfile {
+    return {
+      chargingProfileId: 308,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 0 }],
+    };
+  }
+
+  function preparingConnector(): {
+    connector: Connector;
+    events: { paused: boolean; watts: number }[];
+  } {
+    const connector = makeConnector();
+    connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: 350 };
+    connector.status = OCPPStatus.Preparing;
+    connector.beginTransaction(transaction());
+    connector.addChargingProfile(pausedProfile());
+    const events: { paused: boolean; watts: number }[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+    return { connector, events };
+  }
+
+  it("announces the pause once the connector reaches Charging, not before", () => {
+    const { connector, events } = preparingConnector();
+
+    // The scenario's usual MeterValue, sent while still Preparing.
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+    expect(events).toHaveLength(0);
+
+    // StartTransaction accepted.
+    connector.status = OCPPStatus.Charging;
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.paused).toBe(true);
+  });
+
+  it("does not re-announce on every later sample once Charging", () => {
+    const { connector, events } = preparingConnector();
+    connector.status = OCPPStatus.Charging;
+    for (let i = 0; i < 4; i++) {
+      buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+    }
+    expect(events).toHaveLength(1);
+  });
+
+  it("announces a resume from SuspendedEVSE", () => {
+    // The other state the listener acts in, so a crossing seen there must
+    // still be announced.
+    const { connector, events } = preparingConnector();
+    connector.status = OCPPStatus.SuspendedEVSE;
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.paused).toBe(true);
+
+    connector.setChargingProfiles([]);
+    connector.addChargingProfile({
+      ...pausedProfile(),
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 7000 }],
+    });
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(false);
+  });
+});

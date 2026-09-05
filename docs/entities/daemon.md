@@ -347,7 +347,33 @@ The rules, in the order they bite:
 - **Watching degrades, it never fails to start.** `fs.watch` is unreliable on
   network mounts and some container filesystems. When it cannot be established
   the daemon logs one line saying watching is unavailable and carries on
-  unwatched, rather than refusing to start over a convenience.
+  unwatched, rather than refusing to start over a convenience. Degraded is
+  never _worse_ than unwatched: a charge point being reconciled is measured
+  against the **file on disk**, never against the bytes of the last reload that
+  landed. When the two disagree the file is newer — the watch may be
+  unavailable, or its debounce may simply not have run — so a charge point
+  created from a pool that has since changed keeps the tags its own `cp.create`
+  read, instead of having them overwritten and persisted with an older list that
+  nothing would ever re-read.
+- **A ConfigMap-mounted file reloads like any other.** On a Kubernetes projected
+  volume the tracked files are stable symlinks and an update swaps the
+  directory's `..data` symlink, so the filesystem event names `..data` and never
+  the file. A **rename naming something not tracked re-checks every tracked file
+  in that directory**, which covers that rotation and, locally, an editor that
+  writes a temp file and renames it into place. A `change` on an unrelated
+  neighbour is still ignored, so a shared directory costs nothing. The re-check
+  is debounced and content-compared, so a file that did not change produces no
+  event.
+- **Known limitation: a watch lives as long as the directory it was opened on.**
+  `fs.watch` binds to an inode. If the _directory_ holding a watched file is
+  itself replaced — deleted and recreated, or a bind-mount swapped underneath —
+  the watcher stays open, reports no error, and delivers nothing. It is the one
+  remaining shape in which watching looks healthy and is not, and it cannot be
+  distinguished from a quiet file without polling. Two deployments meet it: a
+  `subPath` ConfigMap mount, where Kubernetes does not propagate updates at all
+  and there is nothing to watch in the first place, and a re-created mount. Mount
+  the whole volume rather than a `subPath` and the projected-volume rotation
+  above works.
 
 Every reload pushes a `file-reload` event on the control plane carrying
 `target`, `path`, `cpId`, `connectorId`, `scenarioId` and an `outcome` of

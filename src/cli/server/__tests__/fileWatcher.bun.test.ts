@@ -214,6 +214,30 @@ describe("FileWatcher (#314)", () => {
     expect(lines).toHaveLength(1);
   });
 
+  it("re-checks tracked files when a name it does not track is renamed", async () => {
+    // Kubernetes projected volumes (ConfigMap, Secret) mount the tracked JSON
+    // files as stable symlinks and rotate the directory's `..data` symlink on
+    // update, so the event names `..data` and never the basename registered
+    // here. Dropping it meant reloads silently stopped for the most common way
+    // this feature is deployed — watcher open, no degradation reported, nothing
+    // delivered. The same branch covers an editor that writes a temp file and
+    // renames it into place, where the event can name the temp file instead.
+    const fake = new FakeFs();
+    let calls = 0;
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(FILE, () => {
+      calls += 1;
+    });
+
+    fake.emit(DIR, "rename", "..data");
+    await sleep(40);
+    expect(calls).toBe(1);
+
+    fake.emit(DIR, "rename", ".tags.json.swp");
+    await sleep(40);
+    expect(calls).toBe(2);
+  });
+
   it("closes the underlying watcher once the last subscriber unsubscribes", async () => {
     const fake = new FakeFs();
     let calls = 0;

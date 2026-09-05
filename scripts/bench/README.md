@@ -253,6 +253,15 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    and got 8 used to print `N=10, connected=8, unsettled=0` — latency
    attributed to a fleet that never existed. Now it prints `N=8, uncreated=2`.
 
+   The two emissions are told apart by **order, not by the value they carry**.
+   OCPP 1.6's `transactionId` is schema-valid for any integer, zero included,
+   so testing `transactionId === 0` for "still the placeholder" meant a CSMS
+   that assigns 0 was never recognised — the cycle waited its full timeout and
+   retired the charge point despite a valid confirmation. The first emission
+   after arming is this cycle's local start; the second is the assigned id,
+   whatever number it carries. "No id arrived" is reported as `null`, which `0`
+   could not express, and `null` alone triggers retirement.
+
    **The hold runs from when the transaction began**, not from when its id was
    confirmed. On OCPP 1.6 the cycle waits for the **CSMS-assigned** transaction
    id before stopping, because `OCPPMessageHandler.sendStopTransaction`
@@ -339,6 +348,24 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    daemon did not register it: `createOneCp` throws before creating anything on
    an id collision, and the blueprint-defaults path rolls the charge point back
    before reporting it.
+
+   **Teardown never treats an acknowledgement as a completion.** That is the
+   invariant behind the three rules below, and every teardown bug in this tool
+   has been one violation of it: _teardown may not consider an operation
+   finished before the bound that operation itself uses._ A `stop_transaction`
+   ack says the daemon **queued** `StopTransaction`, not that it sent it, so
+   teardown waits for the frame to actually leave (watching
+   `ocppcp_ocpp_messages_total`) before deleting — otherwise a backlogged
+   serializer, the condition this tool exists to create, has its queued CALL
+   discarded along with the charge point. A `Promise.race` that rejects on
+   abort does not cancel its loser, so teardown awaits the `cp.create_many`
+   still running rather than deleting provisional ids whose charge points are
+   registered a moment later. And the wait for in-flight cycles uses _the
+   cycle's own bound_ — the authorization timeout plus, on 1.6, the assigned-id
+   timeout — never a smaller number chosen at the teardown site.
+
+   These are all on the preventable side of the invariant split below: nothing
+   can detect the violation afterwards, so only the ordering protects them.
 
    **Open transactions are closed before anything is deleted.** `stop()` only
    cancels timers, and on the active axis roughly half the fleet is inside its
@@ -569,7 +596,12 @@ a spare machine and a CSMS.
 - **Credentials are redacted from stderr, not only from `--out`.** Userinfo in
   `--csms-url` and `--daemon-url` is replaced with `***` in the progress lines,
   the hardware block and every error message, because stderr commonly ends up
-  in a CI log. That includes a URL too malformed to parse — `ws://user:secret@`
+  in a CI log — and the **caught exception text** as well as the URL beside it,
+  because a failed `fetch` commonly quotes the original URL verbatim, so
+  redacting one and appending the other put the password straight back on the
+  line. Every error sink applies it, including the top-level one, since a
+  socket.io connect error can carry the daemon URL. That includes a URL too
+  malformed to parse — `ws://user:secret@`
   is exactly the shape that makes `new URL` throw, and the redaction is a regex
   over the raw text so it does not need a valid URL to work.
 - `/metrics` is scraped every 500ms during settle-wait. That is one bounded

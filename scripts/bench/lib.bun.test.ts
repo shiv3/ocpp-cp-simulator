@@ -53,6 +53,7 @@ import {
   row,
   sleep,
   socketPoolSize,
+  stopTransactionsSent,
   staggerOffsetsMs,
   START_CONFIRM_MARGIN_SEC,
   START_CONFIRM_TIMEOUT_MS,
@@ -1168,33 +1169,52 @@ describe("transaction-start tracking (#302)", () => {
     expect(await armed).toMatchObject({ started: true, transactionId: 4242 });
   });
 
-  it("ignores a previous cycle's late conf instead of confirming this one", async () => {
-    // The round-three requirement, which the fix above must not undo: a
-    // non-zero id arriving before this waiter has seen its own local start can
-    // only belong to an earlier cycle.
+  it("takes the emissions in order, not by the value they carry", async () => {
+    // Phases are explicit now. The first emission after arming is this cycle's
+    // local start whatever id it carries, and the second is the assigned id
+    // whatever id *it* carries. Nothing tests `transactionId === 0`, because
+    // zero is a legal assignment.
     const starts = new TransactionStarts();
     const armed = starts.arm("CP-A", 5_000, true);
-    starts.confirm("CP-A", 99); // straggler from the cycle before
+    starts.confirm("CP-A", 0);
     let settled = false;
     void armed.then(() => {
       settled = true;
     });
     await sleep(20);
     expect(settled).toBe(false);
-    // This cycle's own pair still settles it, with its own id.
-    starts.confirm("CP-A", 0);
     starts.confirm("CP-A", 7);
     expect(await armed).toMatchObject({ started: true, transactionId: 7 });
+  });
+
+  it("recognises a CSMS that assigns transaction id zero", async () => {
+    // OCPP 1.6's transactionId is schema-valid for any integer. Treating 0 as
+    // "still the placeholder" meant such a CSMS was never recognised: the
+    // cycle waited its full timeout and retired the charge point despite a
+    // valid confirmation.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", 5_000, true);
+    starts.confirm("CP-A", 0); // local start
+    starts.confirm("CP-A", 0); // and the CSMS really did assign 0
+    const outcome = await armed;
+    expect(outcome.started).toBe(true);
+    // Zero, not null: an assignment happened. The caller retires only on null.
+    expect(outcome.transactionId).toBe(0);
+    expect(outcome.transactionId).not.toBe(null);
   });
 
   it("reports a start whose id never arrived, rather than calling it unstarted", async () => {
     // A CSMS that never assigns an id must not hang the cycle, and the caller
     // needs to tell "never started" from "started, no id" — the second still
-    // has a transaction to stop.
+    // has a transaction to stop. `null` is what says "no id", because 0 is a
+    // legal assignment and could not carry that meaning.
     const starts = new TransactionStarts();
     const armed = starts.arm("CP-A", 30, true);
     starts.confirm("CP-A", 0);
-    expect(await armed).toMatchObject({ started: true, transactionId: 0 });
+    const outcome = await armed;
+    expect(outcome.started).toBe(true);
+    expect(outcome.transactionId).toBe(null);
+    expect(outcome.localStartAtMs).not.toBe(null);
   });
 
   it("does not wait for an id on a version that never assigns one", async () => {
@@ -1639,19 +1659,24 @@ describe("the three interacting requirements on start confirmation (#302)", () =
   //   R3 (round 10) a conf that arrives after this cycle's timeout must not
   //                confirm a LATER cycle.
 
-  it("R1: a previous cycle's conf does not confirm this one", async () => {
+  it("R1/R3: a timeout reports null, which is what makes the caller retire", async () => {
+    // R1 and R3 are no longer enforced by inspecting the id's value — they
+    // cannot be, now that 0 is a legal assignment. They hold because a cycle
+    // whose assigned id times out reports `transactionId: null`, and the
+    // caller retires that charge point rather than arming it again. With no
+    // later waiter, a straggling conf has nothing to confirm: it is the
+    // absence of a waiter, not a test on the number, that protects both.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
-    starts.confirm("CP-A", 91); // straggler, before this cycle's own start
-    let settled = false;
-    void armed.then(() => {
-      settled = true;
-    });
-    await sleep(20);
-    expect(settled).toBe(false);
+    const armed = starts.arm("CP-A", 30, true);
     starts.confirm("CP-A", 0);
-    starts.confirm("CP-A", 92);
-    expect((await armed).transactionId).toBe(92);
+    const outcome = await armed;
+    expect(outcome.started).toBe(true);
+    expect(outcome.transactionId).toBe(null); // the retirement signal
+
+    // A straggler arriving now finds nothing armed, which is the state the
+    // caller guarantees by not arming a retired charge point again.
+    starts.confirm("CP-A", 4242);
+    expect(starts.isAvailable).toBe(true);
   });
 
   it("R2: the wait runs to the assigned id, not the placeholder", async () => {
@@ -1668,21 +1693,22 @@ describe("the three interacting requirements on start confirmation (#302)", () =
     expect((await armed).transactionId).toBe(55);
   });
 
-  it("R3: a conf arriving after the timeout finds no waiter to confirm", async () => {
-    // The caller retires a charge point whose id timed out, so it is never
-    // armed again — which is what makes the stale conf harmless. Here that is
-    // shown at this layer: once the wait has timed out, a later confirmation
-    // has nothing to settle, and a *fresh* waiter armed afterwards is not
-    // confirmed by it either, because it has not seen its own local start.
-    const starts = new TransactionStarts();
-    const first = starts.arm("CP-A", 30, true);
-    starts.confirm("CP-A", 0);
-    expect(await first).toMatchObject({ started: true, transactionId: 0 });
+  it("R3: the retirement signal is distinguishable from a real assignment", async () => {
+    // The whole of R3 now rests on the caller being able to tell "no id
+    // arrived" from "an id arrived and it was 0". If those two collapsed onto
+    // one value the caller would either retire charge points that were fine
+    // (the CSMS-assigns-zero bug) or keep cycling ones whose straggling conf
+    // can still confuse a later cycle.
+    const timedOut = new TransactionStarts();
+    const a = timedOut.arm("CP-A", 30, true);
+    timedOut.confirm("CP-A", 0);
+    expect((await a).transactionId).toBe(null);
 
-    // The stale conf, arriving long after its cycle ended.
-    const next = starts.arm("CP-A", 100, true);
-    starts.confirm("CP-A", 4242);
-    expect(await next).toMatchObject({ started: false, transactionId: null });
+    const assignedZero = new TransactionStarts();
+    const b = assignedZero.arm("CP-B", 5_000, true);
+    assignedZero.confirm("CP-B", 0);
+    assignedZero.confirm("CP-B", 0);
+    expect((await b).transactionId).toBe(0);
   });
 
   it("reports when the transaction actually began, for the hold to run from", async () => {
@@ -1825,5 +1851,44 @@ describe("credentials never reach an error message (#302)", () => {
       message = (err as Error).message;
     }
     expect(message).not.toContain("secret");
+  });
+});
+
+describe("proving a StopTransaction actually left the queue (#302)", () => {
+  const exposition = [
+    "# TYPE ocppcp_ocpp_messages_total counter",
+    'ocppcp_ocpp_messages_total{action="StopTransaction",direction="cp-to-csms"} 7',
+    'ocppcp_ocpp_messages_total{action="StopTransaction",direction="csms-to-cp"} 5',
+    'ocppcp_ocpp_messages_total{action="StartTransaction",direction="cp-to-csms"} 9',
+    'ocppcp_ocpp_messages_total{action="Heartbeat",direction="cp-to-csms"} 40',
+  ].join("\n");
+
+  it("counts only the StopTransaction CALLs the daemon actually sent", () => {
+    // The `stop_transaction` RPC ack says the daemon *queued* the CALL. Under
+    // a backlogged serializer — the condition this tool exists to create —
+    // deleting the charge point on that ack discards the queued frame and the
+    // CSMS keeps an open transaction. This counter moves when the frame is
+    // written, so it is the signal the ack does not give.
+    expect(stopTransactionsSent(parseExposition(exposition))).toBe(7);
+  });
+
+  it("does not count the answers coming back", () => {
+    // `csms-to-cp` is the conf, not a CALL this daemon sent; counting it would
+    // let teardown believe frames had left that never did.
+    const onlyAnswers = parseExposition(
+      'ocppcp_ocpp_messages_total{action="StopTransaction",direction="csms-to-cp"} 5',
+    );
+    expect(stopTransactionsSent(onlyAnswers)).toBe(0);
+  });
+
+  it("does not count other actions", () => {
+    const onlyStarts = parseExposition(
+      'ocppcp_ocpp_messages_total{action="StartTransaction",direction="cp-to-csms"} 9',
+    );
+    expect(stopTransactionsSent(onlyStarts)).toBe(0);
+  });
+
+  it("is zero on a daemon that has sent none", () => {
+    expect(stopTransactionsSent(parseExposition(""))).toBe(0);
   });
 });

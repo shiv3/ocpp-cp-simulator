@@ -458,3 +458,43 @@ partway rather than about the logic, which is the fourth round running.
   not matter, and a failure there is a warning rather than an error, because
   the tag is cosmetic and the URL is already correct by that point.
 - Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.
+
+## [2026-09-05] ingest | What the next run concludes, not just what the URL serves (#320, #321)
+
+Fifth review pass on PR #325. Both findings were on transient-failure paths in
+the code written in the fourth pass to handle transient failures, and the
+second one is the lesson worth keeping: a decision that was correct when it was
+made became incorrect when a later change in the same round moved the ground
+under it.
+
+- [CLI → "If this dies here, what does the install URL serve?"](entities/cli.md#if-this-dies-here-what-does-the-install-url-serve):
+  the table gains a third column — what the **next** run may conclude from the
+  state left behind. Both of this round's findings lived there, and neither is
+  visible from the "what does the URL serve" column alone.
+- The version marker is now written **before** the asset swap, and failing to
+  write it is fatal rather than a warning. Round 4 made a failed marker write a
+  warning on the explicit grounds that a marker naming an older version was
+  provably inert; that was true when written and stopped being true later in
+  the same round, when the stale-listing fix made the marker a lower bound. A
+  marker that under-claims lets a later run on a stale listing find nothing
+  higher to verify and replace newer bytes with an older tarball. Under the
+  point-lookup semantics the two directions are not symmetric: a marker that
+  over-claims is self-healing, because the next run verifies the claim, finds
+  the release published and converges up, finishing the interrupted swap.
+  Writing the marker first also makes its failure free — nothing else has been
+  touched at that point, so the run exits with the URL still serving the
+  previous release.
+- Asset lookups on the recovery path preserve their status and are retried.
+  They previously suppressed errors and returned empty, so a transient failure
+  after a failed deletion read as "the asset is gone" and let the destructive
+  `--clobber` fallback run against a live, working asset — the fail-open class
+  closed elsewhere in this script, reintroduced inside the recovery path built
+  to prevent that very outcome.
+- Harness note: the stubbed `gh` did not model `--clobber`'s delete-then-upload
+  semantics, which is the exact behaviour the round-4 fix exists for, so the
+  first run of one mutation understated the damage. With the stub corrected,
+  both the round-4 and round-5 mutations leave the install URL 404ing while
+  their controls keep serving. A harness that quietly does the guard's work for
+  it makes a mutation look like a pass — the second time that has happened in
+  this PR.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.

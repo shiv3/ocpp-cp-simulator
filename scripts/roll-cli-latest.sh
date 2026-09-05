@@ -82,12 +82,22 @@
 # Asked of every mutating call, because three review rounds on this script
 # found partial-failure bugs rather than logic bugs:
 #
-#   gh release download        read-only                  -> previous release
-#   upload <asset>.incoming    live asset untouched       -> previous release
-#   delete-asset <asset>       *** the only 404 window *** -> nothing
-#   PATCH asset name           window closes              -> new release
-#   gh release edit (marker)   asset already correct      -> new release
-#   git ref update             cosmetic                   -> new release
+#   call                     URL then serves    next run concludes
+#   ------------------------ ------------------ ------------------------------
+#   gh release download      previous release   nothing changed
+#   gh release edit (marker) previous release   marker over-claims -> its point
+#                                               lookup finds the release
+#                                               published, converges UP, and
+#                                               completes this swap
+#   upload <asset>.incoming  previous release   same as above
+#   delete-asset <asset>     *** 404 window *** same as above
+#   PATCH asset name         new release        consistent
+#   git ref update           new release        consistent
+#
+# The second column is the half the failure table used to cover. The third is
+# where two rounds of findings actually lived: a state is only safe if the NEXT
+# run cannot draw a wrong conclusion from what it finds. That is why the marker
+# is written FIRST and why failing to write it is fatal — see step 4a.
 #
 # `gh release upload --clobber` is NOT used for the live asset: it deletes the
 # existing asset and then uploads, and its own help says "If the upload fails,
@@ -313,9 +323,27 @@ the desktop \`v*\` train owns that badge (#321).
 
 ${MARKER_PREFIX} ${TARGET} -->"
 
-asset_id() { # $1 = asset name; empty output when absent
-  gh api "repos/${REPO_SLUG}/releases/tags/${POINTER_TAG}" \
-    --jq ".assets[] | select(.name == \"$1\") | .id" 2>/dev/null | head -n 1 || true
+# $1 = asset name. Prints the id, or nothing when the asset is absent.
+# Returns 0 ONLY when a query actually succeeded, so "no output" can be told
+# apart from "could not ask". Suppressing that distinction is the fail-open
+# class this script closes everywhere else, and it was reintroduced here in the
+# recovery path built to prevent exactly the outcome it causes: reading a failed
+# lookup as "absent" lets the destructive fallback run against a live, working
+# asset.
+asset_id() {
+  local out n=1
+  while :; do
+    if out="$(gh api "repos/${REPO_SLUG}/releases/tags/${POINTER_TAG}" \
+      --jq ".assets[] | select(.name == \"$1\") | .id" 2>/dev/null)"; then
+      printf '%s' "$out" | head -n 1
+      return 0
+    fi
+    if [ "$n" -ge "$API_ATTEMPTS" ]; then
+      return 1
+    fi
+    sleep "$API_BACKOFF"
+    n=$((n + 1))
+  done
 }
 
 if [ "$POINTER_EXISTS" = 0 ]; then
@@ -324,30 +352,66 @@ if [ "$POINTER_EXISTS" = 0 ]; then
     --title "CLI (rolling latest)" --notes "$NOTES" "$WORKDIR/$ASSET_NAME" \
     || die "could not create ${POINTER_TAG}. No pointer existed before this run, so the install URL is unchanged (still absent)."
 else
-  # --- 4a. new bytes onto the server under a name nothing serves -----------
+  # --- 4a. the marker, BEFORE anything else changes ------------------------
+  # This used to be written last, on the round-3 reasoning that a marker
+  # written first could over-claim — name a version whose bytes never landed —
+  # and that the guard would then trust it. That reasoning stopped holding in
+  # round 4, when the stale-listing fix made every use of the marker go through
+  # a point lookup of the release it names. The claim is now VERIFIED before it
+  # can be acted on, which reverses which direction of staleness is dangerous:
+  #
+  #   over-claiming (marker ahead of the bytes)  -> the next run's lookup finds
+  #     that release published, converges UP to it, and completes the swap.
+  #     Self-healing.
+  #   under-claiming (marker behind the bytes)   -> a later run on a stale
+  #     listing sees nothing higher to verify, and replaces the newer bytes
+  #     with an older tarball. A rollback — the thing this script exists to
+  #     prevent.
+  #
+  # So the marker is advanced first and its failure is fatal: at that point
+  # nothing has changed, the URL still serves the previous release, and failing
+  # costs nothing. Writing it last and warning would leave a successful swap
+  # with a marker that permits a rollback, which is the one state that must not
+  # be allowed to exit 0.
+  gh_retry "recording ${TARGET} in the ${POINTER_TAG} release notes" \
+    gh release edit "$POINTER_TAG" --repo "$REPO_SLUG" --prerelease \
+    --title "CLI (rolling latest)" --notes "$NOTES" \
+    || die "could not record ${TARGET} in ${POINTER_TAG}'s release notes. Nothing else has been touched, so the install URL still serves the previous release and the marker still names it. Re-run."
+
+  # --- 4b. new bytes onto the server under a name nothing serves -----------
   # --clobber here only ever removes a stale `.incoming` orphaned by an
   # earlier crashed run; the live asset is a different name and is untouched.
   gh_retry "uploading ${INCOMING_NAME}" \
     gh release upload "$POINTER_TAG" "$WORKDIR/$INCOMING_NAME" --repo "$REPO_SLUG" --clobber \
-    || die "could not upload the replacement asset for ${POINTER_TAG}. Nothing was deleted, so ${ASSET_NAME} still serves the previous release."
+    || die "could not upload the replacement asset for ${POINTER_TAG}. Nothing was deleted, so ${ASSET_NAME} still serves the previous release; the marker names ${TARGET} and the next run will converge to it."
 
-  # --- 4b. the only destructive step, and the only 404 window --------------
+  # --- 4c. the only destructive step, and the only 404 window --------------
   if ! gh_retry "deleting the live ${ASSET_NAME}" \
     gh release delete-asset "$POINTER_TAG" "$ASSET_NAME" --repo "$REPO_SLUG" --yes; then
-    if [ -n "$(asset_id "$ASSET_NAME")" ]; then
-      die "could not delete the live ${ASSET_NAME} from ${POINTER_TAG}. It is still present, so the install URL still serves the previous release; the staged ${INCOMING_NAME} is harmless and the next run will reuse it."
+    if LIVE_ID="$(asset_id "$ASSET_NAME")"; then
+      if [ -n "$LIVE_ID" ]; then
+        die "could not delete the live ${ASSET_NAME} from ${POINTER_TAG}. It is still present, so the install URL still serves the previous release; the staged ${INCOMING_NAME} is harmless and the next run will reuse it."
+      fi
+      echo "${ASSET_NAME} was already absent (an earlier run died mid-swap); continuing"
+    else
+      die "could not delete the live ${ASSET_NAME} from ${POINTER_TAG}, and could not confirm afterwards whether it is still there. Refusing to run the destructive fallback against an asset that may be working. The install URL is unchanged either way."
     fi
-    echo "${ASSET_NAME} was already absent (an earlier run died mid-swap); continuing"
   fi
+  # Past this point the live asset is provably gone: either the delete
+  # succeeded, or a successful query reported it absent. That is what makes the
+  # --clobber fallback below safe — there is nothing left for it to destroy.
 
-  # --- 4c. close the window -----------------------------------------------
+  # --- 4d. close the window ------------------------------------------------
   SWAPPED=0
-  ID="$(asset_id "$INCOMING_NAME")"
-  if [ -n "$ID" ] || [ "$DRY_RUN" = 1 ]; then
-    if gh_retry "renaming ${INCOMING_NAME} to ${ASSET_NAME}" \
-      gh api -X PATCH "repos/${REPO_SLUG}/releases/assets/${ID:-0}" -f "name=${ASSET_NAME}" --silent; then
-      SWAPPED=1
+  if ID="$(asset_id "$INCOMING_NAME")"; then
+    if [ -n "$ID" ] || [ "$DRY_RUN" = 1 ]; then
+      if gh_retry "renaming ${INCOMING_NAME} to ${ASSET_NAME}" \
+        gh api -X PATCH "repos/${REPO_SLUG}/releases/assets/${ID:-0}" -f "name=${ASSET_NAME}" --silent; then
+        SWAPPED=1
+      fi
     fi
+  else
+    echo "::warning::could not look up ${INCOMING_NAME}; falling back to a direct upload."
   fi
   if [ "$SWAPPED" = 0 ]; then
     echo "::warning::could not rename ${INCOMING_NAME}; re-uploading the asset under its live name instead. The install URL is 404 until this succeeds."
@@ -357,16 +421,11 @@ else
   fi
 
   # Best-effort tidy-up; an orphaned `.incoming` serves nothing and the next
-  # run clobbers it, so a failure here must not fail the release.
-  if [ -n "$(asset_id "$INCOMING_NAME")" ] || [ "$DRY_RUN" = 1 ]; then
+  # run clobbers it, so neither a failed lookup nor a failed delete may fail
+  # the release here.
+  if LEFTOVER="$(asset_id "$INCOMING_NAME")" && { [ -n "$LEFTOVER" ] || [ "$DRY_RUN" = 1 ]; }; then
     run gh release delete-asset "$POINTER_TAG" "$INCOMING_NAME" --repo "$REPO_SLUG" --yes || true
   fi
-
-  # --- 4d. the marker, after the bytes are already correct ----------------
-  gh_retry "writing the ${POINTER_TAG} release notes" \
-    gh release edit "$POINTER_TAG" --repo "$REPO_SLUG" --prerelease \
-    --title "CLI (rolling latest)" --notes "$NOTES" \
-    || echo "::warning::${POINTER_TAG} serves ${TARGET} but its release notes could not be updated, so the version marker still names the previous release. Harmless: the marker is only ever consulted as a lower bound, and it now under-claims."
 fi
 
 # ---------------------------------------------------------------------------

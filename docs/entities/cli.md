@@ -174,14 +174,42 @@ move the pointer anywhere — it can only trigger a lookup whose answer decides.
 Asked of every mutating call, because the reviews of this script have found
 partial-failure bugs rather than logic bugs:
 
-| Step                          | If it dies here         | URL serves       |
-| ----------------------------- | ----------------------- | ---------------- |
-| download the target's asset   | read-only               | previous release |
-| upload `<asset>.incoming`     | live asset untouched    | previous release |
-| delete the live asset         | **the only 404 window** | nothing          |
-| rename `.incoming` into place | window closes           | new release      |
-| write the release notes       | asset already correct   | new release      |
-| move the git tag              | cosmetic                | new release      |
+| Step                          | URL then serves         | What the next run may conclude                                             |
+| ----------------------------- | ----------------------- | -------------------------------------------------------------------------- |
+| download the target's asset   | previous release        | nothing changed                                                            |
+| write the notes (the marker)  | previous release        | marker over-claims: its lookup finds the release published, converges _up_ |
+| upload `<asset>.incoming`     | previous release        | as above — the pending swap is completed by whichever run comes next       |
+| delete the live asset         | **the only 404 window** | as above                                                                   |
+| rename `.incoming` into place | new release             | consistent                                                                 |
+| move the git tag              | new release             | consistent                                                                 |
+
+The second column is the half this table used to cover. The third is where two
+rounds of findings actually lived: a state is only safe if the **next** run
+cannot draw a wrong conclusion from what it finds.
+
+That is why the marker is written **first**, and why failing to write it is
+fatal rather than a warning. Writing it last looked right in isolation — the
+bytes are correct and the URL works, so why fail? — but it leaves a successful
+swap whose marker still names the older version, and a later run on a stale
+listing then sees nothing higher to verify and replaces the newer bytes with an
+older tarball. Once the marker became a lower bound, the two directions of
+staleness stopped being symmetric:
+
+| Marker relative to the bytes | Consequence                                                              |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| **over**-claims (ahead)      | Self-healing: the next run verifies the claim, converges up, finishes it |
+| **under**-claims (behind)    | Permits a rollback — the failure this whole design exists to prevent     |
+
+Writing it first also costs nothing when it fails: at that moment nothing else
+has been touched, so the run can simply exit non-zero with the URL still
+serving the previous release.
+
+Lookups on that path preserve their status: "the asset is absent" and "the
+asset could not be looked up" are different answers, and only the first may
+allow the destructive fallback to proceed. Collapsing them is the fail-open
+class this script closes everywhere else, and it caused the exact outcome the
+fallback exists to prevent — a failed query read as absence lets `--clobber`
+run against a live, working asset.
 
 `gh release upload --clobber` is deliberately **not** used for the live asset.
 Its own help says "If the upload fails, the original assets will be lost": it

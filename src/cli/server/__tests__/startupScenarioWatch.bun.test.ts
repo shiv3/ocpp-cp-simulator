@@ -15,7 +15,9 @@ import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import {
   restoredDialsToDefer,
   runStartupScenario,
+  startupClaimedRowSkip,
   startupClaimedScenarioIds,
+  startupTargetCpIds,
 } from "../startServer";
 import {
   listWatchedScenarioFiles,
@@ -970,6 +972,13 @@ describe("--watch over a startup scenario file (#314)", () => {
           1,
         ),
       ]).toEqual([]);
+      // Nor does a built-in template: `loadScenarioTemplate` mints the id.
+      expect([
+        ...startupClaimedScenarioIds(
+          { ...base, scenarioTemplate: "essential-cp-behavior" },
+          1,
+        ),
+      ]).toEqual([]);
       // An unreadable file claims nothing rather than guessing: every row is
       // then restored in the first pass, exactly as with no flag at all.
       expect([
@@ -984,30 +993,89 @@ describe("--watch over a startup scenario file (#314)", () => {
   });
   it("holds back the dial only for charge points the bootstrap will dial", async () => {
     // The residual left over from the two-phase restore. A restored charge
-    // point whose id a startup flag claims still holds the previous run's copy
-    // of that scenario, and it auto-starts on boot — so dialling it during the
+    // point that startup is about to configure still holds the previous run's
+    // scenarios, and they auto-start on boot — so dialling it during the
     // restore put the whole bootstrap loop between that start and the flag's
     // load. Held back, the two are adjacent.
-    const claimed = new Map<string, ReadonlySet<string>>([
-      ["cp-claimed", new Set(["targeted-scenario"])],
-      ["cp-untouched", new Set<string>()],
-    ]);
-    const restored = ["cp-claimed", "cp-untouched", "cp-not-in-fleet"];
+    const targets = new Set(["cp-startup"]);
+    const restored = ["cp-startup", "cp-untouched", "cp-not-in-fleet"];
 
-    // With `--auto-connect` the bootstrap loop dials, so the claimed one waits.
-    expect([...restoredDialsToDefer(restored, claimed, true)]).toEqual([
-      "cp-claimed",
+    // With `--auto-connect` the bootstrap loop dials, so the target waits.
+    expect([...restoredDialsToDefer(restored, targets, true)]).toEqual([
+      "cp-startup",
     ]);
     // Without it nothing else would dial, and `runStartupScenario` would spend
     // its whole boot-accepted timeout on a charge point this deliberately left
     // unconnected — so the hold-back does not apply.
-    expect([...restoredDialsToDefer(restored, claimed, false)]).toEqual([]);
-    // A charge point with no claimed ids is never held back either way.
+    expect([...restoredDialsToDefer(restored, targets, false)]).toEqual([]);
+    // A charge point startup will not touch is never held back either way.
     expect(
-      restoredDialsToDefer(restored, claimed, true).has("cp-untouched"),
+      restoredDialsToDefer(restored, targets, true).has("cp-untouched"),
     ).toBe(false);
     expect(
-      restoredDialsToDefer(restored, claimed, true).has("cp-not-in-fleet"),
+      restoredDialsToDefer(restored, targets, true).has("cp-not-in-fleet"),
     ).toBe(false);
+  });
+
+  it("treats every startup mode as a dial target, not just the one with a stable id", async () => {
+    // The gap that survived a round. `startupClaimedScenarioIds` answers "which
+    // stored ids will be overwritten?", and for a template — built-in or from a
+    // file — the answer is "none", because the id is minted fresh each boot. Key
+    // the dial deferral on that and three of the four startup modes stop being
+    // deferred, and their restored `triggerOn: connect` scenarios auto-start
+    // from the database before the configured definition loads. The dial
+    // predicate asks a different question: is startup going to configure this
+    // charge point at all?
+    const fleet = [
+      { cpId: "cp-a", connectors: 1 },
+      { cpId: "cp-b", connectors: 2 },
+    ] as unknown as Parameters<typeof startupTargetCpIds>[1];
+    const base = {
+      scenario: null,
+      scenarioTemplate: null,
+      scenarioTemplateFile: null,
+      scenarioConnector: "all",
+    };
+
+    const byMode = Object.fromEntries(
+      (
+        [
+          ["--scenario", { ...base, scenario: "/tmp/s.json" }],
+          ["--scenario-template", { ...base, scenarioTemplate: "essential" }],
+          [
+            "--scenario-template-file",
+            { ...base, scenarioTemplateFile: "/tmp/t.json" },
+          ],
+        ] as const
+      ).map(([mode, opt]) => [
+        mode,
+        [...startupTargetCpIds(opt, fleet)].sort(),
+      ]),
+    );
+    // Named per mode so a failure says which flag regressed.
+    expect(byMode).toEqual({
+      "--scenario": ["cp-a", "cp-b"],
+      "--scenario-template": ["cp-a", "cp-b"],
+      "--scenario-template-file": ["cp-a", "cp-b"],
+    });
+    // No startup flag at all: nothing is a target, so every restored charge
+    // point dials in the first round as it always did.
+    expect([...startupTargetCpIds(base, fleet)]).toEqual([]);
+    expect([...startupTargetCpIds(null, fleet)]).toEqual([]);
+  });
+  it("skips only the rows a startup flag will overwrite, not the whole charge point", async () => {
+    // The counterpart of the dial predicate, and the reason the two cannot
+    // share an answer. Widening this to whole charge points leaves their other
+    // restored scenarios unwatched right up to the moment they dial, which is
+    // exactly what the first pass exists to prevent.
+    const skip = startupClaimedRowSkip(
+      new Map([["cp-a", new Set(["claimed-id"])]]),
+    );
+    expect(skip({ cp_id: "cp-a", scenario_id: "claimed-id" })).toBe(true);
+    // Same charge point, an id the flag will not touch: restored in the first
+    // pass, so it is watched before the charge point connects.
+    expect(skip({ cp_id: "cp-a", scenario_id: "other-id" })).toBe(false);
+    // A charge point startup knows nothing about.
+    expect(skip({ cp_id: "cp-b", scenario_id: "claimed-id" })).toBe(false);
   });
 });

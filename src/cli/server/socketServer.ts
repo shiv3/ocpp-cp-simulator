@@ -1172,6 +1172,62 @@ async function saveScenarioDefinition(
   return saved;
 }
 
+/**
+ * Stop the file behind one scenario from being authoritative, and forget the
+ * row that would re-establish it (#314).
+ *
+ * Every path that takes a definition away from the daemon calls this, because
+ * the alternative has now been three separate bugs with one shape: a definition
+ * removed through one door while the file behind it kept its watch, so the next
+ * edit put it back. The enumeration, so the fourth door is noticed when it is
+ * added:
+ *
+ * - `remove_scenario` — removes runtime *and* stored definition.
+ * - `load_scenario { scenario }` under an id a file already owns — replaces the
+ *   runtime definition inline; the console becomes the source of truth.
+ * - `scenario.definitions.delete` — removes only the stored row, leaving the
+ *   runtime scenario loaded, so `stillLoaded` passes and a reload re-persists
+ *   exactly what the operator deleted.
+ * - `scenario.definitions.replace` — the whole connector at once; see
+ *   {@link detachConnectorScenarioFiles}.
+ *
+ * `scenario.definitions.save` is an upsert and removes nothing.
+ * `cp.delete` and `state.reset` are handled at the registry and schema level
+ * instead, because they are about a charge point rather than one scenario.
+ *
+ * The watch and the row are dropped together and unconditionally: the row is a
+ * fact about stored state, not about `--watch`, so a daemon running without the
+ * flag still invalidates it.
+ */
+function detachScenarioFile(
+  fileReload: FileReloadManager | null | undefined,
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number,
+  scenarioId: string,
+): void {
+  fileReload?.unregisterScenario(cpId, connectorId, scenarioId);
+  forgetWatchedScenarioFile(database, cpId, connectorId, scenarioId);
+}
+
+/**
+ * The connector-wide twin of {@link detachScenarioFile}, for the upload that
+ * replaces a connector's whole definition set.
+ *
+ * A CP-level (`connectorId === null`) scope is deliberately not handled: a
+ * watch is only ever registered against a numeric connector, so no null-scoped
+ * row can exist for one to invalidate.
+ */
+function detachConnectorScenarioFiles(
+  fileReload: FileReloadManager | null | undefined,
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number,
+): void {
+  fileReload?.unregisterConnectorScenarios(cpId, connectorId);
+  forgetWatchedConnectorScenarioFiles(database, cpId, connectorId);
+}
+
 async function replaceConnectorScenarioDefinitions(
   deps: RuntimeSocketIoDeps,
   rawParams: unknown,
@@ -1193,11 +1249,8 @@ async function replaceConnectorScenarioDefinitions(
   // whole definition set. A file still watched behind one of these ids would
   // overwrite the upload at its next edit.
   if (params.data.connectorId !== null) {
-    deps.fileReload?.unregisterConnectorScenarios(
-      params.data.cpId,
-      params.data.connectorId,
-    );
-    forgetWatchedConnectorScenarioFiles(
+    detachConnectorScenarioFiles(
+      deps.fileReload,
       deps.database,
       params.data.cpId,
       params.data.connectorId,
@@ -1226,6 +1279,18 @@ async function deleteScenarioDefinition(
       params.data.definitionId,
     ),
   );
+  // #314: this deletes the stored row and leaves the runtime scenario loaded,
+  // so without dropping the watch the next edit of the file behind it would
+  // pass `stillLoaded`, reload, and persist the definition just deleted.
+  if (params.data.connectorId !== null) {
+    detachScenarioFile(
+      deps.fileReload,
+      deps.database,
+      params.data.cpId,
+      params.data.connectorId,
+      params.data.definitionId,
+    );
+  }
   await emitScenarioDefinitionsChanged(
     deps,
     params.data.cpId,
@@ -1848,8 +1913,13 @@ async function dispatchFacadeCpCommand(
         // operator just installed by hand — and leaving its persisted row in
         // place would let a later `--watch` restart do the same, which is why
         // that goes whether or not this daemon is watching anything.
-        fileReload?.unregisterScenario(id, connectorId, loaded.scenarioId);
-        forgetWatchedScenarioFile(database, id, connectorId, loaded.scenarioId);
+        detachScenarioFile(
+          fileReload,
+          database,
+          id,
+          connectorId,
+          loaded.scenarioId,
+        );
         return handled(loaded);
       }
       throw new Error("Either 'file' or 'scenario' parameter is required");
@@ -1986,8 +2056,7 @@ async function dispatchFacadeCpCommand(
       // persisted row goes unconditionally — it is a fact about stored state,
       // not about `--watch`, and a daemon running without the flag would
       // otherwise leave it for a later watched restart to reattach.
-      fileReload?.unregisterScenario(id, connectorId, scenarioId);
-      forgetWatchedScenarioFile(database, id, connectorId, scenarioId);
+      detachScenarioFile(fileReload, database, id, connectorId, scenarioId);
       return handled({
         removed:
           before.some((scenario) => scenario.scenarioId === scenarioId) &&

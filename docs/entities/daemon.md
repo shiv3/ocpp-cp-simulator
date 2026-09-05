@@ -264,6 +264,12 @@ The rules, in the order they bite:
   connector with an open transaction, or for a scenario whose run is in flight,
   is _held_ — not dropped — and installed when that session ends. An in-flight
   transaction therefore always runs to completion on the values it started with.
+  A held reload that is refused when it finally drains — a sibling scenario grew
+  past the envelope cap while the session was open, say — clears its baseline
+  with it, so saving those same bytes again is judged afresh rather than
+  dismissed as unchanged. `lastText` names the bytes the daemon took
+  responsibility for; a rejection never advances it and a failed drain clears
+  it.
   A held definition is applied when the transaction stops **or when the run's
   cleanup completes**, whichever released the gate — whether the run reached the
   end of its graph, errored, or was stopped by hand with `stop_scenario`. The
@@ -295,11 +301,17 @@ The rules, in the order they bite:
   An idTag pool is exempt by construction: it is drawn from once per session, so
   the transaction under way keeps the tag it presented at StartTransaction and
   only the next draw sees the new list.
-- **Removing or replacing a scenario drops its watch.** `remove_scenario` stops
-  the watch behind a file-backed scenario; so does a `load_scenario` that
-  installs an inline definition under the same id, and so does a
-  `scenario.definitions.replace` upload, which makes the console the source of
-  truth for that connector's whole set. Without that the file would stay
+- **Removing or replacing a scenario drops its watch.** Every path that takes a
+  definition away drops it, and they are enumerated in one place in the code so
+  a new one is noticed: `remove_scenario` (runtime and stored definition);
+  a `load_scenario` that installs an inline definition under the same id;
+  `scenario.definitions.delete`, which removes only the stored row and leaves
+  the runtime scenario loaded — so without this the next edit would reload and
+  persist exactly what was deleted; and a `scenario.definitions.replace`
+  upload, which makes the console the source of truth for that connector's
+  whole set. `scenario.definitions.save` is an upsert and removes nothing;
+  `cp.delete` and `state.reset` are handled at the registry and schema level
+  because they are about a charge point rather than one scenario. Without that the file would stay
   authoritative and the next edit would re-create a scenario the operator
   deleted, or overwrite the definition they had just uploaded. The reload path
   checks as well: a scenario the charge point no longer holds is **never

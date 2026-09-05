@@ -1494,7 +1494,32 @@ export class CLIChargePointService {
       // feature had in common. If this run is no longer the registered one its
       // bookkeeping has already been replaced, so the only correct action is to
       // touch none of it.
-      if (this._executors.get(scenarioId) !== executor) {
+      const registered = this._executors.get(scenarioId);
+      if (registered !== executor) {
+        // `!== executor` covers two different situations and only one of them
+        // means "someone else owns this bookkeeping now".
+        //
+        // *Replaced* — a later run registered its own executor under the same
+        // id — is the case the guard was written for: touch nothing, or this
+        // run deletes the live run's state and finalizes it under the wrong
+        // verdict.
+        //
+        // *Deleted* — `stopScenario` / `stopAllScenarios` dropped the executor
+        // synchronously and left this `finally` queued — is not. Nothing owns
+        // the id, so this run is still responsible for its own remains. The
+        // stop paths freeze the terminal status and finalize the run
+        // themselves (redoing either here would overwrite their pre-stop
+        // snapshot with a post-stop one), but they do not clear the persisted
+        // scenario position — so skipping this left a manually stopped run's
+        // last node in `connector_runtime`, and with `--state-db` the next boot
+        // resumed the scenario the operator had stopped. Cleared here rather
+        // than in each stop path: this callback runs whichever path stopped the
+        // run, and there are two of them today (#314).
+        if (registered === undefined) {
+          this._executorConnectorIds.delete(scenarioId);
+          this._scenarioPositionByConnector.delete(connectorId);
+          this.persistConnectorRuntime(connector, connectorId);
+        }
         this.notifySessionSettled({ connectorId, scenarioId });
         return;
       }

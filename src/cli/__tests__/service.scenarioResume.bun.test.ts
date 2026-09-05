@@ -201,3 +201,158 @@ describe("runScenario resume across daemon restart", () => {
     expect(executedNodes).toContain("node-b");
   });
 });
+
+/**
+ * The stop paths' half of the same story (#314).
+ *
+ * `stopScenario` / `stopAllScenarios` drop the executor synchronously, so the
+ * queued `finally` in `runScenario` finds a different (absent) executor under
+ * the id and takes the supersede branch. That branch exists for a run that was
+ * *replaced* — it must not delete the replacement's bookkeeping — but a stopped
+ * run has no replacement, and skipping the cleanup left its last node in
+ * `connector_runtime`. With `--state-db` the next boot then resumed the very
+ * scenario the operator had stopped.
+ */
+function buildParkedInstance(connectorId: number): ScenarioDefinition {
+  return {
+    id: `parked-c${connectorId}`,
+    name: "Parked",
+    targetType: "connector",
+    targetId: connectorId,
+    nodes: [
+      {
+        id: "start-1",
+        type: ScenarioNodeType.START,
+        position: { x: 0, y: 0 },
+        data: { label: "S" },
+      },
+      {
+        id: "node-a",
+        type: ScenarioNodeType.METER_VALUE,
+        position: { x: 0, y: 1 },
+        data: { label: "A", value: 11, sendMessage: false },
+      },
+      {
+        id: "hold",
+        type: ScenarioNodeType.DELAY,
+        position: { x: 0, y: 2 },
+        data: { label: "Hold", delaySeconds: 30 },
+      },
+      {
+        id: "node-b",
+        type: ScenarioNodeType.METER_VALUE,
+        position: { x: 0, y: 3 },
+        data: { label: "B", value: 22, sendMessage: false },
+      },
+      {
+        id: "end-1",
+        type: ScenarioNodeType.END,
+        position: { x: 0, y: 4 },
+        data: { label: "E" },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "start-1", target: "node-a" },
+      { id: "e2", source: "node-a", target: "hold" },
+      { id: "e3", source: "hold", target: "node-b" },
+      { id: "e4", source: "node-b", target: "end-1" },
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+    trigger: { type: "manual" },
+  };
+}
+
+describe("a manually stopped run leaves nothing to resume from (#314)", () => {
+  function storedPosition(db: BunDb): string | null {
+    const rows = db.all<{ scenario_position_json: string | null }>(
+      "SELECT scenario_position_json FROM connector_runtime " +
+        "WHERE cp_id = ? AND connector_id = ?",
+      ["stop-cp", 1],
+    );
+    return rows[0]?.scenario_position_json ?? null;
+  }
+
+  async function waitFor(
+    predicate: () => boolean,
+    what: string,
+  ): Promise<void> {
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  }
+
+  it("clears and persists the position when stop_scenario ends the run", async () => {
+    // `BunDb.open` rather than the raw handle the tests above use: it runs the
+    // migrations itself, and its typed constructor keeps this file's error
+    // count where it was.
+    const db = BunDb.open(":memory:");
+    const svc = new CLIChargePointService(
+      {
+        cpId: "stop-cp",
+        wsUrl: "ws://127.0.0.1:65534/never",
+        connectors: 1,
+        vendor: "v",
+        model: "m",
+        basicAuth: null,
+      },
+      db,
+    );
+
+    const id = svc.loadScenario(1, buildParkedInstance(1));
+    svc.runScenario(1, id);
+    // Parked in the 30s delay with node-a behind it, so there is a real
+    // position on disk to lose.
+    await waitFor(
+      () => storedPosition(db) !== null,
+      "the run to record a position",
+    );
+    expect(storedPosition(db)).toContain("node-a");
+
+    svc.stopScenario(1, id);
+    // The stop is synchronous; the run's own `finally` is a queued microtask.
+    await waitFor(
+      () => storedPosition(db) === null,
+      "the stopped run to clear its persisted position",
+    );
+
+    // And the restart it protects: a fresh service over the same database has
+    // nothing to resume from, so the scenario replays from the start rather
+    // than picking up where the operator stopped it.
+    const restarted = new CLIChargePointService(
+      {
+        cpId: "stop-cp",
+        wsUrl: "ws://127.0.0.1:65534/never",
+        connectors: 1,
+        vendor: "v",
+        model: "m",
+        basicAuth: null,
+      },
+      db,
+    );
+    restarted.restoreConnectorRuntimeFromDatabase();
+    const executed: string[] = [];
+    restarted.onEvent((ev) => {
+      if (
+        ev.event === "scenario_node_execute" &&
+        typeof ev.data.nodeId === "string"
+      ) {
+        executed.push(ev.data.nodeId);
+      }
+    });
+    const restartedId = restarted.loadScenario(1, buildParkedInstance(1));
+    restarted.runScenario(1, restartedId);
+    await waitFor(
+      () => executed.includes("node-a"),
+      "the restarted run to replay from the start",
+    );
+    restarted.stopScenario(1, restartedId);
+    svc.cleanup(true);
+    restarted.cleanup(true);
+  });
+});

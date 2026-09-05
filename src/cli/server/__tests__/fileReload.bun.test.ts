@@ -2331,6 +2331,99 @@ describe("a reload replaces a definition, it never moves a scenario (#314)", () 
   });
 });
 
+describe("pinning distinguishes absent-on-purpose from missing (#314)", () => {
+  it("leaves a chargePoint-wide scenario without a targetId", async () => {
+    // The pin copies the live definition's target so a reload cannot move a
+    // scenario. A `chargePoint`-wide definition has no `targetId` deliberately,
+    // and a nullish fallback filled it in from the registration on the first
+    // reload — changing the live *and* persisted definition, and making
+    // `scenario_status` advertise connector-specific constraints for a scenario
+    // that has none.
+    const dir = tempDir();
+    const wide = JSON.parse(scenario("cp-wide", 11)) as Record<string, unknown>;
+    wide.targetType = "chargePoint";
+    delete wide.targetId;
+    const file = writeFile(dir, "s.json", JSON.stringify(wide));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-WIDE",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-WIDE");
+    expect(
+      server.registry.get("CP-WIDE")?.getScenario(1, "cp-wide")?.targetId,
+    ).toBeUndefined();
+
+    const edited = {
+      ...wide,
+      ...JSON.parse(scenario("cp-wide", 22)),
+    } as Record<string, unknown>;
+    edited.targetType = "chargePoint";
+    delete edited.targetId;
+    backend.save(file, JSON.stringify(edited));
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the edit to land",
+    );
+
+    const loaded = server.registry.get("CP-WIDE")?.getScenario(1, "cp-wide");
+    expect(
+      (loaded?.nodes[0] as { data?: { duration?: number } })?.data?.duration,
+    ).toBe(22);
+    expect(loaded?.targetType).toBe("chargePoint");
+    expect(loaded?.targetId).toBeUndefined();
+  });
+});
+
+describe("a rejection is never lost to the field it is written into (#314)", () => {
+  it("bounds an oversized sibling id in the overflow message", async () => {
+    // A file-loaded definition gets only minimal shape validation, so its `id`
+    // is whatever the file says. One over 64 KiB embedded whole into the
+    // overflow rejection pushed the envelope's `error` past its own bound, the
+    // push threw, and the bridge logged it — so the reload was judged correctly
+    // and the subscriber saw nothing at all. Third instance of that family.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("bounded", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-BOUNDED",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-BOUNDED");
+
+    // A sibling that is over the definition cap *because* its id is enormous,
+    // so the message that names it is the thing that overflows.
+    const service = server.registry.get("CP-BOUNDED");
+    if (!service) throw new Error("CP-BOUNDED missing");
+    const hugeId = "s".repeat(300_000);
+    service.loadScenario(
+      1,
+      JSON.parse(scenario(hugeId, 1)) as ScenarioDefinition,
+    );
+
+    backend.save(file, scenario("bounded", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the rejection to actually reach the subscriber",
+    );
+    const rejection = events.find((e) => e.outcome === "rejected");
+    expect(rejection?.error?.length).toBeLessThanOrEqual(65_536);
+    expect(rejection?.error).toContain("the control plane can carry");
+    // The previous definition is still loaded, as for any rejection.
+    expect(loadedDelay(server, "CP-BOUNDED", "bounded")).toBe(11);
+  });
+});
+
 describe("a restored charge point dials on the current file (#314)", () => {
   it("re-establishes the watch before the fleet is allowed to connect", async () => {
     // `restoreFromDatabase` used to dial inside its own loop, so a restored

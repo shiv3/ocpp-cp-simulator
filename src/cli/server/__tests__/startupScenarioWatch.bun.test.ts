@@ -12,7 +12,11 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
-import { runStartupScenario, startupClaimedScenarioIds } from "../startServer";
+import {
+  restoredDialsToDefer,
+  runStartupScenario,
+  startupClaimedScenarioIds,
+} from "../startServer";
 import {
   listWatchedScenarioFiles,
   rememberWatchedScenarioFile,
@@ -977,5 +981,33 @@ describe("--watch over a startup scenario file (#314)", () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+  it("holds back the dial only for charge points the bootstrap will dial", async () => {
+    // The residual left over from the two-phase restore. A restored charge
+    // point whose id a startup flag claims still holds the previous run's copy
+    // of that scenario, and it auto-starts on boot — so dialling it during the
+    // restore put the whole bootstrap loop between that start and the flag's
+    // load. Held back, the two are adjacent.
+    const claimed = new Map<string, ReadonlySet<string>>([
+      ["cp-claimed", new Set(["targeted-scenario"])],
+      ["cp-untouched", new Set<string>()],
+    ]);
+    const restored = ["cp-claimed", "cp-untouched", "cp-not-in-fleet"];
+
+    // With `--auto-connect` the bootstrap loop dials, so the claimed one waits.
+    expect([...restoredDialsToDefer(restored, claimed, true)]).toEqual([
+      "cp-claimed",
+    ]);
+    // Without it nothing else would dial, and `runStartupScenario` would spend
+    // its whole boot-accepted timeout on a charge point this deliberately left
+    // unconnected — so the hold-back does not apply.
+    expect([...restoredDialsToDefer(restored, claimed, false)]).toEqual([]);
+    // A charge point with no claimed ids is never held back either way.
+    expect(
+      restoredDialsToDefer(restored, claimed, true).has("cp-untouched"),
+    ).toBe(false);
+    expect(
+      restoredDialsToDefer(restored, claimed, true).has("cp-not-in-fleet"),
+    ).toBe(false);
   });
 });

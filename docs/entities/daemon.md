@@ -332,7 +332,10 @@ The rules, in the order they bite:
     mapped to its registered connector — the executor then derived expectations
     from the edited `targetId` and waited on a connector its runtime callbacks
     were not operating on. A reload replaces a definition; it never moves a
-    scenario.
+    scenario. Pinning copies what is there, including a **missing**
+    `targetId`: a `chargePoint`-wide scenario has none on purpose, and filling
+    it in from the registration would advertise connector-specific constraints
+    for a definition that deliberately has none.
 - **Blueprints are not watched, and do not need to be.** A blueprint is stored
   through `blueprint.save` and lives in the `blueprints` table, not in a file
   (#297 declined a watched blueprint file deliberately, so the control plane
@@ -357,8 +360,13 @@ otherwise keep showing the graph the daemon had stopped executing. Those
 definitions are the connector's live runtime set, not a read-back of the
 scenario repository — a daemon without `--state-db` has no repository content,
 and the persist behind a reload is a background write. The daemon also logs each
-reload to stderr with a `[watch]` prefix. A rejected reload reports **which
-file** failed and never what was in it — the runtime's own parser message
+reload to stderr with a `[watch]` prefix. Every string in that event is clamped to the
+envelope's own bound as the event is built, not only checked by the schema: a
+field that fails validation takes the whole push with it and the failure is
+merely logged, so an unbounded value turns a correct rejection into silence. A
+file-loaded definition's `id` is whatever the file says, and one over 64 KiB
+quoted into a rejection message did exactly that. A rejected reload reports
+**which file** failed and never what was in it — the runtime's own parser message
 quotes the offending bytes, and the control plane is not a place to echo an
 operator's file. See
 [Access control → Event scopes are not an authorization boundary](../concepts/access-control.md#event-scopes-are-not-an-authorization-boundary).
@@ -397,7 +405,14 @@ hold at once and no single position satisfies all three:
 1. **A restored charge point must not run a stale graph.** Its persisted
    connect-triggered scenarios start the moment its boot gate opens, so the
    fleet is now rebuilt **without dialling**, the watches go back on, and only
-   then does it connect.
+   then does it connect. The dial is split as well: a charge point whose id a
+   startup flag will claim is held back from that first round of connects and
+   left to the bootstrap loop, which dials it immediately before loading the
+   flag's definition — so the restored copy of that scenario cannot start and
+   then have the whole bootstrap loop pass before the flag lands. Only when
+   `--auto-connect` is on, because that is what makes the bootstrap loop dial;
+   without it nothing else would, and the startup load's boot-accepted wait
+   would time out on a charge point deliberately left unconnected.
 2. **A startup flag owns its keys before its rows are read.** A stored row can
    name the id `--scenario` will claim, so the first pass skips **exactly those
    ids** — neither applying nor pruning their rows — and a second pass after the

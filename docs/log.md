@@ -1063,3 +1063,37 @@ Sixth review pass on PR #325.
   re-derives it there — an edited `targetId` was accepted while the scenario
   stayed mapped to its registered connector, so the executor waited on a
   connector its runtime callbacks were not operating on.
+
+## [2026-09-05] ingest | `--watch`: closing the dial residual, and a bound where the message is built (#314, PR #317)
+
+- The residual flagged last round is closed, and the route was narrower than the
+  restructure it was weighed against: **split the dial, not the load.** The seam
+  already existed — `restoreFromDatabase({ connect: false })` and
+  `connectRestored` — so a restored charge point whose id a startup flag will
+  claim is simply held out of the first round of connects and left to the
+  bootstrap loop, which dials it immediately before loading the flag's
+  definition. Only under `--auto-connect`: without it nothing else would dial,
+  and `runStartupScenario`'s boot-accepted wait would spend its full timeout on
+  a charge point the hold-back had stranded. That condition is the whole reason
+  this is a split rather than a deferral.
+- The target pin now distinguishes **absent on purpose** from **missing**. A
+  `chargePoint`-wide scenario has no `targetId`, and the nullish fallback filled
+  it in from the registration on the first reload — changing the live and the
+  persisted definition, and making `scenario_status` advertise
+  connector-specific constraints for a scenario that has none. The registration
+  is used only when there is no live definition to copy at all.
+- [Daemon](entities/daemon.md) — third instance of "the reload is judged
+  correctly and the notification goes missing", so the rule is now structural
+  rather than per-site: every string in a `file-reload` event is clamped to the
+  envelope's bound **as the event is built**, and `STR_64K_MAX` is exported from
+  `protocol/limits` so the clamp and the schema cannot drift. The trigger was a
+  file-loaded sibling id over 64 KiB quoted whole into an overflow rejection.
+- Audit, since this is the third: the only strings reaching that envelope are
+  `path` (filesystem-bounded, and capped in the schema since round five),
+  `cpId` (bounded by the RPC schema), `scenarioId` (bounded by the definition
+  cap that carries it), and `error`. `error` is composed in three places — a
+  parse failure (fixed text), a filesystem failure (the path again), and the
+  overflow message (now truncated at composition). The `Scenario <id> …` throws
+  in `service.ts` do quote an unbounded id, but none of them is reachable from
+  `loadScenario`, which is the only call a reload makes. So there is no other
+  live path today; the clamp at the emit boundary is what covers the next one.

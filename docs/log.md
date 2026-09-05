@@ -1157,3 +1157,34 @@ Sixth review pass on PR #325.
   in `service.ts` quote an unbounded id but sit in run/stop/remove, and
   `loadScenario` is the only call a reload makes. The clamp at the emit boundary
   stays unexercised, and stays.
+
+## [2026-09-06] ingest | `--watch`: degraded must not be worse than unwatched, and ConfigMap rotation (#314, PR #317)
+
+- A charge point being reconciled is now measured against the **file on disk**,
+  not against the cached bytes of the last reload that landed. The old rule made
+  degraded mode strictly worse than having no watcher: when the file changed
+  without an event reaching the watcher, a `cp.create` sharing that pool read
+  the new tags correctly and the reconciliation immediately overwrote **and
+  persisted** the stale list over them, with nothing afterwards to re-read. That
+  contradicted the graceful-degradation sentence on
+  [Daemon](entities/daemon.md), and between the code and the promise the promise
+  was right — reconciling a newly registered charge point against disk is also
+  the simpler rule to state, so the page now states it.
+- Rename events naming something the watcher does not track re-check every
+  tracked file in that directory. Kubernetes projected volumes (ConfigMap,
+  Secret) mount the files as stable symlinks and rotate the directory's `..data`
+  symlink, so the event names `..data` and never the file — and it was dropped,
+  which stopped reloads entirely for the most common way this feature will be
+  deployed, with the watcher open and reporting no degradation. The same branch
+  covers an editor writing a temp file and renaming it into place. A `change` on
+  an unrelated neighbour is still ignored, so the fix costs nothing in a shared
+  directory.
+- The question that finding implies, asked and answered on the page: **is there
+  any path left where the watcher believes it is healthy and delivers nothing?**
+  One. `fs.watch` binds to an inode, so if the _directory_ holding a watched
+  file is replaced — deleted and recreated, or a bind-mount swapped — the watch
+  stays open, raises no error, and never fires again. It cannot be told from a
+  quiet file without polling, so it is documented next to the same-tick residual
+  rather than papered over. A `subPath` ConfigMap mount lands there, though
+  Kubernetes does not propagate updates through `subPath` at all, so there is
+  nothing to watch in that case either; mounting the whole volume works.

@@ -68,6 +68,14 @@ class TestWatchBackend {
     }
   }
 
+  /** Deliver a raw event, the way a platform would — used to model an event
+   *  naming something other than the tracked file. */
+  notify(directory: string, eventType: string, filename: string): void {
+    for (const listener of [...(this.listeners.get(directory) ?? [])]) {
+      listener(eventType, filename);
+    }
+  }
+
   watchedDirectories(): string[] {
     return [...this.listeners]
       .filter(([, set]) => set.size > 0)
@@ -2526,6 +2534,129 @@ describe("every scenario id in the registry fits the envelope (#314)", () => {
       "CP-HUGEID",
     );
     expect(loaded.scenarioId).toBe(huge.id);
+  });
+});
+
+describe("a new charge point is reconciled against disk (#314)", () => {
+  it("does not overwrite tags a create just read with the last cached copy", async () => {
+    // Degraded mode has to be *no worse* than no watcher, and this was worse.
+    // The reconcile read the cached bytes of the last reload that landed rather
+    // than the file, so when the file changed without an event reaching the
+    // watcher — `fs.watch` unavailable on this filesystem, or its debounce not
+    // yet run — a second charge point sharing the pool read the new tags
+    // correctly at create time and then had them overwritten and persisted with
+    // the stale cached list. Nothing re-read afterwards, so it stayed wrong.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["FIRST"]));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, db);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-SHARED-A",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+    expect(server.registry.get("CP-SHARED-A")?.getInit().idTags).toEqual([
+      "FIRST",
+    ]);
+
+    // Changed with nothing watching — written directly, no notification.
+    fs.writeFileSync(file, JSON.stringify(["SECOND"]));
+
+    await rpc(socket, "cp.create", {
+      cpId: "CP-SHARED-B",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+
+    // The create read the file, so B holds the new tags — and the reconcile
+    // that runs immediately after must not put the old ones back.
+    expect(server.registry.get("CP-SHARED-B")?.getInit().idTags).toEqual([
+      "SECOND",
+    ]);
+    // Nor may it persist them: the overwrite was durable, so a restart came
+    // back with the stale list too.
+    const stored = db.all<{ id_tags: string | null }>(
+      "SELECT id_tags FROM charge_points WHERE cp_id = ?",
+      ["CP-SHARED-B"],
+    );
+    expect(JSON.parse(stored[0]?.id_tags ?? "null")).toEqual(["SECOND"]);
+
+    // The charge point created *before* the change stays on the tags it was
+    // created with. That is the documented degraded behaviour, not a second
+    // bug: reconciliation is once per charge point per file, and with no watch
+    // event nothing re-reads for one that was already reconciled. What must not
+    // happen is a *new* charge point being dragged backwards to join it.
+    expect(server.registry.get("CP-SHARED-A")?.getInit().idTags).toEqual([
+      "FIRST",
+    ]);
+
+    // The reconcile also brings the baseline up to what it just read, so the
+    // documented "identical bytes are not a reload" rule still holds afterwards:
+    // saving the same content again produces no event at all. Left pointing at
+    // the pre-change bytes, this would report a reload of something that did
+    // not change.
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    backend.save(file, JSON.stringify(["SECOND"]));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(events).toEqual([]);
+  });
+});
+
+describe("a ConfigMap-mounted file still reloads (#314)", () => {
+  it("reloads when only the projected volume's ..data symlink is renamed", async () => {
+    // The layout is real: a generation directory, a `..data` symlink pointing
+    // at it, and the tracked file a symlink through `..data`. The rotation is
+    // real too — a new generation directory and an atomic rename of `..data`
+    // over the old one, which is exactly what kubelet does on a ConfigMap
+    // update. Only the *notification* is synthetic, and deliberately so: this
+    // fires `rename` for `..data` alone, which is what Linux inotify reports,
+    // because the tracked symlink itself is never touched. Before this, that
+    // event was dropped and the reload silently stopped — with the watcher open
+    // and reporting no degradation.
+    const dir = tempDir();
+    const gen1 = path.join(dir, "..2026_01_01");
+    fs.mkdirSync(gen1);
+    fs.writeFileSync(path.join(gen1, "tags.json"), JSON.stringify(["OLD"]));
+    fs.symlinkSync(gen1, path.join(dir, "..data"));
+    const file = path.join(dir, "tags.json");
+    fs.symlinkSync(path.join("..data", "tags.json"), file);
+
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-CONFIGMAP",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+    expect(server.registry.get("CP-CONFIGMAP")?.getInit().idTags).toEqual([
+      "OLD",
+    ]);
+
+    // kubelet's rotation: write a new generation, then swap `..data` atomically.
+    const gen2 = path.join(dir, "..2026_01_02");
+    fs.mkdirSync(gen2);
+    fs.writeFileSync(path.join(gen2, "tags.json"), JSON.stringify(["NEW"]));
+    const staging = path.join(dir, "..data_tmp");
+    fs.symlinkSync(gen2, staging);
+    fs.renameSync(staging, path.join(dir, "..data"));
+    // The tracked file now reads through to the new generation…
+    expect(fs.readFileSync(file, "utf-8")).toBe(JSON.stringify(["NEW"]));
+
+    // …and the only event Linux delivers names `..data`, not `tags.json`.
+    backend.notify(dir, "rename", "..data");
+    await waitFor(
+      () =>
+        server.registry.get("CP-CONFIGMAP")?.getInit().idTags?.[0] === "NEW",
+      "the ConfigMap rotation to reach the charge point",
+    );
   });
 });
 

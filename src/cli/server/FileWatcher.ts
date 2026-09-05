@@ -146,17 +146,35 @@ export class FileWatcher {
 
   private openWatcher(dir: string, entry: DirectoryEntry): fs.FSWatcher | null {
     try {
-      const watcher = this.watchFactory(dir, (_eventType, filename) => {
+      const watcher = this.watchFactory(dir, (eventType, filename) => {
         if (this.closed) return;
-        if (typeof filename === "string" && filename.length > 0) {
-          // A rename event names the *new* link, which for the temp-file dance
-          // is the target basename, so this still fires for atomic saves.
-          if (entry.files.has(filename)) this.schedule(entry, filename);
+        const named = typeof filename === "string" && filename.length > 0;
+        if (named && entry.files.has(filename)) {
+          this.schedule(entry, filename);
           return;
         }
-        // Some platforms report no filename. Re-check everything we track in
-        // this directory rather than miss the edit; the reload path compares
-        // content and does nothing when the bytes are unchanged.
+        // A named event for something we do not track only tells us about our
+        // own files when it is a *rename*. A `change` on a neighbour says
+        // nothing about ours and is still ignored, so an unrelated write in a
+        // shared directory costs nothing.
+        if (named && eventType !== "rename") return;
+        // What is left re-checks every tracked file in this directory:
+        //
+        // - **A rename naming something we do not track.** On a Kubernetes
+        //   projected volume (ConfigMap, Secret) the tracked JSON files are
+        //   stable symlinks and an update swaps the directory's `..data`
+        //   symlink, so the event names `..data` and never the basename
+        //   registered here. Dropping it meant reloads silently stopped for the
+        //   single most common way this feature gets deployed — watcher open,
+        //   no degradation reported, nothing delivered. The same branch covers
+        //   an editor that writes a temp file and renames it into place, where
+        //   the event can name the temp file rather than the target.
+        // - **No name at all.** Some platforms report none.
+        //
+        // Re-checking is cheap and self-limiting: it is debounced per file, and
+        // the reload path compares content and does nothing when the bytes are
+        // unchanged. Correctness here is worth reading a file that did not
+        // change (#314).
         for (const base of entry.files.keys()) this.schedule(entry, base);
       });
       // An `error` after a successful open (a mount going away, an inotify

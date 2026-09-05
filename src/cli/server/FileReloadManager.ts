@@ -583,8 +583,17 @@ export class FileReloadManager {
     for (const cpId of affected) {
       this.reconciledCps.add(reconcileKey(cpId, absolutePath));
     }
-    const text =
-      this.idTagText.get(absolutePath) ?? readTextOrEmpty(absolutePath);
+    // Read from disk, never from the cache. The cache holds the bytes of the
+    // last reload that landed, and a charge point being reconciled here is one
+    // that has *just* been created — `cp.create` read the file itself moments
+    // ago. When the two disagree the file is newer, not older: `fs.watch` may
+    // be degraded on this filesystem, or its debounce may simply not have run
+    // yet. Preferring the cache meant this reconciliation overwrote the correct
+    // tags the create had just read, persisted the stale list over them, and
+    // then never looked again — leaving degraded mode strictly worse than no
+    // watcher at all, which is the opposite of what this feature promises
+    // (#314).
+    const text = readTextOrEmpty(absolutePath);
 
     let tags: string[];
     try {
@@ -600,7 +609,14 @@ export class FileReloadManager {
     const stale = affected.filter(
       (cpId) => !sameTags(this.registry.get(cpId)?.getInit().idTags, tags),
     );
-    if (stale.length === 0) return;
+    if (stale.length === 0) {
+      // Nothing to apply because every affected charge point already holds
+      // these tags — so these bytes *are* what landed, and the baseline says so.
+      // Left pointing at older bytes it would make the next save of this exact
+      // content look like a change.
+      this.idTagText.set(absolutePath, text);
+      return;
+    }
     this.log(
       `[watch] ${absolutePath} no longer matches ${stale.length} charge point(s) it was loaded into; reconciling`,
     );
@@ -614,7 +630,10 @@ export class FileReloadManager {
       // unchanged and the database could never catch up. Do not "make these
       // consistent": they answer different questions.
       this.idTagText.delete(absolutePath);
+      return;
     }
+    // Applied everywhere, so the bytes that landed are the baseline.
+    this.idTagText.set(absolutePath, text);
   }
 
   /** Whether every charge point took the new pool without throwing. A charge

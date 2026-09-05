@@ -1090,4 +1090,260 @@ describe("clearing a profile disarms the latch in any status (#301)", () => {
     sample(connector);
     expect(events).toHaveLength(1);
   });
+
+  it("disarms mid-session in a status the listener cannot act on", () => {
+    // One transaction throughout, so the transaction-boundary re-arm plays no
+    // part: the disarm has to happen in `SuspendedEV` — the car's own pause,
+    // which the `scheduleLimitChange` listener ignores — or the latch left by
+    // the profile that has just been withdrawn silences the next crossing
+    // inside the very same session.
+    const { connector, events } = armed();
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    connector.addChargingProfile(zeroLimitProfile());
+    sample(connector);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.paused).toBe(true);
+
+    // The car stops drawing, and the CSMS withdraws the profile while it is
+    // stopped. Nothing is announced there — but the latch must be disarmed.
+    connector.status = OCPPStatus.SuspendedEV;
+    connector.setChargingProfiles([]);
+    sample(connector);
+    expect(events).toHaveLength(1);
+
+    // The car resumes and a fresh zero-limit profile arrives. Same session,
+    // so this pause is a new crossing and has to be announced.
+    connector.status = OCPPStatus.Charging;
+    connector.addChargingProfile(zeroLimitProfile(313));
+    sample(connector);
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(true);
+  });
+});
+
+describe("the pause latch's lifetime is one transaction (#301)", () => {
+  /**
+   * Only a `TxProfile` is cleared when a transaction ends (§3.13.3);
+   * a `TxDefaultProfile` and a `ChargePointMaxProfile` deliberately survive
+   * it. Under one of those at `limit: 0` the latch was never disarmed —
+   * disarming only happens on an *uncapped* resolve, and between two sessions
+   * there is nothing sampling to produce one. The next transaction was moved
+   * to `Charging` on acceptance, its first resolve matched the latch left by
+   * the previous session and stayed silent, and the connector reported
+   * `Charging` with its meter capped at zero.
+   */
+  function persistentZeroDefault(id = 312): ActiveChargingProfile {
+    return {
+      chargingProfileId: id,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxDefaultProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 0 }],
+    };
+  }
+
+  function sample(connector: Connector): void {
+    buildSampledValues(connector, ["Power.Active.Import"], "Sample.Periodic");
+  }
+
+  function pausedSession(): {
+    connector: Connector;
+    events: { paused: boolean; watts: number }[];
+  } {
+    const connector = makeConnector();
+    connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: 350 };
+    const events: { paused: boolean; watts: number }[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+    connector.addChargingProfile(persistentZeroDefault());
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    sample(connector);
+    return { connector, events };
+  }
+
+  it("announces the pause again for the next transaction under a profile nobody cleared", () => {
+    const { connector, events } = pausedSession();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.paused).toBe(true);
+
+    // The session ends. The TxDefaultProfile stays in force and nothing
+    // samples in the gap, so no uncapped resolve ever disarms the latch.
+    connector.stopTransaction();
+
+    // The next session is accepted straight into Charging. Its first resolve
+    // is still capped at zero, and that has to be announced — otherwise the
+    // connector reports Charging with a meter that cannot move.
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    sample(connector);
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(true);
+    expect(events[1]!.watts).toBe(0);
+  });
+
+  it("announces it for a station-level ChargePointMaxProfile too", () => {
+    const store = new ChargingProfileStore();
+    store.add({
+      chargingProfileId: 314,
+      connectorId: 0,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 0 }],
+    });
+    const connector = new Connector(1, new Logger(LogLevel.ERROR), () => store);
+    connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: 350 };
+    const events: { paused: boolean; watts: number }[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    sample(connector);
+    expect(events).toHaveLength(1);
+
+    connector.stopTransaction();
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    sample(connector);
+    expect(events).toHaveLength(2);
+    expect(events[1]!.paused).toBe(true);
+  });
+
+  it("still reports one crossing per session, not one per sample", () => {
+    // Re-arming is a boundary event, not a licence to re-announce: within a
+    // session the latch stays edge-triggered.
+    const { connector, events } = pausedSession();
+    for (let i = 0; i < 4; i++) sample(connector);
+    expect(events).toHaveLength(1);
+
+    connector.stopTransaction();
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction(transaction());
+    for (let i = 0; i < 4; i++) sample(connector);
+    expect(events).toHaveLength(2);
+  });
+});
+
+describe("profile validity is judged at the same instant as the periods (#301)", () => {
+  /**
+   * `scheduleConstraints()` pins one `now` and hands it to the period and
+   * phase resolvers, but the two *active-profile* lookups —
+   * `getActiveChargingProfile()` and the station store's `getActive()` — each
+   * made their own. A `validFrom` / `validTo` boundary falling between those
+   * readings selected a profile belonging to a different instant than the
+   * periods resolved against: applied early, or omitted late.
+   */
+  const START = new Date("2026-08-01T00:00:00.000Z");
+
+  function windowedTx(bounds: {
+    validFrom?: string;
+    validTo?: string;
+  }): ActiveChargingProfile {
+    return {
+      chargingProfileId: 315,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 7000 }],
+      ...bounds,
+    };
+  }
+
+  function sessionAt(connector: Connector): void {
+    connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: 350 };
+    connector.socMeterSyncEnabled = false;
+    connector.soc = 50;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction({
+      id: 315,
+      connectorId: 1,
+      tagId: "TAG-WINDOW",
+      meterStart: 0,
+      meterStop: null,
+      startTime: START,
+      stopTime: null,
+      meterSent: false,
+    });
+  }
+
+  /** Argument-less `new Date()` walks this list; a second reading inside one
+   *  resolve therefore lands on the far side of the validity boundary. */
+  function stubClockSequence(offsetsSeconds: number[]): () => void {
+    const RealDate = Date;
+    let call = 0;
+    class SequencedDate extends RealDate {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          const i = Math.min(call++, offsetsSeconds.length - 1);
+          super(START.getTime() + offsetsSeconds[i]! * 1000);
+        } else {
+          // @ts-expect-error forwarding the real Date overloads verbatim
+          super(...args);
+        }
+      }
+    }
+    vi.stubGlobal("Date", SequencedDate);
+    return () => vi.unstubAllGlobals();
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps a Tx profile whose validTo has not passed at the pinned instant", () => {
+    const connector = makeConnector();
+    sessionAt(connector);
+    connector.addChargingProfile(
+      windowedTx({ validTo: new Date(START.getTime() + 30_000).toISOString() }),
+    );
+    // Pinned reading inside the window; any later reading is outside it.
+    const restore = stubClockSequence([10, 70]);
+    try {
+      expect(connector.scheduleConstraints().watts).toBe(7000);
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not apply a Tx profile whose validFrom has not arrived at the pinned instant", () => {
+    const connector = makeConnector();
+    sessionAt(connector);
+    connector.addChargingProfile(
+      windowedTx({
+        validFrom: new Date(START.getTime() + 30_000).toISOString(),
+      }),
+    );
+    const restore = stubClockSequence([10, 70]);
+    try {
+      expect(connector.scheduleConstraints().watts).toBe(Infinity);
+    } finally {
+      restore();
+    }
+  });
+
+  it("judges the station ChargePointMaxProfile at the same pinned instant", () => {
+    const store = new ChargingProfileStore();
+    store.add({
+      chargingProfileId: 316,
+      connectorId: 0,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.W,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 3000 }],
+      validTo: new Date(START.getTime() + 30_000).toISOString(),
+    });
+    const connector = new Connector(1, new Logger(LogLevel.ERROR), () => store);
+    sessionAt(connector);
+    const restore = stubClockSequence([10, 70]);
+    try {
+      expect(connector.scheduleConstraints().watts).toBe(3000);
+    } finally {
+      restore();
+    }
+  });
 });

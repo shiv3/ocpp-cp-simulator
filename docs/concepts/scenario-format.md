@@ -23,7 +23,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-05
+updated: 2026-09-06
 ---
 
 # Scenario File Format (v1.2)
@@ -608,16 +608,38 @@ repeated samples at one limit report it once — but it is announced from the
 first resolve made in a state that can act on it, not from the first resolve of
 any kind. A crossing seen while the connector is still `Preparing`, which is
 where a scenario's first MeterValue lands, would otherwise be the only edge
-ever reported and would be discarded unheard. Clearing the profile disarms the
-detection in **every** status, so a pause latched by one session can never
-outlive it and silence the next session's.
+ever reported and would be discarded unheard.
+
+**"Once per crossing" means once per crossing _per transaction_.** The
+edge-detection state is per session: it is re-armed when a transaction begins,
+so the first resolve of a new session always announces the state it finds, and
+it is disarmed mid-session whenever no profile is in force — in **every**
+status, including the ones the pause listener ignores, so a profile withdrawn
+while the car itself is paused (`SuspendedEV`) cannot silence the next crossing
+of the same session. Both halves are needed, because the two ways a pause can
+end are different: a profile can be cleared, or the session under it can end.
+Only a `TxProfile` is cleared when a transaction stops — a `TxDefaultProfile`
+or a station `ChargePointMaxProfile` at `limit: 0` deliberately survives it,
+nothing samples between sessions to produce the uncapped resolve that would
+disarm the detection, and without the re-arm the next transaction was moved to
+`Charging` on acceptance and then reported `Charging` with its meter capped at
+zero, its opening pause never announced.
 
 **Every sample in one MeterValue describes one instant.** The watt cap and the
 active phase count are both derived from the charging schedule, and each used
 to resolve against its own clock reading: a period boundary falling between
 the two took the cap from one period and the phase divisor from the next, so a
 10 A three-phase period capped at 6900 W and was then divided as one phase and
-reported as 30 A. They are resolved together from a single instant.
+reported as 30 A. They are resolved together from a single instant, and that
+instant governs **every** clock-dependent question the resolve asks — not only
+period selection. Named in full, it decides: which Tx-layer profile applies
+(`TxProfile` / `TxDefaultProfile`, by `validFrom` / `validTo`), which station
+`ChargePointMaxProfile` applies (same validity test), which schedule period of
+each is active, and the `numberPhases` restriction in force. The two
+active-profile lookups each took their own clock reading, so a profile whose
+validity window opened or closed between the readings could be applied a
+moment early or omitted a moment late — the same defect as the period
+boundary, one layer up.
 
 **A transaction opens on its own SoC, never the previous session's.** Stopping
 a transaction deliberately leaves `socPercent` in place — disconnect/reconnect

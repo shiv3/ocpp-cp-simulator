@@ -380,12 +380,20 @@ export class Connector {
   /**
    * The watt cap and the active phase count, resolved from **one** instant.
    *
-   * Both are read for every MeterValue, and each used to resolve against its
-   * own `new Date()`. A charging-schedule period boundary falling between the
-   * two calls took the cap from one period and the divisor from the next: a
-   * 10 A three-phase period yields 6900 W, divided as one phase and reported
-   * as 30 A — a sample set describing two instants at once, which is the
-   * property the single schedule resolve was introduced to hold (#301).
+   * One instant covers every clock-dependent question the resolve asks:
+   * which Tx-layer profile applies (`validFrom` / `validTo`), which station
+   * `ChargePointMaxProfile` applies, which schedule period of each is active,
+   * and the phase restriction in force.
+   *
+   * Both constraints are read for every MeterValue, and each used to resolve
+   * against its own `new Date()`. A charging-schedule period boundary falling
+   * between the two calls took the cap from one period and the divisor from
+   * the next: a 10 A three-phase period yields 6900 W, divided as one phase
+   * and reported as 30 A — a sample set describing two instants at once,
+   * which is the property the single schedule resolve was introduced to hold.
+   * A profile-validity boundary falling between the two active-profile
+   * lookups was the same defect one layer up, and is closed the same way
+   * (#301).
    *
    * Emits `scheduleLimitChange` on a crossing exactly as
    * {@link currentScheduleLimitWatts} does, and is the call a sampling path
@@ -407,10 +415,18 @@ export class Connector {
     watts: number;
     activePhases: number;
   } {
-    const txProfile = this.getActiveChargingProfile();
+    // `now` reaches the *selection* of both profiles, not only the period and
+    // phase resolvers below. Both lookups defaulted to a clock reading of
+    // their own, so a `validFrom` / `validTo` boundary falling between them
+    // and the pinned instant selected a profile belonging to a different
+    // moment than the periods were then resolved against — applied a moment
+    // early, or omitted a moment late (#301). Every applicable-profile
+    // question in this method is now asked about one instant.
+    const txProfile = this.getActiveChargingProfile(now);
     const stationMax =
       this.stationProfilesProvider()?.getActive(
         ChargingProfilePurposeType.ChargePointMaxProfile,
+        now,
       ) ?? null;
     const start = this.transactionValue?.startTime ?? null;
     const resolved = resolveEffectiveLimitWatts(
@@ -448,13 +464,17 @@ export class Connector {
   private announceScheduleCrossing(watts: number): void {
     // No profile in force: disarm, whatever the connector's status. This is
     // bookkeeping, not an announcement — it emits nothing — so it deliberately
-    // runs before the status guard below. Skipping it outside
-    // Charging/SuspendedEVSE left a `paused` latched by a previous
-    // transaction alive across the gap: the profile is cleared, an uncapped
-    // sample is built while the next transaction is still Preparing, a
-    // zero-limit profile arrives before acceptance, and the first resolve in
-    // Charging then matches the stale latch and stays silent — the meter
-    // capped at zero while the connector reports Charging (#301).
+    // runs before the status guard below. The case it carries is a withdrawal
+    // seen *inside* a live session, in a status the listener ignores: the car
+    // pauses (`SuspendedEV`), the CSMS withdraws the zero-limit profile while
+    // it is stopped, the car resumes, and a fresh zero-limit profile arrives.
+    // Skipping the disarm there left the latch at `true` for a crossing that
+    // had genuinely been undone, and the new pause went unannounced — the
+    // meter capped at zero while the connector reported Charging (#301).
+    // Across a *transaction* boundary the latch is re-armed by
+    // {@link beginTransaction} instead, which is where its lifetime ends;
+    // this disarm cannot cover that case, because a profile that survives the
+    // session is never cleared and nothing samples in the gap.
     if (watts === Infinity) {
       this.lastSchedulePaused = null;
       return;
@@ -508,9 +528,18 @@ export class Connector {
     return this.resolveScheduleConstraints(new Date()).activePhases;
   }
 
-  /** Snapshot of the last resolved "paused" state, used to detect crossings
-   *  of the limit=0 boundary across schedule periods. `null` means we
-   *  haven't seen a capped schedule yet (or it was cleared). */
+  /**
+   * Snapshot of the last resolved "paused" state, used to detect crossings of
+   * the limit=0 boundary across schedule periods. `null` means nothing has
+   * been announced yet.
+   *
+   * **Its lifetime is one transaction.** It records what this session last
+   * told the ChargePoint, and the `scheduleLimitChange` listener returns
+   * without a transaction attached, so "already announced" is only a
+   * meaningful claim within one. It is re-armed to `null` by
+   * {@link beginTransaction}, and disarmed mid-session by
+   * {@link announceScheduleCrossing} whenever no profile is in force (#301).
+   */
   private lastSchedulePaused: boolean | null = null;
 
   /**
@@ -1003,6 +1032,21 @@ export class Connector {
 
   beginTransaction(transaction: Transaction): void {
     this.transactionValue = transaction;
+    // A new session has announced nothing yet. `lastSchedulePaused` records
+    // what *this* session last told the ChargePoint, and the listener it
+    // feeds no-ops without a transaction — so "already announced" is only a
+    // meaningful claim inside one transaction, and the latch's lifetime is
+    // exactly that. Left standing across the boundary it silenced the next
+    // session: only `TxProfile` is cleared when a transaction ends, so a
+    // station-level or `TxDefaultProfile` at `limit: 0` stays in force, the
+    // uncapped resolve that would otherwise disarm the latch never happens
+    // (nothing samples between sessions), and the first resolve of the next
+    // transaction matched the stale `true` and stayed silent — `Charging`
+    // reported with the meter capped at zero (#301). Re-arming here, rather
+    // than at `stopTransaction`, is deliberate: this is the only path that
+    // attaches a transaction to this connector, and any resolve in the gap
+    // has no `startTime` to resolve against and so disarms on its own.
+    this.lastSchedulePaused = null;
     this.openSessionSoc(transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });

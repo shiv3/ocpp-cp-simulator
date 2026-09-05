@@ -365,7 +365,11 @@ envelope's own bound as the event is built, not only checked by the schema: a
 field that fails validation takes the whole push with it and the failure is
 merely logged, so an unbounded value turns a correct rejection into silence. A
 file-loaded definition's `id` is whatever the file says, and one over 64 KiB
-quoted into a rejection message did exactly that. A rejected reload reports
+quoted into a rejection message did exactly that. A scenario **id** is bounded at the point a
+definition is loaded — by the same constant the event field uses — because a
+definition read from a file passes through none of the object schemas that bound
+an id arriving over RPC, and an id past that length loaded fine and then made
+every event naming it unsendable. A rejected reload reports
 **which file** failed and never what was in it — the runtime's own parser message
 quotes the offending bytes, and the control plane is not a place to echo an
 operator's file. See

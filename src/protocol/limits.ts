@@ -30,8 +30,23 @@ export const STR_256 = z.string().max(256);
 /** Short prose or a path: ≤ 1 KB. */
 export const STR_1K = z.string().max(1_024);
 
+/**
+ * Max length of a `SCENARIO_STR_256K` field — in particular the `scenarioId`
+ * the `file-reload` envelope carries.
+ *
+ * Exported as a number for the same reason as {@link STR_64K_MAX}: the value
+ * has to be enforceable at the point a scenario is *loaded*, not only where an
+ * event is validated. A definition arriving through `load_scenario { scenario }`
+ * is bounded as a whole object by {@link SCENARIO_MAX_BYTES}, so its id cannot
+ * exceed this — but a definition read from a **file** bypasses that object
+ * schema entirely, so an id past this length loaded fine and then made every
+ * reload event for it fail validation and be swallowed (#314). One constant, so
+ * the loader's gate and the envelope cannot disagree.
+ */
+export const SCENARIO_ID_MAX = 262_144;
+
 /** Scenario-definition payload string: ≤ 256 KB (scenarios can be large). */
-export const SCENARIO_STR_256K = z.string().max(262_144);
+export const SCENARIO_STR_256K = z.string().max(SCENARIO_ID_MAX);
 
 /**
  * Max items in an `ARRAY_1000` field.

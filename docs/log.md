@@ -1090,8 +1090,8 @@ Sixth review pass on PR #325.
   file-loaded sibling id over 64 KiB quoted whole into an overflow rejection.
 - Audit, since this is the third: the only strings reaching that envelope are
   `path` (filesystem-bounded, and capped in the schema since round five),
-  `cpId` (bounded by the RPC schema), `scenarioId` (bounded by the definition
-  cap that carries it), and `error`. `error` is composed in three places — a
+  `cpId` (bounded by the RPC schema), `scenarioId` (**see the correction in the
+  next entry — this line was wrong**), and `error`. `error` is composed in three places — a
   parse failure (fixed text), a filesystem failure (the path again), and the
   overflow message (now truncated at composition). The `Scenario <id> …` throws
   in `service.ts` do quote an unbounded id, but none of them is reachable from
@@ -1119,3 +1119,41 @@ Sixth review pass on PR #325.
   survives the next person composing a message — the same reason
   `ARRAY_MAX_ITEMS` and `STR_64K_MAX` are exported constants rather than inline
   numbers.
+
+## [2026-09-06] ingest | `--watch`: no partial state from a failed run, and the audit's missing path (#314, PR #317)
+
+- `run_scenario_file` performed a multi-step mutation with no transaction around
+  it. `loadScenario` replaced and persisted the definition, `runScenario` then
+  threw if that id was already running, and the dispatcher registers the new
+  source file only on success — so a failed request left the new definition live
+  behind the _old_ file's watch, and the next edit to that stale file silently
+  overwrote it. The id is now refused **before** anything is installed. Chosen
+  over a compensating rollback deliberately: the alternative is to undo a
+  definition, a persistence write and a watch association in the right order,
+  and having no partial state is cheaper to be right about than unwinding one.
+  Nothing promised the old behaviour — the call raised an error either way, and
+  the error text is unchanged.
+- **Correction to the previous entry's audit.** It said the envelope's
+  `scenarioId` was "bounded by the definition cap that carries it". That is true
+  of a definition arriving as an RPC _object_, which `SCENARIO_MAX_BYTES` bounds
+  whole — and false of one read from a **file**, which passes through no object
+  schema at all. An id past 262,144 characters therefore loaded successfully and
+  then made every reload event naming it fail validation and be swallowed: the
+  scenario ran and no subscriber heard anything. The audit was one path short,
+  and it had been quoted as part of the justification for keeping an unexercised
+  guard, so it is corrected here rather than left to be re-derived.
+- The gap is closed at the **loader**, not by widening the event schema.
+  `validateLoadableScenario` now bounds the id by `SCENARIO_ID_MAX`, exported
+  from `protocol/limits` and consumed by `SCENARIO_STR_256K`, so every scenario
+  in the registry satisfies the invariant however it arrived and the producer
+  and the schema cannot drift. Widening the envelope would have made the RPC
+  schema and the file loader disagree in the other direction.
+- The corrected audit: `path` is filesystem-bounded and capped in the schema;
+  `cpId` is bounded by the RPC method schema; `scenarioId` is now bounded at the
+  load gate for **every** path, file included; and `error` is composed in three
+  places — a parse failure (fixed text), a filesystem failure (the path again),
+  and the snapshot-overflow message, whose only caller-supplied part is a
+  sibling id truncated where the message is built. The `Scenario <id> …` throws
+  in `service.ts` quote an unbounded id but sit in run/stop/remove, and
+  `loadScenario` is the only call a reload makes. The clamp at the emit boundary
+  stays unexercised, and stays.

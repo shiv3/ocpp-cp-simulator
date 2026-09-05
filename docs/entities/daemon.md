@@ -370,7 +370,12 @@ startup flags are the deliberate exception: `--scenario` and
 rewrite that a fan-out depends on lives in a callback no row can carry, and the
 bootstrap that owns it runs again on every boot. Persisting them would restore a
 second, rewrite-less watch per connector alongside the fresh instances, under
-the previous run's scenario ids. The rows are simulator-owned state, so
+the previous run's scenario ids. A startup registration also **deletes** any row
+already stored under the key it takes over: `--scenario` keeps the file's own id
+when the file already targets its connector, so it can collide with an earlier
+control-plane load of that id, and the abandoned row would otherwise be restored
+at the next start and applied before the bootstrap registered the configured
+scenario. The rows are simulator-owned state, so
 `cp.delete` cascades to them and `state.reset` truncates them, with or without
 `--watch`.
 

@@ -926,3 +926,28 @@ Sixth review pass on PR #325.
   never by a rejection, and cleared when a held text is refused at drain time.
 - [State persistence](concepts/state-persistence.md) — the watch-row lifecycle
   names `scenario.definitions.delete` alongside the other removal paths.
+
+## [2026-09-05] ingest | `--watch`: one stop path, and the other half of "startup registrations are not persisted" (#314, PR #317)
+
+- `stopScenario` and `stopAllScenarios` were hand-copied variants of one another
+  and had already drifted: only the first froze the terminal status, so after a
+  successful bulk stop `scenario_status` and `list_scenarios` answered null or
+  with the previous run's verdict. They now share one `tearDownStoppedRun`,
+  which is the fix rather than adding the missing call to the copy — a second
+  copy is how they diverged in the first place.
+- Recorded because the reasoning, not just the code, was wrong: last round's
+  argument for putting the stopped-run cleanup in `runScenario`'s `finally`
+  rested on "the stop paths take those snapshots before `executor.stop()`". That
+  was verified against `stopScenario` and assumed of `stopAllScenarios`. The
+  placement stands — the callback still runs whichever path stopped the run —
+  but the premise had to be made true rather than asserted. "The stop paths do
+  X" is not a category to reason from until the paths are one.
+- [Daemon](entities/daemon.md) — the startup-registration rule gains its
+  complement: a registration that writes no row must **delete** any row already
+  stored under the key it takes over. `--scenario` keeps the file's own id when
+  it already targets its connector, so it collides with an earlier control-plane
+  load of that id; the abandoned row was restored at the next start and applied
+  _before_ the bootstrap registered the configured scenario, and a matching
+  trigger could auto-start the stale graph in its place. Taking over a key is a
+  removal of the previous owner's record — the same rule the removal-path
+  enumeration follows.

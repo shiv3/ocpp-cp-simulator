@@ -1916,66 +1916,7 @@ export class CLIChargePointService {
     if (!executor) {
       throw new Error(`Scenario ${scenarioId} is not running`);
     }
-    // #179: capture the run id before stop() — executor.stop() lets the
-    // start() promise settle, whose finally() clears _runIdByScenario.
-    const runId = this._runIdByScenario.get(scenarioId) ?? "";
-    // #179 Phase 2b: capture whether the run was parked on a waiting node
-    // BEFORE stop() clears currentExpectation — a scenario stopped mid-wait
-    // couldn't reach a verifiable state, so its verdict should be BLOCKED
-    // rather than a possibly-misleading FAIL/PASS off a truncated
-    // transcript.
-    const ctxBeforeStop = executor.getContext();
-    const wasWaiting = ctxBeforeStop.state === "waiting";
-    // #179 Phase 3: a stop mid-wait is the closest thing to a timeout the
-    // report can attribute — record which node was parked and what it awaited.
-    const timeout =
-      wasWaiting && ctxBeforeStop.currentNodeId
-        ? {
-            nodeId: ctxBeforeStop.currentNodeId,
-            expectation: ctxBeforeStop.expectation,
-          }
-        : null;
-    // Same terminal-status freeze as runScenario's finally(), taken from the
-    // pre-stop context so currentNodeId/executedNodes describe where the run
-    // actually was. finalizeScenarioRun below records this stop as "completed";
-    // keep the two surfaces in step.
-    this.recordTerminalScenarioStatus(
-      scenarioId,
-      runId,
-      "completed",
-      ctxBeforeStop,
-      [],
-    );
-    executor.stop();
-    this._executors.delete(scenarioId);
-    this._runIdByScenario.delete(scenarioId);
-    // Release the EV settings override (#105) — only when this scenario
-    // declared evSettings and therefore owns it; see runScenario's
-    // executor.start().finally() for the natural-completion counterpart.
-    if (this._scenarios.get(scenarioId)?.definition.evSettings) {
-      this._chargePoint.connectors.get(connectorId)?.clearEvSettingsOverride();
-    }
-    // Surface the stop to remote subscribers — executor.stop() bypasses
-    // the onStateChange("completed") path used by runScenario(), so the
-    // browser's active-scenario tracker would otherwise still believe
-    // this scenario is running.
-    this.emit({
-      event: "scenario_completed",
-      data: { connectorId, scenarioId, runId },
-    });
-    // #179 Phase 2b: finalize now, synchronously, before executor.start()'s
-    // own .finally() (deferred to a microtask by the abort machinery) can
-    // race it — finalizeScenarioRun's transcript guard makes that later
-    // call a no-op. A manual stop collects no error message.
-    this.finalizeScenarioRun(
-      scenarioId,
-      connectorId,
-      runId,
-      "completed",
-      wasWaiting,
-      [],
-      timeout,
-    );
+    this.tearDownStoppedRun(connectorId, scenarioId, executor);
   }
 
   /**
@@ -2029,46 +1970,92 @@ export class CLIChargePointService {
 
   stopAllScenarios(connectorId: number): void {
     for (const [scenarioId, entry] of this._scenarios) {
-      if (entry.connectorId === connectorId) {
-        const executor = this._executors.get(scenarioId);
-        if (executor) {
-          const runId = this._runIdByScenario.get(scenarioId) ?? "";
-          // #179 Phase 2b/3: see stopScenario's comment.
-          const ctxBeforeStop = executor.getContext();
-          const wasWaiting = ctxBeforeStop.state === "waiting";
-          const timeout =
-            wasWaiting && ctxBeforeStop.currentNodeId
-              ? {
-                  nodeId: ctxBeforeStop.currentNodeId,
-                  expectation: ctxBeforeStop.expectation,
-                }
-              : null;
-          executor.stop();
-          this._executors.delete(scenarioId);
-          this._runIdByScenario.delete(scenarioId);
-          // Release the EV settings override (#105) only for the owning
-          // (evSettings-declaring) scenario, same as stopScenario.
-          if (entry.definition.evSettings) {
-            this._chargePoint.connectors
-              .get(connectorId)
-              ?.clearEvSettingsOverride();
-          }
-          this.emit({
-            event: "scenario_completed",
-            data: { connectorId, scenarioId, runId },
-          });
-          this.finalizeScenarioRun(
-            scenarioId,
-            connectorId,
-            runId,
-            "completed",
-            wasWaiting,
-            [],
-            timeout,
-          );
-        }
-      }
+      if (entry.connectorId !== connectorId) continue;
+      const executor = this._executors.get(scenarioId);
+      if (!executor) continue;
+      this.tearDownStoppedRun(connectorId, scenarioId, executor);
     }
+  }
+
+  /**
+   * Everything a manual stop does once the run to stop has been identified.
+   *
+   * Shared rather than repeated, because it had already drifted: this body used
+   * to exist twice and only `stopScenario`'s copy froze the terminal status, so
+   * a bulk stop left `scenario_status` and `list_scenarios` answering null or
+   * with the previous run's verdict. That divergence also invalidated the
+   * argument for putting the stopped-run cleanup in `runScenario`'s `finally`
+   * — "the stop paths already record it" was true of one of them (#314).
+   *
+   * Order matters and is the same as it was: the terminal status and the
+   * timeout are captured from the **pre-stop** context, because `executor.stop()`
+   * clears the parked expectation and moves the run's state on, and a snapshot
+   * taken afterwards would describe where the run is not.
+   */
+  private tearDownStoppedRun(
+    connectorId: number,
+    scenarioId: string,
+    executor: ScenarioExecutor,
+  ): void {
+    // #179: capture the run id before stop() — executor.stop() lets the
+    // start() promise settle, whose finally() clears _runIdByScenario.
+    const runId = this._runIdByScenario.get(scenarioId) ?? "";
+    // #179 Phase 2b: capture whether the run was parked on a waiting node
+    // BEFORE stop() clears currentExpectation — a scenario stopped mid-wait
+    // couldn't reach a verifiable state, so its verdict should be BLOCKED
+    // rather than a possibly-misleading FAIL/PASS off a truncated transcript.
+    const ctxBeforeStop = executor.getContext();
+    const wasWaiting = ctxBeforeStop.state === "waiting";
+    // #179 Phase 3: a stop mid-wait is the closest thing to a timeout the
+    // report can attribute — record which node was parked and what it awaited.
+    const timeout =
+      wasWaiting && ctxBeforeStop.currentNodeId
+        ? {
+            nodeId: ctxBeforeStop.currentNodeId,
+            expectation: ctxBeforeStop.expectation,
+          }
+        : null;
+    // Same terminal-status freeze as runScenario's finally(), taken from the
+    // pre-stop context so currentNodeId/executedNodes describe where the run
+    // actually was. finalizeScenarioRun below records this stop as "completed";
+    // keep the two surfaces in step.
+    this.recordTerminalScenarioStatus(
+      scenarioId,
+      runId,
+      "completed",
+      ctxBeforeStop,
+      [],
+    );
+    executor.stop();
+    this._executors.delete(scenarioId);
+    this._runIdByScenario.delete(scenarioId);
+    // Release the EV settings override (#105) — only when this scenario
+    // declared evSettings and therefore owns it; see runScenario's
+    // executor.start().finally() for the natural-completion counterpart.
+    if (this._scenarios.get(scenarioId)?.definition.evSettings) {
+      this._chargePoint.connectors.get(connectorId)?.clearEvSettingsOverride();
+    }
+    // Surface the stop to remote subscribers — executor.stop() bypasses
+    // the onStateChange("completed") path used by runScenario(), so the
+    // browser's active-scenario tracker would otherwise still believe
+    // this scenario is running.
+    this.emit({
+      event: "scenario_completed",
+      data: { connectorId, scenarioId, runId },
+    });
+    // #179 Phase 2b: finalize now, synchronously, before executor.start()'s
+    // own .finally() (deferred to a microtask by the abort machinery) can
+    // race it — finalizeScenarioRun's transcript guard makes that later
+    // call a no-op. A manual stop collects no error message.
+    this.finalizeScenarioRun(
+      scenarioId,
+      connectorId,
+      runId,
+      "completed",
+      wasWaiting,
+      [],
+      timeout,
+    );
   }
 
   /** Drain any buffered log lines to the DB — called from the socket.io

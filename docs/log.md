@@ -1097,3 +1097,25 @@ Sixth review pass on PR #325.
   in `service.ts` do quote an unbounded id, but none of them is reachable from
   `loadScenario`, which is the only call a reload makes. So there is no other
   live path today; the clamp at the emit boundary is what covers the next one.
+
+## [2026-09-05] ingest | `--watch`: the same-tick residual written down, and why one mutation is vacuous on purpose (#314, PR #317)
+
+- [Daemon](entities/daemon.md) — the limitation left after the dial split is now
+  on the page rather than only in a review thread. A restored
+  connect-triggered scenario's auto-start and the startup load's
+  `waitForBootAccepted` are two listeners on the same boot-accepted event, so
+  when both apply, which runs first depends on registration order. The mitigation
+  is stated with it: the startup flag's load takes over the key regardless, so a
+  stale run ends against a definition that is no longer installed. Closing it
+  properly means installing the startup definition _before_ the charge point
+  connects — a change to the startup load, not to `--watch`. A behaviour with no
+  page is a behaviour a later review round can get wrong.
+- The PR body now carries the reasoning behind the one mutation check that is
+  deliberately vacuous: removing the clamp in `FileReloadManager.emit` fails no
+  test, because the audit that accompanies it shows no live path composes an
+  over-long string today. The rule this records: **a vacuous mutation is
+  acceptable only when the absence of a path can be demonstrated.** Unexplained,
+  it is a test that proves nothing; audited, it is a boundary guard that
+  survives the next person composing a message — the same reason
+  `ARRAY_MAX_ITEMS` and `STR_64K_MAX` are exported constants rather than inline
+  numbers.

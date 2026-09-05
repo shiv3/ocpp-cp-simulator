@@ -1222,11 +1222,14 @@ describe("a rejected save never becomes the baseline (#314)", () => {
     await rpc(socket, "load_scenario", { connector: 1, file }, "CP-BASELINE");
 
     // Structurally a scenario (id/nodes/edges) so it clears the watcher's own
-    // shape check, but with a `targetType` `assertLoadableScenario` refuses —
-    // so `loadScenario` throws and the reload is rejected after parsing.
+    // shape check, but with a `name` `assertLoadableScenario` refuses — so
+    // `loadScenario` throws and the reload is rejected after parsing. It used
+    // to use a bad `targetType`, which stopped working once a reload began
+    // pinning the target to what was loaded: the bad value never reaches the
+    // load any more, which is the point of that rule.
     const unloadable = JSON.stringify({
       ...JSON.parse(scenario("baseline-keep", 22)),
-      targetType: "galaxy",
+      name: 42,
     });
     backend.save(file, unloadable);
     await waitFor(() => events.length > 0, "a rejection event");
@@ -2277,6 +2280,54 @@ describe("bookkeeping never fails the RPC that already happened (#314)", () => {
     expect(loadedDelay(server, "CP-BOOKKEEP", "bookkeep")).toBe(11);
     // …and the watch still works for this run; only its durability was lost.
     expect(server.fileReload?.watchedPaths()).toContain(path.resolve(file));
+  });
+});
+
+describe("a reload replaces a definition, it never moves a scenario (#314)", () => {
+  it("keeps a control-plane scenario on the target it was loaded with", async () => {
+    // Scenarios registered through `load_scenario { file }` get no `prepare`,
+    // so nothing re-derived their target: an edited `targetId` was accepted
+    // while the scenario stayed mapped to the connector it was registered on,
+    // and `ScenarioExecutor` then waited on a connector its runtime callbacks
+    // were not operating on. The startup flags are the deliberate opposite —
+    // there the target *is* re-derived per reload.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("pinned", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-PINNED",
+      wsUrl: csmsUrl(),
+      connectors: 2,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-PINNED");
+    expect(
+      server.registry.get("CP-PINNED")?.getScenario(1, "pinned")?.targetId,
+    ).toBe(1);
+
+    // The operator repoints the file at connector 2.
+    const repointed = JSON.parse(scenario("pinned", 22)) as Record<
+      string,
+      unknown
+    >;
+    repointed.targetId = 2;
+    backend.save(file, JSON.stringify(repointed));
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the edit to land",
+    );
+
+    // The new graph is live on the connector it was registered for, and its
+    // target still names that connector.
+    const loaded = server.registry.get("CP-PINNED")?.getScenario(1, "pinned");
+    expect(
+      (loaded?.nodes[0] as { data?: { duration?: number } })?.data?.duration,
+    ).toBe(22);
+    expect(loaded?.targetId).toBe(1);
+    expect(loaded?.targetType).toBe("connector");
   });
 });
 

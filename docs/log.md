@@ -723,6 +723,7 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
 
 - The cross-runtime agreement table was deliberately **not** built. It cannot assert agreement while the interpolators differ, and a table pinning a known-wrong 15% gap as the expected answer would have to be rewritten the moment the real fix lands. The instrument that would actually catch the next divergence is one shared interpolator, which is a behaviour change to one runtime or the other and belongs with the bezier/linear issue rather than at a merge gate.
 
+
 ## [2026-09-04] ingest | `--watch` re-reads loaded idTag and scenario files (#314)
 
 - `entities/daemon.md` — new **File hot-reload** section (what is watched,
@@ -1219,3 +1220,27 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   watch's durability, not its correctness this run. Persist-first, chosen for
   `replaceIdTags`, is simply not available here, and that difference is now
   recorded rather than left to be re-derived.
+
+## [2026-09-05] ingest | `--watch`: a narrow skip, and a reload that never moves a scenario (#314, PR #317)
+
+- The two-pass restore's first pass skipped by **charge point**, on the argument
+  that over-skipping was safe because the second pass would pick the rest up.
+  It was not: the dial happens between the passes, so every other restored
+  scenario on that charge point auto-started from the database copy rather than
+  the reconciled file — constraint 1 broken by constraint 2's own solution. The
+  skip is now a predicate over the exact scenario ids a startup flag will claim.
+- The obstacle to narrowing was that predicting those ids means knowing whether
+  `--scenario` will keep the file's own id or instantiate a fresh one. That rule
+  now lives in one exported function that both `runStartupScenario`'s `prepare`
+  and the prediction call, so the skip cannot drift from the load it predicts —
+  shared rather than duplicated, which was the condition for taking this route.
+  Only `--scenario` on a file already targeting its single connector keeps a
+  stable id; everything else carries `Date.now()` and cannot collide.
+- [Daemon](entities/daemon.md) — the target rule splits in two, stated together
+  so the difference is deliberate. A file behind a startup flag has its target
+  **re-derived** on every reload (round 12's fix: a repointed `--scenario` must
+  be re-evaluated). A file behind `load_scenario { file }` or `run_scenario_file`
+  has its target **pinned** to what the load installed, because nothing
+  re-derives it there — an edited `targetId` was accepted while the scenario
+  stayed mapped to its registered connector, so the executor waited on a
+  connector its runtime callbacks were not operating on.

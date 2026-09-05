@@ -317,13 +317,22 @@ The rules, in the order they bite:
   checks as well: a scenario the charge point no longer holds is **never
   re-created** by an edit, whichever path removed it.
 - **A scenario keeps the connector it was loaded onto, and the id it was loaded
-  under.** An edited `targetType` / `targetId` is re-applied to the connector the
-  scenario is registered for, on every reload — a startup `--scenario` fanned out
-  across connectors keeps its independent copies, and a single-connector one
-  repointed by hand is rewritten back rather than left waiting on a connector it
-  is not attached to. If the edited file's own `id`
-  changed, it is ignored. Honouring it would load a _second_ scenario and leave
-  the first one in place under the old definition.
+  under.** If the edited file's own `id` changed, it is ignored. Honouring it
+  would load a _second_ scenario and leave the first one in place under the old
+  definition. The **target** follows one of two rules, and the difference
+  between them is deliberate:
+  - A file behind a **startup flag** has its `targetType` / `targetId`
+    _re-derived_ on every reload. `--scenario` fanned out across connectors
+    keeps its independent copies, and a single-connector one repointed by hand
+    is rewritten back onto the connector it is registered for rather than left
+    waiting on one it is not attached to.
+  - A file behind **`load_scenario { file }` or `run_scenario_file`** has its
+    target _pinned_ to what the load installed. Nothing re-derives it on that
+    path, so an edited target was otherwise accepted while the scenario stayed
+    mapped to its registered connector — the executor then derived expectations
+    from the edited `targetId` and waited on a connector its runtime callbacks
+    were not operating on. A reload replaces a definition; it never moves a
+    scenario.
 - **Blueprints are not watched, and do not need to be.** A blueprint is stored
   through `blueprint.save` and lives in the `blueprints` table, not in a file
   (#297 declined a watched blueprint file deliberately, so the control plane
@@ -390,10 +399,16 @@ hold at once and no single position satisfies all three:
    fleet is now rebuilt **without dialling**, the watches go back on, and only
    then does it connect.
 2. **A startup flag owns its keys before its rows are read.** A stored row can
-   name the id `--scenario` will claim, so the first pass skips the bootstrap
-   charge points entirely — neither applying nor pruning their rows — and a
-   second pass after the startup scenarios picks up whatever the flags did not
-   claim. By then a takeover has deleted the rows they did.
+   name the id `--scenario` will claim, so the first pass skips **exactly those
+   ids** — neither applying nor pruning their rows — and a second pass after the
+   startup scenarios picks up whatever the flags did not claim. By then a
+   takeover has deleted the rows they did. The prediction is narrow on purpose:
+   only `--scenario` on a file that already targets its single connector keeps a
+   stable id, everything else instantiates a fresh one that no stored row can
+   match. Skipping the whole charge point instead left its _other_ restored
+   scenarios unwatched right up to the moment it dialled, so they auto-started
+   from the database copy rather than from the file as it reads now — which is
+   constraint 1 broken by constraint 2's own solution.
 3. **A restored row must not overwrite a live registration.** This one is not
    solved by position at all: both passes skip keys the reloader already holds.
    Keeping it out of the ordering is what lets the first two be satisfied

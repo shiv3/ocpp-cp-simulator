@@ -12,7 +12,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
-import { runStartupScenario } from "../startServer";
+import { runStartupScenario, startupClaimedScenarioIds } from "../startServer";
 import {
   listWatchedScenarioFiles,
   rememberWatchedScenarioFile,
@@ -102,6 +102,15 @@ function loadedDelay(
   const node = svc.getScenario(connectorId, scenarioId)?.nodes[0] as
     { data?: { delaySeconds?: number } } | undefined;
   return node?.data?.delaySeconds ?? null;
+}
+
+/** {@link targeted} under a chosen id, so one connector can hold two. */
+function targetedNamed(id: string, targetId: number, delayMs: number): string {
+  const parsed = JSON.parse(targeted(targetId, delayMs)) as Record<
+    string,
+    unknown
+  >;
+  return JSON.stringify({ ...parsed, id });
 }
 
 /** The `delaySeconds` of one named instance, when a connector holds several. */
@@ -823,20 +832,49 @@ describe("--watch over a startup scenario file (#314)", () => {
     );
 
     try {
-      // First pass, skipping the charge point the bootstrap will load onto.
+      // A second scenario on the same charge point, from a file the startup
+      // flag will never claim. Skipping the whole charge point left this one
+      // unwatched right up to the moment it dialled, so it auto-started from
+      // the database copy rather than the file as it reads now.
+      const unrelated = join(tmpDir, "unrelated.json");
+      writeFileSync(unrelated, targetedNamed("other-scenario", 1, 55));
+      svc.loadScenario(
+        1,
+        JSON.parse(
+          targetedNamed("other-scenario", 1, 44),
+        ) as ScenarioDefinition,
+      );
+      rememberWatchedScenarioFile(
+        database,
+        "cp314-2phase",
+        1,
+        "other-scenario",
+        unrelated,
+      );
+
+      // First pass, skipping only the id the bootstrap will claim.
       fileReload.restoreScenarioWatches({
-        skipCpIds: new Set(["cp314-2phase"]),
+        // The predicate the daemon builds: this scenario id is one the startup
+        // flag will claim on this charge point.
+        skip: (row) =>
+          row.cp_id === "cp314-2phase" &&
+          row.scenario_id === "targeted-scenario",
       });
-      expect(fileReload.watchedPaths()).toEqual([]);
+      // The unrelated scenario is watched *and* reconciled to the file's
+      // current contents, before anything dials.
+      expect(fileReload.watchedPaths()).toEqual([unrelated]);
+      expect(delayOf(svc, 1, "other-scenario")).toBe(55);
       expect(delayOf(svc, 1, "targeted-scenario")).toBe(11);
-      // The row is left untouched for the second pass — neither applied nor
-      // pruned.
-      expect(listWatchedScenarioFiles(database)).toHaveLength(1);
+      // The claimed row is left untouched for the second pass — neither applied
+      // nor pruned.
+      expect(listWatchedScenarioFiles(database)).toHaveLength(2);
 
       // Second pass, after the bootstrap. Nothing claimed the key in this
       // fixture, so the row is genuinely a previous run's and is restored.
       fileReload.restoreScenarioWatches();
-      expect(fileReload.watchedPaths()).toEqual([abandoned]);
+      expect(fileReload.watchedPaths().sort()).toEqual(
+        [abandoned, unrelated].sort(),
+      );
     } finally {
       fileReload.close();
       svc.disconnect();
@@ -883,6 +921,60 @@ describe("--watch over a startup scenario file (#314)", () => {
       second.shutdownAll();
       database.close();
       await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+  it("claims only the ids a startup flag will actually reuse", async () => {
+    // The narrow skip is only as good as this prediction, and it has to agree
+    // with the `prepare` that `runStartupScenario` builds — which is why both
+    // read the same `scenarioFileTargetsConnector` rule rather than each
+    // carrying a copy of it (#314).
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-claimed-"));
+    const scenarioFile = join(tmpDir, "scenario.json");
+    writeFileSync(scenarioFile, targeted(1, 11));
+    const templateFile = join(tmpDir, "template.json");
+    writeFileSync(templateFile, template(11));
+
+    try {
+      const base = {
+        scenario: null,
+        scenarioTemplate: null,
+        scenarioTemplateFile: null,
+        scenarioConnector: "all",
+      };
+      // One connector, and the file already targets it: loaded as-is, so its
+      // own id is the key it will claim.
+      expect([
+        ...startupClaimedScenarioIds({ ...base, scenario: scenarioFile }, 1),
+      ]).toEqual(["targeted-scenario"]);
+      // Two connectors: every copy is instantiated with a fresh
+      // `Date.now()`-bearing id, so no stored row can collide.
+      expect([
+        ...startupClaimedScenarioIds({ ...base, scenario: scenarioFile }, 2),
+      ]).toEqual([]);
+      // …unless the operator narrowed the fan-out back to one connector.
+      expect([
+        ...startupClaimedScenarioIds(
+          { ...base, scenario: scenarioFile, scenarioConnector: "1" },
+          2,
+        ),
+      ]).toEqual(["targeted-scenario"]);
+      // A template file always instantiates, and so claims nothing.
+      expect([
+        ...startupClaimedScenarioIds(
+          { ...base, scenarioTemplateFile: templateFile },
+          1,
+        ),
+      ]).toEqual([]);
+      // An unreadable file claims nothing rather than guessing: every row is
+      // then restored in the first pass, exactly as with no flag at all.
+      expect([
+        ...startupClaimedScenarioIds(
+          { ...base, scenario: join(tmpDir, "missing.json") },
+          1,
+        ),
+      ]).toEqual([]);
+    } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });

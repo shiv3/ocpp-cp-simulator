@@ -896,3 +896,33 @@ Sixth review pass on PR #325.
   consumer was now deferring anyway. The guarantee is now tested at its source
   in `src/cli/__tests__/service.sessionSettled.bun.test.ts`, independent of the
   reloader.
+
+## [2026-09-05] ingest | `--watch`: stopped runs, the third removal door, and a baseline that ate an edit (#314, PR #317)
+
+- A manually stopped scenario could **resume after a restart**. `stopScenario`
+  drops the executor synchronously, so the run's queued `finally` found a
+  different (absent) executor under the id and took the supersede branch — which
+  exists for a run that was _replaced_ and must not touch the replacement's
+  bookkeeping. A **deleted** executor is not a replacement: nothing owns the id,
+  so the run is still responsible for its own remains. It now clears the
+  persisted scenario position and writes it out before returning, and it does so
+  in the `finally` rather than in each stop path, because that callback runs
+  whichever of the two paths stopped the run.
+- [Daemon](entities/daemon.md) — the removal paths are enumerated rather than
+  listed as they are discovered. `scenario.definitions.delete` was the third
+  door into the room `remove_scenario` and `scenario.definitions.replace`
+  already had closed: it removes only the stored row and leaves the runtime
+  scenario loaded, so the next edit passed `stillLoaded`, reloaded, and
+  persisted exactly the definition the operator had deleted. All four paths now
+  share one helper whose comment carries the enumeration, including the two that
+  deliberately need nothing (`scenario.definitions.save` removes nothing;
+  `cp.delete` and `state.reset` act at the registry and schema level).
+- The baseline family reached its third instance, going the other way. A reload
+  accepted for later becomes `lastText` at defer time; if the drain then refuses
+  it, the connector keeps the older definition while the baseline claims the
+  newer one, and re-saving those same valid bytes is discarded as unchanged —
+  the operator's edit unrecoverable without altering its content. The rule is
+  now written on the field itself: `lastText` is advanced only on acceptance,
+  never by a rejection, and cleared when a held text is refused at drain time.
+- [State persistence](concepts/state-persistence.md) — the watch-row lifecycle
+  names `scenario.definitions.delete` alongside the other removal paths.

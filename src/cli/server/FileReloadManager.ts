@@ -106,6 +106,17 @@ export interface ScenarioFileRegistration {
 interface ScenarioEntry extends ScenarioFileRegistration {
   readonly absolutePath: string;
   unwatch: () => void;
+  /**
+   * The last text this manager took responsibility for: applied, or held for a
+   * session that will apply it. `null` means "no baseline to trust", so the
+   * next read is judged on its merits rather than dismissed as unchanged.
+   *
+   * Three rules, one invariant. It is advanced only when the text was accepted
+   * (`reloadScenario`), it is never advanced by a rejection, and it is cleared
+   * when a held text is refused at drain time (`drainPending`) — because the
+   * connector then keeps the older definition and a baseline claiming otherwise
+   * makes the operator's next save of those exact bytes a silent no-op.
+   */
   lastText: string | null;
   pending: ScenarioDefinition | null;
 }
@@ -846,7 +857,17 @@ export class FileReloadManager {
       // Re-checked, not assumed: the drain event may be one connector's
       // transaction ending while another's is still open.
       entry.pending = null;
-      this.applyOrDefer(entry, pending);
+      // `lastText` names the bytes this manager has taken responsibility for —
+      // applied, or held for a session that will apply them. A drain that ends
+      // in a rejection ends that responsibility without the bytes ever landing,
+      // so the baseline goes with them. Left in place, the connector keeps the
+      // older definition while the baseline claims the newer one, and the
+      // operator re-saving those same valid bytes is discarded as unchanged:
+      // their edit becomes unrecoverable without editing its content. The
+      // direct path already advances the baseline only on success and a failed
+      // idTag persist already clears its cache; this is the same rule reaching
+      // the third of the three ways a reload can end (#314).
+      if (!this.applyOrDefer(entry, pending)) entry.lastText = null;
     }
   }
 

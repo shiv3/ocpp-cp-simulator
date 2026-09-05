@@ -2193,6 +2193,111 @@ describe("the envelope bound is checked against the whole snapshot (#314)", () =
   });
 });
 
+describe("every path that removes a definition drops its watch (#314)", () => {
+  it("scenario.definitions.delete stops the file putting the definition back", async () => {
+    // The third door into the same room: `remove_scenario` and
+    // `scenario.definitions.replace` already unregister. `definitions.delete`
+    // removes only the stored row and leaves the runtime scenario loaded — so
+    // `stillLoaded` passes, the next edit reloads, and `loadScenario` persists
+    // exactly the definition the operator deleted.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("deleted", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, db);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-DELDEF",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-DELDEF");
+    expect(server.fileReload?.watchedPaths()).toContain(file);
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(1);
+
+    await rpc(socket, "scenario.definitions.delete", {
+      cpId: "CP-DELDEF",
+      connectorId: 1,
+      definitionId: "deleted",
+    });
+    expect(
+      db.all("SELECT scenario_id FROM scenarios WHERE scenario_id = ?", [
+        "deleted",
+      ]),
+    ).toHaveLength(0);
+    expect(server.fileReload?.watchedPaths()).toEqual([]);
+    expect(db.all("SELECT path FROM watched_scenario_files")).toHaveLength(0);
+
+    // The edit that used to resurrect it.
+    backend.save(file, scenario("deleted", 22));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(
+      db.all("SELECT scenario_id FROM scenarios WHERE scenario_id = ?", [
+        "deleted",
+      ]),
+    ).toHaveLength(0);
+  });
+});
+
+describe("a rejected drain does not eat the operator's edit (#314)", () => {
+  it("re-judges the same bytes after a held reload is refused", async () => {
+    // `lastText` becomes the deferred bytes when a reload is *accepted* for
+    // later. If the drain then refuses them — a sibling grew past the envelope
+    // cap while the session was open — the connector keeps the older
+    // definition, and a baseline still claiming the newer one makes the
+    // operator's next save of those exact bytes an early-out. Their edit is
+    // then unrecoverable without changing its content.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("held-reject", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-HELD");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-HELD");
+
+    const service = server.registry.get("CP-HELD");
+    if (!service) throw new Error("CP-HELD missing");
+    expect(await openSession(server, "CP-HELD", "TAG-HR")).toBe("TAG-HR");
+
+    const edited = scenario("held-reject", 22);
+    backend.save(file, edited);
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the edit to be held for the open session",
+    );
+
+    // Invalidated while it was held, by something the edit has no control over.
+    const sibling = JSON.parse(scenario("held-sibling", 1)) as {
+      description?: string;
+    };
+    sibling.description = "x".repeat(300_000);
+    service.loadScenario(1, sibling as unknown as ScenarioDefinition);
+
+    await closeSession(server, "CP-HELD");
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the drained reload to be refused",
+    );
+    expect(loadedDelay(server, "CP-HELD", "held-reject")).toBe(11);
+
+    // The obstacle is gone; the operator saves the same file again, unchanged.
+    await rpc(
+      socket,
+      "remove_scenario",
+      { connector: 1, scenarioId: "held-sibling" },
+      "CP-HELD",
+    );
+    backend.save(file, edited);
+    await waitFor(
+      () => loadedDelay(server, "CP-HELD", "held-reject") === 22,
+      "the same bytes to be judged afresh and land",
+    );
+  });
+});
+
 describe("watch rows are simulator state, not watcher state (#314)", () => {
   it("cp.delete drops them on a daemon started without --watch", async () => {
     const dir = tempDir();

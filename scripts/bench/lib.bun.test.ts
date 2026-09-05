@@ -23,6 +23,8 @@ import {
   TokenBucket,
   answeredAfterWatchdog,
   assertDaemonEmpty,
+  assertMetricsAreCurrent,
+  EVICTIONS_METRIC,
   ASSIGNED_ID_TIMEOUT_MS,
   AUTHORIZE_WAIT_SEC,
   benchCpId,
@@ -1926,6 +1928,49 @@ describe("redacting URLs inside a message (#302)", () => {
   it("keeps a userinfo with no password readable", () => {
     expect(redactUrlsInText("at http://user@host/x")).toBe(
       "at http://user@host/x",
+    );
+  });
+});
+
+describe("refusing a daemon whose /metrics predates this benchmark (#302)", () => {
+  const current = [
+    'ocppcp_charge_points{state="Available"} 3',
+    `${EVICTIONS_METRIC} 0`,
+  ].join("\n");
+
+  it("accepts a daemon that renders the eviction counter, even at zero", () => {
+    // Rendered unconditionally, so its presence — not its value — is the
+    // probe. A zero here is a real zero.
+    expect(() =>
+      assertMetricsAreCurrent(parseExposition(current)),
+    ).not.toThrow();
+  });
+
+  it("refuses a daemon that serves /metrics without the counter", () => {
+    // The failure this prevents: an older daemon passes every other check and
+    // then reports 0 abandoned calls because the counter is missing, not
+    // because nothing happened — and on 1.6 that is the headline knee signal.
+    const old = parseExposition(
+      [
+        'ocppcp_charge_points{state="Available"} 3',
+        'ocppcp_ocpp_messages_total{action="Heartbeat",direction="cp-to-csms"} 12',
+      ].join("\n"),
+    );
+    expect(() => assertMetricsAreCurrent(old)).toThrow(BenchValidationError);
+    expect(() => assertMetricsAreCurrent(old)).toThrow(/predates/);
+    expect(() => assertMetricsAreCurrent(old)).toThrow(/knee signal/);
+  });
+
+  it("refuses an empty exposition rather than assuming the best", () => {
+    expect(() => assertMetricsAreCurrent(parseExposition(""))).toThrow(
+      BenchValidationError,
+    );
+  });
+
+  it("is not fooled by a counter whose name merely starts the same", () => {
+    const lookalike = parseExposition(`${EVICTIONS_METRIC}_bucket 4`);
+    expect(() => assertMetricsAreCurrent(lookalike)).toThrow(
+      BenchValidationError,
     );
   });
 });

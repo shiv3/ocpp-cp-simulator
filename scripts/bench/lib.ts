@@ -885,6 +885,31 @@ export function counterValue(
 }
 
 /** The registered-charge-point gauge, labelled by state. */
+/**
+ * The counter this benchmark's own metrics work added, used as a version
+ * probe.
+ *
+ * A daemon old enough to serve `/metrics` but predating the timeout and
+ * eviction counters passes every other preflight check and then reports
+ * **zero** for both — so on OCPP 1.6 the run says "no abandoned calls", the
+ * headline knee signal, with nothing to say the counter simply is not there.
+ * This one is rendered unconditionally, even at zero, so its *absence* means
+ * the daemon is too old rather than that nothing has happened.
+ */
+export const EVICTIONS_METRIC = "ocppcp_ocpp_pending_calls_evicted_total";
+
+/** Throws when `/metrics` predates the counters this benchmark reads. */
+export function assertMetricsAreCurrent(samples: readonly Sample[]): void {
+  if (samples.some((s) => s.name === EVICTIONS_METRIC)) return;
+  throw new BenchValidationError(
+    `this daemon's /metrics does not expose ${EVICTIONS_METRIC}, so it predates ` +
+      `the counters this benchmark reads. The "timeouts" and eviction columns ` +
+      `would report 0 because the counters are missing, not because nothing ` +
+      `happened — and on OCPP-1.6J that is the headline knee signal. Upgrade ` +
+      `the daemon, or run the benchmark from the same checkout.`,
+  );
+}
+
 export const CHARGE_POINTS_METRIC = "ocppcp_charge_points";
 /** The state `ChargePoint.status` takes while disconnected or pre-boot. */
 export const UNAVAILABLE_STATE = "Unavailable";

@@ -104,6 +104,13 @@ documented sweep exactly where the tool is most interesting. The gauge is one
 bounded number at any fleet size, so `--counts` may genuinely reach its 2000
 cap.
 
+**Preflight refuses a daemon whose `/metrics` predates the benchmark.** Probed
+by the eviction counter, which is rendered unconditionally, so its absence means
+"too old" rather than "nothing has happened". Without it an older daemon passes
+every other check and then reports `timeouts 0` — on OCPP-1.6J the headline knee
+signal, reading zero because the counter is missing rather than because no call
+was abandoned.
+
 **Preflight refuses a non-empty daemon.** `/metrics` carries no `cpId` label by
 design, so charge points the bench did not create would put their traffic in
 the same histogram while the reported `N` counted only the bench's own fleet.
@@ -178,17 +185,21 @@ charge points appear a moment later. And the wait for in-flight cycles uses the
 cycle's own bound — the authorization timeout plus, on 1.6, the assigned-id
 timeout — never a smaller number chosen at the teardown site.
 
-The same invariant governs the bookkeeping as well as the waiting, and the
-proof has to be **attributable**. Teardown re-stops every charge point that may
-have an open transaction, acked or not, then confirms each one individually by
-reading that charge point's own `transactionId` back through `status` — a field
-cleared only by the `StopTransaction` CALLRESULT handler, so a cleared value
-means the CSMS saw the stop and answered. An earlier version compared the
-fleet-wide `StopTransaction` message counter against a baseline; that looked
-like proof and was not, because `ocppcp_ocpp_messages_total` carries no `cpId`
-label by design, so an unrelated frame can satisfy the inequality while this
-charge point's stop is still queued. An aggregate cannot establish a
-per-charge-point fact. And the bound is now enumerated rather
+The same invariant governs the bookkeeping as well as the waiting, but the
+proof is not available. Teardown re-stops every charge point that may have an
+open transaction, acked or not, and does not try to work out which ones still
+need it. **Delivery to the CSMS is not verified**, and cannot be from the
+bench: the fleet-wide `StopTransaction` counter carries no `cpId` label by
+design, so an aggregate cannot establish a per-charge-point fact; and
+`connector.transactionId` going `null` is done synchronously by
+`ChargePoint.stopTransaction` before the frame is queued, so it says nothing
+about the wire. Both were tried and both were wrong. The wire is observable in
+principle — `OCPPWebSocket.writeUpstreamPhysical` logs `Sent: …` right after
+`this._ws.send(raw)` — but reading it back needs `logs.get`, whose
+`listStoredLogs` returns nothing unless the daemon runs with `--state-db`,
+which the benchmark does not require. So under a backed-up outbound queue a
+queued stop can still be discarded with the charge point; that is a documented
+limitation rather than a check that looks like proof.
 than incremented — a cycle awaits in exactly four places (the start RPC, the
 confirmation wait, the hold, the stop RPC) and nowhere else, which is what
 makes it complete rather than merely larger than last time. All of this is on

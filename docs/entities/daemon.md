@@ -17,7 +17,7 @@ related:
   - ../concepts/log-format.md
   - ../analyses/fleet-load-and-observability-roadmap.md
   - ../sources/bench-readme.md
-updated: 2026-09-05
+updated: 2026-09-06
 ---
 
 # Daemon (server mode)
@@ -284,7 +284,14 @@ speaks (`OCPP-1.6J` by default, or `OCPP-2.0.1` / `OCPP-2.1`); on 2.x the
 timeout column reads `n/a` rather than `0`, since only the 1.6J handler has the
 per-CALL watchdog that feeds it (see [Metrics](#metrics)). It refuses to run against a daemon that
 already holds charge points, because `/metrics` has no `cpId` label and their
-traffic would land in the same histogram as the bench fleet's.
+traffic would land in the same histogram as the bench fleet's. Its
+`--heartbeat-interval` is a **contract**: the run drives heartbeats at that
+cadence for its whole length, including across reconnects, by reapplying
+`start_heartbeat` after every accepted boot — `onBootNotificationAccepted`
+otherwise reinstalls the CSMS's `BootNotification.conf` interval, and reconnects
+are exactly what start happening near the knee. See
+[Source: bench README](../sources/bench-readme.md) for what that does and does
+not cover.
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review

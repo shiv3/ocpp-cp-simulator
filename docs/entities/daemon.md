@@ -380,13 +380,26 @@ already stored under the key it takes over: `--scenario` keeps the file's own id
 when the file already targets its connector, so it can collide with an earlier
 control-plane load of that id, and the abandoned row would otherwise be restored
 at the next start and applied before the bootstrap registered the configured
-scenario. That deletion, too, does not depend on `--watch`. The restore runs
-**after** the startup flags have loaded, so the bootstrap asserts ownership of
-its keys before any row is read: an abandoned row naming the same scenario id
-can no longer be reconciled onto the connector first, auto-start its stale graph
-and leave the configured file with nothing to start.
+scenario. That deletion, too, does not depend on `--watch`.
 
-That places the restore past the point where the daemon is **already serving**.
+The restore itself runs in **two passes**, because three constraints have to
+hold at once and no single position satisfies all three:
+
+1. **A restored charge point must not run a stale graph.** Its persisted
+   connect-triggered scenarios start the moment its boot gate opens, so the
+   fleet is now rebuilt **without dialling**, the watches go back on, and only
+   then does it connect.
+2. **A startup flag owns its keys before its rows are read.** A stored row can
+   name the id `--scenario` will claim, so the first pass skips the bootstrap
+   charge points entirely — neither applying nor pruning their rows — and a
+   second pass after the startup scenarios picks up whatever the flags did not
+   claim. By then a takeover has deleted the rows they did.
+3. **A restored row must not overwrite a live registration.** This one is not
+   solved by position at all: both passes skip keys the reloader already holds.
+   Keeping it out of the ordering is what lets the first two be satisfied
+   independently.
+
+The second pass runs past the point where the daemon is **already serving**.
 The HTTP listener is bound before the bootstrap begins — deliberately, so
 `cp.list` answers before an unreachable CSMS times out — which means the whole
 bootstrap runs concurrently with RPCs: fleet creation, the `--state-db` restore,

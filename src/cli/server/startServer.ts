@@ -209,18 +209,43 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     scenarioRepository,
     connectorSettingsRepository,
   });
+  // Computed here rather than at the bootstrap loop because the watch restore
+  // below needs it: these are the charge points a startup flag will load a
+  // scenario onto, and their rows wait for the second pass.
+  const fleet = expandBootstrap(opts);
+  const hasExplicitStartupScenario =
+    !!opts.startupScenario &&
+    (!!opts.startupScenario.scenario ||
+      !!opts.startupScenario.scenarioTemplate ||
+      !!opts.startupScenario.scenarioTemplateFile);
+  const seedDefault = !hasExplicitStartupScenario;
+  const startupOwnedCpIds = new Set(
+    hasExplicitStartupScenario ? fleet.map((init) => init.cpId) : [],
+  );
+
   // Re-create CPs that were registered before the previous daemon shut
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
   // re-run with the same --cp-id is treated as "update wsUrl/connectors"
   // rather than "create + collide".
-  const restored = await Promise.resolve(
-    chargePointService.restoreFromDatabase(),
-  );
+  //
+  // Rebuilt without dialling: the moment a restored charge point's boot gate
+  // opens, a persisted connect-triggered scenario starts, and it must start
+  // from the file as it reads now rather than as it read when the daemon
+  // stopped (#314). The watches go back on in between, and `connectRestored`
+  // below lets the fleet dial.
+  // Straight to the registry rather than through the facade: the facade's
+  // `restoreFromDatabase` is part of the shared `ChargePointService` interface
+  // the browser implements too, and deferring the dial is a daemon concern.
+  const restored = registry.restoreFromDatabase({ connect: false });
   if (restored.length > 0) {
     serverLog(
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
     );
   }
+  // First pass. See `finishWatchSetup` for the second, and for the three
+  // constraints this sequence has to satisfy at once.
+  fileReload?.restoreScenarioWatches({ skipCpIds: startupOwnedCpIds });
+  registry.connectRestored(restored);
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
@@ -400,14 +425,6 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // behaviour the ordering above exists for (#314).
   // ---------------------------------------------------------------------
 
-  const fleet = expandBootstrap(opts);
-  const hasExplicitStartupScenario =
-    !!opts.startupScenario &&
-    (!!opts.startupScenario.scenario ||
-      !!opts.startupScenario.scenarioTemplate ||
-      !!opts.startupScenario.scenarioTemplateFile);
-  const seedDefault = !hasExplicitStartupScenario;
-
   // Register the whole fleet first. Creation is synchronous, so every charge
   // point is in the registry — and answering `cp.list` — before anything waits
   // on a network. Connecting inside the loop instead meant an unreachable CSMS
@@ -476,25 +493,31 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 }
 
 /**
- * Re-establish the watches a previous run registered over the control plane,
- * then say what is being watched (#314).
+ * Second pass of the watch restore, then say what is being watched (#314).
  *
- * Deliberately **after** the bootstrap has run its `--scenario` /
- * `--scenario-template-file` loads, not before. A stored row can name the same
- * scenario id the operator's flag uses — `--scenario` keeps the file's own id
- * when the file already targets its connector — and restoring first meant
- * reconciling that abandoned file, auto-starting its graph if the edit it
- * picked up while the daemon was down carried a matching trigger, and then
- * having the real startup load replace only the definition while
- * `startScenarioIfNotAlreadyActive` saw the stale executor still running. The
- * operator's explicit flag lost to a row.
+ * Three constraints have to hold at once, and no single position in the
+ * sequence satisfies all three — which is why the restore is split rather than
+ * moved again:
  *
- * Ordering rather than filtering, because ownership is already expressed: a
- * startup registration takes over its key and deletes any row stored under it.
- * Running the bootstrap first simply lets that assertion happen before anything
- * reads the rows, so the two rules compose instead of needing a third that
- * knows which keys are startup-owned. Rows for scenarios the flags do *not*
- * claim are restored exactly as before.
+ * 1. **A restored charge point must not run a stale graph.** Its persisted
+ *    connect-triggered scenarios start as soon as its boot gate opens, so the
+ *    watch has to be back and the file reconciled *before* it dials. The first
+ *    pass runs immediately after `restoreFromDatabase({ connect: false })` and
+ *    before `connectRestored`.
+ * 2. **A startup flag owns its keys before its rows are read.** A stored row
+ *    can name the id `--scenario` will claim, and reconciling it first would
+ *    put the abandoned graph on the connector and possibly start it. The first
+ *    pass therefore skips the bootstrap charge points; this second pass, after
+ *    `runStartupScenario`, picks up whatever the flags did not claim — by then
+ *    a takeover has deleted the rows they did.
+ * 3. **A restored row must not overwrite a live registration.** The listener is
+ *    bound before the bootstrap, so an RPC can register a watch at any point
+ *    in here. That one is *not* solved by position: `restoreScenarioWatches`
+ *    skips keys it already holds, in both passes. Keeping it out of the
+ *    ordering is what lets 1 and 2 be satisfied independently.
+ *
+ * This pass also does the pruning: a row whose scenario is no longer loaded is
+ * dropped here, once every path that could still load one has run.
  */
 function finishWatchSetup(
   fileReload: FileReloadManager | null,

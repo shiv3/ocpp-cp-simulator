@@ -127,7 +127,19 @@ export class CPRegistry {
    * Idempotent: rows with cp_ids we've already instantiated are skipped.
    * Returns the list of restored cpIds for logging.
    */
-  restoreFromDatabase(): string[] {
+  /**
+   * Re-create every persisted charge point.
+   *
+   * `opts.connect` defaults to true, which is what every caller but the daemon
+   * bootstrap wants. The bootstrap passes `false` and dials separately with
+   * {@link connectRestored}, because a restored charge point's persisted
+   * connect-triggered scenarios auto-start as soon as its boot gate opens — and
+   * if `--watch` has not re-established that scenario's watch by then, the
+   * charge point runs the graph as it was when the daemon stopped rather than
+   * as the file reads now, with the reload deferred behind the stale run it
+   * just started (#314).
+   */
+  restoreFromDatabase(opts: { connect?: boolean } = {}): string[] {
     if (!this.database) return [];
     const rows = this.database.all<ChargePointRow>(
       "SELECT cp_id, ws_url, supervision_urls, url_distribution, " +
@@ -243,20 +255,36 @@ export class CPRegistry {
       if (this.networkSimManager) {
         this.networkSimManager.onCpCreated(row.cp_id);
       }
-      // Kick the WebSocket open so BootNotification + StatusNotification
-      // fly to the CSMS automatically. Fire-and-forget — connect() is
-      // synchronous from JS's POV (returns immediately, opens in
-      // background), and we don't want one slow CSMS to block restore of
-      // the others.
-      svc.connect().catch((err) => {
-        console.error(
-          `[CPRegistry] auto-connect failed for restored CP "${row.cp_id}":`,
-          err,
-        );
-      });
       restored.push(row.cp_id);
     }
+    // Kick the WebSockets open so BootNotification + StatusNotification fly to
+    // the CSMS automatically. Fire-and-forget — connect() returns immediately
+    // and opens in the background, and we don't want one slow CSMS to block the
+    // others. Deferred entirely when the caller says so, so it can put work
+    // between rebuilding the fleet and letting it dial.
+    if (opts.connect !== false) this.connectRestored(restored);
     return restored;
+  }
+
+  /**
+   * Dial the charge points {@link restoreFromDatabase} rebuilt.
+   *
+   * Split out so the daemon can re-establish file watches first: the moment a
+   * restored charge point's boot gate opens, a persisted connect-triggered
+   * scenario starts, and it must start from the file as it reads now (#314).
+   */
+  connectRestored(cpIds: readonly string[]): void {
+    for (const cpId of cpIds) {
+      this.services
+        .get(cpId)
+        ?.connect()
+        .catch((err) => {
+          console.error(
+            `[CPRegistry] auto-connect failed for restored CP "${cpId}":`,
+            err,
+          );
+        });
+    }
   }
 
   has(cpId: string): boolean {

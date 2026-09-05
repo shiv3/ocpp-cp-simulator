@@ -42,6 +42,10 @@ export interface TestServerOptions {
    * `debounceMs` is exposed so a test does not have to sleep for the
    * production 200 ms trailing debounce on every save.
    */
+  /** Mirror the daemon's two-step restore: rebuild the fleet without dialling,
+   *  restore the watches, and leave the dial to `TestServer.connectRestored`
+   *  (#314). */
+  readonly deferRestoredConnect?: boolean;
   readonly watch?:
     | {
         readonly debounceMs?: number;
@@ -61,6 +65,9 @@ export interface TestServer {
   readonly restored: ReadonlyArray<string>;
   /** Non-null only when `watch` was requested. */
   readonly fileReload: FileReloadManager | null;
+  /** Dial the charge points the restore rebuilt. A no-op unless the server was
+   *  started with `deferRestoredConnect`. */
+  readonly connectRestored: () => void;
   close(): Promise<void>;
 }
 
@@ -109,8 +116,11 @@ export async function startTestServer(
   if (fileReload) {
     registry.onInitChange(() => fileReload.syncFromRegistry());
   }
-  const restored = await Promise.resolve(
-    chargePointService.restoreFromDatabase(),
+  // Straight to the registry, the way `startServer` does it: the dial is
+  // deferred so the watches can go back on before a restored charge point's
+  // connect-triggered scenarios can start (#314).
+  const restored = registry.restoreFromDatabase(
+    options.deferRestoredConnect ? { connect: false } : {},
   );
   fileReload?.syncFromRegistry();
   fileReload?.restoreScenarioWatches();
@@ -187,6 +197,7 @@ export async function startTestServer(
     port: server.port ?? 0,
     restored,
     fileReload,
+    connectRestored: () => registry.connectRestored(restored),
     async close() {
       if (closed) return;
       closed = true;

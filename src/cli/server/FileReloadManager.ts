@@ -401,7 +401,9 @@ export class FileReloadManager {
    * operator removed it, or `--state-db` was pointed elsewhere — is dropped
    * rather than re-watched.
    */
-  restoreScenarioWatches(): void {
+  restoreScenarioWatches(
+    opts: { readonly skipCpIds?: ReadonlySet<string> } = {},
+  ): void {
     if (this.closed || !this.database) return;
     const rows = listWatchedScenarioFiles(this.database);
     for (const row of rows) {
@@ -421,6 +423,16 @@ export class FileReloadManager {
       ) {
         continue;
       }
+      // Held back for the second pass: this charge point is about to have a
+      // `--scenario` / `--scenario-template-file` loaded onto it, and a stored
+      // row can name the id that flag will claim. Applying the row's file here
+      // would reconcile the abandoned graph onto the connector and — with a
+      // matching trigger — start it, after which the flag's load replaces only
+      // the definition and finds an executor already running. Skipped now,
+      // restored after the bootstrap, by which time the flag has taken its keys
+      // and deleted their rows. Neither prune nor register: an untouched row is
+      // exactly what the second pass needs to see (#314).
+      if (opts.skipCpIds?.has(row.cp_id)) continue;
       const loaded = this.registry
         .get(row.cp_id)
         ?.getScenario(row.connector_id, row.scenario_id);

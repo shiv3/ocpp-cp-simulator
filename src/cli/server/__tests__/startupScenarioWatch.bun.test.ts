@@ -778,4 +778,112 @@ describe("--watch over a startup scenario file (#314)", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+  it("holds a startup-owned charge point's rows back to the second pass", async () => {
+    // The two-phase restore. The first pass runs before restored charge points
+    // dial, so their persisted connect-triggered scenarios start on the file as
+    // it reads now — but it must not touch a charge point a startup flag is
+    // about to load onto, or the abandoned row's graph lands (and can start)
+    // before the flag has claimed the key. Those rows wait for the pass after
+    // the bootstrap, by which time the takeover has deleted the ones the flags
+    // claimed (#314).
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-2phase-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+      database,
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314-2phase",
+      wsUrl: "ws://127.0.0.1:65534/never",
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    // As a `--state-db` restore leaves it: the definition is back under the id
+    // the startup flag will also use, and the row points at the old file, which
+    // was edited while the daemon was down.
+    const abandoned = join(tmpDir, "abandoned.json");
+    writeFileSync(abandoned, targeted(1, 99));
+    svc.loadScenario(1, JSON.parse(targeted(1, 11)) as ScenarioDefinition);
+    rememberWatchedScenarioFile(
+      database,
+      "cp314-2phase",
+      1,
+      "targeted-scenario",
+      abandoned,
+    );
+
+    try {
+      // First pass, skipping the charge point the bootstrap will load onto.
+      fileReload.restoreScenarioWatches({
+        skipCpIds: new Set(["cp314-2phase"]),
+      });
+      expect(fileReload.watchedPaths()).toEqual([]);
+      expect(delayOf(svc, 1, "targeted-scenario")).toBe(11);
+      // The row is left untouched for the second pass — neither applied nor
+      // pruned.
+      expect(listWatchedScenarioFiles(database)).toHaveLength(1);
+
+      // Second pass, after the bootstrap. Nothing claimed the key in this
+      // fixture, so the row is genuinely a previous run's and is restored.
+      fileReload.restoreScenarioWatches();
+      expect(fileReload.watchedPaths()).toEqual([abandoned]);
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+  it("rebuilds the fleet without dialling until it is told to", async () => {
+    // The seam the two-phase restore needs. `restoreFromDatabase` used to dial
+    // inside its own loop, so a restored charge point's boot gate could open —
+    // and its persisted connect-triggered scenario start — before `--watch` had
+    // re-read the file it came from (#314).
+    const csms = startMockCsms();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-defer-dial-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const first = new CPRegistry(new EventBus(), database);
+    first.create({
+      cpId: "cp314-dial",
+      wsUrl: csms.url,
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    first.shutdownAll();
+
+    const second = new CPRegistry(new EventBus(), database);
+    try {
+      const restored = second.restoreFromDatabase({ connect: false });
+      expect(restored).toEqual(["cp314-dial"]);
+      // Nothing dialled: no BootNotification has reached the CSMS.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(
+        (csms.received as unknown[]).filter(
+          (frame) => Array.isArray(frame) && frame[2] === "BootNotification",
+        ),
+      ).toHaveLength(0);
+
+      // …until the caller says so.
+      second.connectRestored(restored);
+      await csms.waitForCall("BootNotification");
+    } finally {
+      second.shutdownAll();
+      database.close();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

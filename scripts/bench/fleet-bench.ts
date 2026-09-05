@@ -23,6 +23,7 @@ import {
   TokenBucket,
   answeredAfterWatchdog,
   assertDaemonEmpty,
+  assertMetricsAreCurrent,
   BENCH_ID_ROOT,
   benchCpId,
   benchIdPattern,
@@ -529,6 +530,10 @@ async function preflight(
   }
 
   const samples = parseExposition(await metricsRes.text());
+  // Before anything is created: a daemon predating this benchmark's counters
+  // would otherwise run to completion and report zero abandoned calls, which
+  // reads as "no problem" rather than "not measured".
+  assertMetricsAreCurrent(samples);
   const preExisting = assertDaemonEmpty(samples, opts.allowExisting);
   if (preExisting > 0) {
     process.stderr.write(
@@ -1054,6 +1059,39 @@ function armLoad(
  *  per-charge-point work is short, so one further RPC deadline covers it. */
 const RECONCILE_DELAY_MS = RPC_TIMEOUT_MS;
 
+/**
+ * **Delivery of a closing stop is not verified, and cannot be from here.**
+ *
+ * Two mechanisms were tried and both were wrong, in ways worth recording so a
+ * third is not invented:
+ *
+ *  - The fleet-wide `StopTransaction` message counter carries **no `cpId`
+ *    label**, deliberately (#298 bounded its cardinality), so an unrelated
+ *    frame could satisfy an aggregate inequality while *this* charge point's
+ *    stop was still queued. An aggregate cannot establish a per-charge-point
+ *    fact.
+ *  - `connector.transactionId` going `null` looked per-charge-point and
+ *    conclusive, but `ChargePoint.stopTransaction` calls
+ *    `connector.stopTransaction()` synchronously, which clears
+ *    `transactionValue` *before* the frame is queued — so the predicate is
+ *    already true while nothing has been sent. It is cleared locally, not on
+ *    the answer.
+ *
+ * The wire *is* observable in principle: `OCPPWebSocket.writeUpstreamPhysical`
+ * logs `Sent: …` immediately after `this._ws.send(raw)`, per charge point. But
+ * the only way to read that back is `logs.get`, and
+ * `RegistryChargePointService.listStoredLogs` returns nothing unless the daemon
+ * was started with a database (`--state-db`), which this benchmark does not
+ * require. So there is no evidence available in the general case.
+ *
+ * Teardown therefore does the thing that needs no attribution: it re-stops
+ * every charge point that might have a transaction, whether or not one was
+ * already acked, and then says plainly that delivery is unverified. Under a
+ * backed-up outbound queue a queued stop can still be discarded with the
+ * charge point. That is a documented limitation rather than a check that
+ * looks like proof — which is the worse of the two.
+ */
+
 /** Overall budget for closing transactions still open at teardown. Bounded
  *  like the delete sweep and for the same reason: a daemon that has stopped
  *  answering must not turn teardown into an unbounded wait. */
@@ -1093,9 +1131,8 @@ async function closeOpenTransactions(
   );
   const deadline = Date.now() + CLOSE_TX_BUDGET_MS;
   let next = 0;
+  let acked = 0;
   let unresponsive = false;
-  /** Charge points whose transaction is confirmed gone. */
-  const cleared = new Set<string>();
 
   const worker = async (): Promise<void> => {
     for (;;) {
@@ -1104,48 +1141,20 @@ async function closeOpenTransactions(
       if (remainingMs <= 0) return;
       const i = next++;
       if (i >= cpIds.length) return;
-      const cpId = cpIds[i]!;
       try {
-        await pool.rpc("stop_transaction", { connector: 1 }, cpId, remainingMs);
+        await pool.rpc(
+          "stop_transaction",
+          { connector: 1 },
+          cpIds[i]!,
+          remainingMs,
+        );
+        acked++;
       } catch (err) {
         if (err instanceof RpcFailedError && err.code === "timeout") {
           unresponsive = true;
-          return;
         }
         // Anything else: the connector may simply have had no transaction,
-        // which is the outcome wanted. The check below decides.
-      }
-      // Proof, per charge point, that the transaction is gone.
-      //
-      // The ack only says the daemon queued `StopTransaction`. The obvious
-      // instrument for "did it reach the wire" — the `StopTransaction` message
-      // counter — is fleet-wide and carries **no `cpId` label**, deliberately
-      // so (#298 bounded its cardinality on purpose). An unrelated frame can
-      // therefore satisfy an aggregate inequality while *this* charge point's
-      // stop is still queued, so that comparison looked like proof and was
-      // not. `connector.transactionId` is per charge point and is cleared only
-      // by the `StopTransaction` CALLRESULT handler, so it answers the
-      // stronger question — the CSMS saw the stop and replied — about the
-      // charge point actually in hand.
-      for (;;) {
-        const leftMs = deadline - Date.now();
-        if (leftMs <= 0) return;
-        let done: boolean;
-        try {
-          done = !(await hasOpenTransaction(pool, cpId, leftMs));
-        } catch (err) {
-          if (err instanceof RpcFailedError && err.code === "timeout") {
-            unresponsive = true;
-          }
-          // `not_found` means the charge point is already gone, which is the
-          // outcome wanted.
-          done = true;
-        }
-        if (done) {
-          cleared.add(cpId);
-          break;
-        }
-        await sleep(250);
+        // which is the outcome wanted.
       }
     }
   };
@@ -1153,33 +1162,24 @@ async function closeOpenTransactions(
     Array.from({ length: Math.min(CLEANUP_CONCURRENCY, cpIds.length) }, worker),
   );
 
-  const left = cpIds.length - cleared.size;
-  if (left > 0) {
+  const notAcked = cpIds.length - acked;
+  if (notAcked > 0) {
     process.stderr.write(
-      `[bench] ${left} transaction(s) could not be confirmed closed` +
-        `${unresponsive ? " (the daemon stopped answering)" : ""}. Deleting now ` +
-        `would discard any still-queued StopTransaction, so the CSMS may be ` +
-        `left holding them.\n`,
+      `[bench] ${notAcked} closing stop(s) were not accepted` +
+        `${unresponsive ? " (the daemon stopped answering)" : ""}; the CSMS may ` +
+        `be left holding those transactions.\n`,
     );
   }
-}
-
-/** Whether `cpId` still has a transaction on any connector.
- *
- *  Read from the daemon's own per-charge-point state rather than from a
- *  fleet-wide counter, because only this is attributable to one charge
- *  point. */
-async function hasOpenTransaction(
-  pool: SocketPool,
-  cpId: string,
-  timeoutMs: number,
-): Promise<boolean> {
-  const status = await pool.rpc<{
-    connectors?: { transactionId?: number | null }[];
-  }>("status", {}, cpId, timeoutMs);
-  return (status.connectors ?? []).some(
-    (c) => c.transactionId !== null && c.transactionId !== undefined,
-  );
+  if (acked > 0) {
+    // Said plainly, because it cannot be checked — see the comment on
+    // CLOSE_TX_BUDGET_MS for why nothing available establishes delivery.
+    process.stderr.write(
+      `[bench] ${acked} closing stop(s) were accepted by the daemon. Whether ` +
+        `they reached the CSMS before deletion is NOT verified: under a ` +
+        `backed-up outbound queue some may be discarded along with the charge ` +
+        `point. See "Known limitations" in scripts/bench/README.md.\n`,
+    );
+  }
 }
 
 /** Best-effort teardown of everything this run created, bounded by

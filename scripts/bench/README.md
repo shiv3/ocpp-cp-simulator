@@ -156,7 +156,12 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
 ## How it works
 
 1. **Preflight.** GETs the daemon's health path and `/metrics` before
-   creating anything — a 404 on `/metrics` fails fast with "start the daemon
+   creating anything, and **refuses a daemon whose `/metrics` predates this
+   benchmark's counters** — probed by the eviction counter, which is rendered
+   unconditionally, so its absence means "too old" rather than "nothing has
+   happened". Without that check an older daemon passes every other test and
+   then reports `timeouts 0`, which on OCPP-1.6J is the headline knee signal
+   reading zero because the counter is missing — a 404 on `/metrics` fails fast with "start the daemon
    with `--metrics`" instead of a confusing empty report at the end of a long
    run. It also **refuses a daemon that already holds charge points**:
    `/metrics` has no `cpId` label by design, so a pre-existing fleet's traffic
@@ -374,22 +379,10 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    cycle's own bound_ — the authorization timeout plus, on 1.6, the assigned-id
    timeout — never a smaller number chosen at the teardown site.
 
-   The same invariant governs the **bookkeeping**, not only the waiting — and
-   the proof has to be _attributable_. Teardown re-stops every charge point
-   that may have an open transaction, whether or not its stop was already
-   acked, and then confirms each one **individually** by reading that charge
-   point's own `transactionId` back through `status`. That field is cleared
-   only by the `StopTransaction` CALLRESULT handler, so a cleared value means
-   the CSMS saw the stop and answered.
-
-   An earlier version compared the fleet-wide `StopTransaction` message
-   counter against a baseline. That looked like proof and was not:
-   `ocppcp_ocpp_messages_total` carries **no `cpId` label**, deliberately, so
-   an unrelated frame — another charge point's, or one under
-   `--allow-existing` — can satisfy the inequality while this charge point's
-   stop is still queued. Teardown would then omit it and delete it over its own
-   queued CALL. An aggregate cannot establish a per-charge-point fact, so it is
-   not asked to.
+   Teardown re-stops every charge point that may have an open transaction,
+   whether or not its stop was already acked, and does **not** try to work out
+   which ones still need it — there is no signal available that would let it.
+   It then says plainly that delivery is unverified; see "Known limitations".
 
    And the bound teardown waits for is now **complete**, enumerated stage by
    stage rather than incremented when a gap is found. A cycle awaits in exactly
@@ -633,6 +626,22 @@ a spare machine and a CSMS.
   `status`, would add a third RPC per cycle to the very budget the ceiling
   above rations, and each of those builds a full per-connector snapshot. The
   idle axis opens no event socket at all.
+- **A closing stop's delivery to the CSMS is not verified, and cannot be from
+  here.** Teardown re-stops every charge point that may have an open
+  transaction, but under a backed-up outbound queue — the condition this tool
+  exists to create — a queued `StopTransaction` can still be discarded when the
+  charge point is deleted, leaving the CSMS holding that session. Two checks
+  were tried and both were wrong: the fleet-wide `StopTransaction` counter has
+  **no `cpId` label** by design, so an aggregate cannot establish a
+  per-charge-point fact; and `connector.transactionId` going `null` is done
+  synchronously by `ChargePoint.stopTransaction` _before_ the frame is queued,
+  so it says nothing about the wire. The wire is observable in principle —
+  `OCPPWebSocket.writeUpstreamPhysical` logs `Sent: …` immediately after
+  `this._ws.send(raw)` — but reading it back needs `logs.get`, and
+  `listStoredLogs` returns nothing unless the daemon runs with `--state-db`,
+  which this benchmark does not require. So the limitation is stated rather
+  than papered over with a check that looks like proof. The stderr line at
+  teardown names how many stops were accepted and unverified.
 - **Every HTTP request carries a 30s deadline**, because `fetch` has none of
   its own. A daemon that accepts the connection and then stalls while serving
   `/metrics` — the condition at the top of a sweep, which is what this tool

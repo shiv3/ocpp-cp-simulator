@@ -51,6 +51,7 @@ import {
   row,
   sleep,
   socketPoolSize,
+  stopTransactionsSent,
   staggerOffsetsMs,
   ASSIGNED_ID_TIMEOUT_MS,
   START_CONFIRM_TIMEOUT_MS,
@@ -110,7 +111,11 @@ async function fetchWithDeadline(
         ? `${what} did not answer within ${HTTP_TIMEOUT_MS / 1000}s (${redactUrlUserinfo(url)}). ` +
             `A daemon that accepts the connection and then stalls under load would ` +
             `otherwise hang this run forever.`
-        : `${what} failed (${redactUrlUserinfo(url)}): ${String(err)}`,
+        : // The caught error is redacted too, not just the URL beside it: a
+          // failed fetch commonly quotes the original URL verbatim, so
+          // redacting one and appending the other put the plaintext password
+          // straight back on the line.
+          `${what} failed (${redactUrlUserinfo(url)}): ${redactUrlUserinfo(String(err))}`,
       { cause: err },
     );
   }
@@ -707,6 +712,8 @@ function armLoad(
   /** Charge points believed to have a transaction open right now. Teardown
    *  closes these before deleting anything — see {@link closeOpenTransactions}. */
   openTransactions: () => string[];
+  /** The longest a single cycle of this handle may legitimately take. */
+  cycleBoundMs: () => number;
   /** Wait, up to `budgetMs`, for cycles already in flight when `stop()` landed
    *  to finish what they were doing. Without it a start still travelling to
    *  the CSMS lands *after* teardown's closing stop, and that transaction is
@@ -771,7 +778,7 @@ function armLoad(
         );
       } catch (err) {
         process.stderr.write(
-          `[bench] start_heartbeat failed for ${cpId}: ${String(err)}\n`,
+          `[bench] start_heartbeat failed for ${cpId}: ${redactUrlUserinfo(String(err))}\n`,
         );
       }
     }
@@ -837,7 +844,7 @@ function armLoad(
       );
     } catch (err) {
       process.stderr.write(
-        `[bench] start_transaction failed for ${cpId}: ${String(err)}\n`,
+        `[bench] start_transaction failed for ${cpId}: ${redactUrlUserinfo(String(err))}\n`,
       );
     }
     // Hold from the moment the transaction *started*, not from the moment the
@@ -883,7 +890,7 @@ function armLoad(
     // merely unlikely: a stale id can only exist after a confirmation timeout,
     // and after one this charge point is never armed again.
     const retiring =
-      awaitAssignedId && outcome.started && !outcome.transactionId;
+      awaitAssignedId && outcome.started && outcome.transactionId === null;
     if (retiring) {
       retired++;
       process.stderr.write(
@@ -927,7 +934,7 @@ function armLoad(
         // Left in `openTransactions` on purpose: a stop that failed is a
         // transaction still open, and teardown must try again.
         process.stderr.write(
-          `[bench] stop_transaction failed for ${cpId}: ${String(err)}\n`,
+          `[bench] stop_transaction failed for ${cpId}: ${redactUrlUserinfo(String(err))}\n`,
         );
       }
       if (stopped || retiring) return;
@@ -953,20 +960,39 @@ function armLoad(
     lateHolds: () => lateHolds,
     retired: () => retired,
     openTransactions: () => [...openTransactions],
+    /** The bound this handle's own cycles use, so teardown can wait exactly as
+     *  long as a cycle is allowed to take rather than inventing a smaller
+     *  number. See the teardown ordering invariant. */
+    cycleBoundMs: () => confirmTimeoutMs + holdMs,
     settle: async (budgetMs: number): Promise<void> => {
+      if (inFlight.size === 0) return;
       // Bounded: a cycle blocked on a confirmation that will never arrive must
       // not hold teardown open. Anything still running past the budget is
       // reported by `closeOpenTransactions` as a transaction that may be left.
-      await Promise.race([
-        (async () => {
-          // Re-read the set each pass: finishing one cycle can start none, but
-          // a cycle settling may still be mid-await when the first pass reads.
-          for (let pass = 0; pass < 3 && inFlight.size > 0; pass++) {
-            await Promise.allSettled([...inFlight]);
-          }
-        })(),
-        sleep(budgetMs),
-      ]);
+      //
+      // The timer is *cleared* when the wait wins, not left to fire.
+      // `Promise.race` does not cancel its loser, and an uncancelled
+      // `sleep(budgetMs)` here is a 46-second timer holding the event loop
+      // open long after teardown has finished — the same never-exits shape as
+      // the abort race, arriving through the bound this round introduced.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expired = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, budgetMs);
+      });
+      try {
+        await Promise.race([
+          (async () => {
+            // Re-read the set each pass: a cycle settling may still be
+            // mid-await when the first pass reads it.
+            for (let pass = 0; pass < 3 && inFlight.size > 0; pass++) {
+              await Promise.allSettled([...inFlight]);
+            }
+          })(),
+          expired,
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
     },
     stop: () => {
       stopped = true;
@@ -976,15 +1002,46 @@ function armLoad(
   };
 }
 
+// ---------------------------------------------------------------------------
+// TEARDOWN ORDERING INVARIANT
+//
+/**
+ * **Teardown may not consider an operation finished before the bound that
+ * operation itself uses.**
+ *
+ * Every teardown bug in this tool has been one violation of this. An RPC ack
+ * for `stop_transaction` says the daemon *queued* `StopTransaction`, not that
+ * it reached the CSMS, so deleting on the ack discarded the queued CALL. A
+ * `Promise.race` that rejects on abort leaves the losing creation running, so
+ * treating the race as the sweep's completion deleted ids that were registered
+ * afterwards. And teardown waited five seconds for a start that the run itself
+ * allows forty-five, so it stopped transactions that did not exist yet.
+ *
+ * These are all on the *preventable* side of the invariant split recorded in
+ * the wiki: nothing can detect the violation afterwards — a CSMS holds no
+ * listing to reconcile against, and an id deleted before it was created leaves
+ * no trace here — so only the ordering protects them. Whenever teardown waits
+ * for something, the bound it waits for must be the one the operation was
+ * given, never a smaller number chosen locally.
+ */
+
+/** How many `StopTransaction` frames the daemon has sent, or `NaN` if the
+ *  scrape failed. */
+async function stopsSentOrNaN(
+  daemonUrl: string,
+  auth: { username: string; password: string } | null,
+): Promise<number> {
+  try {
+    return stopTransactionsSent(await fetchMetrics(daemonUrl, auth));
+  } catch {
+    return Number.NaN;
+  }
+}
+
 /** Overall budget for closing transactions still open at teardown. Bounded
  *  like the delete sweep and for the same reason: a daemon that has stopped
  *  answering must not turn teardown into an unbounded wait. */
 const CLOSE_TX_BUDGET_MS = 30_000;
-
-/** How long teardown waits for cycles already in flight to finish before it
- *  starts closing transactions. Short on purpose: it only has to cover a start
- *  already travelling to the CSMS, not a confirmation that may never come. */
-const SETTLE_CYCLES_BUDGET_MS = 5_000;
 
 /**
  * Close every transaction this run still has open, before anything is deleted.
@@ -1005,6 +1062,8 @@ const SETTLE_CYCLES_BUDGET_MS = 5_000;
 async function closeOpenTransactions(
   pool: SocketPool,
   cpIds: readonly string[],
+  daemonUrl: string,
+  auth: { username: string; password: string } | null,
 ): Promise<void> {
   if (cpIds.length === 0) return;
   if (!pool.anyConnected()) {
@@ -1018,6 +1077,10 @@ async function closeOpenTransactions(
   process.stderr.write(
     `[bench] closing ${cpIds.length} open transaction(s) before deleting\n`,
   );
+  // Read before issuing anything, so the drain below compares like with like.
+  // NaN when the scrape fails: that only costs the drain check, and the stops
+  // below still go out.
+  const sentBefore = await stopsSentOrNaN(daemonUrl, auth);
   const deadline = Date.now() + CLOSE_TX_BUDGET_MS;
   let next = 0;
   let closed = 0;
@@ -1056,6 +1119,37 @@ async function closeOpenTransactions(
         `${unresponsive ? " (the daemon stopped answering)" : ""}; the CSMS ` +
         `may be left holding them.\n`,
     );
+  }
+
+  // The acks above say the daemon *queued* those StopTransactions, not that it
+  // sent them. Deleting a charge point on the strength of an ack discards its
+  // queued CALL, so wait for the frames to actually leave — bounded by the
+  // per-CALL watchdog, which is the bound the daemon's own serializer works
+  // to, never a smaller number chosen here.
+  if (closed === 0 || unresponsive || Number.isNaN(sentBefore)) return;
+  const target = sentBefore + closed;
+  const drainDeadline = Date.now() + CLOSE_TX_BUDGET_MS;
+  for (;;) {
+    let sentNow: number;
+    try {
+      sentNow = stopTransactionsSent(await fetchMetrics(daemonUrl, auth));
+    } catch {
+      process.stderr.write(
+        `[bench] could not confirm StopTransaction frames left the queue; the ` +
+          `CSMS may be left holding transactions.\n`,
+      );
+      return;
+    }
+    if (sentNow >= target) return;
+    if (Date.now() >= drainDeadline) {
+      process.stderr.write(
+        `[bench] ${target - sentNow} StopTransaction CALL(s) were still queued ` +
+          `after ${CLOSE_TX_BUDGET_MS / 1000}s. Deleting now would discard them, ` +
+          `so the CSMS may be left holding those transactions.\n`,
+      );
+      return;
+    }
+    await sleep(250);
   }
 }
 
@@ -1234,6 +1328,7 @@ async function main(): Promise<void> {
     lateHolds: () => number;
     retired: () => number;
     openTransactions: () => string[];
+    cycleBoundMs: () => number;
     settle: (budgetMs: number) => Promise<void>;
   }> = [];
 
@@ -1266,6 +1361,15 @@ async function main(): Promise<void> {
   /** Resolves when the sweep loop has unwound. Assigned as soon as the loop
    *  starts so the signal handler can await it. */
   let sweepSettled: Promise<unknown> = Promise.resolve();
+  /** The `growFleet` call currently running, if any.
+   *
+   *  `untilLost` is a `Promise.race`, and a race rejecting on abort does not
+   *  cancel or await its loser. So the sweep could look finished while the
+   *  server was still working through the rest of a sequential batch —
+   *  cleanup would then delete provisional ids whose charge points were
+   *  registered *afterwards*, and those leaked. Teardown awaits this, bounded
+   *  by the deadline the creation RPC itself carries. */
+  let creationInFlight: Promise<unknown> | null = null;
 
   let cleanupStarted: Promise<void> | null = null;
   const cleanup = async (): Promise<void> => {
@@ -1280,15 +1384,35 @@ async function main(): Promise<void> {
       signalAbort();
       for (const stop of stopLoads) stop();
       await sweepSettled.catch(() => undefined);
+      // The sweep's promise settling is not the same as creation having
+      // stopped: `untilLost` is a race, and an abort rejects it while the
+      // `cp.create_many` it lost to keeps running. Deleting now would delete
+      // provisional ids whose charge points are registered a moment later.
+      // Bounded by the deadline the creation RPC itself carries, not by a
+      // smaller number chosen here.
+      if (creationInFlight) {
+        await Promise.race([
+          creationInFlight.catch(() => undefined),
+          sleep(RPC_TIMEOUT_MS),
+        ]);
+      }
       // Let cycles already in flight finish first, so a start still on its way
       // to the CSMS is not overtaken by the stop meant to close it.
-      await Promise.all(loads.map((l) => l.settle(SETTLE_CYCLES_BUDGET_MS)));
+      // Each handle is given *its own* bound, not a number chosen here. A
+      // cycle may legitimately wait the authorization timeout and, on 1.6, the
+      // assigned-id timeout on top; waiting five seconds meant teardown
+      // stopped transactions that did not exist yet, and their later
+      // confirmation left the CSMS holding sessions the deletion could not
+      // close.
+      await Promise.all(loads.map((l) => l.settle(l.cycleBoundMs())));
       // Then close what is open. `stop()` cancelled the timers that would have
       // sent these, and a deleted charge point can no longer end its session,
       // so without this the CSMS is left holding them.
       await closeOpenTransactions(
         pool,
         loads.flatMap((l) => l.openTransactions()),
+        opts.daemonUrl,
+        opts.daemonBasicAuth,
       );
       watcher?.close();
       await deleteFleet(pool, runId, [...cleanupIds]);
@@ -1352,9 +1476,24 @@ async function main(): Promise<void> {
         process.stderr.write(
           `[bench] N=${n}: creating ${toCreate} more CP(s)\n`,
         );
-        const created = await untilLost(
-          growFleet(pool, opts, runId, cursor, toCreate, cleanupIds, abort),
+        // Held so teardown can await the loser of the race below. Cleared on
+        // settle, whichever way it settles.
+        const creating = growFleet(
+          pool,
+          opts,
+          runId,
+          cursor,
+          toCreate,
+          cleanupIds,
+          abort,
         );
+        creationInFlight = creating;
+        void creating
+          .catch(() => undefined)
+          .finally(() => {
+            if (creationInFlight === creating) creationInFlight = null;
+          });
+        const created = await untilLost(creating);
         allCpIds.push(...created);
         const notCreated = n - allCpIds.length;
         if (notCreated > 0) {
@@ -1626,7 +1765,12 @@ See scripts/bench/README.md for a worked example and what to record.
 // wants one of its helpers — does not start a benchmark run.
 if (import.meta.main) {
   main().catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
+    // Redacted at the sink as well as at each source: a socket.io connect
+    // error can quote the daemon URL, and this is the last place every failure
+    // path converges before it reaches stderr.
+    const message = redactUrlUserinfo(
+      err instanceof Error ? err.message : String(err),
+    );
     // An abort is a run that stopped on purpose, not a crash — say so, because
     // the difference decides whether the operator looks for a bug or for a
     // daemon that went away.

@@ -165,6 +165,20 @@ at creation, because `cp.create_many` shares every field across a batch except
 the id and the SOAP callback URL, so a pool would be identical for the whole
 batch.
 
+**Teardown never treats an acknowledgement as a completion.** The invariant
+behind the teardown rules, and the one every teardown bug here has violated:
+_teardown may not consider an operation finished before the bound that operation
+itself uses._ A `stop_transaction` ack means the daemon queued
+`StopTransaction`, not that it sent it, so teardown watches
+`ocppcp_ocpp_messages_total` until the frames leave before deleting — otherwise
+a backlogged serializer has its queued CALL discarded with the charge point. A
+`Promise.race` rejecting on abort does not cancel its loser, so teardown awaits
+the `cp.create_many` still running rather than deleting provisional ids whose
+charge points appear a moment later. And the wait for in-flight cycles uses the
+cycle's own bound — the authorization timeout plus, on 1.6, the assigned-id
+timeout — never a smaller number chosen at the teardown site. All three are on
+the preventable side of the split below, so only the ordering protects them.
+
 **Open transactions are closed before deletion, and that is a third
 invariant.** `stop()` only cancels timers, and roughly half an active fleet is
 inside its hold at any moment, so cancelling those callbacks and deleting the
@@ -175,6 +189,14 @@ ids before creation and read them after creation stops; delete only what this
 run created — this one concerns a third-party system with no listing to
 reconcile against, so it can only be met by construction and never repaired
 afterwards.
+
+**The two start emissions are told apart by order, not by value.** OCPP 1.6's
+`transactionId` is schema-valid for any integer, zero included, so testing
+`transactionId === 0` for "still the placeholder" left a CSMS that assigns 0
+unrecognised — the cycle waited its full timeout and retired the charge point
+despite a valid confirmation. The first emission after arming is the local
+start, the second the assigned id whatever it carries, and "no id arrived" is
+`null`, which `0` could not express; `null` alone triggers retirement.
 
 **The stop waits for the assigned transaction id.** On OCPP 1.6
 `transaction_started` is emitted twice — locally with the placeholder id `0`,
@@ -306,7 +328,12 @@ redaction applies to the progress lines, the hardware block and every error
 message, because stderr commonly ends up in a CI log. That includes a URL too
 malformed to parse: `ws://user:secret@` is the shape that makes `new URL`
 throw, and the redaction is a regex over the raw text rather than a URL
-rewrite, so it works without one.
+rewrite, so it works without one. It also covers the **caught exception text**,
+not only the URL printed beside it — a failed `fetch` commonly quotes the
+original URL verbatim, so redacting one and appending the other put the
+password straight back on the line — and it is applied at every error sink
+including the top-level one, since a socket.io connect error can carry the
+daemon URL.
 
 **Every HTTP request carries a 30s deadline.** `fetch` has none of its own, so a
 daemon that accepts the connection and then stalls while serving `/metrics` —

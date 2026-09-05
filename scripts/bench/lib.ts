@@ -820,6 +820,31 @@ export function counterValue(
 }
 
 /** The registered-charge-point gauge, labelled by state. */
+/** Frames actually written to the wire, by action and direction. Used to tell
+ *  "the daemon queued this CALL" from "the CALL left the queue". */
+export const MESSAGES_METRIC = "ocppcp_ocpp_messages_total";
+
+/**
+ * How many `StopTransaction` CALLs this daemon has actually sent.
+ *
+ * The `stop_transaction` RPC ack only says the daemon *queued* one. Under a
+ * backlogged serializer — the condition this tool exists to create — deleting
+ * a charge point on the strength of that ack discards the queued CALL, and the
+ * CSMS keeps an open transaction after an apparently clean teardown. This
+ * counter moves when the frame is written, so waiting for it to rise is
+ * waiting for the thing the ack does not promise.
+ */
+export function stopTransactionsSent(samples: readonly Sample[]): number {
+  return samples
+    .filter(
+      (s) =>
+        s.name === MESSAGES_METRIC &&
+        s.labels.action === "StopTransaction" &&
+        s.labels.direction === "cp-to-csms",
+    )
+    .reduce((sum, s) => sum + s.value, 0);
+}
+
 export const CHARGE_POINTS_METRIC = "ocppcp_charge_points";
 /** The state `ChargePoint.status` takes while disconnected or pre-boot. */
 export const UNAVAILABLE_STATE = "Unavailable";
@@ -1285,15 +1310,26 @@ export interface TransactionStartOutcome {
   readonly localStartAtMs: number | null;
 }
 
+/**
+ * Which emission this waiter is expecting next.
+ *
+ * **Explicit, rather than inferred from the id's value.** The daemon emits
+ * `transaction_started` twice per 1.6 transaction — once locally, once when
+ * `StartTransaction.conf` supplies the assigned id — and this used to tell
+ * them apart by testing `transactionId === 0`. That is wrong on the protocol:
+ * OCPP 1.6's `transactionId` is schema-valid for any integer, zero included,
+ * so a CSMS that assigns 0 was never recognised and its charge point was
+ * retired after the full timeout despite a valid confirmation. The phase is
+ * the run's own state and owes nothing to the number on the wire.
+ */
+type StartPhase = "awaiting-local-start" | "awaiting-assigned-id";
+
 interface StartWaiter {
   settle(outcome: TransactionStartOutcome): void;
-  /** `Date.now()` at the placeholder emission, or `null` before it. */
+  /** `Date.now()` at the local start emission, or `null` before it. */
   localStartAtMs: number | null;
-  /** Whether this waiter has seen the local start (`transactionId` 0) of the
-   *  cycle that armed it. Until it has, a non-zero id can only belong to an
-   *  *earlier* cycle, and accepting it would confirm this cycle off the back
-   *  of the previous one's `StartTransaction.conf`. */
-  sawLocalStart: boolean;
+  /** Which emission is expected next. Ordering, not value, separates them. */
+  phase: StartPhase;
   /** Whether this cycle must wait for the assigned id before proceeding. */
   readonly awaitAssignedId: boolean;
 }
@@ -1369,17 +1405,19 @@ export class TransactionStarts {
         // The two need different handling: the second leaves a conf that may
         // still arrive, the first leaves nothing behind.
         resolve(
-          waiter.sawLocalStart
+          waiter.phase === "awaiting-assigned-id"
             ? {
                 started: true,
-                transactionId: 0,
+                // Started, but no assigned id arrived. `null` says exactly
+                // that, where 0 could not: 0 is a legal assignment.
+                transactionId: null,
                 localStartAtMs: waiter.localStartAtMs,
               }
             : UNCONFIRMED,
         );
       }, timeoutMs);
       const waiter: StartWaiter = {
-        sawLocalStart: false,
+        phase: "awaiting-local-start",
         localStartAtMs: null,
         awaitAssignedId,
         settle: (outcome) => {
@@ -1405,22 +1443,31 @@ export class TransactionStarts {
   confirm(cpId: string, transactionId: number, nowMs = Date.now()): void {
     const waiter = this.waiters.get(cpId);
     if (!waiter) return;
-    if (transactionId === 0) {
-      waiter.sawLocalStart = true;
-      waiter.localStartAtMs ??= nowMs;
-      if (waiter.awaitAssignedId) return; // keep waiting for the real id
-      this.waiters.delete(cpId);
-      waiter.settle({
-        started: true,
-        transactionId: 0,
-        localStartAtMs: waiter.localStartAtMs,
-      });
+
+    if (waiter.phase === "awaiting-local-start") {
+      // The first emission after arming is this cycle's local start, whatever
+      // id it carries. A straggler from an earlier cycle cannot be it: a
+      // second emission only exists after a confirmation timeout, and a cycle
+      // that timed out retires its charge point, so no later waiter is ever
+      // armed for it (see `TransactionStartOutcome` and the retirement path in
+      // `fleet-bench.ts`).
+      waiter.localStartAtMs = nowMs;
+      if (!waiter.awaitAssignedId) {
+        this.waiters.delete(cpId);
+        waiter.settle({
+          started: true,
+          transactionId,
+          localStartAtMs: nowMs,
+        });
+        return;
+      }
+      waiter.phase = "awaiting-assigned-id";
       return;
     }
-    // A non-zero id before this cycle's own local start belongs to an earlier
-    // cycle whose conf is only now arriving. Ignoring it is what keeps a
-    // straggler from confirming a newer cycle.
-    if (!waiter.sawLocalStart) return;
+
+    // The second emission is `StartTransaction.conf`'s assigned id. Accepted
+    // whatever its value — zero is a legal assignment, and testing for it was
+    // what made a CSMS assigning 0 unrecognisable.
     this.waiters.delete(cpId);
     waiter.settle({
       started: true,

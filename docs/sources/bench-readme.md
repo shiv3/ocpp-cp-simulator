@@ -10,7 +10,7 @@ related:
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-09-04
+updated: 2026-09-06
 ---
 
 # Source: `scripts/bench/README.md`
@@ -274,10 +274,22 @@ impossible rather than unlikely.
 rejecting at its 35s deadline does not stop the daemon's sequential handler, so
 the delete sweep answered `not_found` for ids registered moments later and those
 survived to be refused by the next run's preflight. Ids reported `not_found` are
-re-swept once after a further RPC deadline, because "not there yet" and "already
-gone" are indistinguishable from the client. This is the
+re-swept, each pass after a further RPC deadline, because "not there yet" and
+"already gone" are indistinguishable from the client. This is the
 acknowledgement-is-not-completion rule in its strongest form: the
 acknowledgement never arrives and the operation continues anyway.
+
+**And the re-sweep is bounded by a pass count rather than settled by one
+retry.** A second `not_found` is not evidence that an id is gone — against a
+slow `--state-db` or a loaded daemon it means only that the handler had not
+reached it yet — so treating it as final was a fail-open: the ids stayed in a
+local variable nothing read, the daemon registered them after the pool closed,
+and the run said nothing. Reconciliation makes up to `RECONCILE_MAX_PASSES`
+(**3**) passes, returns early without spending a 35s wait if the control plane
+has gone away, and if anything is still unaccounted for it **names every id on
+stderr and sets exit code 1**. The table and the `--out` file are still
+written: the measurement happened, and it is the teardown that could not be
+proved complete.
 
 **SIGINT waits for creation to stop before deleting.** An interrupt landing
 while `growFleet` awaited one batch of a multi-batch step used to snapshot the
@@ -331,7 +343,43 @@ alive after the error is printed. The subscription is itself a small
 load on the daemon (every charge point's connector-status and transaction
 envelopes are encoded and sent to that socket); it is still cheaper than
 polling each charge point's `status`, which would add a third RPC per cycle to
-the rationed budget below. The idle axis opens no event socket.
+the rationed budget below. **The idle axis opens one too**, because the
+accepted-boot events that keep `--heartbeat-interval` in force arrive on it —
+see the heartbeat override below — so a dropped event socket aborts an idle run
+as well.
+
+**The heartbeat override is reapplied after every accepted boot.** The
+contract is that a run drives heartbeats at `--heartbeat-interval` for its whole
+length, including across reconnects, and it was not true until #302's
+round-nine fix. `cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`
+and nothing pins it: every accepted boot runs
+`ChargePoint.onBootNotificationAccepted`, which calls
+`startHeartbeat(BootNotification.conf.interval)`, so the CSMS's value replaces
+the flag's on every reconnect — and reconnects are exactly what begins to
+happen as the sweep approaches the knee, so the offered load changed at the
+point the benchmark exists to measure and every later step inherited the drift.
+The run therefore watches for `status_change` → `Available` (the charge-point
+boot gate opening, the same signal
+`src/cli/server/waitForBootAccepted.ts` uses, emitted unconditionally by
+`ChargePoint`'s status setter) and issues a fresh `start_heartbeat` on each one.
+`connected` is deliberately **not** the hook: it fires before
+`BootNotification.conf` and would race the interval it exists to overwrite. A
+boot observed while an earlier reapplication is in flight is re-issued rather
+than merged, because the daemon may run the in-flight RPC's handler before the
+second boot's frame. Each run records `heartbeatOverride: { reapplied, failed }`
+in `--out`.
+
+Not covered, and documented rather than tested: a CSMS that sends
+`ChangeConfiguration HeartbeatInterval` mid-run reaches `startHeartbeat`
+directly and emits no `status_change`, so the override is not put back; a boot
+answered `Pending` or `Rejected` never reaches `onBootNotificationAccepted` at
+all. The reapplication RPCs are also paced through the same socket pool as the
+transaction cycle, so a wave of reconnects at the knee makes the instrument
+compete with the load at its busiest moment — **two** RPCs per accepted boot,
+since `onBootNotificationAccepted` emits `statusChange` twice (from
+`updateConnectorStatus(0, Available)` and from the status setter) and an RPC
+follows every event by design, so a reconnect wave across a 2000-CP fleet is on
+the order of 4000 paced calls. Taken over letting the load drift.
 
 **Cleanup deletes what this run created, and refuses to touch anything else.**
 An id enters the delete list when it is _offered_ to `cp.create_many`, before

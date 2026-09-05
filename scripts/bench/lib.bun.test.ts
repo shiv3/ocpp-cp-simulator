@@ -40,6 +40,7 @@ import {
   fleetGauge,
   formatSeconds,
   formatTable,
+  HeartbeatOverride,
   histogramQuantile,
   mergeHistogramDeltas,
   parseArgv,
@@ -50,6 +51,8 @@ import {
   parseExposition,
   radicalInverseBase2,
   recommendedWarmupSec,
+  reconcileMissingIds,
+  RECONCILE_MAX_PASSES,
   redactOptions,
   redactUrlsInText,
   redactUrlUserinfo,
@@ -63,6 +66,7 @@ import {
   START_CONFIRM_TIMEOUT_MS,
   sustainableRpcPerSec,
   unpredictedCreatedIds,
+  unresolvedIdsReport,
   validateOptions,
   type Sample,
   type StepResult,
@@ -1286,7 +1290,7 @@ describe("transaction-start tracking (#302)", () => {
   });
 
   it("does not turn a deliberate close into an abort", async () => {
-    // The real sequence, not a hypothetical one: `TransactionWatcher.close()`
+    // The real sequence, not a hypothetical one: `FleetWatcher.close()`
     // closes the tracker and then disconnects the socket, and that disconnect
     // fires the same handler a genuine drop does. A run that finished must not
     // report a failure it did not have — nor abort whatever the SIGINT path is
@@ -1972,5 +1976,275 @@ describe("refusing a daemon whose /metrics predates this benchmark (#302)", () =
     expect(() => assertMetricsAreCurrent(lookalike)).toThrow(
       BenchValidationError,
     );
+  });
+});
+
+describe("HeartbeatOverride", () => {
+  /** A hand-settled `apply`, so the tests control the ordering the races
+   *  depend on rather than hoping the scheduler produces it. */
+  function deferredApply(): {
+    apply: (cpId: string) => Promise<void>;
+    calls: string[];
+    settle: (index: number) => void;
+    fail: (index: number) => void;
+  } {
+    const calls: string[] = [];
+    const resolvers: Array<{ ok: () => void; no: () => void }> = [];
+    return {
+      calls,
+      apply: (cpId) => {
+        calls.push(cpId);
+        return new Promise<void>((resolve, reject) => {
+          resolvers.push({ ok: resolve, no: () => reject(new Error("rpc")) });
+        });
+      },
+      settle: (index) => resolvers[index]!.ok(),
+      fail: (index) => resolvers[index]!.no(),
+    };
+  }
+
+  it("issues a fresh RPC for a boot seen while one is already in flight", async () => {
+    // The property the whole class exists for. `onBootNotificationAccepted`
+    // emits `statusChange` twice per accepted boot, and a reconnect can arrive
+    // while an earlier reapplication is still travelling. Merging the second
+    // event into the in-flight RPC would lose exactly the case that matters:
+    // the daemon may run that RPC's handler *before* the second boot's frame,
+    // and the second boot then reinstalls the CSMS interval permanently.
+    const d = deferredApply();
+    const override = new HeartbeatOverride({
+      owns: () => true,
+      apply: d.apply,
+    });
+
+    override.noteBootAccepted("cp-1");
+    override.noteBootAccepted("cp-1");
+    // Coalesced *for now*: only one RPC is on the wire at a time per charge
+    // point, so the second is owed rather than issued concurrently.
+    expect(d.calls).toEqual(["cp-1"]);
+
+    d.settle(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    // ...and then issued. An RPC follows every event.
+    expect(d.calls).toEqual(["cp-1", "cp-1"]);
+
+    d.settle(1);
+    await override.idle();
+    expect(override.reapplied()).toBe(2);
+    expect(override.inFlightCount()).toBe(0);
+  });
+
+  it("ignores a charge point this run did not create", async () => {
+    // `--allow-existing` puts strangers' charge points on the same daemon, and
+    // they emit `status_change` too. Rewriting their heartbeat interval would
+    // make the benchmark a side effect on someone else's fleet.
+    const d = deferredApply();
+    const override = new HeartbeatOverride({
+      owns: (cpId) => cpId === "mine",
+      apply: d.apply,
+    });
+    override.noteBootAccepted("theirs");
+    override.noteBootAccepted("mine");
+    expect(d.calls).toEqual(["mine"]);
+  });
+
+  it("counts a failed reapplication rather than swallowing it", async () => {
+    // A failure means that charge point may be heartbeating at the CSMS's
+    // interval for the rest of the run — a load the table's rows do not
+    // describe — so the run has to be able to say so.
+    const d = deferredApply();
+    const override = new HeartbeatOverride({
+      owns: () => true,
+      apply: d.apply,
+    });
+    override.noteBootAccepted("cp-1");
+    d.fail(0);
+    await override.idle();
+    expect(override.failures()).toBe(1);
+    expect(override.reapplied()).toBe(0);
+  });
+
+  it("issues nothing once closed, including an owed reapplication", async () => {
+    // Teardown deletes these charge points next; an RPC issued now races the
+    // delete for a charge point whose load has already ended.
+    const d = deferredApply();
+    const override = new HeartbeatOverride({
+      owns: () => true,
+      apply: d.apply,
+    });
+    override.noteBootAccepted("cp-1");
+    override.noteBootAccepted("cp-1");
+    override.close();
+    d.settle(0);
+    await override.idle();
+    expect(d.calls).toEqual(["cp-1"]);
+    override.noteBootAccepted("cp-1");
+    expect(d.calls).toEqual(["cp-1"]);
+  });
+
+  it("keeps two charge points' reapplications independent", async () => {
+    const d = deferredApply();
+    const override = new HeartbeatOverride({
+      owns: () => true,
+      apply: d.apply,
+    });
+    override.noteBootAccepted("cp-1");
+    override.noteBootAccepted("cp-2");
+    expect(d.calls).toEqual(["cp-1", "cp-2"]);
+    d.settle(0);
+    d.settle(1);
+    await override.idle();
+    expect(override.reapplied()).toBe(2);
+  });
+});
+
+describe("reconcileMissingIds", () => {
+  const never = async (): Promise<void> => undefined;
+
+  it("keeps re-sweeping while the daemon is still registering the ids", async () => {
+    // The P2. A `cp.create_many` whose client deadline expired leaves the
+    // daemon creating sequentially, so `not_found` means "not yet" as often as
+    // "already gone" — and one retry is not enough to tell them apart against a
+    // slow state database.
+    const answers = [["a", "b"], ["b"], []];
+    let pass = 0;
+    const seen: string[][] = [];
+    const outcome = await reconcileMissingIds(["a", "b"], {
+      delay: never,
+      deleteMissing: async (ids) => {
+        seen.push([...ids]);
+        return answers[pass++]!;
+      },
+      connected: () => true,
+    });
+    expect(seen).toEqual([["a", "b"], ["a", "b"], ["b"]]);
+    expect(outcome.unresolved).toEqual([]);
+    expect(outcome.resolved).toBe(2);
+    expect(outcome.passes).toBe(3);
+    expect(outcome.stoppedBecause).toBe("resolved");
+  });
+
+  it("reports what is still missing when the pass budget runs out", async () => {
+    // The fail-open this replaces: the second `not_found` was treated as final
+    // and the ids were left in a local variable nothing read, so the daemon
+    // registered them after the pool closed and the run said nothing.
+    const outcome = await reconcileMissingIds(["a", "b"], {
+      delay: never,
+      deleteMissing: async (ids) => ids,
+      connected: () => true,
+    });
+    expect(outcome.passes).toBe(RECONCILE_MAX_PASSES);
+    expect(outcome.unresolved).toEqual(["a", "b"]);
+    expect(outcome.resolved).toBe(0);
+    expect(outcome.stoppedBecause).toBe("budget");
+  });
+
+  it("stops at once, and still names the ids, when the control plane is gone", async () => {
+    // Bounded the other way too: a daemon that has gone away must not cost a
+    // full budget of 35s waits to learn the same thing three times.
+    let calls = 0;
+    let delays = 0;
+    const outcome = await reconcileMissingIds(["a"], {
+      delay: async () => {
+        delays++;
+      },
+      deleteMissing: async () => {
+        calls++;
+        return ["a"];
+      },
+      connected: () => false,
+    });
+    expect(calls).toBe(0);
+    // Not even the wait: `delay` is a full `RECONCILE_DELAY_MS` in production,
+    // so checking reachability only *after* it would cost 35s per pass to
+    // learn what was already known.
+    expect(delays).toBe(0);
+    expect(outcome.passes).toBe(0);
+    expect(outcome.unresolved).toEqual(["a"]);
+    expect(outcome.stoppedBecause).toBe("disconnected");
+  });
+
+  it("does one delay per pass, before the delete", async () => {
+    // The delay is the deadline the creation RPC itself carried, so waiting it
+    // out is what gives the daemon's handler time to finish. A pass that
+    // deleted first would be asking the same question at the same instant.
+    const order: string[] = [];
+    await reconcileMissingIds(["a"], {
+      delay: async () => {
+        order.push("delay");
+      },
+      deleteMissing: async () => {
+        order.push("delete");
+        return ["a"];
+      },
+      connected: () => true,
+      maxPasses: 2,
+    });
+    expect(order).toEqual(["delay", "delete", "delay", "delete"]);
+  });
+
+  it("does nothing at all when nothing was missing", async () => {
+    let calls = 0;
+    const outcome = await reconcileMissingIds([], {
+      delay: never,
+      deleteMissing: async () => {
+        calls++;
+        return [];
+      },
+      connected: () => true,
+    });
+    expect(calls).toBe(0);
+    expect(outcome.passes).toBe(0);
+    expect(outcome.stoppedBecause).toBe("resolved");
+  });
+});
+
+describe("unresolvedIdsReport", () => {
+  it("names every id it could not account for", () => {
+    // The fail-open in one sentence: these ids used to reach a local variable
+    // and stop there. If they are not in the text, the operator cannot delete
+    // them and the next run's preflight refuses the daemon for no stated
+    // reason.
+    const text = unresolvedIdsReport(
+      {
+        resolved: 1,
+        unresolved: ["BENCH-abc-000004", "BENCH-abc-000005"],
+        passes: RECONCILE_MAX_PASSES,
+        stoppedBecause: "budget",
+      },
+      "abc",
+    );
+    expect(text).not.toBeNull();
+    expect(text).toContain("BENCH-abc-000004");
+    expect(text).toContain("BENCH-abc-000005");
+    expect(text).toContain("abc");
+    expect(text).toContain("not_found");
+    expect(text).toContain(`${RECONCILE_MAX_PASSES}-pass`);
+  });
+
+  it("says which bound stopped it", () => {
+    const gone = unresolvedIdsReport(
+      {
+        resolved: 0,
+        unresolved: ["BENCH-abc-000001"],
+        passes: 0,
+        stoppedBecause: "disconnected",
+      },
+      "abc",
+    );
+    expect(gone).toContain("control plane went away");
+    expect(gone).not.toContain("budget ran out");
+  });
+
+  it("is silent when everything was accounted for", () => {
+    // The other half: a clean teardown must not print an ERROR or trip the
+    // exit code the caller pairs with a non-null report.
+    expect(
+      unresolvedIdsReport(
+        { resolved: 2, unresolved: [], passes: 2, stoppedBecause: "resolved" },
+        "abc",
+      ),
+    ).toBeNull();
   });
 });

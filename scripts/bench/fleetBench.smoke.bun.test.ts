@@ -82,18 +82,58 @@ interface MockCsms {
   /** Stop answering entirely, while keeping the socket open — the "CSMS went
    *  black" case the run has to survive rather than hang on. */
   blackHole(): void;
+  /** How many WebSockets `cpId` has opened. `>= 2` is the only proof available
+   *  here that a reconnect really happened. */
+  connections(cpId: string): number;
+  /** Heartbeats `cpId` sent on its `n`-th connection (1-based). Counted at the
+   *  CSMS, off the wire, so it owes nothing to any state the benchmark keeps
+   *  about itself. */
+  heartbeatsOnConnection(cpId: string, n: number): number;
+  /** Every charge point id that has connected. */
+  chargePointIds(): string[];
   stop(): void;
 }
 
-function startMockCsms(): MockCsms {
+interface MockCsmsOptions {
+  /** Close each charge point's socket exactly once, right after answering its
+   *  first Heartbeat, so the reconnect → BootNotification → `Accepted` path
+   *  runs under a live benchmark. */
+  readonly dropOnFirstHeartbeat?: boolean;
+}
+
+/** Per-socket bookkeeping, so a Heartbeat can be attributed to the connection
+ *  it arrived on rather than to the charge point in aggregate. */
+interface CsmsSocketData {
+  readonly cpId: string;
+  /** 1-based: the first connection is 1, the one after a reconnect is 2. */
+  readonly connection: number;
+}
+
+function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
   let blackHoled = false;
   let transactionId = 1;
   let open = 0;
   const seenIdTags = new Set<string>();
-  const server = Bun.serve({
+  /** cpId -> how many sockets it has opened. */
+  const connectionCounts = new Map<string, number>();
+  /** cpId -> heartbeats per connection, indexed by `connection - 1`. */
+  const heartbeats = new Map<string, number[]>();
+  /** cpIds already dropped once, so the drop happens exactly once each. */
+  const alreadyDropped = new Set<string>();
+  const server = Bun.serve<CsmsSocketData, never>({
     port: 0,
     fetch(req, srv) {
-      if (srv.upgrade(req)) return undefined;
+      // `wsUrlWithBasic.ts` appends the charge point id to the supervision
+      // URL's path (`url.pathname += params.chargePointId`), so this is who is
+      // connecting.
+      const cpId = decodeURIComponent(
+        new URL(req.url).pathname.replace(/^\//, ""),
+      );
+      const connection = (connectionCounts.get(cpId) ?? 0) + 1;
+      if (srv.upgrade(req, { data: { cpId, connection } })) {
+        connectionCounts.set(cpId, connection);
+        return undefined;
+      }
       return new Response("upgrade required", { status: 426 });
     },
     websocket: {
@@ -116,7 +156,26 @@ function startMockCsms(): MockCsms {
         if (typeof idTag === "string") seenIdTags.add(idTag);
         if (action === "StartTransaction") open++;
         if (action === "StopTransaction") open--;
+        const { cpId, connection } = ws.data;
+        if (action === "Heartbeat") {
+          const perConnection = heartbeats.get(cpId) ?? [];
+          perConnection[connection - 1] =
+            (perConnection[connection - 1] ?? 0) + 1;
+          heartbeats.set(cpId, perConnection);
+        }
         ws.send(JSON.stringify([3, messageId, confFor(action)]));
+        if (
+          options.dropOnFirstHeartbeat &&
+          action === "Heartbeat" &&
+          !alreadyDropped.has(cpId)
+        ) {
+          // After the conf, not before it: an unanswered CALL would put the
+          // charge point into its watchdog path and confuse what this is
+          // testing. A server-initiated close is not a manual disconnect, so
+          // `OCPPWebSocket.attemptReconnect` runs with its 1s first backoff.
+          alreadyDropped.add(cpId);
+          ws.close();
+        }
       },
     },
   });
@@ -150,6 +209,9 @@ function startMockCsms(): MockCsms {
     blackHole: () => {
       blackHoled = true;
     },
+    connections: (cpId) => connectionCounts.get(cpId) ?? 0,
+    heartbeatsOnConnection: (cpId, n) => heartbeats.get(cpId)?.[n - 1] ?? 0,
+    chargePointIds: () => [...connectionCounts.keys()],
     stop: () => server.stop(true),
   };
 }
@@ -415,12 +477,88 @@ describe("fleet-bench end to end (#302)", () => {
     }
   }, 240_000);
 
+  it("keeps heartbeating at --heartbeat-interval across a reconnect", async () => {
+    // The round-nine P1, as a run-level regression, and the only assertion in
+    // this repo that can settle it.
+    //
+    // `cp.start_heartbeat` does not *pin* an interval. Every accepted boot runs
+    // `ChargePoint.onBootNotificationAccepted`, which calls
+    // `startHeartbeat(BootNotification.conf.interval)` — so the CSMS's value
+    // replaces the flag's on every reconnect, and reconnects are exactly what
+    // begins to happen as a sweep approaches the knee. Arming once per cohort
+    // meant the offered load changed at the precise point the benchmark exists
+    // to measure, and every later step inherited the drift.
+    //
+    // WHY THIS IS NOT CIRCULAR. The mock answers BootNotification with
+    // `interval: 300`, and the run asks for 1s. The evidence is Heartbeat
+    // *frames counted at the CSMS*, per connection — not a value the fix
+    // writes anywhere. If the override did not survive the reconnect the
+    // charge point would be on the CSMS's 300s cadence and connection #2 would
+    // carry no Heartbeat at all inside this window; the previous two "proof
+    // the stop reached the CSMS" mechanisms were both refuted for reading back
+    // something the local side had already set, and this reads the wire.
+    const flappy = startMockCsms({ dropOnFirstHeartbeat: true });
+    try {
+      const outFile = join(outDir, "heartbeat-override.json");
+      const run = await runBench([
+        "--csms-url",
+        flappy.wsUrl,
+        "--daemon-url",
+        daemon.url,
+        "--counts",
+        "1",
+        // Long enough for: first Heartbeat (~1s) → drop → 1s reconnect backoff
+        // → re-boot → the reapplied override → at least one more Heartbeat.
+        "--duration",
+        "15",
+        "--heartbeat-interval",
+        "1",
+        "--warmup",
+        "0",
+        "--settle-timeout",
+        "10",
+        "--out",
+        outFile,
+      ]);
+      expect(run.timedOut).toBe(false);
+      expect(run.exitCode).toBe(0);
+
+      const cpIds = flappy.chargePointIds();
+      expect(cpIds).toHaveLength(1);
+      const cpId = cpIds[0]!;
+
+      // Precondition, asserted rather than assumed: without a second
+      // connection the heartbeat assertion below is vacuous — it would be
+      // satisfied by a run in which nothing ever dropped.
+      expect(flappy.connections(cpId)).toBeGreaterThanOrEqual(2);
+      expect(flappy.heartbeatsOnConnection(cpId, 1)).toBeGreaterThanOrEqual(1);
+
+      // The discriminating assertion. On connection #2 the charge point has
+      // been told 300s by this CSMS; any Heartbeat here at all is the run's
+      // own `--heartbeat-interval` having been put back.
+      expect(flappy.heartbeatsOnConnection(cpId, 2)).toBeGreaterThanOrEqual(1);
+
+      // And the run says so in its own record, so a result file collected from
+      // a real sweep carries the same fact.
+      const report = JSON.parse(readFileSync(outFile, "utf8")) as {
+        heartbeatOverride: { reapplied: number; failed: number };
+      };
+      expect(report.heartbeatOverride.reapplied).toBeGreaterThanOrEqual(1);
+      expect(report.heartbeatOverride.failed).toBe(0);
+
+      expect(await listCpIds(daemon.url)).toEqual([]);
+    } finally {
+      flappy.stop();
+    }
+  }, 240_000);
+
   it("runs the active axis, the one #302 calls the one that matters", async () => {
     // The other cases all run `--tx-interval 0`, so they exercise none of the
-    // active axis: the dedicated event socket and its `events.subscribe`, the
-    // transaction cycle, the epoch-anchored stagger, and the `unconf.tx`
-    // accounting. Every one of those was a source of findings, and all of them
-    // are run-level rather than function-level.
+    // transaction cycle, the epoch-anchored stagger, or the `unconf.tx`
+    // accounting. (The event socket itself is no longer one of them: it is
+    // opened on both axes now, because the heartbeat override rides on it.)
+    // Every one of those was a source of findings, and all of them are
+    // run-level rather than function-level.
     const outFile = join(outDir, "active.json");
     const run = await runBench([
       "--csms-url",

@@ -38,6 +38,7 @@ import {
   firstCycleDelayMs,
   fleetGauge,
   formatTable,
+  HeartbeatOverride,
   histogramQuantile,
   holdSec,
   machineReport,
@@ -47,6 +48,7 @@ import {
   parseArgv,
   parseExposition,
   recommendedWarmupSec,
+  reconcileMissingIds,
   redactOptions,
   redactUrlsInText,
   redactUrlUserinfo,
@@ -61,6 +63,7 @@ import {
   STEP_COLUMNS,
   sustainableRpcPerSec,
   unpredictedCreatedIds,
+  unresolvedIdsReport,
   validateOptions,
   type BenchOptions,
   type FleetGauge,
@@ -311,7 +314,14 @@ class SocketPool {
   }
 }
 
-/** Waits for a charge point's transaction to *actually* start.
+/** The run's one event socket. It carries two jobs, and the second one is why
+ *  it is opened on **both** axes rather than only the active one.
+ *
+ *  1. Waiting for a charge point's transaction to *actually* start.
+ *  2. Observing every accepted boot, so `--heartbeat-interval` can be
+ *     reapplied over the value `BootNotification.conf` just installed — see
+ *     {@link HeartbeatOverride}. The idle axis drives nothing *but*
+ *     heartbeats, so it is the axis where losing the override matters most.
  *
  *  The control-plane `start_transaction` ack says only that the daemon
  *  accepted the call: `CLIChargePointService.startTransaction` does not await
@@ -328,17 +338,23 @@ class SocketPool {
  *  re-subscribing once the fleet is past 1000 charge points would fail
  *  `subscribeResultSchema`'s `ARRAY_1000` cap on the snapshot it returns. The
  *  subscribe therefore happens once, before the first charge point exists. */
-class TransactionWatcher {
+class FleetWatcher {
   /** The invariants — arm/confirm, and what a lost stream does to a run — live
    *  in `lib.ts` so they can be unit-tested; this class is the socket. */
   private readonly starts = new TransactionStarts();
 
-  private constructor(private readonly socket: Socket) {}
+  private constructor(
+    private readonly socket: Socket,
+    /** Called once per observed accepted boot, for every charge point on the
+     *  daemon — the callee decides which ones are this run's. */
+    private readonly onBootAccepted: (cpId: string) => void,
+  ) {}
 
   static async open(
     daemonUrl: string,
     auth: { username: string; password: string } | null,
-  ): Promise<TransactionWatcher> {
+    onBootAccepted: (cpId: string) => void,
+  ): Promise<FleetWatcher> {
     const socket = io(daemonUrl, {
       path: "/socket.io/",
       auth: auth ?? undefined,
@@ -382,7 +398,7 @@ class TransactionWatcher {
       socket.disconnect();
       throw err;
     }
-    const watcher = new TransactionWatcher(socket);
+    const watcher = new FleetWatcher(socket, onBootAccepted);
     socket.on("event", (envelope: unknown) => watcher.onEvent(envelope));
     // `reconnection` is off, so a drop is terminal: room membership is
     // per-connection server-side and a re-subscribe past 1000 charge points
@@ -393,9 +409,12 @@ class TransactionWatcher {
     // no longer the load the row claims.
     socket.on("disconnect", () => {
       watcher.starts.lose(
-        "the event socket dropped, so transaction starts can no longer be " +
-          "confirmed and the remaining rows would not carry the configured " +
-          "load. No table was printed. Re-run against a daemon that stays up.",
+        "the event socket dropped, so accepted boots can no longer be " +
+          "observed — transaction starts stop being confirmable and " +
+          "--heartbeat-interval stops being reapplied over the interval " +
+          "BootNotification.conf installs, so the remaining rows would not " +
+          "carry the configured load. No table was printed. Re-run against a " +
+          "daemon that stays up.",
       );
     });
     return watcher;
@@ -424,10 +443,41 @@ class TransactionWatcher {
       | {
           kind?: string;
           cpId?: string;
-          evt?: { event?: string; data?: { transactionId?: number } };
+          evt?: {
+            event?: string;
+            data?: { transactionId?: number; status?: string };
+          };
         }
       | undefined;
-    if (env?.kind !== "cp" || env.evt?.event !== "transaction_started") return;
+    if (env?.kind !== "cp") return;
+    // The charge-point-level boot gate opening. This is the same signal the
+    // daemon's own `waitForBootAccepted` (src/cli/server/waitForBootAccepted.ts)
+    // treats as "boot has been accepted": `onBootNotificationAccepted` sets
+    // `ChargePoint.status = Available`, whose setter emits `statusChange`
+    // unconditionally — no change-detection — so it fires on the first boot and
+    // on every reboot after a reconnect alike (`teardownAfterClose` has moved
+    // the status to Unavailable in between). There is no `boot_accepted` event
+    // on the wire to hook instead; `connected` exists but fires *before*
+    // `BootNotification.conf`, so reacting to it would race the CSMS interval
+    // it is meant to overwrite.
+    //
+    // This over-fires, and by a known factor rather than "slightly":
+    // `onBootNotificationAccepted` emits `statusChange` **twice** — once from
+    // `updateConnectorStatus(0, Available)` and once from the status setter —
+    // and an RPC follows every event by design, so an accepted boot costs two
+    // `start_heartbeat` calls, and the first boot a third from `armLoad`'s own
+    // arming. `status_change` also fires on occasions that are not boots at all
+    // (a ChangeAvailability, a connector-0 status update). A reconnect wave at
+    // the top of a 2000-CP sweep is therefore ~4000 paced RPCs. That is the
+    // price taken over the alternative, which is the offered load drifting to
+    // the CSMS's cadence at the exact N the sweep is trying to characterise.
+    if (env.evt?.event === "status_change") {
+      if (env.evt.data?.status === "Available" && env.cpId !== undefined) {
+        this.onBootAccepted(env.cpId);
+      }
+      return;
+    }
+    if (env.evt?.event !== "transaction_started") return;
     const cpId = env.cpId;
     const transactionId = env.evt.data?.transactionId;
     if (cpId === undefined || typeof transactionId !== "number") return;
@@ -708,7 +758,7 @@ function armLoad(
   epochMs: number,
   runId: string,
   opts: BenchOptions,
-  watcher: TransactionWatcher | null,
+  watcher: FleetWatcher,
 ): {
   stop: () => void;
   ready: Promise<void>;
@@ -839,13 +889,7 @@ function armLoad(
     // Armed before the RPC is emitted, never after its ack: the
     // `transaction_started` event arrives on the watcher's socket while the
     // ack arrives on a pool socket, and nothing orders those two.
-    const started = watcher
-      ? watcher.arm(cpId, confirmTimeoutMs, awaitAssignedId)
-      : Promise.resolve<TransactionStartOutcome>({
-          started: true,
-          transactionId: null,
-          localStartAtMs: null,
-        });
+    const started = watcher.arm(cpId, confirmTimeoutMs, awaitAssignedId);
     // Marked open before the call, not after its ack: a start whose ack never
     // arrived may still have opened a transaction at the CSMS.
     openTransactions.add(cpId);
@@ -1345,7 +1389,7 @@ async function main(): Promise<void> {
   // the `try`'s `finally` leaves them open and retrying: the top-level catch
   // prints the error and the process never exits. Every await from here on is
   // therefore covered by `cleanup()`.
-  let watcher: TransactionWatcher | null = null;
+  let watcher: FleetWatcher | null = null;
 
   const allCpIds: string[] = [];
   // A superset of `allCpIds`: every id offered to `cp.create_many`, including
@@ -1353,6 +1397,22 @@ async function main(): Promise<void> {
   // indeterminate create cannot leave charge points behind for the next run's
   // preflight to trip over.
   const cleanupIds = new Set<string>();
+  // Keeps every charge point this run created heartbeating at
+  // `--heartbeat-interval` for the whole run, not just until its first
+  // reconnect. Membership is `cleanupIds` itself rather than a second set, so
+  // it is exactly "what this run created" — under `--allow-existing` a
+  // stranger's charge point must not have its heartbeat rewritten by the
+  // benchmark. See `HeartbeatOverride` for the two races it has to get right.
+  const heartbeatOverride = new HeartbeatOverride({
+    owns: (cpId) => cleanupIds.has(cpId),
+    apply: async (cpId) => {
+      await pool.rpc(
+        "start_heartbeat",
+        { interval: opts.heartbeatIntervalSec },
+        cpId,
+      );
+    },
+  });
   const results: StepResult[] = [];
   // One stop handle per step's `armLoad` call — steps only ever *add* CPs, so
   // each step arms just the CPs it created and earlier steps' handles keep
@@ -1459,6 +1519,18 @@ async function main(): Promise<void> {
         ...l.stopsAwaitingWire(),
       ]);
       await closeOpenTransactions(pool, [...new Set(needClosing)]);
+      // Stop reapplying the heartbeat override before anything is deleted: an
+      // RPC issued now would race `cp.delete` for a charge point that is about
+      // to be gone, and the load it protects has already ended. Then let the
+      // ones already travelling land, so a delete does not overtake one and
+      // record a failure in the run's own `heartbeatOverride` count that says
+      // the load drifted when it did not. Unbounded here on purpose: `close()`
+      // has already cleared the owed reapplications, so what is left is at most
+      // one round of `pool.rpc` calls, each of which carries the whole-call
+      // deadline — the bound the operation was given, which is the only bound
+      // teardown in this file is allowed to wait for.
+      heartbeatOverride.close();
+      await heartbeatOverride.idle();
       watcher?.close();
       const notFound = await deleteFleet(pool, runId, [...cleanupIds]);
       // A `cp.create_many` whose *client* deadline expired does not stop the
@@ -1467,15 +1539,34 @@ async function main(): Promise<void> {
       // moments later, and those survived — so the next run's preflight would
       // refuse this daemon. The client promise settling is not the operation
       // completing, so reconcile afterwards instead of trusting it.
-      if (notFound.length > 0 && pool.anyConnected()) {
-        await sleep(RECONCILE_DELAY_MS);
-        const stillMissing = await deleteFleet(pool, runId, notFound);
-        if (stillMissing.length < notFound.length) {
+      //
+      // Bounded by a pass count rather than settled by one retry: a second
+      // `not_found` is not evidence the id is gone, only that the handler had
+      // not reached it yet, and against a slow `--state-db` or a loaded daemon
+      // that is exactly what one retry sees. Treating it as final was a
+      // fail-open — the ids stayed in a local variable nothing read, the daemon
+      // registered them after the pool closed, and the run said nothing.
+      if (notFound.length > 0) {
+        const outcome = await reconcileMissingIds(notFound, {
+          delay: () => sleep(RECONCILE_DELAY_MS),
+          deleteMissing: (ids) => deleteFleet(pool, runId, ids),
+          connected: () => pool.anyConnected(),
+        });
+        if (outcome.resolved > 0) {
           process.stderr.write(
-            `[bench] reconciliation deleted ` +
-              `${notFound.length - stillMissing.length} charge point(s) the daemon ` +
-              `created after its create RPC had already timed out.\n`,
+            `[bench] reconciliation deleted ${outcome.resolved} charge point(s) ` +
+              `the daemon created after its create RPC had already timed out ` +
+              `(${outcome.passes} pass(es)).\n`,
           );
+        }
+        // Named, every one of them, and the exit code says so too. A charge
+        // point the daemon registers after this gives up survives the run, and
+        // the next run's preflight refuses that daemon — a WARNING lost in a
+        // sweep's worth of stderr is not a report.
+        const unresolved = unresolvedIdsReport(outcome, runId);
+        if (unresolved !== null) {
+          process.exitCode = 1;
+          process.stderr.write(unresolved);
         }
       }
       await pool.closeAll();
@@ -1509,19 +1600,25 @@ async function main(): Promise<void> {
       // ack carries a snapshot of the whole fleet through an `ARRAY_1000`
       // schema, so subscribing once the sweep is past 1000 charge points would
       // fail. A failure here reaches the `finally` and closes the pool.
-      if (opts.txIntervalSec > 0) {
-        watcher = await TransactionWatcher.open(
-          opts.daemonUrl,
-          opts.daemonBasicAuth,
-        );
-      }
+      //
+      // On **both** axes, unlike before: the idle axis drives nothing but
+      // heartbeats, so it is the axis where letting `BootNotification.conf`'s
+      // interval quietly replace `--heartbeat-interval` after a reconnect
+      // changes the *whole* offered load rather than part of it.
+      const events = await FleetWatcher.open(
+        opts.daemonUrl,
+        opts.daemonBasicAuth,
+        (cpId) => heartbeatOverride.noteBootAccepted(cpId),
+      );
+      watcher = events;
       // Every long wait below is raced against the event socket's loss, so a run
-      // that can no longer confirm transaction starts stops and says why instead
-      // of printing rows whose load is no longer the load they claim.
+      // that can no longer confirm transaction starts — or reapply the heartbeat
+      // override — stops and says why instead of printing rows whose load is no
+      // longer the load they claim.
       // Every long wait is raced against both the event socket's loss and the
       // interrupt, so neither has to wait out a measurement window.
       const untilLost = <T>(p: Promise<T>): Promise<T> =>
-        Promise.race([watcher ? watcher.lost(p) : p, abortSignal]);
+        Promise.race([events.lost(p), abortSignal]);
 
       // One origin for every cohort's stagger, fixed before the first charge
       // point exists. See `firstCycleDelayMs`.
@@ -1532,6 +1629,8 @@ async function main(): Promise<void> {
       let unconfirmedStartsBefore = 0;
       let lateHoldsBefore = 0;
       let retiredBefore = 0;
+      let hbReappliedBefore = 0;
+      let hbOverrideFailuresBefore = 0;
       for (const n of opts.counts) {
         if (abort.requested) return;
         const toCreate = n - allCpIds.length;
@@ -1591,7 +1690,7 @@ async function main(): Promise<void> {
           runEpochMs,
           runId,
           opts,
-          watcher,
+          events,
         );
         stopLoads.push(load.stop);
         loads.push(load);
@@ -1688,6 +1787,33 @@ async function main(): Promise<void> {
           );
         }
 
+        // Reported per step because it is the one number that says whether the
+        // heartbeat load this row describes is still the configured one. A
+        // non-zero count here beside a non-zero `reconnects` is the expected
+        // pairing — a reconnect boots again and `BootNotification.conf`
+        // reinstalls the CSMS interval, which this puts back. Failures are
+        // called out separately: those charge points may now be heartbeating at
+        // the CSMS's interval, which is a load this row does not describe.
+        const hbReapplied = heartbeatOverride.reapplied() - hbReappliedBefore;
+        const hbFailures =
+          heartbeatOverride.failures() - hbOverrideFailuresBefore;
+        if (hbReapplied > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: reapplied --heartbeat-interval ` +
+              `${opts.heartbeatIntervalSec}s after ${hbReapplied} accepted boot(s)\n`,
+          );
+        }
+        if (hbFailures > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: WARNING: ${hbFailures} heartbeat reapplication(s) ` +
+              `failed, so that many charge point(s) may be heartbeating at the ` +
+              `CSMS's BootNotification interval rather than the ` +
+              `${opts.heartbeatIntervalSec}s this row assumes.\n`,
+          );
+        }
+        hbReappliedBefore = heartbeatOverride.reapplied();
+        hbOverrideFailuresBefore = heartbeatOverride.failures();
+
         results.push({
           requested: n,
           fleet: allCpIds.length,
@@ -1735,6 +1861,16 @@ async function main(): Promise<void> {
         // it, and so two result files are never confused.
         runId,
         preExistingChargePoints: baseline.total,
+        // How many times `--heartbeat-interval` had to be put back over the
+        // interval `BootNotification.conf` installed, and how many of those
+        // RPCs failed. Recorded because it is the record's own answer to "was
+        // the heartbeat load in these rows the configured one?" — a non-zero
+        // `failed` means some charge points were heartbeating at the CSMS's
+        // cadence for part of the run.
+        heartbeatOverride: {
+          reapplied: heartbeatOverride.reapplied(),
+          failed: heartbeatOverride.failures(),
+        },
         // Says whose hardware it is; `daemonHostIsRunner` makes that
         // machine-readable, so a collected result can be filtered rather than
         // read hopefully.

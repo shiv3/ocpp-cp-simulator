@@ -1780,3 +1780,246 @@ export function createFailureHint(reason: string): string {
     ` it will not create; check the daemon's own log to tell them apart`
   );
 }
+
+// ---------------------------------------------------------------------------
+// Keeping the offered load the load that was configured.
+// ---------------------------------------------------------------------------
+
+/**
+ * Reapplies `--heartbeat-interval` to a charge point after **every** accepted
+ * boot, for as long as the run lasts.
+ *
+ * Why this exists. `cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`
+ * and nothing pins it there: `ChargePoint.onBootNotificationAccepted` calls
+ * `startHeartbeat(BootNotification.conf.interval)` on every accepted boot, so
+ * the CSMS's value replaces the flag's the moment a charge point reconnects.
+ * Arming the heartbeat once per cohort was therefore only true until the first
+ * reconnect — and reconnects are precisely what begins to happen as the sweep
+ * approaches the knee. The offered load would change at the exact point the
+ * benchmark exists to measure, every later step would inherit the drift, and
+ * nothing in the table would say so. A benchmark that changes its own workload
+ * as it nears the interesting region is not measuring that region.
+ *
+ * Two properties this has to get right, both of them races:
+ *
+ * 1. **An RPC is issued after every event, never merged into one already in
+ *    flight.** `onBootNotificationAccepted` emits `statusChange` *twice* per
+ *    accepted boot, and a reconnect can land while an earlier reapplication is
+ *    still travelling. Dropping the second event because the first RPC has not
+ *    come back would lose exactly the case that matters: the daemon may run
+ *    that RPC's handler *before* the second boot's frame, and the second boot
+ *    then clobbers it with the CSMS value for good. So a coalesced event sets a
+ *    dirty flag and issues a fresh RPC when the in-flight one settles.
+ * 2. **Only this run's charge points.** Membership is asked of the caller
+ *    rather than tracked here, so it is the same set cleanup deletes: under
+ *    `--allow-existing` someone else's charge point must not have its heartbeat
+ *    rewritten by this script.
+ *
+ * The ordering against the CSMS value needs no bookkeeping and cannot be
+ * arranged the wrong way round: `onBootNotificationAccepted` sets the status
+ * (emitting the event) and then calls `startHeartbeat(csmsInterval)` in the
+ * same synchronous frame, and this reapplication is issued from a different
+ * process, so it can only ever land afterwards.
+ */
+export interface HeartbeatOverrideDeps {
+  /** Whether `cpId` belongs to this run — usually `cleanupIds.has`. */
+  readonly owns: (cpId: string) => boolean;
+  /** Issue one `start_heartbeat` at the configured interval. */
+  readonly apply: (cpId: string) => Promise<void>;
+}
+
+export class HeartbeatOverride {
+  private readonly inFlight = new Set<string>();
+  /** Charge points that booted again while their reapplication was in flight
+   *  and therefore still owe one. */
+  private readonly dirty = new Set<string>();
+  private readonly pending = new Set<Promise<void>>();
+  private applied = 0;
+  private failed = 0;
+  private closed = false;
+
+  constructor(private readonly deps: HeartbeatOverrideDeps) {}
+
+  /** Called for every observed accepted boot. Cheap and idempotent-ish: a
+   *  charge point that is not this run's, or a run that has closed, is
+   *  ignored. */
+  noteBootAccepted(cpId: string): void {
+    if (this.closed) return;
+    if (!this.deps.owns(cpId)) return;
+    if (this.inFlight.has(cpId)) {
+      this.dirty.add(cpId);
+      return;
+    }
+    this.issue(cpId);
+  }
+
+  private issue(cpId: string): void {
+    this.inFlight.add(cpId);
+    const work: Promise<void> = this.deps
+      .apply(cpId)
+      .then(
+        () => {
+          this.applied++;
+        },
+        () => {
+          this.failed++;
+        },
+      )
+      .finally(() => {
+        this.pending.delete(work);
+        this.inFlight.delete(cpId);
+        // Re-issued rather than dropped: see property 1 above.
+        if (this.dirty.delete(cpId) && !this.closed) this.issue(cpId);
+      });
+    this.pending.add(work);
+  }
+
+  /** Reapplications that came back acked. */
+  reapplied(): number {
+    return this.applied;
+  }
+
+  /** Reapplications whose RPC failed. Non-zero means some charge point may be
+   *  heartbeating at the CSMS's interval rather than the flag's. */
+  failures(): number {
+    return this.failed;
+  }
+
+  /** Reapplications still travelling. */
+  inFlightCount(): number {
+    return this.pending.size;
+  }
+
+  /** Resolve once nothing is in flight. Re-checked in a loop because settling
+   *  one RPC can issue another (the dirty path). */
+  async idle(): Promise<void> {
+    while (this.pending.size > 0) {
+      await Promise.all([...this.pending]).catch(() => undefined);
+    }
+  }
+
+  /** Stop issuing. Teardown deletes these charge points next, and an RPC
+   *  issued after that races the delete for no benefit. */
+  close(): void {
+    this.closed = true;
+    this.dirty.clear();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reconciling ids a delete pass reported as `not_found`.
+// ---------------------------------------------------------------------------
+
+/** How many further delete passes an id reported `not_found` is given before
+ *  the run says it could not account for it. Each pass is preceded by one
+ *  `RECONCILE_DELAY_MS` wait, which is itself the deadline the creation RPC
+ *  carried — so the budget is "the bound the operation was given, times k",
+ *  never a smaller number chosen locally. */
+export const RECONCILE_MAX_PASSES = 3;
+
+export interface ReconcileOutcome {
+  /** Ids that were `not_found` on entry and are accounted for now. */
+  readonly resolved: number;
+  /** Ids still unaccounted for. **Never silently dropped**: the caller reports
+   *  every one of them, because a charge point the daemon registers after this
+   *  gives up survives the run and the next run's preflight refuses that
+   *  daemon. */
+  readonly unresolved: readonly string[];
+  /** Delete passes actually made (excludes the pass that produced the input). */
+  readonly passes: number;
+  readonly stoppedBecause: "resolved" | "budget" | "disconnected";
+}
+
+/**
+ * Re-sweep ids a delete pass answered `not_found`, within a bounded number of
+ * passes, and report anything still unresolved.
+ *
+ * A `cp.create_many` whose *client* deadline expired does not stop the
+ * daemon's handler, which keeps creating charge points sequentially. So
+ * `not_found` is ambiguous — "already gone" and "not there yet" are the same
+ * answer — and one further pass is not enough to disambiguate it: against a
+ * slow state database or a loaded daemon the handler can still be working when
+ * that pass runs. Treating the second `not_found` as final was a fail-open:
+ * the ids stayed in a local variable that nothing read, the daemon registered
+ * them after the pool closed, and the run said nothing.
+ *
+ * Keeps going while there is no progress, on purpose: no progress is what "the
+ * handler is still creating" looks like from here. The bound is the pass count,
+ * not progress.
+ */
+export async function reconcileMissingIds(
+  missing: readonly string[],
+  deps: {
+    /** One `RECONCILE_DELAY_MS` wait before each pass. */
+    readonly delay: () => Promise<void>;
+    /** Delete these ids; returns the ones still answered `not_found`. */
+    readonly deleteMissing: (
+      ids: readonly string[],
+    ) => Promise<readonly string[]>;
+    /** Whether the control plane can still be reached. */
+    readonly connected: () => boolean;
+    readonly maxPasses?: number;
+  },
+): Promise<ReconcileOutcome> {
+  const total = missing.length;
+  let pending: readonly string[] = [...missing];
+  const maxPasses = deps.maxPasses ?? RECONCILE_MAX_PASSES;
+  let passes = 0;
+  while (pending.length > 0 && passes < maxPasses) {
+    if (!deps.connected()) {
+      return {
+        resolved: total - pending.length,
+        unresolved: pending,
+        passes,
+        stoppedBecause: "disconnected",
+      };
+    }
+    await deps.delay();
+    if (!deps.connected()) {
+      return {
+        resolved: total - pending.length,
+        unresolved: pending,
+        passes,
+        stoppedBecause: "disconnected",
+      };
+    }
+    passes++;
+    pending = [...(await deps.deleteMissing(pending))];
+  }
+  return {
+    resolved: total - pending.length,
+    unresolved: pending,
+    passes,
+    stoppedBecause: pending.length === 0 ? "resolved" : "budget",
+  };
+}
+
+/**
+ * The teardown line for a reconciliation that could not account for every id,
+ * or `null` when it could.
+ *
+ * A pure function rather than a `process.stderr.write` buried in `cleanup`,
+ * because "does the run say anything at all, and does it name the ids" is the
+ * whole content of the fix: the previous version left the unaccounted ids in a
+ * local variable nothing read. The caller pairs this with a non-zero exit code
+ * — a WARNING inside a sweep's worth of stderr is not a report.
+ */
+export function unresolvedIdsReport(
+  outcome: ReconcileOutcome,
+  runId: string,
+): string | null {
+  if (outcome.unresolved.length === 0) return null;
+  const why =
+    outcome.stoppedBecause === "disconnected"
+      ? "the control plane went away"
+      : `the ${RECONCILE_MAX_PASSES}-pass reconciliation budget ran out`;
+  return (
+    `[bench] ERROR: ${outcome.unresolved.length} charge point id(s) from run ` +
+    `${runId} could not be accounted for after ${outcome.passes} ` +
+    `reconciliation pass(es) (${why}). The daemon answered not_found for each, ` +
+    `which means either it never created them or it has not created them ` +
+    `*yet* — and if the latter they will be registered after this process ` +
+    `exits, and the next run's preflight will refuse this daemon. Delete them ` +
+    `by hand if they appear: ${outcome.unresolved.join(", ")}\n`
+  );
+}

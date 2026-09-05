@@ -71,21 +71,21 @@ diverge from this baseline as N grows.
 
 ## Flags
 
-| Flag                             | Required | Default              | Meaning                                                                                                                                                                                                                                                       |
-| -------------------------------- | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                                                                                         |
-| `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                                                                               |
-| `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                                                                                  |
-| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                                                                           |
-| `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                                                                              |
-| `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. 1–3600.                                                                                            |
-| `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at this period, staggered across CPs. Bounded by the pool ceiling: **N ≤ 320 × `--tx-interval`** (see "Why a socket pool"). |
-| `--settle-timeout <seconds>`     | No       | `60`                 | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                                                                                           |
-| `--warmup <seconds>`             | No       | `30 + --tx-interval` | How long a step holds the new `N` **and its load** before the first scrape, so the step's `timeouts` are its own. 0–3630. See "Warmup: why a step waits before it measures".                                                                                  |
-| `--ocpp-version <version>`       | No       | `OCPP-1.6J`          | OCPP version every benchmarked charge point is created with: `OCPP-1.6J`, `OCPP-2.0.1` or `OCPP-2.1`. The three SOAP versions are rejected, for the same reason `--csms-url` rejects `http(s)://`.                                                            |
-| `--health-path <path>`           | No       | `/v1/healthz`        | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                                                                                |
-| `--daemon-basic-auth-user/-pass` | No       | —                    | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                                                                                             |
-| `--out <path>`                   | No       | —                    | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`.                                                               |
+| Flag                             | Required | Default              | Meaning                                                                                                                                                                                                                                                                               |
+| -------------------------------- | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                                                                                                                 |
+| `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                                                                                                       |
+| `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                                                                                                          |
+| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                                                                                                   |
+| `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                                                                                                      |
+| `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. **Reapplied after every accepted boot**, not only at creation — see "The heartbeat override survives a reconnect". 1–3600. |
+| `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at this period, staggered across CPs. Bounded by the pool ceiling: **N ≤ 320 × `--tx-interval`** (see "Why a socket pool").                         |
+| `--settle-timeout <seconds>`     | No       | `60`                 | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                                                                                                                   |
+| `--warmup <seconds>`             | No       | `30 + --tx-interval` | How long a step holds the new `N` **and its load** before the first scrape, so the step's `timeouts` are its own. 0–3630. See "Warmup: why a step waits before it measures".                                                                                                          |
+| `--ocpp-version <version>`       | No       | `OCPP-1.6J`          | OCPP version every benchmarked charge point is created with: `OCPP-1.6J`, `OCPP-2.0.1` or `OCPP-2.1`. The three SOAP versions are rejected, for the same reason `--csms-url` rejects `http(s)://`.                                                                                    |
+| `--health-path <path>`           | No       | `/v1/healthz`        | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                                                                                                        |
+| `--daemon-basic-auth-user/-pass` | No       | —                    | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                                                                                                                     |
+| `--out <path>`                   | No       | —                    | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`.                                                                                       |
 
 Every flag is bounds-checked before anything is created (`scripts/bench/lib.ts`'s
 `validateOptions`) — a bad flag fails before the first charge point exists.
@@ -419,11 +419,24 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    registering charge points sequentially. The delete sweep then answered
    `not_found` for ids that appeared moments later, and those survived to be
    refused by the next run's preflight. Ids the sweep reports as `not_found`
-   are therefore re-swept once after a further RPC deadline: "not there yet"
-   and "already gone" look identical from the client, so the ambiguity is
+   are therefore re-swept, each pass after a further RPC deadline: "not there
+   yet" and "already gone" look identical from the client, so the ambiguity is
    resolved by looking again rather than by trusting the first answer. This is
    the acknowledgement-is-not-completion invariant in its strongest form — here
    the acknowledgement never arrives at all and the operation continues anyway.
+
+   **Bounded by a pass count, and loud when it runs out.** One retry is not
+   enough: against a slow `--state-db` or a loaded daemon the handler can still
+   be working when that pass runs, and a second `not_found` says only that it
+   had not reached the id yet. Treating it as final was a fail-open — the ids
+   stayed in a local variable nothing read, the daemon registered them after
+   the pool closed, and the run said nothing. Reconciliation now makes up to
+   **three** passes (`RECONCILE_MAX_PASSES`), stops at once if the control
+   plane has gone away rather than spending a 35s wait to learn that, and if
+   anything is still unaccounted for it **names every id on stderr and exits
+   non-zero**. The table and the `--out` file are still written — the
+   measurement happened; it is the teardown that could not be proved
+   complete.
 
    **SIGINT is a third route to the same leak, and is handled the same way.**
    An interrupt landing while `growFleet` awaited one batch of a multi-batch
@@ -470,6 +483,73 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    still holds it. This script never calls `state.reset` (daemon-wide, drops
    CPs it didn't create too) — run it against a dedicated bench daemon if you
    want a clean slate.
+
+### The heartbeat override survives a reconnect
+
+**Contract: the benchmark drives heartbeats at `--heartbeat-interval` for the
+whole run, including across reconnects.** That sentence is the reason this
+section exists, and it was not true before #302's round-nine fix.
+
+`cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`; nothing pins it
+there. Every accepted boot runs `ChargePoint.onBootNotificationAccepted`, which
+calls `startHeartbeat(BootNotification.conf.interval)` — so the CSMS's value
+replaces the flag's the moment a charge point reconnects. Arming the heartbeat
+once per cohort was therefore only true until that charge point's first
+reconnect, and **reconnects are exactly what begins to happen as a sweep
+approaches the knee**. The offered load changed at the precise point the
+benchmark exists to measure, every later step inherited the drift, and nothing
+in the table said so. A benchmark that changes its own workload as it nears the
+interesting region is not measuring that region.
+
+So the run watches for accepted boots on its event socket and puts the override
+back on each one. The signal is the `status_change` → `Available` event: the
+charge-point-level boot gate opening, which is the same signal the daemon's own
+`src/cli/server/waitForBootAccepted.ts` treats as "boot has been accepted".
+`ChargePoint`'s status setter emits it unconditionally — no change detection —
+so it fires on the first boot and on every reboot after a reconnect alike,
+because `teardownAfterClose` has moved the status to `Unavailable` in between.
+
+Two things it deliberately does not do:
+
+- **It does not hook `connected`.** That event fires _before_
+  `BootNotification.conf` arrives, so reacting to it would race the very
+  interval it exists to overwrite. `status_change` is emitted from inside
+  `onBootNotificationAccepted`, one statement before `startHeartbeat(csms)` in
+  the same synchronous frame — and the reapplication is issued from a different
+  process, so it can only ever land afterwards. There is no `boot_accepted`
+  event on the control plane to hook instead.
+- **It does not merge a second boot into an in-flight reapplication.** An RPC is
+  issued _after every event_. Dropping one because an earlier RPC had not come
+  back would lose the case that matters: the daemon may run that RPC's handler
+  before the second boot's frame, and the second boot then reinstalls the CSMS
+  interval for good.
+
+**This over-fires, and by a known factor.** `onBootNotificationAccepted` emits
+`statusChange` **twice** — once from `updateConnectorStatus(0, Available)` and
+once from the status setter — and an RPC follows every event by design, so an
+accepted boot costs two `start_heartbeat` calls, and a charge point's first
+boot a third from the step's own arming. `status_change` also fires on
+occasions that are not boots (a `ChangeAvailability`, a connector-0 status
+update). A reconnect wave at the top of a 2000-CP sweep is therefore on the
+order of 4000 control-plane RPCs, paced through the same socket pool as the
+transaction cycle. That is the price; the alternative is the offered load
+drifting to the CSMS's cadence at the exact N the sweep is trying to
+characterise.
+
+**How the fix is known to hold, and what is still unverified.** The evidence is
+in `fleetBench.smoke.bun.test.ts`: a mock CSMS answers `BootNotification` with
+`interval: 300`, closes each charge point's socket once after its first
+Heartbeat, and then counts Heartbeat **frames on the wire, per connection**. A
+Heartbeat arriving on connection #2 cannot come from the CSMS's 300s cadence
+inside a 15s window, and the count is kept by the CSMS rather than read back
+out of anything the benchmark sets — the circularity that refuted both earlier
+"proof the stop reached the CSMS" mechanisms. What the benchmark _cannot_ do is
+read a charge point's live heartbeat interval back from the daemon: there is no
+control-plane method that reports it, so "the interval in use is N" is inferred
+from the frames, not observed directly. Each run also records
+`heartbeatOverride: { reapplied, failed }` in `--out` and prints the per-step
+counts on stderr, so a collected result carries its own answer to "was the
+heartbeat load in these rows the configured one?".
 
 ### Warmup: why a step waits before it measures
 
@@ -625,7 +705,11 @@ a spare machine and a CSMS.
   is still the cheaper option: the alternative, polling each charge point's
   `status`, would add a third RPC per cycle to the very budget the ceiling
   above rations, and each of those builds a full per-connector snapshot. The
-  idle axis opens no event socket at all.
+  idle axis opens one too, since #302's round-nine fix: the accepted-boot
+  events that keep `--heartbeat-interval` in force arrive on it, and an idle
+  run's whole load is heartbeats. A dropped event socket therefore aborts an
+  idle run as well as an active one — the run can no longer keep the load it
+  reports.
 - **A closing stop's delivery to the CSMS is not verified, and cannot be from
   here.** Teardown re-stops every charge point that may have an open
   transaction, but under a backed-up outbound queue — the condition this tool
@@ -642,6 +726,34 @@ a spare machine and a CSMS.
   which this benchmark does not require. So the limitation is stated rather
   than papered over with a check that looks like proof. The stderr line at
   teardown names how many stops were accepted and unverified.
+- **The heartbeat override covers reconnects, not a CSMS that changes the
+  interval by hand.** `ChangeConfiguration HeartbeatInterval` reaches
+  `ChargePoint`'s configuration listener
+  (`src/cp/domain/charge-point/ChargePoint.ts`, the `HeartbeatInterval` case)
+  and calls `startHeartbeat` directly, emitting **no** `status_change` — so
+  nothing here observes it and the override is not put back. Real CSMSes do
+  send that message; the mock in the smoke test does not, so this gap is
+  documented rather than tested. If a run's `heartbeat` latency column looks
+  like a cadence nobody configured, suspect that first. The same applies to a
+  boot the CSMS answers `Pending` or `Rejected`: neither reaches
+  `onBootNotificationAccepted`, both stop the heartbeat, and neither emits the
+  `Available` this hooks — such a charge point contributes no heartbeat load
+  until it is finally accepted.
+- **Reapplication RPCs share the socket pool with everything else.** At the
+  knee, a wave of reconnects produces a wave of `start_heartbeat` calls paced
+  through the same token buckets as the transaction cycle, so the instrument
+  competes with the load at exactly the busiest moment. It is **two** RPCs per
+  accepted boot (`onBootNotificationAccepted` emits `statusChange` twice), and
+  the alternative — letting the offered load drift to the
+  CSMS's cadence — is worse, but it is a perturbation and it is at its largest
+  where the measurement is most delicate.
+- **A teardown that cannot account for every id exits non-zero.** Ids the
+  delete sweep answered `not_found` for are re-swept up to
+  `RECONCILE_MAX_PASSES` times; anything still unresolved is named on stderr
+  and the process exits `1`, with the table and `--out` file still written. So
+  a non-zero exit from this script does not necessarily mean the measurement
+  failed — read the stderr line to tell "the sweep did not finish" from "the
+  sweep finished but teardown could not be proved complete".
 - **Every HTTP request carries a 30s deadline**, because `fetch` has none of
   its own. A daemon that accepts the connection and then stalls while serving
   `/metrics` — the condition at the top of a sweep, which is what this tool
@@ -693,7 +805,11 @@ a spare machine and a CSMS.
   only the idle heartbeat path, and it kills the daemon mid-run to check the
   pool does not hang on a control plane that has gone away. It runs under
   `bun run test:bun`, so CI gates on it; it is the slowest file in that suite,
-  which is the price of covering the thing that actually broke.
+  which is the price of covering the thing that actually broke. It also drops a
+  charge point's socket mid-run against a CSMS that advertises a 300s heartbeat
+  interval and counts Heartbeat frames per connection, which is the only
+  evidence available anywhere that `--heartbeat-interval` survives a
+  reconnect.
 
   **Its mock CSMS is far more forgiving than a real one, and the test file says
   so at length.** It does no subprotocol negotiation, no schema validation and

@@ -2,6 +2,7 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import type { ChargePointService } from "../../data/interfaces/ChargePointService";
 import type { RuntimeMode } from "../../data/RuntimeMode";
 import { serializeScenarioGraph } from "./scenarioSerialize";
+import { withNormalizedChargingCurve } from "../../cp/domain/connector/ChargingCurve";
 
 /**
  * Dependencies needed to durably persist a scenario the user just loaded into
@@ -164,6 +165,22 @@ export async function saveEditorScenario(
  * connector-scoped selection filters drop on the next refresh — so the upload
  * looks like it "didn't save" (#101). `now` is injected for testability and to
  * win the `updated_at DESC` ordering local mode lists by.
+ *
+ * This is also where an uploaded `chargingCurve` is normalized — sorted by
+ * `socPercent`, invalid points dropped (#301). It is the one function every
+ * upload path calls (the scenario editor's file input and the scenario
+ * library's "open uploaded scenario"), and both write the result straight to
+ * storage: the editor normalized only its own React state, so the raw curve
+ * reached storage and any export taken from it, and the library path
+ * normalized nowhere at all. Doing it here keeps one validator for the import
+ * boundary rather than one per caller, which is the arrangement
+ * {@link withNormalizedChargingCurve} exists to hold.
+ *
+ * The domain was never at risk — `Connector`'s `evSettings` setter normalizes
+ * again on the way in — but storage and export do not sit behind that setter.
+ *
+ * `evSettings` is only rewritten when the file carried it, so a scenario
+ * without EV settings does not gain an empty object it never had.
  */
 export function retargetScenarioToConnector(
   scenario: ScenarioDefinition,
@@ -172,6 +189,9 @@ export function retargetScenarioToConnector(
 ): ScenarioDefinition {
   return {
     ...scenario,
+    ...(scenario.evSettings
+      ? { evSettings: withNormalizedChargingCurve({ ...scenario.evSettings }) }
+      : {}),
     targetType: connectorId === null ? "chargePoint" : "connector",
     targetId: connectorId ?? undefined,
     updatedAt: now,

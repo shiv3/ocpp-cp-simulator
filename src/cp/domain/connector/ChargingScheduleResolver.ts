@@ -4,11 +4,24 @@ import {
   ChargingRateUnitType,
   RecurrencyKindType,
 } from "../types/OcppTypes";
+import {
+  type ElectricalSettings,
+  isPhaseRestriction,
+  powerWattsForCurrent,
+} from "./ChargingCurve";
 
 /**
- * Reference voltage used to convert ChargingRateUnit=A to watts. OCPP 1.6 §7.5
- * does not pin down a value (real CPs report the AC line voltage). 230 V
- * matches IEC single-phase; for 3-phase systems we multiply by numberPhases.
+ * Reference voltage used to convert ChargingRateUnit=A to watts when the
+ * connector declares no electrical model of its own. OCPP 1.6 §7.5 does not
+ * pin down a value (real CPs report the AC line voltage). 230 V matches IEC
+ * single-phase; for 3-phase systems we multiply by numberPhases.
+ *
+ * A connector that *does* declare a model (`currentType` / `phases` /
+ * `voltageV` / `powerFactor`, #301) converts through
+ * {@link powerWattsForCurrent} instead, so the watt cap and the
+ * `Current.Import` derived back from it agree. This constant remains the
+ * fallback for the connectors that declare nothing, and it is still what
+ * `GetCompositeSchedule` reports with.
  */
 const REFERENCE_PHASE_VOLTAGE = 230;
 
@@ -29,6 +42,14 @@ export interface ResolvedScheduleLimit {
   rawLimit: number | null;
   /** Unit the profile declared (`W` or `A`). */
   unit: ChargingRateUnitType | null;
+  /**
+   * The active period's `numberPhases`, verbatim (`null` when the period
+   * omits it or no profile is active). Carried out of the resolver so the
+   * MeterValues side can narrow its per-phase sampling to the phases the
+   * profile allows, using exactly the count that produced the watt cap
+   * (#301).
+   */
+  limitNumberPhases: number | null;
 }
 
 const UNCAPPED: ResolvedScheduleLimit = {
@@ -37,6 +58,7 @@ const UNCAPPED: ResolvedScheduleLimit = {
   periodIndex: null,
   rawLimit: null,
   unit: null,
+  limitNumberPhases: null,
 };
 
 /**
@@ -117,23 +139,50 @@ function limitToWatts(
   rawLimit: number,
   unit: ChargingRateUnitType,
   numberPhases: number | undefined,
+  electrical: ElectricalSettings | undefined,
+  jointPhases: number | null | undefined,
 ): number {
+  // The phase count every applicable profile agrees on, when the caller knows
+  // it. A profile's own `numberPhases` describes the phases *it* permits, but
+  // delivery happens on the phases every profile permits, and an amp limit is
+  // a per-phase current: converting 10 A on 3 phases while another profile
+  // holds the connector to 1 gives a cap that draws about 13 A on the phase
+  // actually in use, violating the 10 A limit still in force (#301).
+  const phases =
+    jointPhases ??
+    (isPhaseRestriction(numberPhases) ? numberPhases : undefined);
   if (unit === ChargingRateUnitType.W) return rawLimit;
-  // A → W: amperes × volts × phases. OCPP §7.21: numberPhases defaults to 3
-  // when absent. Single-phase profiles must set numberPhases=1 explicitly.
-  const phases = numberPhases ?? 3;
-  return rawLimit * REFERENCE_PHASE_VOLTAGE * phases;
+  // A → W through the connector's own model when it has one, so that the
+  // W → A conversion `MeterValueBuilder` applies to the resulting cap lands
+  // back on `rawLimit` rather than above it (#301).
+  if (electrical) return powerWattsForCurrent(rawLimit, electrical, phases);
+  // No model declared: the pre-#301 conversion. amperes × volts × phases,
+  // with OCPP §7.21's default of 3 when no phase count is known at all.
+  // Single-phase profiles must set numberPhases=1 explicitly. The joint count
+  // applies here too — it can only ever narrow the cap, and leaving this
+  // branch converting on phases another profile has excluded would keep the
+  // violation alive for exactly the connectors with the least to say about
+  // their own electrics.
+  return rawLimit * REFERENCE_PHASE_VOLTAGE * (phases ?? 3);
 }
 
 /**
  * Resolve the effective wattage cap for a connector at this instant. Returns
  * `Infinity` when there's no active profile (i.e. the auto-meter is free to
  * use its scenario-configured rate).
+ *
+ * `electrical` is the connector's declared electrical model, when it has one.
+ * It only affects a `ChargingRateUnit=A` profile, where it makes the A → W
+ * conversion the exact inverse of the W → A one `MeterValueBuilder` uses to
+ * report `Current.Import` (#301). Omit it — as `buildCompositeWattsSchedule`
+ * does — for the pre-#301 conversion against a 230 V reference.
  */
 export function resolveScheduleLimitWatts(
   profile: ActiveChargingProfile | null,
   transactionStart: Date | null,
   now: Date = new Date(),
+  electrical?: ElectricalSettings,
+  jointPhases?: number | null,
 ): ResolvedScheduleLimit {
   if (!profile || !transactionStart) return UNCAPPED;
 
@@ -146,6 +195,8 @@ export function resolveScheduleLimitWatts(
     period.limit,
     profile.chargingRateUnit,
     period.numberPhases,
+    electrical,
+    jointPhases,
   );
 
   return {
@@ -154,6 +205,7 @@ export function resolveScheduleLimitWatts(
     periodIndex: idx,
     rawLimit: period.limit,
     unit: profile.chargingRateUnit,
+    limitNumberPhases: period.numberPhases ?? null,
   };
 }
 
@@ -168,24 +220,80 @@ export function resolveScheduleLimitWatts(
  *
  * The returned `profileId` / `periodIndex` come from whichever side is
  * tighter (so logs show which profile actually constrained the draw).
+ *
+ * Both sides are converted on the **joint** phase count
+ * ({@link resolveEffectivePhaseLimit}) rather than on their own
+ * `numberPhases`, because an ampere limit is a per-phase current and the
+ * station delivers only on the phases every applicable profile permits.
  */
 export function resolveEffectiveLimitWatts(
   txProfile: ActiveChargingProfile | null,
   chargePointMaxProfile: ActiveChargingProfile | null,
   transactionStart: Date | null,
   now: Date = new Date(),
+  electrical?: ElectricalSettings,
 ): ResolvedScheduleLimit {
-  const tx = resolveScheduleLimitWatts(txProfile, transactionStart, now);
+  // Phases first, then the conversion. The watt cap and the phase restriction
+  // are independent constraints, but turning an ampere limit into watts
+  // depends on both, so it cannot happen until both are known. Converting each
+  // profile on its own `numberPhases` and only then taking the tighter wattage
+  // let a 10 A / 3-phase TxProfile become 6900 W beside a 3000 W / 1-phase
+  // ChargePointMaxProfile: 3000 W won, delivery was on the one phase the
+  // station profile allowed, and that is roughly 13 A on it — over a 10 A
+  // limit still in force (#301).
+  const jointPhases = resolveEffectivePhaseLimit(
+    txProfile,
+    chargePointMaxProfile,
+    transactionStart,
+    now,
+  );
+  const tx = resolveScheduleLimitWatts(
+    txProfile,
+    transactionStart,
+    now,
+    electrical,
+    jointPhases,
+  );
   const cap = resolveScheduleLimitWatts(
     chargePointMaxProfile,
     transactionStart,
     now,
+    electrical,
+    jointPhases,
   );
   if (tx.watts === Infinity && cap.watts === Infinity) return UNCAPPED;
   // The tighter side wins. Equal watts → prefer the tx side (more
   // specific) for the metadata.
   if (cap.watts < tx.watts) return cap;
   return tx;
+}
+
+/**
+ * The tightest `numberPhases` restriction in force across both applicable
+ * profiles, or `null` when neither restricts the phase count.
+ *
+ * Resolved independently of {@link resolveEffectiveLimitWatts}, because the
+ * watt cap and the phase restriction are independent constraints and the
+ * profile that supplies one need not be the profile that supplies the other
+ * (#301). Reading `limitNumberPhases` off the watt winner meant a Tx profile
+ * restricting a connector to one phase was ignored whenever a three-phase
+ * `ChargePointMaxProfile` happened to name the lower wattage — and the
+ * MeterValues then claimed consumption on two phases the Tx profile had
+ * excluded, while that restriction was still in force.
+ */
+export function resolveEffectivePhaseLimit(
+  txProfile: ActiveChargingProfile | null,
+  chargePointMaxProfile: ActiveChargingProfile | null,
+  transactionStart: Date | null,
+  now: Date = new Date(),
+): number | null {
+  const limits = [txProfile, chargePointMaxProfile]
+    .map((p) => resolveScheduleLimitWatts(p, transactionStart, now))
+    .map((r) => r.limitNumberPhases)
+    // A `numberPhases` that is not a positive integer states no restriction we
+    // can honour, so it must not narrow anything — least of all to zero (#301).
+    .filter(isPhaseRestriction);
+  return limits.length === 0 ? null : Math.min(...limits);
 }
 
 // ─── Composite schedule (GetCompositeSchedule.req) ───────────────────────
@@ -229,6 +337,12 @@ export interface CompositeInput {
  * `watts === Infinity` is emitted; the SmartCharging handler decides
  * whether to skip those when serializing to ChargingSchedulePeriod[] (the
  * OCPP type has no "uncapped" encoding).
+ *
+ * Deliberately converts `ChargingRateUnit=A` against the 230 V reference
+ * rather than the connector's electrical model: the handler converts the
+ * watts straight back to amperes for a CSMS that asked for `A`, and the two
+ * halves of *that* round trip have to agree with each other. A composite is
+ * a restatement of the CSMS's own profiles, not a metering claim.
  */
 export function buildCompositeWattsSchedule(
   inputs: CompositeInput,

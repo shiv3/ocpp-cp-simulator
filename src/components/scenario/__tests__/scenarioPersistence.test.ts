@@ -590,4 +590,41 @@ describe("retargetScenarioToConnector (upload retargeting — #101)", () => {
     expect(out.targetType).toBe("chargePoint");
     expect(out.targetId).toBeUndefined();
   });
+
+  // #301: every upload path calls this, and both write the result straight to
+  // storage — the editor normalized only its own React state and the library
+  // path normalized nowhere, so an imported curve reached storage (and any
+  // export taken from it) unvalidated.
+  it("sorts an uploaded chargingCurve and drops its invalid points", () => {
+    const uploaded = {
+      ...scenario("up-3"),
+      evSettings: {
+        initialSoc: 20,
+        chargingCurve: [
+          { socPercent: 80, powerFraction: 0.4 },
+          { socPercent: 10, powerFraction: 1 },
+          { socPercent: 150, powerFraction: 1 },
+          { socPercent: 50, powerFraction: 9 },
+          { socPercent: 30, powerFraction: 0.8 },
+        ],
+      },
+    } as unknown as ScenarioDefinition;
+
+    const out = retargetScenarioToConnector(uploaded, 1, now);
+
+    expect(out.evSettings?.chargingCurve).toEqual([
+      { socPercent: 10, powerFraction: 1 },
+      { socPercent: 30, powerFraction: 0.8 },
+      { socPercent: 80, powerFraction: 0.4 },
+    ]);
+    // Retargeting still does its own job, and other EV settings are untouched.
+    expect(out.targetId).toBe(1);
+    expect(out.evSettings?.initialSoc).toBe(20);
+  });
+
+  it("leaves a scenario without evSettings without them", () => {
+    // Normalizing must not invent an empty object the file never carried.
+    const out = retargetScenarioToConnector(scenario("up-4"), 1, now);
+    expect("evSettings" in out).toBe(false);
+  });
 });

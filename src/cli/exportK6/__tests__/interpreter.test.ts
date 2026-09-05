@@ -443,3 +443,408 @@ describe("runScenario", () => {
     expect(result.error).toMatch(/start/);
   });
 });
+
+describe("k6 auto-meter curve is session-relative (#301)", () => {
+  /**
+   * The exported runtime is a second implementation of the same scenario
+   * semantics, so a change to how a scenario behaves has to reach both. The
+   * curve node used to assign its interpolated value to the register outright,
+   * which is the pre-#301 daemon behaviour: on any session after the first the
+   * meter rewound, and a `meterStop` could land below its own `meterStart`.
+   */
+  function curveScenario(
+    startValueWh: number,
+    points: Array<{ time: number; value: number }> = [
+      { time: 0, value: 0 },
+      { time: 3, value: 3 },
+    ],
+  ) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        // Set the register to where a previous session left it.
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            useCurve: true,
+            curvePoints: points,
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  /** The FakeHost answers `{}` by default, which the interpreter reads as a
+   *  refused StartTransaction; script an acceptance so the walk gets past it. */
+  function acceptTransactions(host: FakeHost): void {
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+  }
+
+  function meterSamples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  it("never reports below the register the session started from", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(5000));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const samples = meterSamples(host);
+    // The curve tops out at 3 kWh, well below the 5 kWh already registered,
+    // so an absolute assignment would send values far under where the session
+    // started — the rewind this guards.
+    for (const value of samples) expect(value).toBeGreaterThanOrEqual(5000);
+    // And it climbs: 1 kWh a second on top of the 5 kWh already registered.
+    expect(samples[samples.length - 1]).toBeGreaterThan(5000);
+  });
+
+  it("never sends a meterStop below its own meterStart", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(5000));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(start).toBeDefined();
+    expect(stop).toBeDefined();
+    expect(Number(stop!.payload.meterStop)).toBeGreaterThanOrEqual(
+      Number(start!.payload.meterStart),
+    );
+  });
+
+  it("still starts from zero on a connector whose register is zero", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(0));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+    expect(meterSamples(host)[0]).toBe(0);
+  });
+});
+
+describe("k6 puts an integral energy register on the wire (#301)", () => {
+  it("rounds a fractional increment instead of sending a decimal", async () => {
+    // A strict CSMS rejects a fractional meterStop with a FormationViolation.
+    // The interpreter keeps the unrounded value so a sub-watt-hour step still
+    // accumulates — the same carry the daemon performs — and the wire builder
+    // rounds.
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "transaction", data: { action: "start" } },
+        {
+          id: "c",
+          type: "meterValue",
+          data: {
+            value: 0,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            incrementAmount: 0.4,
+            stopMode: "manual",
+            maxValue: 2,
+          },
+        },
+        { id: "d", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "e", type: "transaction", data: { action: "stop" } },
+        { id: "f", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+      ],
+    );
+    const run = runScenario(host, wire16, s);
+    const values = () =>
+      host.sent
+        .filter((c) => c.action === "MeterValues")
+        .map(
+          (c) =>
+            (
+              c.payload.meterValue as Array<{
+                sampledValue: Array<{ value: string }>;
+              }>
+            )[0].sampledValue[0].value,
+        );
+    await vi.waitFor(() => expect(values().length).toBeGreaterThan(4));
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    // Every sample is an integer string...
+    for (const v of values()) expect(v).toMatch(/^-?\d+$/);
+    // ...and the fraction is carried rather than discarded: 0.4 a tick reaches
+    // 1 by the third tick and 2 by the fifth, instead of sticking at 0.
+    expect(values().slice(0, 6)).toEqual(["0", "0", "1", "1", "2", "2"]);
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(Number.isInteger(Number(stop!.payload.meterStop))).toBe(true);
+  });
+});
+
+describe("k6 offsets a curve by its own start, not by the register (#301)", () => {
+  /**
+   * The same defect the daemon carried: adding the register alone assumes a
+   * zero-based curve, so a run at 5 kWh on a 5→8 kWh curve jumps to 10 kWh
+   * and delivers twice what the curve describes.
+   */
+  function nonZeroCurveScenario(startValueWh: number) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            useCurve: true,
+            // 5 → 8 kWh: three kilowatt-hours of delivery, whatever the
+            // register happens to read.
+            curvePoints: [
+              { time: 0, value: 5 },
+              { time: 3, value: 8 },
+            ],
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  function samples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  it("delivers the curve's own span rather than its absolute value", async () => {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const run = runScenario(host, wire16, nonZeroCurveScenario(5000));
+    await vi.waitFor(() => expect(samples(host).length).toBeGreaterThan(3));
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const seen = samples(host);
+    // Never jumps by the curve's own 5 kWh ordinate…
+    for (const value of seen) {
+      expect(value).toBeGreaterThanOrEqual(5000);
+      expect(value).toBeLessThanOrEqual(8000);
+    }
+    // …and delivers exactly the 3 kWh the curve spans.
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    expect(
+      Number(stop!.payload.meterStop) - Number(start!.payload.meterStart),
+    ).toBe(3000);
+  });
+});
+
+describe("k6 baselines a curve at session start, not at its earliest point (#301)", () => {
+  /**
+   * `curveStartKwh` asked `interpolateCurveKwh` for `-Infinity`, which clamps
+   * to the curve's *earliest* point. `MeterValueScheduler` baselines with
+   * `getMeterValueAtTime(0, config)` — the value at **session start**. The two
+   * are the same answer for any curve beginning at or after `t = 0`, and
+   * different for one that begins before it and crosses session start, which
+   * `schema/scenario.schema.json` permits (`curvePoint.time` is a plain
+   * `number`, no minimum) and the curve editor accepts (its time input has no
+   * `min`).
+   *
+   * This is the mirror image of the finding withdrawn on the same file: there
+   * the export reproduced the simulator, so clamping the exporter alone would
+   * have manufactured a divergence. Here it diverges from the simulator, so
+   * the exporter is the defect and the fix removes one.
+   */
+  function straddlingCurveScenario(
+    startValueWh: number,
+    points: Array<{ time: number; value: number }>,
+  ) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 10,
+            useCurve: true,
+            curvePoints: points,
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  function samples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  async function firstSample(
+    startWh: number,
+    points: Array<{ time: number; value: number }>,
+  ): Promise<number> {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const run = runScenario(
+      host,
+      wire16,
+      straddlingCurveScenario(startWh, points),
+    );
+    // samples[0] is the node's own initial publish at `startWh`; samples[1]
+    // is the auto-meter's first tick, which is the one the baseline decides.
+    await vi.waitFor(() => expect(samples(host).length).toBeGreaterThan(1));
+    host.emitCsmsCall("Ping", {});
+    await run;
+    return samples(host)[1]!;
+  }
+
+  it("delivers the simulator's 5 kWh, not 10, on a curve that starts before t=0", async () => {
+    // Points (-10s, 5 kWh) and (10s, 15 kWh). At t=0 the curve reads 10 kWh,
+    // so ten seconds in it has delivered 15 − 10 = 5 kWh — which is what
+    // `MeterValueScheduler` does. Baselined at the earliest point (5) the
+    // export delivered 15 − 5 = 10 kWh, twice the simulator's answer.
+    const first = await firstSample(5000, [
+      { time: -10, value: 5 },
+      { time: 10, value: 15 },
+    ]);
+    expect(first).toBe(10_000);
+  });
+
+  it("is unchanged for a curve that begins exactly at t=0", async () => {
+    // Non-discriminating guard: at or after session start the earliest point
+    // and the value at t=0 are the same reading, and this must stay true.
+    const first = await firstSample(5000, [
+      { time: 0, value: 5 },
+      { time: 10, value: 8 },
+    ]);
+    expect(first).toBe(8000);
+  });
+
+  it("is unchanged for a curve that begins after t=0", async () => {
+    // Also non-discriminating: `interpolateCurveKwh` clamps below the first
+    // point, so t=0 reads that point either way.
+    const first = await firstSample(5000, [
+      { time: 5, value: 2 },
+      { time: 10, value: 6 },
+    ]);
+    expect(first).toBe(9000);
+  });
+});

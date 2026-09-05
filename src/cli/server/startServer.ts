@@ -213,14 +213,26 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // below needs it: these are the charge points a startup flag will load a
   // scenario onto, and their rows wait for the second pass.
   const fleet = expandBootstrap(opts);
-  const hasExplicitStartupScenario =
-    !!opts.startupScenario &&
-    (!!opts.startupScenario.scenario ||
-      !!opts.startupScenario.scenarioTemplate ||
-      !!opts.startupScenario.scenarioTemplateFile);
+  const hasExplicitStartupScenario = isExplicitStartupScenario(
+    opts.startupScenario,
+  );
   const seedDefault = !hasExplicitStartupScenario;
-  // Per charge point, because the connector count decides whether `--scenario`
-  // keeps the file's own id or instantiates a fresh one.
+  // Two questions, two predicates. They are not the same set and conflating
+  // them is what let a whole class of startup mode through (#314):
+  //
+  // - *Which stored scenario ids will a startup flag overwrite on this charge
+  //   point?* — `startupClaimedByCp`, below. Used to hold watch rows back for
+  //   the second pass, where being narrow is the entire point: skip more than
+  //   the flag claims and the other restored scenarios go unwatched until they
+  //   dial.
+  // - *Which charge points is startup about to configure at all?* —
+  //   `startupTargets`. Used to hold the dial back, where being narrow is
+  //   wrong: `--scenario-template` and `--scenario-template-file` instantiate a
+  //   fresh id every boot, so they claim nothing and answer the first question
+  //   with an empty set while still being about to reconfigure the connector.
+  //
+  // Per charge point for the first, because the connector count decides whether
+  // `--scenario` keeps the file's own id or instantiates a fresh one.
   const startupClaimedByCp = new Map<string, ReadonlySet<string>>(
     hasExplicitStartupScenario
       ? fleet.map((init) => [
@@ -229,6 +241,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
         ])
       : [],
   );
+  const startupTargets = startupTargetCpIds(opts.startupScenario, fleet);
 
   // Re-create CPs that were registered before the previous daemon shut
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
@@ -252,12 +265,11 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // First pass. See `finishWatchSetup` for the second, and for the three
   // constraints this sequence has to satisfy at once.
   fileReload?.restoreScenarioWatches({
-    skip: (row) =>
-      startupClaimedByCp.get(row.cp_id)?.has(row.scenario_id) === true,
+    skip: startupClaimedRowSkip(startupClaimedByCp),
   });
-  // Split, not just deferred. A charge point whose id a startup flag will claim
+  // Split, not just deferred. A charge point that startup is about to configure
   // must not dial here when the bootstrap loop is going to dial it anyway: the
-  // moment its boot gate opens, the *restored* copy of that scenario
+  // moment its boot gate opens, the *restored* copy of its scenarios
   // auto-starts, and dialling this early leaves the whole bootstrap loop —
   // every other charge point's connect, which can be minutes against a slow
   // CSMS — between that start and the flag's load. Held back, the dial and the
@@ -269,7 +281,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // charge point this function had deliberately left unconnected (#314).
   const dialLater = restoredDialsToDefer(
     restored,
-    startupClaimedByCp,
+    startupTargets,
     opts.autoConnect === true,
   );
   registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
@@ -932,12 +944,67 @@ export async function runStartupScenario(
  */
 export function restoredDialsToDefer(
   restored: readonly string[],
-  claimedByCp: ReadonlyMap<string, ReadonlySet<string>>,
+  startupTargets: ReadonlySet<string>,
   autoConnect: boolean,
 ): Set<string> {
   if (!autoConnect) return new Set();
-  return new Set(
-    restored.filter((cpId) => (claimedByCp.get(cpId)?.size ?? 0) > 0),
+  return new Set(restored.filter((cpId) => startupTargets.has(cpId)));
+}
+
+/**
+ * The first pass's row filter: hold back exactly the rows whose scenario id a
+ * startup flag will overwrite on that charge point.
+ *
+ * Narrow on purpose, and the counterpart of {@link startupTargetCpIds}: widen
+ * this to whole charge points and the *other* restored scenarios on them go
+ * unwatched until they dial, which is the failure the first pass exists to
+ * prevent. The two predicates answer different questions and neither one's
+ * answer is safe for the other's job (#314).
+ */
+export function startupClaimedRowSkip(
+  claimedByCp: ReadonlyMap<string, ReadonlySet<string>>,
+): (row: { readonly cp_id: string; readonly scenario_id: string }) => boolean {
+  return (row) => claimedByCp.get(row.cp_id)?.has(row.scenario_id) === true;
+}
+
+/**
+ * Which charge points a startup flag is about to configure.
+ *
+ * Answers "is startup going to reconfigure this charge point?", which is a
+ * different question from "which stored scenario ids will it overwrite?" — see
+ * {@link startupClaimedScenarioIds} for that one. Every bootstrap charge point
+ * is a target whenever any startup flag is set, because all three modes load a
+ * definition onto every one of them; only the *ids* differ by mode, and ids are
+ * irrelevant here.
+ *
+ * Keying the dial deferral on the id set instead let three of the four startup
+ * modes through: `--scenario-template` and `--scenario-template-file` mint a
+ * fresh id each boot and so claim nothing, as does a `--scenario` that has to
+ * be instantiated across connectors. Their restored charge points therefore
+ * dialled immediately and their persisted `triggerOn: connect` scenarios
+ * auto-started from the database, well before the configured definition
+ * loaded (#314).
+ *
+ * Everything deferred here is dialled afterwards by the bootstrap loop, which
+ * iterates exactly this fleet — see the mode table in `docs/entities/daemon.md`.
+ */
+export function startupTargetCpIds(
+  startupScenario: ServerOptions["startupScenario"],
+  fleet: readonly ChargePointInitOptions[],
+): Set<string> {
+  if (!isExplicitStartupScenario(startupScenario)) return new Set();
+  return new Set(fleet.map((init) => init.cpId));
+}
+
+/** Whether any startup flag names something to load. */
+export function isExplicitStartupScenario(
+  startupScenario: ServerOptions["startupScenario"],
+): boolean {
+  return (
+    !!startupScenario &&
+    (!!startupScenario.scenario ||
+      !!startupScenario.scenarioTemplate ||
+      !!startupScenario.scenarioTemplateFile)
   );
 }
 

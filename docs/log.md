@@ -1188,3 +1188,28 @@ Sixth review pass on PR #325.
   rather than papered over. A `subPath` ConfigMap mount lands there, though
   Kubernetes does not propagate updates through `subPath` at all, so there is
   nothing to watch in that case either; mounting the whole volume works.
+
+## [2026-09-06] ingest | `--watch`: two predicates, because they answer two questions (#314, PR #317)
+
+- The dial deferral was keyed on `startupClaimedScenarioIds`, which answers
+  _which stored scenario ids will a startup flag overwrite?_ — the right
+  question for holding watch rows back and the wrong one for holding a dial
+  back. `--scenario-template`, `--scenario-template-file` and a `--scenario`
+  that has to be instantiated all mint a fresh id each boot, so they claim
+  nothing, the set came back empty, and their restored charge points dialled
+  immediately — bringing back the whole failure the deferral exists to prevent,
+  for three of the four startup modes.
+- Split into two named predicates, each with its question written above it:
+  `startupClaimedRowSkip` (narrow, per id, for the first pass) and
+  `startupTargetCpIds` (every bootstrap charge point whenever any startup flag
+  is set, for the dial). Neither one's answer is safe for the other's job.
+- [Daemon](entities/daemon.md) carries the mode-by-mode table that makes the
+  widening checkable rather than asserted: all four startup modes are deferred
+  and all four are dialled by the bootstrap loop, which iterates exactly the
+  fleet the deferral is drawn from; a restored charge point with no startup flag
+  against it is not deferred and dials in the first round. The `--auto-connect`
+  condition is unchanged and still load-bearing — without it nothing dials the
+  deferred charge points and the startup load's boot wait times out on them.
+- The lesson worth keeping: this survived a round because the only test covered
+  the one mode whose predicate was non-empty. Both predicates are now tested
+  mode by mode, including the modes that must answer "nothing".

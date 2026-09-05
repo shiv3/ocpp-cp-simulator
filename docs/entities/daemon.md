@@ -435,14 +435,36 @@ hold at once and no single position satisfies all three:
 1. **A restored charge point must not run a stale graph.** Its persisted
    connect-triggered scenarios start the moment its boot gate opens, so the
    fleet is now rebuilt **without dialling**, the watches go back on, and only
-   then does it connect. The dial is split as well: a charge point whose id a
-   startup flag will claim is held back from that first round of connects and
-   left to the bootstrap loop, which dials it immediately before loading the
-   flag's definition — so the restored copy of that scenario cannot start and
-   then have the whole bootstrap loop pass before the flag lands. Only when
-   `--auto-connect` is on, because that is what makes the bootstrap loop dial;
-   without it nothing else would, and the startup load's boot-accepted wait
-   would time out on a charge point deliberately left unconnected.
+   then does it connect. The dial is split as well: a charge point **a startup
+   flag is about to configure** is held back from that first round of connects
+   and left to the bootstrap loop, which dials it immediately before loading the
+   flag's definition — so its restored scenarios cannot start and then have the
+   whole bootstrap loop pass before the flag lands. Only when `--auto-connect`
+   is on, because that is what makes the bootstrap loop dial; without it nothing
+   else would, and the startup load's boot-accepted wait would time out on a
+   charge point deliberately left unconnected.
+
+   Two different questions are involved and they must not share an answer.
+   _Which stored scenario ids will a flag overwrite?_ decides which watch rows
+   wait for the second pass, and being narrow is the point — skip more than the
+   flag claims and the charge point's other restored scenarios go unwatched
+   until it dials. _Which charge points is startup about to configure?_ decides
+   the dial, and being narrow there is wrong: only `--scenario` on a file that
+   already targets its single connector keeps a stable id, so keying the dial on
+   the id set left three of the four modes dialling immediately.
+
+   | Startup mode                                          | Deferred? | Dialled afterwards by                           |
+   | ----------------------------------------------------- | --------- | ----------------------------------------------- |
+   | `--scenario` (file already targets its one connector) | yes       | the bootstrap loop, immediately before its load |
+   | `--scenario` (instantiated across connectors)         | yes       | the bootstrap loop                              |
+   | `--scenario-template`                                 | yes       | the bootstrap loop                              |
+   | `--scenario-template-file`                            | yes       | the bootstrap loop                              |
+   | restored charge point with no startup flag against it | no        | `connectRestored`, in the first round           |
+
+   Every deferred charge point is in the bootstrap fleet, and the bootstrap loop
+   iterates exactly that fleet — which is what makes the widening safe: nothing
+   is deferred that nothing subsequently dials.
+
 2. **A startup flag owns its keys before its rows are read.** A stored row can
    name the id `--scenario` will claim, so the first pass skips **exactly those
    ids** — neither applying nor pruning their rows — and a second pass after the

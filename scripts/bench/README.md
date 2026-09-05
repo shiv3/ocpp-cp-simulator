@@ -374,13 +374,22 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    cycle's own bound_ — the authorization timeout plus, on 1.6, the assigned-id
    timeout — never a smaller number chosen at the teardown site.
 
-   The same invariant governs the **bookkeeping**, not only the waiting. A
-   charge point leaves the open-transaction set when its stop is known to be on
-   the wire, not when the RPC acked — otherwise the set says "stopped" while
-   the wait says "queued", and teardown drops the charge point from the close
-   list and can delete it, and its serialized queue, before the CSMS sees the
-   stop. Acked-but-unverified stops are reconciled against the daemon's sent
-   counter at teardown and closed again if it has not caught up.
+   The same invariant governs the **bookkeeping**, not only the waiting — and
+   the proof has to be _attributable_. Teardown re-stops every charge point
+   that may have an open transaction, whether or not its stop was already
+   acked, and then confirms each one **individually** by reading that charge
+   point's own `transactionId` back through `status`. That field is cleared
+   only by the `StopTransaction` CALLRESULT handler, so a cleared value means
+   the CSMS saw the stop and answered.
+
+   An earlier version compared the fleet-wide `StopTransaction` message
+   counter against a baseline. That looked like proof and was not:
+   `ocppcp_ocpp_messages_total` carries **no `cpId` label**, deliberately, so
+   an unrelated frame — another charge point's, or one under
+   `--allow-existing` — can satisfy the inequality while this charge point's
+   stop is still queued. Teardown would then omit it and delete it over its own
+   queued CALL. An aggregate cannot establish a per-charge-point fact, so it is
+   not asked to.
 
    And the bound teardown waits for is now **complete**, enumerated stage by
    stage rather than incremented when a gap is found. A cycle awaits in exactly
@@ -411,6 +420,17 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    charge point that could close it is gone — never by reconciliation
    afterwards. If it is violated, nothing can detect or repair it from here;
    the run can only warn.
+
+   **A create whose client deadline expired keeps creating.** `cp.create_many`
+   rejecting at 35s does not stop the daemon's handler, which goes on
+   registering charge points sequentially. The delete sweep then answered
+   `not_found` for ids that appeared moments later, and those survived to be
+   refused by the next run's preflight. Ids the sweep reports as `not_found`
+   are therefore re-swept once after a further RPC deadline: "not there yet"
+   and "already gone" look identical from the client, so the ambiguity is
+   resolved by looking again rather than by trusting the first answer. This is
+   the acknowledgement-is-not-completion invariant in its strongest form — here
+   the acknowledgement never arrives at all and the operation continues anyway.
 
    **SIGINT is a third route to the same leak, and is handled the same way.**
    An interrupt landing while `growFleet` awaited one batch of a multi-batch
@@ -623,7 +643,11 @@ a spare machine and a CSMS.
 - **Credentials are redacted from stderr, not only from `--out`.** Userinfo in
   `--csms-url` and `--daemon-url` is replaced with `***` in the progress lines,
   the hardware block and every error message, because stderr commonly ends up
-  in a CI log — and the **caught exception text** as well as the URL beside it,
+  in a CI log — from anywhere in the text, not only from its start: a URL
+  embedded in an exception (`TypeError: ... https://user:secret@host`) needs a
+  scan rather than the anchored bare-URL helper, and handing a whole message to
+  that helper is how a password reached stderr once. It covers the **caught
+  exception text** as well as the URL beside it,
   because a failed `fetch` commonly quotes the original URL verbatim, so
   redacting one and appending the other put the password straight back on the
   line. Every error sink applies it, including the top-level one, since a

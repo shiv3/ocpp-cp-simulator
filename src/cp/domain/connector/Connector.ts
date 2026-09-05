@@ -656,9 +656,29 @@ export class Connector {
     // Set while idle it is a statement about the car plugged in now and waits
     // for the transaction about to start; set mid-session it describes that
     // session's car and is replaced when the next one begins (#301).
-    this.socAwaitsNextTransaction = this.transactionValue === null;
+    this.socAwaitsNextTransaction = !this.hasRunningTransaction;
     this.eventsEmitter.emit("socChange", { soc: value });
     this.checkAutoStop();
+  }
+
+  /**
+   * Whether a session is running right now: a transaction that has begun and
+   * not yet stopped.
+   *
+   * Deliberately not "a transaction object is attached". When a
+   * `StartTransaction` is rejected, or comes back a CALLERROR,
+   * `ChargePoint.cleanTransaction` stamps `stopTime` and leaves the object on
+   * the connector — so the connector is logically idle with a transaction
+   * still hanging off it. `ChargePoint.startTransaction` already asks the
+   * question this way before refusing a duplicate start; asking it the same
+   * way here is what lets a hand retry after a rejection behave like a first
+   * attempt, which is precisely when an operator is most likely to be typing
+   * an SoC before pressing Start (#301).
+   */
+  private get hasRunningTransaction(): boolean {
+    return (
+      this.transactionValue !== null && this.transactionValue.stopTime === null
+    );
   }
 
   get transaction(): Transaction | null {

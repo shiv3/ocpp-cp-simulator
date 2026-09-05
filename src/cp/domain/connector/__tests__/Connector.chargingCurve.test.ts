@@ -977,3 +977,103 @@ describe("a curve is offset by its own start, not by the register (#301)", () =>
     expect(connector.meterValue).toBe(1_000);
   });
 });
+
+describe("a rejected start leaves the connector idle for SoC purposes (#301)", () => {
+  /**
+   * `ChargePoint.cleanTransaction` stamps `stopTime` and deliberately leaves
+   * the transaction object attached, so after a rejected `StartTransaction`
+   * the connector is logically idle with a transaction still hanging off it.
+   * Asking "is a transaction attached?" rather than "is one running?" marked
+   * everything typed afterwards as belonging to that stopped session — and
+   * the retry then discarded it, at exactly the moment an operator is most
+   * likely to be entering values by hand.
+   */
+  function cliffAt90(connector: Connector): void {
+    connector.evSettings = {
+      ...connector.evSettings,
+      batteryCapacityKwh: 1,
+      maxChargingPowerKw: 100,
+      initialSoc: 20,
+      targetSoc: 100,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0 },
+        { socPercent: 100, powerFraction: 0 },
+      ],
+    };
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+  }
+
+  function reportedPowerW(connector: Connector): number {
+    return Number(
+      buildSampledValues(
+        connector,
+        ["Power.Active.Import"],
+        "Sample.Periodic",
+      ).find((s) => s.measurand === "Power.Active.Import")?.value ?? "0",
+    );
+  }
+
+  /** Exactly what `ChargePoint.cleanTransaction` leaves behind. */
+  function rejectStart(connector: Connector): void {
+    connector.beginTransaction(transaction(0));
+    connector.transaction!.stopTime = new Date();
+    connector.transaction!.meterStop = connector.meterValue;
+  }
+
+  it("keeps an SoC typed after a rejected start", () => {
+    const connector = makeConnector();
+    cliffAt90(connector);
+    rejectStart(connector);
+
+    // The operator retries by hand: type the SoC, then press Start.
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+
+    expect(connector.soc).toBe(95);
+    expect(reportedPowerW(connector)).toBe(0);
+  });
+
+  it("keeps an initialSoc handed to the retry", () => {
+    // The same path through `ChargePoint.startTransaction`, which writes the
+    // value through the `soc` setter before beginning. It was discarded too.
+    const connector = makeConnector();
+    cliffAt90(connector);
+    rejectStart(connector);
+
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0, 95));
+
+    expect(connector.soc).toBe(95);
+    expect(reportedPowerW(connector)).toBe(0);
+  });
+
+  it("still treats an SoC set during a running session as that session's", () => {
+    // The distinction has to keep cutting the other way: a value set while a
+    // transaction is genuinely in flight belongs to it.
+    const connector = makeConnector();
+    cliffAt90(connector);
+    connector.beginTransaction(transaction(0));
+    expect(connector.transaction!.stopTime).toBeNull();
+    connector.soc = 95;
+    connector.stopTransaction();
+
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+  });
+
+  it("does not let the rejected attempt's own SoC open the retry", () => {
+    const connector = makeConnector();
+    cliffAt90(connector);
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0, 95));
+    connector.transaction!.stopTime = new Date();
+
+    // Nothing typed before the retry: the rejected attempt's value is a
+    // leftover like any other.
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+  });
+});

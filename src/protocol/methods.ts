@@ -87,7 +87,7 @@ const cpParamsBaseSchema = z.object({
         .optional()
         .describe("Inline idTags"),
       file: STR_1K.optional().describe(
-        "Path to a JSON file holding a string array of idTags, read once at creation",
+        "Path to a JSON file holding a string array of idTags, resolved at creation and re-read on change only when the daemon runs with --watch",
       ),
       distribution: z
         .enum(["round-robin", "random", "connector-affinity"])

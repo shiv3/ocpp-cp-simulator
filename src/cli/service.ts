@@ -240,6 +240,21 @@ export type CLIEvent =
 type EventHandler = (evt: CLIEvent) => void;
 
 /**
+ * Something that could have been holding a `--watch` reload back has finished,
+ * and the state it was blocking on is *already cleared* by the time this is
+ * reported. See {@link CLIChargePointService.onSessionSettled}.
+ *
+ * `scenarioId` names the run that wound up, or is null when what settled was a
+ * connector's transaction rather than a scenario run.
+ */
+export interface SessionSettledInfo {
+  readonly connectorId: number;
+  readonly scenarioId: string | null;
+}
+
+type SessionSettledHandler = (info: SessionSettledInfo) => void;
+
+/**
  * #179: mint a stable, human-legible run id for one scenario execution.
  * `scenarioId#<epochMs>-<rand>` — the scenarioId anchors it to the scenario,
  * the epoch + short random suffix distinguish repeated runs of the same one.
@@ -266,6 +281,23 @@ export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _soapServer: OCPPSoapServer | null;
   private readonly _handlers: Set<EventHandler> = new Set();
+  /**
+   * #314: notified once something that can block a reload has *actually*
+   * cleared — a scenario run wound up, or a connector's transaction was
+   * dropped.
+   *
+   * Deliberately not `CLIEvent`s. Every lifecycle event on the bus announces
+   * the end of a thing from *inside* the code that is ending it, while the
+   * state it announces is still set: `scenario_completed` fires from the
+   * executor's own state hook with the executor still in `_executors`, and
+   * `transaction_stopped` fires from `ChargePoint.stopTransaction` several
+   * statements before `connector.stopTransaction()` clears the transaction. A
+   * listener that re-checks the gate on those events always finds it shut, and
+   * then waits forever for a second notification that never comes. These
+   * handlers run after the state is gone, which is the whole point.
+   */
+  private readonly _sessionSettledHandlers: Set<SessionSettledHandler> =
+    new Set();
   private _unsubscribes: Array<() => void> = [];
   private _connectorUnsubscribes: Array<() => void> = [];
   private readonly _scenarios: Map<
@@ -363,7 +395,11 @@ export class CLIChargePointService {
   // modal without us having to round-trip the persisted SQL row back into
   // ChargePointInitOptions shape. Exposed via getInit() and the
   // `config` block of getStatus().
-  private readonly _init: ChargePointInitOptions;
+  // Not `readonly`: a `--watch` idTag reload (#314) replaces the block so
+  // `getInit().idTags` keeps agreeing with what the charge point is actually
+  // drawing from — `cp.update` merges against this, and a stale copy there
+  // would quietly re-install the pre-edit pool.
+  private _init: ChargePointInitOptions;
 
   constructor(
     init: ChargePointInitOptions,
@@ -532,6 +568,28 @@ export class CLIChargePointService {
     };
   }
 
+  /**
+   * Subscribe to "a reload gate has actually opened" (#314).
+   *
+   * Fires from exactly the points where the two things `--watch` defers on stop
+   * being true, and always after they have stopped being true:
+   *
+   * - last in {@link runScenario}'s `finally`, once the executor has been
+   *   dropped from `_executors` and the run finalized, so a handler asking
+   *   {@link isScenarioRunning} gets `false`;
+   * - on a connector's `transactionChange` to null — the one place
+   *   `Connector.stopTransaction` clears the transaction — so a handler asking
+   *   {@link hasOpenTransaction} gets `false`;
+   * - from {@link resetScenario}, which drops the transaction through the
+   *   setter and so produces no `transactionChange` of its own.
+   */
+  onSessionSettled(handler: SessionSettledHandler): () => void {
+    this._sessionSettledHandlers.add(handler);
+    return () => {
+      this._sessionSettledHandlers.delete(handler);
+    };
+  }
+
   connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -647,6 +705,42 @@ export class CLIChargePointService {
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {
     return this._init;
+  }
+
+  /**
+   * Install a re-read `idTagPool.file` on the live charge point (#314).
+   *
+   * Applied immediately, mid-transaction included: the pool is drawn from once
+   * per session, so a transaction already under way keeps the tag it presented
+   * at StartTransaction and only the next draw sees the new list. Returns
+   * `false` when this charge point has no pool to replace.
+   */
+  /** See {@link ChargePoint.canReplaceIdTags}. */
+  canReplaceIdTags(tags: readonly string[]): boolean {
+    return this._chargePoint.canReplaceIdTags(tags);
+  }
+
+  replaceIdTags(tags: readonly string[]): boolean {
+    if (!this._chargePoint.replaceIdTags(tags)) return false;
+    this._init = { ...this._init, idTags: [...tags] };
+    return true;
+  }
+
+  /**
+   * Whether a transaction is open on this connector (#314).
+   *
+   * `transactionId` is 0 between StartTransaction.req and its .conf, so this
+   * asks whether the connector holds a transaction at all rather than whether
+   * it has a CSMS-assigned id — a reload during that window is still a reload
+   * mid-transaction.
+   */
+  hasOpenTransaction(connectorId: number): boolean {
+    return this._chargePoint.connectors.get(connectorId)?.transaction != null;
+  }
+
+  /** Whether a run of this scenario is in flight (#314). */
+  isScenarioRunning(scenarioId: string): boolean {
+    return this._executors.has(scenarioId);
   }
 
   setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void {
@@ -979,7 +1073,21 @@ export class CLIChargePointService {
     }
   }
 
-  loadScenario(connectorId: number, definition: ScenarioDefinition): string {
+  /**
+   * Load a scenario onto a connector.
+   *
+   * `options.autoStart: false` suppresses the auto-start gate below. The one
+   * caller that needs it is a "load this and run it *now, with these options*"
+   * path (`run_scenario_file`): letting the gate start the scenario first left
+   * the explicit start with nothing to do, so the caller's per-run options were
+   * silently discarded and there was no way to tell that from a start this call
+   * actually made (#314).
+   */
+  loadScenario(
+    connectorId: number,
+    definition: ScenarioDefinition,
+    options: { readonly autoStart?: boolean } = {},
+  ): string {
     // Hard gate on the fields the runtime map and every scenario RPC key on.
     // Without it a definition with no `id` was stored under the key
     // `undefined`, returned as `{}` instead of `{ scenarioId }`, and left an
@@ -1009,7 +1117,10 @@ export class CLIChargePointService {
     // the JSON `load_scenario` command on a long-running daemon). The CP
     // statusChange event won't refire, so kick the auto-start gate here
     // too — it's idempotent thanks to the dedup key.
-    if (this._chargePoint.status === OCPPStatus.Available) {
+    if (
+      options.autoStart !== false &&
+      this._chargePoint.status === OCPPStatus.Available
+    ) {
       this.tryAutoStartForConnector(connectorId, "connect", null);
       this.tryAutoStartForConnector(connectorId, "status", connector.status);
     }
@@ -1373,6 +1484,45 @@ export class CLIChargePointService {
     });
 
     executor.start(resumeOpts).finally(() => {
+      // The invariant, asserted rather than assumed. Every teardown below is
+      // keyed by `scenarioId`, so a *later* run of the same scenario that began
+      // while this promise was queued would have its executor, run id and
+      // transcript deleted by the run it replaced — and then be finalized under
+      // the wrong verdict. Nothing should be able to start a replacement inside
+      // that window (drains are entered only from points where cleanup is
+      // complete), but "should" is what the last three ordering bugs in this
+      // feature had in common. If this run is no longer the registered one its
+      // bookkeeping has already been replaced, so the only correct action is to
+      // touch none of it.
+      const registered = this._executors.get(scenarioId);
+      if (registered !== executor) {
+        // `!== executor` covers two different situations and only one of them
+        // means "someone else owns this bookkeeping now".
+        //
+        // *Replaced* — a later run registered its own executor under the same
+        // id — is the case the guard was written for: touch nothing, or this
+        // run deletes the live run's state and finalizes it under the wrong
+        // verdict.
+        //
+        // *Deleted* — `stopScenario` / `stopAllScenarios` dropped the executor
+        // synchronously and left this `finally` queued — is not. Nothing owns
+        // the id, so this run is still responsible for its own remains. The
+        // stop paths freeze the terminal status and finalize the run
+        // themselves (redoing either here would overwrite their pre-stop
+        // snapshot with a post-stop one), but they do not clear the persisted
+        // scenario position — so skipping this left a manually stopped run's
+        // last node in `connector_runtime`, and with `--state-db` the next boot
+        // resumed the scenario the operator had stopped. Cleared here rather
+        // than in each stop path: this callback runs whichever path stopped the
+        // run, and there are two of them today (#314).
+        if (registered === undefined) {
+          this._executorConnectorIds.delete(scenarioId);
+          this._scenarioPositionByConnector.delete(connectorId);
+          this.persistConnectorRuntime(connector, connectorId);
+        }
+        this.notifySessionSettled({ connectorId, scenarioId });
+        return;
+      }
       // Freeze the terminal status BEFORE dropping the executor, so
       // scenario_status keeps answering once this map entry is gone. A manual
       // stop takes the same snapshot in stopScenario, ahead of executor.stop().
@@ -1421,6 +1571,50 @@ export class CLIChargePointService {
         // clears it, which is the case that can be non-null.
         null,
       );
+      // Last, deliberately: #314's held-reload drain calls loadScenario, which
+      // can auto-start a fresh run of the same scenario. Announcing the settle
+      // any earlier would let that new run install its transcript and run id
+      // and then have this cleanup tear them down again.
+      this.notifySessionSettled({ connectorId, scenarioId });
+    });
+  }
+
+  /** Tell {@link onSessionSettled} subscribers a gate has opened. A throwing
+   *  handler is logged and never breaks the path it was called from. */
+  /**
+   * Announce a settle — always on a later microtask, never inline (#314).
+   *
+   * This is the one place the invariant lives, because enumerating safe emit
+   * sites kept missing one. The rule that actually holds is *not* "the gate the
+   * listener checks is clear": a drain does not merely read that gate, it calls
+   * `loadScenario`, which can auto-start a run that snapshots connector state
+   * and starts a transcript. Its correctness therefore depends on state the
+   * gate says nothing about. `transactionChange` fires from inside
+   * `ChargePoint.stopTransaction` with the transaction already null but auto-
+   * reset and scheduled-availability cleanup still to come; `resetScenario`
+   * emits before its own meter and status cleanup. Both have an open gate and a
+   * half-torn-down connector, which is exactly the combination four separate
+   * bugs here have been.
+   *
+   * So the requirement is the stronger one: **no listener runs inside any
+   * synchronous teardown, even one whose own gate has already opened.** A
+   * microtask is precisely that guarantee — JavaScript runs the enclosing
+   * synchronous block to completion first — and asserting it here covers every
+   * emit site, including ones not yet written.
+   */
+  private notifySessionSettled(info: SessionSettledInfo): void {
+    const handlers = [...this._sessionSettledHandlers];
+    if (handlers.length === 0) return;
+    queueMicrotask(() => {
+      for (const handler of handlers) {
+        // Re-checked: the service can be torn down between the emit and here.
+        if (!this._sessionSettledHandlers.has(handler)) continue;
+        try {
+          handler(info);
+        } catch (err) {
+          process.stderr.write(`[CLI] Session settled handler error: ${err}\n`);
+        }
+      }
     });
   }
 
@@ -1722,14 +1916,94 @@ export class CLIChargePointService {
     if (!executor) {
       throw new Error(`Scenario ${scenarioId} is not running`);
     }
+    this.tearDownStoppedRun(connectorId, scenarioId, executor);
+  }
+
+  /**
+   * #179 Phase 4: scenario-scoped reset. Unlike the global `state.reset`
+   * (`resetAllState` wipes every CP + the DB), this returns just ONE connector
+   * to a clean baseline so a campaign can run the next scenario without
+   * leakage from the previous one. Steps: stop the run if active (reusing
+   * `stopScenario`, which aborts the executor, finalizes + drops its
+   * transcript, and clears armed response overrides), then clear any active
+   * transaction and reservation on the connector, zero its meter, return it to
+   * Available (emitting the StatusNotification so a CSMS stays in sync), and
+   * drop the persisted scenario position.
+   */
+  resetScenario(connectorId: number, scenarioId: string): void {
+    const stoppedRun = this._executors.has(scenarioId);
+    if (stoppedRun) {
+      this.stopScenario(connectorId, scenarioId);
+    }
+
+    const connector = this._chargePoint.connectors.get(connectorId);
+    if (!connector) return;
+
+    connector.transaction = null;
+    // The setter does not emit `transactionChange`, so nothing else would
+    // announce this one (#314) — but only announce it here when there was no
+    // run to stop. `stopScenario` drops the executor synchronously and leaves
+    // its `start()` promise's `finally` queued as a microtask; announcing now
+    // drains a held reload *inside* that window, and a reloaded definition with
+    // a matching connect trigger can auto-start immediately, whereupon the old
+    // `finally` runs and tears down the run it never started. The stopped run's
+    // own post-cleanup notification does the drain instead, which keeps one
+    // terminator per run rather than two racing ones.
+    if (!stoppedRun) {
+      this.notifySessionSettled({ connectorId, scenarioId: null });
+    }
+
+    const reservation =
+      this._chargePoint.reservationManager.getReservationForConnector(
+        connectorId,
+      );
+    if (reservation) {
+      this._chargePoint.reservationManager.cancelReservation(
+        reservation.reservationId,
+      );
+    }
+
+    this._chargePoint.setMeterValue(connectorId, 0);
+    this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Available);
+    this._scenarioPositionByConnector.delete(connectorId);
+  }
+
+  stopAllScenarios(connectorId: number): void {
+    for (const [scenarioId, entry] of this._scenarios) {
+      if (entry.connectorId !== connectorId) continue;
+      const executor = this._executors.get(scenarioId);
+      if (!executor) continue;
+      this.tearDownStoppedRun(connectorId, scenarioId, executor);
+    }
+  }
+
+  /**
+   * Everything a manual stop does once the run to stop has been identified.
+   *
+   * Shared rather than repeated, because it had already drifted: this body used
+   * to exist twice and only `stopScenario`'s copy froze the terminal status, so
+   * a bulk stop left `scenario_status` and `list_scenarios` answering null or
+   * with the previous run's verdict. That divergence also invalidated the
+   * argument for putting the stopped-run cleanup in `runScenario`'s `finally`
+   * — "the stop paths already record it" was true of one of them (#314).
+   *
+   * Order matters and is the same as it was: the terminal status and the
+   * timeout are captured from the **pre-stop** context, because `executor.stop()`
+   * clears the parked expectation and moves the run's state on, and a snapshot
+   * taken afterwards would describe where the run is not.
+   */
+  private tearDownStoppedRun(
+    connectorId: number,
+    scenarioId: string,
+    executor: ScenarioExecutor,
+  ): void {
     // #179: capture the run id before stop() — executor.stop() lets the
     // start() promise settle, whose finally() clears _runIdByScenario.
     const runId = this._runIdByScenario.get(scenarioId) ?? "";
     // #179 Phase 2b: capture whether the run was parked on a waiting node
     // BEFORE stop() clears currentExpectation — a scenario stopped mid-wait
     // couldn't reach a verifiable state, so its verdict should be BLOCKED
-    // rather than a possibly-misleading FAIL/PASS off a truncated
-    // transcript.
+    // rather than a possibly-misleading FAIL/PASS off a truncated transcript.
     const ctxBeforeStop = executor.getContext();
     const wasWaiting = ctxBeforeStop.state === "waiting";
     // #179 Phase 3: a stop mid-wait is the closest thing to a timeout the
@@ -1784,86 +2058,6 @@ export class CLIChargePointService {
     );
   }
 
-  /**
-   * #179 Phase 4: scenario-scoped reset. Unlike the global `state.reset`
-   * (`resetAllState` wipes every CP + the DB), this returns just ONE connector
-   * to a clean baseline so a campaign can run the next scenario without
-   * leakage from the previous one. Steps: stop the run if active (reusing
-   * `stopScenario`, which aborts the executor, finalizes + drops its
-   * transcript, and clears armed response overrides), then clear any active
-   * transaction and reservation on the connector, zero its meter, return it to
-   * Available (emitting the StatusNotification so a CSMS stays in sync), and
-   * drop the persisted scenario position.
-   */
-  resetScenario(connectorId: number, scenarioId: string): void {
-    if (this._executors.has(scenarioId)) {
-      this.stopScenario(connectorId, scenarioId);
-    }
-
-    const connector = this._chargePoint.connectors.get(connectorId);
-    if (!connector) return;
-
-    connector.transaction = null;
-
-    const reservation =
-      this._chargePoint.reservationManager.getReservationForConnector(
-        connectorId,
-      );
-    if (reservation) {
-      this._chargePoint.reservationManager.cancelReservation(
-        reservation.reservationId,
-      );
-    }
-
-    this._chargePoint.setMeterValue(connectorId, 0);
-    this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Available);
-    this._scenarioPositionByConnector.delete(connectorId);
-  }
-
-  stopAllScenarios(connectorId: number): void {
-    for (const [scenarioId, entry] of this._scenarios) {
-      if (entry.connectorId === connectorId) {
-        const executor = this._executors.get(scenarioId);
-        if (executor) {
-          const runId = this._runIdByScenario.get(scenarioId) ?? "";
-          // #179 Phase 2b/3: see stopScenario's comment.
-          const ctxBeforeStop = executor.getContext();
-          const wasWaiting = ctxBeforeStop.state === "waiting";
-          const timeout =
-            wasWaiting && ctxBeforeStop.currentNodeId
-              ? {
-                  nodeId: ctxBeforeStop.currentNodeId,
-                  expectation: ctxBeforeStop.expectation,
-                }
-              : null;
-          executor.stop();
-          this._executors.delete(scenarioId);
-          this._runIdByScenario.delete(scenarioId);
-          // Release the EV settings override (#105) only for the owning
-          // (evSettings-declaring) scenario, same as stopScenario.
-          if (entry.definition.evSettings) {
-            this._chargePoint.connectors
-              .get(connectorId)
-              ?.clearEvSettingsOverride();
-          }
-          this.emit({
-            event: "scenario_completed",
-            data: { connectorId, scenarioId, runId },
-          });
-          this.finalizeScenarioRun(
-            scenarioId,
-            connectorId,
-            runId,
-            "completed",
-            wasWaiting,
-            [],
-            timeout,
-          );
-        }
-      }
-    }
-  }
-
   /** Drain any buffered log lines to the DB — called from the socket.io
    *  logs.get handler so the download includes the last
    *  seconds of activity that the LogRepository hasn't flushed yet. */
@@ -1914,6 +2108,7 @@ export class CLIChargePointService {
     }
     this._unsubscribes = [];
     this._handlers.clear();
+    this._sessionSettledHandlers.clear();
   }
 
   private emit(evt: CLIEvent): void {
@@ -2196,6 +2391,18 @@ export class CLIChargePointService {
       );
       this._connectorUnsubscribes.push(
         connector.events.on("transactionChange", persist),
+      );
+      this._connectorUnsubscribes.push(
+        connector.events.on("transactionChange", ({ transaction }) => {
+          // #314: `Connector.stopTransaction` nulls the field and *then* emits,
+          // so by here `hasOpenTransaction` already answers false. The bus's
+          // `transaction_stopped` fires several statements earlier, while the
+          // transaction is still set — which is why a reload held behind it
+          // cannot be released from there.
+          if (transaction === null) {
+            this.notifySessionSettled({ connectorId, scenarioId: null });
+          }
+        }),
       );
       this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", persist),

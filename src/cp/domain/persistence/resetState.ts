@@ -15,6 +15,11 @@ export function resetSimulatorState(db: Database): void {
   // log line and ease of diffing.
   const tables = [
     "scenarios",
+    // #314: daemon-only, but simulator-owned all the same. Left out, a reset
+    // cleared every scenario and left the rows saying where they came from, so
+    // a later watched restart reattached files for scenarios that no longer
+    // exist. `state.reset` promises to truncate every simulator-owned table.
+    "watched_scenario_files",
     "connector_settings",
     "charging_profiles",
     "configuration",

@@ -103,7 +103,7 @@ bucket with the same numbers).
 | `load_scenario`                   | `{ "connector": number, "file"?: string, "scenario"?: object }`                            | Load a scenario from a file path or inline definition. An inline definition missing `id`, `name`, `targetType`, `nodes` or `edges` is rejected with `invalid_params`.                                                                                                                                                                                                                                                                                                                           |
 | `list_scenarios`                  | `{ "connector": number }`                                                                  | List loaded scenarios: `{ scenarioId, name, active, state, mode }`. `state` / `mode` mirror `scenario_status` and are `null` for a scenario that has never run.                                                                                                                                                                                                                                                                                                                                 |
 | `run_scenario`                    | `{ "connector": number, "scenarioId": string, "strict"?: boolean }`                        | Run a loaded scenario. `strict` promotes warning-severity assertions to failures ([Scenario format → Severity](scenario-format.md#severity-conformance-vs-compatibility)).                                                                                                                                                                                                                                                                                                                      |
-| `run_scenario_file`               | `{ "connector": number, "file": string, "strict"?: boolean }`                              | Load and run a scenario file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `run_scenario_file`               | `{ "connector": number, "file": string, "strict"?: boolean }`                              | Load a scenario file and run it **with the options given**. The connector's auto-start gate is suppressed for this load, so `strict` always reaches the run this call starts; an id that was already running before the call is an error, never a silent success (#314).                                                                                                                                                                                                                        |
 | `run_scenario_template`           | `{ "connector": number, "templateId": string, "evSettings"?: object, "strict"?: boolean }` | Load and run a built-in template.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `scenario_status`                 | `{ "connector": number, "scenarioId": string }`                                            | Return scenario execution status: the live context while a run is in flight, otherwise the **terminal** state (`completed` / `error`) and `runId` of the last run, until the scenario is removed. `null` only for a scenarioId with no run on record — which is how a poller tells "unknown scenario" from "already finished".                                                                                                                                                                  |
 | `scenario_report`                 | `{ "connector": number, "scenarioId": string, "runId"?: string, "format"?: "json" }`       | Machine-readable verdict of a finished run (`verdict`, `conformanceVerdict`, `compatibilityVerdict`, `assertions[]` with `frameRefs`, `transcript`, `simulatorVersion`). Used by the [Testcontainers harness](../sources/testcontainers-java-readme.md).                                                                                                                                                                                                                                        |
@@ -182,12 +182,18 @@ transaction node without one draws from the pool. A charge point with no pool
 keeps the historical `123456` fallback, so nothing changes for a caller that
 never configured one.
 
-**`file` is resolved once, at creation.** What the charge point stores and
-persists is the list itself, so a file edited later cannot silently change a
-running charge point, and a bad path fails the create rather than the first
-transaction. The pool holds at most 1000 tags and is persisted in
-`charge_points.id_tags` / `id_tag_distribution` (schema v9), so a restart does
-not bring the charge point back drawing nothing.
+**`file` is resolved at creation.** What the charge point stores and persists is
+the list itself, so a bad path fails the create rather than the first
+transaction. A relative path is resolved against the daemon's working directory
+at that moment and stored **absolute**, so a restart from another directory
+still names the same file. By default a file edited later does not change a
+running charge point; a daemon started with
+[`--watch`](../entities/daemon.md#file-hot-reload) (#314) re-reads it and
+replaces the pool live, which is safe because the pool is drawn from once per
+session. The pool holds at most 1000 tags and is persisted in
+`charge_points.id_tags` / `id_tag_distribution` (schema v9) plus the source path
+in `id_tag_file` (schema v11), so a restart does not bring the charge point back
+drawing nothing — or, under `--watch`, watching nothing.
 
 An unrecognised `distribution` is refused rather than defaulted.
 
@@ -435,7 +441,8 @@ Server-to-client push uses one Socket.IO event:
 
 ```js
 socket.on("event", (envelope) => {
-  // envelope.kind is "cp" or "registry"
+  // envelope.kind is "cp", "registry", "config", "scenario-definitions"
+  // or "file-reload"
 });
 ```
 
@@ -472,6 +479,38 @@ Registry event envelope:
 }
 ```
 
+File-reload event envelope, pushed only by a daemon started with `--watch`
+(#314) — see [Daemon → File hot-reload](../entities/daemon.md#file-hot-reload):
+
+```json
+{
+  "kind": "file-reload",
+  "event": "file-reloaded",
+  "target": "id-tags",
+  "path": "/srv/fleet/tags.json",
+  "cpId": "CP001",
+  "connectorId": null,
+  "scenarioId": null,
+  "outcome": "applied",
+  "error": null
+}
+```
+
+`outcome` is the whole contract, and a consumer should branch on it rather than
+assume a reload took effect:
+
+| `outcome`  | Meaning                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `applied`  | The re-read copy is live.                                                                                                                                                                                                                                                                                                                                                                           |
+| `deferred` | The file parsed, but the charge point is mid-session; the new copy is held and installed when that session ends — when the transaction stops, when the in-flight run's cleanup completes, or when a `cp.update` rebuilds the charge point. Never dropped: a `deferred` is always followed by an `applied` or a `rejected` for that path unless the scenario, or its charge point, is removed first. |
+| `rejected` | The file could not be read or did not parse. The previous good copy is untouched, and `error` says why.                                                                                                                                                                                                                                                                                             |
+
+`target` is `"id-tags"` or `"scenario"`. `connectorId` and `scenarioId` are
+non-null only for `"scenario"`; an idTag reload is charge-point wide. `path` is
+always the **resolved absolute** path, and both it and `error` are bounded the
+same way the `file` params that produce them are (64 KiB), so a legal Linux path
+longer than 1 KiB cannot make a reload that already happened arrive as silence.
+
 Subscribe with `events.subscribe`:
 
 ```js
@@ -483,11 +522,14 @@ const ack = await socket.timeout(30_000).emitWithAck("rpc", {
 
 Scopes:
 
-| Scope        | Push events received                                        | Subscribe result snapshot                                                                  |
-| ------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `"*"`        | CP events for every CP and all registry changes             | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
-| `"registry"` | Registry `added`, `removed`, `updated`, and `reset` changes | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
-| `"<cpId>"`   | CP events for that CP                                       | `snapshot.cps` still includes registry entries; `snapshot.perCp` includes the selected CP. |
+| Scope                    | Push events received                                                                                  | Subscribe result snapshot                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `"*"`                    | CP events for every CP and all registry changes                                                       | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
+| `"registry"`             | Registry `added`, `removed`, `updated`, and `reset` changes                                           | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
+| `"<cpId>"`               | CP events for that CP                                                                                 | `snapshot.cps` still includes registry entries; `snapshot.perCp` includes the selected CP. |
+| `"config"`               | `config-changed` pushes for the shared simulator config                                               | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| `"scenario-definitions"` | `scenario-definitions-changed` pushes, including the ones a `--watch` scenario reload produces (#314) | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| `"file-reload"`          | `file-reloaded` pushes from a `--watch` daemon (#314)                                                 | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
 
 The subscribe ack is atomic: the room join and snapshot capture happen together,
 so clients can apply the snapshot before processing subsequent `event` pushes.

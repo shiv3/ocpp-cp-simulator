@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import type { Server as BunServer, WebSocketHandler } from "bun";
 import { Server as Engine } from "@socket.io/bun-engine";
 import {
@@ -96,6 +97,12 @@ import {
   createRegistryEventBridge,
   type RegistryEventBridge,
 } from "./registryEvents";
+import type { FileReloadManager } from "./FileReloadManager";
+import {
+  forgetWatchedConnectorScenarioFiles,
+  forgetWatchedScenarioFile,
+  rememberWatchedScenarioFile,
+} from "./watchedScenarioFiles";
 import {
   RegistryChargePointService,
   type RegistryConfigRepository,
@@ -112,6 +119,9 @@ export interface SocketIoAttachment {
   readonly engine: Engine;
   readonly websocket: AnyWebSocketHandler;
   readonly idleTimeout: number;
+  /** The push bridge, so a caller that produced it indirectly (the daemon's
+   *  `--watch` reloader, #314) can emit through the same socket.io server. */
+  readonly registryEvents: RegistryEventBridge | null;
   handleRequest(
     req: Request,
     server: BunServer<Record<string, unknown>>,
@@ -140,6 +150,14 @@ export interface SocketIoDeps {
   readonly blueprints?: BlueprintRepository;
   readonly chargePointService?: RegistryChargePointService;
   readonly registryEvents?: RegistryEventBridge | null;
+  /**
+   * The `--watch` file reloader (#314), or null/absent when the daemon was
+   * started without `--watch`. Threaded through so the RPCs that load a
+   * scenario *from a path* can register that path — without it `--watch`
+   * would only ever cover the startup flags, and a scenario loaded over the
+   * control plane would silently not be watched.
+   */
+  readonly fileReload?: FileReloadManager | null;
 }
 
 export interface RuntimeSocketIoDeps extends SocketIoDeps {
@@ -168,6 +186,7 @@ const EXPLICIT_METHOD_SET = new Set<string>(EXPLICIT_METHODS);
 const CONFIG_KEY = "global_config";
 const CONFIG_EVENTS_SCOPE = "config";
 const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
+const FILE_RELOAD_EVENTS_SCOPE = "file-reload";
 const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
   "manual",
   "scenario",
@@ -214,6 +233,7 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
     engine,
     websocket: handler.websocket as AnyWebSocketHandler,
     idleTimeout,
+    registryEvents,
     handleRequest(req, server) {
       return engine.handleRequest(req, server as never);
     },
@@ -495,6 +515,8 @@ export async function dispatchRpcCore(
     method,
     cpId,
     rawParams,
+    deps.fileReload ?? null,
+    deps.database ?? null,
   );
   if (facadeResult.handled) return facadeResult.value;
 
@@ -1152,6 +1174,101 @@ async function saveScenarioDefinition(
   return saved;
 }
 
+/**
+ * Stop the file behind one scenario from being authoritative, and forget the
+ * row that would re-establish it (#314).
+ *
+ * Every path that takes a definition away from the daemon calls this, because
+ * the alternative has now been three separate bugs with one shape: a definition
+ * removed through one door while the file behind it kept its watch, so the next
+ * edit put it back. The enumeration, so the fourth door is noticed when it is
+ * added:
+ *
+ * - `remove_scenario` — removes runtime *and* stored definition.
+ * - `load_scenario { scenario }` under an id a file already owns — replaces the
+ *   runtime definition inline; the console becomes the source of truth.
+ * - `scenario.definitions.delete` — removes only the stored row, leaving the
+ *   runtime scenario loaded, so `stillLoaded` passes and a reload re-persists
+ *   exactly what the operator deleted.
+ * - `scenario.definitions.replace` — the whole connector at once; see
+ *   {@link detachConnectorScenarioFiles}.
+ *
+ * `scenario.definitions.save` is an upsert and removes nothing.
+ * `cp.delete` and `state.reset` are handled at the registry and schema level
+ * instead, because they are about a charge point rather than one scenario.
+ *
+ * The watch and the row are dropped together and unconditionally: the row is a
+ * fact about stored state, not about `--watch`, so a daemon running without the
+ * flag still invalidates it.
+ */
+function detachScenarioFile(
+  fileReload: FileReloadManager | null | undefined,
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number,
+  scenarioId: string,
+): void {
+  fileReload?.unregisterScenario(cpId, connectorId, scenarioId);
+  forgetWatchedScenarioFile(database, cpId, connectorId, scenarioId);
+}
+
+/**
+ * Record where a control-plane load got its scenario, and watch the file when
+ * this daemon is watching (#314).
+ *
+ * The row goes in whether or not `--watch` is on, and that is the whole point:
+ * it is a fact about stored state, not about the feature that consumes it.
+ * Written only behind the flag, a `--state-db` daemon started without `--watch`
+ * recorded no origin, and a later restart *with* `--watch` had nothing to
+ * restore — the persisted scenario came back silently unwatched. This is the
+ * same rule as {@link detachScenarioFile}'s unconditional delete, in the other
+ * direction: both the writing and the clearing of the row are independent of
+ * the watcher, and only the in-memory watch is behind the flag.
+ *
+ * The startup flags do not come through here: they own their keys and
+ * deliberately store nothing — see `ScenarioFileRegistration.persist`.
+ */
+function attachScenarioFile(
+  fileReload: FileReloadManager | null | undefined,
+  database: Database | null | undefined,
+  registration: {
+    readonly filePath: string;
+    readonly cpId: string;
+    readonly connectorId: number;
+    readonly scenarioId: string;
+    readonly loadedText?: string | null;
+  },
+): void {
+  rememberWatchedScenarioFile(
+    database,
+    registration.cpId,
+    registration.connectorId,
+    registration.scenarioId,
+    // Resolved the same way `registerScenarioFile` resolves it, so the row a
+    // watcher writes and the row it reads back are the same string.
+    path.resolve(registration.filePath),
+  );
+  fileReload?.registerScenarioFile(registration);
+}
+
+/**
+ * The connector-wide twin of {@link detachScenarioFile}, for the upload that
+ * replaces a connector's whole definition set.
+ *
+ * A CP-level (`connectorId === null`) scope is deliberately not handled: a
+ * watch is only ever registered against a numeric connector, so no null-scoped
+ * row can exist for one to invalidate.
+ */
+function detachConnectorScenarioFiles(
+  fileReload: FileReloadManager | null | undefined,
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number,
+): void {
+  fileReload?.unregisterConnectorScenarios(cpId, connectorId);
+  forgetWatchedConnectorScenarioFiles(database, cpId, connectorId);
+}
+
 async function replaceConnectorScenarioDefinitions(
   deps: RuntimeSocketIoDeps,
   rawParams: unknown,
@@ -1169,6 +1286,17 @@ async function replaceConnectorScenarioDefinitions(
       definitions,
     ),
   );
+  // #314: the console has just become the source of truth for this connector's
+  // whole definition set. A file still watched behind one of these ids would
+  // overwrite the upload at its next edit.
+  if (params.data.connectorId !== null) {
+    detachConnectorScenarioFiles(
+      deps.fileReload,
+      deps.database,
+      params.data.cpId,
+      params.data.connectorId,
+    );
+  }
   deps.registryEvents?.emitScenarioDefinitionsChanged(
     params.data.cpId,
     params.data.connectorId,
@@ -1192,6 +1320,18 @@ async function deleteScenarioDefinition(
       params.data.definitionId,
     ),
   );
+  // #314: this deletes the stored row and leaves the runtime scenario loaded,
+  // so without dropping the watch the next edit of the file behind it would
+  // pass `stillLoaded`, reload, and persist the definition just deleted.
+  if (params.data.connectorId !== null) {
+    detachScenarioFile(
+      deps.fileReload,
+      deps.database,
+      params.data.cpId,
+      params.data.connectorId,
+      params.data.definitionId,
+    );
+  }
   await emitScenarioDefinitionsChanged(
     deps,
     params.data.cpId,
@@ -1419,6 +1559,12 @@ async function dispatchFacadeCpCommand(
   method: RpcMethod,
   cpId: string | undefined,
   rawParams: unknown,
+  /** Null unless the daemon runs with `--watch` (#314). */
+  fileReload: FileReloadManager | null = null,
+  /** The `--state-db`, when there is one. Separate from `fileReload` on
+   *  purpose: a `watched_scenario_files` row is a fact about stored state, so
+   *  invalidating it must not depend on this daemon happening to watch (#314). */
+  database: Database | null = null,
 ): Promise<FacadeDispatchResult> {
   const params = rawParamsAsRecord(rawParams);
 
@@ -1767,33 +1913,55 @@ async function dispatchFacadeCpCommand(
       const id = requireFacadeCpId(cpId, rawParams);
       const connectorId = requirePositiveInt(params, "connector");
       if (typeof params.file === "string") {
-        const parsed: unknown = JSON.parse(
-          fs.readFileSync(params.file, "utf-8"),
-        );
+        // Kept, not re-read: the reload baseline has to be the bytes this
+        // definition came from, or a write between here and the watch starting
+        // is recorded as already-seen and never applied (#314).
+        const loadedText = fs.readFileSync(params.file, "utf-8");
+        const parsed: unknown = JSON.parse(loadedText);
         if (!isScenarioDefinitionShape(parsed)) {
           throw new RpcFailure("invalid_params", "");
         }
         warnOnScenarioSchemaMismatch(params.file, parsed);
-        return handled(
-          await runFacadeOperation(() =>
-            chargePointService.loadScenario(id, connectorId, parsed),
-          ),
+        const loaded = await runFacadeOperation(() =>
+          chargePointService.loadScenario(id, connectorId, parsed),
         );
+        // #314: a scenario loaded *from a path* is watchable; the inline
+        // `params.scenario` branch below has no file behind it and is not.
+        attachScenarioFile(fileReload, database, {
+          filePath: params.file,
+          cpId: id,
+          connectorId,
+          scenarioId: loaded.scenarioId,
+          loadedText,
+        });
+        return handled(loaded);
       }
       if (params.scenario) {
         warnOnScenarioSchemaMismatch(
           "load_scenario params.scenario",
           params.scenario,
         );
-        return handled(
-          await runFacadeOperation(() =>
-            chargePointService.loadScenario(
-              id,
-              connectorId,
-              params.scenario as ScenarioDefinition,
-            ),
+        const loaded = await runFacadeOperation(() =>
+          chargePointService.loadScenario(
+            id,
+            connectorId,
+            params.scenario as ScenarioDefinition,
           ),
         );
+        // #314: an inline definition replaces whatever was under this id, file
+        // or not. Leaving an earlier `load_scenario { file }` watch in place
+        // would let the next edit of that file overwrite the definition the
+        // operator just installed by hand — and leaving its persisted row in
+        // place would let a later `--watch` restart do the same, which is why
+        // that goes whether or not this daemon is watching anything.
+        detachScenarioFile(
+          fileReload,
+          database,
+          id,
+          connectorId,
+          loaded.scenarioId,
+        );
+        return handled(loaded);
       }
       throw new Error("Either 'file' or 'scenario' parameter is required");
     }
@@ -1924,6 +2092,12 @@ async function dispatchFacadeCpCommand(
         chargePointService.removeScenario(id, connectorId, scenarioId),
       );
       const after = await chargePointService.listScenarios(id, connectorId);
+      // #314: the file behind a removed scenario stops being watched, or the
+      // next edit would re-create the scenario that was just deleted. The
+      // persisted row goes unconditionally — it is a fact about stored state,
+      // not about `--watch`, and a daemon running without the flag would
+      // otherwise leave it for a later watched restart to reattach.
+      detachScenarioFile(fileReload, database, id, connectorId, scenarioId);
       return handled({
         removed:
           before.some((scenario) => scenario.scenarioId === scenarioId) &&
@@ -1936,15 +2110,26 @@ async function dispatchFacadeCpCommand(
         params.strict === undefined
           ? undefined
           : requireBoolean(params, "strict");
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.runScenarioFile(
-            id,
-            requireString(params, "file"),
-            { connectorId: requirePositiveInt(params, "connector"), strict },
-          ),
-        ),
+      const filePath = requireString(params, "file");
+      const connectorId = requirePositiveInt(params, "connector");
+      let loadedText: string | undefined;
+      const started = await runFacadeOperation(() =>
+        chargePointService.runScenarioFile(id, filePath, {
+          connectorId,
+          strict,
+          onSourceText: (text) => {
+            loadedText = text;
+          },
+        }),
       );
+      attachScenarioFile(fileReload, database, {
+        filePath,
+        cpId: id,
+        connectorId,
+        scenarioId: started.scenarioId,
+        loadedText,
+      });
+      return handled(started);
     }
     case "run_scenario_template": {
       const id = requireFacadeCpId(cpId, rawParams);
@@ -2021,7 +2206,8 @@ async function captureSubscribeSnapshot(
   // those instead of doing the per-connector work and discarding the result.
   const wantsPerCp =
     scope !== CONFIG_EVENTS_SCOPE &&
-    scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE;
+    scope !== SCENARIO_DEFINITIONS_EVENTS_SCOPE &&
+    scope !== FILE_RELOAD_EVENTS_SCOPE;
   const snapshots = await chargePointService.listChargePoints();
 
   const perCp: Record<string, StatusWire> = {};
@@ -2253,6 +2439,7 @@ function isValidSubscribeScope(registry: CPRegistry, scope: string): boolean {
     scope === "registry" ||
     scope === CONFIG_EVENTS_SCOPE ||
     scope === SCENARIO_DEFINITIONS_EVENTS_SCOPE ||
+    scope === FILE_RELOAD_EVENTS_SCOPE ||
     registry.has(scope)
   );
 }

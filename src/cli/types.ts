@@ -34,6 +34,24 @@ export interface CLIOptions {
    * exposes fleet size and traffic shape.
    */
   readonly metricsNoAuth: boolean;
+  /**
+   * Server mode: re-read the idTag and scenario files this process loaded when
+   * they change on disk (#314). Off by default — a daemon that silently
+   * re-reads files under the operator is surprising, and the agent-driven
+   * workflows go through the control plane instead.
+   *
+   * **Refused**, not ignored, outside a server mode and alongside a client mode
+   * (`--send`, `--stop`, `--events`): the watcher lives in the daemon, so a
+   * flag that cannot take effect is an error.
+   *
+   * The two watched kinds behave differently on purpose. An **idTag pool
+   * applies live** — it is drawn once per session, so a transaction already
+   * under way keeps the tag it presented and only the next draw sees the new
+   * list. A **scenario reload is held** while the connector has an open
+   * transaction *or* a run of that scenario is in flight, and installed when
+   * that session ends.
+   */
+  readonly watch: boolean;
   readonly connectors: number;
   readonly jsonMode: boolean;
   readonly daemon: boolean;
@@ -150,11 +168,21 @@ export interface ChargePointInitOptions {
   readonly urlDistribution?: UrlDistribution;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
-   * `file` form is read once at creation, so what is stored and persisted is
-   * always the list itself — a file that changes later does not silently
-   * change a running charge point.
+   * `file` form is resolved at creation, so what is stored and persisted is
+   * always the list itself — a file that changes later does not change a
+   * running charge point unless the daemon was started with `--watch` (#314).
    */
   readonly idTags?: readonly string[];
+  /**
+   * The `idTagPool.file` this charge point's `idTags` were read from, when it
+   * came from a file rather than an inline list (#314).
+   *
+   * Persisted so a daemon restarted with `--watch` and `--state-db` can watch
+   * the same file again; without it a restored charge point would come back
+   * holding the tags but unwatched, which is the silent half-feature the flag
+   * exists to avoid.
+   */
+  readonly idTagFile?: string;
   readonly idTagDistribution?: IdTagDistribution;
   readonly connectors: number;
   readonly vendor: string;

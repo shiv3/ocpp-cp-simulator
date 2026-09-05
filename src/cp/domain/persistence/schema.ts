@@ -13,12 +13,28 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+
+-- #314: which file a scenario was loaded from, when it came from one over the
+-- control plane. The definition itself lives in \`scenarios\` and is restored
+-- either way; without this the *watch* was not, so a restarted --watch daemon
+-- came back holding a frozen snapshot of a file it believed it was watching --
+-- the exact failure \`charge_points.id_tag_file\` exists to prevent, on the other
+-- half of the feature. Daemon-only, and deliberately not a column on
+-- \`scenarios\`: a source path is meaningless to the browser services that share
+-- that table's repository.
+CREATE TABLE IF NOT EXISTS watched_scenario_files (
+  cp_id        TEXT NOT NULL,
+  connector_id INTEGER NOT NULL,
+  scenario_id  TEXT NOT NULL,
+  path         TEXT NOT NULL,
+  PRIMARY KEY (cp_id, connector_id, scenario_id)
 );
 
 CREATE TABLE IF NOT EXISTS scenarios (
@@ -113,10 +129,14 @@ CREATE TABLE IF NOT EXISTS charge_points (
   supervision_urls TEXT,
   url_distribution TEXT,
   -- Resolved idTags as a JSON array (#299), plus how the charge point picks
-  -- among them. Resolved at creation, so a \`file\` that changes later cannot
-  -- silently change a running charge point.
+  -- among them. Resolved at creation; a \`file\` that changes later only
+  -- changes a running charge point when the daemon runs with --watch (#314).
   id_tags TEXT,
   id_tag_distribution TEXT,
+  -- The \`idTagPool.file\` \`id_tags\` was read from, when it came from a file
+  -- (#314). Without it a restored charge point comes back with the tags but
+  -- with nothing for --watch to watch.
+  id_tag_file TEXT,
   connectors     INTEGER NOT NULL,
   vendor         TEXT NOT NULL,
   model          TEXT NOT NULL,
@@ -376,6 +396,30 @@ export function runMigrations(db: Database): void {
     if (!new Set(cols.map((c) => c.name)).has("auto_traffic")) {
       db.exec("ALTER TABLE connector_settings ADD COLUMN auto_traffic TEXT");
     }
+  }
+
+  // v10 → v11: file hot-reload (#314). The idTag pool's source path, so a
+  // daemon restarted with --watch can watch the same file again instead of
+  // coming back with the tags and no watch.
+  if (stored < 11) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("id_tag_file")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN id_tag_file TEXT");
+    }
+  }
+
+  // v11 → v12: file hot-reload (#314), second half. The scenario file a
+  // control-plane `load_scenario { file }` / `run_scenario_file` was loaded
+  // from, so its watch is re-established on restart. The startup flags
+  // (`--scenario`, `--scenario-template-file`) re-register by themselves
+  // because the bootstrap runs again; only the control-plane loads were lost.
+  if (stored < 12) {
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS watched_scenario_files (" +
+        "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
+        "scenario_id TEXT NOT NULL, path TEXT NOT NULL, " +
+        "PRIMARY KEY (cp_id, connector_id, scenario_id))",
+    );
   }
 
   // (Place future forward migrations here, gated on `stored < N`.)

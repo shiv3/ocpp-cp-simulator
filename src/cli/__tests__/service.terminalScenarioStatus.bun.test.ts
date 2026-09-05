@@ -154,6 +154,28 @@ describe("scenario_status keeps a terminal state after the run ends", () => {
     expect(terminal!.runId).toBe(service.getScenarioReport(1, id)!.runId);
   });
 
+  it("reports a terminal state after stop_all_scenarios too", async () => {
+    // The bulk path used to be a hand-copied variant of stopScenario that had
+    // lost the terminal-status freeze, so a successful bulk stop left this
+    // surface answering null (#314). Both paths now share one teardown.
+    const service = newService();
+    const first = service.loadScenario(1, blockingScenario("blocks-a"));
+    const second = service.loadScenario(1, blockingScenario("blocks-b"));
+    service.runScenario(1, first);
+    service.runScenario(1, second);
+    await new Promise((r) => setTimeout(r, 20));
+
+    service.stopAllScenarios(1);
+    await settle();
+
+    for (const id of [first, second]) {
+      const terminal = service.getScenarioStatus(1, id);
+      expect(terminal).not.toBeNull();
+      expect(["completed", "error"]).toContain(terminal!.state);
+      expect(terminal!.runId).toBeTruthy();
+    }
+  });
+
   it("replaces the terminal state with live status on a re-run", async () => {
     const service = newService();
     const id = service.loadScenario(1, completingScenario());

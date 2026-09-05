@@ -1911,6 +1911,13 @@ export class RemoteChargePointService implements ChargePointService {
       return;
     }
 
+    if (envelope.kind === "file-reload") {
+      // #314: a daemon-side `--watch` reload. The browser has no file view to
+      // update, and the fall-through below would otherwise hand this envelope
+      // to the registry subscriber, whose shape it is not.
+      return;
+    }
+
     const registry = this.registrySub;
     if (!registry) return;
     if (!registry.ready) {

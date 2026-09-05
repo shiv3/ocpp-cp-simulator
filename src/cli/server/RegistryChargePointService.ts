@@ -582,7 +582,13 @@ export class RegistryChargePointService implements ChargePointService {
   ): Promise<{ scenarioId: string }> {
     const service = this.requireService(id);
     const connectorId = opts.connectorId ?? 1;
-    const parsed: unknown = JSON.parse(fs.readFileSync(path, "utf-8"));
+    const sourceText = fs.readFileSync(path, "utf-8");
+    // `--watch` needs the exact bytes this call read as its reload baseline
+    // (#314). Handed over, never returned: as a result field it reached
+    // standalone JSON mode's stdout, because only the socket.io dispatcher
+    // knew to strip it.
+    opts.onSourceText?.(sourceText);
+    const parsed: unknown = JSON.parse(sourceText);
     if (!isScenarioDefinitionShape(parsed)) {
       throw new Error(`file does not contain a scenario definition: ${path}`);
     }
@@ -593,7 +599,32 @@ export class RegistryChargePointService implements ChargePointService {
         `[RegistryChargePointService] "${path}" does not match schema/scenario.schema.json (loading anyway): ${schemaResult.errors.slice(0, 5).join("; ")}`,
       );
     }
-    const scenarioId = service.loadScenario(connectorId, parsed);
+    // The auto-start gate is suppressed here on purpose (#314). Left on, a file
+    // with the usual connect-triggered start node is already running by the time
+    // the load returns whenever the charge point is Available — the common case
+    // — and the explicit start below then either threw "already running",
+    // failing an RPC whose scenario was in fact loaded and running, or (once
+    // that throw was skipped) silently dropped the caller's `strict` override
+    // and reported success for a run this call never began. Neither is
+    // distinguishable by the caller. Starting it here instead keeps the
+    // requested options, and leaves "this id was already running before the
+    // call" the honest error it has always been.
+    // Refused *before* anything is installed, not after. `runScenario` has
+    // always thrown on an id that is already running, but by then
+    // `loadScenario` had replaced and persisted the definition — and the
+    // dispatcher registers the new source file only once this method returns,
+    // so a failed call left the new definition live behind the *old* file's
+    // watch, and the next edit to that stale file quietly overwrote it. This
+    // method performs a multi-step mutation with no transaction around it, so
+    // the fix is to have no partial state to undo rather than to compensate for
+    // one. The message is the one `runScenario` would have raised, so a caller
+    // sees no change beyond the side effect disappearing (#314).
+    if (service.isScenarioRunning(parsed.id)) {
+      throw new Error(`Scenario ${parsed.id} is already running`);
+    }
+    const scenarioId = service.loadScenario(connectorId, parsed, {
+      autoStart: false,
+    });
     if (opts.strict === undefined) {
       service.runScenario(connectorId, scenarioId);
     } else {
@@ -786,6 +817,10 @@ function toInitOptions(
     // there is no `existing` fallback — an update that drops `idTagPool`
     // means the charge point no longer has one.
     idTags: params.idTags,
+    // #314: the path travels with the list. Dropping it here is exactly the
+    // failure #299 shipped with — the create reports success and the feature
+    // (here, the watch) is inert.
+    idTagFile: params.idTagFile,
     idTagDistribution: params.idTagDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
     soapCallbackUrl: params.soapCallbackUrl ?? existing?.soapCallbackUrl,

@@ -14,6 +14,8 @@
  * name but no id, which could be neither run nor removed.
  */
 
+import { SCENARIO_ID_MAX } from "../protocol/limits";
+
 /** Fields the schema marks required, in the order they are reported. */
 const REQUIRED_FIELDS = ["id", "name", "targetType", "nodes", "edges"] as const;
 
@@ -54,6 +56,20 @@ export function validateLoadableScenario(
   if (def.id !== undefined && def.id !== null) {
     if (typeof def.id !== "string" || def.id.trim() === "") {
       errors.push('scenario "id" must be a non-empty string');
+    } else if (def.id.length > SCENARIO_ID_MAX) {
+      // The gate is here, at the one point every load passes through, rather
+      // than at each reader. A definition arriving as an RPC *object* is
+      // already bounded by `SCENARIO_MAX_BYTES`, so its id cannot reach this —
+      // but one read from a file goes through no object schema at all, and an
+      // id past this length loaded happily and then made every `file-reload`
+      // event naming it fail envelope validation, where the failure is only
+      // logged. The scenario ran; nobody was told anything about it. Bounding
+      // the loader means every scenario in the registry satisfies the same
+      // invariant however it arrived, which is what the event producer is
+      // entitled to assume (#314).
+      errors.push(
+        `scenario "id" must be at most ${SCENARIO_ID_MAX} characters`,
+      );
     }
   }
 

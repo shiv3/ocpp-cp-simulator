@@ -111,6 +111,10 @@ export interface CreateChargePointParams {
    * with no pool at all.
    */
   idTags?: readonly string[];
+  /** Where `idTags` was read from, when it came from `idTagPool.file` (#314).
+   *  Declared here for the same reason `idTags` is: the facade is where a
+   *  create parameter goes to be silently dropped. */
+  idTagFile?: string;
   idTagDistribution?: IdTagDistribution;
   centralSystemUrl?: string;
   soapCallbackUrl?: string;
@@ -268,6 +272,17 @@ export interface ScenarioRunOptions {
   connectorId?: number;
   evSettings?: Partial<EVSettings>;
   strict?: boolean;
+  /**
+   * Handed the exact text a scenario file was read from, for `--watch`'s reload
+   * baseline (#314).
+   *
+   * A callback rather than a field on the result, deliberately. Returning it
+   * meant every dispatcher had to remember to strip it: the socket.io one did,
+   * and the standalone JSON one printed the whole scenario file to stdout while
+   * breaking the documented `{ scenarioId }` result shape. A value that is never
+   * part of the result cannot be forgotten by a second transport.
+   */
+  onSourceText?: (text: string) => void;
 }
 
 export interface ChargePointSummary {

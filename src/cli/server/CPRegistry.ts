@@ -1,6 +1,7 @@
 import * as fs from "fs";
 
 import { CLIChargePointService } from "../service";
+import type { SessionSettledInfo } from "../service";
 import type { ChargePointInitOptions } from "../types";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
@@ -12,6 +13,7 @@ import type {
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
+import { forgetWatchedChargePointFiles } from "./watchedScenarioFiles";
 
 export type RegistryMembershipChange = "added" | "removed";
 
@@ -23,6 +25,13 @@ export interface RegistryMembershipEvent {
 
 export type RegistryMembershipSink = (event: RegistryMembershipEvent) => void;
 
+/** #314: "something that could hold a reload back on this charge point has
+ *  actually cleared" — a scenario run wound up, or a transaction was dropped. */
+export type SessionSettledSink = (
+  cpId: string,
+  info: SessionSettledInfo,
+) => void;
+
 interface ChargePointRow {
   cp_id: string;
   ws_url: string;
@@ -30,6 +39,7 @@ interface ChargePointRow {
   url_distribution: string | null;
   id_tags: string | null;
   id_tag_distribution: string | null;
+  id_tag_file: string | null;
   connectors: number;
   vendor: string;
   model: string;
@@ -56,6 +66,13 @@ export class CPRegistry {
   private readonly services = new Map<string, CLIChargePointService>();
   private readonly unsubscribes = new Map<string, () => void>();
   private readonly registrySinks = new Set<RegistryMembershipSink>();
+  /** #314: fired whenever the set of live charge points, or the init options
+   *  behind one, changes. `--watch` uses it to keep its watched-file set in
+   *  step without every mutation path having to know the watcher exists. */
+  private readonly initChangeSinks = new Set<() => void>();
+  /** #314: fan-in of every live service's `onSessionSettled`, so a fleet-wide
+   *  listener subscribes once instead of tracking memberships. */
+  private readonly runSettledSinks = new Set<SessionSettledSink>();
   private networkSimManager: NetworkSimManager | null = null;
 
   constructor(
@@ -110,11 +127,23 @@ export class CPRegistry {
    * Idempotent: rows with cp_ids we've already instantiated are skipped.
    * Returns the list of restored cpIds for logging.
    */
-  restoreFromDatabase(): string[] {
+  /**
+   * Re-create every persisted charge point.
+   *
+   * `opts.connect` defaults to true, which is what every caller but the daemon
+   * bootstrap wants. The bootstrap passes `false` and dials separately with
+   * {@link connectRestored}, because a restored charge point's persisted
+   * connect-triggered scenarios auto-start as soon as its boot gate opens — and
+   * if `--watch` has not re-established that scenario's watch by then, the
+   * charge point runs the graph as it was when the daemon stopped rather than
+   * as the file reads now, with the reload deferred behind the stale run it
+   * just started (#314).
+   */
+  restoreFromDatabase(opts: { connect?: boolean } = {}): string[] {
     if (!this.database) return [];
     const rows = this.database.all<ChargePointRow>(
       "SELECT cp_id, ws_url, supervision_urls, url_distribution, " +
-        "id_tags, id_tag_distribution, " +
+        "id_tags, id_tag_distribution, id_tag_file, " +
         "connectors, vendor, model, ocpp_version, " +
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
@@ -146,6 +175,9 @@ export class CPRegistry {
             }
           : {}),
         ...(idTags && idTags.length > 0 ? { idTags } : {}),
+        // #314: the source path comes back too, so a daemon restarted with
+        // --watch re-watches the file instead of holding a snapshot of it.
+        ...(row.id_tag_file ? { idTagFile: row.id_tag_file } : {}),
         ...(row.id_tag_distribution
           ? {
               idTagDistribution: row.id_tag_distribution as NonNullable<
@@ -223,20 +255,36 @@ export class CPRegistry {
       if (this.networkSimManager) {
         this.networkSimManager.onCpCreated(row.cp_id);
       }
-      // Kick the WebSocket open so BootNotification + StatusNotification
-      // fly to the CSMS automatically. Fire-and-forget — connect() is
-      // synchronous from JS's POV (returns immediately, opens in
-      // background), and we don't want one slow CSMS to block restore of
-      // the others.
-      svc.connect().catch((err) => {
-        console.error(
-          `[CPRegistry] auto-connect failed for restored CP "${row.cp_id}":`,
-          err,
-        );
-      });
       restored.push(row.cp_id);
     }
+    // Kick the WebSockets open so BootNotification + StatusNotification fly to
+    // the CSMS automatically. Fire-and-forget — connect() returns immediately
+    // and opens in the background, and we don't want one slow CSMS to block the
+    // others. Deferred entirely when the caller says so, so it can put work
+    // between rebuilding the fleet and letting it dial.
+    if (opts.connect !== false) this.connectRestored(restored);
     return restored;
+  }
+
+  /**
+   * Dial the charge points {@link restoreFromDatabase} rebuilt.
+   *
+   * Split out so the daemon can re-establish file watches first: the moment a
+   * restored charge point's boot gate opens, a persisted connect-triggered
+   * scenario starts, and it must start from the file as it reads now (#314).
+   */
+  connectRestored(cpIds: readonly string[]): void {
+    for (const cpId of cpIds) {
+      this.services
+        .get(cpId)
+        ?.connect()
+        .catch((err) => {
+          console.error(
+            `[CPRegistry] auto-connect failed for restored CP "${cpId}":`,
+            err,
+          );
+        });
+    }
   }
 
   has(cpId: string): boolean {
@@ -259,6 +307,87 @@ export class CPRegistry {
   }
 
   /**
+   * Subscribe to "the init options of some charge point changed" (#314).
+   *
+   * Deliberately separate from {@link onRegistryMembership}, which only ever
+   * reports `added` / `removed`: `update()` replaces a charge point's whole
+   * init block — including `idTagFile` — without a membership change, so a
+   * watcher driven by membership alone would keep watching the old file and
+   * report success. The handler takes no argument; it is a "re-read me" ping,
+   * and the subscriber walks the registry itself.
+   */
+  onInitChange(handler: () => void): () => void {
+    this.initChangeSinks.add(handler);
+    return () => {
+      this.initChangeSinks.delete(handler);
+    };
+  }
+
+  /**
+   * Subscribe to "a reload gate has opened" across the whole fleet (#314).
+   *
+   * The bus's lifecycle events all announce the end of something from inside
+   * the code that is ending it, while the state they announce is still set —
+   * `scenario_completed` with the executor still registered,
+   * `transaction_stopped` before the transaction is cleared — so none of them
+   * can be used to decide that a charge point is free to be mutated. This
+   * forwards each service's post-clear hook instead.
+   */
+  onSessionSettled(handler: SessionSettledSink): () => void {
+    this.runSettledSinks.add(handler);
+    return () => {
+      this.runSettledSinks.delete(handler);
+    };
+  }
+
+  private notifySessionSettled(cpId: string, info: SessionSettledInfo): void {
+    for (const sink of this.runSettledSinks) {
+      try {
+        sink(cpId, info);
+      } catch (err) {
+        console.error(
+          `[CPRegistry] session-settled sink error for "${cpId}":`,
+          err,
+        );
+      }
+    }
+  }
+
+  /**
+   * Swap the idTag pool of a live charge point, and re-persist it (#314).
+   *
+   * Safe to apply mid-transaction, unlike a scenario reload: the pool is drawn
+   * from once per session, so a transaction already under way keeps the tag it
+   * started with and only the next draw sees the new list.
+   *
+   * Returns `false` when the charge point is gone or was created without a
+   * pool at all — there is nothing to replace, and inventing one here would
+   * make a `--watch` daemon behave differently from a plain `cp.create`.
+   */
+  applyIdTagReload(cpId: string, tags: readonly string[]): boolean {
+    const svc = this.services.get(cpId);
+    if (!svc) return false;
+    // Asked without mutating, so the write below can come first.
+    if (!svc.canReplaceIdTags(tags)) return false;
+    // Persisted *before* the live pool is touched, deliberately (#314). The
+    // caller reports the outcome of this call, so a write that throws
+    // (SQLITE_BUSY, a full disk) must leave the daemon exactly as it was —
+    // otherwise `rejected` is announced while the new tags are in force and a
+    // restart quietly reverts them: the event, the running daemon and the
+    // stored state would all disagree.
+    //
+    // Persist-first rather than mutate-then-roll-back on purpose. Both keep the
+    // two in step at rest, but a rollback exposes a window in which a
+    // concurrent draw can present a tag that is not durable; ordering it this
+    // way means no reader ever sees one.
+    this.database?.run("UPDATE charge_points SET id_tags = ? WHERE cp_id = ?", [
+      JSON.stringify(tags),
+      cpId,
+    ]);
+    return svc.replaceIdTags(tags);
+  }
+
+  /**
    * Attach an already-constructed single-CP service to the registry without
    * persisting, preparing, or seeding it. Standalone CLI mode uses this to
    * preserve the legacy `CLIChargePointService.fromOptions` bootstrap while
@@ -270,8 +399,15 @@ export class CPRegistry {
       throw new Error(`cpId already exists: ${init.cpId}`);
     }
     const unsub = service.onEvent((evt) => this.bus.publish(init.cpId, evt));
+    const unsubSettled = service.onSessionSettled((info) =>
+      this.notifySessionSettled(init.cpId, info),
+    );
     this.services.set(init.cpId, service);
-    this.unsubscribes.set(init.cpId, unsub);
+    this.unsubscribes.set(init.cpId, () => {
+      unsub();
+      unsubSettled();
+    });
+    this.notifyInitChange();
     this.notifyRegistryMembership({
       change: "added",
       cpId: init.cpId,
@@ -366,6 +502,11 @@ export class CPRegistry {
         );
       }
     }
+    // #314: `instantiate` already pinged, but that was *before* the scenarios
+    // came back, so a subscriber that inspects them (the `--watch` drain) saw a
+    // charge point with none. Ping again now the rebuild is actually complete;
+    // `syncFromRegistry` is idempotent, so the extra ping costs nothing.
+    this.notifyInitChange();
     return svc;
   }
 
@@ -375,8 +516,17 @@ export class CPRegistry {
   private instantiate(init: ChargePointInitOptions): CLIChargePointService {
     const svc = new CLIChargePointService(init, this.database);
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
+    const unsubSettled = svc.onSessionSettled((info) =>
+      this.notifySessionSettled(init.cpId, info),
+    );
     this.services.set(init.cpId, svc);
-    this.unsubscribes.set(init.cpId, unsub);
+    this.unsubscribes.set(init.cpId, () => {
+      unsub();
+      unsubSettled();
+    });
+    // The single choke point for "a service now exists under this init" —
+    // create(), update() and restoreFromDatabase() all land here.
+    this.notifyInitChange();
     return svc;
   }
 
@@ -433,19 +583,20 @@ export class CPRegistry {
     this.database.run(
       "INSERT INTO charge_points " +
         "(cp_id, ws_url, supervision_urls, url_distribution, " +
-        "id_tags, id_tag_distribution, " +
+        "id_tags, id_tag_distribution, id_tag_file, " +
         "connectors, vendor, model, ocpp_version, " +
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
         "url_distribution = excluded.url_distribution, " +
         "id_tags = excluded.id_tags, " +
         "id_tag_distribution = excluded.id_tag_distribution, " +
+        "id_tag_file = excluded.id_tag_file, " +
         "connectors = excluded.connectors, " +
         "vendor = excluded.vendor, model = excluded.model, " +
         "ocpp_version = excluded.ocpp_version, " +
@@ -466,6 +617,7 @@ export class CPRegistry {
         init.urlDistribution ?? null,
         init.idTags ? JSON.stringify(init.idTags) : null,
         init.idTagDistribution ?? null,
+        init.idTagFile ?? null,
         init.connectors,
         init.vendor,
         init.model,
@@ -558,6 +710,9 @@ export class CPRegistry {
     // schema, so the cleanup is explicit.
     this.database.run("DELETE FROM scenarios WHERE cp_id = ?", [cpId]);
     this.database.run("DELETE FROM connector_runtime WHERE cp_id = ?", [cpId]);
+    // #314: the watch rows are stored state like the rest, so they go with the
+    // charge point whether or not this daemon was started with `--watch`.
+    forgetWatchedChargePointFiles(this.database, cpId);
   }
 
   remove(cpId: string, opts: { notify?: boolean } = {}): boolean {
@@ -583,6 +738,7 @@ export class CPRegistry {
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.
     this.persistRemove(cpId);
+    this.notifyInitChange();
     return true;
   }
 
@@ -598,6 +754,17 @@ export class CPRegistry {
     this.services.clear();
     for (const [, svc] of entries) {
       svc.cleanup();
+    }
+    this.notifyInitChange();
+  }
+
+  private notifyInitChange(): void {
+    for (const sink of this.initChangeSinks) {
+      try {
+        sink();
+      } catch {
+        process.stderr.write("[CPRegistry] init change sink error\n");
+      }
     }
   }
 

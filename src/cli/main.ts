@@ -166,6 +166,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpIdPattern: string | null = null;
   let metrics = false;
   let metricsNoAuth = false;
+  let watch = false;
   let connectors = 1;
   let jsonMode = false;
   let daemon = false;
@@ -257,6 +258,9 @@ export function parseArgs(argv: string[]): CLIOptions {
       case "--metrics-no-auth":
         metrics = true;
         metricsNoAuth = true;
+        break;
+      case "--watch":
+        watch = true;
         break;
       case "--json":
         jsonMode = true;
@@ -648,6 +652,31 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  if (watch && isClientMode) {
+    // Checked BEFORE the server-mode test, and separately from it, because
+    // `isServerMode` is not the whole question (#314). `--send`, `--stop` and
+    // `--events` return through the client path before any server is started,
+    // and `--http-port` in their company names the daemon to talk to rather
+    // than a port to listen on — so `--events --http-port 9000 --watch`
+    // satisfied a guard that looks only at server flags and then ignored the
+    // flag anyway, which is worse than no guard: it advertises a protection it
+    // does not provide.
+    process.stderr.write(
+      "Error: --watch cannot be combined with a client mode (--send, --stop or --events); " +
+        "it configures the daemon being talked to, not the client talking to it\n",
+    );
+    process.exit(1);
+  }
+  if (watch && !isServerMode) {
+    // Same reasoning as --cp-count above: the file watcher lives in the
+    // daemon, so outside a server mode the flag would be accepted and then do
+    // nothing at all. #295's review settled that a flag which cannot take
+    // effect is an error rather than silence.
+    process.stderr.write(
+      "Error: --watch needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
 
   if (isClientMode) {
     if ((send !== null || events) && !cpId && !allEvents) {
@@ -799,6 +828,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpIdPattern,
     metrics,
     metricsNoAuth,
+    watch,
     connectors,
     jsonMode,
     daemon,
@@ -858,6 +888,7 @@ Server modes (HTTP/WebSocket, multi-CP):
   --daemon [--cp-id X --ws-url Y]                  Background TCP server (127.0.0.1:${DEFAULT_HTTP_PORT})
   --cp-count N [--cp-id-pattern CP{n:03}]          Bootstrap N charge points instead of one
   --metrics [--metrics-no-auth]                    Serve Prometheus text exposition at GET /metrics
+  --watch                                          Re-read loaded idTag and scenario files when they change
   --daemon --http-port P [--cp-id ...]             Background TCP server on port P
   --http-port P [--cp-id ...]                      Foreground TCP server
 
@@ -1008,6 +1039,17 @@ Options:
                            together with --health-path /metrics.
   --metrics-no-auth        Implies --metrics and serves it outside the
                            Basic Auth gate. Trusted networks only.
+  --watch                  Server mode: re-read the idTag and scenario files
+                           this daemon loaded when they change on disk,
+                           debounced. A parse failure keeps the previous good
+                           copy. An idTag pool applies live -- it is drawn once
+                           per session, so an open transaction keeps the tag it
+                           presented and the next draw sees the new list. A
+                           scenario reload is held while that connector has an
+                           open transaction or a run of it is in flight, and
+                           applied when that session ends. Off by default;
+                           refused outside a server mode and alongside
+                           --send/--stop/--events.
   --soap-callback-url <url>
                            SOAP ChargePointService callback URL for OCPP 1.2, 1.5,
                            or 1.6S. Required for SOAP versions unless
@@ -1245,6 +1287,7 @@ async function main(): Promise<void> {
       soapPublicBaseUrl: options.soapPublicBaseUrl,
       metrics: options.metrics,
       metricsNoAuth: options.metricsNoAuth,
+      watch: options.watch,
       autoConnect: !!options.cpId,
       startupScenario: options.cpId
         ? {

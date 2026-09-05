@@ -71,6 +71,7 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--cp-id-pattern <tpl>`             | `<cp-id>{n:03}`              | Id template used with `--cp-count`. `{n}` is the index, `{n:03}` zero-pads it. The fleet registers before it dials, then connects 8 at a time.                                                                                                                                           |
 | `--metrics`                         | off                          | Serve `GET /metrics` (Prometheus text exposition). Off by default; the path 404s without it. See [Metrics](#metrics).                                                                                                                                                                    |
 | `--metrics-no-auth`                 | off                          | Implies `--metrics` and serves it outside the Basic Auth gate. Trusted networks only; exempts nothing else.                                                                                                                                                                              |
+| `--watch`                           | off                          | Re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. Off by default; **refused outside a server mode** (`--daemon`, `--http-port`, `--web-console`) rather than accepted and ignored. See [File hot-reload](#file-hot-reload) (#314).            |
 | `--unsafe-remote`                   | -                            | Allows a non-loopback daemon bind without web-console Basic Auth. Use only on trusted networks or when another boundary handles access.                                                                                                                                                  |
 | `--web-console [<port>]`            | -                            | Serve the bundled browser UI alongside health and Socket.IO. Without a port, shares `--http-port`; with a port, serves the UI on that listener.                                                                                                                                          |
 | `--web-console-dist <dir>`          | -                            | Serve the console from this directory instead of searching for a bundled `dist/`. Must contain `index.html`; a path that does not is a startup error, not a fallback. The [desktop app](desktop-app.md#how-the-sidecar-finds-the-web-console) passes its Tauri resource dir here (#319). |
@@ -209,6 +210,307 @@ image is published on every push to `main` / version tag at
 `--http-host 0.0.0.0 --unsafe-remote --web-console` pinned in its entrypoint —
 see [Docker image](docker-image.md).
 
+## File hot-reload
+
+`--watch` (#314) makes the daemon re-read the files it loaded when they change,
+so editing a file by hand does not mean deleting and recreating a charge point.
+It is **off by default**: a daemon that silently re-reads files under the
+operator is surprising, and the agent-driven workflows this project is built
+around go through the [control plane](../concepts/control-plane.md), where there
+is nothing on disk to re-read. `--watch` serves the human editing a file.
+
+The watcher lives in the daemon, so `--watch` **is refused outside a server
+mode** (`--daemon`, `--http-port`, `--web-console`) rather than parsed and then
+ignored — the same rule `--cp-count` follows (#295). It is also **refused
+alongside a client mode** (`--send`, `--stop`, `--events`), even with a server
+flag present: those return through the client path before any server starts,
+and `--http-port` in their company names the daemon to talk to rather than a
+port to listen on, so `--events --http-port 9000 --watch` would otherwise pass a
+server-flag-only check and still be ignored.
+
+What is watched — and only these, because these are the only paths the daemon
+reads and then keeps a copy of:
+
+| File                               | Reached by                                                                                            | What a reload does                                                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `idTagPool.file` on a charge point | `cp.create` / `cp.update` / `cp.create_many`, and a `--state-db` restore of any of them               | Replaces the pool **live** on every charge point that was created from that path. The next session draws the new tags. |
+| A scenario file                    | `--scenario`, `--scenario-template-file`, and the `load_scenario { file }` / `run_scenario_file` RPCs | Replaces the definition **under the same scenario id**, unless the connector is mid-session — see the rule below.      |
+
+The rules, in the order they bite:
+
+- **Debounced.** Editors save in bursts — write a temp file, rename it over the
+  target, touch the mtime — so an undebounced watch fires two or three times per
+  save and can read a truncated intermediate file. The watch waits 200 ms after
+  the last event, then reads once. Identical bytes are not a reload and produce
+  no event.
+- **A malformed file never lands, and `rejected` is true of everything.** The
+  reload path applies exactly the checks the load path applies, and an idTag
+  pool is written to `--state-db` **before** the live pool is touched — so a
+  write that fails leaves the daemon exactly as it was, and the event, the
+  running daemon and the stored state cannot disagree. (Persist-first rather
+  than mutate-then-roll-back: a rollback would expose a window in which a
+  concurrent draw presents a tag that is not durable.) A file that fails them is
+  logged, reported as `rejected`, and the previous good copy stays in place — a half-saved file
+  never leaves a charge point with half a configuration. A reload the control
+  plane could not announce is refused the same way and for the same reason:
+  applying it would leave every subscriber on the previous graph with nothing to
+  say so. What is checked is the **resulting `scenario-definitions-changed`
+  snapshot**, not the edited file — that envelope carries every definition on the
+  connector, capped at 1 000 entries of at most 256 KiB serialized each, so an
+  oversized _sibling_ scenario, or a connector already holding more scenarios
+  than fit, refuses the edit even when the edited file is small. The rejection
+  names the scenario id at fault.
+- **A reload never mutates a charge point mid-session.** A scenario reload for a
+  connector with an open transaction, or for a scenario whose run is in flight,
+  is _held_ — not dropped — and installed when that session ends. An in-flight
+  transaction therefore always runs to completion on the values it started with.
+  A held reload that is refused when it finally drains — a sibling scenario grew
+  past the envelope cap while the session was open, say — clears its baseline
+  with it, so saving those same bytes again is judged afresh rather than
+  dismissed as unchanged. `lastText` names the bytes the daemon took
+  responsibility for; a rejection never advances it and a failed drain clears
+  it.
+  A held definition is applied when the transaction stops **or when the run's
+  cleanup completes**, whichever released the gate — whether the run reached the
+  end of its graph, errored, or was stopped by hand with `stop_scenario`. The
+  A held definition is never installed from inside the call that released it —
+  not from a teardown whose own gate has already opened, and not from a registry
+  mutation. Both drain triggers defer to a later microtask, so the enclosing
+  synchronous work always finishes first. "The gate is clear" is not a
+  sufficient condition, because installing a definition can auto-start a run
+  that snapshots connector state the gate says nothing about. There are exactly
+  two triggers: the settled hook, which fires where a gate actually opens, and
+  the registry sync, which fires on any change to a charge point's init options
+  because a `cp.update` rebuild takes the old service's lifecycle handlers with
+  it and nothing else would retry. The registry ping itself stays synchronous —
+  its subscriber must see the registry as the mutation left it, and the file
+  watches it establishes must not be delayed — so only the drain at the end of
+  it is deferred.
+  The daemon waits for the blocking state to actually clear, never for the
+  lifecycle event that announces it: every such event on the control plane is
+  published from inside the code that is ending the thing, while the state it
+  announces is still set — `scenario_completed` with the run's executor still
+  registered, `transaction_stopped` and `Finishing` several statements before
+  the transaction is cleared. A held reload is therefore released from the three
+  points where a gate genuinely opens (a run's cleanup, a connector's
+  transaction being dropped, and `reset_scenario`), which is why it lands even
+  with `set_auto_reset_to_available` off, where no later `Available` status
+  would arrive to retry on. A `cp.update` that rebuilds the charge point
+  releases it too: the rebuild ends the session, and the held definition is
+  applied to the replacement once its scenarios are back.
+  An idTag pool is exempt by construction: it is drawn from once per session, so
+  the transaction under way keeps the tag it presented at StartTransaction and
+  only the next draw sees the new list.
+- **Removing or replacing a scenario drops its watch.** Every path that takes a
+  definition away drops it, and they are enumerated in one place in the code so
+  a new one is noticed: `remove_scenario` (runtime and stored definition);
+  a `load_scenario` that installs an inline definition under the same id;
+  `scenario.definitions.delete`, which removes only the stored row and leaves
+  the runtime scenario loaded — so without this the next edit would reload and
+  persist exactly what was deleted; and a `scenario.definitions.replace`
+  upload, which makes the console the source of truth for that connector's
+  whole set. `scenario.definitions.save` is an upsert and removes nothing;
+  `cp.delete` and `state.reset` are handled at the registry and schema level
+  because they are about a charge point rather than one scenario. Without that the file would stay
+  authoritative and the next edit would re-create a scenario the operator
+  deleted, or overwrite the definition they had just uploaded. The reload path
+  checks as well: a scenario the charge point no longer holds is **never
+  re-created** by an edit, whichever path removed it.
+- **A scenario keeps the connector it was loaded onto, and the id it was loaded
+  under.** If the edited file's own `id` changed, it is ignored. Honouring it
+  would load a _second_ scenario and leave the first one in place under the old
+  definition. The **target** follows one of two rules, and the difference
+  between them is deliberate:
+  - A file behind a **startup flag** has its `targetType` / `targetId`
+    _re-derived_ on every reload. `--scenario` fanned out across connectors
+    keeps its independent copies, and a single-connector one repointed by hand
+    is rewritten back onto the connector it is registered for rather than left
+    waiting on one it is not attached to.
+  - A file behind **`load_scenario { file }` or `run_scenario_file`** has its
+    target _pinned_ to what the load installed. Nothing re-derives it on that
+    path, so an edited target was otherwise accepted while the scenario stayed
+    mapped to its registered connector — the executor then derived expectations
+    from the edited `targetId` and waited on a connector its runtime callbacks
+    were not operating on. A reload replaces a definition; it never moves a
+    scenario. Pinning copies what is there, including a **missing**
+    `targetId`: a `chargePoint`-wide scenario has none on purpose, and filling
+    it in from the registration would advertise connector-specific constraints
+    for a definition that deliberately has none.
+- **Blueprints are not watched, and do not need to be.** A blueprint is stored
+  through `blueprint.save` and lives in the `blueprints` table, not in a file
+  (#297 declined a watched blueprint file deliberately, so the control plane
+  stays the single source of truth). The file a blueprint can _reference_ — its
+  `params.idTagPool.file` — is re-read at every `cp.create_many` instantiation,
+  which is why editing it affects charge points created from the blueprint
+  **afterwards** and never retroactively: charge points instantiated from a
+  blueprint are independent copies, not live views of it.
+- **Watching degrades, it never fails to start.** `fs.watch` is unreliable on
+  network mounts and some container filesystems. When it cannot be established
+  the daemon logs one line saying watching is unavailable and carries on
+  unwatched, rather than refusing to start over a convenience. Degraded is
+  never _worse_ than unwatched: a charge point being reconciled is measured
+  against the **file on disk**, never against the bytes of the last reload that
+  landed. When the two disagree the file is newer — the watch may be
+  unavailable, or its debounce may simply not have run — so a charge point
+  created from a pool that has since changed keeps the tags its own `cp.create`
+  read, instead of having them overwritten and persisted with an older list that
+  nothing would ever re-read.
+- **A ConfigMap-mounted file reloads like any other.** On a Kubernetes projected
+  volume the tracked files are stable symlinks and an update swaps the
+  directory's `..data` symlink, so the filesystem event names `..data` and never
+  the file. A **rename naming something not tracked re-checks every tracked file
+  in that directory**, which covers that rotation and, locally, an editor that
+  writes a temp file and renames it into place. A `change` on an unrelated
+  neighbour is still ignored, so a shared directory costs nothing. The re-check
+  is debounced and content-compared, so a file that did not change produces no
+  event.
+- **Known limitation: a watch lives as long as the directory it was opened on.**
+  `fs.watch` binds to an inode. If the _directory_ holding a watched file is
+  itself replaced — deleted and recreated, or a bind-mount swapped underneath —
+  the watcher stays open, reports no error, and delivers nothing. It is the one
+  remaining shape in which watching looks healthy and is not, and it cannot be
+  distinguished from a quiet file without polling. Two deployments meet it: a
+  `subPath` ConfigMap mount, where Kubernetes does not propagate updates at all
+  and there is nothing to watch in the first place, and a re-created mount. Mount
+  the whole volume rather than a `subPath` and the projected-volume rotation
+  above works.
+
+Every reload pushes a `file-reload` event on the control plane carrying
+`target`, `path`, `cpId`, `connectorId`, `scenarioId` and an `outcome` of
+`applied`, `deferred` or `rejected` — see
+[Control plane → Event push and rooms](../concepts/control-plane.md#event-push-and-rooms).
+A **scenario** reload additionally pushes the ordinary
+`scenario-definitions-changed` update for that connector, because the console's
+scenario editor subscribes to the `scenario-definitions` scope and would
+otherwise keep showing the graph the daemon had stopped executing. Those
+definitions are the connector's live runtime set, not a read-back of the
+scenario repository — a daemon without `--state-db` has no repository content,
+and the persist behind a reload is a background write. The daemon also logs each
+reload to stderr with a `[watch]` prefix. Every string in that event is clamped to the
+envelope's own bound as the event is built, not only checked by the schema: a
+field that fails validation takes the whole push with it and the failure is
+merely logged, so an unbounded value turns a correct rejection into silence. A
+file-loaded definition's `id` is whatever the file says, and one over 64 KiB
+quoted into a rejection message did exactly that. A scenario **id** is bounded at the point a
+definition is loaded — by the same constant the event field uses — because a
+definition read from a file passes through none of the object schemas that bound
+an id arriving over RPC, and an id past that length loaded fine and then made
+every event naming it unsendable. A rejected reload reports
+**which file** failed and never what was in it — the runtime's own parser message
+quotes the offending bytes, and the control plane is not a place to echo an
+operator's file. See
+[Access control → Event scopes are not an authorization boundary](../concepts/access-control.md#event-scopes-are-not-an-authorization-boundary).
+
+Under `--state-db` the `idTagPool.file` path is persisted alongside the resolved
+tags (`charge_points.id_tag_file`, schema v11), so a daemon restarted with
+`--watch` watches the same files again instead of coming back holding a frozen
+snapshot of a file it believes it is watching. The path is **resolved to an
+absolute path when the charge point is created** and stored that way, so a
+daemon restarted from a different working directory still watches the file the
+operator meant. See [State persistence](../concepts/state-persistence.md).
+
+A **scenario** loaded over the control plane persists its source path the same
+way (`watched_scenario_files`, schema v12), so a restarted `--watch` daemon
+re-establishes that watch and reconciles an edit made while it was down. The row
+is written **whether or not `--watch` is on**, for the same reason it is cleared
+that way: it is a fact about stored state, not about the feature that reads it.
+Only the in-memory watch is behind the flag — so a daemon run without `--watch`
+still records where each scenario came from, and a later watched start has
+something to restore. The
+startup flags are the deliberate exception: `--scenario` and
+`--scenario-template-file` are **not** written down, because the per-connector
+rewrite that a fan-out depends on lives in a callback no row can carry, and the
+bootstrap that owns it runs again on every boot. Persisting them would restore a
+second, rewrite-less watch per connector alongside the fresh instances, under
+the previous run's scenario ids. A startup registration also **deletes** any row
+already stored under the key it takes over: `--scenario` keeps the file's own id
+when the file already targets its connector, so it can collide with an earlier
+control-plane load of that id, and the abandoned row would otherwise be restored
+at the next start and applied before the bootstrap registered the configured
+scenario. That deletion, too, does not depend on `--watch`.
+
+The restore itself runs in **two passes**, because three constraints have to
+hold at once and no single position satisfies all three:
+
+1. **A restored charge point must not run a stale graph.** Its persisted
+   connect-triggered scenarios start the moment its boot gate opens, so the
+   fleet is now rebuilt **without dialling**, the watches go back on, and only
+   then does it connect. The dial is split as well: a charge point **a startup
+   flag is about to configure** is held back from that first round of connects
+   and left to the bootstrap loop, which dials it immediately before loading the
+   flag's definition — so its restored scenarios cannot start and then have the
+   whole bootstrap loop pass before the flag lands. Only when `--auto-connect`
+   is on, because that is what makes the bootstrap loop dial; without it nothing
+   else would, and the startup load's boot-accepted wait would time out on a
+   charge point deliberately left unconnected.
+
+   Two different questions are involved and they must not share an answer.
+   _Which stored scenario ids will a flag overwrite?_ decides which watch rows
+   wait for the second pass, and being narrow is the point — skip more than the
+   flag claims and the charge point's other restored scenarios go unwatched
+   until it dials. _Which charge points is startup about to configure?_ decides
+   the dial, and being narrow there is wrong: only `--scenario` on a file that
+   already targets its single connector keeps a stable id, so keying the dial on
+   the id set left three of the four modes dialling immediately.
+
+   | Startup mode                                          | Deferred? | Dialled afterwards by                           |
+   | ----------------------------------------------------- | --------- | ----------------------------------------------- |
+   | `--scenario` (file already targets its one connector) | yes       | the bootstrap loop, immediately before its load |
+   | `--scenario` (instantiated across connectors)         | yes       | the bootstrap loop                              |
+   | `--scenario-template`                                 | yes       | the bootstrap loop                              |
+   | `--scenario-template-file`                            | yes       | the bootstrap loop                              |
+   | restored charge point with no startup flag against it | no        | `connectRestored`, in the first round           |
+
+   Every deferred charge point is in the bootstrap fleet, and the bootstrap loop
+   iterates exactly that fleet — which is what makes the widening safe: nothing
+   is deferred that nothing subsequently dials.
+
+2. **A startup flag owns its keys before its rows are read.** A stored row can
+   name the id `--scenario` will claim, so the first pass skips **exactly those
+   ids** — neither applying nor pruning their rows — and a second pass after the
+   startup scenarios picks up whatever the flags did not claim. By then a
+   takeover has deleted the rows they did. The prediction is narrow on purpose:
+   only `--scenario` on a file that already targets its single connector keeps a
+   stable id, everything else instantiates a fresh one that no stored row can
+   match. Skipping the whole charge point instead left its _other_ restored
+   scenarios unwatched right up to the moment it dialled, so they auto-started
+   from the database copy rather than from the file as it reads now — which is
+   constraint 1 broken by constraint 2's own solution.
+3. **A restored row must not overwrite a live registration.** This one is not
+   solved by position at all: both passes skip keys the reloader already holds.
+   Keeping it out of the ordering is what lets the first two be satisfied
+   independently.
+
+The second pass runs past the point where the daemon is **already serving**.
+The HTTP listener is bound before the bootstrap begins — deliberately, so
+`cp.list` answers before an unreachable CSMS times out — which means the whole
+bootstrap runs concurrently with RPCs: fleet creation, the `--state-db` restore,
+the connect loop, the startup scenarios and the watch restore at its end. So a
+restored row **never overwrites a registration this run already holds**. A row
+records what a previous run knew; a `load_scenario { file }` or
+`run_scenario_file` that arrived mid-bootstrap knows better, and re-registering
+over it would discard its baseline, re-apply the definition already loaded, and
+— with a run in flight — hold and reinstall it when that run settles, starting
+it a second time from a single request. The rows are simulator-owned state, so
+`cp.delete` cascades to them and `state.reset` truncates them, with or without
+`--watch`.
+
+Both watched kinds establish the watch **before** reading the copy they compare
+against, so an edit landing between a file being loaded and its watch starting
+is still seen — otherwise the cached text would already be the pre-edit copy and
+the reconciliation would compare the old file with the state it produced, find
+them equal, and leave the charge point stale.
+
+A file edited **while the daemon was stopped** is reconciled at startup rather
+than merely watched from then on: the restore brings back the tags as of the
+last time the daemon saw the file, so the daemon compares the file against what
+each restored charge point actually holds and applies it if they differ. The
+comparison is made **once per charge point**, not once per file — several charge
+points can share one pool, and the restore re-creates them one at a time. Without
+that step the current bytes would be recorded as already-seen, and the
+operator's next save of that same content would be dismissed as a duplicate —
+the pool would stay stale until the file happened to change again.
+
 ## Limits & Roadmap
 
 - Current: one Socket.IO connection per client, `rpc` ack for commands, `event`
@@ -218,7 +520,8 @@ see [Docker image](docker-image.md).
 - Future: bearer token auth or mTLS can be added at the HTTP/socket boundary
   without changing CP command method names.
 - Shipped: bulk CP creation, multiple supervision URLs, CP blueprints, the
-  metrics endpoint, an idTag pool and seeded background traffic (#295–#300).
+  metrics endpoint, an idTag pool, seeded background traffic and `--watch` file
+  hot-reload (#295–#300, #314).
   Planned: a charging-curve EV model and a measured per-process ceiling. See
   [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)
   for the full sequencing.

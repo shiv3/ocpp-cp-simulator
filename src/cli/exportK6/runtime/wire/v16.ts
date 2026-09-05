@@ -33,11 +33,19 @@ export const wire16: Wire = {
     return call("StatusNotification", payload);
   },
 
+  // The energy register is an integer watt-hour on the wire in all three of
+  // these — `meterStart`, `meterStop` and the
+  // `Energy.Active.Import.Register` sample. A strict CSMS rejects a
+  // fractional `meterStop` with a FormationViolation that strands the
+  // transaction in Charging, so the rounding lives here, at the boundary, and
+  // the interpreter keeps the unrounded value: a per-tick increment smaller
+  // than the register can express then accumulates instead of being discarded,
+  // which is the same carry the daemon's meter scheduler performs (#301).
   startTransaction(connectorId, tagId, meterWh, nowIso): WireCall {
     return call("StartTransaction", {
       connectorId,
       idTag: tagId,
-      meterStart: meterWh,
+      meterStart: Math.round(meterWh),
       timestamp: nowIso,
     });
   },
@@ -53,7 +61,7 @@ export const wire16: Wire = {
   stopTransaction(transactionId, meterWh, nowIso, reason): WireCall {
     const payload: Record<string, unknown> = {
       transactionId,
-      meterStop: meterWh,
+      meterStop: Math.round(meterWh),
       timestamp: nowIso,
     };
     if (reason) payload.reason = reason;
@@ -68,7 +76,7 @@ export const wire16: Wire = {
           timestamp: nowIso,
           sampledValue: [
             {
-              value: String(meterWh),
+              value: String(Math.round(meterWh)),
               measurand: "Energy.Active.Import.Register",
               unit: "Wh",
             },

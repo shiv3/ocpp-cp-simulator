@@ -359,7 +359,14 @@ function startAutoMeter(
       if (stopped) return;
       elapsedSec += intervalSec;
       if (curve && curve.length > 0) {
-        ctx.meterWh = Math.round(interpolateCurveKwh(curve, elapsedSec) * 1000);
+        // Offset by the register the run started from. The curve describes
+        // energy delivered in this session, while the register is cumulative
+        // for the life of the connector — assigning the curve value outright
+        // rewound the meter on any session after the first, and could send a
+        // `meterStop` below its own `meterStart` (#301). Unrounded here; the
+        // wire builders round, so a sub-watt-hour step accumulates rather than
+        // being discarded.
+        ctx.meterWh = startWh + interpolateCurveKwh(curve, elapsedSec) * 1000;
       } else {
         ctx.meterWh += incrementWh;
       }

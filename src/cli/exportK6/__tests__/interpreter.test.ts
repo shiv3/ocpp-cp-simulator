@@ -443,3 +443,192 @@ describe("runScenario", () => {
     expect(result.error).toMatch(/start/);
   });
 });
+
+describe("k6 auto-meter curve is session-relative (#301)", () => {
+  /**
+   * The exported runtime is a second implementation of the same scenario
+   * semantics, so a change to how a scenario behaves has to reach both. The
+   * curve node used to assign its interpolated value to the register outright,
+   * which is the pre-#301 daemon behaviour: on any session after the first the
+   * meter rewound, and a `meterStop` could land below its own `meterStart`.
+   */
+  function curveScenario(startValueWh: number) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        // Set the register to where a previous session left it.
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            useCurve: true,
+            curvePoints: [
+              { time: 0, value: 0 },
+              { time: 3, value: 3 },
+            ],
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  /** The FakeHost answers `{}` by default, which the interpreter reads as a
+   *  refused StartTransaction; script an acceptance so the walk gets past it. */
+  function acceptTransactions(host: FakeHost): void {
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+  }
+
+  function meterSamples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  it("never reports below the register the session started from", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(5000));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const samples = meterSamples(host);
+    // The curve tops out at 3 kWh, well below the 5 kWh already registered,
+    // so an absolute assignment would send values far under where the session
+    // started — the rewind this guards.
+    for (const value of samples) expect(value).toBeGreaterThanOrEqual(5000);
+    // And it climbs: 1 kWh a second on top of the 5 kWh already registered.
+    expect(samples[samples.length - 1]).toBeGreaterThan(5000);
+  });
+
+  it("never sends a meterStop below its own meterStart", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(5000));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(start).toBeDefined();
+    expect(stop).toBeDefined();
+    expect(Number(stop!.payload.meterStop)).toBeGreaterThanOrEqual(
+      Number(start!.payload.meterStart),
+    );
+  });
+
+  it("still starts from zero on a connector whose register is zero", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(0));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+    expect(meterSamples(host)[0]).toBe(0);
+  });
+});
+
+describe("k6 puts an integral energy register on the wire (#301)", () => {
+  it("rounds a fractional increment instead of sending a decimal", async () => {
+    // A strict CSMS rejects a fractional meterStop with a FormationViolation.
+    // The interpreter keeps the unrounded value so a sub-watt-hour step still
+    // accumulates — the same carry the daemon performs — and the wire builder
+    // rounds.
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "transaction", data: { action: "start" } },
+        {
+          id: "c",
+          type: "meterValue",
+          data: {
+            value: 0,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            incrementAmount: 0.4,
+            stopMode: "manual",
+            maxValue: 2,
+          },
+        },
+        { id: "d", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "e", type: "transaction", data: { action: "stop" } },
+        { id: "f", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+      ],
+    );
+    const run = runScenario(host, wire16, s);
+    const values = () =>
+      host.sent
+        .filter((c) => c.action === "MeterValues")
+        .map(
+          (c) =>
+            (
+              c.payload.meterValue as Array<{
+                sampledValue: Array<{ value: string }>;
+              }>
+            )[0].sampledValue[0].value,
+        );
+    await vi.waitFor(() => expect(values().length).toBeGreaterThan(4));
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    // Every sample is an integer string...
+    for (const v of values()) expect(v).toMatch(/^-?\d+$/);
+    // ...and the fraction is carried rather than discarded: 0.4 a tick reaches
+    // 1 by the third tick and 2 by the fifth, instead of sticking at 0.
+    expect(values().slice(0, 6)).toEqual(["0", "0", "1", "1", "2", "2"]);
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(Number.isInteger(Number(stop!.payload.meterStop))).toBe(true);
+  });
+});

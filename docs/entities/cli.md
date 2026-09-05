@@ -610,6 +610,33 @@ stable `k6/websockets` module, not the deprecated
 CSMS_URL=wss://csms.example.com/ocpp k6 run loadtest/scenario.k6.ts
 ```
 
+#### What the exported runtime models
+
+The bundle is a **second implementation** of the scenario semantics, not the
+daemon compiled to another target, and it models a deliberately reduced
+subset: enough to put realistic OCPP traffic on a CSMS at volume, not enough
+to reproduce the simulator's meter physics. The line was drawn when the
+charging-curve model landed — [the k6 export ignores the curve and keeps its
+flat rate](../analyses/fleet-load-and-observability-roadmap.md#4a-charging-curve-ev-model)
+rather than porting the model into the runtime — and it is stated here so each
+difference is not discovered one at a time.
+
+| Behaviour                                                             | In the exported runtime                                                                                                                                       |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-meter time curve, session-relative                               | **Yes**, and agreeing: the curve is added to the register the run started from, so a second session never rewinds.                                            |
+| Energy register integral on the wire                                  | **Yes**: `meterStart`, `meterStop` and the register sample are rounded at the wire, and the unrounded value is carried between ticks.                         |
+| `maxValue` / `maxTime` / target-SoC stop conditions                   | **Yes**, judged on the delivered value.                                                                                                                       |
+| Battery charging curve (`evSettings.chargingCurve`)                   | **No** — `chargingCurve` is not read; the rate is the scenario's own increment or time curve.                                                                 |
+| Electrical model (`currentType`, `phases`, `voltageV`, `powerFactor`) | **No** — the runtime sends one measurand, `Energy.Active.Import.Register`. No current, voltage, power or power-factor samples, and so no per-phase samples.   |
+| `SetChargingProfile` limits                                           | **No** — the auto-responder Accepts the call and the profile is never applied, so nothing caps the meter.                                                     |
+| State of charge                                                       | **Arithmetic only** — SoC is computed inside the target-SoC stop condition. It is not tracked, sampled or persisted, so the SoC-ownership rules do not apply. |
+| Persistence / restart resume                                          | **No** — a k6 VU is a fresh charge point each run.                                                                                                            |
+
+A scenario that relies on anything in the "No" rows still exports and runs; it
+simply generates traffic at the scenario's configured rate rather than the
+simulated one. The rows marked "Yes" are the ones a change to scenario
+behaviour has to reach in both places (#301).
+
 ## Events
 
 Events are emitted in all modes:

@@ -108,12 +108,20 @@ pointer.
 
 **The contract.** `cli-latest` always serves the highest published
 `cli-vX.Y.Z` release, and never a lower one, whatever order the pointer jobs
-run in or fail in. Two carve-outs, stated rather than accidental: a CLI release
-tagged with a SemVer prerelease or build-metadata suffix (`cli-v1.0.0-rc.1`) is
-not eligible to own the pointer and is ignored when picking the highest —
-install those by their pinned URL; and if the highest release is later
-_deleted_, the pointer follows the new highest downwards, with a `::warning::`,
-because an unpublished release cannot be the thing the pointer serves.
+run in or fail in. Three carve-outs, stated rather than left to be discovered:
+
+- A CLI release tagged with a SemVer prerelease or build-metadata suffix
+  (`cli-v1.0.0-rc.1`) is not eligible to own the pointer and is ignored when
+  picking the highest. Install those by their pinned URL.
+- If the highest release is later _deleted_, the pointer follows the new
+  highest downwards, with a `::warning::` — an unpublished release cannot be
+  the thing the pointer serves. It never moves down on the strength of a
+  release _listing_ alone; see
+  [The marker is load-bearing, narrowly](#the-marker-is-load-bearing-narrowly).
+- Replacing the asset is not atomic — GitHub has no atomic asset swap — so
+  there is a window, bounded by two metadata calls rather than by a 2 MB
+  upload, in which the URL can 404. It is recovered from rather than exited
+  from, and only an exhausted recovery leaves it 404ing, loudly.
 
 **How it holds.** Every pointer run asks which is the highest published
 `cli-v*` release and rolls to _that_, not to the version that triggered it. The
@@ -141,16 +149,68 @@ authorise anything. The marker is kept only as a **record** of what is served,
 for humans and for `gh release view cli-latest`; it is deliberately not used to
 short-circuit the upload, because that would put it back on the trusted path.
 
-| Situation                                                            | What happens                                                                                         |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| A higher `cli-v*` release exists than the one that triggered the run | `::notice::`, pointer goes to the higher one                                                         |
-| Release listing cannot be read                                       | **Release fails.** The highest release is unknown, so the pointer is left alone                      |
-| Listing is stale and omits the triggering release                    | Retried; then the triggering version is used as a floor, since its publish job demonstrably finished |
-| Target release has no (or an empty) `ocpp-cp-simulator.tgz`          | **Release fails** rather than pointing at a release that cannot be served                            |
-| Pointer lookup returns a confirmed **404**                           | Pointer is created                                                                                   |
-| Pointer lookup fails any **other** way (401, 403, 5xx, DNS)          | **Release fails.** "Absent" must never be inferred from a transient error                            |
-| Pointer's marker is missing, unparseable, or higher than the target  | `::warning::`, marker overwritten — it is a record, not a veto                                       |
-| Version given is a prerelease or has build metadata                  | **Release fails** with an error naming the reason                                                    |
+#### The marker is load-bearing, narrowly
+
+Converging on "the highest published release" is only as good as the listing it
+is computed from, and `gh release list` is eventually consistent. Waiting until
+the listing shows the _triggering_ tag closes "the listing has not caught up
+with me". It does not close "the listing has not caught up with someone
+**newer**": an older rerun can see a listing that looks complete, omits a
+higher release, and would then overwrite the pointer downwards — recreating the
+rollback this design exists to prevent.
+
+In that one situation the marker is the only evidence the newer release exists,
+so it _is_ consulted — as a lower bound on what has already been served, never
+as authority to move. Whenever it names something higher than the listing did,
+the run does a point lookup of that single release (a direct `GET` of one tag,
+not a paginated list) and: **published** → the listing was stale, converge _up_
+to it; **confirmed 404** → deleted, converge down with a warning; **draft** →
+not published, converge down with a warning; **any other error** → fail closed
+and leave the pointer alone. A hand-edited or corrupt marker therefore cannot
+move the pointer anywhere — it can only trigger a lookup whose answer decides.
+
+#### "If this dies here, what does the install URL serve?"
+
+Asked of every mutating call, because the reviews of this script have found
+partial-failure bugs rather than logic bugs:
+
+| Step                          | If it dies here         | URL serves       |
+| ----------------------------- | ----------------------- | ---------------- |
+| download the target's asset   | read-only               | previous release |
+| upload `<asset>.incoming`     | live asset untouched    | previous release |
+| delete the live asset         | **the only 404 window** | nothing          |
+| rename `.incoming` into place | window closes           | new release      |
+| write the release notes       | asset already correct   | new release      |
+| move the git tag              | cosmetic                | new release      |
+
+`gh release upload --clobber` is deliberately **not** used for the live asset.
+Its own help says "If the upload fails, the original assets will be lost": it
+deletes first and uploads second, so a transient failure would leave the URL
+`README.md` advertises 404ing indefinitely. The new bytes go up under a
+temporary name first, so the destructive step never runs until the replacement
+is already on the server; then delete and rename, both fast metadata calls,
+both retried, with a recovery that re-uploads under the live name if the rename
+cannot be completed. Only if that recovery is also exhausted does the run exit
+with the URL dead, and then it says so and says how to restore it.
+
+The git tag is moved to the commit behind the _target_ release, not to the
+checkout's `HEAD` — an older run that converged upward is checked out at its
+own older tag, and tagging that would make the tag disagree with the asset. It
+is moved through the refs API, so the checkout's fetch depth does not matter,
+and failing to move it is a warning rather than an error: the tag is cosmetic
+and the URL is already correct by then.
+
+| Situation                                                            | What happens                                                                                                      |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| A higher `cli-v*` release exists than the one that triggered the run | `::notice::`, pointer goes to the higher one                                                                      |
+| Release listing cannot be read                                       | **Release fails.** The highest release is unknown, so the pointer is left alone                                   |
+| Listing is stale and omits the triggering release                    | Retried; then the triggering version is used as a floor, since its publish job demonstrably finished              |
+| Listing is stale and omits a release the marker records as higher    | Point lookup decides: published -> converge up; 404 or draft -> converge down, warned; other error -> fail closed |
+| Target release has no (or an empty) `ocpp-cp-simulator.tgz`          | **Release fails** rather than pointing at a release that cannot be served                                         |
+| Pointer lookup returns a confirmed **404**                           | Pointer is created                                                                                                |
+| Pointer lookup fails any **other** way (401, 403, 5xx, DNS)          | **Release fails.** "Absent" must never be inferred from a transient error                                         |
+| Pointer's marker is missing, unparseable, or higher than the target  | `::warning::`, marker overwritten — it is a record, not a veto                                                    |
+| Version given is a prerelease or has build metadata                  | **Release fails** with an error naming the reason                                                                 |
 
 Versions are compared numerically field by field, never with `sort -V`, which
 is not SemVer-aware: it orders `1.0.0-rc.1` _after_ `1.0.0`. The asset is taken

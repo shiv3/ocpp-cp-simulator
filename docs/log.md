@@ -414,3 +414,47 @@ Third review pass on PR #325, two P1s, one answer.
   excludes drafts, and refuses a target release whose asset is missing or
   empty); `.github/workflows/cli-release.yml` (the pointer job no longer
   pre-fetches a tarball — the script downloads the target release's own asset).
+
+## [2026-09-05] ingest | Partial failures in the pointer swap, and a listing that omits someone newer (#320, #321)
+
+Fourth review pass on PR #325. All three findings were about a step failing
+partway rather than about the logic, which is the fourth round running.
+
+- [CLI → "If this dies here, what does the install URL serve?"](entities/cli.md#if-this-dies-here-what-does-the-install-url-serve):
+  new section, and the question was asked of every mutating call rather than
+  only the ones review flagged. `gh release upload --clobber` deletes the
+  same-named asset **before** uploading — its own help says "If the upload
+  fails, the original assets will be lost" — so a transient failure left the
+  install URL `README.md` advertises 404ing indefinitely. Every other guard in
+  the script fails toward "the old thing keeps working"; that one could not,
+  because its first act was destructive. The replacement bytes now go up under
+  a temporary asset name first, so the destructive step never runs until the
+  new asset is already on the server, and the swap is then a delete plus a
+  rename — two fast metadata calls, both retried, with a recovery that
+  re-uploads under the live name if the rename cannot be completed. GitHub has
+  no atomic asset replacement, so a window remains; it is bounded by two
+  metadata calls instead of a 2 MB upload, and an exhausted recovery exits
+  saying the URL is 404 and how to restore it rather than exiting silently.
+- [CLI → The marker is load-bearing, narrowly](entities/cli.md#the-marker-is-load-bearing-narrowly):
+  new section. Waiting for the release listing to show the triggering tag
+  closed "the listing has not caught up with me" but not "…with someone
+  newer" — an older rerun could see a listing that looked complete, omit a
+  higher release, and overwrite the pointer downwards, recreating the very
+  rollback the convergence design exists to prevent. The marker, demoted to a
+  record in the previous pass, is the only evidence of that release, so it is
+  now consulted in exactly one way: as a lower bound that can trigger a point
+  lookup of the single release it names. Published means the listing was stale
+  and the run converges _up_; a confirmed 404 or a draft means the release is
+  genuinely not published and the run may converge down, warned; any other
+  error fails closed. A hand-edited marker still cannot move the pointer
+  anywhere — it can only ask a question whose answer decides. The contract
+  paragraph now states this dependency instead of quietly relying on it.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): the `cli-latest`
+  git tag is moved to the commit behind the _target_ release rather than to the
+  checkout's `HEAD`. An older run that converges upward is checked out at its
+  own older tag, so the previous code left the tag disagreeing with the asset
+  and the release body — contradicting the comment that said the tag must not
+  mislead. It is moved through the refs API so the checkout's fetch depth does
+  not matter, and a failure there is a warning rather than an error, because
+  the tag is cosmetic and the URL is already correct by that point.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.

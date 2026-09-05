@@ -387,6 +387,19 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 
   lifecycle.installSignalHandlers();
 
+  // ---------------------------------------------------------------------
+  // The daemon is now SERVING. `Bun.serve` is bound above, so socket.io and
+  // the HTTP routes accept requests from here on, and everything below runs
+  // concurrently with them: fleet creation, `--state-db` restore, the bounded
+  // connect loop (which awaits the network), `runStartupScenario`, and the
+  // watch restore at the end. There is no quiescent window after the listener
+  // opens, so anything below that reads persisted state has to treat what this
+  // process already holds as newer than what the database remembers — see
+  // `FileReloadManager.restoreScenarioWatches`. Listening later is not the
+  // answer: `cp.list` answering before an unreachable CSMS times out is the
+  // behaviour the ordering above exists for (#314).
+  // ---------------------------------------------------------------------
+
   const fleet = expandBootstrap(opts);
   const hasExplicitStartupScenario =
     !!opts.startupScenario &&

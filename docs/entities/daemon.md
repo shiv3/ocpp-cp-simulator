@@ -384,7 +384,19 @@ scenario. That deletion, too, does not depend on `--watch`. The restore runs
 **after** the startup flags have loaded, so the bootstrap asserts ownership of
 its keys before any row is read: an abandoned row naming the same scenario id
 can no longer be reconciled onto the connector first, auto-start its stale graph
-and leave the configured file with nothing to start. The rows are simulator-owned state, so
+and leave the configured file with nothing to start.
+
+That places the restore past the point where the daemon is **already serving**.
+The HTTP listener is bound before the bootstrap begins — deliberately, so
+`cp.list` answers before an unreachable CSMS times out — which means the whole
+bootstrap runs concurrently with RPCs: fleet creation, the `--state-db` restore,
+the connect loop, the startup scenarios and the watch restore at its end. So a
+restored row **never overwrites a registration this run already holds**. A row
+records what a previous run knew; a `load_scenario { file }` or
+`run_scenario_file` that arrived mid-bootstrap knows better, and re-registering
+over it would discard its baseline, re-apply the definition already loaded, and
+— with a run in flight — hold and reinstall it when that run settles, starting
+it a second time from a single request. The rows are simulator-owned state, so
 `cp.delete` cascades to them and `state.reset` truncates them, with or without
 `--watch`.
 

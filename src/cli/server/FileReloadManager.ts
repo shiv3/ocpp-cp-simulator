@@ -405,6 +405,22 @@ export class FileReloadManager {
     if (this.closed || !this.database) return;
     const rows = listWatchedScenarioFiles(this.database);
     for (const row of rows) {
+      // A row records what a *previous* run knew. It must never overwrite what
+      // this run has already been told, and by the time this executes the
+      // daemon has been accepting RPCs for a while: the HTTP listener opens
+      // before the bootstrap begins, so a `run_scenario_file` arriving while
+      // the fleet was still connecting has already written its own row and
+      // registered a live watch under this key. Replacing that registration
+      // would hand it `loadedText: null`, whose immediate reconcile defers the
+      // definition that is running and can auto-start it a second time once the
+      // first run settles — duplicate traffic out of one request (#314).
+      if (
+        this.scenarios.has(
+          scenarioKey(row.cp_id, row.connector_id, row.scenario_id),
+        )
+      ) {
+        continue;
+      }
       const loaded = this.registry
         .get(row.cp_id)
         ?.getScenario(row.connector_id, row.scenario_id);

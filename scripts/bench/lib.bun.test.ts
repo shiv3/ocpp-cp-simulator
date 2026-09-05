@@ -29,6 +29,7 @@ import {
   benchIdTag,
   cleanupIdsAfterBatch,
   createFailureHint,
+  cycleBoundMs,
   cyclePeriodSec,
   daemonIsLocal,
   droppedDuringWindow,
@@ -50,6 +51,7 @@ import {
   redactOptions,
   redactUrlUserinfo,
   requiredRpcPerSec,
+  RPC_DEADLINE_MS,
   row,
   sleep,
   socketPoolSize,
@@ -1890,5 +1892,35 @@ describe("proving a StopTransaction actually left the queue (#302)", () => {
 
   it("is zero on a daemon that has sent none", () => {
     expect(stopTransactionsSent(parseExposition(""))).toBe(0);
+  });
+});
+
+describe("the complete cycle bound (#302)", () => {
+  it("covers every stage a cycle can await in", () => {
+    // The bound has grown twice, so the enumeration is asserted rather than
+    // trusted: the start RPC, the confirmation wait, the hold, the stop RPC.
+    // Nothing else in `cycle` awaits — arming is synchronous and the next
+    // cycle is scheduled after the body returns.
+    // 1.6 at --tx-interval 2: both RPC stages, the assigned-id wait, the hold.
+    expect(cycleBoundMs(ASSIGNED_ID_TIMEOUT_MS, holdSec(2) * 1000)).toBe(
+      RPC_DEADLINE_MS + 45_000 + 1_000 + RPC_DEADLINE_MS,
+    );
+    // The previous bound omitted both RPC stages, so it was short by a full
+    // 70s — long enough for an emitted start or stop to take effect after the
+    // fleet had been deleted.
+    const previous = ASSIGNED_ID_TIMEOUT_MS + holdSec(2) * 1000;
+    expect(
+      cycleBoundMs(ASSIGNED_ID_TIMEOUT_MS, holdSec(2) * 1000) - previous,
+    ).toBe(2 * RPC_DEADLINE_MS);
+    // And it must be exactly the four stages, so dropping one fails here.
+    for (const confirmMs of [
+      START_CONFIRM_TIMEOUT_MS,
+      ASSIGNED_ID_TIMEOUT_MS,
+    ]) {
+      const holdMs = holdSec(60) * 1000;
+      const bound = cycleBoundMs(confirmMs, holdMs);
+      expect(bound).toBeGreaterThan(confirmMs + holdMs);
+      expect(bound).toBe(confirmMs + holdMs + 2 * RPC_DEADLINE_MS);
+    }
   });
 });

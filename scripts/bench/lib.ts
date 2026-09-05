@@ -356,6 +356,39 @@ export const START_CONFIRM_MARGIN_SEC = 5;
 export const START_CONFIRM_TIMEOUT_MS =
   (AUTHORIZE_WAIT_SEC + START_CONFIRM_MARGIN_SEC) * 1000;
 
+/** The pool's whole-call RPC deadline, covering admission and acknowledgement.
+ *  Mirrors `RPC_TIMEOUT_MS` in `fleet-bench.ts`, which is where the pool that
+ *  enforces it lives. */
+export const RPC_DEADLINE_MS = 35_000;
+
+/**
+ * The longest a single transaction cycle may legitimately take.
+ *
+ * Enumerated stage by stage, because this bound has grown twice and the next
+ * reader deserves to check the sum rather than trust it. A cycle awaits in
+ * exactly four places:
+ *
+ *  1. the `start_transaction` RPC — {@link RPC_DEADLINE_MS};
+ *  2. the confirmation wait — `confirmTimeoutMs`
+ *     ({@link START_CONFIRM_TIMEOUT_MS} on 2.x,
+ *     {@link ASSIGNED_ID_TIMEOUT_MS} on 1.6);
+ *  3. the hold — `holdMs`;
+ *  4. the `stop_transaction` RPC — {@link RPC_DEADLINE_MS} again.
+ *
+ * Arming is synchronous and the next cycle is scheduled after the body
+ * returns, so there is no fifth. The RPC stages are what the previous bound
+ * omitted: a cycle could leave the confirmation wait and then sit in the pool
+ * for a further 35s, so teardown stopped waiting and deleted the fleet while
+ * an already-emitted start or stop was still in flight.
+ *
+ * Summed, not maxed. Stages 1 and 2 overlap in practice, but a teardown bound
+ * that is too large only costs time when something is genuinely stuck, while
+ * one that is too small loses transactions.
+ */
+export function cycleBoundMs(confirmTimeoutMs: number, holdMs: number): number {
+  return RPC_DEADLINE_MS + confirmTimeoutMs + holdMs + RPC_DEADLINE_MS;
+}
+
 /**
  * How long a cycle waits for the **CSMS-assigned** transaction id, on the
  * versions that supply one.
@@ -1468,6 +1501,15 @@ export class TransactionStarts {
     // The second emission is `StartTransaction.conf`'s assigned id. Accepted
     // whatever its value — zero is a legal assignment, and testing for it was
     // what made a CSMS assigning 0 unrecognisable.
+    //
+    // KNOWN LIMITATION, not fixable from here: against a CSMS that assigns
+    // `transactionId: 0` this second emission never arrives at all.
+    // `CLIChargePointService` suppresses the `transactionIdChange` it would
+    // come from (`src/cli/service.ts`, `if (transactionId === 0) return`), so
+    // the wait times out and the charge point is retired despite a valid
+    // confirmation — the fleet's offered load drops, visibly in the `retired`
+    // column but for the wrong reason. Tracked as issue #328; the fix is in
+    // the daemon's event contract, not in this script.
     this.waiters.delete(cpId);
     waiter.settle({
       started: true,

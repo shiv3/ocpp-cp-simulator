@@ -526,6 +526,18 @@ register had passed the curve's maximum. Offsetting the trajectory by the
 register at session start is what makes the second session behave like the
 first.
 
+**"Session start" means the curve's value at `t = 0`, not its earliest
+point.** The two are the same reading for a curve that begins at or after
+session start, which is every curve written by hand. They differ for one that
+begins _before_ it and crosses `t = 0` — `curvePoint.time` is a plain `number`
+in the JSON schema with no minimum, and the curve editor's time input has no
+`min` either, so such a curve is legal and reachable. Points `(-10s, 5 kWh)`
+and `(10s, 15 kWh)` read 10 kWh at session start, so ten seconds in they have
+delivered 5 kWh, not the 10 that baselining at the earliest point would claim.
+The [k6 export](../entities/cli.md#what-the-exported-runtime-models) baselines
+identically; the shape it draws _between_ the points is still its own linear
+interpolation against the simulator's bezier, which that page records.
+
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
 `min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the
 curve says the battery accepts. A 100 kW charger still offers 100 kW to a

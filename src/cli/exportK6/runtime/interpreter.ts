@@ -421,11 +421,21 @@ function shouldStop(
   return false;
 }
 
-/** The curve's ordinate at its own first point — what "session start" means
- *  for a curve, wherever its abscissa begins. `interpolateCurveKwh` clamps
- *  below the first point, so asking for -infinity is asking for that point. */
+/** The curve's ordinate at **session start**, i.e. at `t = 0` — the value the
+ *  register is baselined against, mirroring what `MeterValueScheduler` does
+ *  with `getMeterValueAtTime(0, config)` before its first tick.
+ *
+ *  This asked for the *earliest point* instead (`interpolateCurveKwh` clamps
+ *  below the first point, so -infinity returned it). The two are the same
+ *  answer for the curves anyone writes by hand — one that begins at or after
+ *  `t = 0` — and different for a curve that begins before it and crosses
+ *  session start, which the schema permits (`curvePoint.time` is a plain
+ *  `number` with no minimum) and the editor's time input accepts (no `min`).
+ *  Points `(-10s, 5 kWh)` and `(10s, 15 kWh)` baselined at the earliest point,
+ *  5, so the exported run delivered 10 kWh by 10 seconds where the simulator,
+ *  baselining at `t = 0` on 10, delivers 5 (#301). */
 function curveStartKwh(curve: CurvePointJson[]): number {
-  return interpolateCurveKwh(curve, Number.NEGATIVE_INFINITY);
+  return interpolateCurveKwh(curve, 0);
 }
 
 function interpolateCurveKwh(curve: CurvePointJson[], atSec: number): number {

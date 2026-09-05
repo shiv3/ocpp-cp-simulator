@@ -723,3 +723,128 @@ describe("k6 offsets a curve by its own start, not by the register (#301)", () =
     ).toBe(3000);
   });
 });
+
+describe("k6 baselines a curve at session start, not at its earliest point (#301)", () => {
+  /**
+   * `curveStartKwh` asked `interpolateCurveKwh` for `-Infinity`, which clamps
+   * to the curve's *earliest* point. `MeterValueScheduler` baselines with
+   * `getMeterValueAtTime(0, config)` — the value at **session start**. The two
+   * are the same answer for any curve beginning at or after `t = 0`, and
+   * different for one that begins before it and crosses session start, which
+   * `schema/scenario.schema.json` permits (`curvePoint.time` is a plain
+   * `number`, no minimum) and the curve editor accepts (its time input has no
+   * `min`).
+   *
+   * This is the mirror image of the finding withdrawn on the same file: there
+   * the export reproduced the simulator, so clamping the exporter alone would
+   * have manufactured a divergence. Here it diverges from the simulator, so
+   * the exporter is the defect and the fix removes one.
+   */
+  function straddlingCurveScenario(
+    startValueWh: number,
+    points: Array<{ time: number; value: number }>,
+  ) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 10,
+            useCurve: true,
+            curvePoints: points,
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  function samples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  async function firstSample(
+    startWh: number,
+    points: Array<{ time: number; value: number }>,
+  ): Promise<number> {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const run = runScenario(
+      host,
+      wire16,
+      straddlingCurveScenario(startWh, points),
+    );
+    // samples[0] is the node's own initial publish at `startWh`; samples[1]
+    // is the auto-meter's first tick, which is the one the baseline decides.
+    await vi.waitFor(() => expect(samples(host).length).toBeGreaterThan(1));
+    host.emitCsmsCall("Ping", {});
+    await run;
+    return samples(host)[1]!;
+  }
+
+  it("delivers the simulator's 5 kWh, not 10, on a curve that starts before t=0", async () => {
+    // Points (-10s, 5 kWh) and (10s, 15 kWh). At t=0 the curve reads 10 kWh,
+    // so ten seconds in it has delivered 15 − 10 = 5 kWh — which is what
+    // `MeterValueScheduler` does. Baselined at the earliest point (5) the
+    // export delivered 15 − 5 = 10 kWh, twice the simulator's answer.
+    const first = await firstSample(5000, [
+      { time: -10, value: 5 },
+      { time: 10, value: 15 },
+    ]);
+    expect(first).toBe(10_000);
+  });
+
+  it("is unchanged for a curve that begins exactly at t=0", async () => {
+    // Non-discriminating guard: at or after session start the earliest point
+    // and the value at t=0 are the same reading, and this must stay true.
+    const first = await firstSample(5000, [
+      { time: 0, value: 5 },
+      { time: 10, value: 8 },
+    ]);
+    expect(first).toBe(8000);
+  });
+
+  it("is unchanged for a curve that begins after t=0", async () => {
+    // Also non-discriminating: `interpolateCurveKwh` clamps below the first
+    // point, so t=0 reads that point either way.
+    const first = await firstSample(5000, [
+      { time: 5, value: 2 },
+      { time: 10, value: 6 },
+    ]);
+    expect(first).toBe(9000);
+  });
+});

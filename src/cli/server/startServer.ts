@@ -34,6 +34,7 @@ import {
 import { renderMetrics } from "./metrics/render";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
+import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -422,13 +423,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   }
 
   fileReload?.syncFromRegistry();
-  // After the fleet and its scenarios are back: re-establish the watches a
-  // previous run registered over the control plane (#314). The startup flags
-  // re-register themselves further down, because this bootstrap runs again.
-  fileReload?.restoreScenarioWatches();
 
   if (!opts.autoConnect && !opts.startupScenario) {
-    logWatchSummary(fileReload, serverLog);
+    finishWatchSetup(fileReload, serverLog);
     return;
   }
 
@@ -456,11 +453,41 @@ export async function startServer(opts: ServerOptions): Promise<void> {
           opts.startupScenario,
           init.connectors,
           fileReload,
+          database,
         );
       }
     },
   );
 
+  finishWatchSetup(fileReload, serverLog);
+}
+
+/**
+ * Re-establish the watches a previous run registered over the control plane,
+ * then say what is being watched (#314).
+ *
+ * Deliberately **after** the bootstrap has run its `--scenario` /
+ * `--scenario-template-file` loads, not before. A stored row can name the same
+ * scenario id the operator's flag uses — `--scenario` keeps the file's own id
+ * when the file already targets its connector — and restoring first meant
+ * reconciling that abandoned file, auto-starting its graph if the edit it
+ * picked up while the daemon was down carried a matching trigger, and then
+ * having the real startup load replace only the definition while
+ * `startScenarioIfNotAlreadyActive` saw the stale executor still running. The
+ * operator's explicit flag lost to a row.
+ *
+ * Ordering rather than filtering, because ownership is already expressed: a
+ * startup registration takes over its key and deletes any row stored under it.
+ * Running the bootstrap first simply lets that assertion happen before anything
+ * reads the rows, so the two rules compose instead of needing a third that
+ * knows which keys are startup-owned. Rows for scenarios the flags do *not*
+ * claim are restored exactly as before.
+ */
+function finishWatchSetup(
+  fileReload: FileReloadManager | null,
+  serverLog: (message: string) => void,
+): void {
+  fileReload?.restoreScenarioWatches();
   logWatchSummary(fileReload, serverLog);
 }
 
@@ -640,6 +667,14 @@ export async function runStartupScenario(
   connectorCount: number,
   /** Null unless the daemon runs with `--watch` (#314). */
   fileReload: FileReloadManager | null = null,
+  /**
+   * The `--state-db`, when there is one. Separate from `fileReload` because a
+   * startup registration's effect on stored state is not conditional on the
+   * watcher: taking over a key deletes whatever row was stored under it, and a
+   * daemon started without `--watch` must still do that or a later watched
+   * start would reattach the abandoned file (#314).
+   */
+  database: Database | null = null,
 ): Promise<void> {
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
@@ -732,6 +767,12 @@ export async function runStartupScenario(
           // target over the prepared copies (#314).
           persist: false,
         });
+        forgetWatchedScenarioFile(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+        );
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
@@ -791,6 +832,12 @@ export async function runStartupScenario(
           // targets this connector, and no persisted row can replay that.
           persist: false,
         });
+        forgetWatchedScenarioFile(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+        );
         startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
         process.stderr.write(
           `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,

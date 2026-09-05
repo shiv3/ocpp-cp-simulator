@@ -2193,6 +2193,55 @@ describe("the envelope bound is checked against the whole snapshot (#314)", () =
   });
 });
 
+describe("the origin is stored state, not watcher state (#314)", () => {
+  it("records where a scenario came from on a daemon without --watch", async () => {
+    // The other direction of the rule that made the cleanup unconditional. The
+    // row was written from inside `registerScenarioFile`, so a `--state-db`
+    // daemon started without `--watch` recorded no origin at all — and a later
+    // restart *with* `--watch` had nothing to restore, leaving the persisted
+    // scenario silently unwatched.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("origin", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+
+    const plain = await startTestServer({ database: db });
+    servers.push(plain);
+    const plainSocket = await openClient(plain);
+    expect(plain.fileReload).toBeNull();
+    await rpc(plainSocket, "cp.create", {
+      cpId: "CP-ORIGIN",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(
+      plainSocket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-ORIGIN",
+    );
+    const rows = db.all<{ path: string }>(
+      "SELECT path FROM watched_scenario_files",
+    );
+    expect(rows).toHaveLength(1);
+    // Absolute, the way a watcher resolves it, so the row it reads back matches.
+    expect(rows[0]?.path).toBe(path.resolve(file));
+    plainSocket.disconnect();
+    await plain.close();
+    servers.pop();
+
+    // The restart the row exists for.
+    const backend = new TestWatchBackend();
+    const watching = await startWatchingServer(backend, db);
+    expect(watching.fileReload?.watchedPaths()).toEqual([path.resolve(file)]);
+    backend.save(file, scenario("origin", 22));
+    await waitFor(
+      () => loadedDelay(watching, "CP-ORIGIN", "origin") === 22,
+      "the restored watch to pick up an edit",
+    );
+  });
+});
+
 describe("every path that removes a definition drops its watch (#314)", () => {
   it("scenario.definitions.delete stops the file putting the definition back", async () => {
     // The third door into the same room: `remove_scenario` and

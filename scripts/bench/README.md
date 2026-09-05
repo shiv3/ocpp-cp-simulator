@@ -352,6 +352,28 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    are `cp.delete`d at the end (or on Ctrl-C), 32 at a time and **within a 60s
    budget**.
 
+   **The teardown ceiling, so it is met on this page and not in the field.**
+   Every stage carries its own deadline and they compose to a worst case of
+   about **six and a half minutes**, reached only in the failure case
+   reconciliation exists for — a `cp.create_many` whose client deadline expired
+   against a daemon that then answers `not_found` three times running:
+
+   | Stage                                       | Worst case                           |
+   | ------------------------------------------- | ------------------------------------ |
+   | wait for in-flight cycles (`settle`)        | one `cycleBoundMs` per step's handle |
+   | outstanding `cp.create_many` (if any)       | 35s (the RPC's own deadline)         |
+   | close open transactions                     | 30s (`CLOSE_TX_BUDGET_MS`)           |
+   | let in-flight heartbeat reapplications land | 35s (the RPC's own deadline)         |
+   | first delete sweep                          | 60s (`CLEANUP_BUDGET_MS`)            |
+   | reconciliation: 3 × (35s wait + 60s sweep)  | 285s (`RECONCILE_MAX_PASSES`)        |
+
+   The nominal case is none of it: with nothing open, nothing unresolved and a
+   responsive daemon, teardown is one delete sweep. And a daemon that has
+   _gone away_ is the fast path, not the slow one — `cp.delete` is skipped
+   outright when no control-plane socket is connected, and reconciliation
+   returns "disconnected" without spending a single 35s wait, so the ceiling
+   above needs a daemon that is answering but has not finished creating.
+
    An id enters the delete list when it is _offered_ to `cp.create_many`,
    before the call is awaited, and **leaves it again if the ack names that id
    as a failure**. The two rules cover two different cases. While the outcome
@@ -524,17 +546,59 @@ Two things it deliberately does not do:
   before the second boot's frame, and the second boot then reinstalls the CSMS
   interval for good.
 
-**This over-fires, and by a known factor.** `onBootNotificationAccepted` emits
-`statusChange` **twice** — once from `updateConnectorStatus(0, Available)` and
-once from the status setter — and an RPC follows every event by design, so an
-accepted boot costs two `start_heartbeat` calls, and a charge point's first
-boot a third from the step's own arming. `status_change` also fires on
-occasions that are not boots (a `ChangeAvailability`, a connector-0 status
-update). A reconnect wave at the top of a 2000-CP sweep is therefore on the
-order of 4000 control-plane RPCs, paced through the same socket pool as the
-transaction cycle. That is the price; the alternative is the offered load
-drifting to the CSMS's cadence at the exact N the sweep is trying to
-characterise.
+#### What the reapplication itself costs
+
+A fix for "the instrument changes the workload at the knee" that issues a wave
+of control-plane RPCs at the knee is the same defect with the sign flipped, so
+the cost is collapsed where it can be and measured where it cannot.
+
+**One boot emitted two events, and that is collapsed.**
+`onBootNotificationAccepted` emits `statusChange` twice — once from
+`updateConnectorStatus(0, Available)`, once from the status setter — for a
+single boot. Issuing per event meant one boot cost two RPCs, for no added
+coverage. Observed boots are therefore gathered for `BOOT_COALESCE_MS` (50ms)
+and flushed to **one RPC per charge point**. Any window is correct here: every
+observed event has already run `startHeartbeat(csmsInterval)` on the daemon
+before it was emitted, so an RPC issued strictly after the last event of a
+window overwrites every CSMS interval that window saw — collapsing merges boots
+that are already covered, it never drops one. 50ms sits between two numbers
+four orders of magnitude apart: the two emissions of one boot are microseconds
+apart, and the fastest a charge point can boot _again_ is a socket close plus
+`OCPPWebSocket`'s 1s first reconnect backoff plus a connect and a
+BootNotification round trip. The in-flight case is untouched — a boot observed
+_after_ an RPC was issued is still owed its own RPC, because the daemon may run
+that RPC's handler before the later boot's frame.
+
+The collapse is measured, not asserted: the smoke test's two-step sweep reports
+`bootsObserved: 4, rpcsIssued: 2` against a real daemon, and removing the
+window makes it 4 and 2 respectively — a clean 2×.
+
+**The residual is bounded by the pool, not by hope.** After the collapse a
+reconnect wave costs **one RPC per charge point that reconnected**: 2000 calls
+at the largest fleet this tool accepts. Those calls are paced by the same token
+buckets as everything else, which cap _total_ control-plane traffic at
+`sustainableRpcPerSec(MAX_SOCKETS)` = 10 × 80 × 0.8 = **640 RPC/s** — so the
+wave drains in roughly 3s and, crucially, **cannot make the benchmark offer
+more control-plane load than the ceiling the sweep was already validated
+against**. On the idle axis `requiredRpcPerSec` is zero, so those 3s contend
+with nothing at all. On the active axis the steady cycle already claims the
+budget, so a wave displaces cycle RPCs for a few seconds and stretches those
+charge points' cycles — which the `late holds` and `unconf.tx` columns already
+report, per row.
+
+**What is not measured.** Whether the knee _moves_ has not been shown
+empirically, because doing so needs a real CSMS at fleet sizes this repository
+has no CI or review environment for — the same reason
+[Daemon → Measured scale ceiling](../../docs/entities/daemon.md#measured-scale-ceiling)
+still records a method rather than a number. The argument above is analytic
+plus the pool's hard ceiling. Every run records `bootsObserved` and
+`rpcsIssued` in `--out` beside the per-row `reconnects`, so when the benchmark
+is finally run against a real CSMS the perturbation is in the record and can be
+checked rather than re-argued.
+
+`status_change` also fires on occasions that are not boots at all (a
+`ChangeAvailability`, a connector-0 status update). Those cost one RPC each and
+are counted in `bootsObserved` like any other.
 
 **How the fix is known to hold, and what is still unverified.** The evidence is
 in `fleetBench.smoke.bun.test.ts`: a mock CSMS answers `BootNotification` with
@@ -707,9 +771,22 @@ a spare machine and a CSMS.
   above rations, and each of those builds a full per-connector snapshot. The
   idle axis opens one too, since #302's round-nine fix: the accepted-boot
   events that keep `--heartbeat-interval` in force arrive on it, and an idle
-  run's whole load is heartbeats. A dropped event socket therefore aborts an
-  idle run as well as an active one — the run can no longer keep the load it
-  reports.
+  run's whole load is heartbeats.
+- **A dropped event socket aborts the active axis and only annotates the idle
+  one.** On the active axis the loss is immediate and unconditional — every
+  later cycle would burn a full hold on a confirmation that can never arrive —
+  so the run stops. On the idle axis nothing waits on a confirmation; the only
+  casualty is the heartbeat reapplication, and that costs nothing at all unless
+  a charge point actually reconnects afterwards, which the run already measures
+  per row. Aborting there would throw away every valid row in order to protect
+  the rows the `reconnects` column already identifies, and a benchmark that
+  produces a number with a stated caveat is worth more than one that refuses to
+  produce a number. So an idle run continues, records the step at which the
+  socket dropped (`heartbeatOverride.eventSocketLostAtN` in `--out`), and
+  prints a WARNING on every later row whose `reconnects` is non-zero saying
+  that row's heartbeat load is no longer the configured one. This also leaves
+  a passive run's failure modes exactly as they were before the idle axis grew
+  an event socket at all.
 - **A closing stop's delivery to the CSMS is not verified, and cannot be from
   here.** Teardown re-stops every charge point that may have an open
   transaction, but under a backed-up outbound queue — the condition this tool
@@ -739,14 +816,16 @@ a spare machine and a CSMS.
   `onBootNotificationAccepted`, both stop the heartbeat, and neither emits the
   `Available` this hooks — such a charge point contributes no heartbeat load
   until it is finally accepted.
-- **Reapplication RPCs share the socket pool with everything else.** At the
-  knee, a wave of reconnects produces a wave of `start_heartbeat` calls paced
-  through the same token buckets as the transaction cycle, so the instrument
-  competes with the load at exactly the busiest moment. It is **two** RPCs per
-  accepted boot (`onBootNotificationAccepted` emits `statusChange` twice), and
-  the alternative — letting the offered load drift to the
-  CSMS's cadence — is worse, but it is a perturbation and it is at its largest
-  where the measurement is most delicate.
+- **Reapplication RPCs share the socket pool with everything else, and the
+  knee has not been shown to stay put.** After coalescing it is one RPC per
+  accepted boot, so a reconnect wave at N=2000 is 2000 calls draining in ~3s
+  against the pool's 640 RPC/s ceiling — it cannot exceed the budget the sweep
+  was validated against, and on the idle axis it contends with nothing. But
+  "bounded" is not "measured": no run against a real CSMS at those fleet sizes
+  exists to compare a sweep with the reapplication against one without, so
+  whether the knee moves is argued rather than demonstrated. The counters are
+  in `--out` so the first real sweep can settle it. See "What the
+  reapplication itself costs".
 - **A teardown that cannot account for every id exits non-zero.** Ids the
   delete sweep answered `not_found` for are re-swept up to
   `RECONCILE_MAX_PASSES` times; anything still unresolved is named on stderr

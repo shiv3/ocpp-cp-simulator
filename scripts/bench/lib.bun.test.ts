@@ -39,6 +39,7 @@ import {
   diffHistogram,
   fleetGauge,
   formatSeconds,
+  BOOT_COALESCE_MS,
   formatTable,
   HeartbeatOverride,
   histogramQuantile,
@@ -1980,122 +1981,190 @@ describe("refusing a daemon whose /metrics predates this benchmark (#302)", () =
 });
 
 describe("HeartbeatOverride", () => {
-  /** A hand-settled `apply`, so the tests control the ordering the races
-   *  depend on rather than hoping the scheduler produces it. */
-  function deferredApply(): {
-    apply: (cpId: string) => Promise<void>;
+  /** A hand-settled `apply` and a hand-fired coalescing window, so the tests
+   *  control the ordering the races depend on rather than hoping the scheduler
+   *  produces it. */
+  function harness(owns: (cpId: string) => boolean = () => true): {
+    override: HeartbeatOverride;
     calls: string[];
+    /** Fire the pending coalescing window, if one is armed. */
+    flush: () => void;
+    /** Whether a window is currently armed. */
+    armed: () => boolean;
     settle: (index: number) => void;
     fail: (index: number) => void;
   } {
     const calls: string[] = [];
     const resolvers: Array<{ ok: () => void; no: () => void }> = [];
-    return {
-      calls,
+    let scheduled: (() => void) | null = null;
+    const override = new HeartbeatOverride({
+      owns,
       apply: (cpId) => {
         calls.push(cpId);
         return new Promise<void>((resolve, reject) => {
           resolvers.push({ ok: resolve, no: () => reject(new Error("rpc")) });
         });
       },
+      scheduleFlush: (flush) => {
+        scheduled = flush;
+        return () => {
+          scheduled = null;
+        };
+      },
+    });
+    return {
+      override,
+      calls,
+      armed: () => scheduled !== null,
+      flush: () => {
+        const run = scheduled;
+        scheduled = null;
+        run?.();
+      },
       settle: (index) => resolvers[index]!.ok(),
       fail: (index) => resolvers[index]!.no(),
     };
   }
 
-  it("issues a fresh RPC for a boot seen while one is already in flight", async () => {
-    // The property the whole class exists for. `onBootNotificationAccepted`
-    // emits `statusChange` twice per accepted boot, and a reconnect can arrive
-    // while an earlier reapplication is still travelling. Merging the second
-    // event into the in-flight RPC would lose exactly the case that matters:
-    // the daemon may run that RPC's handler *before* the second boot's frame,
-    // and the second boot then reinstalls the CSMS interval permanently.
-    const d = deferredApply();
-    const override = new HeartbeatOverride({
-      owns: () => true,
-      apply: d.apply,
-    });
-
-    override.noteBootAccepted("cp-1");
-    override.noteBootAccepted("cp-1");
-    // Coalesced *for now*: only one RPC is on the wire at a time per charge
-    // point, so the second is owed rather than issued concurrently.
-    expect(d.calls).toEqual(["cp-1"]);
-
-    d.settle(0);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    // ...and then issued. An RPC follows every event.
-    expect(d.calls).toEqual(["cp-1", "cp-1"]);
-
-    d.settle(1);
-    await override.idle();
-    expect(override.reapplied()).toBe(2);
-    expect(override.inFlightCount()).toBe(0);
+  it("collapses one boot's two events into one RPC", () => {
+    // `onBootNotificationAccepted` emits `statusChange` twice for ONE boot —
+    // once from `updateConnectorStatus(0, Available)`, once from the status
+    // setter. An RPC per event doubled the control-plane traffic a reconnect
+    // wave costs, which is load the benchmark offers without reporting, at the
+    // exact N it exists to characterise. Both events are already covered by a
+    // single RPC issued after them, because each had run
+    // `startHeartbeat(csmsInterval)` before it was emitted.
+    const h = harness();
+    h.override.noteBootAccepted("cp-1");
+    h.override.noteBootAccepted("cp-1");
+    expect(h.calls).toEqual([]);
+    h.flush();
+    expect(h.calls).toEqual(["cp-1"]);
+    // And the run can say what that cost: two events in, one RPC out.
+    expect(h.override.bootsObserved()).toBe(2);
+    expect(h.override.rpcsIssued()).toBe(1);
   });
 
-  it("ignores a charge point this run did not create", async () => {
+  it("arms one window for a whole reconnect wave, not one per charge point", () => {
+    // A wave at the knee is the case this exists for. One timer, one flush,
+    // one RPC per charge point — not a timer per charge point all firing at
+    // once, which is the shape that turns an instrument into a load spike.
+    const h = harness();
+    for (const cpId of ["cp-1", "cp-2", "cp-3"]) {
+      h.override.noteBootAccepted(cpId);
+      h.override.noteBootAccepted(cpId);
+    }
+    expect(h.armed()).toBe(true);
+    h.flush();
+    expect(h.armed()).toBe(false);
+    expect(h.calls).toEqual(["cp-1", "cp-2", "cp-3"]);
+    expect(h.override.bootsObserved()).toBe(6);
+    expect(h.override.rpcsIssued()).toBe(3);
+  });
+
+  it("issues a fresh RPC for a boot seen while one is already in flight", async () => {
+    // The collapse must not swallow the case the dirty flag exists for. A boot
+    // observed *after* an RPC was issued cannot be answered by that RPC: the
+    // daemon may run its handler before the later boot's frame, and the later
+    // boot then reinstalls the CSMS interval permanently. Only boots inside
+    // one window collapse; a boot in a later window does not.
+    const h = harness();
+    h.override.noteBootAccepted("cp-1");
+    h.flush();
+    expect(h.calls).toEqual(["cp-1"]);
+
+    // A second boot, a window later, while the first RPC is still travelling.
+    h.override.noteBootAccepted("cp-1");
+    h.flush();
+    // Owed, not merged and not issued concurrently.
+    expect(h.calls).toEqual(["cp-1"]);
+
+    h.settle(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.calls).toEqual(["cp-1", "cp-1"]);
+
+    h.settle(1);
+    await h.override.idle();
+    expect(h.override.reapplied()).toBe(2);
+    expect(h.override.inFlightCount()).toBe(0);
+  });
+
+  it("ignores a charge point this run did not create", () => {
     // `--allow-existing` puts strangers' charge points on the same daemon, and
     // they emit `status_change` too. Rewriting their heartbeat interval would
     // make the benchmark a side effect on someone else's fleet.
-    const d = deferredApply();
-    const override = new HeartbeatOverride({
-      owns: (cpId) => cpId === "mine",
-      apply: d.apply,
-    });
-    override.noteBootAccepted("theirs");
-    override.noteBootAccepted("mine");
-    expect(d.calls).toEqual(["mine"]);
+    const h = harness((cpId) => cpId === "mine");
+    h.override.noteBootAccepted("theirs");
+    h.override.noteBootAccepted("mine");
+    h.flush();
+    expect(h.calls).toEqual(["mine"]);
+    // And a stranger's boot is not even counted as observed traffic.
+    expect(h.override.bootsObserved()).toBe(1);
   });
 
   it("counts a failed reapplication rather than swallowing it", async () => {
     // A failure means that charge point may be heartbeating at the CSMS's
     // interval for the rest of the run — a load the table's rows do not
     // describe — so the run has to be able to say so.
-    const d = deferredApply();
-    const override = new HeartbeatOverride({
-      owns: () => true,
-      apply: d.apply,
-    });
-    override.noteBootAccepted("cp-1");
-    d.fail(0);
-    await override.idle();
-    expect(override.failures()).toBe(1);
-    expect(override.reapplied()).toBe(0);
+    const h = harness();
+    h.override.noteBootAccepted("cp-1");
+    h.flush();
+    h.fail(0);
+    await h.override.idle();
+    expect(h.override.failures()).toBe(1);
+    expect(h.override.reapplied()).toBe(0);
   });
 
   it("issues nothing once closed, including an owed reapplication", async () => {
     // Teardown deletes these charge points next; an RPC issued now races the
     // delete for a charge point whose load has already ended.
-    const d = deferredApply();
-    const override = new HeartbeatOverride({
-      owns: () => true,
-      apply: d.apply,
-    });
-    override.noteBootAccepted("cp-1");
-    override.noteBootAccepted("cp-1");
-    override.close();
-    d.settle(0);
-    await override.idle();
-    expect(d.calls).toEqual(["cp-1"]);
-    override.noteBootAccepted("cp-1");
-    expect(d.calls).toEqual(["cp-1"]);
+    const h = harness();
+    h.override.noteBootAccepted("cp-1");
+    h.flush();
+    h.override.noteBootAccepted("cp-1");
+    h.flush();
+    h.override.close();
+    h.settle(0);
+    await h.override.idle();
+    expect(h.calls).toEqual(["cp-1"]);
+    h.override.noteBootAccepted("cp-1");
+    h.flush();
+    expect(h.calls).toEqual(["cp-1"]);
+  });
+
+  it("cancels an armed window on close, so no timer outlives the run", () => {
+    // "The process never exits" is the defect class this tool's smoke test
+    // exists for, and an armed `setTimeout` is one of its forms. An armed
+    // window must also not fire an RPC at a charge point teardown is deleting.
+    const h = harness();
+    h.override.noteBootAccepted("cp-1");
+    expect(h.armed()).toBe(true);
+    h.override.close();
+    expect(h.armed()).toBe(false);
+    h.flush();
+    expect(h.calls).toEqual([]);
   });
 
   it("keeps two charge points' reapplications independent", async () => {
-    const d = deferredApply();
-    const override = new HeartbeatOverride({
-      owns: () => true,
-      apply: d.apply,
-    });
-    override.noteBootAccepted("cp-1");
-    override.noteBootAccepted("cp-2");
-    expect(d.calls).toEqual(["cp-1", "cp-2"]);
-    d.settle(0);
-    d.settle(1);
-    await override.idle();
-    expect(override.reapplied()).toBe(2);
+    const h = harness();
+    h.override.noteBootAccepted("cp-1");
+    h.override.noteBootAccepted("cp-2");
+    h.flush();
+    expect(h.calls).toEqual(["cp-1", "cp-2"]);
+    h.settle(0);
+    h.settle(1);
+    await h.override.idle();
+    expect(h.override.reapplied()).toBe(2);
+  });
+
+  it("uses a window far below the fastest possible reconnect", () => {
+    // The window is only safe because it cannot span two genuine boots.
+    // `OCPPWebSocket`'s first reconnect backoff is 1s, before the connect and
+    // the BootNotification round trip on top.
+    expect(BOOT_COALESCE_MS).toBeLessThan(1000);
+    expect(BOOT_COALESCE_MS).toBeGreaterThan(0);
   });
 });
 

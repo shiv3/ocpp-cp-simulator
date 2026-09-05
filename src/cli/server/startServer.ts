@@ -219,8 +219,15 @@ export async function startServer(opts: ServerOptions): Promise<void> {
       !!opts.startupScenario.scenarioTemplate ||
       !!opts.startupScenario.scenarioTemplateFile);
   const seedDefault = !hasExplicitStartupScenario;
-  const startupOwnedCpIds = new Set(
-    hasExplicitStartupScenario ? fleet.map((init) => init.cpId) : [],
+  // Per charge point, because the connector count decides whether `--scenario`
+  // keeps the file's own id or instantiates a fresh one.
+  const startupClaimedByCp = new Map<string, ReadonlySet<string>>(
+    hasExplicitStartupScenario
+      ? fleet.map((init) => [
+          init.cpId,
+          startupClaimedScenarioIds(opts.startupScenario, init.connectors),
+        ])
+      : [],
   );
 
   // Re-create CPs that were registered before the previous daemon shut
@@ -244,7 +251,10 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   }
   // First pass. See `finishWatchSetup` for the second, and for the three
   // constraints this sequence has to satisfy at once.
-  fileReload?.restoreScenarioWatches({ skipCpIds: startupOwnedCpIds });
+  fileReload?.restoreScenarioWatches({
+    skip: (row) =>
+      startupClaimedByCp.get(row.cp_id)?.has(row.scenario_id) === true,
+  });
   registry.connectRestored(restored);
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
@@ -850,12 +860,10 @@ export async function runStartupScenario(
         // registered on the original connector while its executor derived
         // expectations from the edited target — waiting on a connector it was
         // not attached to, and never firing.
-        const alreadyTargeted = (next: ScenarioDefinition): boolean =>
-          connectors.length === 1 &&
-          next.targetType === "connector" &&
-          next.targetId === connectorId;
         const prepare = (next: ScenarioDefinition): ScenarioDefinition =>
-          alreadyTargeted(next) ? next : instantiateTemplate(next, connectorId);
+          scenarioFileTargetsConnector(next, connectorId, connectors.length)
+            ? next
+            : instantiateTemplate(next, connectorId);
         const scenarioId = svc.loadScenario(connectorId, prepare(definition));
         fileReload?.registerScenarioFile({
           filePath: opt.scenario as string,
@@ -887,6 +895,69 @@ export async function runStartupScenario(
       }
     }
   }
+}
+
+/**
+ * Whether a `--scenario` definition already targets the connector it is being
+ * loaded onto, and therefore keeps its own id instead of an instantiated one.
+ *
+ * Shared, not duplicated: `runStartupScenario` uses it to build the `prepare`
+ * that runs on every reload, and the boot sequence uses it to work out which
+ * persisted scenario ids the startup flags are about to claim. Those two
+ * answers have to agree — a skip computed from a second copy of this rule would
+ * drift from the load it is meant to predict (#314).
+ */
+export function scenarioFileTargetsConnector(
+  definition: ScenarioDefinition,
+  connectorId: number,
+  connectorCount: number,
+): boolean {
+  return (
+    connectorCount === 1 &&
+    definition.targetType === "connector" &&
+    definition.targetId === connectorId
+  );
+}
+
+/**
+ * The persisted scenario ids the startup flags will claim on this boot.
+ *
+ * Only `--scenario` on a file that already targets its single connector keeps a
+ * stable id, so only that case can collide with a row a previous run stored.
+ * Everything else goes through `instantiateTemplate`, whose ids carry
+ * `Date.now()` and cannot match anything already on disk — which is why this
+ * returns a *narrow* set rather than the charge point's whole row set. Skipping
+ * a whole charge point instead would leave its other restored scenarios
+ * unwatched right up to the moment it dials, and they would then auto-start
+ * from the database copy rather than the file as it reads now (#314).
+ */
+export function startupClaimedScenarioIds(
+  opt: ServerOptions["startupScenario"],
+  connectorCount: number,
+): Set<string> {
+  const claimed = new Set<string>();
+  if (!opt?.scenario) return claimed;
+  let definition: ScenarioDefinition;
+  try {
+    definition = JSON.parse(
+      fs.readFileSync(opt.scenario, "utf-8"),
+    ) as ScenarioDefinition;
+  } catch {
+    // Unreadable or unparseable: `runStartupScenario` reports it properly a
+    // moment later. Claiming nothing is the safe answer — every row is then
+    // restored in the first pass, which is what happens without the flag.
+    return claimed;
+  }
+  if (typeof definition?.id !== "string") return claimed;
+  const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
+  for (const connectorId of connectors) {
+    if (
+      scenarioFileTargetsConnector(definition, connectorId, connectors.length)
+    ) {
+      claimed.add(definition.id);
+    }
+  }
+  return claimed;
 }
 
 /**

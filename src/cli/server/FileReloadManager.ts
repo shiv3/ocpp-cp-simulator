@@ -11,6 +11,7 @@ import {
   forgetWatchedScenarioFile,
   listWatchedScenarioFiles,
   rememberWatchedScenarioFile,
+  type WatchedScenarioFileRow,
 } from "./watchedScenarioFiles";
 import { parseIdTagsFile } from "./idTagFile";
 import { ARRAY_MAX_ITEMS, SCENARIO_MAX_BYTES } from "../../protocol/limits";
@@ -402,7 +403,10 @@ export class FileReloadManager {
    * rather than re-watched.
    */
   restoreScenarioWatches(
-    opts: { readonly skipCpIds?: ReadonlySet<string> } = {},
+    opts: {
+      /** Rows to leave for a later pass — see the caller for why. */
+      readonly skip?: (row: WatchedScenarioFileRow) => boolean;
+    } = {},
   ): void {
     if (this.closed || !this.database) return;
     const rows = listWatchedScenarioFiles(this.database);
@@ -423,16 +427,21 @@ export class FileReloadManager {
       ) {
         continue;
       }
-      // Held back for the second pass: this charge point is about to have a
-      // `--scenario` / `--scenario-template-file` loaded onto it, and a stored
-      // row can name the id that flag will claim. Applying the row's file here
-      // would reconcile the abandoned graph onto the connector and — with a
-      // matching trigger — start it, after which the flag's load replaces only
-      // the definition and finds an executor already running. Skipped now,
-      // restored after the bootstrap, by which time the flag has taken its keys
-      // and deleted their rows. Neither prune nor register: an untouched row is
-      // exactly what the second pass needs to see (#314).
-      if (opts.skipCpIds?.has(row.cp_id)) continue;
+      // Held back for the second pass: a startup flag is about to claim this
+      // exact scenario id, and a stored row under it names a file the operator
+      // has replaced. Applying it here would reconcile the abandoned graph onto
+      // the connector and — with a matching trigger — start it, after which the
+      // flag's load replaces only the definition and finds an executor already
+      // running. Skipped now, restored after the bootstrap, by which time the
+      // flag has taken its key and deleted its row. Neither prune nor register:
+      // an untouched row is exactly what the second pass needs to see.
+      //
+      // The predicate is deliberately narrow. Skipping a whole charge point
+      // instead left its *other* restored scenarios unwatched right up to the
+      // moment it dialled, so they auto-started from the database copy rather
+      // than from the file as it reads now — constraint 1 broken by
+      // constraint 2's own solution (#314).
+      if (opts.skip?.(row)) continue;
       const loaded = this.registry
         .get(row.cp_id)
         ?.getScenario(row.connector_id, row.scenario_id);
@@ -688,6 +697,21 @@ export class FileReloadManager {
    * A file whose `id` was edited would otherwise load a *second* scenario and
    * leave the first one running under the old definition — the reverse of what
    * "reload" means, and unremovable through the connector's scenario list.
+   *
+   * The **target** follows one of two rules, and the difference is deliberate:
+   *
+   * - With a `prepare` — the startup flags — an edited `targetType` /
+   *   `targetId` is *re-derived* on every reload. `--scenario` on a single
+   *   connector that the file already targets is loaded as-is, and repointing
+   *   the file has to be re-evaluated or the definition sits on the connector
+   *   it was registered for while its executor waits on the new one.
+   * - Without one — `load_scenario { file }` and `run_scenario_file` — the
+   *   target is *pinned* to what was loaded. Nothing re-derives it there, so an
+   *   edited target was accepted while the scenario stayed mapped to
+   *   `entry.connectorId`: `ScenarioExecutor` then derived its expectations
+   *   from the edited `targetId` and waited on a connector its runtime
+   *   callbacks were not operating on. A reload replaces a definition; it never
+   *   moves a scenario (#314).
    */
   private parseScenario(
     entry: ScenarioEntry,
@@ -717,7 +741,20 @@ export class FileReloadManager {
         `[watch] ${entry.absolutePath} does not match schema/scenario.schema.json (loading anyway): ${result.errors.slice(0, 5).join("; ")}`,
       );
     }
-    return { ...prepared, id: entry.scenarioId };
+    if (entry.prepare) return { ...prepared, id: entry.scenarioId };
+    // Pinned to the target the live definition carries — what the load
+    // installed — rather than normalised to `entry.connectorId`, so a scenario
+    // legitimately loaded against something other than its own connector keeps
+    // that shape instead of being quietly rewritten by a reload.
+    const live = this.registry
+      .get(entry.cpId)
+      ?.getScenario(entry.connectorId, entry.scenarioId);
+    return {
+      ...prepared,
+      id: entry.scenarioId,
+      targetType: live?.targetType ?? "connector",
+      targetId: live?.targetId ?? entry.connectorId,
+    };
   }
 
   /** Whether the definition was accepted — applied now, or held for a session

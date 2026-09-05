@@ -542,6 +542,7 @@ Sixth review pass on PR #325.
   it. This is the third round in which this page needed correcting after the
   code moved — the correction pass is now part of the work, not a follow-up.
 - Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.
+
 ## [2026-09-04] ingest | `--watch` re-reads loaded idTag and scenario files (#314)
 
 - `entities/daemon.md` — new **File hot-reload** section (what is watched,
@@ -1038,3 +1039,27 @@ Sixth review pass on PR #325.
   watch's durability, not its correctness this run. Persist-first, chosen for
   `replaceIdTags`, is simply not available here, and that difference is now
   recorded rather than left to be re-derived.
+
+## [2026-09-05] ingest | `--watch`: a narrow skip, and a reload that never moves a scenario (#314, PR #317)
+
+- The two-pass restore's first pass skipped by **charge point**, on the argument
+  that over-skipping was safe because the second pass would pick the rest up.
+  It was not: the dial happens between the passes, so every other restored
+  scenario on that charge point auto-started from the database copy rather than
+  the reconciled file — constraint 1 broken by constraint 2's own solution. The
+  skip is now a predicate over the exact scenario ids a startup flag will claim.
+- The obstacle to narrowing was that predicting those ids means knowing whether
+  `--scenario` will keep the file's own id or instantiate a fresh one. That rule
+  now lives in one exported function that both `runStartupScenario`'s `prepare`
+  and the prediction call, so the skip cannot drift from the load it predicts —
+  shared rather than duplicated, which was the condition for taking this route.
+  Only `--scenario` on a file already targeting its single connector keeps a
+  stable id; everything else carries `Date.now()` and cannot collide.
+- [Daemon](entities/daemon.md) — the target rule splits in two, stated together
+  so the difference is deliberate. A file behind a startup flag has its target
+  **re-derived** on every reload (round 12's fix: a repointed `--scenario` must
+  be re-evaluated). A file behind `load_scenario { file }` or `run_scenario_file`
+  has its target **pinned** to what the load installed, because nothing
+  re-derives it there — an edited `targetId` was accepted while the scenario
+  stayed mapped to its registered connector, so the executor waited on a
+  connector its runtime callbacks were not operating on.

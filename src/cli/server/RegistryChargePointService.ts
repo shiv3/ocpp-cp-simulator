@@ -609,6 +609,19 @@ export class RegistryChargePointService implements ChargePointService {
     // distinguishable by the caller. Starting it here instead keeps the
     // requested options, and leaves "this id was already running before the
     // call" the honest error it has always been.
+    // Refused *before* anything is installed, not after. `runScenario` has
+    // always thrown on an id that is already running, but by then
+    // `loadScenario` had replaced and persisted the definition — and the
+    // dispatcher registers the new source file only once this method returns,
+    // so a failed call left the new definition live behind the *old* file's
+    // watch, and the next edit to that stale file quietly overwrote it. This
+    // method performs a multi-step mutation with no transaction around it, so
+    // the fix is to have no partial state to undo rather than to compensate for
+    // one. The message is the one `runScenario` would have raised, so a caller
+    // sees no change beyond the side effect disappearing (#314).
+    if (service.isScenarioRunning(parsed.id)) {
+      throw new Error(`Scenario ${parsed.id} is already running`);
+    }
     const scenarioId = service.loadScenario(connectorId, parsed, {
       autoStart: false,
     });

@@ -12,7 +12,7 @@ import {
   type OcppFrame,
 } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
-import { ARRAY_MAX_ITEMS } from "../../../protocol/limits";
+import { ARRAY_MAX_ITEMS, SCENARIO_ID_MAX } from "../../../protocol/limits";
 import { rememberWatchedScenarioFile } from "../watchedScenarioFiles";
 import type { WatchFactory } from "../FileWatcher";
 import {
@@ -2405,11 +2405,15 @@ describe("a rejection is never lost to the field it is written into (#314)", () 
     // so the message that names it is the thing that overflows.
     const service = server.registry.get("CP-BOUNDED");
     if (!service) throw new Error("CP-BOUNDED missing");
-    const hugeId = "s".repeat(300_000);
-    service.loadScenario(
-      1,
-      JSON.parse(scenario(hugeId, 1)) as ScenarioDefinition,
-    );
+    // Long enough to overflow the envelope's 64 KiB `error` field when quoted,
+    // but inside the load gate's own id bound — which is the only way this can
+    // now be reached, and is exactly the case the truncation is for.
+    const hugeId = "s".repeat(100_000);
+    const sibling = JSON.parse(scenario(hugeId, 1)) as ScenarioDefinition & {
+      description?: string;
+    };
+    sibling.description = "x".repeat(200_000);
+    service.loadScenario(1, sibling);
 
     backend.save(file, scenario("bounded", 22));
     await waitFor(
@@ -2421,6 +2425,107 @@ describe("a rejection is never lost to the field it is written into (#314)", () 
     expect(rejection?.error).toContain("the control plane can carry");
     // The previous definition is still loaded, as for any rejection.
     expect(loadedDelay(server, "CP-BOUNDED", "bounded")).toBe(11);
+  });
+});
+
+describe("a failed run_scenario_file leaves nothing behind (#314)", () => {
+  it("refuses an already-running id before it installs anything", async () => {
+    // `runScenario` has always thrown on an id already running, but
+    // `loadScenario` had replaced and persisted the definition first — and the
+    // dispatcher registers the new source file only after the call *succeeds*.
+    // So a failed request left the second file's definition live behind the
+    // first file's watch, and the next edit to that stale file silently
+    // overwrote it. No partial state to compensate for now: the id is refused
+    // before anything is touched.
+    const dir = tempDir();
+    const running = writeFile(dir, "a.json", runnableScenario("clash", 30));
+    const other = writeFile(dir, "b.json", runnableScenario("clash", 31));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await createConnectedCp(server, socket, "CP-CLASH");
+    await rpc(
+      socket,
+      "run_scenario_file",
+      { connector: 1, file: running },
+      "CP-CLASH",
+    );
+    const service = server.registry.get("CP-CLASH");
+    if (!service) throw new Error("CP-CLASH missing");
+    expect(service.isScenarioRunning("clash")).toBe(true);
+    expect(server.fileReload?.watchedPaths()).toEqual([path.resolve(running)]);
+
+    // The same id, from a different file, while the first is still running.
+    await expect(
+      rpc(
+        socket,
+        "run_scenario_file",
+        { connector: 1, file: other },
+        "CP-CLASH",
+      ),
+      // The rpc layer maps a facade throw to a generic `internal` error, so the
+      // rejection itself is not the discriminating assertion — the three state
+      // checks below are. Under the bug this call also rejected, having already
+      // replaced and persisted the definition.
+    ).rejects.toThrow();
+
+    // Nothing moved: the definition is still the one that is running, and the
+    // watch is still on the file it came from.
+    expect(loadedDelaySeconds(server, "CP-CLASH", "clash")).toBe(30);
+    expect(server.fileReload?.watchedPaths()).toEqual([path.resolve(running)]);
+
+    // And the second file is inert — under the bug it owned the definition
+    // while this watch pointed at the first file.
+    backend.save(other, runnableScenario("clash", 32));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(loadedDelaySeconds(server, "CP-CLASH", "clash")).toBe(30);
+  });
+});
+
+describe("every scenario id in the registry fits the envelope (#314)", () => {
+  it("refuses a file whose id is longer than the event field can carry", async () => {
+    // A definition arriving as an RPC *object* is bounded whole by
+    // SCENARIO_MAX_BYTES, so its id cannot reach the envelope's cap. One read
+    // from a file passes through no object schema at all: an id past the cap
+    // loaded happily, and then every `file-reload` event naming it failed
+    // validation and was swallowed — the scenario ran and nobody was told.
+    // Bounded at the load gate, so the invariant holds however it arrived.
+    const dir = tempDir();
+    const huge = JSON.parse(scenario("x", 11)) as Record<string, unknown>;
+    huge.id = "i".repeat(SCENARIO_ID_MAX + 1);
+    const file = writeFile(dir, "s.json", JSON.stringify(huge));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-HUGEID",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+
+    await expect(
+      rpc(socket, "load_scenario", { connector: 1, file }, "CP-HUGEID"),
+    ).rejects.toThrow();
+    // Nothing loaded, and nothing watched behind it.
+    // `cp.create` seeds a default scenario, so the question is whether *this*
+    // id got in, not how many scenarios exist.
+    expect(
+      server.registry.get("CP-HUGEID")?.getScenario(1, huge.id as string) ??
+        null,
+    ).toBeNull();
+    expect(server.fileReload?.watchedPaths()).toEqual([]);
+
+    // Exactly at the bound is accepted, so this is the envelope's limit and
+    // not an arbitrary tightening.
+    huge.id = "i".repeat(SCENARIO_ID_MAX);
+    const ok = writeFile(dir, "ok.json", JSON.stringify(huge));
+    const loaded = await rpc(
+      socket,
+      "load_scenario",
+      { connector: 1, file: ok },
+      "CP-HUGEID",
+    );
+    expect(loaded.scenarioId).toBe(huge.id);
   });
 });
 

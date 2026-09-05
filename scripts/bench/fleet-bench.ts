@@ -47,12 +47,12 @@ import {
   parseExposition,
   recommendedWarmupSec,
   redactOptions,
+  redactUrlsInText,
   redactUrlUserinfo,
   requiredRpcPerSec,
   row,
   sleep,
   socketPoolSize,
-  stopTransactionsSent,
   staggerOffsetsMs,
   ASSIGNED_ID_TIMEOUT_MS,
   START_CONFIRM_TIMEOUT_MS,
@@ -116,7 +116,7 @@ async function fetchWithDeadline(
           // failed fetch commonly quotes the original URL verbatim, so
           // redacting one and appending the other put the plaintext password
           // straight back on the line.
-          `${what} failed (${redactUrlUserinfo(url)}): ${redactUrlUserinfo(String(err))}`,
+          `${what} failed (${redactUrlUserinfo(url)}): ${redactUrlsInText(String(err))}`,
       { cause: err },
     );
   }
@@ -475,10 +475,6 @@ interface Preflight {
    *  target and connected count is relative to it, so a run with
    *  `--allow-existing` still reports its own fleet rather than the daemon's. */
   readonly baseline: FleetGauge;
-  /** `StopTransaction` frames this daemon had already sent before the run
-   *  started. Teardown compares against it to tell whether every stop it had
-   *  acked has actually reached the wire. */
-  readonly stopsSentAtStart: number;
 }
 
 async function preflight(
@@ -548,7 +544,6 @@ async function preflight(
   return {
     daemonVersion: health.version ?? "unknown",
     baseline: fleetGauge(samples),
-    stopsSentAtStart: stopTransactionsSent(samples),
   };
 }
 
@@ -795,7 +790,7 @@ function armLoad(
         );
       } catch (err) {
         process.stderr.write(
-          `[bench] start_heartbeat failed for ${cpId}: ${redactUrlUserinfo(String(err))}\n`,
+          `[bench] start_heartbeat failed for ${cpId}: ${redactUrlsInText(String(err))}\n`,
         );
       }
     }
@@ -861,7 +856,7 @@ function armLoad(
       );
     } catch (err) {
       process.stderr.write(
-        `[bench] start_transaction failed for ${cpId}: ${redactUrlUserinfo(String(err))}\n`,
+        `[bench] start_transaction failed for ${cpId}: ${redactUrlsInText(String(err))}\n`,
       );
     }
     // Hold from the moment the transaction *started*, not from the moment the
@@ -960,7 +955,7 @@ function armLoad(
         // Left in `openTransactions` on purpose: a stop that failed is a
         // transaction still open, and teardown must try again.
         process.stderr.write(
-          `[bench] stop_transaction failed for ${cpId}: ${redactUrlUserinfo(String(err))}\n`,
+          `[bench] stop_transaction failed for ${cpId}: ${redactUrlsInText(String(err))}\n`,
         );
       }
       if (stopped || retiring) return;
@@ -1053,18 +1048,11 @@ function armLoad(
  * given, never a smaller number chosen locally.
  */
 
-/** How many `StopTransaction` frames the daemon has sent, or `NaN` if the
- *  scrape failed. */
-async function stopsSentOrNaN(
-  daemonUrl: string,
-  auth: { username: string; password: string } | null,
-): Promise<number> {
-  try {
-    return stopTransactionsSent(await fetchMetrics(daemonUrl, auth));
-  } catch {
-    return Number.NaN;
-  }
-}
+/** How long to wait before re-sweeping ids the delete pass reported as
+ *  `not_found`. Long enough for a `cp.create_many` whose client deadline has
+ *  expired to finish server-side: the handler creates sequentially and its own
+ *  per-charge-point work is short, so one further RPC deadline covers it. */
+const RECONCILE_DELAY_MS = RPC_TIMEOUT_MS;
 
 /** Overall budget for closing transactions still open at teardown. Bounded
  *  like the delete sweep and for the same reason: a daemon that has stopped
@@ -1090,8 +1078,6 @@ const CLOSE_TX_BUDGET_MS = 30_000;
 async function closeOpenTransactions(
   pool: SocketPool,
   cpIds: readonly string[],
-  daemonUrl: string,
-  auth: { username: string; password: string } | null,
 ): Promise<void> {
   if (cpIds.length === 0) return;
   if (!pool.anyConnected()) {
@@ -1105,14 +1091,12 @@ async function closeOpenTransactions(
   process.stderr.write(
     `[bench] closing ${cpIds.length} open transaction(s) before deleting\n`,
   );
-  // Read before issuing anything, so the drain below compares like with like.
-  // NaN when the scrape fails: that only costs the drain check, and the stops
-  // below still go out.
-  const sentBefore = await stopsSentOrNaN(daemonUrl, auth);
   const deadline = Date.now() + CLOSE_TX_BUDGET_MS;
   let next = 0;
-  let closed = 0;
   let unresponsive = false;
+  /** Charge points whose transaction is confirmed gone. */
+  const cleared = new Set<string>();
+
   const worker = async (): Promise<void> => {
     for (;;) {
       if (unresponsive) return;
@@ -1120,65 +1104,82 @@ async function closeOpenTransactions(
       if (remainingMs <= 0) return;
       const i = next++;
       if (i >= cpIds.length) return;
+      const cpId = cpIds[i]!;
       try {
-        await pool.rpc(
-          "stop_transaction",
-          { connector: 1 },
-          cpIds[i]!,
-          remainingMs,
-        );
-        closed++;
+        await pool.rpc("stop_transaction", { connector: 1 }, cpId, remainingMs);
       } catch (err) {
         if (err instanceof RpcFailedError && err.code === "timeout") {
           unresponsive = true;
+          return;
         }
         // Anything else: the connector may simply have had no transaction,
-        // which is the outcome wanted.
+        // which is the outcome wanted. The check below decides.
+      }
+      // Proof, per charge point, that the transaction is gone.
+      //
+      // The ack only says the daemon queued `StopTransaction`. The obvious
+      // instrument for "did it reach the wire" — the `StopTransaction` message
+      // counter — is fleet-wide and carries **no `cpId` label**, deliberately
+      // so (#298 bounded its cardinality on purpose). An unrelated frame can
+      // therefore satisfy an aggregate inequality while *this* charge point's
+      // stop is still queued, so that comparison looked like proof and was
+      // not. `connector.transactionId` is per charge point and is cleared only
+      // by the `StopTransaction` CALLRESULT handler, so it answers the
+      // stronger question — the CSMS saw the stop and replied — about the
+      // charge point actually in hand.
+      for (;;) {
+        const leftMs = deadline - Date.now();
+        if (leftMs <= 0) return;
+        let done: boolean;
+        try {
+          done = !(await hasOpenTransaction(pool, cpId, leftMs));
+        } catch (err) {
+          if (err instanceof RpcFailedError && err.code === "timeout") {
+            unresponsive = true;
+          }
+          // `not_found` means the charge point is already gone, which is the
+          // outcome wanted.
+          done = true;
+        }
+        if (done) {
+          cleared.add(cpId);
+          break;
+        }
+        await sleep(250);
       }
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(CLEANUP_CONCURRENCY, cpIds.length) }, worker),
   );
-  const left = cpIds.length - closed;
+
+  const left = cpIds.length - cleared.size;
   if (left > 0) {
     process.stderr.write(
-      `[bench] ${left} transaction(s) could not be closed` +
-        `${unresponsive ? " (the daemon stopped answering)" : ""}; the CSMS ` +
-        `may be left holding them.\n`,
+      `[bench] ${left} transaction(s) could not be confirmed closed` +
+        `${unresponsive ? " (the daemon stopped answering)" : ""}. Deleting now ` +
+        `would discard any still-queued StopTransaction, so the CSMS may be ` +
+        `left holding them.\n`,
     );
   }
+}
 
-  // The acks above say the daemon *queued* those StopTransactions, not that it
-  // sent them. Deleting a charge point on the strength of an ack discards its
-  // queued CALL, so wait for the frames to actually leave — bounded by the
-  // per-CALL watchdog, which is the bound the daemon's own serializer works
-  // to, never a smaller number chosen here.
-  if (closed === 0 || unresponsive || Number.isNaN(sentBefore)) return;
-  const target = sentBefore + closed;
-  const drainDeadline = Date.now() + CLOSE_TX_BUDGET_MS;
-  for (;;) {
-    let sentNow: number;
-    try {
-      sentNow = stopTransactionsSent(await fetchMetrics(daemonUrl, auth));
-    } catch {
-      process.stderr.write(
-        `[bench] could not confirm StopTransaction frames left the queue; the ` +
-          `CSMS may be left holding transactions.\n`,
-      );
-      return;
-    }
-    if (sentNow >= target) return;
-    if (Date.now() >= drainDeadline) {
-      process.stderr.write(
-        `[bench] ${target - sentNow} StopTransaction CALL(s) were still queued ` +
-          `after ${CLOSE_TX_BUDGET_MS / 1000}s. Deleting now would discard them, ` +
-          `so the CSMS may be left holding those transactions.\n`,
-      );
-      return;
-    }
-    await sleep(250);
-  }
+/** Whether `cpId` still has a transaction on any connector.
+ *
+ *  Read from the daemon's own per-charge-point state rather than from a
+ *  fleet-wide counter, because only this is attributable to one charge
+ *  point. */
+async function hasOpenTransaction(
+  pool: SocketPool,
+  cpId: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const status = await pool.rpc<{
+    connectors?: { transactionId?: number | null }[];
+  }>("status", {}, cpId, timeoutMs);
+  return (status.connectors ?? []).some(
+    (c) => c.transactionId !== null && c.transactionId !== undefined,
+  );
 }
 
 /** Best-effort teardown of everything this run created, bounded by
@@ -1193,8 +1194,8 @@ async function deleteFleet(
   pool: SocketPool,
   runId: string,
   cpIds: readonly string[],
-): Promise<void> {
-  if (cpIds.length === 0) return;
+): Promise<string[]> {
+  if (cpIds.length === 0) return [];
   if (!pool.anyConnected()) {
     process.stderr.write(
       `[bench] skipping cleanup: no control-plane socket is connected, so ` +
@@ -1202,7 +1203,7 @@ async function deleteFleet(
         `the daemon. Restart it, or delete them before the next run — the ` +
         `preflight refuses a daemon that already holds charge points.\n`,
     );
-    return;
+    return [];
   }
   process.stderr.write(
     `[bench] cleaning up ${cpIds.length} charge point(s) (up to ${CLEANUP_BUDGET_MS / 1000}s)\n`,
@@ -1210,6 +1211,10 @@ async function deleteFleet(
   const deadline = Date.now() + CLEANUP_BUDGET_MS;
   let next = 0;
   let deleted = 0;
+  /** Ids the daemon said it did not have. Under a `cp.create_many` whose
+   *  client deadline expired while the server kept creating, an id can be
+   *  absent now and registered a moment later, so these are re-swept. */
+  const notFound = new Set<string>();
   // One timeout means the daemon has stopped answering; the remaining ids
   // would each spend the rest of the budget learning the same thing.
   let daemonUnresponsive = false;
@@ -1232,6 +1237,9 @@ async function deleteFleet(
         if (err instanceof RpcFailedError && err.code === "timeout") {
           daemonUnresponsive = true;
         } else if (err instanceof RpcFailedError && err.code === "not_found") {
+          // Recorded, because "not there yet" and "already gone" look the same
+          // from here — see the reconciliation pass in `cleanup`.
+          notFound.add(cpIds[i]!);
           // Already gone — the outcome cleanup wanted, so it counts as done
           // rather than inflating the "still registered" tally below.
           deleted++;
@@ -1252,6 +1260,7 @@ async function deleteFleet(
         `run's preflight will refuse this daemon until they are gone.\n`,
     );
   }
+  return [...notFound];
 }
 
 async function main(): Promise<void> {
@@ -1280,10 +1289,7 @@ async function main(): Promise<void> {
   process.stderr.write(
     `[bench] run id ${runId}: charge points are created as ${benchIdPattern(runId)}\n`,
   );
-  const { daemonVersion, baseline, stopsSentAtStart } = await preflight(
-    opts,
-    runId,
-  );
+  const { daemonVersion, baseline } = await preflight(opts, runId);
 
   process.stderr.write(machineInfo(opts.daemonUrl, daemonVersion) + "\n");
   process.stderr.write(
@@ -1441,36 +1447,37 @@ async function main(): Promise<void> {
       // Then close what is open. `stop()` cancelled the timers that would have
       // sent these, and a deleted charge point can no longer end its session,
       // so without this the CSMS is left holding them.
-      // Which charge points still need a closing stop. Never-acked ones
-      // always do. Acked-but-unverified ones do too *unless* the daemon's
-      // sent counter shows every stop this run acked has reached the wire —
-      // the bookkeeping and the wait now answer "stopped" the same way.
-      const ackedTotal = loads.reduce((sum, l) => sum + l.stopsAcked(), 0);
-      const sentNow = await stopsSentOrNaN(
-        opts.daemonUrl,
-        opts.daemonBasicAuth,
-      );
-      const ackedStopsAreOnTheWire =
-        !Number.isNaN(sentNow) && sentNow >= stopsSentAtStart + ackedTotal;
-      const needClosing = loads.flatMap((l) =>
-        ackedStopsAreOnTheWire
-          ? l.openTransactions()
-          : [...l.openTransactions(), ...l.stopsAwaitingWire()],
-      );
-      if (!ackedStopsAreOnTheWire && ackedTotal > 0) {
-        process.stderr.write(
-          `[bench] not every acked stop has reached the wire yet; closing the ` +
-            `unverified ones too rather than deleting over a queued CALL.\n`,
-        );
-      }
-      await closeOpenTransactions(
-        pool,
-        needClosing,
-        opts.daemonUrl,
-        opts.daemonBasicAuth,
-      );
+      // Unconditionally: every charge point that may have an open
+      // transaction, whether or not its stop was acked. There is no way to
+      // attribute a wire frame to a charge point — the message counter has no
+      // `cpId` label by design — so teardown does not try to reason about
+      // which ones still need it. It re-stops them all and then verifies each
+      // one individually, which costs at most one fleet's worth of RPCs and
+      // does not depend on attribution.
+      const needClosing = loads.flatMap((l) => [
+        ...l.openTransactions(),
+        ...l.stopsAwaitingWire(),
+      ]);
+      await closeOpenTransactions(pool, [...new Set(needClosing)]);
       watcher?.close();
-      await deleteFleet(pool, runId, [...cleanupIds]);
+      const notFound = await deleteFleet(pool, runId, [...cleanupIds]);
+      // A `cp.create_many` whose *client* deadline expired does not stop the
+      // daemon's sequential handler, which keeps creating charge points. The
+      // sweep above then answered `not_found` for ids the handler registered
+      // moments later, and those survived — so the next run's preflight would
+      // refuse this daemon. The client promise settling is not the operation
+      // completing, so reconcile afterwards instead of trusting it.
+      if (notFound.length > 0 && pool.anyConnected()) {
+        await sleep(RECONCILE_DELAY_MS);
+        const stillMissing = await deleteFleet(pool, runId, notFound);
+        if (stillMissing.length < notFound.length) {
+          process.stderr.write(
+            `[bench] reconciliation deleted ` +
+              `${notFound.length - stillMissing.length} charge point(s) the daemon ` +
+              `created after its create RPC had already timed out.\n`,
+          );
+        }
+      }
       await pool.closeAll();
     })();
     return cleanupStarted;
@@ -1823,7 +1830,7 @@ if (import.meta.main) {
     // Redacted at the sink as well as at each source: a socket.io connect
     // error can quote the daemon URL, and this is the last place every failure
     // path converges before it reaches stderr.
-    const message = redactUrlUserinfo(
+    const message = redactUrlsInText(
       err instanceof Error ? err.message : String(err),
     );
     // An abort is a run that stopped on purpose, not a crash — say so, because

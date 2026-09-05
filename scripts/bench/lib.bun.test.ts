@@ -49,13 +49,13 @@ import {
   radicalInverseBase2,
   recommendedWarmupSec,
   redactOptions,
+  redactUrlsInText,
   redactUrlUserinfo,
   requiredRpcPerSec,
   RPC_DEADLINE_MS,
   row,
   sleep,
   socketPoolSize,
-  stopTransactionsSent,
   staggerOffsetsMs,
   START_CONFIRM_MARGIN_SEC,
   START_CONFIRM_TIMEOUT_MS,
@@ -1856,45 +1856,6 @@ describe("credentials never reach an error message (#302)", () => {
   });
 });
 
-describe("proving a StopTransaction actually left the queue (#302)", () => {
-  const exposition = [
-    "# TYPE ocppcp_ocpp_messages_total counter",
-    'ocppcp_ocpp_messages_total{action="StopTransaction",direction="cp-to-csms"} 7',
-    'ocppcp_ocpp_messages_total{action="StopTransaction",direction="csms-to-cp"} 5',
-    'ocppcp_ocpp_messages_total{action="StartTransaction",direction="cp-to-csms"} 9',
-    'ocppcp_ocpp_messages_total{action="Heartbeat",direction="cp-to-csms"} 40',
-  ].join("\n");
-
-  it("counts only the StopTransaction CALLs the daemon actually sent", () => {
-    // The `stop_transaction` RPC ack says the daemon *queued* the CALL. Under
-    // a backlogged serializer — the condition this tool exists to create —
-    // deleting the charge point on that ack discards the queued frame and the
-    // CSMS keeps an open transaction. This counter moves when the frame is
-    // written, so it is the signal the ack does not give.
-    expect(stopTransactionsSent(parseExposition(exposition))).toBe(7);
-  });
-
-  it("does not count the answers coming back", () => {
-    // `csms-to-cp` is the conf, not a CALL this daemon sent; counting it would
-    // let teardown believe frames had left that never did.
-    const onlyAnswers = parseExposition(
-      'ocppcp_ocpp_messages_total{action="StopTransaction",direction="csms-to-cp"} 5',
-    );
-    expect(stopTransactionsSent(onlyAnswers)).toBe(0);
-  });
-
-  it("does not count other actions", () => {
-    const onlyStarts = parseExposition(
-      'ocppcp_ocpp_messages_total{action="StartTransaction",direction="cp-to-csms"} 9',
-    );
-    expect(stopTransactionsSent(onlyStarts)).toBe(0);
-  });
-
-  it("is zero on a daemon that has sent none", () => {
-    expect(stopTransactionsSent(parseExposition(""))).toBe(0);
-  });
-});
-
 describe("the complete cycle bound (#302)", () => {
   it("covers every stage a cycle can await in", () => {
     // The bound has grown twice, so the enumeration is asserted rather than
@@ -1922,5 +1883,49 @@ describe("the complete cycle bound (#302)", () => {
       expect(bound).toBeGreaterThan(confirmMs + holdMs);
       expect(bound).toBe(confirmMs + holdMs + 2 * RPC_DEADLINE_MS);
     }
+  });
+});
+
+describe("redacting URLs inside a message (#302)", () => {
+  it("redacts a URL that is not at the start of the text", () => {
+    // The finding: `redactUrlUserinfo` is anchored, so a URL embedded in an
+    // exception message passed through with the password intact — and caught
+    // exceptions go to stderr.
+    const message =
+      "TypeError: fetch failed for https://admin:hunter2@daemon.test/metrics";
+    expect(redactUrlsInText(message)).not.toContain("hunter2");
+    expect(redactUrlsInText(message)).toContain("admin:***@daemon.test");
+    // The anchored helper is exactly what did not catch it.
+    expect(redactUrlUserinfo(message)).toContain("hunter2");
+  });
+
+  it("redacts every URL in the text, not just the first", () => {
+    const message =
+      "connect ws://a:s1@csms.test failed while polling http://b:s2@daemon.test";
+    const out = redactUrlsInText(message);
+    expect(out).not.toContain("s1");
+    expect(out).not.toContain("s2");
+    expect(out).toContain("a:***@csms.test");
+    expect(out).toContain("b:***@daemon.test");
+  });
+
+  it("still handles a bare URL, so it is a safe superset", () => {
+    expect(redactUrlsInText("wss://u:p@host/ocpp")).toBe(
+      "wss://u:***@host/ocpp",
+    );
+  });
+
+  it("leaves text with no credentials alone", () => {
+    const plain = "GET /metrics -> 503 Service Unavailable";
+    expect(redactUrlsInText(plain)).toBe(plain);
+    expect(redactUrlsInText("https://daemon.test/x")).toBe(
+      "https://daemon.test/x",
+    );
+  });
+
+  it("keeps a userinfo with no password readable", () => {
+    expect(redactUrlsInText("at http://user@host/x")).toBe(
+      "at http://user@host/x",
+    );
   });
 });

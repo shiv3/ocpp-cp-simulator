@@ -750,6 +750,38 @@ export function validateOptions(raw: Map<string, RawArgValue>): BenchOptions {
  *  URL parsing uses. Stopping at the first `@` would leave the tail of a
  *  password containing one (`user:p@ss@host`) in the output, and a partial
  *  leak is still a leak. */
+/**
+ * Redact userinfo from **every** URL occurring anywhere in `text`.
+ *
+ * {@link redactUrlUserinfo} is anchored to the start of its input, which is
+ * right for a bare URL and wrong for a message that merely contains one. A
+ * caught exception reads `TypeError: ... https://user:secret@host`, and
+ * handing that to the anchored helper let the password straight through to
+ * stderr — the fourth redaction finding on this work, and the first where the
+ * helper was fine and the call site was not.
+ *
+ * Deliberately scheme-relative rather than a URL parse: the text is arbitrary,
+ * a parse would fail on it, and a regex over the raw characters cannot be
+ * defeated by a URL too malformed to construct.
+ */
+export function redactUrlsInText(text: string): string {
+  return text.replace(
+    /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/?#]*)@/g,
+    (_all, scheme: string, userinfo: string) => {
+      const colon = userinfo.indexOf(":");
+      if (colon < 0) return `${scheme}${userinfo}@`;
+      return `${scheme}${userinfo.slice(0, colon)}:***@`;
+    },
+  );
+}
+
+/** Redact userinfo from a **bare** URL.
+ *
+ *  Anchored to the start of the input on purpose, so it cannot mangle text
+ *  that merely looks URL-shaped. That anchoring makes it the wrong tool for a
+ *  message that *contains* a URL — an exception, a log line — where the URL
+ *  can sit anywhere; use {@link redactUrlsInText} for those. Handing a whole
+ *  message to this function is how a password reached stderr once already. */
 export function redactUrlUserinfo(raw: string): string {
   return raw.replace(
     /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)@/,
@@ -853,31 +885,6 @@ export function counterValue(
 }
 
 /** The registered-charge-point gauge, labelled by state. */
-/** Frames actually written to the wire, by action and direction. Used to tell
- *  "the daemon queued this CALL" from "the CALL left the queue". */
-export const MESSAGES_METRIC = "ocppcp_ocpp_messages_total";
-
-/**
- * How many `StopTransaction` CALLs this daemon has actually sent.
- *
- * The `stop_transaction` RPC ack only says the daemon *queued* one. Under a
- * backlogged serializer — the condition this tool exists to create — deleting
- * a charge point on the strength of that ack discards the queued CALL, and the
- * CSMS keeps an open transaction after an apparently clean teardown. This
- * counter moves when the frame is written, so waiting for it to rise is
- * waiting for the thing the ack does not promise.
- */
-export function stopTransactionsSent(samples: readonly Sample[]): number {
-  return samples
-    .filter(
-      (s) =>
-        s.name === MESSAGES_METRIC &&
-        s.labels.action === "StopTransaction" &&
-        s.labels.direction === "cp-to-csms",
-    )
-    .reduce((sum, s) => sum + s.value, 0);
-}
-
 export const CHARGE_POINTS_METRIC = "ocppcp_charge_points";
 /** The state `ChargePoint.status` takes while disconnected or pre-boot. */
 export const UNAVAILABLE_STATE = "Unavailable";

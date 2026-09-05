@@ -178,11 +178,17 @@ charge points appear a moment later. And the wait for in-flight cycles uses the
 cycle's own bound — the authorization timeout plus, on 1.6, the assigned-id
 timeout — never a smaller number chosen at the teardown site.
 
-The same invariant governs the bookkeeping as well as the waiting: a charge
-point leaves the open-transaction set when its stop is known to be on the wire,
-not when the RPC acked, because otherwise the set says "stopped" while the wait
-says "queued" and teardown can delete the charge point, and its serialized
-queue, before the CSMS sees the stop. And the bound is now enumerated rather
+The same invariant governs the bookkeeping as well as the waiting, and the
+proof has to be **attributable**. Teardown re-stops every charge point that may
+have an open transaction, acked or not, then confirms each one individually by
+reading that charge point's own `transactionId` back through `status` — a field
+cleared only by the `StopTransaction` CALLRESULT handler, so a cleared value
+means the CSMS saw the stop and answered. An earlier version compared the
+fleet-wide `StopTransaction` message counter against a baseline; that looked
+like proof and was not, because `ocppcp_ocpp_messages_total` carries no `cpId`
+label by design, so an unrelated frame can satisfy the inequality while this
+charge point's stop is still queued. An aggregate cannot establish a
+per-charge-point fact. And the bound is now enumerated rather
 than incremented — a cycle awaits in exactly four places (the start RPC, the
 confirmation wait, the hold, the stop RPC) and nowhere else, which is what
 makes it complete rather than merely larger than last time. All of this is on
@@ -252,6 +258,15 @@ because its conf may still land during a later cycle and be taken for that
 cycle's id — the event carries no generation, so a stale conf cannot be told
 from a fresh one, and withdrawing the charge point is what makes the confusion
 impossible rather than unlikely.
+
+**A create whose client deadline expired keeps creating.** `cp.create_many`
+rejecting at its 35s deadline does not stop the daemon's sequential handler, so
+the delete sweep answered `not_found` for ids registered moments later and those
+survived to be refused by the next run's preflight. Ids reported `not_found` are
+re-swept once after a further RPC deadline, because "not there yet" and "already
+gone" are indistinguishable from the client. This is the
+acknowledgement-is-not-completion rule in its strongest form: the
+acknowledgement never arrives and the operation continues anyway.
 
 **SIGINT waits for creation to stop before deleting.** An interrupt landing
 while `growFleet` awaited one batch of a multi-batch step used to snapshot the
@@ -347,7 +362,10 @@ redaction applies to the progress lines, the hardware block and every error
 message, because stderr commonly ends up in a CI log. That includes a URL too
 malformed to parse: `ws://user:secret@` is the shape that makes `new URL`
 throw, and the redaction is a regex over the raw text rather than a URL
-rewrite, so it works without one. It also covers the **caught exception text**,
+rewrite, so it works without one. It scans the whole text rather than only its start — a URL embedded in an
+exception (`TypeError: ... https://user:secret@host`) is missed by the anchored
+bare-URL helper, and handing a whole message to that helper is how a password
+reached stderr once. It also covers the **caught exception text**,
 not only the URL printed beside it — a failed `fetch` commonly quotes the
 original URL verbatim, so redacting one and appending the other put the
 password straight back on the line — and it is applied at every error sink

@@ -978,3 +978,33 @@ Sixth review pass on PR #325.
   takeover deletion, so running the bootstrap first simply lets that assertion
   happen before anything reads the rows — the two rules compose instead of
   needing a third that knows which keys are startup-owned.
+
+## [2026-09-05] ingest | `--watch`: the restore runs on a serving daemon (#314, PR #317)
+
+- Moving `restoreScenarioWatches()` after the bootstrap fixed a startup-ordering
+  hazard and bought a concurrency one. The HTTP listener is bound _before_ the
+  bootstrap, so the restore no longer runs in a quiet process: an RPC that
+  arrived while the fleet was still connecting has already written its row and
+  registered a live watch, and the restore then re-registered over it with
+  `loadedText: null`. That discards the baseline, re-applies the definition
+  already loaded, and — with a run in flight — holds and reinstalls it when the
+  run settles, auto-starting it a second time. One request, duplicate traffic.
+- The rule, which is the honest framing of it: **a persisted row describes what a
+  previous run knew, and must not overwrite what this run has since been told.**
+  Rows for keys already present in the manager's registration map are skipped.
+  The idTag half already worked this way and needed no change — `syncFromRegistry`
+  establishes a watch only when the path is not already watched, and the
+  reconcile marker is set per charge point and path — so this closes the one
+  place where restored state could win over live state.
+- [Daemon](entities/daemon.md) — the boundary is now written down in both the
+  code and the wiki: everything in the bootstrap runs while the daemon is
+  serving. `startServer` carries a marker comment saying so and naming what runs
+  past it, because this finding exists only because "startup" and "serving"
+  overlap and nothing said where the line was. Listening later is not the
+  alternative: `cp.list` answering before an unreachable CSMS times out is the
+  behaviour that ordering exists for.
+- The previous round's matched pair of ordering tests still holds, but neither
+  contains a concurrent RPC, so both passed with this bug present. The new test
+  registers a file the way a mid-bootstrap RPC would and asserts the restore
+  emits nothing at all — the mutation that removes the guard reports one
+  `applied`.

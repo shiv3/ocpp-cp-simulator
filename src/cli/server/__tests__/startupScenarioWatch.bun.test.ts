@@ -709,4 +709,73 @@ describe("--watch over a startup scenario file (#314)", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+  it("a registration made while the daemon was already serving survives the restore", async () => {
+    // The hazard the ordering change bought. `Bun.serve` is bound before the
+    // bootstrap runs, so the restore no longer executes in a quiet process: an
+    // RPC arriving mid-bootstrap has already written its row and registered a
+    // live watch. The row it wrote names the same file, so the damage is not a
+    // wrong path — it is the *re-registration*, which arrives with
+    // `loadedText: null` ("no baseline to trust") and immediately reconciles:
+    // the definition that is already loaded is applied again, and while a run
+    // is in flight it is deferred and re-installed when that run settles, which
+    // can auto-start it a second time. One request, duplicate traffic (#314).
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-serving-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+      database,
+    });
+    const events: string[] = [];
+    fileReload.setSink((event) => events.push(event.outcome));
+    const svc = new CLIChargePointService({
+      cpId: "cp314-serving",
+      wsUrl: "ws://127.0.0.1:65534/never",
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    // What an RPC does while the bootstrap is still awaiting its connections:
+    // load the definition, register the file it came from, write the row.
+    const live = join(tmpDir, "live.json");
+    const liveText = targeted(1, 11);
+    writeFileSync(live, liveText);
+    svc.loadScenario(1, JSON.parse(liveText) as ScenarioDefinition);
+    fileReload.registerScenarioFile({
+      filePath: live,
+      cpId: "cp314-serving",
+      connectorId: 1,
+      scenarioId: "targeted-scenario",
+      loadedText: liveText,
+    });
+    // Registering a file whose bytes are already loaded is silent.
+    expect(events).toEqual([]);
+    expect(listWatchedScenarioFiles(database)).toHaveLength(1);
+
+    try {
+      // The bootstrap reaches its end and restores over a serving daemon.
+      fileReload.restoreScenarioWatches();
+
+      // Nothing happened: the live registration kept its baseline, so the
+      // definition already running was not re-applied. Without the guard the
+      // row is re-registered with no baseline and this reports one `applied`.
+      expect(events).toEqual([]);
+      expect(fileReload.watchedPaths()).toEqual([live]);
+      expect(delayOf(svc, 1, "targeted-scenario")).toBe(11);
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -55,6 +55,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [examples/testcontainers-java/README.md](sources/testcontainers-java-readme.md) | JVM Testcontainers prototype driving the control plane and asserting a verdict                        |
 | [scripts/poc/README.md](sources/socketio-bun-poc.md)                            | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |
 | [src/utils/scenarios/README.md](sources/cert16-templates-readme.md)             | Authoritative cert16 ↔ test-case mapping, side effects, responseOverride matrix, out-of-scope list    |
+| [scripts/bench/README.md](sources/bench-readme.md)                              | Fleet scale benchmark: sweeps N vs. p50/p95 OCPP call latency via cp.create_many + /metrics diffing   |
 | [GitHub issues](sources/github-issues.md)                                       | Index of issue / PR numbers the wiki cites, with the pages that cite them                             |
 
 ## Analyses (`analyses/`)

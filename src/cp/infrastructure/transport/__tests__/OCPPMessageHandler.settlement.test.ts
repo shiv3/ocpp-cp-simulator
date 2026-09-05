@@ -7,6 +7,7 @@ import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Settlement } from "../network-sim";
 import type { GenerationToken } from "../network-sim";
+import { MetricsRecorder } from "../../../../cli/server/metrics/MetricsRecorder";
 
 /**
  * Controllable fake OCPPWebSocket for testing settlement-based serializer custody.
@@ -215,6 +216,30 @@ describe("OCPPMessageHandler settlement-based serializer custody", () => {
 
       // The second CALL should now go to wire (slot was cleared by timeout)
       expect(secondSendActionCalled).toBe(true);
+    });
+
+    it("emits the watchdog line the daemon's timeout counter is parsed from (#302)", () => {
+      // The daemon counts abandoned CALLs off this exact log line, because the
+      // transport also runs in the browser and must not import a Prometheus
+      // recorder. That makes the wording load-bearing: drive the real watchdog
+      // and assert the emitted line still reaches the counter.
+      const recorder = new MetricsRecorder();
+      const unsubscribe = recorder.attach({
+        cpId: "TEST-CP",
+        ocppVersion: "OCPP-1.6J",
+        logger,
+      });
+      try {
+        handler.sendHeartbeat();
+        const heartbeatId = fakeSocket.pendingSettlements[0].id;
+        fakeSocket.settleSynchronously(heartbeatId, { outcome: "written" });
+
+        expect(recorder.callTimeouts.size).toBe(0);
+        vi.advanceTimersByTime(30_000 + 1);
+        expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+      } finally {
+        unsubscribe();
+      }
     });
   });
 

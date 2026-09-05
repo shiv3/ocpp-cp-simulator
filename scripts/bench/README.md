@@ -1,0 +1,909 @@
+# fleet-bench
+
+Measures where per-charge-point overhead starts distorting OCPP timing on one
+daemon process (issue [#302](https://github.com/shiv3/ocpp-cp-simulator/issues/302)).
+Stands up N charge points against a real CSMS via
+[`cp.create_many`](../../docs/concepts/control-plane.md#cpcreate_many--the-batch-fields),
+drives heartbeats (and, optionally, transactions) at a configurable rate, and
+reads the daemon's [`/metrics`](../../docs/entities/daemon.md#metrics)
+endpoint before and after each step to report N vs. p50/p95 OCPP CALL
+round-trip latency — so a human can spot the knee.
+
+This is a benchmark, not a test suite: it has no pass/fail assertion, only a
+table. See [Fleet, load and observability roadmap →
+5a](../../docs/analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling)
+for how this fits the larger plan, and
+[daemon.md → Limits & Roadmap](../../docs/entities/daemon.md#limits--roadmap)
+for where a run's result gets recorded.
+
+## Prerequisites
+
+- [`bun`](https://bun.sh)
+- A running daemon started with `--metrics` (or `--metrics-no-auth` if you
+  don't want to pass Basic Auth to this script): `bun src/cli/main.ts
+--http-port 9700 --metrics`
+- A CSMS the daemon can reach — [gocpp](../../docs/entities/csms-peers.md#gocpp)
+  is what this project's own e2e suite uses; any real OCPP-J CSMS works
+  ([SteVe](../steve-verify/README.md), a vendor CSMS staging environment, etc.).
+  Point `--ocpp-version` at whatever the CSMS speaks: the fleet is created as
+  `OCPP-1.6J` unless told otherwise, and a 2.x-only CSMS rejects every 1.6J
+  handshake — which shows up as an unsettled fleet and an empty table, not as
+  an error naming the cause.
+
+## Quick start
+
+```bash
+bun scripts/bench/fleet-bench.ts \
+  --csms-url ws://localhost:8887/ocpp \
+  --daemon-url http://127.0.0.1:9700 \
+  --counts 10,50,100,200 \
+  --duration 60
+```
+
+This creates 10 CPs, measures for 60s, grows to 50 (creating 40 more),
+measures again, and so on. Progress goes to stderr as each step runs; the
+table is printed once, at the end, covering every step.
+
+Here is real output from a local smoke test — `--counts 50,250,450` against
+a trivial auto-acking mock CSMS on loopback (not gocpp, not a real machine
+for the record, and **not the #302 result**; see "Recording a result"
+below):
+
+```
+N    uncreated  connected  dropped  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx  late hold  retired
+---  ---------  ---------  -------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------  ---------  -------
+50   0          50         0        0          150    6ms  21ms  6ms     21ms    0         0         0       0           0          0          0
+250  0          250        0        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0          0          0
+450  0          450        0        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0          0          0
+```
+
+(The header has changed since that run — `timeouts` / `late>30s` replaced a
+single `>30s` column, and `uncreated`, `unconf.tx`, `dropped`, `late hold` and
+`retired` were added.
+Every added column was zero in this run, so the numbers above are still the
+run's own.)
+
+Flat, as expected: a trivial mock CSMS answering on loopback never saturates,
+so this run shows no knee at all — the point of this example is to show the
+table shape and confirm the tool works end to end, not to suggest what a real
+knee looks like. A real CSMS on real hardware is what would make p50/p95
+diverge from this baseline as N grows.
+
+## Flags
+
+| Flag                             | Required | Default              | Meaning                                                                                                                                                                                                                                                                               |
+| -------------------------------- | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                                                                                                                 |
+| `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                                                                                                       |
+| `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                                                                                                          |
+| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                                                                                                   |
+| `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                                                                                                      |
+| `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. **Reapplied after every accepted boot**, not only at creation — see "The heartbeat override survives a reconnect". 1–3600. |
+| `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at this period, staggered across CPs. Bounded by the pool ceiling: **N ≤ 320 × `--tx-interval`** (see "Why a socket pool").                         |
+| `--settle-timeout <seconds>`     | No       | `60`                 | How long to wait for a step's newly-created CPs to report connected before measuring anyway. 1–600.                                                                                                                                                                                   |
+| `--warmup <seconds>`             | No       | `30 + --tx-interval` | How long a step holds the new `N` **and its load** before the first scrape, so the step's `timeouts` are its own. 0–3630. See "Warmup: why a step waits before it measures".                                                                                                          |
+| `--ocpp-version <version>`       | No       | `OCPP-1.6J`          | OCPP version every benchmarked charge point is created with: `OCPP-1.6J`, `OCPP-2.0.1` or `OCPP-2.1`. The three SOAP versions are rejected, for the same reason `--csms-url` rejects `http(s)://`.                                                                                    |
+| `--health-path <path>`           | No       | `/v1/healthz`        | Must match the daemon's own `--health-path` if it was changed.                                                                                                                                                                                                                        |
+| `--daemon-basic-auth-user/-pass` | No       | —                    | Basic Auth for a daemon started with `--http-basic-auth-user/-pass` and not `--metrics-no-auth`. Both or neither.                                                                                                                                                                     |
+| `--out <path>`                   | No       | —                    | Also write the full per-step results (including raw seconds, not just the formatted table) as JSON. Credentials are redacted: the daemon Basic Auth password and any URL userinfo become `***`.                                                                                       |
+
+Every flag is bounds-checked before anything is created (`scripts/bench/lib.ts`'s
+`validateOptions`) — a bad flag fails before the first charge point exists.
+
+## The two axes
+
+Per the issue, idle and active CPs have very different ceilings, and this
+script measures one axis per invocation:
+
+- **Idle** (`--tx-interval 0`, the default): a heartbeat is the only traffic.
+  Because the simulator's heartbeat is an _idle timer_ — any outgoing CALL
+  resets it (`src/cp/application/services/HeartbeatService.ts`) — this
+  isolates pure per-CP scheduling/timer overhead from OCPP call handling.
+- **Active** (`--tx-interval N`): each CP also start/stops a transaction on
+  connector 1 roughly every `N` seconds, staggered so the fleet reaches
+  steady state instead of bursting in lockstep. This is the axis the issue
+  calls "the one that matters" — it drives the daemon's actual OCPP call
+  handling path, not just timers.
+
+  The stagger is **deterministic, and phased off each charge point's global
+  fleet index** — never its index within the step that created it. Two runs
+  with the same flags therefore issue the same traffic pattern, so a knee is
+  reproducible and a run can be replayed from the options recorded in `--out`
+  — the same guarantee the rest of the project's randomness gives by being
+  seeded. `Math.random()` offsets could cluster by chance and move the observed
+  knee, which this cannot.
+
+  **Why global indices, and why not exact even spacing.** The fleet is grown in
+  place, so the load is armed once per step with only that step's new charge
+  points. Spacing each cohort evenly across the period _by itself_ restarted
+  the phase at 0 for every step: with `--counts 1,2,3` and step durations that
+  are multiples of the period, all three charge points ended up in nearly the
+  same phase — a burst, and a latency knee belonging to this script rather than
+  to the daemon, which is the worst answer a tool whose whole output is a knee
+  can give. Exact even spacing cannot survive growth without re-phasing the
+  running fleet, which would mean clearing in-flight transaction timers and
+  re-issuing `start_transaction` on connectors mid-session.
+
+  So a charge point's phase is fixed once, from its global index, using the
+  van der Corput sequence in base 2 (`0, ½, ¼, ¾, ⅛, …`). Its defining property
+  is the one grow-in-place needs: _every prefix_ is near-uniform, so the fleet
+  is well spread at every step of the sweep and a cohort added later never has
+  to disturb one already running. The widest silent stretch is at most `2/n` of
+  a period at fleet size `n`, against `1/n` for a perfect ring — and against
+  "the entire fleet in one phase" for the per-cohort version. The span is the
+  cycle period, not the raw `--tx-interval`: a hold is floored at 1s, so at
+  `--tx-interval 1` the period is 2s and spreading over 1s would bunch the
+  fleet into half the phase space.
+
+  **The offsets are anchored to a run-wide epoch, not to each cohort's own
+  start.** Global indices fix _which_ fraction of the period a charge point
+  gets; they say nothing about what that fraction is measured from. Creation,
+  settling and heartbeat arming all take variable time, so scheduling each
+  cohort's offsets from the moment its own arming finished rotated every cohort
+  by an arbitrary amount — and two charge points with well-separated indices
+  could still collide in wall-clock phase, reaching the artificial-knee failure
+  by another route. Each first cycle is therefore rebased modulo the period
+  against one epoch fixed before the first charge point exists, so index `i`
+  means the same instant whichever step created it.
+
+Run both and compare:
+
+```bash
+bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 0   # idle
+bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 15  # active
+```
+
+## How it works
+
+1. **Preflight.** GETs the daemon's health path and `/metrics` before
+   creating anything, and **refuses a daemon whose `/metrics` predates this
+   benchmark's counters** — probed by the eviction counter, which is rendered
+   unconditionally, so its absence means "too old" rather than "nothing has
+   happened". Without that check an older daemon passes every other test and
+   then reports `timeouts 0`, which on OCPP-1.6J is the headline knee signal
+   reading zero because the counter is missing — a 404 on `/metrics` fails fast with "start the daemon
+   with `--metrics`" instead of a confusing empty report at the end of a long
+   run. It also **refuses a daemon that already holds charge points**:
+   `/metrics` has no `cpId` label by design, so a pre-existing fleet's traffic
+   would land in the same histogram as the bench fleet's while the reported `N`
+   counts only the charge points this script created — the N-vs-latency curve
+   would then not be the curve it claims to be. `--allow-existing` waives the
+   refusal and records the pre-existing count in the report and in `--out`.
+2. **Grow, don't reset.** Each step creates only the CPs it needs
+   (`startIndex` into the running total) via `cp.create_many`, chunked at
+   `CP_CREATE_MANY_MAX` (200) per call. The fleet is never torn down between
+   steps — recreating it would mean a BootNotification storm at the start of
+   every measurement window, and `state.reset` is daemon-wide destructive, so
+   this script never calls it.
+3. **Settle before measuring.** Polls the `ocppcp_charge_points` gauge until
+   at least the expected number of charge points report a state other than
+   `"Unavailable"` (or the settle timeout elapses), so boot traffic doesn't
+   land inside the measurement window. The gauge, not `cp.list`: `cp.list`'s
+   _result_ schema is `ARRAY_1000` (`src/protocol/methods.ts`), so past 1000
+   charge points the response fails validation and the RPC answers `internal`
+   — which aborted the sweep at exactly the sizes this tool exists to reach.
+   The gauge is one bounded number whatever the fleet size, so the documented
+   2000-CP cap is a size the sweep can actually run.
+4. **Arm load, warm up, then measure.** After the step's new CPs are armed the
+   script holds the fleet at this `N` under this load for `--warmup` seconds
+   _before_ the first scrape (see "Warmup" below), then snapshots `/metrics`,
+   sleeps `--duration`, and snapshots `/metrics` again. **Every reported
+   number is a delta between those two scrapes** — the histogram is a
+   Prometheus cumulative counter that never resets, so a single scrape can't
+   isolate one step's traffic from the whole daemon's lifetime. See
+   `diffHistogram` in `lib.ts`.
+5. **p50/p95** are computed by linear interpolation within the bucket the
+   target quantile falls in — the same approximation Prometheus's own
+   `histogram_quantile()` uses. Resolution is bounded by the fixed bucket
+   edges (`CALL_DURATION_BUCKETS_SECONDS` in
+   `src/cli/server/metrics/MetricsRecorder.ts`, currently up to 30s); a
+   quantile inside a wide bucket is only as precise as that bucket is
+   narrow. A quantile past the last finite edge is reported as `>30s`
+   ("overflow"), never fabricated.
+6. **`hb p50`/`hb p95`** are the `Heartbeat` action alone — the constant-cost
+   probe, so its drift in isolation is closer to pure per-CP overhead than
+   the aggregate column (which, in active mode, is dominated by
+   StartTransaction/StopTransaction).
+7. **`timeouts`** is the delta of `ocppcp_ocpp_call_timeouts_total` — CALLs
+   the charge point's transport gave up on, i.e. the 30s per-CALL watchdog
+   fired. Nothing else increments it. **This is the headline knee signal.** It
+   is a separate counter and not the histogram's overflow bucket for a concrete
+   reason: a duration is only observed when an answer arrives, so a CALL the
+   CSMS never answers produces no histogram observation at all — a saturated
+   CSMS used to report `>30s=0, errors=0`, the exact opposite of the truth.
+
+   The column reads **`n/a`, not `0`**, on `--ocpp-version OCPP-2.0.1` /
+   `OCPP-2.1`: there is no watchdog in the 2.x handler, so nothing there could
+   ever move the counter, and a `0` would read as "no calls were abandoned".
+
+   A **correlation-cache eviction is not a timeout** and no longer counts as
+   one (it did until #302). The recorder correlates at most 4096 in-flight
+   CALLs; past that it drops the oldest, which costs a _duration sample_ and
+   says nothing about the CSMS — the transport still holds the call. When
+   `ocppcp_ocpp_pending_calls_evicted_total` moves during a window the script
+   warns on stderr and records the count in `--out`, because it means that
+   row's `p50`/`p95` are computed from fewer observations than the `calls`
+   column implies.
+
+   **`late>30s`** is the histogram overflow (`+Inf` minus the last finite
+   bucket): calls the CSMS _did_ answer, later than the 30s watchdog. A
+   different fact from a timeout, and reported as its own column rather than
+   passed off as one.
+
+   **`errors`**/**`reconnects`** are deltas of
+   `ocppcp_ocpp_call_errors_total`/`ocppcp_ws_reconnects_total`. Together
+   these are a sharper knee signal than latency — latency creeping up is
+   ambiguous on a loaded CSMS; abandoned calls, CALLERRORs and reconnects on
+   the _daemon_ side are not.
+
+   Attribution is what the warmup below is for: the watchdog fires 30s _after_
+   the CALL, so which calls a step's `timeouts` delta covers is a property of
+   when the step's load started, not of `--duration`.
+
+   **`connected`/`dropped`.** `connected` is read from the **final** scrape —
+   the fleet that actually generated this row's histogram — not from the settle
+   poll that ran before the warmup. `dropped` is how many had settled and were
+   gone by the end. Reporting the settle-time count attributed a window's
+   latency to a fleet larger than the one producing it; a disconnect during the
+   _warmup_ is the worst case, because its reconnect attempts land before the
+   `before` scrape, so `reconnects` stays 0 and nothing else in the row hints at
+   it. A charge point that reconnects inside the window can leave `connected`
+   above the settle count, which is reported as `dropped 0` rather than a
+   negative number. The script also warns on stderr whenever `dropped` is
+   non-zero.
+
+   **`N`/`uncreated`.** `N` is the fleet the row's numbers actually describe,
+   **not** the `--counts` entry it was aiming for; `uncreated` is the
+   difference. `cp.create_many` succeeds partially, so a step that asked for 10
+   and got 8 used to print `N=10, connected=8, unsettled=0` — latency
+   attributed to a fleet that never existed. Now it prints `N=8, uncreated=2`.
+
+   The two emissions are told apart by **order, not by the value they carry**.
+   OCPP 1.6's `transactionId` is schema-valid for any integer, zero included,
+   so testing `transactionId === 0` for "still the placeholder" meant a CSMS
+   that assigns 0 was never recognised — the cycle waited its full timeout and
+   retired the charge point despite a valid confirmation. The first emission
+   after arming is this cycle's local start; the second is the assigned id,
+   whatever number it carries. "No id arrived" is reported as `null`, which `0`
+   could not express, and `null` alone triggers retirement.
+
+   **Known limitation, and it is not fixable here.** Against a CSMS that
+   assigns `transactionId: 0` the second emission never arrives at all: the
+   daemon suppresses the `transactionIdChange` it would come from
+   (`src/cli/service.ts`, `if (transactionId === 0) return`). The cycle then
+   waits its full 45s and **retires the charge point despite a valid
+   confirmation**, so the offered load drops — visibly, in the `retired`
+   column, but for the wrong reason. Tracked as
+   [#328](https://github.com/shiv3/ocpp-cp-simulator/issues/328); the fix
+   belongs to the daemon's event contract, not to this script.
+
+   **The hold runs from when the transaction began**, not from when its id was
+   confirmed. On OCPP 1.6 the cycle waits for the **CSMS-assigned** transaction
+   id before stopping, because `OCPPMessageHandler.sendStopTransaction`
+   snapshots the id immediately and stopping on the placeholder `0` produces
+   CALLERRORs and corrupted connector state — near the knee, where a conf
+   routinely outlasts a hold. But starting the hold timer once that id arrived
+   added the whole `StartTransaction.conf` latency to every transaction's
+   on-time, so the duty cycle silently stopped matching the configuration. The
+   remaining hold is therefore measured from the local start; if it has already
+   elapsed the transaction is stopped at once and counted in **`late hold`**,
+   because a row whose duty cycle slipped must say so rather than imply the
+   cadence held. OCPP 2.x assigns no numeric id, so nothing is waited for
+   there.
+
+   **`retired`** counts charge points withdrawn from the transaction cycle
+   because no id arrived inside the bound (45s: the authorization wait plus a
+   full CALL watchdog, past which `StartTransaction` has been abandoned and no
+   conf is coming). Withdrawing them is not tidiness. A conf that arrives later
+   would land during a _later_ cycle, after that cycle's own placeholder
+   emission, and be accepted as that cycle's id — and the simulator would apply
+   the stale id to the current connector transaction, so the next stop and the
+   cadence would both use the wrong one. The event carries only a charge point
+   id and a transaction id, so no generation can be read off the wire and a
+   stale conf is indistinguishable by content from a fresh one; never arming
+   that charge point again is what makes the confusion impossible rather than
+   merely unlikely. The fleet's offered load falls accordingly, which is why
+   the column exists.
+
+   **Every charge point presents its own idTag.** They used to share
+   `DEFAULT_ID_TAG` (`123456`), and a CSMS that enforces per-idTag concurrency
+   — conforming behaviour — answers `ConcurrentTx` to every concurrent start
+   after the first, so the run applied a fraction of the transaction load it
+   reported. The tag is `BT<run-id fragment><global index>`, deterministic and
+   inside OCPP 1.6's `CiString20` `IdToken` limit. It is passed per
+   `start_transaction` call rather than configured as an idTag pool at
+   creation, because `cp.create_many` shares every field across a batch except
+   the id and the SOAP callback URL — a pool set at creation would be the same
+   pool for every charge point, which is the collision being removed.
+
+   **`unconf.tx`** counts transaction starts this step could not confirm: the
+   `start_transaction` ack returns while the charge point is still waiting on
+   `Authorize.conf`, so the script waits for the daemon's `transaction_started`
+   event before timing the hold. It waits **15s — the daemon's own 10s
+   authorization timeout plus slack — never the hold**. At `--tx-interval 2`
+   the hold is 1s while authorization may legitimately take 10s, so a
+   hold-length wait declared the start dead while it was still pending: the
+   stop then fired against a transaction that did not exist, the next cycle
+   began immediately, and the original start landed _after_ that ineffective
+   stop — leaving a transaction active, or letting its event confirm a newer
+   cycle's waiter. `authorizeAndWait` never rejects (on timeout it warns and
+   proceeds as `Accepted`), so a start still unconfirmed after 15s was
+   genuinely denied: the wait ends with a definitive answer rather than a
+   guess, and no second cycle for a charge point begins until the outstanding
+   one has been answered, held and stopped.
+
+   **The drift this causes is one-way and permanent.** A cycle that had to wait
+   out a denial occupies 15s plus a hold, and the next cycle is anchored one
+   period after the _start_ of that one — so at `--tx-interval 2` the charge
+   point's cycle stretches from 2s to about 16s and is never caught back up. A
+   non-zero `unconf.tx` therefore does not mean "the load was fine, just late":
+   it means those charge points' cadence is now their own rather than the
+   flag's, and the fleet is that much below the configured load from then on.
+   That is the honest trade against the alternative — beginning a new cycle
+   while the old start is still outstanding, which is the desynchronisation
+   this bound exists to prevent. A non-zero value means authorization is taking longer than a hold — a
+   knee signal in its own right, and a warning that those cycles applied less
+   load than the flags asked for — a slow CSMS, not a broken one, since a lost
+   event stream aborts the run rather than filling this column. Unlike every
+   other column it is counted in this process, not scraped, so its window is
+   step-end to step-end and includes the warmup rather than only `--duration`.
+
+8. **Cleanup, and what it refuses to touch.** Charge points this run created
+   are `cp.delete`d at the end (or on Ctrl-C), 32 at a time and **within a 60s
+   budget**.
+
+   **The teardown ceiling, so it is met on this page and not in the field.**
+   Every stage carries its own deadline and they compose to a worst case of
+   about **six and a half minutes**, reached only in the failure case
+   reconciliation exists for — a `cp.create_many` whose client deadline expired
+   against a daemon that then answers `not_found` three times running:
+
+   | Stage                                       | Worst case                           |
+   | ------------------------------------------- | ------------------------------------ |
+   | wait for in-flight cycles (`settle`)        | one `cycleBoundMs` per step's handle |
+   | outstanding `cp.create_many` (if any)       | 35s (the RPC's own deadline)         |
+   | close open transactions                     | 30s (`CLOSE_TX_BUDGET_MS`)           |
+   | let in-flight heartbeat reapplications land | 35s (the RPC's own deadline)         |
+   | first delete sweep                          | 60s (`CLEANUP_BUDGET_MS`)            |
+   | reconciliation: 3 × (35s wait + 60s sweep)  | 285s (`RECONCILE_MAX_PASSES`)        |
+
+   The nominal case is none of it: with nothing open, nothing unresolved and a
+   responsive daemon, teardown is one delete sweep. And a daemon that has
+   _gone away_ is the fast path, not the slow one — `cp.delete` is skipped
+   outright when no control-plane socket is connected, and reconciliation
+   returns "disconnected" without spending a single 35s wait, so the ceiling
+   above needs a daemon that is answering but has not finished creating.
+
+   An id enters the delete list when it is _offered_ to `cp.create_many`,
+   before the call is awaited, and **leaves it again if the ack names that id
+   as a failure**. The two rules cover two different cases. While the outcome
+   is unknown — an RPC deadline, a dropped connection — the daemon was never
+   told to stop and may hold charge points whose ids never reached this
+   process, so keeping them costs nothing (`cp.delete` answering `not_found`
+   already counts as success) while dropping them would leave a daemon the next
+   run's preflight refuses. Once the ack names an id as failed we _know_ the
+   daemon did not register it: `createOneCp` throws before creating anything on
+   an id collision, and the blueprint-defaults path rolls the charge point back
+   before reporting it.
+
+   **Teardown never treats an acknowledgement as a completion.** That is the
+   invariant behind the three rules below, and every teardown bug in this tool
+   has been one violation of it: _teardown may not consider an operation
+   finished before the bound that operation itself uses._ A `stop_transaction`
+   ack says the daemon **queued** `StopTransaction`, not that it sent it, so
+   teardown waits for the frame to actually leave (watching
+   `ocppcp_ocpp_messages_total`) before deleting — otherwise a backlogged
+   serializer, the condition this tool exists to create, has its queued CALL
+   discarded along with the charge point. A `Promise.race` that rejects on
+   abort does not cancel its loser, so teardown awaits the `cp.create_many`
+   still running rather than deleting provisional ids whose charge points are
+   registered a moment later. And the wait for in-flight cycles uses _the
+   cycle's own bound_ — the authorization timeout plus, on 1.6, the assigned-id
+   timeout — never a smaller number chosen at the teardown site.
+
+   Teardown re-stops every charge point that may have an open transaction,
+   whether or not its stop was already acked, and does **not** try to work out
+   which ones still need it — there is no signal available that would let it.
+   It then says plainly that delivery is unverified; see "Known limitations".
+
+   And the bound teardown waits for is now **complete**, enumerated stage by
+   stage rather than incremented when a gap is found. A cycle awaits in exactly
+   four places: the `start_transaction` RPC (35s, the pool's whole-call
+   deadline), the confirmation wait (15s on 2.x, 45s on 1.6), the hold, and the
+   `stop_transaction` RPC (35s again). Arming is synchronous and the next cycle
+   is scheduled after the body returns, so there is no fifth. The bound had
+   omitted both RPC stages, leaving it short by 70s — long enough for an
+   already-emitted start or stop to take effect after the fleet was deleted.
+
+   These are all on the preventable side of the invariant split below: nothing
+   can detect the violation afterwards, so only the ordering protects them.
+
+   **Open transactions are closed before anything is deleted.** `stop()` only
+   cancels timers, and on the active axis roughly half the fleet is inside its
+   hold at any moment — those pending callbacks are exactly the ones that would
+   have sent `stop_transaction`. Cancelling them and then deleting the charge
+   points left the **CSMS** holding transactions that could never be ended,
+   contaminating every later run against it. Teardown now waits briefly for
+   cycles already in flight (so a start still travelling to the CSMS is not
+   overtaken by the stop meant to close it), then issues and awaits a stop for
+   every transaction it believes open, and only then deletes.
+
+   This is a different invariant from the two below, not a restatement. Those
+   are about the daemon, whose state the run can enumerate and reconcile with
+   `cp.list`. A CSMS is a third-party system with no such listing, so this one
+   can only be satisfied _by construction_ — close what you opened, before the
+   charge point that could close it is gone — never by reconciliation
+   afterwards. If it is violated, nothing can detect or repair it from here;
+   the run can only warn.
+
+   **A create whose client deadline expired keeps creating.** `cp.create_many`
+   rejecting at 35s does not stop the daemon's handler, which goes on
+   registering charge points sequentially. The delete sweep then answered
+   `not_found` for ids that appeared moments later, and those survived to be
+   refused by the next run's preflight. Ids the sweep reports as `not_found`
+   are therefore re-swept, each pass after a further RPC deadline: "not there
+   yet" and "already gone" look identical from the client, so the ambiguity is
+   resolved by looking again rather than by trusting the first answer. This is
+   the acknowledgement-is-not-completion invariant in its strongest form — here
+   the acknowledgement never arrives at all and the operation continues anyway.
+
+   **Bounded by a pass count, and loud when it runs out.** One retry is not
+   enough: against a slow `--state-db` or a loaded daemon the handler can still
+   be working when that pass runs, and a second `not_found` says only that it
+   had not reached the id yet. Treating it as final was a fail-open — the ids
+   stayed in a local variable nothing read, the daemon registered them after
+   the pool closed, and the run said nothing. Reconciliation now makes up to
+   **three** passes (`RECONCILE_MAX_PASSES`), stops at once if the control
+   plane has gone away rather than spending a 35s wait to learn that, and if
+   anything is still unaccounted for it **names every id on stderr and exits
+   non-zero**. The table and the `--out` file are still written — the
+   measurement happened; it is the teardown that could not be proved
+   complete.
+
+   **SIGINT is a third route to the same leak, and is handled the same way.**
+   An interrupt landing while `growFleet` awaited one batch of a multi-batch
+   step used to snapshot the id list at once; the outstanding batch then
+   finished and later batches were offered and created _behind_ the snapshot,
+   so the handler exited having deleted only the earlier ids. Cleanup now
+   raises an abort flag, waits for the sweep to unwind, and only then reads the
+   list. The flag alone was not enough: it is read between steps and between
+   create batches, so an interrupt during a settle, warmup or measurement wait
+   — up to an hour at the permitted maximum — would have held every deletion
+   until that wait ended on its own. Those waits are raced against the
+   interrupt as well as against a dropped event socket, so the sweep unwinds
+   immediately. A second Ctrl-C exits at once and names the charge points that
+   may be left behind.
+
+   That second rule is not a nicety. Under `--allow-existing`, a charge point
+   somebody else created that already held an offered id was reported as failed
+   **because it already exists** — and deleting on that basis destroyed a fleet
+   this benchmark never created. The asymmetry is deliberate: an id kept by
+   mistake leaks, which an operator can recover from, while a charge point
+   deleted by mistake cannot be recovered. So an id leaves the list only on
+   positive evidence that it was never ours.
+
+   **But the bookkeeping is the second line of defence, not the first.** Every
+   run mints a **run id** and creates its charge points as
+   `BENCH-<runid>-000001`, `BENCH-<runid>-000002`, … The run id is printed on
+   stderr at startup and recorded in `--out`. Because no two runs share an id
+   space, a pre-existing charge point _cannot_ be sitting on an id this run
+   offers, so "the benchmark deleted something it did not create" is not a case
+   that has to be reasoned about correctly — it cannot arise. Anything left
+   behind by a crashed run is still recognisable by the shared `BENCH-` root,
+   which is what the preflight's refusal is asking you to clear.
+
+   The randomness in a run id is _identity_, not behaviour: it names charge
+   points and never influences the traffic pattern, so the stagger, the cycle
+   and every other observable stay deterministic and replayable. It is best-effort, so it is
+   bounded: deleting sequentially with the full 35s RPC timeout each meant a
+   daemon that had died turned teardown of a 2000-CP fleet into ~19 hours of
+   blocked failure handling and an unresponsive Ctrl-C. If no control-plane
+   socket is connected the sweep is skipped outright — socket.io _buffers_ an
+   emit issued while disconnected rather than failing it, so those deletes
+   would each sit in the buffer until their timeout fired. Whatever is left is
+   named on stderr, because the next run's preflight refuses a daemon that
+   still holds it. This script never calls `state.reset` (daemon-wide, drops
+   CPs it didn't create too) — run it against a dedicated bench daemon if you
+   want a clean slate.
+
+### The heartbeat override survives a reconnect
+
+**Contract: the benchmark drives heartbeats at `--heartbeat-interval` for the
+whole run, including across reconnects.** That sentence is the reason this
+section exists, and it was not true before #302's round-nine fix.
+
+`cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`; nothing pins it
+there. Every accepted boot runs `ChargePoint.onBootNotificationAccepted`, which
+calls `startHeartbeat(BootNotification.conf.interval)` — so the CSMS's value
+replaces the flag's the moment a charge point reconnects. Arming the heartbeat
+once per cohort was therefore only true until that charge point's first
+reconnect, and **reconnects are exactly what begins to happen as a sweep
+approaches the knee**. The offered load changed at the precise point the
+benchmark exists to measure, every later step inherited the drift, and nothing
+in the table said so. A benchmark that changes its own workload as it nears the
+interesting region is not measuring that region.
+
+So the run watches for accepted boots on its event socket and puts the override
+back on each one. The signal is the `status_change` → `Available` event: the
+charge-point-level boot gate opening, which is the same signal the daemon's own
+`src/cli/server/waitForBootAccepted.ts` treats as "boot has been accepted".
+`ChargePoint`'s status setter emits it unconditionally — no change detection —
+so it fires on the first boot and on every reboot after a reconnect alike,
+because `teardownAfterClose` has moved the status to `Unavailable` in between.
+
+Two things it deliberately does not do:
+
+- **It does not hook `connected`.** That event fires _before_
+  `BootNotification.conf` arrives, so reacting to it would race the very
+  interval it exists to overwrite. `status_change` is emitted from inside
+  `onBootNotificationAccepted`, one statement before `startHeartbeat(csms)` in
+  the same synchronous frame — and the reapplication is issued from a different
+  process, so it can only ever land afterwards. There is no `boot_accepted`
+  event on the control plane to hook instead.
+- **It does not merge a second boot into an in-flight reapplication.** An RPC is
+  issued _after every event_. Dropping one because an earlier RPC had not come
+  back would lose the case that matters: the daemon may run that RPC's handler
+  before the second boot's frame, and the second boot then reinstalls the CSMS
+  interval for good.
+
+#### What the reapplication itself costs
+
+A fix for "the instrument changes the workload at the knee" that issues a wave
+of control-plane RPCs at the knee is the same defect with the sign flipped, so
+the cost is collapsed where it can be and measured where it cannot.
+
+**One boot emitted two events, and that is collapsed.**
+`onBootNotificationAccepted` emits `statusChange` twice — once from
+`updateConnectorStatus(0, Available)`, once from the status setter — for a
+single boot. Issuing per event meant one boot cost two RPCs, for no added
+coverage. Observed boots are therefore gathered for `BOOT_COALESCE_MS` (50ms)
+and flushed to **one RPC per charge point**. Any window is correct here: every
+observed event has already run `startHeartbeat(csmsInterval)` on the daemon
+before it was emitted, so an RPC issued strictly after the last event of a
+window overwrites every CSMS interval that window saw — collapsing merges boots
+that are already covered, it never drops one. 50ms sits between two numbers
+four orders of magnitude apart: the two emissions of one boot are microseconds
+apart, and the fastest a charge point can boot _again_ is a socket close plus
+`OCPPWebSocket`'s 1s first reconnect backoff plus a connect and a
+BootNotification round trip. The in-flight case is untouched — a boot observed
+_after_ an RPC was issued is still owed its own RPC, because the daemon may run
+that RPC's handler before the later boot's frame.
+
+The collapse is measured, not asserted: the smoke test's two-step sweep reports
+`bootsObserved: 4, rpcsIssued: 2` against a real daemon, and removing the
+window makes it 4 and 2 respectively — a clean 2×.
+
+**The residual is bounded by the pool, not by hope.** After the collapse a
+reconnect wave costs **one RPC per charge point that reconnected**: 2000 calls
+at the largest fleet this tool accepts. Those calls are paced by the same token
+buckets as everything else, which cap _total_ control-plane traffic at
+`sustainableRpcPerSec(MAX_SOCKETS)` = 10 × 80 × 0.8 = **640 RPC/s** — so the
+wave drains in roughly 3s and, crucially, **cannot make the benchmark offer
+more control-plane load than the ceiling the sweep was already validated
+against**. On the idle axis `requiredRpcPerSec` is zero, so those 3s contend
+with nothing at all. On the active axis the steady cycle already claims the
+budget, so a wave displaces cycle RPCs for a few seconds and stretches those
+charge points' cycles — which the `late holds` and `unconf.tx` columns already
+report, per row.
+
+**What is not measured.** Whether the knee _moves_ has not been shown
+empirically, because doing so needs a real CSMS at fleet sizes this repository
+has no CI or review environment for — the same reason
+[Daemon → Measured scale ceiling](../../docs/entities/daemon.md#measured-scale-ceiling)
+still records a method rather than a number. The argument above is analytic
+plus the pool's hard ceiling. Every run records `bootsObserved` and
+`rpcsIssued` in `--out` beside the per-row `reconnects`, so when the benchmark
+is finally run against a real CSMS the perturbation is in the record and can be
+checked rather than re-argued.
+
+`status_change` also fires on occasions that are not boots at all (a
+`ChangeAvailability`, a connector-0 status update). Those cost one RPC each and
+are counted in `bootsObserved` like any other.
+
+**How the fix is known to hold, and what is still unverified.** The evidence is
+in `fleetBench.smoke.bun.test.ts`: a mock CSMS answers `BootNotification` with
+`interval: 300`, closes each charge point's socket once after its first
+Heartbeat, and then counts Heartbeat **frames on the wire, per connection**. A
+Heartbeat arriving on connection #2 cannot come from the CSMS's 300s cadence
+inside a 15s window, and the count is kept by the CSMS rather than read back
+out of anything the benchmark sets — the circularity that refuted both earlier
+"proof the stop reached the CSMS" mechanisms. What the benchmark _cannot_ do is
+read a charge point's live heartbeat interval back from the daemon: there is no
+control-plane method that reports it, so "the interval in use is N" is inferred
+from the frames, not observed directly. Each run also records
+`heartbeatOverride: { reapplied, failed }` in `--out` and prints the per-step
+counts on stderr, so a collected result carries its own answer to "was the
+heartbeat load in these rows the configured one?".
+
+### Warmup: why a step waits before it measures
+
+`ocppcp_ocpp_call_timeouts_total` increments when a CALL's 30s watchdog fires,
+which is 30s **after** the CALL was sent. A step's `timeouts` number is the
+delta between the two scrapes bracketing its window, so it counts watchdogs
+that fired in that window — that is, calls issued in the 30s-earlier interval.
+Without a warmup those calls were issued during the _previous_ step, or during
+this step's boot and stagger ramp, at a smaller `N` and a different load. The
+first non-zero `timeouts` then showed up one step late, and finding the `N`
+where it first goes non-zero is the entire point of the sweep.
+
+So each step holds the fleet at its new `N`, with its load already running, for
+`--warmup` seconds before taking the `before` scrape. The default is
+`30 + --tx-interval`: one CALL watchdog, plus the stagger ramp, because on the
+active axis the last charge point issues its first StartTransaction one cycle
+period after the first one does. (Precisely: one _cycle period_, which is
+`--tx-interval` for every interval of 2s or more and 2s below that, and zero on
+the idle axis, which starts no transactions and so has nothing to ramp.)
+
+**What a row's `timeouts` covers, precisely:** every watchdog expiry between
+the two scrapes — i.e. every CALL issued between 30s before the window opened
+and 30s before it closed. With the default warmup all of those calls were
+issued at this step's `N`, under this step's load. Calls issued in the last 30s
+of the window expire during the _next_ step's warmup, outside both windows, and
+are counted in neither row: dropped, never misattributed. `--warmup 0` opts out
+for a quick smoke run; the script prints a note saying the attribution
+guarantee no longer holds. The `p50`/`p95`, `late>30s`, `errors` and
+`reconnects` columns do not depend on the warmup — a duration is observed the
+moment the answer arrives.
+
+The warmup costs `--warmup` seconds per sweep point, on top of settling and
+`--duration`.
+
+### Why a socket pool
+
+The control plane rate-limits each socket.io connection
+(`RPC_RATE_PER_SEC` / `INFLIGHT_CAP` in `src/protocol/limits.ts`) — a real
+protection against a single misbehaving client, but it would also throttle
+_this script's own_ control-plane traffic (arming N heartbeats, cycling
+transactions) long before the daemon's OCPP-handling capacity is the
+bottleneck. The limiter is **per connection** (`SocketRpcState` in
+`src/cli/server/socketServer.ts`), so the pool's budget grows with the socket
+count. `fleet-bench.ts` opens as many sockets as the run needs — one per ~200
+planned CPs **and** enough for the transaction rate — capped at 10, and paces
+each at 80 RPC/s, below the server's 100.
+
+**The sustainable ceiling, and why a run is refused rather than throttled.**
+On the idle axis the script issues nothing after arming: heartbeats are the
+daemon's own timers. On the active axis it issues two RPCs per charge point per
+cycle, and `cycle` awaits each RPC before scheduling the next phase — so a
+required rate above the pool's budget does not queue, it _stretches the cycle_.
+The fleet then runs at a longer interval than `--tx-interval` says, and the
+table reports the latency of that smaller load as if it were the configured
+one. Sizing the pool by CP count alone was enough to cause this: 200 CPs fit on
+one socket, but at `--tx-interval 2` they demand 200 RPC/s and one socket
+allows 64.
+
+So the pool is sized by rate too, and `validateOptions` **refuses** what ten
+sockets still cannot sustain, naming the numbers and the two ways out. Ten
+sockets × 80 RPC/s × 0.8 headroom = **640 RPC/s**, i.e.
+
+> **N ≤ 320 × `--tx-interval`**, for `--tx-interval ≥ 2` — 640 CPs at 2, 1600
+> at 5, the full 2000 at 7 or more. (`--tx-interval 1` really cycles every 2s,
+> because a hold is floored at 1s, so its ceiling is 640 as well.)
+
+The 0.8 is not a fudge factor: a token bucket driven at exactly its refill rate
+is a queue at utilisation 1, where jitter accumulates into a backlog that never
+drains. The remaining fifth also covers the step's own `start_heartbeat` arming
+and the end-of-run `cp.delete` sweep, which share the same buckets. A benchmark
+that refuses to run beats one that quietly measures something else.
+
+Beyond those RPCs, the OCPP wire traffic each triggers (a heartbeat timer, a
+StartTransaction/StopTransaction pair) runs asynchronously per CP and isn't
+bounded by this pacing. One further connection sits outside the pool: on the
+active axis the script opens a **single dedicated event socket**
+(`events.subscribe`, scope `"*"`) to learn when a transaction has actually
+started. It spends none of the pool's rate budget, and it is opened _before the
+first charge point exists_ — the subscribe ack carries a whole-fleet snapshot
+through an `ARRAY_1000` schema, so subscribing later in a 2000-CP sweep would
+fail. It does not reconnect: room membership is per-connection server-side, so
+a re-subscribe would hit that same cap.
+
+**A drop therefore aborts the run**, and deliberately so. With no way to
+confirm a start, every later cycle would spend a full hold waiting for a
+confirmation that can never arrive and _then_ the real hold — roughly doubling
+each transaction's occupancy and collapsing the rest period, so the remaining
+rows would carry about twice the configured load while still being labelled
+with it. That is the same failure as running past the pool's rate ceiling, and
+it gets the same answer: the sweep stops, prints `Aborted:` with the reason,
+writes no table and no `--out` file, and **exits** — the timers it was racing
+(a measurement sleep runs up to an hour) are not waited out, because a stop
+that does not stop is not a stop. Rows already completed are discarded
+with it — a truncated sweep invites a wrong knee, and re-running is cheap next
+to recording one. The daemon going away is the only thing that causes this;
+the script's own teardown closes the socket without triggering it.
+
+## Recording a result
+
+Per the acceptance criteria on #302, a real run's result belongs in
+[`docs/entities/daemon.md` → Limits & Roadmap](../../docs/entities/daemon.md#limits--roadmap),
+recorded as:
+
+- the **machine** — but read the label the script prints before copying it.
+  `os.cpus()`, `os.totalmem()` and `Bun.version` describe the process running
+  _this script_, which is the machine under test only when the daemon is local.
+  With a local `--daemon-url` the block says `machine (daemon host, and this
+runner):` and can be copied verbatim. With a remote one it says
+  `benchmark client, NOT the daemon host:` and `daemon host: UNKNOWN`, and you
+  must record the daemon host's CPU/RAM/OS by hand — a ceiling published against
+  the wrong hardware is quotable and false, which is worse than one published
+  with the hardware missing. `--out` carries the same distinction as a boolean,
+  `daemonHostIsRunner`,
+- the **CSMS** used (gocpp / SteVe / other, and whether it was local or
+  remote — a remote CSMS's own latency will dominate long before the daemon's
+  does, which is a different, also worth-recording, knee),
+- the **N, p50, p95 table** for both axes, and
+- the **knee** — the N where p50/p95 visibly diverges from the N=1..a few
+  baseline, or where `timeouts`/`errors`/`reconnects` first go non-zero.
+
+This script cannot produce that number itself (no CSMS is available in this
+repo's CI or review sandboxes) — running it is a manual step for whoever has
+a spare machine and a CSMS.
+
+## Known limitations
+
+- **SOAP is out of scope, and `--csms-url` rejects `http(s)://` rather than
+  pretending otherwise.** The duration histogram is OCPP-J only
+  (`ocppcp_ocpp_call_duration_seconds` has no SOAP equivalent — a SOAP log line
+  carries no message id to correlate a response back with; see
+  `docs/entities/daemon.md#metrics`), so a SOAP fleet would produce an empty
+  latency table. An `http(s)://` URL used to be accepted and then quietly run
+  a 1.6J WebSocket fleet, because `cp.create_many` was only ever passed
+  `wsUrl` and the daemon defaults to `OCPP-1.6J`. `--ocpp-version` rejects the
+  three SOAP versions (`OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`) for the same
+  reason, rather than accepting one and reporting a table of dashes.
+- **On OCPP 2.x there is no `timeouts` column at all.** The 30s per-CALL
+  watchdog lives only in the OCPP-1.6J message handler
+  (`docs/entities/daemon.md#metrics`); `OCPPMessageHandlerV201` has none, and
+  nothing else feeds `ocppcp_ocpp_call_timeouts_total`. So on
+  `--ocpp-version OCPP-2.0.1` / `OCPP-2.1` the column reads `n/a` and the
+  script prints a note saying so. Use `late>30s`, `errors` and `reconnects` as
+  the knee signals there; they are unaffected, as is the warmup. (Before #302
+  the pending-call eviction path also incremented that counter, which made this
+  column look populated on 2.x while actually reporting how full the daemon's
+  correlation cache was.)
+- **The event socket is itself a small load on the daemon.** Confirming
+  transaction starts means subscribing to the `"*"` scope, so the daemon
+  encodes and sends every charge point's `connector_status`,
+  `transaction_started`/`transaction_stopped` and registry-`updated` envelope
+  to one extra socket — a few thousand events per second at the top of an
+  active sweep. That is a real perturbation of the thing being measured, and it
+  is still the cheaper option: the alternative, polling each charge point's
+  `status`, would add a third RPC per cycle to the very budget the ceiling
+  above rations, and each of those builds a full per-connector snapshot. The
+  idle axis opens one too, since #302's round-nine fix: the accepted-boot
+  events that keep `--heartbeat-interval` in force arrive on it, and an idle
+  run's whole load is heartbeats.
+- **A dropped event socket aborts the active axis and only annotates the idle
+  one.** On the active axis the loss is immediate and unconditional — every
+  later cycle would burn a full hold on a confirmation that can never arrive —
+  so the run stops. On the idle axis nothing waits on a confirmation; the only
+  casualty is the heartbeat reapplication, and that costs nothing at all unless
+  a charge point actually reconnects afterwards, which the run already measures
+  per row. Aborting there would throw away every valid row in order to protect
+  the rows the `reconnects` column already identifies, and a benchmark that
+  produces a number with a stated caveat is worth more than one that refuses to
+  produce a number. So an idle run continues, records the step at which the
+  socket dropped (`heartbeatOverride.eventSocketLostAtN` in `--out`), and
+  prints a WARNING on every later row whose `reconnects` is non-zero saying
+  that row's heartbeat load is no longer the configured one. This also leaves
+  a passive run's failure modes exactly as they were before the idle axis grew
+  an event socket at all.
+- **A closing stop's delivery to the CSMS is not verified, and cannot be from
+  here.** Teardown re-stops every charge point that may have an open
+  transaction, but under a backed-up outbound queue — the condition this tool
+  exists to create — a queued `StopTransaction` can still be discarded when the
+  charge point is deleted, leaving the CSMS holding that session. Two checks
+  were tried and both were wrong: the fleet-wide `StopTransaction` counter has
+  **no `cpId` label** by design, so an aggregate cannot establish a
+  per-charge-point fact; and `connector.transactionId` going `null` is done
+  synchronously by `ChargePoint.stopTransaction` _before_ the frame is queued,
+  so it says nothing about the wire. The wire is observable in principle —
+  `OCPPWebSocket.writeUpstreamPhysical` logs `Sent: …` immediately after
+  `this._ws.send(raw)` — but reading it back needs `logs.get`, and
+  `listStoredLogs` returns nothing unless the daemon runs with `--state-db`,
+  which this benchmark does not require. So the limitation is stated rather
+  than papered over with a check that looks like proof. The stderr line at
+  teardown names how many stops were accepted and unverified.
+- **The heartbeat override covers reconnects, not a CSMS that changes the
+  interval by hand.** `ChangeConfiguration HeartbeatInterval` reaches
+  `ChargePoint`'s configuration listener
+  (`src/cp/domain/charge-point/ChargePoint.ts`, the `HeartbeatInterval` case)
+  and calls `startHeartbeat` directly, emitting **no** `status_change` — so
+  nothing here observes it and the override is not put back. Real CSMSes do
+  send that message; the mock in the smoke test does not, so this gap is
+  documented rather than tested. If a run's `heartbeat` latency column looks
+  like a cadence nobody configured, suspect that first. The same applies to a
+  boot the CSMS answers `Pending` or `Rejected`: neither reaches
+  `onBootNotificationAccepted`, both stop the heartbeat, and neither emits the
+  `Available` this hooks — such a charge point contributes no heartbeat load
+  until it is finally accepted.
+- **Reapplication RPCs share the socket pool with everything else, and the
+  knee has not been shown to stay put.** After coalescing it is one RPC per
+  accepted boot, so a reconnect wave at N=2000 is 2000 calls draining in ~3s
+  against the pool's 640 RPC/s ceiling — it cannot exceed the budget the sweep
+  was validated against, and on the idle axis it contends with nothing. But
+  "bounded" is not "measured": no run against a real CSMS at those fleet sizes
+  exists to compare a sweep with the reapplication against one without, so
+  whether the knee moves is argued rather than demonstrated. The counters are
+  in `--out` so the first real sweep can settle it. See "What the
+  reapplication itself costs".
+- **A teardown that cannot account for every id exits non-zero.** Ids the
+  delete sweep answered `not_found` for are re-swept up to
+  `RECONCILE_MAX_PASSES` times; anything still unresolved is named on stderr
+  and the process exits `1`, with the table and `--out` file still written. So
+  a non-zero exit from this script does not necessarily mean the measurement
+  failed — read the stderr line to tell "the sweep did not finish" from "the
+  sweep finished but teardown could not be proved complete".
+- **Every HTTP request carries a 30s deadline**, because `fetch` has none of
+  its own. A daemon that accepts the connection and then stalls while serving
+  `/metrics` — the condition at the top of a sweep, which is what this tool
+  exists to reach — would otherwise hang the run forever: `--settle-timeout`
+  would never fire, the measurement would never finish, and the cleanup in the
+  `finally` would never run. The deadline covers the response body, not just
+  the headers.
+- **Credentials are redacted from stderr, not only from `--out`.** Userinfo in
+  `--csms-url` and `--daemon-url` is replaced with `***` in the progress lines,
+  the hardware block and every error message, because stderr commonly ends up
+  in a CI log — from anywhere in the text, not only from its start: a URL
+  embedded in an exception (`TypeError: ... https://user:secret@host`) needs a
+  scan rather than the anchored bare-URL helper, and handing a whole message to
+  that helper is how a password reached stderr once. It covers the **caught
+  exception text** as well as the URL beside it,
+  because a failed `fetch` commonly quotes the original URL verbatim, so
+  redacting one and appending the other put the password straight back on the
+  line. Every error sink applies it, including the top-level one, since a
+  socket.io connect error can carry the daemon URL. That includes a URL too
+  malformed to parse — `ws://user:secret@`
+  is exactly the shape that makes `new URL` throw, and the redaction is a regex
+  over the raw text so it does not need a valid URL to work.
+- `/metrics` is scraped every 500ms during settle-wait. That is one bounded
+  HTTP response whatever the fleet size, and it is HTTP rather than
+  control-plane traffic, so it is not paced through the socket pool.
+- `timeouts` and every other number is fleet-wide, not per charge point:
+  `/metrics` carries no `cpId` label by design. That is why the preflight
+  refuses a daemon with a pre-existing fleet.
+- No MeterValues are driven during a transaction — set
+  `MeterValueSampleInterval` on the CPs' config if you want that traffic
+  included (not currently a flag on this script).
+
+## Directory layout
+
+- `fleetBench.smoke.bun.test.ts` — an end-to-end smoke test that spawns the
+  real script as a subprocess against a real daemon and a real mock CSMS. It
+  exists because two classes of defect in this tool are invisible to unit
+  tests: **"the process never exits"** (a pool left connected, a timer set that
+  grew without bound, an uncancelled `Promise.race` loser, an unbounded
+  `fetch`) and **sweep-level composition** (a function correct in isolation
+  that breaks across steps or against pre-existing daemon state). Both recurred
+  repeatedly during review; the stagger is the proof, since a _tested_ `lib.ts`
+  function broke twice in how `main()` called it. The test asserts the run
+  terminates inside a hard wall-clock bound, that both sweep steps are reported
+  with the fleet size they describe, that the daemon is left empty, that a
+  pre-existing charge point survives an `--allow-existing` run, and that a
+  black-holing CSMS still ends the run. It covers the **active axis** too, so
+  the event socket, the transaction cycle and `unconf.tx` are exercised and not
+  only the idle heartbeat path, and it kills the daemon mid-run to check the
+  pool does not hang on a control plane that has gone away. It runs under
+  `bun run test:bun`, so CI gates on it; it is the slowest file in that suite,
+  which is the price of covering the thing that actually broke. It also drops a
+  charge point's socket mid-run against a CSMS that advertises a 300s heartbeat
+  interval and counts Heartbeat frames per connection, which is the only
+  evidence available anywhere that `--heartbeat-interval` survives a
+  reconnect.
+
+  **Its mock CSMS is far more forgiving than a real one, and the test file says
+  so at length.** It does no subprotocol negotiation, no schema validation and
+  never emits a CALLERROR, and it acks unknown actions — so the very failure
+  this README warns about hardest, a 1.6J fleet against a 2.x-only CSMS,
+  _cannot_ be reproduced there: gocpp reports that fleet `Unavailable` while
+  the mock reports it `Available`, and the `errors` column can only ever read 0. Version and handshake behaviour must be checked against a real CSMS.
+
+- `fleet-bench.ts` — the CLI entry point / orchestrator.
+- `lib.ts` — pure logic: flag validation, the Prometheus exposition parser,
+  before/after histogram diffing, quantile interpolation, table formatting,
+  and the token-bucket/semaphore pacing helpers. No network, no sockets — see
+  `lib.bun.test.ts`.
+- `lib.bun.test.ts` — unit tests for the above (`bun test`).
+- `tsconfig.json` — this directory isn't part of `tsconfig.cli.json`; typecheck
+  it directly with `npx tsc --noEmit -p scripts/bench/tsconfig.json`. It is a
+  `composite` project referenced from the root `tsconfig.json`, so `tsc -b`
+  covers it too rather than leaving it orphaned.

@@ -9,11 +9,13 @@ sources:
   - src/cp/domain/connector/EVSettings.ts
   - src/cp/domain/connector/MeterValueBuilder.ts
   - src/cp/infrastructure/transport/network-sim/SeededRng.ts
+  - scripts/bench/README.md
 related:
   - ../concepts/control-plane.md
   - ../entities/daemon.md
   - choosing-an-interface.md
   - ../sources/github-issues.md
+  - ../sources/bench-readme.md
 updated: 2026-09-04
 ---
 
@@ -55,7 +57,7 @@ runtime model.
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300  |
 | 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | planned     | #301  |
 | 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | 4a         | not filed   | —     |
-| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | planned     | #302  |
+| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped     | #302  |
 | 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |
 | 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | not filed   | —     |
 
@@ -217,17 +219,18 @@ without parsing logs.
 **Shape.** `GET /metrics`, Prometheus text exposition, hand-rolled — the format
 is a few lines and this avoids a Bun-compatibility question on `prom-client`.
 
-Series to start with:
-
-| Metric                              | Type      | Labels                           |
-| ----------------------------------- | --------- | -------------------------------- |
-| `ocppcp_charge_points`              | gauge     | `state`                          |
-| `ocppcp_connectors`                 | gauge     | `status`                         |
-| `ocppcp_transactions_active`        | gauge     | —                                |
-| `ocppcp_ocpp_messages_total`        | counter   | `action`, `direction`, `outcome` |
-| `ocppcp_ocpp_call_duration_seconds` | histogram | `action`                         |
-| `ocppcp_rpc_requests_total`         | counter   | `method`, `outcome`              |
-| `ocppcp_ws_reconnects_total`        | counter   | —                                |
+Series to start with: charge-point and connector gauges, an active-transaction
+gauge, message and rpc counters, a CALL-duration histogram and a reconnect
+counter. The **shipped** set is the canonical table in
+[Daemon → Metrics](../entities/daemon.md#metrics) — it is not identical to what
+this plan sketched: `outcome` turned out to be unnecessary on the message
+counter (a CALLERROR is its own `ocppcp_ocpp_call_errors_total` series), and
+#302 added `ocppcp_ocpp_call_timeouts_total` once it became clear the duration
+histogram cannot see a CALL that is never answered, and then
+`ocppcp_ocpp_pending_calls_evicted_total` beside it, because folding the
+recorder's own correlation-cache overflows into the timeout counter made that
+counter report load rather than failure — worst at exactly the fleet sizes 5a
+below is trying to characterise.
 
 **Cardinality.** Use only the bounded labels in the table above — `action`,
 `direction`, `state`, `status`, `method`, `outcome` — and **never** `cpId` —
@@ -413,6 +416,22 @@ knee for a stated machine.
 **Acceptance.** The number, the method, and the machine are all in
 `daemon.md`. This is the cheapest item on this page and it is what makes 5b a
 decision rather than a guess.
+
+**Shipped, number pending.** [`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md)
+implements the shape above — it grows a fleet via `cp.create_many`, drives
+both axes (idle heartbeat-only and active start/stop-transaction, staggered),
+and diffs two `/metrics` scrapes to isolate one step's
+`ocppcp_ocpp_call_duration_seconds` histogram, reporting p50/p95 plus
+abandoned calls (`ocppcp_ocpp_call_timeouts_total`), errors and reconnects as
+sharper knee signals. Its active axis is bounded by the control plane's
+per-connection rate limit — ten pooled sockets sustain `N ≤ 320 ×
+--tx-interval`, and a sweep past that is refused rather than run at less load
+than configured. What is **not** done: no
+real CSMS is available in this repository's CI or review sandboxes to
+actually run it against, so
+[Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
+states the method and what to record rather than a number. Running it and
+filling in that number is the remaining step before 5b can be decided.
 
 ### 5b. Worker model (conditional)
 

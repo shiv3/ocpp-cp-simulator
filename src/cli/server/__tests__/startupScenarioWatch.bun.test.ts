@@ -7,6 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 import { CLIChargePointService } from "../../service";
+import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { FileReloadManager } from "../FileReloadManager";
@@ -495,6 +496,212 @@ describe("--watch over a startup scenario file (#314)", () => {
       expect(listWatchedScenarioFiles(database)).toEqual([]);
     } finally {
       fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+  it("the bootstrap asserts ownership before the rows are read", async () => {
+    // Why `restoreScenarioWatches()` moved after the bootstrap loop. The stored
+    // row names the same scenario id the operator's `--scenario` uses, and the
+    // file it points at was edited while the daemon was down. Restored first,
+    // that abandoned graph is reconciled onto the connector — and if its
+    // trigger matches it auto-starts, after which the real startup load
+    // replaces only the definition and `startScenarioIfNotAlreadyActive` sees
+    // the stale executor already running. Run the bootstrap first and its
+    // takeover deletes the row before anything reads it, so the two rules
+    // compose without a third that knows which keys are startup-owned (#314).
+    const csms = startMockCsms();
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-order-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+      database,
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314-order",
+      wsUrl: csms.url,
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const scenarioFile = join(tmpDir, "scenario.json");
+    writeFileSync(scenarioFile, targeted(1, 11));
+    const abandoned = join(tmpDir, "abandoned.json");
+    writeFileSync(abandoned, targeted(1, 99));
+    rememberWatchedScenarioFile(
+      database,
+      "cp314-order",
+      1,
+      "targeted-scenario",
+      abandoned,
+    );
+
+    try {
+      await svc.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      const runPromise = runStartupScenario(
+        svc,
+        {
+          scenario: scenarioFile,
+          scenarioTemplate: null,
+          scenarioTemplateFile: null,
+          scenarioConnector: "1",
+        },
+        1,
+        fileReload,
+        database,
+      );
+      csms.replyCallResult(boot.messageId, {
+        currentTime: new Date().toISOString(),
+        interval: 300,
+        status: "Accepted",
+      });
+      await runPromise;
+
+      // The order `startServer` uses: bootstrap, then restore.
+      fileReload.restoreScenarioWatches();
+
+      // Only the configured file is watched, and the connector holds its graph
+      // rather than the abandoned one.
+      expect(fileReload.watchedPaths()).toEqual([scenarioFile]);
+      expect(delayOf(svc, 1, "targeted-scenario")).toBe(11);
+      expect(listWatchedScenarioFiles(database)).toEqual([]);
+
+      // …and the abandoned file is inert: an edit to it changes nothing.
+      backend.save(abandoned, targeted(1, 77));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(delayOf(svc, 1, "targeted-scenario")).toBe(11);
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("restoring first is what the order protects against", async () => {
+    // The same fixture with the two steps swapped, so the ordering above is
+    // shown to be load-bearing rather than incidental: the abandoned file wins
+    // the key, and the connector ends up on its graph.
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-order-bad-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+      database,
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314-order-bad",
+      wsUrl: "ws://127.0.0.1:65534/never",
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const abandoned = join(tmpDir, "abandoned.json");
+    writeFileSync(abandoned, targeted(1, 99));
+    // As a `--state-db` restore would leave it: the definition is back under
+    // the id the startup flag will also use.
+    svc.loadScenario(1, JSON.parse(targeted(1, 11)) as ScenarioDefinition);
+    rememberWatchedScenarioFile(
+      database,
+      "cp314-order-bad",
+      1,
+      "targeted-scenario",
+      abandoned,
+    );
+
+    try {
+      fileReload.restoreScenarioWatches();
+      // Restored first, the abandoned file is reconciled straight onto the
+      // connector — before the bootstrap has had any say.
+      expect(fileReload.watchedPaths()).toEqual([abandoned]);
+      expect(delayOf(svc, 1, "targeted-scenario")).toBe(99);
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+  it("clears the row it takes over even with --watch off", async () => {
+    // The third site of the "stored state is not watcher state" rule, found by
+    // auditing the other two. Without `--watch` there is no reloader, so the
+    // takeover deletion that lives inside `registerScenarioFile` never runs —
+    // and the row survived a run whose `--scenario` had actually taken the key,
+    // leaving a false fact for the next watched start to act on (#314).
+    const csms = startMockCsms();
+    const registry = new CPRegistry(new EventBus());
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-nowatch-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const svc = new CLIChargePointService({
+      cpId: "cp314-nowatch",
+      wsUrl: csms.url,
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const scenarioFile = join(tmpDir, "scenario.json");
+    writeFileSync(scenarioFile, targeted(1, 11));
+    rememberWatchedScenarioFile(
+      database,
+      "cp314-nowatch",
+      1,
+      "targeted-scenario",
+      join(tmpDir, "abandoned.json"),
+    );
+    expect(listWatchedScenarioFiles(database)).toHaveLength(1);
+
+    try {
+      await svc.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      // No reloader: `--state-db` without `--watch`.
+      const runPromise = runStartupScenario(
+        svc,
+        {
+          scenario: scenarioFile,
+          scenarioTemplate: null,
+          scenarioTemplateFile: null,
+          scenarioConnector: "1",
+        },
+        1,
+        null,
+        database,
+      );
+      csms.replyCallResult(boot.messageId, {
+        currentTime: new Date().toISOString(),
+        interval: 300,
+        status: "Accepted",
+      });
+      await runPromise;
+      expect(svc.listScenarios(1)[0]?.scenarioId).toBe("targeted-scenario");
+      expect(listWatchedScenarioFiles(database)).toEqual([]);
+    } finally {
       svc.disconnect();
       registry.shutdownAll();
       database.close();

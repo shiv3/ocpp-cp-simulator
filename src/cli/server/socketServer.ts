@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import type { Server as BunServer, WebSocketHandler } from "bun";
 import { Server as Engine } from "@socket.io/bun-engine";
 import {
@@ -100,6 +101,7 @@ import type { FileReloadManager } from "./FileReloadManager";
 import {
   forgetWatchedConnectorScenarioFiles,
   forgetWatchedScenarioFile,
+  rememberWatchedScenarioFile,
 } from "./watchedScenarioFiles";
 import {
   RegistryChargePointService,
@@ -1211,6 +1213,45 @@ function detachScenarioFile(
 }
 
 /**
+ * Record where a control-plane load got its scenario, and watch the file when
+ * this daemon is watching (#314).
+ *
+ * The row goes in whether or not `--watch` is on, and that is the whole point:
+ * it is a fact about stored state, not about the feature that consumes it.
+ * Written only behind the flag, a `--state-db` daemon started without `--watch`
+ * recorded no origin, and a later restart *with* `--watch` had nothing to
+ * restore — the persisted scenario came back silently unwatched. This is the
+ * same rule as {@link detachScenarioFile}'s unconditional delete, in the other
+ * direction: both the writing and the clearing of the row are independent of
+ * the watcher, and only the in-memory watch is behind the flag.
+ *
+ * The startup flags do not come through here: they own their keys and
+ * deliberately store nothing — see `ScenarioFileRegistration.persist`.
+ */
+function attachScenarioFile(
+  fileReload: FileReloadManager | null | undefined,
+  database: Database | null | undefined,
+  registration: {
+    readonly filePath: string;
+    readonly cpId: string;
+    readonly connectorId: number;
+    readonly scenarioId: string;
+    readonly loadedText?: string | null;
+  },
+): void {
+  rememberWatchedScenarioFile(
+    database,
+    registration.cpId,
+    registration.connectorId,
+    registration.scenarioId,
+    // Resolved the same way `registerScenarioFile` resolves it, so the row a
+    // watcher writes and the row it reads back are the same string.
+    path.resolve(registration.filePath),
+  );
+  fileReload?.registerScenarioFile(registration);
+}
+
+/**
  * The connector-wide twin of {@link detachScenarioFile}, for the upload that
  * replaces a connector's whole definition set.
  *
@@ -1886,7 +1927,7 @@ async function dispatchFacadeCpCommand(
         );
         // #314: a scenario loaded *from a path* is watchable; the inline
         // `params.scenario` branch below has no file behind it and is not.
-        fileReload?.registerScenarioFile({
+        attachScenarioFile(fileReload, database, {
           filePath: params.file,
           cpId: id,
           connectorId,
@@ -2081,7 +2122,7 @@ async function dispatchFacadeCpCommand(
           },
         }),
       );
-      fileReload?.registerScenarioFile({
+      attachScenarioFile(fileReload, database, {
         filePath,
         cpId: id,
         connectorId,

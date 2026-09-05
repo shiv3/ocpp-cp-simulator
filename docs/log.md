@@ -951,3 +951,30 @@ Sixth review pass on PR #325.
   trigger could auto-start the stale graph in its place. Taking over a key is a
   removal of the previous owner's record — the same rule the removal-path
   enumeration follows.
+
+## [2026-09-05] ingest | `--watch`: the origin row is stored state in both directions, and the bootstrap goes first (#314, PR #317)
+
+- The rule from round 10 — _persisted source cleanup must not depend on an
+  active watcher_ — applies to **writing** the row as well. It was written from
+  inside `registerScenarioFile`, so a `--state-db` daemon started without
+  `--watch` recorded no origin at all and a later restart _with_ `--watch` had
+  nothing to restore: the persisted scenario came back silently unwatched. The
+  row now goes in unconditionally and only the in-memory watch is behind the
+  flag.
+- Audited for a third site rather than waiting for one, and found it: round 12's
+  "a startup registration deletes the row for the key it takes over" lived
+  inside `rememberScenarioFile`, which only runs when a reloader exists. A
+  `--scenario` run without `--watch` therefore left a row asserting an origin
+  that flag had already taken. `runStartupScenario` now takes the database and
+  deletes unconditionally. Three sites, one rule: the row is written, cleared
+  and taken over independently of the watcher.
+- [Daemon](entities/daemon.md) — `restoreScenarioWatches()` now runs **after**
+  the startup flags have loaded, not before. A stored row can name the same
+  scenario id an explicit `--scenario` uses, and restoring first reconciled that
+  abandoned file onto the connector, auto-started its graph if the edit it
+  picked up while the daemon was down carried a matching trigger, and left the
+  configured file replacing only a definition while an old executor kept
+  running. Ordering rather than filtering: ownership is already expressed by the
+  takeover deletion, so running the bootstrap first simply lets that assertion
+  happen before anything reads the rows — the two rules compose instead of
+  needing a third that knows which keys are startup-owned.

@@ -364,7 +364,12 @@ operator meant. See [State persistence](../concepts/state-persistence.md).
 
 A **scenario** loaded over the control plane persists its source path the same
 way (`watched_scenario_files`, schema v12), so a restarted `--watch` daemon
-re-establishes that watch and reconciles an edit made while it was down. The
+re-establishes that watch and reconciles an edit made while it was down. The row
+is written **whether or not `--watch` is on**, for the same reason it is cleared
+that way: it is a fact about stored state, not about the feature that reads it.
+Only the in-memory watch is behind the flag — so a daemon run without `--watch`
+still records where each scenario came from, and a later watched start has
+something to restore. The
 startup flags are the deliberate exception: `--scenario` and
 `--scenario-template-file` are **not** written down, because the per-connector
 rewrite that a fan-out depends on lives in a callback no row can carry, and the
@@ -375,7 +380,11 @@ already stored under the key it takes over: `--scenario` keeps the file's own id
 when the file already targets its connector, so it can collide with an earlier
 control-plane load of that id, and the abandoned row would otherwise be restored
 at the next start and applied before the bootstrap registered the configured
-scenario. The rows are simulator-owned state, so
+scenario. That deletion, too, does not depend on `--watch`. The restore runs
+**after** the startup flags have loaded, so the bootstrap asserts ownership of
+its keys before any row is read: an abandoned row naming the same scenario id
+can no longer be reconciled onto the connector first, auto-start its stale graph
+and leave the configured file with nothing to start. The rows are simulator-owned state, so
 `cp.delete` cascades to them and `state.reset` truncates them, with or without
 `--watch`.
 

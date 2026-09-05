@@ -42,6 +42,32 @@ jobs:
       - name: CLI sidecar compiles (release smoke)
         run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke src/cli/main.ts
 
+      # No CI job used to touch the npm tarball at all — the only checks on it
+      # lived in cli-release.yml and ran on the `cli-v*` tag, so a PR that
+      # broke packaging stayed green and the breakage surfaced weeks later at
+      # release time. It did: package.json#files lost track of src/data,
+      # src/ocpp, src/trace and vendor/, and the published CLI could not run
+      # (#320). Pack it and boot it here, on the pull request.
+      #
+      # Packed with --ignore-scripts, so no vite build and no dist/ — the
+      # script skips its web-console stage for exactly that reason and does
+      # not fail on it. Do NOT add a vite build here to "fix" the skip; the
+      # release workflow builds dist/ and passes --expect-dist, which is where
+      # a missing "dist" entry is caught.
+      - name: CLI tarball installs and runs (packaging smoke)
+        run: ./scripts/verify-cli-tarball.sh
+
+      # #321: the documented install command must actually run. The first
+      # version of this guard only asserted that the places restating the URL
+      # agreed with each other — which is worthless, since several places
+      # agreeing on a broken URL is exactly the state the issue describes. The
+      # script fetches every install command README.md and docs/entities/cli.md
+      # advertise and fails if one does not return 200. Needs network access to
+      # github.com, and has a short retry so a blip is not a red build; a 404
+      # fails immediately.
+      - name: Documented install URLs resolve
+        run: ./scripts/verify-install-urls.sh
+
       - name: Unit tests (vitest)
         run: bun run test:vitest
 

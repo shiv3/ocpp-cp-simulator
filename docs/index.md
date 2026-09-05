@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # Index
@@ -15,7 +15,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 
 | Page                                                          | Summary                                                                                                                             |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| [CLI (`ocpp-cp-sim`)](entities/cli.md)                        | Headless Bun binary — REPL, JSON Lines, daemon launcher, client modes, startup scenarios, `export-k6`, full flag reference          |
+| [CLI (`ocpp-cp-sim`)](entities/cli.md)                        | Headless Bun binary — REPL, JSON Lines, daemon launcher, client modes, install / packaging, `export-k6`, full flag reference        |
 | [analyze subcommand](entities/analyze.md)                     | DebugKit failure-pattern reports from a trace file or a live daemon; per-CP / per-connector splitting; excluded records; disclaimer |
 | [Daemon (server mode)](entities/daemon.md)                    | Long-lived multi-CP process: starting, flags, HTTP surfaces, health endpoint, security posture, limits                              |
 | [Web console](entities/web-console.md)                        | React browser UI at `/`, `/v3`, `/v1`; Local vs Remote; what it can do; dev commands                                                |

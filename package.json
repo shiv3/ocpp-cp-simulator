@@ -9,11 +9,14 @@
   "files": [
     "src/cli",
     "src/cp",
+    "src/data",
+    "src/ocpp",
     "src/protocol",
     "src/scenario",
-    "src/utils/scenarioTemplates.ts",
-    "src/utils/scenarios",
+    "src/trace",
+    "src/utils",
     "schema",
+    "vendor",
     "dist"
   ],
   "scripts": {

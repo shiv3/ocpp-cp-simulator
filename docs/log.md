@@ -258,3 +258,287 @@ fixes:
 - [Testing strategy](analyses/testing-strategy.md): new section "Does anything actually launch the desktop daemon?". CI compiled the sidecar but never ran it, which is precisely why #319 survived 30 releases. `src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` now compiles and launches it on every PR under `test:bun`, parsing the arguments out of `lib.rs`'s `DAEMON_ARGS` and the readiness budget out of `splash.html` so neither copy can drift.
 - [GitHub issues](sources/github-issues.md): #319 indexed.
 - Left as-is, reported not fixed: `dist/` is now bundled twice on the desktop (embedded in the Rust binary for `splash.html`, and as a resource for the daemon). Deduplicating it would mean serving the console over `tauri://` instead of HTTP, which is a different architecture, not a doc fix.
+
+## [2026-09-05] ingest | The CLI distribution was broken twice over (#320, #321)
+
+Both defects are the same surface — how the CLI reaches a user — so they were
+fixed and ingested together.
+
+- [CLI → What the package ships](entities/cli.md#what-the-package-ships): new
+  section. `package.json#files` had drifted to a mix of directories and
+  individual files and was missing `src/data`, `src/ocpp`, `src/trace` and
+  `vendor/`; `src/cli/main.ts` statically imports `../data/sqlite/…`, so the
+  published tarball died on its first import and even `--help` exited 1
+  (#320). Broken since 8a0fda5 (2026-07-01); the last actual CLI release,
+  `cli-v0.3.1` (2026-06-02), predates it, so no published artifact was ever
+  affected — the next one would have been. `files` is now eleven directories,
+  each one mutation-proven load-bearing (drop any single entry and `--help`
+  fails), and the same set the `Dockerfile` COPY list carries.
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  new section. The documented install URL used `releases/latest/download/…`,
+  which GitHub resolves across both tag trains (`v*` desktop, `cli-v*` CLI);
+  with `v0.7.8` newest it redirected to a release carrying no `.tgz` and
+  404'd — the steady state for half of any release cycle, not a transient
+  (#321). Replaced everywhere by `releases/download/cli-latest/…`, a rolling
+  pre-release `cli-release.yml` re-points on every CLI release. Pre-release
+  status is deliberate: GitHub never resolves `releases/latest` to one, so the
+  pointer cannot hijack the desktop train's badge. Chosen over pinning the
+  docs to a `cli-v*` tag (needs a human to remember) and over attaching the
+  `.tgz` to desktop releases (couples the two trains and ships CLI tarballs
+  under desktop version numbers).
+- [Docker image → Image details](entities/docker-image.md#image-details): notes
+  that the runtime `COPY` list and `package.json#files` are the same set and
+  links to the CLI page's canonical table rather than repeating it.
+- [`README.md`](../README.md): the quick-start install commands (pnpm and bun)
+  and the pinned example (`cli-v0.1.0` → `cli-v0.3.1`) updated to match.
+- [GitHub issues](sources/github-issues.md): #320 and #321 added.
+- Raw sources changed in the same commit: `package.json#files`; new
+  `scripts/verify-cli-tarball.sh` (installs the tarball into a throwaway
+  global prefix and boots it — `--help`, `bun build --compile` over the
+  installed tree, daemon `/v1/healthz` with a CP bootstrapped, web-console
+  shell when `dist/` ships); `.github/workflows/cli-release.yml` (the three
+  `tar -tf | grep` verify steps replaced by that script, rolling `cli-latest`
+  pointer, post-publish install from the documented URL, release-notes body);
+  `.github/workflows/ci.yml` (the packaging smoke and an install-URL
+  consistency guard now run on every pull request — previously no CI job
+  touched the tarball at all, which is why a July regression would only have
+  surfaced at the next release).
+
+## [2026-09-05] ingest | The install URL must resolve, and the pointer must not roll back (#320, #321)
+
+Follow-up to the same-day ingest above, from review on PR #325.
+
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  rewritten. The previous revision documented
+  `releases/download/cli-latest/ocpp-cp-simulator.tgz` as the primary install
+  command, but the rolling release it names is created by `cli-release.yml` on
+  the next `cli-v*` push and does not exist yet — so a change whose purpose was
+  fixing a 404 in the quick start would have merged with the quick start still
+  404ing, for a new reason. The pinned `cli-v0.3.1` URL (verified HTTP 200) is
+  primary until then; the page carries a **Rollout status** paragraph saying
+  who can close the gap (a maintainer with release rights, by cutting a
+  `cli-v*` release) and that the CLI release which first creates the pointer is
+  the one that swaps the URLs.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): documents that
+  the pointer only ever moves forward. The move was an unconditional
+  force-push plus `gh release upload --clobber`, so re-running an older tag's
+  workflow — or two release jobs finishing out of order — would have left
+  `cli-latest` serving an older package under the URL the docs call the newest.
+- [`README.md`](../README.md): the two quick-start commands now use the pinned
+  URL, with the rolling form named in prose rather than advertised as a
+  runnable command.
+- Raw sources changed in the same commit: new `scripts/verify-install-urls.sh`
+  (**fetches** every advertised install command and fails on anything but 200;
+  the previous guard only checked that the places restating the URL agreed with
+  each other, which is no guard at all — several places agreeing on a broken
+  URL is precisely the reported defect); new `scripts/roll-cli-latest.sh`
+  (reads the version the pointer holds from a machine-readable marker in its
+  release body and refuses to move backwards, re-running the same version still
+  allowed so a failed upload can be retried); `.github/workflows/cli-release.yml`
+  (calls the roll script, and a workflow-level `concurrency:` group serialises
+  release runs because the read-then-write is not atomic on its own);
+  `.github/workflows/ci.yml` (runs the URL guard on every pull request).
+
+## [2026-09-05] ingest | Guards that fail open, abort, or cancel what they protect (#320, #321)
+
+Second review pass on PR #325. Four findings, all in the machinery added by
+the previous two commits rather than in the original defects — three of them
+about the guard's own failure modes rather than its happy path.
+
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  the "only moves forward" paragraph is now a table of every way the pointer
+  move can fail and which direction each one points. The rules that changed:
+  a pointer lookup that fails as anything other than a confirmed 404 fails the
+  release instead of being read as "does not exist yet" (which skipped the
+  roll-back check and force-moved the tag); a pointer release carrying no
+  version marker initialises the marker with a `::warning::` instead of
+  aborting the script, which is the state the first hand-created pointer would
+  be in; a malformed marker fails the release rather than guessing an
+  ordering; and prerelease / build-metadata versions are refused outright,
+  because `sort -V` is not SemVer-aware — it orders `1.0.0-rc.1` after
+  `1.0.0`, so re-running a prerelease after the stable release would have
+  rolled the pointer backwards, the exact bug the check exists for. Versions
+  are now compared numerically field by field. The asset is uploaded before
+  the marker is written and before the tag moves, so a partial failure leaves
+  the marker naming the version the pointer really serves.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): new paragraph
+  on why only the pointer move is serialised. The previous commit put a
+  workflow-level `concurrency:` group on `cli-release.yml`, which was a
+  regression: GitHub cancels the _pending_ run when a newer one joins a group,
+  and `cancel-in-progress: false` protects only the run already executing — so
+  with several CLI releases queued the middle tag would have been cancelled and
+  would never have published its own `cli-v*` assets, which are the release.
+  The cure was worse than the race.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh`
+  (rewritten around the failure-direction rules above); `scripts/
+verify-install-urls.sh` (also asserts that `cli-release.yml` carries no
+  workflow-level `concurrency:` and still serialises the pointer job, so the
+  group cannot migrate back up); `.github/workflows/cli-release.yml` (split
+  into an uncancellable `release` job and a serialised `roll-pointer` job that
+  downloads the tarball back off the release it just published, so the bytes
+  the pointer serves are provably the bytes that release published).
+
+## [2026-09-05] ingest | `cli-latest` converges on the highest published release (#320, #321)
+
+Third review pass on PR #325, two P1s, one answer.
+
+- [CLI → Why `cli-latest` and not `releases/latest`](entities/cli.md#why-cli-latest-and-not-releaseslatest):
+  the pointer's rule is now stated as a contract — **`cli-latest` always serves
+  the highest published `cli-vX.Y.Z` release, and never a lower one, whatever
+  order the pointer jobs run in or fail in** — with its two carve-outs
+  (prerelease-tagged CLI releases are ineligible; a deleted highest release
+  makes the pointer follow the new highest down, warned) written down rather
+  than left implicit.
+- The design that contract replaced moved the pointer to the version that
+  triggered the run and used a marker in the pointer's body to refuse
+  roll-backs. Two ways that failed, both real: GitHub keeps one pending job per
+  concurrency group and replaces it with the most recently **queued** one, and
+  queue order is release-completion order, so a slow rerun of 1.2 evicts 1.3's
+  pending job, 1.2 advances the pointer from 1.1, and the published 1.3 is
+  never served; and because uploading the asset and writing the marker are two
+  API calls, an upload that lands with a failed write leaves the URL serving
+  new bytes under an old marker, which a later older run then passes its
+  comparison against and rolls the bytes backwards. Reversing the two calls
+  only swaps which direction is wrong — it was the mirror of the ordering bug
+  fixed in the previous pass.
+- Every pointer run now asks which `cli-v*` release is highest and rolls to
+  that. Queue order stops mattering, a cancelled job costs nothing because the
+  next one reaches the same state, and the marker is demoted to a record of
+  what is served. One hole the rewrite had to close on its own: the release
+  listing is eventually consistent, so the triggering version is used as a
+  floor and the listing is retried until it shows the triggering tag —
+  otherwise a lagging listing could strand the newest release with no later job
+  to correct it.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh`
+  (rewritten around the contract; also fails closed on an unreadable listing,
+  excludes drafts, and refuses a target release whose asset is missing or
+  empty); `.github/workflows/cli-release.yml` (the pointer job no longer
+  pre-fetches a tarball — the script downloads the target release's own asset).
+
+## [2026-09-05] ingest | Partial failures in the pointer swap, and a listing that omits someone newer (#320, #321)
+
+Fourth review pass on PR #325. All three findings were about a step failing
+partway rather than about the logic, which is the fourth round running.
+
+- [CLI → "If this dies here, what does the install URL serve?"](entities/cli.md#if-this-dies-here-what-does-the-install-url-serve):
+  new section, and the question was asked of every mutating call rather than
+  only the ones review flagged. `gh release upload --clobber` deletes the
+  same-named asset **before** uploading — its own help says "If the upload
+  fails, the original assets will be lost" — so a transient failure left the
+  install URL `README.md` advertises 404ing indefinitely. Every other guard in
+  the script fails toward "the old thing keeps working"; that one could not,
+  because its first act was destructive. The replacement bytes now go up under
+  a temporary asset name first, so the destructive step never runs until the
+  new asset is already on the server, and the swap is then a delete plus a
+  rename — two fast metadata calls, both retried, with a recovery that
+  re-uploads under the live name if the rename cannot be completed. GitHub has
+  no atomic asset replacement, so a window remains; it is bounded by two
+  metadata calls instead of a 2 MB upload, and an exhausted recovery exits
+  saying the URL is 404 and how to restore it rather than exiting silently.
+- [CLI → The marker is load-bearing, narrowly](entities/cli.md#the-marker-is-load-bearing-narrowly):
+  new section. Waiting for the release listing to show the triggering tag
+  closed "the listing has not caught up with me" but not "…with someone
+  newer" — an older rerun could see a listing that looked complete, omit a
+  higher release, and overwrite the pointer downwards, recreating the very
+  rollback the convergence design exists to prevent. The marker, demoted to a
+  record in the previous pass, is the only evidence of that release, so it is
+  now consulted in exactly one way: as a lower bound that can trigger a point
+  lookup of the single release it names. Published means the listing was stale
+  and the run converges _up_; a confirmed 404 or a draft means the release is
+  genuinely not published and the run may converge down, warned; any other
+  error fails closed. A hand-edited marker still cannot move the pointer
+  anywhere — it can only ask a question whose answer decides. The contract
+  paragraph now states this dependency instead of quietly relying on it.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): the `cli-latest`
+  git tag is moved to the commit behind the _target_ release rather than to the
+  checkout's `HEAD`. An older run that converges upward is checked out at its
+  own older tag, so the previous code left the tag disagreeing with the asset
+  and the release body — contradicting the comment that said the tag must not
+  mislead. It is moved through the refs API so the checkout's fetch depth does
+  not matter, and a failure there is a warning rather than an error, because
+  the tag is cosmetic and the URL is already correct by that point.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.
+
+## [2026-09-05] ingest | What the next run concludes, not just what the URL serves (#320, #321)
+
+Fifth review pass on PR #325. Both findings were on transient-failure paths in
+the code written in the fourth pass to handle transient failures, and the
+second one is the lesson worth keeping: a decision that was correct when it was
+made became incorrect when a later change in the same round moved the ground
+under it.
+
+- [CLI → "If this dies here, what does the install URL serve?"](entities/cli.md#if-this-dies-here-what-does-the-install-url-serve):
+  the table gains a third column — what the **next** run may conclude from the
+  state left behind. Both of this round's findings lived there, and neither is
+  visible from the "what does the URL serve" column alone.
+- The version marker is now written **before** the asset swap, and failing to
+  write it is fatal rather than a warning. Round 4 made a failed marker write a
+  warning on the explicit grounds that a marker naming an older version was
+  provably inert; that was true when written and stopped being true later in
+  the same round, when the stale-listing fix made the marker a lower bound. A
+  marker that under-claims lets a later run on a stale listing find nothing
+  higher to verify and replace newer bytes with an older tarball. Under the
+  point-lookup semantics the two directions are not symmetric: a marker that
+  over-claims is self-healing, because the next run verifies the claim, finds
+  the release published and converges up, finishing the interrupted swap.
+  Writing the marker first also makes its failure free — nothing else has been
+  touched at that point, so the run exits with the URL still serving the
+  previous release.
+- Asset lookups on the recovery path preserve their status and are retried.
+  They previously suppressed errors and returned empty, so a transient failure
+  after a failed deletion read as "the asset is gone" and let the destructive
+  `--clobber` fallback run against a live, working asset — the fail-open class
+  closed elsewhere in this script, reintroduced inside the recovery path built
+  to prevent that very outcome.
+- Harness note: the stubbed `gh` did not model `--clobber`'s delete-then-upload
+  semantics, which is the exact behaviour the round-4 fix exists for, so the
+  first run of one mutation understated the damage. With the stub corrected,
+  both the round-4 and round-5 mutations leave the install URL 404ing while
+  their controls keep serving. A harness that quietly does the guard's work for
+  it makes a mutation look like a pass — the second time that has happened in
+  this PR.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.
+
+## [2026-09-05] ingest | "It may have succeeded and we cannot tell", and a page that stated the invariant backwards (#320, #321)
+
+Sixth review pass on PR #325.
+
+- [CLI → "If this dies here…"](entities/cli.md#if-this-dies-here-what-does-the-install-url-serve):
+  a third class of partial failure, distinct from "it failed" and "it failed
+  partway". A retry loop cannot distinguish a lost request from a lost
+  response, so an exhausted retry does not mean the mutation was not applied.
+  The asset rename assumed it had failed and ran the destructive `--clobber`
+  fallback, which deletes first — so a PATCH that had actually been applied,
+  with only its reply lost, had its own successful result deleted, and one more
+  upload failure left the install URL 404. The rule is now stated and applied
+  everywhere: after an exhausted retry of a mutation, **query** the state,
+  never assume it. The page carries the table of where each exhausted call
+  lands. Checked the other retried mutations while there: the marker write and
+  the `.incoming` upload are safe under either answer and still fail loudly;
+  the live-asset delete already queried; the fallback re-upload, the pointer
+  creation and the git-tag move now query too, so a lost response is no longer
+  reported as a dead URL or a stale tag.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): the page said
+  the asset is uploaded before the marker is written. Round 5 deliberately made
+  it the other way round, because a marker that lags the bytes is what permits
+  a rollback. The ordering **is** the safety invariant, so a page describing it
+  backwards would have talked a future maintainer into restoring the bug. Now
+  stated as the invariant, with a pointer to the reasoning and an explicit "do
+  not reverse it".
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): the outcome
+  table lumped "marker missing", "marker unparseable" and "marker higher than
+  the target" into one row that said all three are warned about and
+  overwritten. Only the first two are; a marker naming something higher goes
+  through the point lookup. Split into separate rows.
+- Two more disagreements found by re-reading the whole section against the
+  script rather than only the rows under review, both the same class as the one
+  above. The paragraph explaining why the original design failed ended
+  "reversing the two calls only swaps which direction is wrong", which is no
+  longer true and directly contradicted the code; it is now scoped to the
+  period when the marker was trusted unverified. And "a stale or hand-edited
+  marker cannot authorise anything" contradicted the section two paragraphs
+  later that makes the marker load-bearing in one narrow way; it now says the
+  marker cannot authorise anything _by itself_ and names the lookup that gates
+  it. This is the third round in which this page needed correcting after the
+  code moved — the correction pass is now part of the work, not a follow-up.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.

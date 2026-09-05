@@ -33,19 +33,20 @@ ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 
 ```bash
 # pnpm (recommended)
-pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
+pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.3.1/ocpp-cp-simulator-0.3.1.tgz
 
 # bun
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/latest/download/ocpp-cp-simulator.tgz
-
-# Or pin to a specific CLI release
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.1.0/ocpp-cp-simulator-0.1.0.tgz
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.3.1/ocpp-cp-simulator-0.3.1.tgz
 
 # From a local checkout
 bun link              # in this repo
 bun link ocpp-cp-simulator   # in any other project
 ```
 
+> Every install command above is fetched by CI, so a URL printed here resolves. Do **not** use GitHub's `releases/latest/download/…` — this repo has two tag trains (`v*` desktop, `cli-v*` CLI) and "latest" resolves across both, landing on a desktop release that carries no `.tgz`.
+>
+> A version-independent URL, `releases/download/cli-latest/ocpp-cp-simulator.tgz`, is created by the `Release CLI` workflow as a rolling pre-release. It does not exist until the next CLI release is cut; that release's PR replaces the pinned URLs above with it. See [docs/entities/cli.md](docs/entities/cli.md#why-cli-latest-and-not-releaseslatest).
+>
 > The release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags. A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
 
 Then run from anywhere:

@@ -12,7 +12,10 @@ import { EventBus } from "../eventBus";
 import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import { runStartupScenario } from "../startServer";
-import { listWatchedScenarioFiles } from "../watchedScenarioFiles";
+import {
+  listWatchedScenarioFiles,
+  rememberWatchedScenarioFile,
+} from "../watchedScenarioFiles";
 
 /**
  * `--watch` over a `--scenario-template-file` fan-out (#314).
@@ -410,6 +413,86 @@ describe("--watch over a startup scenario file (#314)", () => {
       } finally {
         restored.close();
       }
+    } finally {
+      fileReload.close();
+      svc.disconnect();
+      registry.shutdownAll();
+      database.close();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+  it("deletes a control-plane row for a key it takes over", async () => {
+    // The complement of "startup registrations are not persisted". Writing no
+    // new row is only half of it: the same (cpId, connectorId, scenarioId) can
+    // already carry a row from a control-plane `load_scenario { file }` in an
+    // earlier run. Left behind, the next restart restores that abandoned file
+    // and applies it *before* the bootstrap registers the configured scenario —
+    // and a matching trigger can auto-start the stale graph instead (#314).
+    const csms = startMockCsms();
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-takeover-"));
+    const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+      database,
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314-takeover",
+      wsUrl: csms.url,
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const scenarioFile = join(tmpDir, "scenario.json");
+    writeFileSync(scenarioFile, targeted(1, 11));
+    const abandoned = join(tmpDir, "from-an-earlier-run.json");
+    writeFileSync(abandoned, targeted(1, 99));
+    // The row a previous run's control-plane load left under this exact key —
+    // `--scenario` keeps the file's own id when it already targets the
+    // connector, so the two collide.
+    rememberWatchedScenarioFile(
+      database,
+      "cp314-takeover",
+      1,
+      "targeted-scenario",
+      abandoned,
+    );
+    expect(listWatchedScenarioFiles(database)).toHaveLength(1);
+
+    try {
+      await svc.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      const runPromise = runStartupScenario(
+        svc,
+        {
+          scenario: scenarioFile,
+          scenarioTemplate: null,
+          scenarioTemplateFile: null,
+          scenarioConnector: "1",
+        },
+        1,
+        fileReload,
+      );
+      csms.replyCallResult(boot.messageId, {
+        currentTime: new Date().toISOString(),
+        interval: 300,
+        status: "Accepted",
+      });
+      await runPromise;
+
+      expect(svc.listScenarios(1)[0]?.scenarioId).toBe("targeted-scenario");
+      expect(fileReload.watchedPaths()).toEqual([scenarioFile]);
+      // The stale row is gone, so a restart has nothing to reattach.
+      expect(listWatchedScenarioFiles(database)).toEqual([]);
     } finally {
       fileReload.close();
       svc.disconnect();

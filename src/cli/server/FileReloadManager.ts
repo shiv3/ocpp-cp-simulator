@@ -428,7 +428,17 @@ export class FileReloadManager {
   }
 
   private rememberScenarioFile(entry: ScenarioEntry): void {
-    if (entry.persist === false) return;
+    if (entry.persist === false) {
+      // Taking over a key is a removal of whatever owned it before. A startup
+      // registration writes no row of its own, but the same
+      // (cpId, connectorId, scenarioId) may already carry one from a
+      // control-plane load in an earlier run. Left behind, the next restart
+      // restores that abandoned file, applies it *before* the bootstrap
+      // registers the configured scenario, and — if its trigger matches — can
+      // auto-start the stale graph and keep the real one from running (#314).
+      this.forgetScenarioFile(entry.cpId, entry.connectorId, entry.scenarioId);
+      return;
+    }
     rememberWatchedScenarioFile(
       this.database,
       entry.cpId,

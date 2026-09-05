@@ -419,6 +419,13 @@ describe("fleet-bench end to end (#302)", () => {
     const report = JSON.parse(readFileSync(outFile, "utf8")) as {
       runId: string;
       results: { n: number; connected: number; calls: number }[];
+      heartbeatOverride: {
+        bootsObserved: number;
+        rpcsIssued: number;
+        reapplied: number;
+        failed: number;
+        eventSocketLostAtN: number | null;
+      };
     };
     expect(report.results).toHaveLength(2);
     expect(report.results.map((r) => r.n)).toEqual([1, 2]);
@@ -434,7 +441,21 @@ describe("fleet-bench end to end (#302)", () => {
     // A real CSMS answered, so the run measured something.
     expect(report.results.at(-1)!.calls).toBeGreaterThan(0);
 
-    // 3. Cleanup actually ran: the daemon holds none of this run's fleet.
+    // 3. The instrument's own cost, measured against a real daemon rather than
+    //    argued. Two charge points, one accepted boot each, no reconnects — so
+    //    the reapplication must cost exactly two RPCs. It observes twice that
+    //    many events, because `onBootNotificationAccepted` emits `statusChange`
+    //    from `updateConnectorStatus(0, Available)` and again from the status
+    //    setter; without the coalescing window those four events would be four
+    //    RPCs. This is the assertion that keeps the fix for the heartbeat drift
+    //    from becoming its own unreported load.
+    expect(report.heartbeatOverride.bootsObserved).toBe(4);
+    expect(report.heartbeatOverride.rpcsIssued).toBe(2);
+    expect(report.heartbeatOverride.failed).toBe(0);
+    // Nothing dropped, so the idle axis's degrade path was never taken.
+    expect(report.heartbeatOverride.eventSocketLostAtN).toBeNull();
+
+    // 4. Cleanup actually ran: the daemon holds none of this run's fleet.
     expect(await listCpIds(daemon.url)).toEqual([]);
   }, 240_000);
 
@@ -541,9 +562,21 @@ describe("fleet-bench end to end (#302)", () => {
       // And the run says so in its own record, so a result file collected from
       // a real sweep carries the same fact.
       const report = JSON.parse(readFileSync(outFile, "utf8")) as {
-        heartbeatOverride: { reapplied: number; failed: number };
+        heartbeatOverride: {
+          bootsObserved: number;
+          rpcsIssued: number;
+          reapplied: number;
+          failed: number;
+        };
       };
-      expect(report.heartbeatOverride.reapplied).toBeGreaterThanOrEqual(1);
+      // NOTE: `reapplied >= 1` is *not* the reconnect discriminator — the
+      // initial boot fires the hook too. The wire count above is. What this
+      // adds is the instrument's cost across a reconnect: one charge point,
+      // two accepted boots (creation and the reconnect), two RPCs — not the
+      // four its four `statusChange` events would otherwise produce.
+      expect(report.heartbeatOverride.bootsObserved).toBe(4);
+      expect(report.heartbeatOverride.rpcsIssued).toBe(2);
+      expect(report.heartbeatOverride.reapplied).toBe(2);
       expect(report.heartbeatOverride.failed).toBe(0);
 
       expect(await listCpIds(daemon.url)).toEqual([]);

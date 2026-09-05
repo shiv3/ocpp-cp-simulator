@@ -173,8 +173,17 @@ export const CPS_PER_SOCKET = 200;
  *  backlog that never drains — the cycle period would drift past
  *  `--tx-interval` and keep drifting, which is the same silent under-load this
  *  ceiling exists to prevent. The remaining fifth also covers the step's own
- *  `start_heartbeat` arming and the end-of-run `cp.delete` sweep, which share
- *  the same buckets. */
+ *  `start_heartbeat` arming, the reapplication of that interval after each
+ *  accepted boot (see {@link HeartbeatOverride}) and the end-of-run
+ *  `cp.delete` sweep, which all share the same buckets.
+ *
+ *  That sharing is also the bound on how much the reapplication can perturb a
+ *  measurement. The buckets cap *total* control-plane traffic at
+ *  {@link sustainableRpcPerSec}, whatever else is happening, so a reconnect
+ *  wave cannot make the benchmark offer more load than the ceiling the sweep
+ *  was already validated against — at worst it spends this fifth, and on the
+ *  idle axis (where {@link requiredRpcPerSec} is zero) there is nothing for it
+ *  to compete with at all. */
 export const RPC_HEADROOM = 0.8;
 
 /** How long a transaction is held open, and how long the connector then rests
@@ -1800,20 +1809,30 @@ export function createFailureHint(reason: string): string {
  * nothing in the table would say so. A benchmark that changes its own workload
  * as it nears the interesting region is not measuring that region.
  *
- * Two properties this has to get right, both of them races:
+ * Three properties it has to get right. The first two are races; the third is
+ * the cost of the mechanism itself, which on a benchmark is not a detail.
  *
- * 1. **An RPC is issued after every event, never merged into one already in
- *    flight.** `onBootNotificationAccepted` emits `statusChange` *twice* per
- *    accepted boot, and a reconnect can land while an earlier reapplication is
- *    still travelling. Dropping the second event because the first RPC has not
- *    come back would lose exactly the case that matters: the daemon may run
- *    that RPC's handler *before* the second boot's frame, and the second boot
- *    then clobbers it with the CSMS value for good. So a coalesced event sets a
- *    dirty flag and issues a fresh RPC when the in-flight one settles.
+ * 1. **An RPC is issued after every window, never merged into one already in
+ *    flight.** A reconnect can land while an earlier reapplication is still
+ *    travelling. Dropping that event because the first RPC has not come back
+ *    would lose exactly the case that matters: the daemon may run that RPC's
+ *    handler *before* the second boot's frame, and the second boot then
+ *    clobbers it with the CSMS value for good. So a boot observed while an RPC
+ *    is in flight sets a dirty flag and issues a fresh RPC when that one
+ *    settles.
  * 2. **Only this run's charge points.** Membership is asked of the caller
  *    rather than tracked here, so it is the same set cleanup deletes: under
  *    `--allow-existing` someone else's charge point must not have its heartbeat
  *    rewritten by this script.
+ * 3. **One RPC per boot, not one per event.** `onBootNotificationAccepted`
+ *    emits `statusChange` *twice* for one boot, and issuing per event doubled
+ *    the control-plane traffic a reconnect wave costs — load the benchmark
+ *    offers without reporting, arriving at the N it exists to characterise.
+ *    Events are therefore gathered for {@link BOOT_COALESCE_MS} and flushed to
+ *    one RPC per charge point. This is strictly a collapse of boots that are
+ *    already covered, never a dropped one: see that constant. The counters
+ *    {@link bootsObserved} and {@link rpcsIssued} report the residual, so the
+ *    perturbation is stated rather than inferred.
  *
  * The ordering against the CSMS value needs no bookkeeping and cannot be
  * arranged the wrong way round: `onBootNotificationAccepted` sets the status
@@ -1821,11 +1840,47 @@ export function createFailureHint(reason: string): string {
  * same synchronous frame, and this reapplication is issued from a different
  * process, so it can only ever land afterwards.
  */
+/**
+ * How long observed accepted boots are gathered before one `start_heartbeat`
+ * is issued per charge point.
+ *
+ * This exists because **one** accepted boot emits `statusChange` **twice**:
+ * `onBootNotificationAccepted` calls `updateConnectorStatus(0, Available)`
+ * (which emits) and then assigns `this.status = Available` (whose setter emits
+ * again), both before `startHeartbeat(csmsInterval)` and both in the same
+ * synchronous frame. Issuing an RPC per event meant one boot cost two RPCs —
+ * a reconnect wave at the top of a sweep is then twice the control-plane
+ * traffic it needs to be, arriving at the exact N the benchmark is trying to
+ * characterise. That is the fixed defect's own shape with the sign flipped, so
+ * it is collapsed rather than documented.
+ *
+ * **Any window is correct, which is why one this coarse is safe.** Every
+ * observed event has already run `startHeartbeat(csmsInterval)` on the daemon
+ * before it was emitted, so an RPC issued strictly *after* the last event of a
+ * window overwrites every CSMS interval that window saw. Collapsing therefore
+ * cannot lose a boot; it can only merge boots that are already covered.
+ *
+ * The value is chosen to sit between two numbers that are four orders of
+ * magnitude apart: the two emissions of one boot are microseconds apart, and
+ * the fastest a charge point can boot *again* is a socket close plus
+ * `OCPPWebSocket`'s 1s first reconnect backoff plus a connect and a
+ * BootNotification round trip. Anything from a microsecond to several hundred
+ * milliseconds separates them equally well; 50ms is far enough above
+ * scheduling jitter to be deterministic and far enough below 1s that a genuine
+ * reconnect is never merged into the boot before it.
+ */
+export const BOOT_COALESCE_MS = 50;
+
 export interface HeartbeatOverrideDeps {
   /** Whether `cpId` belongs to this run — usually `cleanupIds.has`. */
   readonly owns: (cpId: string) => boolean;
   /** Issue one `start_heartbeat` at the configured interval. */
   readonly apply: (cpId: string) => Promise<void>;
+  /** Run `flush` once, after {@link BOOT_COALESCE_MS}. Injected so the
+   *  collapse can be tested without a real clock; defaults to `setTimeout`.
+   *  Must return a canceller, so a teardown does not leave a timer holding the
+   *  process open. */
+  readonly scheduleFlush?: (flush: () => void) => () => void;
 }
 
 export class HeartbeatOverride {
@@ -1833,12 +1888,24 @@ export class HeartbeatOverride {
   /** Charge points that booted again while their reapplication was in flight
    *  and therefore still owe one. */
   private readonly dirty = new Set<string>();
+  /** Charge points whose boot has been observed but whose RPC has not been
+   *  issued yet — the coalescing window. */
+  private readonly waiting = new Set<string>();
+  private cancelFlush: (() => void) | null = null;
   private readonly pending = new Set<Promise<void>>();
+  private observed = 0;
+  private issued = 0;
   private applied = 0;
   private failed = 0;
   private closed = false;
 
   constructor(private readonly deps: HeartbeatOverrideDeps) {}
+
+  private schedule(flush: () => void): () => void {
+    if (this.deps.scheduleFlush) return this.deps.scheduleFlush(flush);
+    const timer = setTimeout(flush, BOOT_COALESCE_MS);
+    return () => clearTimeout(timer);
+  }
 
   /** Called for every observed accepted boot. Cheap and idempotent-ish: a
    *  charge point that is not this run's, or a run that has closed, is
@@ -1846,15 +1913,33 @@ export class HeartbeatOverride {
   noteBootAccepted(cpId: string): void {
     if (this.closed) return;
     if (!this.deps.owns(cpId)) return;
-    if (this.inFlight.has(cpId)) {
-      this.dirty.add(cpId);
-      return;
+    this.observed++;
+    this.waiting.add(cpId);
+    // One timer for the whole window, not one per charge point: a reconnect
+    // wave is then a single flush issuing one RPC per charge point, rather
+    // than a timer per charge point all firing at once.
+    if (this.cancelFlush !== null) return;
+    this.cancelFlush = this.schedule(() => this.flush());
+  }
+
+  private flush(): void {
+    this.cancelFlush = null;
+    const due = [...this.waiting];
+    this.waiting.clear();
+    if (this.closed) return;
+    for (const cpId of due) {
+      // An RPC already travelling for this charge point cannot be the answer
+      // to a boot observed after it was issued — the daemon may run that RPC's
+      // handler *before* the later boot's frame — so that one is owed, not
+      // merged. Only boots inside one window collapse.
+      if (this.inFlight.has(cpId)) this.dirty.add(cpId);
+      else this.issue(cpId);
     }
-    this.issue(cpId);
   }
 
   private issue(cpId: string): void {
     this.inFlight.add(cpId);
+    this.issued++;
     const work: Promise<void> = this.deps
       .apply(cpId)
       .then(
@@ -1872,6 +1957,19 @@ export class HeartbeatOverride {
         if (this.dirty.delete(cpId) && !this.closed) this.issue(cpId);
       });
     this.pending.add(work);
+  }
+
+  /** Accepted-boot events observed for this run's charge points — two per
+   *  accepted boot, before coalescing. Reported beside {@link rpcsIssued} so a
+   *  result file states the perturbation this mechanism cost rather than
+   *  leaving it to be inferred. */
+  bootsObserved(): number {
+    return this.observed;
+  }
+
+  /** `start_heartbeat` calls actually put on the control plane. */
+  rpcsIssued(): number {
+    return this.issued;
   }
 
   /** Reapplications that came back acked. */
@@ -1899,10 +1997,16 @@ export class HeartbeatOverride {
   }
 
   /** Stop issuing. Teardown deletes these charge points next, and an RPC
-   *  issued after that races the delete for no benefit. */
+   *  issued after that races the delete for no benefit. The coalescing timer
+   *  is cancelled rather than left to fire: an armed `setTimeout` keeps the
+   *  process alive, and "the process never exits" is the defect class this
+   *  tool's smoke test exists for. */
   close(): void {
     this.closed = true;
     this.dirty.clear();
+    this.waiting.clear();
+    this.cancelFlush?.();
+    this.cancelFlush = null;
   }
 }
 

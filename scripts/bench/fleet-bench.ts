@@ -354,6 +354,10 @@ class FleetWatcher {
     daemonUrl: string,
     auth: { username: string; password: string } | null,
     onBootAccepted: (cpId: string) => void,
+    /** Called once if the event stream is lost, before the abort signal is
+     *  raised — so a run that survives the loss can say which rows it
+     *  affected. */
+    onLost: () => void,
   ): Promise<FleetWatcher> {
     const socket = io(daemonUrl, {
       path: "/socket.io/",
@@ -402,12 +406,24 @@ class FleetWatcher {
     socket.on("event", (envelope: unknown) => watcher.onEvent(envelope));
     // `reconnection` is off, so a drop is terminal: room membership is
     // per-connection server-side and a re-subscribe past 1000 charge points
-    // would fail the ack's `ARRAY_1000` snapshot anyway. Carrying on would
-    // have meant every later cycle burning a full hold on a confirmation that
-    // can never arrive — doubling transaction occupancy and collapsing the
-    // rest period — so the run aborts instead of printing rows whose load is
-    // no longer the load the row claims.
+    // would fail the ack's `ARRAY_1000` snapshot anyway.
+    //
+    // What a drop *costs* is not the same on the two axes, and the run no
+    // longer treats it as if it were. On the active axis it is immediate and
+    // unconditional: every later cycle burns a full hold on a confirmation
+    // that can never arrive, doubling transaction occupancy and collapsing the
+    // rest period, so the run aborts rather than printing rows whose load is
+    // no longer the load the row claims. On the idle axis nothing waits on a
+    // confirmation, so the only thing lost is the heartbeat reapplication —
+    // and that costs nothing at all unless a charge point actually reconnects,
+    // which the run already measures per row (`ocppcp_ws_reconnects_total`).
+    // Aborting there would refuse to produce a number in every case in order
+    // to protect the case the `reconnects` column already identifies, and a
+    // benchmark that produces a number with a stated caveat is worth more than
+    // one that refuses. So the idle axis records the loss and annotates the
+    // affected rows; `onLost` is how the caller learns which happened.
     socket.on("disconnect", () => {
+      onLost();
       watcher.starts.lose(
         "the event socket dropped, so accepted boots can no longer be " +
           "observed — transaction starts stop being confirmable and " +
@@ -1413,6 +1429,14 @@ async function main(): Promise<void> {
       );
     },
   });
+  /** The `--counts` entry the sweep is on, so a loss can be attributed to a
+   *  step rather than to the run as a whole. */
+  let currentN: number | null = null;
+  /** The step during which the event socket dropped, or `null` if it never
+   *  did. On the idle axis the run continues past that point without
+   *  reapplying `--heartbeat-interval`, so every later row that also saw a
+   *  reconnect carries a heartbeat load that is not the configured one. */
+  let overrideLostAtN: number | null = null;
   const results: StepResult[] = [];
   // One stop handle per step's `armLoad` call — steps only ever *add* CPs, so
   // each step arms just the CPs it created and earlier steps' handles keep
@@ -1609,16 +1633,31 @@ async function main(): Promise<void> {
         opts.daemonUrl,
         opts.daemonBasicAuth,
         (cpId) => heartbeatOverride.noteBootAccepted(cpId),
+        () => {
+          if (overrideLostAtN === null) overrideLostAtN = currentN;
+        },
       );
       watcher = events;
-      // Every long wait below is raced against the event socket's loss, so a run
-      // that can no longer confirm transaction starts — or reapply the heartbeat
-      // override — stops and says why instead of printing rows whose load is no
-      // longer the load they claim.
-      // Every long wait is raced against both the event socket's loss and the
-      // interrupt, so neither has to wait out a measurement window.
+      // Every long wait is raced against the interrupt, and — on the active
+      // axis only — against the event socket's loss, so a run that can no
+      // longer confirm transaction starts stops and says why instead of
+      // printing rows whose load is no longer the load they claim.
+      //
+      // **The idle axis deliberately does not abort on that loss.** Nothing
+      // there waits on a confirmation; the only casualty is the heartbeat
+      // reapplication, and that only matters for charge points that actually
+      // reconnect afterwards — which this run measures, per row, in
+      // `reconnects`. Aborting would throw away every valid row to protect the
+      // rows the table already identifies. The loss is recorded instead, and
+      // any later row with a non-zero `reconnects` is called out as carrying a
+      // heartbeat load that is no longer the configured one. This also keeps
+      // the idle axis behaving as it did before it grew an event socket at
+      // all: a passive run's failure modes are unchanged.
       const untilLost = <T>(p: Promise<T>): Promise<T> =>
-        Promise.race([events.lost(p), abortSignal]);
+        Promise.race([
+          opts.txIntervalSec > 0 ? events.lost(p) : p,
+          abortSignal,
+        ]);
 
       // One origin for every cohort's stagger, fixed before the first charge
       // point exists. See `firstCycleDelayMs`.
@@ -1629,9 +1668,11 @@ async function main(): Promise<void> {
       let unconfirmedStartsBefore = 0;
       let lateHoldsBefore = 0;
       let retiredBefore = 0;
-      let hbReappliedBefore = 0;
       let hbOverrideFailuresBefore = 0;
+      let hbRpcsBefore = 0;
+      let hbBootsBefore = 0;
       for (const n of opts.counts) {
+        currentN = n;
         if (abort.requested) return;
         const toCreate = n - allCpIds.length;
         process.stderr.write(
@@ -1794,13 +1835,38 @@ async function main(): Promise<void> {
         // reinstalls the CSMS interval, which this puts back. Failures are
         // called out separately: those charge points may now be heartbeating at
         // the CSMS's interval, which is a load this row does not describe.
-        const hbReapplied = heartbeatOverride.reapplied() - hbReappliedBefore;
         const hbFailures =
           heartbeatOverride.failures() - hbOverrideFailuresBefore;
-        if (hbReapplied > 0) {
+        const hbRpcs = heartbeatOverride.rpcsIssued() - hbRpcsBefore;
+        const hbBoots = heartbeatOverride.bootsObserved() - hbBootsBefore;
+        if (hbRpcs > 0) {
+          // Both numbers, not just the RPC count: their ratio is the run's own
+          // statement of how much control-plane traffic the instrument spent
+          // to keep the load honest. One boot emits two events, so a healthy
+          // ratio is 2:1; anything approaching 1:1 means the coalescing window
+          // is not collapsing them and the traffic is twice what it should be.
           process.stderr.write(
             `[bench] N=${n}: reapplied --heartbeat-interval ` +
-              `${opts.heartbeatIntervalSec}s after ${hbReapplied} accepted boot(s)\n`,
+              `${opts.heartbeatIntervalSec}s with ${hbRpcs} start_heartbeat RPC(s) ` +
+              `for ${hbBoots} observed accepted-boot event(s)\n`,
+          );
+        }
+        if (
+          overrideLostAtN !== null &&
+          Math.max(0, reconnectsAfter - reconnectsBefore) > 0
+        ) {
+          // The idle axis's degrade, made loud exactly where it bites. The run
+          // kept going after the event socket dropped, which is right — but a
+          // row that also saw reconnects contains charge points that rebooted
+          // with nobody left to put the override back, so their heartbeat
+          // cadence is now the CSMS's.
+          process.stderr.write(
+            `[bench] N=${n}: WARNING: the event socket dropped at N=${overrideLostAtN}, ` +
+              `so --heartbeat-interval is no longer being reapplied, and this row saw ` +
+              `${Math.max(0, reconnectsAfter - reconnectsBefore)} reconnect(s). Every ` +
+              `charge point that reconnected is heartbeating at the CSMS's ` +
+              `BootNotification interval, so this row's heartbeat load is not the ` +
+              `configured one.\n`,
           );
         }
         if (hbFailures > 0) {
@@ -1811,8 +1877,9 @@ async function main(): Promise<void> {
               `${opts.heartbeatIntervalSec}s this row assumes.\n`,
           );
         }
-        hbReappliedBefore = heartbeatOverride.reapplied();
         hbOverrideFailuresBefore = heartbeatOverride.failures();
+        hbRpcsBefore = heartbeatOverride.rpcsIssued();
+        hbBootsBefore = heartbeatOverride.bootsObserved();
 
         results.push({
           requested: n,
@@ -1868,8 +1935,19 @@ async function main(): Promise<void> {
         // `failed` means some charge points were heartbeating at the CSMS's
         // cadence for part of the run.
         heartbeatOverride: {
+          // `bootsObserved` beside `rpcsIssued` is the instrument reporting its
+          // own cost: two events per accepted boot go in, one RPC per charge
+          // point per coalescing window comes out. A collected result therefore
+          // states how much control-plane traffic the reapplication added,
+          // rather than leaving a reader to infer it from the fleet size.
+          bootsObserved: heartbeatOverride.bootsObserved(),
+          rpcsIssued: heartbeatOverride.rpcsIssued(),
           reapplied: heartbeatOverride.reapplied(),
           failed: heartbeatOverride.failures(),
+          // Non-null on the idle axis when the event socket dropped and the run
+          // carried on without it: rows at or after this N whose `reconnects`
+          // is non-zero do not carry the configured heartbeat load.
+          eventSocketLostAtN: overrideLostAtN,
         },
         // Says whose hardware it is; `daemonHostIsRunner` makes that
         // machine-readable, so a collected result can be filtered rather than

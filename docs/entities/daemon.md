@@ -291,7 +291,10 @@ cadence for its whole length, including across reconnects, by reapplying
 otherwise reinstalls the CSMS's `BootNotification.conf` interval, and reconnects
 are exactly what start happening near the knee. See
 [Source: bench README](../sources/bench-readme.md) for what that does and does
-not cover.
+not cover, including what the reapplication itself costs the measurement (one
+control-plane RPC per accepted boot, paced inside the socket pool's existing
+ceiling) and the fact that whether it moves the knee is argued rather than
+demonstrated, for want of the same real CSMS this section is waiting on.
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review

@@ -289,7 +289,14 @@ and the run said nothing. Reconciliation makes up to `RECONCILE_MAX_PASSES`
 has gone away, and if anything is still unaccounted for it **names every id on
 stderr and sets exit code 1**. The table and the `--out` file are still
 written: the measurement happened, and it is the teardown that could not be
-proved complete.
+proved complete. The composed teardown ceiling — settle, an outstanding
+create (35s), closing transactions (30s), in-flight heartbeat reapplications
+(35s), the first delete sweep (60s) and 3 × (35s + 60s) of reconciliation —
+is about six and a half minutes, reached only against a daemon that is
+answering but has not finished creating; a daemon that has gone away is the
+_fast_ path, since the sweep is skipped and reconciliation returns at once
+without spending a wait. The table is on the README so an operator meets the
+number before the wait.
 
 **SIGINT waits for creation to stop before deleting.** An interrupt landing
 while `growFleet` awaited one batch of a multi-batch step used to snapshot the
@@ -345,8 +352,19 @@ envelopes are encoded and sent to that socket); it is still cheaper than
 polling each charge point's `status`, which would add a third RPC per cycle to
 the rationed budget below. **The idle axis opens one too**, because the
 accepted-boot events that keep `--heartbeat-interval` in force arrive on it —
-see the heartbeat override below — so a dropped event socket aborts an idle run
-as well.
+see the heartbeat override below.
+
+**Losing it aborts the active axis and only annotates the idle one.** The two
+axes do not pay the same price for the loss: on the active axis it is immediate
+and unconditional, but on the idle axis nothing waits on a confirmation and the
+only casualty is the reapplication — which costs nothing unless a charge point
+actually reconnects afterwards, and reconnects are already measured per row.
+Aborting there would discard every valid row to protect the rows `reconnects`
+already identifies, so an idle run continues, records the step at which the
+socket dropped (`heartbeatOverride.eventSocketLostAtN` in `--out`) and warns on
+every later row whose `reconnects` is non-zero that its heartbeat load is no
+longer the configured one. That also leaves a passive run's failure modes as
+they were before the idle axis grew an event socket.
 
 **The heartbeat override is reapplied after every accepted boot.** The
 contract is that a run drives heartbeats at `--heartbeat-interval` for its whole
@@ -375,11 +393,34 @@ directly and emits no `status_change`, so the override is not put back; a boot
 answered `Pending` or `Rejected` never reaches `onBootNotificationAccepted` at
 all. The reapplication RPCs are also paced through the same socket pool as the
 transaction cycle, so a wave of reconnects at the knee makes the instrument
-compete with the load at its busiest moment — **two** RPCs per accepted boot,
-since `onBootNotificationAccepted` emits `statusChange` twice (from
-`updateConnectorStatus(0, Available)` and from the status setter) and an RPC
-follows every event by design, so a reconnect wave across a 2000-CP fleet is on
-the order of 4000 paced calls. Taken over letting the load drift.
+compete with the load at its busiest moment.
+
+**What the reapplication costs, since a fix that adds load at the knee is the
+fixed defect with the sign flipped.** One boot emits `statusChange` **twice**
+(from `updateConnectorStatus(0, Available)` and from the status setter), so
+issuing per event cost two RPCs per boot for no added coverage. Observed boots
+are gathered for `BOOT_COALESCE_MS` (50ms) and flushed to one RPC per charge
+point. Any window is correct — every observed event had already run
+`startHeartbeat(csmsInterval)` before it was emitted, so an RPC issued after
+the last event of a window overwrites every CSMS interval that window saw — and
+50ms sits four orders of magnitude above the microseconds separating one boot's
+two emissions and well below the 1s minimum reconnect backoff, so it never
+merges two genuine boots. The in-flight case is untouched: a boot observed
+after an RPC was issued is still owed its own. The collapse is **measured**,
+not asserted: the smoke test's two-step sweep reports `bootsObserved: 4,
+rpcsIssued: 2` against a real daemon, and removing the window makes it 4 and 4.
+
+The residual is one RPC per reconnecting charge point — 2000 at the largest
+accepted fleet — paced by token buckets that cap _total_ control-plane traffic
+at `sustainableRpcPerSec(MAX_SOCKETS)` = 640 RPC/s, so a wave drains in ~3s and
+**cannot exceed the budget the sweep was already validated against**; on the
+idle axis `requiredRpcPerSec` is zero, so it contends with nothing. Whether the
+knee itself _moves_ is argued rather than demonstrated: comparing a sweep with
+the reapplication against one without needs a real CSMS at those fleet sizes,
+which is the same thing missing from
+[Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling).
+`bootsObserved` and `rpcsIssued` are recorded in `--out` beside the per-row
+`reconnects` so the first real sweep can settle it.
 
 **Cleanup deletes what this run created, and refuses to touch anything else.**
 An id enters the delete list when it is _offered_ to `cp.create_many`, before

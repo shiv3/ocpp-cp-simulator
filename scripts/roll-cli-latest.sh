@@ -99,6 +99,29 @@
 # run cannot draw a wrong conclusion from what it finds. That is why the marker
 # is written FIRST and why failing to write it is fatal — see step 4a.
 #
+# THE THIRD CLASS: "IT MAY HAVE SUCCEEDED AND WE CANNOT TELL"
+#
+# Distinct from "it failed" and "it failed partway". A retry loop cannot tell a
+# lost REQUEST from a lost RESPONSE, so an exhausted retry does NOT mean the
+# mutation was not applied. The rule everywhere below: after an exhausted retry
+# of a mutation, QUERY the state; never assume it. Assuming a rename had failed
+# is what let the destructive `--clobber` fallback run against an asset the
+# rename had in fact already put in place — turning a cosmetic retry failure
+# into a dead install URL.
+#
+# Where each exhausted retry lands:
+#   release edit (marker) -> die. Safe either way: if it was applied, the
+#                            marker over-claims, which is self-healing.
+#   upload .incoming      -> die. Safe either way: if it was applied, the
+#                            orphan serves nothing and the next run clobbers it.
+#   delete-asset (live)   -> QUERY. Present: stop. Absent: continue. Unknown: stop.
+#   PATCH rename          -> QUERY. Present: it worked. Absent: fall back.
+#                            Unknown: stop, never run the destructive fallback.
+#   upload (fallback)     -> QUERY, so a lost response is not reported as a
+#                            dead URL.
+#   release create        -> QUERY, same reason.
+#   git ref update        -> QUERY, to keep the warning honest. Cosmetic.
+#
 # `gh release upload --clobber` is NOT used for the live asset: it deletes the
 # existing asset and then uploads, and its own help says "If the upload fails,
 # the original assets will be lost" — a failed upload would leave the URL
@@ -153,6 +176,23 @@ gh_retry() {
     sleep "$API_BACKOFF"
     n=$((n + 1))
   done
+}
+
+# 0 = present, 1 = confirmed absent, 2 = could not determine.
+#
+# A retry loop cannot tell a lost REQUEST from a lost RESPONSE. When a mutation
+# reports failure after exhausting its retries, it may in fact have been
+# applied. So the rule on this script is: after an exhausted retry of a
+# mutation, QUERY the state, never assume it. Assuming failure is how a
+# successful rename ended up triggering a destructive `--clobber` against a
+# live, working asset.
+asset_state() {
+  local id
+  if id="$(asset_id "$1")"; then
+    [ -n "$id" ] && return 0
+    return 1
+  fi
+  return 2
 }
 
 # Only plain X.Y.Z, so the numeric comparison is total and exact over the whole
@@ -347,10 +387,17 @@ asset_id() {
 }
 
 if [ "$POINTER_EXISTS" = 0 ]; then
-  gh_retry "creating ${POINTER_TAG}" \
+  if ! gh_retry "creating ${POINTER_TAG}" \
     gh release create "$POINTER_TAG" --repo "$REPO_SLUG" --prerelease \
-    --title "CLI (rolling latest)" --notes "$NOTES" "$WORKDIR/$ASSET_NAME" \
-    || die "could not create ${POINTER_TAG}. No pointer existed before this run, so the install URL is unchanged (still absent)."
+    --title "CLI (rolling latest)" --notes "$NOTES" "$WORKDIR/$ASSET_NAME"; then
+    # It may have been created and only the response lost. Ask before reporting.
+    CREATED=0
+    asset_state "$ASSET_NAME" || CREATED=$?
+    case "$CREATED" in
+      0) echo "::notice::creating ${POINTER_TAG} reported failure, but ${ASSET_NAME} is present on it — the request had been applied and only its response was lost." ;;
+      *) die "could not create ${POINTER_TAG}. No pointer existed before this run, so the install URL is unchanged (still absent)." ;;
+    esac
+  fi
 else
   # --- 4a. the marker, BEFORE anything else changes ------------------------
   # This used to be written last, on the round-3 reasoning that a marker
@@ -413,11 +460,35 @@ else
   else
     echo "::warning::could not look up ${INCOMING_NAME}; falling back to a direct upload."
   fi
+  # The rename reported failure — but the PATCH may have reached GitHub with
+  # only its response lost, in which case ${ASSET_NAME} is already in place and
+  # working. Running the `--clobber` fallback then DELETES that working asset
+  # first. So ask, and only fall back on a confirmed absence.
   if [ "$SWAPPED" = 0 ]; then
-    echo "::warning::could not rename ${INCOMING_NAME}; re-uploading the asset under its live name instead. The install URL is 404 until this succeeds."
-    gh_retry "re-uploading ${ASSET_NAME}" \
-      gh release upload "$POINTER_TAG" "$WORKDIR/$ASSET_NAME" --repo "$REPO_SLUG" --clobber \
-      || die "${POINTER_TAG} has NO ${ASSET_NAME} asset right now and the documented install URL is returning 404. Re-run this workflow, or attach ${TARGET_TAG}'s ${ASSET_NAME} to the ${POINTER_TAG} release by hand, to restore it."
+    LIVE_STATE=0
+    asset_state "$ASSET_NAME" || LIVE_STATE=$?
+    case "$LIVE_STATE" in
+      0)
+        echo "::notice::renaming ${INCOMING_NAME} reported failure, but ${ASSET_NAME} is present — the request had been applied and only its response was lost. Not touching it."
+        SWAPPED=1
+        ;;
+      2)
+        die "could not rename ${INCOMING_NAME}, and could not determine whether ${ASSET_NAME} is present. Refusing to run the destructive fallback against an asset that may be working. Re-run this workflow."
+        ;;
+    esac
+  fi
+  if [ "$SWAPPED" = 0 ]; then
+    echo "::warning::${ASSET_NAME} is confirmed absent and could not be renamed into place; re-uploading it under its live name instead. The install URL is 404 until this succeeds."
+    if ! gh_retry "re-uploading ${ASSET_NAME}" \
+      gh release upload "$POINTER_TAG" "$WORKDIR/$ASSET_NAME" --repo "$REPO_SLUG" --clobber; then
+      # Same question one last time: the upload may have landed regardless.
+      FINAL_STATE=0
+      asset_state "$ASSET_NAME" || FINAL_STATE=$?
+      case "$FINAL_STATE" in
+        0) echo "::notice::the re-upload reported failure, but ${ASSET_NAME} is present — the request had been applied and only its response was lost." ;;
+        *) die "${POINTER_TAG} has NO ${ASSET_NAME} asset right now (or its presence cannot be confirmed) and the documented install URL is returning 404. Re-run this workflow, or attach ${TARGET_TAG}'s ${ASSET_NAME} to the ${POINTER_TAG} release by hand, to restore it." ;;
+      esac
+    fi
   fi
 
   # Best-effort tidy-up; an orphaned `.incoming` serves nothing and the next
@@ -449,14 +520,29 @@ if REF="$(gh api "repos/${REPO_SLUG}/git/ref/tags/${TARGET_TAG}" --jq '.object.t
 fi
 if [ -z "$TARGET_SHA" ]; then
   echo "::warning::could not resolve the commit behind ${TARGET_TAG}; leaving the ${POINTER_TAG} git tag where it is. The release and its asset are correct."
-elif gh api "repos/${REPO_SLUG}/git/ref/tags/${POINTER_TAG}" >/dev/null 2>&1; then
-  run gh api -X PATCH "repos/${REPO_SLUG}/git/refs/tags/${POINTER_TAG}" \
-    -f "sha=${TARGET_SHA}" -F force=true --silent \
-    || echo "::warning::could not move the ${POINTER_TAG} git tag to ${TARGET_SHA}. The release and its asset are correct; only the tag is stale."
 else
-  run gh api -X POST "repos/${REPO_SLUG}/git/refs" \
-    -f "ref=refs/tags/${POINTER_TAG}" -f "sha=${TARGET_SHA}" --silent \
-    || echo "::warning::could not create the ${POINTER_TAG} git tag at ${TARGET_SHA}. The release and its asset are correct; only the tag is missing."
+  if gh api "repos/${REPO_SLUG}/git/ref/tags/${POINTER_TAG}" >/dev/null 2>&1; then
+    TAG_OK=0
+    run gh api -X PATCH "repos/${REPO_SLUG}/git/refs/tags/${POINTER_TAG}" \
+      -f "sha=${TARGET_SHA}" -F force=true --silent || TAG_OK=1
+  else
+    TAG_OK=0
+    run gh api -X POST "repos/${REPO_SLUG}/git/refs" \
+      -f "ref=refs/tags/${POINTER_TAG}" -f "sha=${TARGET_SHA}" --silent || TAG_OK=1
+  fi
+  # Same "it may have been applied and the response lost" question as the asset
+  # calls. Nothing destructive hangs off the answer here — the tag is cosmetic
+  # and the URL is already correct — but asking keeps the warning honest
+  # instead of reporting a stale tag that is in fact correct.
+  if [ "$TAG_OK" != 0 ] && [ "$DRY_RUN" != 1 ]; then
+    if [ "$(gh api "repos/${REPO_SLUG}/git/ref/tags/${POINTER_TAG}" --jq '.object.sha' 2>/dev/null)" = "$TARGET_SHA" ]; then
+      TAG_OK=0
+      echo "::notice::the ${POINTER_TAG} tag update reported failure but the tag is at ${TARGET_SHA} — the request had been applied and only its response was lost."
+    fi
+  fi
+  if [ "$TAG_OK" != 0 ]; then
+    echo "::warning::could not point the ${POINTER_TAG} git tag at ${TARGET_SHA}. The release and its asset are correct; only the tag is stale."
+  fi
 fi
 
 echo "${POINTER_TAG} now serves ${TARGET} (${TARGET_TAG}${TARGET_SHA:+ @ ${TARGET_SHA}})"

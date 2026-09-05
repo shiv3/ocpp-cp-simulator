@@ -121,7 +121,9 @@ run in or fail in. Three carve-outs, stated rather than left to be discovered:
 - Replacing the asset is not atomic — GitHub has no atomic asset swap — so
   there is a window, bounded by two metadata calls rather than by a 2 MB
   upload, in which the URL can 404. It is recovered from rather than exited
-  from, and only an exhausted recovery leaves it 404ing, loudly.
+  from; only a recovery that is exhausted — or that cannot establish what state
+  the release is in — leaves it 404ing, and it says so loudly and says how to
+  restore it.
 
 **How it holds.** Every pointer run asks which is the highest published
 `cli-v*` release and rolls to _that_, not to the version that triggered it. The
@@ -134,20 +136,27 @@ both shipped before this design:
   and queue order here is release-job completion order. With 1.1 running, 1.3
   pending and a slow rerun of 1.2 arriving, 1.2's job evicts 1.3's, 1.2
   advances the pointer from 1.1, and the already-published 1.3 is never served.
-- **The marker is not a trustworthy authority.** Uploading the asset and
-  writing the marker are two API calls. If the upload lands and the write does
-  not, the URL immediately serves the new asset while the body still names the
-  old version — and a later, older run then passes the comparison against that
-  stale marker and rolls the served bytes backwards. Reversing the two calls
-  only swaps which direction is wrong.
+- **An unverified marker is not a trustworthy authority.** Uploading the asset
+  and writing the marker are two API calls. If the upload lands and the write
+  does not, the URL immediately serves the new asset while the body still names
+  the old version — and a later, older run passed its comparison against that
+  stale marker and rolled the served bytes backwards. While the marker was
+  trusted _unverified_, reversing the two calls only swapped which direction
+  was wrong; it is the point lookup added later, described
+  [below](#the-marker-is-load-bearing-narrowly), that makes one order safe. The
+  code writes the marker first, and
+  ["If this dies here…"](#if-this-dies-here-what-does-the-install-url-serve)
+  says why.
 
 Converging on the highest published release removes both, because it removes
 the two things that were being trusted. Queue order stops mattering: whichever
 job survives reaches the same state. A cancelled job costs nothing, because the
 next one to run reaches that same state. A stale or hand-edited marker cannot
-authorise anything. The marker is kept only as a **record** of what is served,
-for humans and for `gh release view cli-latest`; it is deliberately not used to
-short-circuit the upload, because that would put it back on the trusted path.
+_by itself_ authorise anything — it is a **record** of what is served, and the
+one decision it participates in is gated on a point lookup that verifies it
+(see [the next section](#the-marker-is-load-bearing-narrowly)). It is
+deliberately not used to short-circuit the upload, because that would put it
+back on the trusted path.
 
 #### The marker is load-bearing, narrowly
 
@@ -187,6 +196,25 @@ The second column is the half this table used to cover. The third is where two
 rounds of findings actually lived: a state is only safe if the **next** run
 cannot draw a wrong conclusion from what it finds.
 
+There is a third class of failure besides "it failed" and "it failed partway":
+**"it may have succeeded and we cannot tell"**. A retry loop cannot distinguish
+a lost request from a lost response, so an exhausted retry does not mean the
+mutation was not applied. The rule is therefore that after an exhausted retry
+of a mutation the state is **queried, never assumed**. Assuming a rename had
+failed is what let the destructive `--clobber` fallback run against the asset
+that same rename had already put in place — turning a cosmetic retry failure
+into a dead install URL. Where each exhausted retry lands:
+
+| Exhausted call            | What happens                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| write the notes (marker)  | Fail. Safe either way — if it did apply, the marker over-claims, which self-heals |
+| upload `<asset>.incoming` | Fail. Safe either way — an orphan serves nothing and the next run clobbers it     |
+| delete the live asset     | Query. Present → stop; absent → continue; unknown → stop                          |
+| rename `.incoming`        | Query. Present → it worked; absent → fall back; unknown → **never** fall back     |
+| fallback re-upload        | Query, so a lost response is not reported as a dead URL                           |
+| create the pointer        | Query, same reason                                                                |
+| move the git tag          | Query, to keep the warning honest. Cosmetic either way                            |
+
 That is why the marker is written **first**, and why failing to write it is
 fatal rather than a warning. Writing it last looked right in isolation — the
 bytes are correct and the URL works, so why fail? — but it leaves a successful
@@ -217,9 +245,10 @@ deletes first and uploads second, so a transient failure would leave the URL
 `README.md` advertises 404ing indefinitely. The new bytes go up under a
 temporary name first, so the destructive step never runs until the replacement
 is already on the server; then delete and rename, both fast metadata calls,
-both retried, with a recovery that re-uploads under the live name if the rename
-cannot be completed. Only if that recovery is also exhausted does the run exit
-with the URL dead, and then it says so and says how to restore it.
+both retried, with a recovery that re-uploads under the live name — but only
+once a query has _confirmed_ the live asset is absent. Only if that recovery is
+also exhausted, or the state cannot be established, does the run exit with the
+URL dead, and then it says so and says how to restore it.
 
 The git tag is moved to the commit behind the _target_ release, not to the
 checkout's `HEAD` — an older run that converged upward is checked out at its
@@ -237,14 +266,19 @@ and the URL is already correct by then.
 | Target release has no (or an empty) `ocpp-cp-simulator.tgz`          | **Release fails** rather than pointing at a release that cannot be served                                         |
 | Pointer lookup returns a confirmed **404**                           | Pointer is created                                                                                                |
 | Pointer lookup fails any **other** way (401, 403, 5xx, DNS)          | **Release fails.** "Absent" must never be inferred from a transient error                                         |
-| Pointer's marker is missing, unparseable, or higher than the target  | `::warning::`, marker overwritten — it is a record, not a veto                                                    |
+| Pointer's marker is missing or unparseable                           | `::warning::`, marker overwritten — in this state it carries no information                                       |
+| Pointer's marker names a version **higher** than the target          | Point lookup of that release decides (row above); it is never simply overwritten                                  |
+| A mutation exhausts its retries                                      | The state is **queried**, never assumed — a lost response is not a failed request                                 |
 | Version given is a prerelease or has build metadata                  | **Release fails** with an error naming the reason                                                                 |
 
 Versions are compared numerically field by field, never with `sort -V`, which
 is not SemVer-aware: it orders `1.0.0-rc.1` _after_ `1.0.0`. The asset is taken
 from the target release itself, so the bytes the pointer serves are provably
-the bytes that release published, and it is uploaded before the marker is
-written and before the tag moves.
+the bytes that release published. The **marker is written first**, then the
+asset is swapped, then the tag moves — that order is the safety invariant, not
+an implementation detail, and the reasoning is in
+["If this dies here…"](#if-this-dies-here-what-does-the-install-url-serve).
+Do not reverse it.
 
 **Only the pointer move is serialised.** `cli-release.yml` is two jobs: the
 publish job, which creates the per-tag `cli-v*` release, and `roll-pointer`.

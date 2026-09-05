@@ -498,3 +498,47 @@ under it.
   it makes a mutation look like a pass — the second time that has happened in
   this PR.
 - Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.
+
+## [2026-09-05] ingest | "It may have succeeded and we cannot tell", and a page that stated the invariant backwards (#320, #321)
+
+Sixth review pass on PR #325.
+
+- [CLI → "If this dies here…"](entities/cli.md#if-this-dies-here-what-does-the-install-url-serve):
+  a third class of partial failure, distinct from "it failed" and "it failed
+  partway". A retry loop cannot distinguish a lost request from a lost
+  response, so an exhausted retry does not mean the mutation was not applied.
+  The asset rename assumed it had failed and ran the destructive `--clobber`
+  fallback, which deletes first — so a PATCH that had actually been applied,
+  with only its reply lost, had its own successful result deleted, and one more
+  upload failure left the install URL 404. The rule is now stated and applied
+  everywhere: after an exhausted retry of a mutation, **query** the state,
+  never assume it. The page carries the table of where each exhausted call
+  lands. Checked the other retried mutations while there: the marker write and
+  the `.incoming` upload are safe under either answer and still fail loudly;
+  the live-asset delete already queried; the fallback re-upload, the pointer
+  creation and the git-tag move now query too, so a lost response is no longer
+  reported as a dead URL or a stale tag.
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): the page said
+  the asset is uploaded before the marker is written. Round 5 deliberately made
+  it the other way round, because a marker that lags the bytes is what permits
+  a rollback. The ordering **is** the safety invariant, so a page describing it
+  backwards would have talked a future maintainer into restoring the bug. Now
+  stated as the invariant, with a pointer to the reasoning and an explicit "do
+  not reverse it".
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): the outcome
+  table lumped "marker missing", "marker unparseable" and "marker higher than
+  the target" into one row that said all three are warned about and
+  overwritten. Only the first two are; a marker naming something higher goes
+  through the point lookup. Split into separate rows.
+- Two more disagreements found by re-reading the whole section against the
+  script rather than only the rows under review, both the same class as the one
+  above. The paragraph explaining why the original design failed ended
+  "reversing the two calls only swaps which direction is wrong", which is no
+  longer true and directly contradicted the code; it is now scoped to the
+  period when the marker was trusted unverified. And "a stale or hand-edited
+  marker cannot authorise anything" contradicted the section two paragraphs
+  later that makes the marker load-bearing in one narrow way; it now says the
+  marker cannot authorise anything _by itself_ and names the lookup that gates
+  it. This is the third round in which this page needed correcting after the
+  code moved — the correction pass is now part of the work, not a follow-up.
+- Raw sources changed in the same commit: `scripts/roll-cli-latest.sh` only.

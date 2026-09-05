@@ -591,6 +591,13 @@ the EVSE's offer as the station's consumption with nothing to reveal the
 substitution. Nothing is lost that was not already unavailable — as soon as
 one supported measurand is configured, the request goes out with it.
 
+**Every sample in one MeterValue describes one instant.** The watt cap and the
+active phase count are both derived from the charging schedule, and each used
+to resolve against its own clock reading: a period boundary falling between
+the two took the cap from one period and the phase divisor from the next, so a
+10 A three-phase period capped at 6900 W and was then divided as one phase and
+reported as 30 A. They are resolved together from a single instant.
+
 **A transaction opens on its own SoC, never the previous session's — across a
 daemon restart too.** Whether the stored SoC was derived from the energy
 register or set explicitly is persisted alongside it (`connector_runtime`
@@ -613,9 +620,17 @@ what `socFromMeterValue` computes on the first meter tick anyway. Without that,
 the charging curve was evaluated against the previous battery for exactly one
 scheduler interval — the interval that sets the session's opening power — and
 for the whole session when meter/SoC sync is off, since nothing would correct
-it. An **explicitly** set SoC survives: a value typed into the side panel, one
-that arrived in a MeterValue SoC sample, or `initialSoc` handed to
-`StartTransaction` describes the car plugged in now, not a leftover.
+it. An SoC set while the connector was **idle** survives: a value typed into the
+side panel before pressing Start, or `initialSoc` handed to
+`StartTransaction`, describes the car plugged in now. It is claimed by the
+session that starts next and belongs to that session only — a second
+transaction with no `initialSoc` of its own falls back to
+`evSettings.initialSoc` like any other. What decides is whether a transaction
+was running when the value was written, not where the value came from: written
+mid-session it describes the car then charging, and is replaced when the next
+session begins. That rule survives a restart, where an explicit SoC restored
+alongside an active transaction belongs to that transaction and one restored
+with no transaction is still waiting for the next.
 
 **The curve is evaluated at the transaction's (or EV settings') `initialSoc`
 before the first synced SoC, not 0%.** `connector.soc` is `null` until the

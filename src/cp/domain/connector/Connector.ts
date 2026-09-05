@@ -170,24 +170,36 @@ export class Connector {
   private meterValueWh = 0;
 
   /**
-   * Whether the current `socPercent` was derived from the energy register
-   * rather than set explicitly.
+   * Which session the current `socPercent` belongs to.
    *
-   * A derived SoC describes the battery of the transaction whose meter
-   * produced it, so it must not survive into the next one: `stopTransaction`
-   * deliberately leaves `socPercent` in place (disconnect/reconnect paths and
-   * post-boot StatusNotifications read it), and the next session's first
-   * scheduler interval then evaluated the charging curve against the previous
-   * battery's SoC — 82% on a car that just plugged in at 20% — until the first
-   * meter tick reset it. One interval, and it is the interval that sets the
-   * session's opening power (#301).
+   * `stopTransaction` deliberately leaves `socPercent` in place — the
+   * disconnect/reconnect paths and post-boot StatusNotifications describe the
+   * connector with it — so at the moment a new transaction begins the value on
+   * the connector may belong to the car that just left. The charging curve is
+   * evaluated against it from the first scheduler interval, the interval that
+   * sets the session's opening power, and with meter/SoC sync off nothing
+   * would ever correct it. So the question at `beginTransaction` is not where
+   * the number came from but **whose it is** (#301):
    *
-   * An *explicitly* set SoC is kept across `beginTransaction`: a value typed
-   * into the side panel, reported in a MeterValue SoC sample, or handed to
-   * `startTransaction` as `initialSoc` is a statement about the car that is
-   * plugged in now, not a leftover.
+   * - `"meter"` — derived from the energy register, so it describes the
+   *   battery whose meter produced it: the session that has just ended.
+   * - `"session"` — set while a transaction was active, so it describes that
+   *   transaction's car. Once that transaction ends it is a leftover too. A
+   *   `startTransaction` `initialSoc` becomes this the moment its own
+   *   transaction begins, which is what stops it leaking into the next one.
+   * - `"pending"` — set while the connector was idle, so it is a statement
+   *   about the car plugged in *now*, waiting for the session that is about to
+   *   start. Typing an SoC into the side panel before pressing Start is the
+   *   real use, and `ChargePoint.startTransaction` writes an `initialSoc`
+   *   through the same setter just before `beginTransaction`, so both arrive
+   *   here.
+   *
+   * `beginTransaction` keeps a `"pending"` value and claims it for the new
+   * session; anything else it replaces. Whether a transaction was active at
+   * the moment of the write is the whole distinction, and it is available at
+   * the one place every SoC write passes through.
    */
-  private socIsMeterDerived = false;
+  private socOwner: "meter" | "session" | "pending" = "pending";
   private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
 
@@ -230,7 +242,10 @@ export class Connector {
       transaction: this.transactionValue ? { ...this.transactionValue } : null,
       meterValueWh: this.meterValueWh,
       socPercent: this.socPercent,
-      socIsMeterDerived: this.socIsMeterDerived,
+      // Persisted as the boolean the v11 column holds. "session" and "pending"
+      // both mean "not meter-derived"; which of the two is
+      // reconstructed on restore from whether a transaction was active.
+      socIsMeterDerived: this.socOwner === "meter",
       lastAutoStartedScenarioKey: this.lastAutoStartedScenarioKeyValue,
     };
   }
@@ -271,7 +286,16 @@ export class Connector {
     // transaction on that connector opened on the previous battery's charge
     // again — the defect this marker exists to prevent, reachable a second
     // time through persistence (#301).
-    this.socIsMeterDerived = snapshot.socIsMeterDerived ?? false;
+    // A restored SoC that was meter-derived still is. An explicit one belongs
+    // to the restored transaction when there is one, and is otherwise a
+    // value set while the connector was idle — still waiting for the
+    // next session, which is how it would have been treated had the
+    // daemon never stopped.
+    this.socOwner = snapshot.socIsMeterDerived
+      ? "meter"
+      : this.transactionValue
+        ? "session"
+        : "pending";
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
   }
 
@@ -344,6 +368,41 @@ export class Connector {
    * without needing an extra timer.
    */
   currentScheduleLimitWatts(): number {
+    const { watts } = this.resolveScheduleConstraints(new Date());
+    this.announceScheduleCrossing(watts);
+    return watts;
+  }
+
+  /**
+   * The watt cap and the active phase count, resolved from **one** instant.
+   *
+   * Both are read for every MeterValue, and each used to resolve against its
+   * own `new Date()`. A charging-schedule period boundary falling between the
+   * two calls took the cap from one period and the divisor from the next: a
+   * 10 A three-phase period yields 6900 W, divided as one phase and reported
+   * as 30 A — a sample set describing two instants at once, which is the
+   * property the single schedule resolve was introduced to hold (#301).
+   *
+   * Emits `scheduleLimitChange` on a crossing exactly as
+   * {@link currentScheduleLimitWatts} does, and is the call a sampling path
+   * should make instead of those two.
+   */
+  scheduleConstraints(): { watts: number; activePhases: number } {
+    const constraints = this.resolveScheduleConstraints(new Date());
+    this.announceScheduleCrossing(constraints.watts);
+    return constraints;
+  }
+
+  /**
+   * Resolve both schedule-derived constraints at `now`. Pure: the crossing
+   * announcement is {@link announceScheduleCrossing}'s job, so a caller that
+   * only wants a number — `activePhaseCount` — can share this without
+   * acquiring a side effect.
+   */
+  private resolveScheduleConstraints(now: Date): {
+    watts: number;
+    activePhases: number;
+  } {
     const txProfile = this.getActiveChargingProfile();
     const stationMax =
       this.stationProfilesProvider()?.getActive(
@@ -354,7 +413,7 @@ export class Connector {
       txProfile,
       stationMax,
       start,
-      new Date(),
+      now,
       // A `ChargingRateUnit=A` limit is converted with this connector's own
       // volts/phases/cos φ when it declares them, so that the current
       // `MeterValueBuilder` derives back from the resulting cap never exceeds
@@ -363,22 +422,38 @@ export class Connector {
       // stays exactly where it was.
       electricalModelOf(this._evSettings),
     );
-    const paused = resolved.watts === 0;
-    const isCapped = resolved.watts !== Infinity;
+    const limitPhases = resolveEffectivePhaseLimit(
+      txProfile,
+      stationMax,
+      start,
+      now,
+    );
+    return {
+      watts: resolved.watts,
+      activePhases: resolveActivePhases(
+        this._evSettings,
+        limitPhases ?? undefined,
+      ),
+    };
+  }
+
+  /** Emit `scheduleLimitChange` when the paused/active boundary has moved
+   *  since the last resolve. Edge-triggered: see
+   *  {@link currentScheduleLimitWatts}'s note on why repeated calls at one
+   *  boundary state emit once. */
+  private announceScheduleCrossing(watts: number): void {
+    const paused = watts === 0;
+    const isCapped = watts !== Infinity;
     if (
       isCapped &&
       (this.lastSchedulePaused === null || paused !== this.lastSchedulePaused)
     ) {
       this.lastSchedulePaused = paused;
-      this.eventsEmitter.emit("scheduleLimitChange", {
-        paused,
-        watts: resolved.watts,
-      });
+      this.eventsEmitter.emit("scheduleLimitChange", { paused, watts });
     } else if (!isCapped && this.lastSchedulePaused !== null) {
       // Profile cleared — reset so we re-arm on the next SetChargingProfile.
       this.lastSchedulePaused = null;
     }
-    return resolved.watts;
   }
 
   /**
@@ -399,16 +474,7 @@ export class Connector {
    * sample set, not while driving the meter.
    */
   activePhaseCount(): number {
-    const stationMax =
-      this.stationProfilesProvider()?.getActive(
-        ChargingProfilePurposeType.ChargePointMaxProfile,
-      ) ?? null;
-    const limitPhases = resolveEffectivePhaseLimit(
-      this.getActiveChargingProfile(),
-      stationMax,
-      this.transactionValue?.startTime ?? null,
-    );
-    return resolveActivePhases(this._evSettings, limitPhases ?? undefined);
+    return this.resolveScheduleConstraints(new Date()).activePhases;
   }
 
   /** Snapshot of the last resolved "paused" state, used to detect crossings
@@ -561,7 +627,7 @@ export class Connector {
       const derived = this.socFromMeterValue(this.meterValueWh);
       if (derived !== null && this.socPercent !== derived) {
         this.socPercent = derived;
-        this.socIsMeterDerived = true;
+        this.socOwner = "meter";
         this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }
@@ -589,9 +655,11 @@ export class Connector {
 
   set soc(value: number | null) {
     this.socPercent = value;
-    // Explicit: a statement about the car plugged in now, so it survives the
-    // next `beginTransaction` (#301).
-    this.socIsMeterDerived = false;
+    // Whose it is depends on whether a session is running: set while idle it
+    // is a statement about the car plugged in now and survives into the
+    // transaction about to start; set mid-session it describes that session's
+    // car and is replaced when the next one begins (#301).
+    this.socOwner = this.transactionValue ? "session" : "pending";
     this.eventsEmitter.emit("socChange", { soc: value });
     this.checkAutoStop();
   }
@@ -904,17 +972,25 @@ export class Connector {
    * This does the same reset one tick earlier, and does it whether or not
    * meter/SoC sync is on: with sync off nothing would ever have corrected it.
    *
-   * Only a **meter-derived** SoC is replaced. An explicit one — typed in the
-   * side panel, arrived in a MeterValue SoC sample, or passed to
+   * A `"pending"` SoC is kept and claimed for this session: it was set while
+   * the connector was idle, so it describes the car plugged in now — typed
+   * into the side panel before pressing Start, or handed to
    * `startTransaction` as `initialSoc`, which the ChargePoint writes through
-   * the `soc` setter just before this runs — describes the car that is
-   * plugged in now and is left exactly as it is.
+   * the `soc` setter just before this runs. Everything else belongs to a
+   * session that has ended and is replaced. That is what closes the leak an
+   * explicit `initialSoc` used to have: it arrives `"pending"`, becomes
+   * `"session"` here, and the *next* `beginTransaction` therefore treats it as
+   * the leftover it has become rather than as a fresh statement about a new
+   * car.
    */
   private openSessionSoc(transaction: Transaction): void {
-    if (!this.socIsMeterDerived) return;
+    if (this.socOwner === "pending") {
+      this.socOwner = "session";
+      return;
+    }
     const opening = transaction.initialSoc ?? this._evSettings.initialSoc;
     if (opening === undefined) return;
-    this.socIsMeterDerived = false;
+    this.socOwner = "session";
     if (this.socPercent === opening) return;
     this.socPercent = opening;
     this.eventsEmitter.emit("socChange", { soc: opening });
@@ -1011,7 +1087,7 @@ export class Connector {
       const derived = this.socFromMeterValue(meterValueWh);
       if (derived !== null && this.socPercent !== derived) {
         this.socPercent = derived;
-        this.socIsMeterDerived = true;
+        this.socOwner = "meter";
         this.eventsEmitter.emit("socChange", { soc: derived });
       }
     }

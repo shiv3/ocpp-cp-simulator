@@ -57,6 +57,8 @@ function threePhaseConnectorStub(): unknown {
     currentScheduleLimitWatts: () => Infinity,
     // Three phases in use: no profile restricts them (#301).
     activePhaseCount: () => 3,
+    // One resolve, one instant (#301).
+    scheduleConstraints: () => ({ watts: Infinity, activePhases: 3 }),
   };
 }
 

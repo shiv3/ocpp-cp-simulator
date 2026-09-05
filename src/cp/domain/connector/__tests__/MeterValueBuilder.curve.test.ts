@@ -20,6 +20,14 @@ function connectorStub(options: {
   /** The active profile period's `numberPhases`, when one restricts us. */
   limitNumberPhases?: number;
 }): Connector {
+  const watts = options.scheduleLimitW ?? Infinity;
+  const activePhases = resolveActivePhases(
+    {
+      currentType: options.evSettings?.currentType,
+      phases: options.evSettings?.phases,
+    },
+    options.limitNumberPhases,
+  );
   return {
     status: options.status ?? "Charging",
     soc: options.soc ?? null,
@@ -36,17 +44,13 @@ function connectorStub(options: {
       targetSoc: 80,
       ...options.evSettings,
     },
-    currentScheduleLimitWatts: () => options.scheduleLimitW ?? Infinity,
+    currentScheduleLimitWatts: () => watts,
     // Mirrors `Connector.activePhaseCount()`: the wiring, narrowed by the
     // active profile's `numberPhases`.
-    activePhaseCount: () =>
-      resolveActivePhases(
-        {
-          currentType: options.evSettings?.currentType,
-          phases: options.evSettings?.phases,
-        },
-        options.limitNumberPhases,
-      ),
+    activePhaseCount: () => activePhases,
+    // The real connector resolves both from one instant, so the stub hands
+    // back the same pair rather than letting the two drift (#301).
+    scheduleConstraints: () => ({ watts, activePhases }),
   } as unknown as Connector;
 }
 

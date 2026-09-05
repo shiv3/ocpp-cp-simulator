@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { Connector } from "../Connector";
 import type { ActiveChargingProfile } from "../Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";
@@ -789,5 +789,119 @@ describe("printing a sample never carries it above the limit (#301)", () => {
     const connector = singlePhase();
     connector.addChargingProfile(ampProfile(16, 1));
     expect(valueOfMeasurand(connector, "Current.Import")).toBe(16.0);
+  });
+});
+
+describe("the cap and the phase count come from one instant (#301)", () => {
+  /**
+   * Both constraints are read for every MeterValue and each used to resolve
+   * against its own `new Date()`. A schedule period boundary falling between
+   * the two calls took the cap from one period and the divisor from the next:
+   * a 10 A three-phase period caps at 6900 W, is then divided as one phase,
+   * and reports 30 A — one sample set describing two instants.
+   */
+  const START = new Date("2026-07-01T00:00:00.000Z");
+
+  function twoPeriodProfile(): ActiveChargingProfile {
+    return {
+      chargingProfileId: 307,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.A,
+      chargingSchedulePeriods: [
+        { startPeriod: 0, limit: 10, numberPhases: 3 },
+        { startPeriod: 60, limit: 10, numberPhases: 1 },
+      ],
+    };
+  }
+
+  function connectorAtStart(): Connector {
+    const connector = makeConnector();
+    connector.evSettings = {
+      ...connector.evSettings,
+      maxChargingPowerKw: 350,
+      currentType: "AC",
+      phases: 3,
+    };
+    connector.socMeterSyncEnabled = false;
+    connector.soc = 50;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction({
+      id: 307,
+      connectorId: 1,
+      tagId: "TAG-CLOCK",
+      meterStart: 0,
+      meterStop: null,
+      startTime: START,
+      stopTime: null,
+      meterSent: false,
+    });
+    connector.addChargingProfile(twoPeriodProfile());
+    return connector;
+  }
+
+  /** Make each argument-less `new Date()` return the next value in turn, so a
+   *  second resolve inside one sample build lands in the next period. */
+  function stubClockSequence(offsetsSeconds: number[]): () => void {
+    const RealDate = Date;
+    let call = 0;
+    class SequencedDate extends RealDate {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          const i = Math.min(call++, offsetsSeconds.length - 1);
+          super(START.getTime() + offsetsSeconds[i]! * 1000);
+        } else {
+          // @ts-expect-error forwarding the real Date overloads verbatim
+          super(...args);
+        }
+      }
+    }
+    vi.stubGlobal("Date", SequencedDate);
+    return () => vi.unstubAllGlobals();
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("does not mix a cap from one period with a divisor from the next", () => {
+    const connector = connectorAtStart();
+    // First reading inside period 0 (three phases), any second reading inside
+    // period 1 (one phase). One resolve means the second never happens.
+    const restore = stubClockSequence([10, 70]);
+    try {
+      const { watts, activePhases } = connector.scheduleConstraints();
+      expect(watts).toBeCloseTo(10 * 230 * 3, 6);
+      expect(activePhases).toBe(3);
+      // The pair is coherent: dividing this cap by these phases is the limit.
+      expect(watts / (230 * activePhases)).toBeCloseTo(10, 6);
+    } finally {
+      restore();
+    }
+  });
+
+  it("reports the limit, not three times it, across the boundary", () => {
+    const connector = connectorAtStart();
+    const restore = stubClockSequence([10, 70]);
+    try {
+      const reported = reportedCurrentA(connector);
+      expect(reported).toBeCloseTo(10, 1);
+      expect(reported).toBeLessThanOrEqual(10);
+    } finally {
+      restore();
+    }
+  });
+
+  it("resolves the later period coherently once the boundary has passed", () => {
+    const connector = connectorAtStart();
+    const restore = stubClockSequence([70, 130]);
+    try {
+      const { watts, activePhases } = connector.scheduleConstraints();
+      expect(watts).toBeCloseTo(10 * 230, 6);
+      expect(activePhases).toBe(1);
+      expect(watts / (230 * activePhases)).toBeCloseTo(10, 6);
+    } finally {
+      restore();
+    }
   });
 });

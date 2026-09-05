@@ -742,3 +742,124 @@ describe("the derived-SoC marker survives a restart (#301)", () => {
     expect(connector.soc).toBe(77);
   });
 });
+
+describe("an explicit SoC belongs to one session only (#301)", () => {
+  /**
+   * Round 8 distinguished "derived during this transaction" from "left over".
+   * An explicit SoC from a *previous* transaction is left over too, and the
+   * marker did not say so: `ChargePoint.startTransaction` writes `initialSoc`
+   * through the `soc` setter, so with no meter-derived update afterwards —
+   * auto-metering off, or SoC sync disabled — the next transaction kept the
+   * previous one's value for its whole session.
+   *
+   * The two are told apart by whether a transaction was active when the value
+   * was written. Set while idle it is a statement about the car plugged in
+   * now and belongs to the session about to start; set while a session is
+   * running it belongs to that session, and `beginTransaction` claims a
+   * pending value so it cannot be claimed twice.
+   */
+  function cliffAt90(connector: Connector): void {
+    connector.evSettings = {
+      ...connector.evSettings,
+      batteryCapacityKwh: 1,
+      maxChargingPowerKw: 100,
+      initialSoc: 20,
+      targetSoc: 100,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0 },
+        { socPercent: 100, powerFraction: 0 },
+      ],
+    };
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+  }
+
+  function reportedPowerW(connector: Connector): number {
+    return Number(
+      buildSampledValues(
+        connector,
+        ["Power.Active.Import"],
+        "Sample.Periodic",
+      ).find((s) => s.measurand === "Power.Active.Import")?.value ?? "0",
+    );
+  }
+
+  it("does not carry a transaction's initialSoc into the next transaction", () => {
+    const connector = makeConnector();
+    cliffAt90(connector);
+
+    // Exactly what ChargePoint.startTransaction does: write the SoC, then
+    // begin. No meter tick follows, because sync is off.
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0, 95));
+    expect(connector.soc).toBe(95);
+    expect(reportedPowerW(connector)).toBe(0);
+    connector.stopTransaction();
+
+    // A different car, no initialSoc of its own.
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+    expect(reportedPowerW(connector)).toBe(100_000);
+  });
+
+  it("keeps an SoC set while the connector was idle", () => {
+    // The real use this must not break: type a value in the side panel, then
+    // press Start.
+    const connector = makeConnector();
+    cliffAt90(connector);
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(95);
+    expect(reportedPowerW(connector)).toBe(0);
+  });
+
+  it("does not carry an SoC set mid-session into the next one", () => {
+    const connector = makeConnector();
+    cliffAt90(connector);
+    connector.beginTransaction(transaction(0));
+    // Set while this session is running: it describes this session's car.
+    connector.soc = 95;
+    expect(reportedPowerW(connector)).toBe(0);
+    connector.stopTransaction();
+
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+  });
+
+  it("claims a pending SoC once, so a third transaction still resets", () => {
+    const connector = makeConnector();
+    cliffAt90(connector);
+    connector.soc = 95;
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(95);
+    connector.stopTransaction();
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+    connector.stopTransaction();
+    connector.beginTransaction(transaction(0));
+    expect(connector.soc).toBe(20);
+  });
+
+  it("restores an explicit SoC as the restored transaction's, not the next one's", () => {
+    // After a restart, an explicit SoC alongside an active transaction belongs
+    // to that transaction — so the transaction after it must not inherit it.
+    const source = makeConnector();
+    cliffAt90(source);
+    source.soc = 95;
+    source.beginTransaction(transaction(0, 95));
+    const snapshot = source.snapshotRuntime();
+    expect(snapshot.socIsMeterDerived).toBe(false);
+    expect(snapshot.transaction).not.toBeNull();
+
+    const restored = makeConnector();
+    cliffAt90(restored);
+    restored.restoreRuntimeSnapshot(snapshot);
+    expect(restored.soc).toBe(95);
+
+    restored.stopTransaction();
+    restored.beginTransaction(transaction(0));
+    expect(restored.soc).toBe(20);
+  });
+});

@@ -63,11 +63,14 @@ export function buildSampledValues(
   // charger still *offers* 100 kW to a nearly-full battery that only draws
   // 10 kW of it).
   const settings = connector.evSettings;
-  // Resolved once for the whole sample set rather than per derivation: every
-  // sample in one MeterValue should describe the same instant, and this is the
-  // one call that can emit `scheduleLimitChange` (see
-  // `Connector.currentScheduleLimitWatts`).
-  const scheduleLimitW = connector.currentScheduleLimitWatts();
+  // Both schedule-derived constraints come from one resolve at one instant.
+  // Resolving them separately took the watt cap from one schedule period and
+  // the phase divisor from the next whenever a boundary fell between the two
+  // calls — a 10 A three-phase period capping at 6900 W and then being divided
+  // as one phase, reported as 30 A. This is also the one call in a sample
+  // build that can emit `scheduleLimitChange` (#301).
+  const { watts: scheduleLimitW, activePhases } =
+    connector.scheduleConstraints();
   const powerW = derivedInstantaneousPowerW(connector, scheduleLimitW);
   const offeredW = derivedOfferedPowerW(connector, scheduleLimitW);
   // Both currents divide by the phases actually in use, the same count the
@@ -75,7 +78,6 @@ export function buildSampledValues(
   // single-phase limit caps a 3-phase connector at 2300 W, and dividing that
   // across three wires reported 3.3 A for a line carrying 10, so the sample
   // contradicted the profile it was produced under (#301).
-  const activePhases = connector.activePhaseCount();
   const currentA = currentAmpsFor(powerW, settings ?? {}, activePhases);
   const offeredCurrentA = currentAmpsFor(
     offeredW,

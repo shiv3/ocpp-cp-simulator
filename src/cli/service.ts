@@ -734,8 +734,34 @@ export class CLIChargePointService {
    * it has a CSMS-assigned id — a reload during that window is still a reload
    * mid-transaction.
    */
+  /**
+   * Whether connector `connectorId` has a session **running right now**.
+   *
+   * Deliberately `hasRunningTransaction`, not "a transaction object is
+   * attached". The two differ after a `StartTransaction` that was rejected or
+   * answered with a CALLERROR: `ChargePoint.cleanTransaction` stamps `stopTime`
+   * and leaves the object on the connector on purpose (#301), so the connector
+   * is logically idle with a transaction still hanging off it — and no further
+   * `transactionChange(null)` is ever emitted for it, because nothing stops a
+   * transaction that never ran. Asking the attached-object question made
+   * `--watch` hold a reload behind a session that had already failed, with
+   * nothing left that could release it (#314).
+   *
+   * `Connector.hasRunningTransaction` is the codebase's existing definition of
+   * the question — `ChargePoint.startTransaction` asks it the same way before
+   * refusing a duplicate start — so this reads it rather than restating it.
+   */
   hasOpenTransaction(connectorId: number): boolean {
-    return this._chargePoint.connectors.get(connectorId)?.transaction != null;
+    return (
+      this._chargePoint.connectors.get(connectorId)?.hasRunningTransaction ===
+      true
+    );
+  }
+
+  /** Whether the connector still exists. A reload held for one that has been
+   *  removed can never be applied, and nothing else would say so (#314). */
+  hasConnector(connectorId: number): boolean {
+    return this._chargePoint.connectors.has(connectorId);
   }
 
   /** Whether a run of this scenario is in flight (#314). */
@@ -2283,6 +2309,12 @@ export class CLIChargePointService {
     this._unsubscribes.push(
       this._chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
         this.emit({ event: "connector_removed", data: { connectorId } });
+        // #314: whatever a `--watch` reload was waiting on here is gone with
+        // the connector — `removeConnector` disposes it without ever emitting
+        // `transactionChange(null)`, so a held definition would wait for a
+        // notification that can no longer be sent. Announcing the settle is
+        // what lets the reload path see the connector has gone and say so.
+        this.notifySessionSettled({ connectorId, scenarioId: null });
       }),
     );
   }

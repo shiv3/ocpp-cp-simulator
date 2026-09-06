@@ -899,6 +899,50 @@ export class FileReloadManager {
       this.rejectScenario(entry, new Error(overflow));
       return false;
     }
+    // The connector this reload is registered for is gone. Nothing can apply the
+    // definition to it, and nothing will ever release a hold taken for it, so
+    // this is reported and the watch is dropped rather than left waiting. See
+    // the gate note below.
+    if (!service.hasConnector(entry.connectorId)) {
+      this.rejectScenario(
+        entry,
+        new Error(
+          `connector ${entry.connectorId} was removed; the file is no longer watched`,
+        ),
+      );
+      this.unregisterScenario(entry.cpId, entry.connectorId, entry.scenarioId);
+      return false;
+    }
+    // ---- the deferral gate -------------------------------------------------
+    //
+    // A reload is held while the connector is mid-session or the scenario's own
+    // run is in flight. A gate is only safe if every way it can close is paired
+    // with a way it reopens, so both directions are enumerated here — the same
+    // discipline `ScenarioEntry.lastText` needed, for the same reason.
+    //
+    // **Ordering.** The condition is re-read at drain time, never cached: a
+    // drain may be one connector's session ending while another's is still
+    // open. Every drain runs on a later microtask (`drainLater`), so it never
+    // executes inside the teardown that opened the gate.
+    //
+    // **What reopens it.** A real stop, via `transactionChange(null)` — emitted
+    // *after* the field is nulled. A run settling, via `runScenario`'s cleanup
+    // or `resetScenario`. A `cp.update` rebuild, via `syncFromRegistry`'s
+    // drain. And a connector being removed, via the settle announced from
+    // `connectorRemoved` — which lands on the branch above, not here.
+    //
+    // **What never closes it.** A `StartTransaction` that was rejected or
+    // answered with a CALLERROR leaves a stopped transaction object attached to
+    // the connector (#301, deliberate). No `transactionChange(null)` follows,
+    // because nothing stopped a session that never ran — so a gate keyed on
+    // "an object is attached" would close with nothing able to reopen it.
+    // `hasOpenTransaction` therefore asks whether a session is *running*, which
+    // is the definition the rest of the codebase already uses.
+    //
+    // **Destruction.** The two things a hold waits on can be destroyed rather
+    // than released: the connector (above) and the charge point (pruned by
+    // `syncFromRegistry`, which forgets the row with it). Shutdown closes the
+    // manager and drops every hold with it.
     if (
       service.hasOpenTransaction(entry.connectorId) ||
       service.isScenarioRunning(entry.scenarioId)

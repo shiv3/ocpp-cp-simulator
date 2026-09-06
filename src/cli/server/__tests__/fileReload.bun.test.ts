@@ -2619,6 +2619,90 @@ describe("a new charge point is reconciled against disk (#314)", () => {
   });
 });
 
+describe("a hold is never left waiting on something that is gone (#314)", () => {
+  it("reports and unregisters when the connector a reload waits on is removed", async () => {
+    // The gate holds a reload while the connector is mid-session, and waits for
+    // `transactionChange(null)` to release it. `remove_connector` disposes the
+    // connector without ever emitting that, so the hold could never end: the
+    // thing being waited on was destroyed rather than released. The operator is
+    // told — a `rejected` event naming the connector — rather than left with a
+    // silently discarded edit or a watch on a file that can never apply.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("orphaned", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-ORPHAN", { connectors: 2 });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-ORPHAN");
+
+    // Mid-session, so the edit is held rather than applied.
+    expect(await openSession(server, "CP-ORPHAN", "TAG-OR")).toBe("TAG-OR");
+    backend.save(file, scenario("orphaned", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the edit to be held for the open session",
+    );
+
+    // The connector goes away underneath the hold.
+    await rpc(socket, "remove_connector", { connector: 1 }, "CP-ORPHAN");
+
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the hold to be resolved rather than left waiting",
+    );
+    const rejection = events.find((e) => e.outcome === "rejected");
+    expect(rejection?.error).toContain("was removed");
+    // The watch is dropped with it: nothing can apply this file any more.
+    expect(server.fileReload?.watchedPaths()).toEqual([]);
+  });
+
+  it("does not hold a reload behind a transaction that never ran", async () => {
+    // `cleanTransaction` stamps `stopTime` and leaves the object attached after
+    // a rejected or CALLERROR `StartTransaction` — deliberately (#301), and no
+    // `transactionChange(null)` follows, because nothing stopped a session that
+    // never ran. A gate keyed on "an object is attached" therefore closed with
+    // nothing able to reopen it. It asks whether a session is *running*, which
+    // is the definition the rest of the codebase already uses.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("callerror", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    await createConnectedCp(server, socket, "CP-CALLERROR");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-CALLERROR");
+
+    const service = server.registry.get("CP-CALLERROR");
+    if (!service) throw new Error("CP-CALLERROR missing");
+    expect(await openSession(server, "CP-CALLERROR", "TAG-CE")).toBe("TAG-CE");
+    // Exactly what the CALLERROR recovery does: clean the transaction and
+    // return the connector to Available, leaving the stopped object attached.
+    // Reached through the charge point, because that is the code path
+    // `OCPPMessageHandler.handleCallError` takes.
+    const chargePoint = (
+      service as unknown as {
+        _chargePoint: {
+          cleanTransaction(connectorId: number): void;
+          getConnector(id: number): { transaction: unknown } | undefined;
+        };
+      }
+    )._chargePoint;
+    chargePoint.cleanTransaction(1);
+    // The object is still attached — that part is deliberate — and the gate
+    // nonetheless reads the connector as idle.
+    expect(chargePoint.getConnector(1)?.transaction).not.toBeNull();
+    expect(service.hasOpenTransaction(1)).toBe(false);
+
+    // With the gate asking the right question this applies immediately.
+    backend.save(file, scenario("callerror", 22));
+    await waitFor(
+      () => loadedDelay(server, "CP-CALLERROR", "callerror") === 22,
+      "the reload to apply to a connector whose session never ran",
+    );
+  });
+});
+
 describe("a reload that could not be stored is not `applied` (#314)", () => {
   it("reports rejected and keeps the bytes retryable when the write fails", async () => {
     // `loadScenario` installs the definition synchronously and persists in the

@@ -1459,3 +1459,30 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   reload can still fail to hold clears it). An audit that lists callers but not
   what happens when one fails halfway is the same shape of incomplete as one
   that ignores interleavings.
+
+## [2026-09-06] ingest | `--watch`: the deferral gate, enumerated in both directions (#314, PR #317)
+
+- A reload held for a connector that is then **removed** could never be
+  released: `remove_connector` disposes the connector without ending a session,
+  so the `transactionChange(null)` the hold waits for is never emitted. The
+  charge point now announces a settle when a connector goes, and the reload path
+  answers it by reporting **`rejected`** — naming the connector — and dropping
+  the watch. Rejecting rather than draining, because applying a definition to a
+  connector that no longer exists is meaningless; and rejecting _visibly_ rather
+  than unregistering quietly, because the operator asked for that edit.
+- The second finding looked like a pre-existing `main` defect and was not.
+  `OCPPMessageHandler.handleCallError` leaves a stopped transaction object
+  attached after a failed `StartTransaction` — that is deliberate (#301), and
+  `Connector.hasRunningTransaction` and `ChargePoint.startTransaction` both
+  already define a live session as "attached **and** not stopped". The gate was
+  the only reader asking the other question, so the fix was to ask the one the
+  codebase already defines, not to change the 1.6 handler's transaction
+  lifecycle to satisfy a premise `--watch` should never have had. Smaller,
+  local, and it leaves a documented convention with one meaning instead of two.
+- [Daemon](entities/daemon.md) — the gate's conditions are now enumerated in
+  both directions next to the gate itself, the way `lastText` was: what closes
+  it, what reopens it, what can never close it, and — new — what can be
+  **destroyed** while a hold waits on it. Three rounds went to `lastText`
+  because its invariant was discovered a caller at a time; this is the same
+  shape starting on the transaction gate, so the enumeration is written down
+  before a fourth round finds the next exit.

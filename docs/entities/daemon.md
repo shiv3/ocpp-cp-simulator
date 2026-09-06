@@ -281,6 +281,20 @@ The rules, in the order they bite:
   oversized _sibling_ scenario, or a connector already holding more scenarios
   than fit, refuses the edit even when the edited file is small. The rejection
   names the scenario id at fault.
+- **A hold is never left waiting on something that is gone.** A reload held for
+  a connector is released when that connector's session ends, when the
+  scenario's own run settles, or when a `cp.update` rebuilds the charge point.
+  Two things can _destroy_ what it waits on instead of releasing it, and both
+  are answered rather than left to strand. Removing the connector
+  (`remove_connector`) disposes it without ending a session, so the hold is
+  reported **`rejected`** — naming the connector — and the file stops being
+  watched, because nothing could ever apply it again. Removing the charge point
+  drops the registration and its stored row with it. And a session that never
+  ran does not close the gate at all: a `StartTransaction` that is rejected, or
+  answered with a CALLERROR, leaves a stopped transaction object attached to the
+  connector by design, with no further notification to come — so the gate asks
+  whether a session is _running_, which is the question the rest of the
+  simulator already asks before refusing a duplicate start.
 - **A reload never mutates a charge point mid-session.** A scenario reload for a
   connector with an open transaction, or for a scenario whose run is in flight,
   is _held_ — not dropped — and installed when that session ends. An in-flight

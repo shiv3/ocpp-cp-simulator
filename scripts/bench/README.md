@@ -50,11 +50,11 @@ for the record, and **not the #302 result**; see "Recording a result"
 below):
 
 ```
-N    uncreated  connected  dropped  unsettled  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx  late hold  retired
----  ---------  ---------  -------  ---------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------  ---------  -------
-50   0          50         0        0          150    6ms  21ms  6ms     21ms    0         0         0       0           0          0          0
-250  0          250        0        0          750    7ms  22ms  7ms     22ms    0         0         0       0           0          0          0
-450  0          450        0        0          1350   7ms  23ms  7ms     23ms    0         0         0       0           0          0          0
+N    uncreated  connected  dropped  unsettled  conn.src  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx  late hold  retired
+---  ---------  ---------  -------  ---------  --------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------  ---------  -------
+50   0          50         0        0          own       150    6ms  21ms  6ms     21ms    0         0         0       0           0          0          0
+250  0          250        0        0          own       750    7ms  22ms  7ms     22ms    0         0         0       0           0          0          0
+450  0          450        0        0          own       1350   7ms  23ms  7ms     23ms    0         0         0       0           0          0          0
 ```
 
 (The header has changed since that run — `timeouts` / `late>30s` replaced a
@@ -252,6 +252,38 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    negative number. The script also warns on stderr whenever `dropped` is
    non-zero.
 
+   **`conn.src` — whether those numbers are counted or inferred.**
+   `ocppcp_charge_points` is a daemon-wide gauge with no `cpId` label, so the
+   only arithmetic available for "how many of _ours_ are connected" is to
+   subtract the count taken at preflight. On a daemon the preflight found
+   empty that is not a subtraction at all — every registered charge point is
+   this run's — and the column reads **`own`**. Under `--allow-existing` it
+   reads **`est`**, always, and `connected` / `dropped` / `unsettled` are
+   estimates for that row.
+
+   Always, and not "when drift is detected", because drift cannot be detected:
+   a bystander disconnecting while one of this run's charge points connects
+   nets to zero on both the total and the connected gauge. The failure modes
+   are real in both directions — a bystander dropping made the run report one
+   of its own charge points as unsettled and undercount `connected`, and a
+   previously unavailable bystander connecting let a step settle before this
+   run's fleet was actually up. Per-charge-point attribution would need a
+   `cp.status` poll per charge point per settle round, which at these fleet
+   sizes is itself a load on the daemon being measured — the instrument
+   perturbing the measurement to describe it. So the number is still offered,
+   with its caveat attached: on stderr once per step, in the `conn.src` column,
+   and as `connectivityAttributable` on every `--out` row. `p50`/`p95` and the
+   call counts are unaffected — what is contaminated is the fleet size the row
+   attributes them to, not the histogram.
+
+   `own` is also not unconditional in the default mode: if the daemon's total
+   ever exceeds what this run created, the row degrades to `est`. Two causes,
+   and the message names both because they are indistinguishable from here — a
+   `cp.create_many` that outlived its client deadline and is still registering
+   ids this run never got back (the case teardown's reconciliation exists for),
+   or something else creating charge points on this daemon. Either way the row's
+   `N` does not count them and the gauge does.
+
    **`N`/`uncreated`.** `N` is the fleet the row's numbers actually describe,
    **not** the `--counts` entry it was aiming for; `uncreated` is the
    difference. `cp.create_many` succeeds partially, so a step that asked for 10
@@ -271,8 +303,8 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    assigns `transactionId: 0` the second emission never arrives at all: the
    daemon suppresses the `transactionIdChange` it would come from
    (`src/cli/service.ts`, `if (transactionId === 0) return`). The cycle then
-   waits its full 45s and **retires the charge point despite a valid
-   confirmation**, so the offered load drops — visibly, in the `retired`
+   waits out its full assigned-id budget (95s) and **retires the charge point
+   despite a valid confirmation**, so the offered load drops — visibly, in the `retired`
    column, but for the wrong reason. Tracked as
    [#328](https://github.com/shiv3/ocpp-cp-simulator/issues/328); the fix
    belongs to the daemon's event contract, not to this script.
@@ -292,9 +324,18 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    there.
 
    **`retired`** counts charge points withdrawn from the transaction cycle
-   because no id arrived inside the bound (45s: the authorization wait plus a
-   full CALL watchdog, past which `StartTransaction` has been abandoned and no
-   conf is coming). Withdrawing them is not tidiness. A conf that arrives later
+   because no id arrived inside the bound (**95s, measured from the local
+   start**: the CALLs the domain is known to queue ahead of
+   `StartTransaction.req` at that instant — `StatusNotification(Preparing)`,
+   enqueued before the transaction event by design, and one unrelated CALL that
+   may still hold the serialization slot — a full CALL watchdog each, plus
+   `StartTransaction`'s own, plus slack). That is a bound in the regime where
+   the number matters rather than a proof: while CSMS latency stays under
+   `--heartbeat-interval` the serial queue does not grow, so at most one
+   heartbeat-class CALL is ahead of `Preparing`. Once the queue _does_ grow the
+   budget can be outlasted — and there retirement is the correct answer, because
+   the offered load genuinely fell and `retired` is the signal for it.
+   Withdrawing them is not tidiness. A conf that arrives later
    would land during a _later_ cycle, after that cycle's own placeholder
    emission, and be accepted as that cycle's id — and the simulator would apply
    the stale id to the current connector transaction, so the next stop and the
@@ -304,6 +345,33 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    that charge point again is what makes the confusion impossible rather than
    merely unlikely. The fleet's offered load falls accordingly, which is why
    the column exists.
+
+   **A retired charge point keeps its transaction open.** It is _not_ stopped
+   at the moment of retirement, and that is deliberate.
+   `OCPPMessageHandler.sendStopTransaction` snapshots `transaction.id` — still
+   unassigned — and `ChargePoint.stopTransaction` then clears the connector's
+   transaction synchronously. A `StartTransaction.conf` is still perfectly able
+   to arrive afterwards: `handleSerialTimeout` releases the serialization slot
+   but never evicts the `RequestHistory` entry, so the CALLRESULT still reaches
+   `StartTransactionResultHandler`. It would then find
+   `Connector.transactionId`'s setter with no transaction to write to and
+   return, and the CSMS session would be unclosable for the rest of the run and
+   through teardown. The placeholder stop destroys the only handle that could
+   ever close it, at precisely the moment the session is most likely to be
+   real.
+
+   Preserving it costs **one CALL, not a stream**. The charge point never cycles
+   again and runs no meter scheduler: `Connector.startConfiguredMeterValue`
+   needs `autoConfig.enabled` or an increment fallback, `cp.create` accepts no
+   field that sets either, and the daemon constructs every charge point with
+   `autoMeterValueSetting = null` (`src/cli/service.ts`). The one frame it does
+   still emit is at the moment the late conf lands, when
+   `StartTransactionResultHandler` drives the connector to `Charging` and a
+   `StatusNotification` goes out — one frame per retired charge point, against
+   the whole transaction cycle it no longer runs. Teardown's closing sweep
+   issues the stop, outside every measurement window and late enough that the
+   conf has usually landed, so the stop carries the real id. What that does
+   _not_ guarantee is listed under "Known limitations".
 
    **Every charge point presents its own idTag.** They used to share
    `DEFAULT_ID_TAG` (`123456`), and a CSMS that enforces per-idTag concurrency
@@ -319,23 +387,46 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    **`unconf.tx`** counts transaction starts this step could not confirm: the
    `start_transaction` ack returns while the charge point is still waiting on
    `Authorize.conf`, so the script waits for the daemon's `transaction_started`
-   event before timing the hold. It waits **15s — the daemon's own 10s
-   authorization timeout plus slack — never the hold**. At `--tx-interval 2`
+   event before timing the hold. It waits **50s — the pool's whole-call RPC
+   deadline plus the daemon's own 10s authorization timeout plus slack — never
+   the hold**. At `--tx-interval 2`
    the hold is 1s while authorization may legitimately take 10s, so a
    hold-length wait declared the start dead while it was still pending: the
    stop then fired against a transaction that did not exist, the next cycle
    began immediately, and the original start landed _after_ that ineffective
    stop — leaving a transaction active, or letting its event confirm a newer
    cycle's waiter. `authorizeAndWait` never rejects (on timeout it warns and
-   proceeds as `Accepted`), so a start still unconfirmed after 15s was
+   proceeds as `Accepted`), so a start still unconfirmed after that bound was
    genuinely denied: the wait ends with a definitive answer rather than a
    guess, and no second cycle for a charge point begins until the outstanding
    one has been answered, held and stopped.
 
+   **Each phase gets its own clock, and the first one contains the RPC.** The
+   waiter is armed _before_ `SocketPool.rpc("start_transaction", …)` queues for
+   its token, its in-flight slot and its acknowledgement — it has to be, because
+   the event arrives on the watcher's socket while the ack arrives on a pool
+   socket and nothing orders the two. Under the daemon and control-plane
+   pressure this benchmark exists to find, that RPC can legitimately spend the
+   full 35s deadline being admitted. A confirmation budget of 15s measured from
+   arming therefore left little or none of the documented authorization
+   allowance for a transaction that had not yet been asked for: at the knee,
+   healthy starts were reported `unconf.tx`, their charge points were retired
+   for a missing id, and the fleet's offered load fell — for a reason invisible
+   in every column of the row. So the local-start budget is 35s + 15s, and the
+   assigned-id budget is **restarted by the local-start event** rather than
+   inheriting whatever the first phase left over. Splitting the budget without
+   restarting it would be the same bug wearing a different number.
+
+   Neither clock is re-armed from the RPC's _acknowledgement_, which would be
+   the tighter bound: the ack and the event race, so an ack-triggered re-arm can
+   only start a clock the event has already beaten. The chosen bounds are
+   monotone instead — larger can only reduce false retirements, and the only
+   cost is that a genuinely denied start is reported that much later.
+
    **The drift this causes is one-way and permanent.** A cycle that had to wait
-   out a denial occupies 15s plus a hold, and the next cycle is anchored one
-   period after the _start_ of that one — so at `--tx-interval 2` the charge
-   point's cycle stretches from 2s to about 16s and is never caught back up. A
+   out a denial occupies up to 50s plus a hold, and the next cycle is anchored
+   one period after the _start_ of that one — so at `--tx-interval 2` the charge
+   point's cycle stretches from 2s to a minute or so and is never caught back up. A
    non-zero `unconf.tx` therefore does not mean "the load was fine, just late":
    it means those charge points' cadence is now their own rather than the
    flag's, and the fleet is that much below the configured load from then on.
@@ -353,19 +444,31 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    budget**.
 
    **The teardown ceiling, so it is met on this page and not in the field.**
-   Every stage carries its own deadline and they compose to a worst case of
-   about **six and a half minutes**, reached only in the failure case
-   reconciliation exists for — a `cp.create_many` whose client deadline expired
-   against a daemon that then answers `not_found` three times running:
+   The stages run in sequence and each carries its own deadline, so they
+   compose to a worst case of about **ten and a half minutes on OCPP 1.6**
+   (about nine on 2.x), reached only in the failure case reconciliation exists
+   for — a `cp.create_many` whose client deadline expired against a daemon that
+   then answers `not_found` three times running:
 
-   | Stage                                       | Worst case                           |
-   | ------------------------------------------- | ------------------------------------ |
-   | wait for in-flight cycles (`settle`)        | one `cycleBoundMs` per step's handle |
-   | outstanding `cp.create_many` (if any)       | 35s (the RPC's own deadline)         |
-   | close open transactions                     | 30s (`CLOSE_TX_BUDGET_MS`)           |
-   | let in-flight heartbeat reapplications land | 35s (the RPC's own deadline)         |
-   | first delete sweep                          | 60s (`CLEANUP_BUDGET_MS`)            |
-   | reconciliation: 3 × (35s wait + 60s sweep)  | 285s (`RECONCILE_MAX_PASSES`)        |
+   | Stage                                       | Worst case                                                 |
+   | ------------------------------------------- | ---------------------------------------------------------- |
+   | wait for in-flight cycles (`settle`)        | one `cycleBoundMs` — 180s + hold on 1.6, 85s + hold on 2.x |
+   | outstanding `cp.create_many` (if any)       | 35s (the RPC's own deadline)                               |
+   | close open transactions                     | 30s (`CLOSE_TX_BUDGET_MS`)                                 |
+   | let in-flight heartbeat reapplications land | 35s (the RPC's own deadline)                               |
+   | first delete sweep                          | 60s (`CLEANUP_BUDGET_MS`)                                  |
+   | reconciliation: 3 × (35s wait + 60s sweep)  | 285s (`RECONCILE_MAX_PASSES`)                              |
+
+   The `settle` row is per handle but the handles are awaited together, so it
+   is one `cycleBoundMs`, not one per step; the totals above quote it at the
+   default `--tx-interval 2`, whose hold is 1s. This total is larger than the
+   "six and a half minutes" this page carried before. Splitting the start
+   confirmation into two independently-clocked phases accounts for part of it —
+   `cycleBoundMs` on 1.6 went from 115s + hold to 180s + hold. The rest is that
+   the earlier figure **did not reconcile with its own table**: the five rows
+   below `settle` already sum to 445s (7.4 minutes) on their own. It is stated
+   that way rather than diagnosed, because guessing at which row it omitted
+   would be another number nobody checked.
 
    The nominal case is none of it: with nothing open, nothing unresolved and a
    responsive daemon, teardown is one delete sweep. And a daemon that has
@@ -409,9 +512,14 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    And the bound teardown waits for is now **complete**, enumerated stage by
    stage rather than incremented when a gap is found. A cycle awaits in exactly
    four places: the `start_transaction` RPC (35s, the pool's whole-call
-   deadline), the confirmation wait (15s on 2.x, 45s on 1.6), the hold, and the
-   `stop_transaction` RPC (35s again). Arming is synchronous and the next cycle
-   is scheduled after the body returns, so there is no fifth. The bound had
+   deadline), the local-start wait (50s — which _contains_ that RPC, since its
+   clock starts before the call is offered, so the two are not added), the
+   assigned-id wait (95s on 1.6, restarted at the local start; nothing on 2.x),
+   the hold, and the `stop_transaction` RPC (35s). Arming is synchronous and the
+   next cycle is scheduled after the body returns, so there is no fifth. The
+   composed bound is therefore 180s + hold on 1.6 and 85s + hold on 2.x — the
+   2.x figure unchanged by the phase split, since the 35s only moved from the
+   sum into the first phase. The bound had
    omitted both RPC stages, leaving it short by 70s — long enough for an
    already-emitted start or stop to take effect after the fleet was deleted.
 
@@ -787,6 +895,37 @@ a spare machine and a CSMS.
   that row's heartbeat load is no longer the configured one. This also leaves
   a passive run's failure modes exactly as they were before the idle axis grew
   an event socket at all.
+- **Under `--allow-existing`, `connected` / `dropped` / `unsettled` are
+  estimates and say so.** They are a daemon-wide gauge with the preflight
+  baseline subtracted, and that subtraction assumes the pre-existing population
+  is constant — which is exactly what the flag permits it not to be. It is not
+  a detectable condition: a bystander disconnecting while one of this run's
+  charge points connects nets to zero on both gauges, so the row is marked
+  `est` in `conn.src` (and `connectivityAttributable: false` in `--out`)
+  whenever anything else shares the daemon, regardless of whether drift is
+  visible. Per-charge-point attribution is possible in principle — the `status`
+  RPC is per charge point — but at these fleet sizes it would add a poll per
+  charge point per settle round to the very control-plane budget the ceiling
+  rations, which is the instrument perturbing what it measures. The latency
+  histogram and the call counts are unaffected; what is contaminated is the
+  fleet size the row attributes them to. The default mode is exact, because
+  `assertDaemonEmpty` refuses a daemon that holds anything.
+- **A retired charge point's transaction is left open until teardown, and the
+  teardown stop is subject to the same unverifiability as every other.** A
+  charge point retired for a missing transaction id keeps its transaction —
+  stopping it there would send the placeholder id and destroy the handle that
+  a later `StartTransaction.conf` needs (see `retired` above). Two consequences
+  worth stating: the CSMS holds that session for the remainder of the run, and
+  if the conf never arrives at all the teardown stop is the _same_ placeholder
+  stop, just issued later. Preserving is never worse and is usually better; it
+  is not a guarantee that the session closes. There is also a protocol-level
+  case this script does not attempt to handle: `StartTransaction` is
+  transaction-related, so a charge point that reconnects while holding it may
+  re-send it from `PendingMessageQueue` and open a _second_ CSMS session. That
+  is pre-existing simulator behaviour rather than something the benchmark
+  introduces, but a retired charge point holds its transaction across
+  reconnects for longer than a cycling one ever would, so the exposure is
+  larger here.
 - **A closing stop's delivery to the CSMS is not verified, and cannot be from
   here.** Teardown re-stops every charge point that may have an open
   transaction, but under a backed-up outbound queue — the condition this tool

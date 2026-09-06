@@ -284,7 +284,12 @@ speaks (`OCPP-1.6J` by default, or `OCPP-2.0.1` / `OCPP-2.1`); on 2.x the
 timeout column reads `n/a` rather than `0`, since only the 1.6J handler has the
 per-CALL watchdog that feeds it (see [Metrics](#metrics)). It refuses to run against a daemon that
 already holds charge points, because `/metrics` has no `cpId` label and their
-traffic would land in the same histogram as the bench fleet's. Its
+traffic would land in the same histogram as the bench fleet's. `--allow-existing`
+waives that refusal, and every row of such a run is then marked `est` in its
+`conn.src` column: with no `cpId` label the connected count can only be a
+daemon-wide gauge minus a preflight baseline, and a bystander's churn moves that
+in either direction undetectably. The latency numbers are unaffected — what
+cannot be attributed is the fleet size they are reported against. Its
 `--heartbeat-interval` is a **contract**: the run drives heartbeats at that
 cadence for its whole length, including across reconnects, by reapplying
 `start_heartbeat` after every accepted boot — `onBootNotificationAccepted`
@@ -294,7 +299,10 @@ are exactly what start happening near the knee. See
 not cover, including what the reapplication itself costs the measurement (one
 control-plane RPC per accepted boot, paced inside the socket pool's existing
 ceiling) and the fact that whether it moves the knee is argued rather than
-demonstrated, for want of the same real CSMS this section is waiting on.
+demonstrated, for want of the same real CSMS this section is waiting on. The
+same README also states the teardown ceiling an operator meets on Ctrl-C:
+about ten and a half minutes worst case on OCPP 1.6, and only against a daemon
+that is answering but has not finished creating.
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review

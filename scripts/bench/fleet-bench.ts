@@ -24,6 +24,7 @@ import {
   answeredAfterWatchdog,
   assertDaemonEmpty,
   assertMetricsAreCurrent,
+  attributeConnectivity,
   BENCH_ID_ROOT,
   benchCpId,
   benchIdPattern,
@@ -32,6 +33,7 @@ import {
   createFailureHint,
   cycleBoundMs,
   cyclePeriodSec,
+  dispositionAfterStart,
   daemonIsLocal,
   diffHistogram,
   droppedDuringWindow,
@@ -58,7 +60,7 @@ import {
   socketPoolSize,
   staggerOffsetsMs,
   ASSIGNED_ID_TIMEOUT_MS,
-  START_CONFIRM_TIMEOUT_MS,
+  LOCAL_START_TIMEOUT_MS,
   TransactionStarts,
   STEP_COLUMNS,
   sustainableRpcPerSec,
@@ -68,6 +70,7 @@ import {
   type BenchOptions,
   type FleetGauge,
   type Sample,
+  type StartWaitBudget,
   type StepResult,
   type TransactionStartOutcome,
 } from "./lib.ts";
@@ -446,12 +449,8 @@ class FleetWatcher {
    *  The event arrives on this socket while the ack arrives on a pool socket,
    *  and nothing orders the two — arming after the ack would drop the event
    *  of every fast CSMS and skip every stop. Resolves `false` on timeout. */
-  arm(
-    cpId: string,
-    timeoutMs: number,
-    awaitAssignedId: boolean,
-  ): Promise<TransactionStartOutcome> {
-    return this.starts.arm(cpId, timeoutMs, awaitAssignedId);
+  arm(cpId: string, budget: StartWaitBudget): Promise<TransactionStartOutcome> {
+    return this.starts.arm(cpId, budget);
   }
 
   private onEvent(envelope: unknown): void {
@@ -748,15 +747,18 @@ async function waitForSettle(
   opts: BenchOptions,
   targetConnected: number,
   timeoutSec: number,
-): Promise<{ connected: number; notSettled: number }> {
+): Promise<{ gauge: FleetGauge; notSettled: number }> {
   const deadline = Date.now() + timeoutSec * 1000;
   for (;;) {
     const samples = await fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth);
-    const connected = fleetGauge(samples).connected;
-    if (connected >= targetConnected || Date.now() >= deadline) {
+    const gauge = fleetGauge(samples);
+    if (gauge.connected >= targetConnected || Date.now() >= deadline) {
       return {
-        connected,
-        notSettled: Math.max(0, targetConnected - connected),
+        gauge,
+        // The whole gauge, not just this number: the caller has to decide
+        // whether the reading is this run's fleet or a daemon-wide count with
+        // a baseline subtracted, and `total` is what says so.
+        notSettled: Math.max(0, targetConnected - gauge.connected),
       };
     }
     await sleep(500);
@@ -782,7 +784,10 @@ function armLoad(
   lateHolds: () => number;
   retired: () => number;
   /** Charge points believed to have a transaction open right now. Teardown
-   *  closes these before deleting anything — see {@link closeOpenTransactions}. */
+   *  closes these before deleting anything — see {@link closeOpenTransactions}.
+   *  Includes every charge point retired for a missing transaction id: those
+   *  deliberately keep their transaction open, and teardown's sweep is the
+   *  only thing that will ever close it. */
   openTransactions: () => string[];
   /** Charge points whose stop was acked but not yet seen on the wire. */
   stopsAwaitingWire: () => string[];
@@ -826,9 +831,14 @@ function armLoad(
   // waiting for it there would time out every cycle and stretch the cadence
   // for an id that is not coming.
   const awaitAssignedId = opts.ocppVersion === OCPP_1_6;
-  const confirmTimeoutMs = awaitAssignedId
-    ? ASSIGNED_ID_TIMEOUT_MS
-    : START_CONFIRM_TIMEOUT_MS;
+  // Two clocks, not one. The first has to contain the `start_transaction`
+  // RPC's admission because it starts before that RPC is offered; the second
+  // is restarted by the local-start event, so what the first overspends does
+  // not come out of the second. See `LOCAL_START_TIMEOUT_MS`.
+  const startBudget: StartWaitBudget = {
+    localStartMs: LOCAL_START_TIMEOUT_MS,
+    assignedIdMs: awaitAssignedId ? ASSIGNED_ID_TIMEOUT_MS : null,
+  };
   // Only *live* timers, and each one removes itself as it fires. A plain
   // array that every cycle appended to grew by two handles per transaction
   // per charge point and never shrank, so a long 2000-CP run retained
@@ -905,7 +915,7 @@ function armLoad(
     // Armed before the RPC is emitted, never after its ack: the
     // `transaction_started` event arrives on the watcher's socket while the
     // ack arrives on a pool socket, and nothing orders those two.
-    const started = watcher.arm(cpId, confirmTimeoutMs, awaitAssignedId);
+    const started = watcher.arm(cpId, startBudget);
     // Marked open before the call, not after its ack: a start whose ack never
     // arrived may still have opened a transaction at the CSMS.
     openTransactions.add(cpId);
@@ -966,17 +976,41 @@ function armLoad(
     // This is also what makes the stale-conf hazard impossible rather than
     // merely unlikely: a stale id can only exist after a confirmation timeout,
     // and after one this charge point is never armed again.
-    const retiring =
-      awaitAssignedId && outcome.started && outcome.transactionId === null;
-    if (retiring) {
+    const disposition = dispositionAfterStart(outcome, awaitAssignedId);
+    if (disposition.retire) {
       retired++;
+      // **The transaction is left open on purpose.** Issuing the stop here
+      // would send the placeholder: `OCPPMessageHandler.sendStopTransaction`
+      // snapshots `transaction.id` — still unassigned — and
+      // `ChargePoint.stopTransaction` then clears the connector's transaction
+      // synchronously, so the `StartTransaction.conf` that is still perfectly
+      // able to arrive (`handleSerialTimeout` releases the serialization slot
+      // but never evicts the `RequestHistory` entry, so the result handler
+      // still runs) finds `Connector.transactionId`'s setter with nothing to
+      // write to and returns. The CSMS session would then be unclosable for
+      // the rest of the run and through teardown — the placeholder stop
+      // destroys the only handle that could ever close it.
+      //
+      // Preserving it costs one CALL, not a stream — see
+      // `dispositionAfterStart`. This charge point never cycles again and runs
+      // no meter scheduler; the one frame it still emits is the
+      // `StatusNotification` that the late conf's transition to `Charging`
+      // produces. Teardown's `closeOpenTransactions` sweep issues the stop
+      // instead — outside every measurement window, and late enough that the
+      // conf has usually landed and the stop carries the real id.
       process.stderr.write(
         `[bench] ${cpId}: transaction started but no id was assigned within ` +
-          `${confirmTimeoutMs / 1000}s. Stopping it and retiring this charge ` +
-          `point from the transaction cycle — a conf arriving now would be ` +
-          `taken for a later cycle's.\n`,
+          `${(startBudget.assignedIdMs ?? 0) / 1000}s of the local start. ` +
+          `Retiring this charge point from the transaction cycle and leaving ` +
+          `its transaction open for teardown to close — stopping it now would ` +
+          `send the placeholder id and discard the transaction a later conf ` +
+          `still needs.\n`,
       );
     }
+    // Returning here is what preserves the transaction: no stop is sent, the
+    // charge point stays in `openTransactions`, and teardown closes it. That is
+    // the point — see `dispositionAfterStart`.
+    if (!disposition.stop) return;
 
     // The awaits above can span a `stop()`; without this check the callback
     // installs a timer after cleanup already cleared the set, keeping the
@@ -992,7 +1026,7 @@ function armLoad(
     const heldForMs =
       outcome.localStartAtMs === null ? 0 : Date.now() - outcome.localStartAtMs;
     const holdRemainingMs = holdMs - heldForMs;
-    if (holdRemainingMs <= 0 && !retiring) {
+    if (holdRemainingMs <= 0) {
       // The confirmation alone outlasted the hold, so this transaction has
       // already been on longer than configured. Stop now and record it; the
       // alternative is to hold anyway and report a duty cycle the run did not
@@ -1023,7 +1057,7 @@ function armLoad(
           `[bench] stop_transaction failed for ${cpId}: ${redactUrlsInText(String(err))}\n`,
         );
       }
-      if (stopped || retiring) return;
+      if (stopped) return;
       // Next start one full period after this one *started*, not one hold
       // after this one stopped: the cycle period stays exactly --tx-interval
       // while the CSMS keeps up, and stretches only when it genuinely cannot.
@@ -1051,7 +1085,7 @@ function armLoad(
     /** The bound this handle's cycles work to, enumerated stage by stage in
      *  `cycleBoundMs`. Teardown asks for it rather than choosing a number, so
      *  the bound cannot drift from the operation it describes. */
-    cycleBoundMs: () => cycleBoundMs(confirmTimeoutMs, holdMs),
+    cycleBoundMs: () => cycleBoundMs(startBudget, holdMs),
     settle: async (budgetMs: number): Promise<void> => {
       if (inFlight.size === 0) return;
       // Bounded: a cycle blocked on a confirmation that will never arrive must
@@ -1707,16 +1741,41 @@ async function main(): Promise<void> {
 
         // Relative to the preflight baseline, so `--allow-existing` measures
         // this run's fleet settling rather than the daemon's whole population.
-        const { connected, notSettled } = await untilLost(
+        // The target is the best available, not a sound one: see
+        // `attributeConnectivity` for why the subtraction cannot be trusted
+        // once anything else shares the daemon, and what is reported instead.
+        const settle = await untilLost(
           waitForSettle(
             opts,
             baseline.connected + allCpIds.length,
             opts.settleTimeoutSec,
           ),
         );
+        const settleAttribution = attributeConnectivity(
+          baseline,
+          settle.gauge,
+          allCpIds.length,
+        );
+        const notSettled = settle.notSettled;
         if (notSettled > 0) {
           process.stderr.write(
-            `[bench] N=${n}: ${notSettled} CP(s) did not report connected within ${opts.settleTimeoutSec}s\n`,
+            `[bench] N=${n}: ${notSettled} CP(s) did not report connected within ` +
+              `${opts.settleTimeoutSec}s` +
+              (settleAttribution.attributable
+                ? ""
+                : ` (estimated: ${settleAttribution.caveat})`) +
+              `\n`,
+          );
+        }
+        if (!settleAttribution.attributable) {
+          // Once per step, because it changes what four columns of that step's
+          // row mean. Not fatal: the latency histogram is the measurement, and
+          // it is unaffected — what is contaminated is the count of charge
+          // points the row attributes it to.
+          process.stderr.write(
+            `[bench] N=${n}: WARNING: connected/dropped/unsettled for this row ` +
+              `are ESTIMATES — ${settleAttribution.caveat}. The row is marked ` +
+              `"est" in the conn.src column.\n`,
           );
         }
 
@@ -1817,14 +1876,23 @@ async function main(): Promise<void> {
         // that produced it. A warmup disconnect is the worst case — its
         // reconnect attempts land before the `before` scrape, so the
         // `reconnects` column stays 0 and nothing else in the row hints at it.
-        const connectedAtEnd = fleetGauge(after).connected;
-        const dropped = Math.max(0, connected - connectedAtEnd);
+        const endAttribution = attributeConnectivity(
+          baseline,
+          fleetGauge(after),
+          allCpIds.length,
+        );
+        const dropped = Math.max(
+          0,
+          settleAttribution.connected - endAttribution.connected,
+        );
         if (dropped > 0) {
           process.stderr.write(
             `[bench] N=${n}: WARNING: ${dropped} charge point(s) that had settled ` +
               `were no longer connected at the end of the window; the row's ` +
-              `latency comes from the ${Math.max(0, connectedAtEnd - baseline.connected)} ` +
-              `still connected, not from all ${Math.max(0, connected - baseline.connected)}.\n`,
+              `latency comes from the ${endAttribution.connected} ` +
+              `still connected, not from all ${settleAttribution.connected}.` +
+              (endAttribution.attributable ? "" : " (estimated.)") +
+              `\n`,
           );
         }
 
@@ -1884,8 +1952,13 @@ async function main(): Promise<void> {
         results.push({
           requested: n,
           fleet: allCpIds.length,
-          connectedAtSettle: Math.max(0, connected - baseline.connected),
-          connectedAtEnd: Math.max(0, connectedAtEnd - baseline.connected),
+          connectedAtSettle: settleAttribution.connected,
+          connectedAtEnd: endAttribution.connected,
+          // One flag for both readings: a row whose settle count is an
+          // estimate and whose end count is exact is still a row whose
+          // `dropped` is an estimate.
+          connectivityAttributable:
+            settleAttribution.attributable && endAttribution.attributable,
           notSettled,
           aggregate,
           heartbeat,
@@ -1967,6 +2040,12 @@ async function main(): Promise<void> {
           connectedAtSettle: r.connectedAtSettle,
           droppedDuringWindow: droppedDuringWindow(r),
           notSettled: r.notSettled,
+          // Whether the four connectivity numbers above count this run's own
+          // charge points or are a daemon-wide gauge with the preflight
+          // baseline subtracted from it. `false` under `--allow-existing`,
+          // always — see `attributeConnectivity`. A collected result therefore
+          // carries its own caveat instead of being read as fact later.
+          connectivityAttributable: r.connectivityAttributable,
           calls: r.aggregate.count,
           p50Seconds: valueOrNull(histogramQuantile(r.aggregate, 0.5)),
           p95Seconds: valueOrNull(histogramQuantile(r.aggregate, 0.95)),

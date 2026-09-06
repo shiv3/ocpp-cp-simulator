@@ -24,8 +24,11 @@ import {
   answeredAfterWatchdog,
   assertDaemonEmpty,
   assertMetricsAreCurrent,
+  attributeConnectivity,
   EVICTIONS_METRIC,
   ASSIGNED_ID_TIMEOUT_MS,
+  LOCAL_START_TIMEOUT_MS,
+  SERIALIZED_AHEAD_CALLS,
   AUTHORIZE_WAIT_SEC,
   benchCpId,
   benchIdTag,
@@ -33,6 +36,7 @@ import {
   createFailureHint,
   cycleBoundMs,
   cyclePeriodSec,
+  dispositionAfterStart,
   daemonIsLocal,
   droppedDuringWindow,
   firstCycleDelayMs,
@@ -70,6 +74,7 @@ import {
   unresolvedIdsReport,
   validateOptions,
   type Sample,
+  type StartWaitBudget,
   type StepResult,
 } from "./lib.ts";
 
@@ -1064,6 +1069,7 @@ describe("a step's reported row (#302)", () => {
       fleet: 10,
       connectedAtSettle: 10,
       connectedAtEnd: 10,
+      connectivityAttributable: true,
       notSettled: 0,
       aggregate: emptyAggregate,
       heartbeat: null,
@@ -1145,14 +1151,19 @@ describe("a step's reported row (#302)", () => {
 describe("transaction-start tracking (#302)", () => {
   it("resolves an armed waiter when its charge point confirms", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, false);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: null,
+    });
     starts.confirm("CP-A", 0);
     expect(await armed).toMatchObject({ started: true, transactionId: 0 });
   });
 
   it("resolves unstarted when no confirmation arrives in time", async () => {
     const starts = new TransactionStarts();
-    expect(await starts.arm("CP-A", 10, false)).toMatchObject({
+    expect(
+      await starts.arm("CP-A", { localStartMs: 10, assignedIdMs: null }),
+    ).toMatchObject({
       started: false,
       transactionId: null,
     });
@@ -1166,7 +1177,10 @@ describe("transaction-start tracking (#302)", () => {
     // CSMS rejects. That happens near the latency knee, which is exactly where
     // the measurement matters.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.confirm("CP-A", 0); // local start; not enough on its own
     let settled = false;
     void armed.then(() => {
@@ -1184,7 +1198,10 @@ describe("transaction-start tracking (#302)", () => {
     // whatever id *it* carries. Nothing tests `transactionId === 0`, because
     // zero is a legal assignment.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.confirm("CP-A", 0);
     let settled = false;
     void armed.then(() => {
@@ -1202,7 +1219,10 @@ describe("transaction-start tracking (#302)", () => {
     // cycle waited its full timeout and retired the charge point despite a
     // valid confirmation.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.confirm("CP-A", 0); // local start
     starts.confirm("CP-A", 0); // and the CSMS really did assign 0
     const outcome = await armed;
@@ -1218,7 +1238,7 @@ describe("transaction-start tracking (#302)", () => {
     // has a transaction to stop. `null` is what says "no id", because 0 is a
     // legal assignment and could not carry that meaning.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 30, true);
+    const armed = starts.arm("CP-A", { localStartMs: 30, assignedIdMs: 30 });
     starts.confirm("CP-A", 0);
     const outcome = await armed;
     expect(outcome.started).toBe(true);
@@ -1230,14 +1250,20 @@ describe("transaction-start tracking (#302)", () => {
     // OCPP 2.x never sets the numeric id, so waiting would time out every
     // cycle and stretch the cadence for an id that is not coming.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, false);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: null,
+    });
     starts.confirm("CP-A", 0);
     expect(await armed).toMatchObject({ started: true, transactionId: 0 });
   });
 
   it("ignores a confirmation for a charge point nobody is waiting on", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, false);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: null,
+    });
     starts.confirm("CP-A", 0);
     expect((await armed).started).toBe(true);
     starts.confirm("CP-A", 0);
@@ -1252,27 +1278,161 @@ describe("transaction-start tracking (#302)", () => {
     const starts = new TransactionStarts();
     starts.lose("socket dropped");
     const startedAt = Date.now();
-    expect((await starts.arm("CP-A", 3_000, true)).started).toBe(false);
+    expect(
+      (await starts.arm("CP-A", { localStartMs: 3_000, assignedIdMs: 3_000 }))
+        .started,
+    ).toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(250);
     expect(starts.isAvailable).toBe(false);
   });
 
   it("fails the waiters that were already armed when the stream was lost", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.lose("socket dropped");
     expect((await armed).started).toBe(false);
   });
 
-  it("bounds the assigned-id wait by the point the daemon itself gives up", () => {
-    // Same reasoning as START_CONFIRM_TIMEOUT_MS: once StartTransaction has
-    // been abandoned by the per-CALL watchdog, its conf will never arrive, so
-    // waiting past that buys nothing.
-    expect(ASSIGNED_ID_TIMEOUT_MS).toBeGreaterThan(START_CONFIRM_TIMEOUT_MS);
+  it("budgets the assigned-id wait for the CALLs queued ahead of it", () => {
+    // Not "one watchdog and done". At the instant `transaction_started` fires,
+    // `StatusNotification(Preparing)` is already ahead of `StartTransaction.req`
+    // in the §4.1.1 queue by design (#176) and the handler may still hold an
+    // unrelated CALL in its in-flight slot — so the request this waits on has
+    // up to SERIALIZED_AHEAD_CALLS watchdogs of queueing before its own.
+    // Budgeting one watchdog is the same "healthy confirmation reported as a
+    // failure" defect one stage further in.
     expect(ASSIGNED_ID_TIMEOUT_MS).toBe(
+      ((SERIALIZED_AHEAD_CALLS + 1) * CALL_WATCHDOG_SEC +
+        START_CONFIRM_MARGIN_SEC) *
+        1000,
+    );
+    expect(ASSIGNED_ID_TIMEOUT_MS).toBeGreaterThan(
+      (CALL_WATCHDOG_SEC + START_CONFIRM_MARGIN_SEC) * 1000,
+    );
+    // The authorization wait is *not* in it: the local start only fires once
+    // `authorizeAndWait` has resolved, so charging it again would be the
+    // double-count the phase split exists to remove.
+    expect(ASSIGNED_ID_TIMEOUT_MS % 1000).toBe(
+      (START_CONFIRM_MARGIN_SEC * 1000) % 1000,
+    );
+    expect(ASSIGNED_ID_TIMEOUT_MS).not.toBe(
       (AUTHORIZE_WAIT_SEC + CALL_WATCHDOG_SEC + START_CONFIRM_MARGIN_SEC) *
         1000,
     );
+  });
+
+  it("retires a start whose id never landed WITHOUT stopping it", async () => {
+    // The finding. Issuing `stop_transaction` here sends the placeholder id
+    // and, worse, makes `ChargePoint.stopTransaction` clear the connector's
+    // transaction — so the `StartTransaction.conf` that is still able to
+    // arrive finds nothing to assign its id to, and the CSMS session can never
+    // be closed, not even by teardown. Preserving it is what keeps the handle
+    // alive until an id exists.
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", { localStartMs: 400, assignedIdMs: 30 });
+    starts.confirm("CP-A", 0); // local start only; no conf ever comes
+    const outcome = await armed;
+    expect(outcome.started).toBe(true);
+    expect(outcome.transactionId).toBe(null);
+
+    const d = dispositionAfterStart(outcome, true);
+    expect(d.retire).toBe(true);
+    expect(d.stop).toBe(false); // the whole finding, in one assertion
+  });
+
+  it("stops and keeps cycling every start that did get an id", () => {
+    // Including id 0, which is a legal assignment — retiring on it was the
+    // earlier bug, and it must not come back as "0 means no stop".
+    for (const transactionId of [0, 1, 4242]) {
+      const d = dispositionAfterStart(
+        { started: true, transactionId, localStartAtMs: 1_000 },
+        true,
+      );
+      expect(d).toEqual({ stop: true, retire: false });
+    }
+  });
+
+  it("stops a start that was never confirmed at all", () => {
+    // A start that may still have opened a transaction at the CSMS. Unlike the
+    // retirement case there is no id to wait for and no transaction the
+    // simulator is holding open, so leaving the connector occupied would make
+    // every later cycle for this charge point a duplicate.
+    const d = dispositionAfterStart(
+      { started: false, transactionId: null, localStartAtMs: null },
+      true,
+    );
+    expect(d).toEqual({ stop: true, retire: false });
+  });
+
+  it("never retires on a version that assigns no id", () => {
+    // 2.x sets no numeric id, so `transactionId: null` there is normal, not a
+    // missing assignment.
+    const d = dispositionAfterStart(
+      { started: true, transactionId: null, localStartAtMs: 1_000 },
+      false,
+    );
+    expect(d).toEqual({ stop: true, retire: false });
+  });
+
+  it("gives the local-start wait the whole RPC deadline on top of authorization", () => {
+    // The finding: the waiter is armed *before* `SocketPool.rpc` queues for its
+    // token, its in-flight slot and its ack, and that call may legitimately
+    // spend RPC_DEADLINE_MS doing so under exactly the pressure this benchmark
+    // exists to find. A budget of START_CONFIRM_TIMEOUT_MS alone therefore left
+    // little or none of the documented authorization allowance for a
+    // transaction that had not yet been asked for.
+    expect(LOCAL_START_TIMEOUT_MS).toBe(
+      RPC_DEADLINE_MS + START_CONFIRM_TIMEOUT_MS,
+    );
+    expect(LOCAL_START_TIMEOUT_MS - RPC_DEADLINE_MS).toBe(
+      (AUTHORIZE_WAIT_SEC + START_CONFIRM_MARGIN_SEC) * 1000,
+    );
+  });
+
+  it("gives the assigned-id phase its own clock, not the first phase's remainder", async () => {
+    // THE finding. With one timer armed at `arm()`, an admission that consumed
+    // nearly the whole budget left the confirmation nothing — so a start that
+    // was confirmed well inside its own allowance was reported unconfirmed and
+    // its charge point retired, silently reducing the offered load at the knee.
+    //
+    // Scaled down but shaped the same: the local start lands at half the
+    // local-start budget, and the id half the assigned-id budget *after that*.
+    // Both are comfortably inside their own phase; their sum is outside either.
+    // The margins are 50% rather than tight, because these are real timers on a
+    // shared CI runner and a flaky test here would be read as this fix failing.
+    const localStartMs = 200;
+    const assignedIdMs = 200;
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", { localStartMs, assignedIdMs });
+    await sleep(100);
+    starts.confirm("CP-A", 0); // local start, inside phase one
+    await sleep(100); // past `localStartMs` in absolute terms
+    starts.confirm("CP-A", 4242); // conf, inside phase two's own budget
+    const outcome = await armed;
+    expect(outcome.started).toBe(true);
+    // Not null: null is the retirement signal, and retiring here is the bug.
+    expect(outcome.transactionId).toBe(4242);
+  });
+
+  it("does not let the assigned-id clock start before the local start", async () => {
+    // The other half of the same property: the second phase's budget is spent
+    // from the local-start emission, so a conf later than `assignedIdMs`
+    // *after* that emission does time out. Without this the fix would just be
+    // "make the number bigger".
+    const starts = new TransactionStarts();
+    const armed = starts.arm("CP-A", {
+      localStartMs: 2_000,
+      assignedIdMs: 40,
+    });
+    starts.confirm("CP-A", 0);
+    await sleep(400);
+    starts.confirm("CP-A", 4242); // far too late for phase two
+    const outcome = await armed;
+    expect(outcome.started).toBe(true);
+    expect(outcome.transactionId).toBe(null);
   });
 
   it("aborts the waits raced against it, naming the reason", async () => {
@@ -1297,7 +1457,10 @@ describe("transaction-start tracking (#302)", () => {
     // report a failure it did not have — nor abort whatever the SIGINT path is
     // still awaiting.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, false);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: null,
+    });
     starts.close();
     starts.lose("the socket disconnected because we closed it");
     expect((await armed).started).toBe(false);
@@ -1366,10 +1529,90 @@ describe("anchoring the stagger to a run-wide epoch (#302)", () => {
   });
 });
 
+describe("attributing connectivity to this run's own fleet (#302)", () => {
+  const g = (total: number, connected: number) => ({ total, connected });
+
+  it("needs no subtraction on a daemon the preflight found empty", () => {
+    // `assertDaemonEmpty` guarantees baseline.total === 0 without
+    // --allow-existing, so every connected charge point is this run's and the
+    // number is exact.
+    const a = attributeConnectivity(g(0, 0), g(10, 10), 10);
+    expect(a).toEqual({ connected: 10, attributable: true, caveat: null });
+  });
+
+  it("marks a row estimated when something else created charge points mid-run", () => {
+    // The daemon was empty at preflight and now holds more than this run
+    // created: someone else is using it, and the gauge is no longer ours.
+    // Detectable for free from `total` in the same scrape.
+    const a = attributeConnectivity(g(0, 0), g(12, 12), 10);
+    expect(a.attributable).toBe(false);
+    expect(a.caveat).toMatch(/creating or deleting/);
+    expect(a.connected).toBe(10); // never above what this run created
+  });
+
+  it("never claims attribution under --allow-existing, even when nothing looks wrong", () => {
+    // THE finding. A bystander disconnecting while one of this run's charge
+    // points connects nets to zero on BOTH gauges, so "no drift detected" is
+    // not evidence of no drift. Subtracting a baseline that the flag exists to
+    // permit changing is inference, not attribution.
+    const a = attributeConnectivity(g(5, 5), g(15, 15), 10);
+    expect(a.connected).toBe(10);
+    expect(a.attributable).toBe(false);
+    expect(a.caveat).toMatch(/pre-existing/);
+  });
+
+  it("does not let a bystander's disconnect report one of ours as unsettled", () => {
+    // Before: baseline 5 connected, 10 of ours up, one bystander drops → the
+    // gauge reads 14 and the subtraction says 9 of ours are connected, naming
+    // a charge point of ours that is in fact fine. It still says 9 — there is
+    // no way to know better from a gauge with no cpId label — but it no longer
+    // says it as a fact.
+    const a = attributeConnectivity(g(5, 5), g(15, 14), 10);
+    expect(a.connected).toBe(9);
+    expect(a.attributable).toBe(false);
+  });
+
+  it("clamps to the fleet this run created", () => {
+    // A bystander connecting can push the subtraction above the number of
+    // charge points this run owns; reporting 11-of-10 connected is worse than
+    // reporting 10 with a caveat.
+    expect(attributeConnectivity(g(5, 3), g(15, 15), 10).connected).toBe(10);
+    // And it never goes negative when the baseline shrinks.
+    expect(attributeConnectivity(g(5, 5), g(11, 2), 10).connected).toBe(0);
+  });
+
+  it("marks the row in the table, so the caveat travels with the number", () => {
+    const base: StepResult = {
+      requested: 10,
+      fleet: 10,
+      connectedAtSettle: 10,
+      connectedAtEnd: 10,
+      connectivityAttributable: true,
+      notSettled: 0,
+      aggregate: mergeHistogramDeltas(new Map()),
+      heartbeat: null,
+      timeouts: 0,
+      evictions: 0,
+      errors: 0,
+      reconnects: 0,
+      unconfirmedStarts: 0,
+      lateHolds: 0,
+      retired: 0,
+    };
+    expect(row(base)[STEP_COLUMNS.indexOf("conn.src")]).toBe("own");
+    expect(
+      row({ ...base, connectivityAttributable: false })[
+        STEP_COLUMNS.indexOf("conn.src")
+      ],
+    ).toBe("est");
+  });
+});
+
 describe("end-of-window connectivity (#302)", () => {
   const base = {
     requested: 10,
     fleet: 10,
+    connectivityAttributable: true,
     notSettled: 0,
     aggregate: mergeHistogramDeltas(new Map()),
     heartbeat: null,
@@ -1676,7 +1919,7 @@ describe("the three interacting requirements on start confirmation (#302)", () =
     // later waiter, a straggling conf has nothing to confirm: it is the
     // absence of a waiter, not a test on the number, that protects both.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 30, true);
+    const armed = starts.arm("CP-A", { localStartMs: 30, assignedIdMs: 30 });
     starts.confirm("CP-A", 0);
     const outcome = await armed;
     expect(outcome.started).toBe(true);
@@ -1690,7 +1933,10 @@ describe("the three interacting requirements on start confirmation (#302)", () =
 
   it("R2: the wait runs to the assigned id, not the placeholder", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.confirm("CP-A", 0);
     let settled = false;
     void armed.then(() => {
@@ -1709,12 +1955,15 @@ describe("the three interacting requirements on start confirmation (#302)", () =
     // (the CSMS-assigns-zero bug) or keep cycling ones whose straggling conf
     // can still confuse a later cycle.
     const timedOut = new TransactionStarts();
-    const a = timedOut.arm("CP-A", 30, true);
+    const a = timedOut.arm("CP-A", { localStartMs: 30, assignedIdMs: 30 });
     timedOut.confirm("CP-A", 0);
     expect((await a).transactionId).toBe(null);
 
     const assignedZero = new TransactionStarts();
-    const b = assignedZero.arm("CP-B", 5_000, true);
+    const b = assignedZero.arm("CP-B", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     assignedZero.confirm("CP-B", 0);
     assignedZero.confirm("CP-B", 0);
     expect((await b).transactionId).toBe(0);
@@ -1725,7 +1974,10 @@ describe("the three interacting requirements on start confirmation (#302)", () =
     // added the whole StartTransaction.conf latency to every transaction's
     // on-time, so the duty cycle stopped matching the configuration.
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.confirm("CP-A", 0, 1_000);
     starts.confirm("CP-A", 77, 4_000);
     const outcome = await armed;
@@ -1738,7 +1990,10 @@ describe("the three interacting requirements on start confirmation (#302)", () =
 
   it("keeps the first local start's time when the placeholder repeats", async () => {
     const starts = new TransactionStarts();
-    const armed = starts.arm("CP-A", 5_000, true);
+    const armed = starts.arm("CP-A", {
+      localStartMs: 5_000,
+      assignedIdMs: 5_000,
+    });
     starts.confirm("CP-A", 0, 1_000);
     starts.confirm("CP-A", 0, 2_500);
     starts.confirm("CP-A", 5, 3_000);
@@ -1747,7 +2002,10 @@ describe("the three interacting requirements on start confirmation (#302)", () =
 
   it("reports no local-start time when nothing started", async () => {
     const starts = new TransactionStarts();
-    expect((await starts.arm("CP-A", 20, true)).localStartAtMs).toBe(null);
+    expect(
+      (await starts.arm("CP-A", { localStartMs: 20, assignedIdMs: 20 }))
+        .localStartAtMs,
+    ).toBe(null);
   });
 });
 
@@ -1757,6 +2015,7 @@ describe("a row discloses a duty cycle that slipped (#302)", () => {
     fleet: 2,
     connectedAtSettle: 2,
     connectedAtEnd: 2,
+    connectivityAttributable: true,
     notSettled: 0,
     aggregate: mergeHistogramDeltas(new Map()),
     heartbeat: null,
@@ -1864,32 +2123,50 @@ describe("credentials never reach an error message (#302)", () => {
 });
 
 describe("the complete cycle bound (#302)", () => {
+  const v16: StartWaitBudget = {
+    localStartMs: LOCAL_START_TIMEOUT_MS,
+    assignedIdMs: ASSIGNED_ID_TIMEOUT_MS,
+  };
+  const v2: StartWaitBudget = {
+    localStartMs: LOCAL_START_TIMEOUT_MS,
+    assignedIdMs: null,
+  };
+
   it("covers every stage a cycle can await in", () => {
-    // The bound has grown twice, so the enumeration is asserted rather than
-    // trusted: the start RPC, the confirmation wait, the hold, the stop RPC.
-    // Nothing else in `cycle` awaits — arming is synchronous and the next
-    // cycle is scheduled after the body returns.
-    // 1.6 at --tx-interval 2: both RPC stages, the assigned-id wait, the hold.
-    expect(cycleBoundMs(ASSIGNED_ID_TIMEOUT_MS, holdSec(2) * 1000)).toBe(
-      RPC_DEADLINE_MS + 45_000 + 1_000 + RPC_DEADLINE_MS,
+    // The bound has grown three times, so the enumeration is asserted rather
+    // than trusted: the local-start wait (which contains the start RPC), the
+    // assigned-id wait, the hold, the stop RPC. Nothing else in `cycle`
+    // awaits — arming is synchronous and the next cycle is scheduled after the
+    // body returns.
+    expect(cycleBoundMs(v16, holdSec(2) * 1000)).toBe(
+      LOCAL_START_TIMEOUT_MS + ASSIGNED_ID_TIMEOUT_MS + 1_000 + RPC_DEADLINE_MS,
     );
-    // The previous bound omitted both RPC stages, so it was short by a full
-    // 70s — long enough for an emitted start or stop to take effect after the
-    // fleet had been deleted.
-    const previous = ASSIGNED_ID_TIMEOUT_MS + holdSec(2) * 1000;
-    expect(
-      cycleBoundMs(ASSIGNED_ID_TIMEOUT_MS, holdSec(2) * 1000) - previous,
-    ).toBe(2 * RPC_DEADLINE_MS);
-    // And it must be exactly the four stages, so dropping one fails here.
-    for (const confirmMs of [
-      START_CONFIRM_TIMEOUT_MS,
-      ASSIGNED_ID_TIMEOUT_MS,
-    ]) {
+    // The start RPC is *not* added on top: `LOCAL_START_TIMEOUT_MS` already
+    // contains it, and adding it again would double-count the same 35s.
+    expect(cycleBoundMs(v16, 0)).toBeLessThan(
+      RPC_DEADLINE_MS +
+        LOCAL_START_TIMEOUT_MS +
+        ASSIGNED_ID_TIMEOUT_MS +
+        RPC_DEADLINE_MS,
+    );
+    // Every stage is present, so dropping one fails here.
+    for (const budget of [v2, v16]) {
       const holdMs = holdSec(60) * 1000;
-      const bound = cycleBoundMs(confirmMs, holdMs);
+      const bound = cycleBoundMs(budget, holdMs);
+      const confirmMs = budget.localStartMs + (budget.assignedIdMs ?? 0);
       expect(bound).toBeGreaterThan(confirmMs + holdMs);
-      expect(bound).toBe(confirmMs + holdMs + 2 * RPC_DEADLINE_MS);
+      expect(bound).toBe(confirmMs + holdMs + RPC_DEADLINE_MS);
     }
+  });
+
+  it("keeps 2.x at the bound it had before the phases were split", () => {
+    // The split moved 35s from the sum into `localStartMs`; on 2.x, where
+    // there is no second phase, the composed bound is therefore unchanged.
+    // Stated because teardown waits this long per handle and a silent growth
+    // here is a silently slower Ctrl-C.
+    expect(cycleBoundMs(v2, holdSec(2) * 1000)).toBe(
+      RPC_DEADLINE_MS + START_CONFIRM_TIMEOUT_MS + 1_000 + RPC_DEADLINE_MS,
+    );
   });
 });
 

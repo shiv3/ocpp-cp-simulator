@@ -144,6 +144,30 @@ the `reconnects` column at zero. Both ends of the step are in `--out`
 (`connectedAtSettle` and `connected`), and a non-zero drop is warned about on
 stderr.
 
+**`conn.src` says whether those numbers are counted or inferred.**
+`ocppcp_charge_points` is a daemon-wide gauge with no `cpId` label, so "how many
+of _ours_ are connected" can only be the preflight count subtracted from the
+current one. On a daemon the preflight found empty that is no subtraction at
+all — everything registered is this run's — and the column reads **`own`**.
+Under `--allow-existing` it reads **`est`**, always: a bystander disconnecting
+while one of this run's charge points connects nets to zero on both gauges, so
+"no drift detected" is not evidence of no drift. Both directions had bitten —
+a bystander dropping made the run report one of its _own_ charge points as
+unsettled, and a bystander connecting let a step settle before this run's fleet
+was up. Per-charge-point attribution exists in principle (the `status` RPC is
+per charge point) but would add a poll per charge point per settle round to the
+control-plane budget the teardown ceiling rations, which is the instrument
+perturbing what it measures. So the number is offered with its caveat attached
+rather than dropped or asserted: `conn.src` in the table,
+`connectivityAttributable` on every `--out` row, and one stderr warning per
+step. The latency histogram is unaffected; what is contaminated is the fleet
+size the row attributes it to. The default mode also degrades to `est` if the
+daemon's total ever exceeds what this run created, and the message names both
+causes because they cannot be told apart from here: a `cp.create_many` that
+outlived its client deadline and is still registering ids this run never got
+back — the case teardown's reconciliation exists for — or something else
+creating charge points on this daemon.
+
 **The hardware block says whose hardware it is.** `os.cpus()`, `os.totalmem()`
 and `Bun.version` describe the process running the script, which is the machine
 under test only when `--daemon-url` is local. A local run prints
@@ -242,9 +266,14 @@ ignored while this cycle's own id is still waited for. Taking only the first
 emission satisfied the first requirement and broke the second:
 `sendStopTransaction` snapshots the id immediately, so a conf slower than the
 hold sent `0` and produced CALLERRORs and corrupted connector state, near the
-latency knee the tool exists to find. Bounded at the authorization wait plus the
-per-CALL watchdog, past which no id is ever coming; OCPP 2.x assigns no numeric
-id, so nothing is waited for there.
+latency knee the tool exists to find. Bounded at **95s measured from the local
+start** — the CALLs the domain queues ahead of `StartTransaction.req` at that
+instant (`StatusNotification(Preparing)` by design, plus one unrelated CALL that
+may hold the serialization slot), a watchdog each, plus `StartTransaction`'s own
+and slack; OCPP 2.x assigns no numeric id, so nothing is waited for there.
+Passing that bound does **not** mean no id is coming — `handleSerialTimeout`
+releases the serialization slot but never evicts the `RequestHistory` entry, so
+a late CALLRESULT is still applied. What expires is the cycle's accounting.
 
 **The stop waits for the assigned transaction id.** On OCPP 1.6
 `transaction_started` is emitted twice — locally with the placeholder id `0`,
@@ -254,9 +283,14 @@ ignored while this cycle's own id is still waited for. Taking only the first
 emission satisfied that first requirement and broke the second:
 `sendStopTransaction` snapshots the id immediately, so a conf slower than the
 hold sent `0` and produced CALLERRORs and corrupted connector state, near the
-latency knee the tool exists to find. Bounded at the authorization wait plus the
-per-CALL watchdog, past which no id is ever coming; OCPP 2.x assigns no numeric
-id, so nothing is waited for there.
+latency knee the tool exists to find. Bounded at **95s measured from the local
+start** — the CALLs the domain queues ahead of `StartTransaction.req` at that
+instant (`StatusNotification(Preparing)` by design, plus one unrelated CALL that
+may hold the serialization slot), a watchdog each, plus `StartTransaction`'s own
+and slack; OCPP 2.x assigns no numeric id, so nothing is waited for there.
+Passing that bound does **not** mean no id is coming — `handleSerialTimeout`
+releases the serialization slot but never evicts the `RequestHistory` entry, so
+a late CALLRESULT is still applied. What expires is the cycle's accounting.
 
 **The hold runs from the local start, and a charge point whose id never
 arrives is retired.** Starting the hold timer once the assigned id had been
@@ -269,6 +303,21 @@ because its conf may still land during a later cycle and be taken for that
 cycle's id — the event carries no generation, so a stale conf cannot be told
 from a fresh one, and withdrawing the charge point is what makes the confusion
 impossible rather than unlikely.
+
+**A retired charge point keeps its transaction open.** It is not stopped at
+retirement: `sendStopTransaction` would snapshot the still-unassigned id and
+`ChargePoint.stopTransaction` then clears the connector's transaction
+synchronously, so the late `StartTransaction.conf` — which is still routed to
+`StartTransactionResultHandler`, since the watchdog never evicts the request —
+would find `Connector.transactionId`'s setter with nothing to write to and
+return. The placeholder stop destroys the only handle that could close the CSMS
+session. Preserving it costs **one CALL, not a stream**: the charge point never
+cycles again and runs no meter scheduler (`cp.create` accepts no field that
+enables one and the daemon constructs every charge point with
+`autoMeterValueSetting = null`), and the single frame it still emits is the
+`StatusNotification` produced when the late conf drives the connector to
+`Charging`. Teardown's closing sweep issues the stop instead, outside every
+measurement window and late enough that the conf has usually landed.
 
 **A create whose client deadline expired keeps creating.** `cp.create_many`
 rejecting at its 35s deadline does not stop the daemon's sequential handler, so
@@ -292,8 +341,8 @@ written: the measurement happened, and it is the teardown that could not be
 proved complete. The composed teardown ceiling — settle, an outstanding
 create (35s), closing transactions (30s), in-flight heartbeat reapplications
 (35s), the first delete sweep (60s) and 3 × (35s + 60s) of reconciliation —
-is about six and a half minutes, reached only against a daemon that is
-answering but has not finished creating; a daemon that has gone away is the
+is about **ten and a half minutes on OCPP 1.6** (about nine on 2.x), reached
+only against a daemon that is answering but has not finished creating; a daemon that has gone away is the
 _fast_ path, since the sweep is skipped and reconciliation returns at once
 without spending a wait. The table is on the README so an operator meets the
 number before the wait.
@@ -320,21 +369,39 @@ first emission, the one carrying the placeholder id `0`, since 1.6 re-emits the
 event with the real id once `StartTransaction.conf` lands and a late conf would
 otherwise confirm the _next_ cycle's start. Starts it cannot confirm are counted in the
 `unconf.tx` column — a slow CSMS, not a broken one. The wait is bounded by the
-daemon's **authorization** timeout (10s, plus slack), never by the hold: at
-`--tx-interval 2` the hold is 1s while `authorizeAndWait` may legitimately take
-10s, so a hold-length wait declared the start dead while it was still pending,
-stopped a transaction that did not exist, and began the next cycle into the
-arrival of the old one — which could leave a transaction active or let its event
-confirm a newer cycle's waiter. `authorizeAndWait` never rejects (it resolves
+pool's whole-call RPC deadline (35s) plus the daemon's **authorization** timeout
+(10s) plus slack, so 50s in all, never by the hold: at `--tx-interval 2` the
+hold is 1s while `authorizeAndWait` may legitimately take 10s, so a hold-length
+wait declared the start dead while it was still pending, stopped a transaction
+that did not exist, and began the next cycle into the arrival of the old one —
+which could leave a transaction active or let its event confirm a newer cycle's
+waiter. `authorizeAndWait` never rejects (it resolves
 `"Accepted"` on timeout), so a start unconfirmed past that bound was genuinely
 denied; the wait ends on a definitive answer, and no second cycle for a charge
 point begins until the outstanding one is answered, held and stopped. The
 resulting drift is **one-way and permanent**: a cycle that waited out a denial
-occupies 15s plus a hold and the next is anchored one period after that one
-_started_, so at `--tx-interval 2` the charge point stretches from a 2s cycle to
-roughly 16s and never catches up. A non-zero `unconf.tx` means those charge
-points' cadence is their own rather than the flag's, not merely that the load
-was late.
+occupies up to 50s plus a hold and the next is anchored one period after that
+one _started_, so at `--tx-interval 2` the charge point stretches from a 2s
+cycle to about a minute and never catches up. A non-zero `unconf.tx` means those
+charge points' cadence is their own rather than the flag's, not merely that the
+load was late.
+
+**Each phase of the confirmation has its own clock, and the first one contains
+the RPC.** The waiter is armed before `SocketPool.rpc("start_transaction", …)`
+queues for its token, its in-flight slot and its ack — it must be, since the
+event arrives on the watcher's socket while the ack arrives on a pool socket and
+nothing orders the two. Under the pressure the benchmark exists to find that
+call can spend its whole 35s deadline being admitted, so a 15s confirmation
+budget measured from arming left little or none of the documented authorization
+allowance for a transaction that had not yet been asked for: healthy starts were
+reported `unconf.tx`, their charge points retired for a missing id, and the
+offered load fell at the knee for a reason no column showed. The local-start
+budget is therefore 35s + 15s, and the assigned-id budget is _restarted_ by the
+local-start event rather than inheriting the first phase's remainder — splitting
+the budget without restarting it would be the same defect with a different
+number. Neither clock is re-armed from the ack, which would be tighter but races
+the event it is meant to bound; the chosen bounds are monotone, so larger only
+ever reduces false retirements.
 **Losing the socket aborts the run instead:** without confirmations every later
 cycle would burn a full hold waiting for one that can never arrive and then the
 real hold, roughly doubling each transaction's occupancy and collapsing the

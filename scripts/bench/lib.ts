@@ -371,47 +371,194 @@ export const START_CONFIRM_TIMEOUT_MS =
 export const RPC_DEADLINE_MS = 35_000;
 
 /**
- * The longest a single transaction cycle may legitimately take.
+ * How long a cycle waits for the **local start** emission, measured from the
+ * moment the waiter is armed.
  *
- * Enumerated stage by stage, because this bound has grown twice and the next
- * reader deserves to check the sum rather than trust it. A cycle awaits in
- * exactly four places:
+ * **Includes the RPC's own admission, which is the whole point.** The waiter is
+ * armed before `SocketPool.rpc("start_transaction", …)` is even offered a
+ * token, and under the daemon and control-plane pressure this benchmark exists
+ * to find that call can legitimately spend the full {@link RPC_DEADLINE_MS}
+ * queueing for its token, its in-flight slot and its acknowledgement. A budget
+ * of {@link START_CONFIRM_TIMEOUT_MS} alone therefore left little or none of
+ * the documented authorization allowance for the transaction that had not yet
+ * been asked for — so at the knee healthy starts were reported `unconf.tx`,
+ * their charge points were retired, and the offered load fell for a reason
+ * invisible in every column of the row. The clock has to start before the RPC
+ * because the event can arrive before the ack does; so the budget has to
+ * contain the RPC.
  *
- *  1. the `start_transaction` RPC — {@link RPC_DEADLINE_MS};
- *  2. the confirmation wait — `confirmTimeoutMs`
- *     ({@link START_CONFIRM_TIMEOUT_MS} on 2.x,
- *     {@link ASSIGNED_ID_TIMEOUT_MS} on 1.6);
- *  3. the hold — `holdMs`;
- *  4. the `stop_transaction` RPC — {@link RPC_DEADLINE_MS} again.
- *
- * Arming is synchronous and the next cycle is scheduled after the body
- * returns, so there is no fifth. The RPC stages are what the previous bound
- * omitted: a cycle could leave the confirmation wait and then sit in the pool
- * for a further 35s, so teardown stopped waiting and deleted the fleet while
- * an already-emitted start or stop was still in flight.
- *
- * Summed, not maxed. Stages 1 and 2 overlap in practice, but a teardown bound
- * that is too large only costs time when something is genuinely stuck, while
- * one that is too small loses transactions.
+ * Not re-armed from the RPC's acknowledgement, which would be the tighter
+ * bound: the ack lands on a pool socket while `transaction_started` lands on
+ * the watcher's socket and nothing orders those two, so an ack-triggered
+ * re-arm can only ever start a clock that the event has already beaten. This
+ * one is monotone instead — a larger budget can only ever *reduce* false
+ * retirements, and its only cost is that a genuinely denied start is reported
+ * this much later.
  */
-export function cycleBoundMs(confirmTimeoutMs: number, holdMs: number): number {
-  return RPC_DEADLINE_MS + confirmTimeoutMs + holdMs + RPC_DEADLINE_MS;
+export const LOCAL_START_TIMEOUT_MS =
+  RPC_DEADLINE_MS + START_CONFIRM_TIMEOUT_MS;
+
+/**
+ * CALLs the domain is known to place ahead of `StartTransaction.req` in the
+ * §4.1.1 serialization queue at the instant `transaction_started` fires.
+ *
+ * Two, enumerated rather than guessed: `ChargePoint.startTransaction` enqueues
+ * `StatusNotification(Preparing)` *before* the transaction event by design
+ * (#176), and `OCPPMessageHandler` may already hold one unrelated CALL — a
+ * Heartbeat, most often — in its in-flight slot with a full watchdog left to
+ * run. Both are ahead of `StartTransaction.req`, and neither exists yet as far
+ * as the benchmark can see.
+ *
+ * **A bound in the regime where the number matters, and the right signal
+ * outside it.** The queue is FIFO and unbounded, so a CSMS stalled long enough
+ * to pile several heartbeats in front of `StatusNotification` can outlast the
+ * budget below. But that is the regime past the knee: while CSMS latency stays
+ * under `--heartbeat-interval` the serial queue does not grow, so at most one
+ * heartbeat-class CALL is ahead of `Preparing` and two is a real bound. Once
+ * the queue does grow, retirement *is* the correct answer — the offered load
+ * genuinely fell, the `retired` column says so, and that is the knee the sweep
+ * exists to find.
+ */
+export const SERIALIZED_AHEAD_CALLS = 2;
+
+/**
+ * How long a cycle waits for the **CSMS-assigned** transaction id, measured
+ * from the local-start emission rather than from arming.
+ *
+ * From the local start, because that is the first instant at which the
+ * `StartTransaction.req` this waits on has been enqueued at all. Timing it
+ * from arming shared one budget with the admission of an RPC that had not been
+ * accepted yet — the same defect as {@link LOCAL_START_TIMEOUT_MS}, one stage
+ * later.
+ *
+ * Sized as the CALLs known to be queued ahead of it
+ * ({@link SERIALIZED_AHEAD_CALLS}, each able to burn a full
+ * {@link CALL_WATCHDOG_SEC}), plus `StartTransaction`'s own watchdog, plus
+ * slack. The authorization wait is deliberately *not* in it: the local start
+ * only fires once `authorizeAndWait` has resolved, so that stage is already
+ * spent.
+ *
+ * Note what this bound does **not** mean. It used to be documented as "past
+ * here no id is ever coming"; that is false. `handleSerialTimeout` releases
+ * the serialization slot but never touches `RequestHistory`, so a
+ * `StartTransaction.conf` that arrives after the watchdog is still routed to
+ * `StartTransactionResultHandler` and still assigns the id. What expires here
+ * is this cycle's *accounting*, not the transaction — which is why a charge
+ * point retired at this bound keeps its transaction open instead of stopping
+ * it with a placeholder id.
+ */
+export const ASSIGNED_ID_TIMEOUT_MS =
+  ((SERIALIZED_AHEAD_CALLS + 1) * CALL_WATCHDOG_SEC +
+    START_CONFIRM_MARGIN_SEC) *
+  1000;
+
+/**
+ * What a cycle does once its start has been answered — or has run out of
+ * budget without one.
+ *
+ * A record rather than a branch inside `cycle`, because the interesting field
+ * is `stop`, and the reason it is sometimes `false` is not obvious from the
+ * call site.
+ */
+export interface StartDisposition {
+  /** Issue `stop_transaction` for what this cycle started, and go on to
+   *  schedule the next cycle. The two are one decision: a charge point whose
+   *  transaction is preserved is exactly the one that stops cycling, so a
+   *  separate `cycle` flag would be a branch nothing could ever take. */
+  readonly stop: boolean;
+  /** Count this charge point as withdrawn from the offered load. */
+  readonly retire: boolean;
 }
 
 /**
- * How long a cycle waits for the **CSMS-assigned** transaction id, on the
- * versions that supply one.
+ * Decide what to do with a start whose outcome is now known.
  *
- * Bounded by the same reasoning as {@link START_CONFIRM_TIMEOUT_MS}: past the
- * point where the daemon itself has given up, no id is ever coming, so waiting
- * longer buys nothing. Here that is the authorization wait plus the per-CALL
- * watchdog — once `StartTransaction` has been abandoned
- * ({@link CALL_WATCHDOG_SEC}) its conf will never arrive — plus slack. A CSMS
- * that simply never answers therefore stalls one cycle by this much and then
- * proceeds; it cannot hang the run.
+ * The one case that is not obvious: a 1.6 transaction that began locally but
+ * whose CSMS-assigned id never arrived is **retired without being stopped**.
+ * Stopping it would send the placeholder —
+ * `OCPPMessageHandler.sendStopTransaction` snapshots `transaction.id`, still
+ * unassigned — and `ChargePoint.stopTransaction` then clears the connector's
+ * transaction synchronously. A `StartTransaction.conf` is still perfectly able
+ * to arrive afterwards (`handleSerialTimeout` releases the serialization slot
+ * but never evicts the `RequestHistory` entry, so the result handler still
+ * runs), and it would find `Connector.transactionId`'s setter with no
+ * transaction to write to and return. The placeholder stop therefore destroys
+ * the only handle that could ever close the CSMS's session, and does it at
+ * precisely the moment the session is most likely to be real.
+ *
+ * Preserving it costs one CALL, not a stream. The charge point never cycles
+ * again, and a connector merely holding a transaction runs no meter scheduler:
+ * `Connector.startConfiguredMeterValue` needs `autoConfig.enabled` or an
+ * increment fallback, `cp.create` accepts no field that sets either, and the
+ * daemon constructs every charge point with `autoMeterValueSetting = null`
+ * (`src/cli/service.ts`). The exception is the moment the late conf lands:
+ * `StartTransactionResultHandler` drives the connector to `Charging`, which
+ * emits one `StatusNotification`. One frame per retired charge point, against
+ * the whole transaction cycle it no longer runs. Teardown's closing sweep
+ * issues the stop — outside every measurement window, and late enough that the
+ * conf has usually landed and the stop carries the real id.
+ *
+ * `transactionId === null` is what "no id was assigned" means here, and it has
+ * to be: `0` is a legal OCPP 1.6 assignment and cannot carry that meaning.
  */
-export const ASSIGNED_ID_TIMEOUT_MS =
-  (AUTHORIZE_WAIT_SEC + CALL_WATCHDOG_SEC + START_CONFIRM_MARGIN_SEC) * 1000;
+export function dispositionAfterStart(
+  outcome: TransactionStartOutcome,
+  awaitAssignedId: boolean,
+): StartDisposition {
+  const retire =
+    awaitAssignedId && outcome.started && outcome.transactionId === null;
+  return { stop: !retire, retire };
+}
+
+/**
+ * The budget a single armed start works to, split by phase.
+ *
+ * Two independent deadlines rather than one, because the two phases wait on
+ * different things and a single budget shared between them is how a healthy
+ * confirmation came to be reported as a failure: whatever the first phase
+ * overspent, the second no longer had.
+ */
+export interface StartWaitBudget {
+  /** Deadline for the local-start emission, from arming. Must cover the
+   *  `start_transaction` RPC's own admission — see
+   *  {@link LOCAL_START_TIMEOUT_MS}. */
+  readonly localStartMs: number;
+  /** Deadline for the CSMS-assigned id, restarted **at** the local-start
+   *  emission. `null` on the versions that assign no numeric id, where the
+   *  local start is the whole answer. */
+  readonly assignedIdMs: number | null;
+}
+
+/**
+ * The longest a single transaction cycle may legitimately take.
+ *
+ * Enumerated stage by stage, because this bound has grown three times and the
+ * next reader deserves to check the sum rather than trust it. A cycle awaits
+ * in exactly four places:
+ *
+ *  1. the `start_transaction` RPC — {@link RPC_DEADLINE_MS};
+ *  2. the local-start wait — `budget.localStartMs`, which *contains* stage 1
+ *     because its clock starts before the RPC is offered;
+ *  3. the assigned-id wait — `budget.assignedIdMs`, restarted at the local
+ *     start, so it composes after stage 2 rather than sharing it;
+ *  4. the hold — `holdMs`;
+ *  5. the `stop_transaction` RPC — {@link RPC_DEADLINE_MS} again.
+ *
+ * Arming is synchronous and the next cycle is scheduled after the body
+ * returns, so there is no sixth. Stage 1 is *not* added: it runs concurrently
+ * with stage 2 and is bounded by it, which is exactly what
+ * {@link LOCAL_START_TIMEOUT_MS} was defined to guarantee. Adding it again
+ * would double-count the same 35s.
+ *
+ * A teardown bound that is too large only costs time when something is
+ * genuinely stuck, while one that is too small loses transactions — so where
+ * stages cannot be proven disjoint they are summed.
+ */
+export function cycleBoundMs(budget: StartWaitBudget, holdMs: number): number {
+  return (
+    budget.localStartMs + (budget.assignedIdMs ?? 0) + holdMs + RPC_DEADLINE_MS
+  );
+}
 
 export interface DaemonBasicAuth {
   readonly username: string;
@@ -944,6 +1091,85 @@ export function fleetGauge(samples: readonly Sample[]): FleetGauge {
   return { total, connected };
 }
 
+/**
+ * What a fleet gauge reading says about **this run's own** charge points.
+ *
+ * `ocppcp_charge_points` is a daemon-wide gauge with no `cpId` label, so
+ * subtracting a baseline taken at preflight is the only arithmetic available.
+ * That subtraction assumes the pre-existing population is constant — and
+ * `--allow-existing` is precisely the flag that says it is not. A bystander
+ * disconnecting made the run report one of its *own* charge points as
+ * unsettled and undercount `connected`; a bystander connecting let a step
+ * settle before this run's fleet was up. Both wrong, both silent.
+ *
+ * So the subtraction is still done — there is nothing better to offer without
+ * polling every charge point individually, which at these fleet sizes is
+ * itself a load on the daemon being measured — but the result now says whether
+ * it is attributable. A number with a stated caveat beats a wrong number.
+ */
+export interface ConnectivityAttribution {
+  /** This run's connected charge points: exact when `attributable`, and the
+   *  baseline-subtracted estimate otherwise. Never above `owned`. */
+  readonly connected: number;
+  /** True only when every registered charge point on the daemon belongs to
+   *  this run, so the gauge needs no subtraction at all. */
+  readonly attributable: boolean;
+  /** Why the number is only an estimate. `null` when it is exact. */
+  readonly caveat: string | null;
+}
+
+/**
+ * Attribute one gauge reading to this run's fleet.
+ *
+ * Exact in the default mode: {@link assertDaemonEmpty} refuses a daemon that
+ * holds anything, so `baseline.total === 0` and every connected charge point
+ * is this run's — no subtraction, nothing to be wrong about. The one thing
+ * still checked there is that the population has not grown behind the run's
+ * back: someone creating charge points on a daemon the preflight found empty
+ * contaminates it just as thoroughly, and `total` says so for free in the same
+ * scrape.
+ *
+ * Never exact under `--allow-existing` with a non-empty daemon, and not
+ * because a drift was detected — because it cannot be. A bystander
+ * disconnecting while one of this run's charge points connects nets to zero on
+ * both `total` and `connected`.
+ */
+export function attributeConnectivity(
+  baseline: FleetGauge,
+  now: FleetGauge,
+  owned: number,
+): ConnectivityAttribution {
+  const clamp = (n: number): number => Math.max(0, Math.min(owned, n));
+  if (baseline.total === 0) {
+    if (now.total === owned) {
+      return {
+        connected: clamp(now.connected),
+        attributable: true,
+        caveat: null,
+      };
+    }
+    return {
+      connected: clamp(now.connected),
+      attributable: false,
+      caveat:
+        `the daemon holds ${now.total} charge point(s) but this run created ` +
+        `${owned} — either a \`cp.create_many\` outlived its client deadline and ` +
+        `is still registering ids this run never got back, or something else ` +
+        `is creating or deleting charge points on this daemon. Either way the ` +
+        `connected count is not this run's fleet counted`,
+    };
+  }
+  return {
+    connected: clamp(now.connected - baseline.connected),
+    attributable: false,
+    caveat:
+      `--allow-existing: ${baseline.total} pre-existing charge point(s) share ` +
+      `this gauge, and the connected count is the baseline subtracted rather ` +
+      `than this run's fleet counted. A bystander connecting or disconnecting ` +
+      `moves it in either direction and is undetectable from here`,
+  };
+}
+
 /** Preflight guard: refuse to measure a daemon that already holds charge
  *  points, because `/metrics` carries no `cpId` label — their traffic would
  *  land in the same histogram as the bench fleet's while the reported `N`
@@ -1232,6 +1458,13 @@ export interface StepResult {
   /** Charge points connected when the step finished settling, i.e. before the
    *  warmup and the measurement window. */
   readonly connectedAtSettle: number;
+  /** Whether `connectedAtSettle`, `connectedAtEnd`, `notSettled` and the
+   *  `dropped` derived from them count **this run's** charge points, or are a
+   *  daemon-wide gauge with a preflight baseline subtracted from it. See
+   *  {@link attributeConnectivity}: under `--allow-existing` the baseline is
+   *  not guaranteed constant, and a bystander's churn moves these numbers in
+   *  either direction. */
+  readonly connectivityAttributable: boolean;
   /** Charge points connected in the **final** scrape — the fleet that actually
    *  generated the histogram this row reports. Reporting the settle-time count
    *  attributed a window's latency to a fleet larger than the one producing
@@ -1256,7 +1489,10 @@ export interface StepResult {
   readonly lateHolds: number;
   /** Charge points withdrawn from the transaction cycle because the CSMS never
    *  assigned a transaction id inside the bound. The fleet's offered load
-   *  falls by this much from then on. */
+   *  falls by this much from then on, and each of them keeps its transaction
+   *  open until teardown — stopping it would send a placeholder id and destroy
+   *  the handle that closes the CSMS session. See
+   *  {@link dispositionAfterStart}. */
   readonly retired: number;
 }
 
@@ -1296,6 +1532,7 @@ export function row(r: StepResult): string[] {
     String(r.connectedAtEnd),
     String(droppedDuringWindow(r)),
     String(r.notSettled),
+    r.connectivityAttributable ? "own" : "est",
     String(r.aggregate.count),
     p50,
     p95,
@@ -1319,6 +1556,9 @@ export const STEP_COLUMNS = [
   "connected",
   "dropped",
   "unsettled",
+  // Whether the three columns to the left count this run's own charge points
+  // ("own") or are a daemon-wide gauge minus a preflight baseline ("est").
+  "conn.src",
   "calls",
   "p50",
   "p95",
@@ -1404,8 +1644,17 @@ interface StartWaiter {
   localStartAtMs: number | null;
   /** Which emission is expected next. Ordering, not value, separates them. */
   phase: StartPhase;
-  /** Whether this cycle must wait for the assigned id before proceeding. */
-  readonly awaitAssignedId: boolean;
+  /** The phase's own timer. Replaced — never merely re-read — when the local
+   *  start moves the waiter into its second phase, so the assigned-id budget
+   *  is spent from that instant rather than from whatever the first phase
+   *  left over. */
+  timer: ReturnType<typeof setTimeout>;
+  /** What that timer runs. Held so the second phase can re-arm the same
+   *  expiry rather than duplicate it. */
+  expire: () => void;
+  /** The two phases' deadlines. `assignedIdMs === null` means this cycle
+   *  settles on the local start. */
+  readonly budget: StartWaitBudget;
 }
 
 /** Nothing was observed: no local start, no id. */
@@ -1440,10 +1689,10 @@ export class TransactionStarts {
   /**
    * Arm a waiter for `cpId`, to be settled by {@link confirm}.
    *
-   * `awaitAssignedId` is what reconciles two requirements that pull against
-   * each other. OCPP 1.6 emits `transaction_started` **twice**: once when the
-   * transaction begins locally, carrying the placeholder id `0`, and again
-   * when `StartTransaction.conf` supplies the CSMS-assigned id.
+   * `budget.assignedIdMs` is what reconciles two requirements that pull
+   * against each other. OCPP 1.6 emits `transaction_started` **twice**: once
+   * when the transaction begins locally, carrying the placeholder id `0`, and
+   * again when `StartTransaction.conf` supplies the CSMS-assigned id.
    *
    * - A late conf from the *previous* cycle must not confirm this one. Taking
    *   only the first emission satisfied that.
@@ -1459,20 +1708,23 @@ export class TransactionStarts {
    * this one's; and the wait then continues to the assigned id rather than
    * stopping at the placeholder.
    *
-   * `awaitAssignedId` is false where no assigned id is coming — OCPP 2.x never
-   * sets the numeric id, so waiting for one there would time out every cycle
-   * and stretch the cadence for nothing.
+   * `budget.assignedIdMs` is `null` where no assigned id is coming — OCPP 2.x
+   * never sets the numeric id, so waiting for one there would time out every
+   * cycle and stretch the cadence for nothing.
+   *
+   * **Each phase gets its own clock.** `budget.localStartMs` runs from this
+   * call, which is before the `start_transaction` RPC is offered, so it has to
+   * cover that RPC's admission; `budget.assignedIdMs` is started fresh by
+   * {@link confirm} when the local start lands. One shared budget meant an
+   * admission that took its full deadline left nothing for the confirmation,
+   * and the healthy confirmation that followed was reported as a failure.
    */
-  arm(
-    cpId: string,
-    timeoutMs: number,
-    awaitAssignedId: boolean,
-  ): Promise<TransactionStartOutcome> {
+  arm(cpId: string, budget: StartWaitBudget): Promise<TransactionStartOutcome> {
     if (!this.available) {
       return Promise.resolve(UNCONFIRMED);
     }
     return new Promise<TransactionStartOutcome>((resolve) => {
-      const timer = setTimeout(() => {
+      const expire = (): void => {
         if (this.waiters.get(cpId) === waiter) this.waiters.delete(cpId);
         // A local start seen but no id is still a start — report it, so the
         // caller can tell "never started" from "started, id never assigned".
@@ -1489,13 +1741,15 @@ export class TransactionStarts {
               }
             : UNCONFIRMED,
         );
-      }, timeoutMs);
+      };
       const waiter: StartWaiter = {
         phase: "awaiting-local-start",
         localStartAtMs: null,
-        awaitAssignedId,
+        budget,
+        expire,
+        timer: setTimeout(expire, budget.localStartMs),
         settle: (outcome) => {
-          clearTimeout(timer);
+          clearTimeout(waiter.timer);
           resolve(outcome);
         },
       };
@@ -1526,7 +1780,7 @@ export class TransactionStarts {
       // armed for it (see `TransactionStartOutcome` and the retirement path in
       // `fleet-bench.ts`).
       waiter.localStartAtMs = nowMs;
-      if (!waiter.awaitAssignedId) {
+      if (waiter.budget.assignedIdMs === null) {
         this.waiters.delete(cpId);
         waiter.settle({
           started: true,
@@ -1536,6 +1790,14 @@ export class TransactionStarts {
         return;
       }
       waiter.phase = "awaiting-assigned-id";
+      // Restart the clock here, rather than let the first phase's remainder
+      // stand in for the second phase's budget. The first phase has to cover
+      // the `start_transaction` RPC's admission, and under the pressure this
+      // benchmark exists to find that can consume nearly all of it — leaving a
+      // confirmation that arrives well inside its own documented allowance to
+      // be reported as never having arrived, and its charge point retired.
+      clearTimeout(waiter.timer);
+      waiter.timer = setTimeout(waiter.expire, waiter.budget.assignedIdMs);
       return;
     }
 

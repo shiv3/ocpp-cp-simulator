@@ -418,7 +418,12 @@ describe("fleet-bench end to end (#302)", () => {
     //    describes — the composition-across-steps property.
     const report = JSON.parse(readFileSync(outFile, "utf8")) as {
       runId: string;
-      results: { n: number; connected: number; calls: number }[];
+      results: {
+        n: number;
+        connected: number;
+        calls: number;
+        connectivityAttributable: boolean;
+      }[];
       heartbeatOverride: {
         bootsObserved: number;
         rpcsIssued: number;
@@ -432,6 +437,11 @@ describe("fleet-bench end to end (#302)", () => {
     expect(report.runId).toBeTruthy();
     for (const r of report.results) {
       expect(r.connected).toBe(r.n);
+      // On a daemon the preflight found empty, every registered charge point
+      // is this run's, so the count is attributed rather than inferred by
+      // subtracting a baseline. This is the "own" half of the pair the
+      // --allow-existing test asserts the other half of.
+      expect(r.connectivityAttributable).toBe(true);
     }
     // The printed table carries a row per step too, not just the JSON.
     const tableRows = run.stdout
@@ -491,6 +501,23 @@ describe("fleet-bench end to end (#302)", () => {
       const after = await listCpIds(daemon.url);
       expect(after).toContain(bystander);
       expect(after.filter((id) => id !== bystander)).toEqual([]);
+
+      // And every row says its connectivity numbers are an estimate. The
+      // bystander here never connects (`autoConnect: false`), so no drift is
+      // *detectable* — which is exactly the point: `--allow-existing` cannot
+      // attribute the gauge to this run's fleet whether or not anything
+      // actually moved, because a bystander disconnecting while one of ours
+      // connects nets to zero on both gauges. The flag reports that rather
+      // than inferring a number from a baseline it was told may change.
+      const report = JSON.parse(readFileSync(outFile, "utf8")) as {
+        preExistingChargePoints: number;
+        results: { connectivityAttributable: boolean }[];
+      };
+      expect(report.preExistingChargePoints).toBe(1);
+      expect(report.results.length).toBeGreaterThan(0);
+      for (const r of report.results) {
+        expect(r.connectivityAttributable).toBe(false);
+      }
     } finally {
       await withControlPlane(daemon.url, (rpc) =>
         rpc("cp.delete", { cpId: bystander }),

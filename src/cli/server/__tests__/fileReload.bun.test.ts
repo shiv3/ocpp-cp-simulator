@@ -2658,6 +2658,98 @@ describe("a hold is never left waiting on something that is gone (#314)", () => 
     expect(server.fileReload?.watchedPaths()).toEqual([]);
   });
 
+  it("releases a held reload after a StartTransaction CALLERROR", async () => {
+    // The trigger, not the condition. `cleanTransaction` stamps `stopTime`, so
+    // the gate reads open — and emits neither `transactionChange(null)` nor a
+    // settle, so nothing re-reads it. Correcting the predicate last round left
+    // the hold waiting on a condition that was already satisfied. What closes
+    // it is the status transition the CALLERROR recovery performs, which every
+    // connector reports and which the drain now listens to.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("callerror-hold", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-CE-HOLD");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-CE-HOLD");
+
+    const service = server.registry.get("CP-CE-HOLD");
+    if (!service) throw new Error("CP-CE-HOLD missing");
+    expect(await openSession(server, "CP-CE-HOLD", "TAG-CEH")).toBe("TAG-CEH");
+    backend.save(file, scenario("callerror-hold", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the edit to be held for the open session",
+    );
+
+    // Exactly `handleCallError`'s recovery: clean the transaction, then return
+    // the connector to Available. Nothing else happens afterwards.
+    const chargePoint = (
+      service as unknown as {
+        _chargePoint: {
+          cleanTransaction(connectorId: number): void;
+          updateConnectorStatus(connectorId: number, status: string): void;
+        };
+      }
+    )._chargePoint;
+    chargePoint.cleanTransaction(1);
+    chargePoint.updateConnectorStatus(1, "Available");
+
+    await waitFor(
+      () => loadedDelay(server, "CP-CE-HOLD", "callerror-hold") === 22,
+      "the held reload to land after the failed StartTransaction",
+    );
+  });
+
+  it("rejects a hold whose connector a cp.update removed", async () => {
+    // The same stranding in a different costume. A rebuild that drops
+    // connectors is permanent for the holds attached to them, and the hold
+    // branch treated every rebuild as the temporary window — so the question
+    // "is this connector gone?" was never reached.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("shrunk", 11));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-SHRINK", { connectors: 2 });
+    await rpc(socket, "load_scenario", { connector: 2, file }, "CP-SHRINK");
+    expect(server.fileReload?.watchedPaths()).toEqual([path.resolve(file)]);
+
+    // Held: connector 2 is mid-session when the edit lands.
+    const service = server.registry.get("CP-SHRINK");
+    if (!service) throw new Error("CP-SHRINK missing");
+    service.startTransaction(2, "TAG-SH");
+    await waitFor(
+      () => service.hasOpenTransaction(2),
+      "a transaction to open on connector 2",
+    );
+    backend.save(file, scenario("shrunk", 22));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the edit to be held for the open session",
+    );
+
+    // The rebuild drops the connector the hold belongs to.
+    await rpc(socket, "cp.update", {
+      cpId: "CP-SHRINK",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the hold to be reported rather than stranded by the rebuild",
+    );
+    expect(events.find((e) => e.outcome === "rejected")?.error).toContain(
+      "was removed",
+    );
+    expect(server.fileReload?.watchedPaths()).toEqual([]);
+  });
+
   it("does not hold a reload behind a transaction that never ran", async () => {
     // `cleanTransaction` stamps `stopTime` and leaves the object attached after
     // a rejected or CALLERROR `StartTransaction` — deliberately (#301), and no

@@ -281,14 +281,29 @@ The rules, in the order they bite:
   oversized _sibling_ scenario, or a connector already holding more scenarios
   than fit, refuses the edit even when the edited file is small. The rejection
   names the scenario id at fault.
+- **An accepted reload always ends in `applied` or `rejected` — never neither.**
+  Once a reload has been accepted it is either installed or reported; it is
+  never left held indefinitely. A hold is released when the session ends, when
+  the scenario's run settles, when a `cp.update` rebuild completes — and, as a
+  backstop that does not depend on any of those firing, on **any connector
+  status transition**, which no lifecycle change on a live connector avoids.
+  That backstop is what makes this a guarantee rather than a list of cases: a
+  gate can be opened by something that announces nothing (a `StartTransaction`
+  answered with a CALLERROR returns the connector to Available without ending a
+  session that never began), because the condition clearing and the
+  notification are separate events.
 - **A hold is never left waiting on something that is gone.** A reload held for
   a connector is released when that connector's session ends, when the
   scenario's own run settles, or when a `cp.update` rebuilds the charge point.
   Two things can _destroy_ what it waits on instead of releasing it, and both
   are answered rather than left to strand. Removing the connector
-  (`remove_connector`) disposes it without ending a session, so the hold is
-  reported **`rejected`** — naming the connector — and the file stops being
-  watched, because nothing could ever apply it again. Removing the charge point
+  (`remove_connector`, or a `cp.update` that rebuilds the charge point with
+  fewer of them) disposes it without ending a session, so the hold is reported
+  **`rejected`** — naming the connector — and the file stops being watched,
+  because nothing could ever apply it again. That question is asked _before_ the
+  rebuild window is assumed: a rebuild is temporary for the connectors it keeps
+  and permanent for the ones it drops, and the two are indistinguishable unless
+  the code asks. Removing the charge point
   drops the registration and its stored row with it. And a session that never
   ran does not close the gate at all: a `StartTransaction` that is rejected, or
   answered with a CALLERROR, leaves a stopped transaction object attached to the

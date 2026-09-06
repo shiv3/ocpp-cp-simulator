@@ -2458,6 +2458,30 @@ export class CLIChargePointService {
         }),
       );
       this._connectorUnsubscribes.push(
+        // The backstop, and the reason the contract holds rather than mostly
+        // holding (#314). Every precise gate-opening point already announces a
+        // settle; this one announces on *any* connector status transition, so a
+        // hold cannot outlive the condition that took it. Three review rounds
+        // went to paths where the gate read open and nothing re-read it — a
+        // connector removed, a `StartTransaction` answered with a CALLERROR, a
+        // `cp.update` that dropped the connector — and enumerating the
+        // *condition* did not help, because what was missing each time was a
+        // *trigger*.
+        //
+        // Not the `connector_status` bus-event drain an earlier round rejected,
+        // and the difference matters: that one was proposed *instead of*
+        // understanding where the gate actually opens, and it hid stranded
+        // reloads by accident because it fired while the gate was still shut.
+        // The precise triggers are still there and still fire first; this only
+        // guarantees that a gate which is already open gets looked at again.
+        // Re-reading is cheap — the drain walks the held entries and does
+        // nothing when the gate is shut — and it runs on a later microtask, so
+        // it can never execute inside the teardown that opened it.
+        connector.events.on("statusChange", () => {
+          this.notifySessionSettled({ connectorId, scenarioId: null });
+        }),
+      );
+      this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", persist),
       );
       this._connectorUnsubscribes.push(

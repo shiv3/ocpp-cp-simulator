@@ -1486,3 +1486,34 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   because its invariant was discovered a caller at a time; this is the same
   shape starting on the transaction gate, so the enumeration is written down
   before a fourth round finds the next exit.
+
+## [2026-09-06] ingest | `--watch`: the hold contract, and the dimension that cost three rounds (#314, PR #317)
+
+- **New guarantee on [Daemon](entities/daemon.md): an accepted reload always
+  ends in `applied` or `rejected` — never neither.** Written as a contract
+  sentence so the next review round's job is to falsify it rather than to find
+  another case, which is what the last three did.
+- The dimension that was missing is the **trigger**. Previous rounds enumerated
+  when the deferral gate's _condition_ clears and still left holds stranded,
+  because a gate that reads open needs something to re-read it, and the two are
+  separate events: `cleanTransaction` opens the gate after a `StartTransaction`
+  CALLERROR and announces nothing at all. Correcting the predicate last round
+  left the hold waiting on a condition that was already satisfied.
+- So the guarantee no longer rests on the precise triggers. A settle is
+  announced on **every connector status transition**, which no lifecycle change
+  on a live connector avoids; the precise triggers stay because they make the
+  drain prompt. Deliberately _not_ the `connector_status` bus-event drain an
+  earlier round rejected: that one was proposed instead of understanding where
+  the gate opens and hid stranded reloads by firing while the gate was still
+  shut. This one fires in addition, on a channel that cannot be starved, and the
+  drain is idempotent — it re-reads and does nothing when the gate is shut.
+- The second finding fell out of the same answer once the question was asked in
+  the right order: a `cp.update` that rebuilds with fewer connectors is
+  permanent for the holds attached to the dropped ones, and the code assumed
+  every rebuild was the temporary window because it never asked whether the
+  connector was still there. That check now runs _before_ the rebuild-window
+  hold. A rebuild is temporary for the connectors it keeps and permanent for the
+  ones it drops; nothing distinguishes them unless the code asks.
+- Recorded for the method: enumerate a hold's **ordering**, its **failure**, its
+  **destruction** — and its **trigger**. The first three were already written
+  down and were not enough.

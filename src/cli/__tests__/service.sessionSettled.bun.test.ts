@@ -39,7 +39,13 @@ describe("CLIChargePointService.onSessionSettled (#314)", () => {
     expect(seen).toEqual([]);
 
     await Promise.resolve();
-    expect(seen).toEqual(["handler"]);
+    // At least once, not exactly once. What this pins is the *ordering* — no
+    // handler inside the caller's stack — and a settle is a "look again"
+    // signal whose consumers are idempotent, so the count is deliberately not
+    // part of the contract. `resetScenario` also returns the connector to
+    // Available, and the status backstop announces on that too (#314).
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((entry) => entry === "handler")).toBe(true);
     svc.cleanup(true);
   });
 

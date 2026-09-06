@@ -865,13 +865,32 @@ export class FileReloadManager {
       entry.pending = definition;
       return true;
     }
-    // The scenario is not on the connector right now. Either it was removed —
-    // and `loadScenario` would cheerfully re-create it, which is the bug — or
-    // this is the window inside a `cp.update` rebuild, where the old service
-    // has been torn down and the snapshot is not yet re-attached. Never load,
-    // and never unregister either: unregistering here would throw away the
-    // watch and the held definition every time a charge point is edited.
-    // `reloadScenario` drops a genuinely stale registration at the next edit.
+    // Asked *before* the hold below, and that order is the fix rather than an
+    // accident. The connector this reload is registered for no longer exists —
+    // `remove_connector`, or a `cp.update` that rebuilt the charge point with
+    // fewer connectors. Nothing can apply the definition to it and nothing will
+    // ever release a hold taken for it, so treating this as the rebuild window
+    // meant holding forever. Checking it second is exactly what stranded a
+    // shrinking `cp.update`: the hold below fired first and the question was
+    // never reached (#314).
+    if (!service.hasConnector(entry.connectorId)) {
+      this.rejectScenario(
+        entry,
+        new Error(
+          `connector ${entry.connectorId} was removed; the file is no longer watched`,
+        ),
+      );
+      this.unregisterScenario(entry.cpId, entry.connectorId, entry.scenarioId);
+      return false;
+    }
+    // The connector is there but the scenario is not on it right now. Either it
+    // was removed — and `loadScenario` would cheerfully re-create it, which is
+    // the bug — or this is the window inside a `cp.update` rebuild, where the
+    // old service has been torn down and the snapshot is not yet re-attached.
+    // Never load, and never unregister either: unregistering here would throw
+    // away the watch and the held definition every time a charge point is
+    // edited. `reloadScenario` drops a genuinely stale registration at the next
+    // edit.
     if (!this.stillLoaded(entry)) {
       entry.pending = definition;
       return true;
@@ -899,26 +918,15 @@ export class FileReloadManager {
       this.rejectScenario(entry, new Error(overflow));
       return false;
     }
-    // The connector this reload is registered for is gone. Nothing can apply the
-    // definition to it, and nothing will ever release a hold taken for it, so
-    // this is reported and the watch is dropped rather than left waiting. See
-    // the gate note below.
-    if (!service.hasConnector(entry.connectorId)) {
-      this.rejectScenario(
-        entry,
-        new Error(
-          `connector ${entry.connectorId} was removed; the file is no longer watched`,
-        ),
-      );
-      this.unregisterScenario(entry.cpId, entry.connectorId, entry.scenarioId);
-      return false;
-    }
     // ---- the deferral gate -------------------------------------------------
     //
     // A reload is held while the connector is mid-session or the scenario's own
-    // run is in flight. A gate is only safe if every way it can close is paired
-    // with a way it reopens, so both directions are enumerated here — the same
-    // discipline `ScenarioEntry.lastText` needed, for the same reason.
+    // run is in flight. The contract this has to keep is one sentence: **an
+    // accepted reload always ends in `applied` or `rejected` — never neither.**
+    // A gate is only safe if every way it can close is paired with a way it
+    // reopens *and* with something that looks again, so all of it is enumerated
+    // here — the same discipline `ScenarioEntry.lastText` needed, for the same
+    // reason.
     //
     // **Ordering.** The condition is re-read at drain time, never cached: a
     // drain may be one connector's session ending while another's is still
@@ -940,9 +948,22 @@ export class FileReloadManager {
     // is the definition the rest of the codebase already uses.
     //
     // **Destruction.** The two things a hold waits on can be destroyed rather
-    // than released: the connector (above) and the charge point (pruned by
+    // than released: the connector (above — including a `cp.update` that
+    // rebuilds with fewer of them) and the charge point (pruned by
     // `syncFromRegistry`, which forgets the row with it). Shutdown closes the
     // manager and drops every hold with it.
+    //
+    // **Trigger.** The dimension that cost three rounds, because it is not the
+    // same question as any of the above: a gate that *reads* open still needs
+    // something to *re-read* it. Enumerating when the condition clears found
+    // every one of those clearings and still left holds stranded, because the
+    // clearing and the notification are separate events and one can happen
+    // without the other — `cleanTransaction` opens the gate and announces
+    // nothing. So the guarantee does not rest on the precise triggers at all:
+    // `CLIChargePointService` announces a settle on **every connector status
+    // transition**, which no lifecycle change on a live connector avoids. The
+    // precise triggers remain because they make the drain prompt; the backstop
+    // is what makes the contract true rather than nearly true.
     if (
       service.hasOpenTransaction(entry.connectorId) ||
       service.isScenarioRunning(entry.scenarioId)

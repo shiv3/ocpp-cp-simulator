@@ -595,6 +595,11 @@ describe("fleet-bench end to end (#302)", () => {
           reapplied: number;
           failed: number;
         };
+        results: {
+          reconnects: number;
+          reconnectsSinceOverrideLoss: number | null;
+          heartbeatLoadConfigured: boolean;
+        }[];
       };
       // NOTE: `reapplied >= 1` is *not* the reconnect discriminator — the
       // initial boot fires the hook too. The wire count above is. What this
@@ -605,6 +610,24 @@ describe("fleet-bench end to end (#302)", () => {
       expect(report.heartbeatOverride.rpcsIssued).toBe(2);
       expect(report.heartbeatOverride.reapplied).toBe(2);
       expect(report.heartbeatOverride.failed).toBe(0);
+
+      // A reconnect with the watcher still up is NOT drift. This is the arm of
+      // `hb.load` that a too-eager marking would break: the override was
+      // reapplied, the wire count above proves the cadence held, and a row
+      // that cried "drift" here would make the column useless exactly where it
+      // is supposed to be trusted.
+      for (const r of report.results) {
+        expect(r.reconnectsSinceOverrideLoss).toBe(null);
+        expect(r.heartbeatLoadConfigured).toBe(true);
+      }
+      // Not vacuous on an empty list: there is at least one row to check.
+      expect(report.results.length).toBeGreaterThan(0);
+      // Deliberately NOT asserting `reconnects > 0` here. The drop lands right
+      // after the first heartbeat, which is usually before the measurement
+      // window opens, so the window delta legitimately reads 0 — that gap is
+      // the very defect `reconnectsSinceOverrideLoss` exists to close. What
+      // proves the reconnect happened is `flappy.connections(cpId) >= 2` and
+      // the per-connection heartbeat counts above, taken at the CSMS.
 
       expect(await listCpIds(daemon.url)).toEqual([]);
     } finally {

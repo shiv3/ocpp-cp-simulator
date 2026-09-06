@@ -144,6 +144,27 @@ the `reconnects` column at zero. Both ends of the step are in `--out`
 (`connectedAtSettle` and `connected`), and a non-zero drop is warned about on
 stderr.
 
+**`hb.load` says whether the row's heartbeat cadence is the configured one.**
+`set` means both mechanisms holding `--heartbeat-interval` in force were intact
+all step; `drift` means at least one charge point was heartbeating at the
+CSMS's `BootNotification` interval instead — either a reapplication RPC failed,
+or a charge point reconnected after the event socket that triggers
+reapplication was lost, leaving nothing to put the override back. The second
+reason was previously reported off the measurement window's `reconnects` delta,
+which reads **zero** for a charge point that reconnected during creation,
+settling or the warmup — so the warning was suppressed for exactly the charge
+points whose cadence had silently reverted, and the row measured a load nobody
+asked for. It is now counted since the socket was **lost**, and as an upper
+bound: the cumulative total at the instant of the loss is only known as of the
+last scrape before it, so a reconnect in that gap is attributed to the loss.
+Over-warning is the safe direction. That "last scrape" is seeded from the
+preflight one rather than from zero, because `ocppcp_ws_reconnects_total` is
+cumulative since _daemon_ start — seeding at zero would charge a loss with
+every reconnect the daemon had ever recorded and make `drift` the permanent
+reading on any daemon that had been up a while. Losing the socket is not itself `drift` —
+the override only needs reapplying after an accepted boot, so a fleet that
+never reconnects keeps the configured cadence.
+
 **`conn.src` says whether those numbers are counted or inferred.**
 `ocppcp_charge_points` is a daemon-wide gauge with no `cpId` label, so "how many
 of _ours_ are connected" can only be the preflight count subtracted from the
@@ -338,7 +359,23 @@ and the run said nothing. Reconciliation makes up to `RECONCILE_MAX_PASSES`
 has gone away, and if anything is still unaccounted for it **names every id on
 stderr and sets exit code 1**. The table and the `--out` file are still
 written: the measurement happened, and it is the teardown that could not be
-proved complete. The composed teardown ceiling — settle, an outstanding
+proved complete.
+
+**A delete that simply failed now reaches that same report.** `not_found` is
+the ambiguous category; `disconnected`, `internal`, `rate_limited` and "the
+sweep gave up after a timeout without ever attempting this id" are the
+unambiguous one — those charge points are still registered. They used to be
+counted into a "cleanup gave up with N still registered" WARNING and dropped:
+nothing reconciled them, nothing set an exit code, so a run that leaked its
+whole fleet exited **0** and the next run's preflight refused the daemon for a
+reason that run never reported. They are collected **by subtraction** —
+everything the sweep has no definitive "it is gone" for — rather than from the
+error branches, because a timeout makes the remaining workers return before
+dequeuing, so they never reach a `catch`; collecting error branches would have
+reported none of exactly the case that leaks. Accumulated across the first
+sweep and every reconciliation pass, since a pass drops what it could not
+delete out of its own pending list. An id in both categories is reported once,
+as undeleted. The composed teardown ceiling — settle, an outstanding
 create (35s), closing transactions (30s), in-flight heartbeat reapplications
 (35s), the first delete sweep (60s) and 3 × (35s + 60s) of reconciliation —
 is about **ten and a half minutes on OCPP 1.6** (about nine on 2.x), reached
@@ -477,17 +514,32 @@ after an RPC was issued is still owed its own. The collapse is **measured**,
 not asserted: the smoke test's two-step sweep reports `bootsObserved: 4,
 rpcsIssued: 2` against a real daemon, and removing the window makes it 4 and 4.
 
-The residual is one RPC per reconnecting charge point — 2000 at the largest
-accepted fleet — paced by token buckets that cap _total_ control-plane traffic
-at `sustainableRpcPerSec(MAX_SOCKETS)` = 640 RPC/s, so a wave drains in ~3s and
-**cannot exceed the budget the sweep was already validated against**; on the
-idle axis `requiredRpcPerSec` is zero, so it contends with nothing. Whether the
-knee itself _moves_ is argued rather than demonstrated: comparing a sweep with
-the reapplication against one without needs a real CSMS at those fleet sizes,
-which is the same thing missing from
-[Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling).
-`bootsObserved` and `rpcsIssued` are recorded in `--out` beside the per-row
-`reconnects` so the first real sweep can settle it.
+**Whether the knee moves is a standing limitation, not outstanding work.** It
+is recorded the same way as the closing stop's unverifiable delivery, because
+it has the same shape: it cannot be established from here, so carrying it as
+something still owed would let it quietly become a claim nobody checks.
+
+- _Measured_: the collapse. `bootsObserved: 4, rpcsIssued: 2` against a real
+  daemon; `4` and `4` without the window. Two charge points on loopback against
+  a mock CSMS — enough to prove the collapse, nothing at all about the knee.
+- _Argued_: that the residual cannot perturb the measurement. One RPC per
+  reconnecting charge point — 2000 at the largest accepted fleet — paced by
+  token buckets that cap _total_ control-plane traffic at
+  `sustainableRpcPerSec(MAX_SOCKETS)` = 640 RPC/s, so a wave drains in ~3s and
+  **cannot exceed the budget the sweep was already validated against**; on the
+  idle axis `requiredRpcPerSec` is zero, so it contends with nothing. Analytic
+  plus the pool's hard ceiling, not an observation.
+- _Would settle it_: one sweep against a real CSMS at fleet size with
+  reconnects induced at the knee, run with and without the reapplication,
+  comparing p95 at each `N`. No mock and no small fleet reproduces the effect,
+  which is a few seconds of extra control-plane traffic at exactly the moment
+  the daemon is already saturated. The missing ingredient is the same one
+  [Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
+  is waiting on.
+- _Counters that settle it_: `heartbeatOverride.bootsObserved` / `rpcsIssued`
+  (their ratio is the instrument's own cost — 2:1 healthy, 1:1 means the window
+  stopped collapsing), `heartbeatOverride.failed`, the per-row `reconnects`,
+  and the `hb.load` column. All already in every `--out` file.
 
 **Cleanup deletes what this run created, and refuses to touch anything else.**
 An id enters the delete list when it is _offered_ to `cp.create_many`, before

@@ -50,11 +50,11 @@ for the record, and **not the #302 result**; see "Recording a result"
 below):
 
 ```
-N    uncreated  connected  dropped  unsettled  conn.src  calls  p50  p95   hb p50  hb p95  timeouts  late>30s  errors  reconnects  unconf.tx  late hold  retired
----  ---------  ---------  -------  ---------  --------  -----  ---  ----  ------  ------  --------  --------  ------  ----------  ---------  ---------  -------
-50   0          50         0        0          own       150    6ms  21ms  6ms     21ms    0         0         0       0           0          0          0
-250  0          250        0        0          own       750    7ms  22ms  7ms     22ms    0         0         0       0           0          0          0
-450  0          450        0        0          own       1350   7ms  23ms  7ms     23ms    0         0         0       0           0          0          0
+N    uncreated  connected  dropped  unsettled  conn.src  calls  p50  p95   hb p50  hb p95  hb.load  timeouts  late>30s  errors  reconnects  unconf.tx  late hold  retired
+---  ---------  ---------  -------  ---------  --------  -----  ---  ----  ------  ------  -------  --------  --------  ------  ----------  ---------  ---------  -------
+50   0          50         0        0          own       150    6ms  21ms  6ms     21ms    set      0         0         0       0           0          0          0
+250  0          250        0        0          own       750    7ms  22ms  7ms     22ms    set      0         0         0       0           0          0          0
+450  0          450        0        0          own       1350   7ms  23ms  7ms     23ms    set      0         0         0       0           0          0          0
 ```
 
 (The header has changed since that run — `timeouts` / `late>30s` replaced a
@@ -275,6 +275,37 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    and as `connectivityAttributable` on every `--out` row. `p50`/`p95` and the
    call counts are unaffected — what is contaminated is the fleet size the row
    attributes them to, not the histogram.
+
+   **`hb.load` — whether this row's heartbeat cadence is the configured one.**
+   `set` means both mechanisms that hold `--heartbeat-interval` in force were
+   intact for the whole step. `drift` means at least one charge point was
+   heartbeating at the CSMS's `BootNotification` interval instead, for one of
+   two reasons: a `start_heartbeat` reapplication RPC failed, or a charge point
+   reconnected _after_ the event socket that triggers reapplication was lost,
+   leaving nothing to put the override back.
+
+   The second reason used to be reported off the wrong number. The warning was
+   gated on the measurement window's `reconnects` delta — but a charge point
+   that reconnects during creation, settling or the warmup has already
+   reconnected by the time the `before` scrape is taken, so the delta reads
+   zero for exactly the charge points whose cadence has silently reverted. The
+   row then measured a different load and said nothing. The count is now taken
+   **since the socket was lost**, not since the window opened, and it is an
+   upper bound: the cumulative reconnect total at the instant of the loss is
+   only known as of the last scrape before it, so a reconnect in that gap is
+   attributed to the loss. Over-warning is the safe direction; under-warning
+   was the defect. The "last scrape" is seeded from the **preflight** scrape,
+   not from zero — `ocppcp_ws_reconnects_total` is cumulative since _daemon_
+   start, so seeding at zero would charge a loss with every reconnect the
+   daemon had ever recorded and make `hb.load` read `drift` on every row of
+   every run against a daemon that had been up a while. Seeded at preflight,
+   the worst case is "since this run started". `reconnectsSinceOverrideLoss` and
+   `heartbeatOverrideFailures` are on every `--out` row beside
+   `heartbeatLoadConfigured`.
+
+   Losing the socket is not itself `drift`: the override only needs reapplying
+   after an accepted boot, so a fleet that never reconnects keeps the
+   configured cadence and the row says so.
 
    `own` is also not unconditional in the default mode: if the daemon's total
    ever exceeds what this run created, the row degrades to `est`. Two causes,
@@ -679,7 +710,7 @@ that RPC's handler before the later boot's frame.
 
 The collapse is measured, not asserted: the smoke test's two-step sweep reports
 `bootsObserved: 4, rpcsIssued: 2` against a real daemon, and removing the
-window makes it 4 and 2 respectively — a clean 2×.
+window makes it `4` and `4` — a clean 2×.
 
 **The residual is bounded by the pool, not by hope.** After the collapse a
 reconnect wave costs **one RPC per charge point that reconnected**: 2000 calls
@@ -694,15 +725,13 @@ budget, so a wave displaces cycle RPCs for a few seconds and stretches those
 charge points' cycles — which the `late holds` and `unconf.tx` columns already
 report, per row.
 
-**What is not measured.** Whether the knee _moves_ has not been shown
-empirically, because doing so needs a real CSMS at fleet sizes this repository
-has no CI or review environment for — the same reason
-[Daemon → Measured scale ceiling](../../docs/entities/daemon.md#measured-scale-ceiling)
-still records a method rather than a number. The argument above is analytic
-plus the pool's hard ceiling. Every run records `bootsObserved` and
-`rpcsIssued` in `--out` beside the per-row `reconnects`, so when the benchmark
-is finally run against a real CSMS the perturbation is in the record and can be
-checked rather than re-argued.
+**What is not measured** is whether the knee _moves_, and that is recorded as a
+standing limitation rather than as work outstanding — see "Known limitations".
+The short version: the collapse is measured, the residual's bound is argued,
+and settling the question needs a real CSMS at fleet size that this repository
+does not have. Every run records `bootsObserved`, `rpcsIssued` and `failed` in
+`--out` beside the per-row `reconnects` and the `hb.load` column, so the
+perturbation is in the record whenever someone does run it.
 
 `status_change` also fires on occasions that are not boots at all (a
 `ChangeAvailability`, a connector-0 status update). Those cost one RPC each and
@@ -955,23 +984,73 @@ a spare machine and a CSMS.
   `onBootNotificationAccepted`, both stop the heartbeat, and neither emits the
   `Available` this hooks — such a charge point contributes no heartbeat load
   until it is finally accepted.
-- **Reapplication RPCs share the socket pool with everything else, and the
-  knee has not been shown to stay put.** After coalescing it is one RPC per
-  accepted boot, so a reconnect wave at N=2000 is 2000 calls draining in ~3s
-  against the pool's 640 RPC/s ceiling — it cannot exceed the budget the sweep
-  was validated against, and on the idle axis it contends with nothing. But
-  "bounded" is not "measured": no run against a real CSMS at those fleet sizes
-  exists to compare a sweep with the reapplication against one without, so
-  whether the knee moves is argued rather than demonstrated. The counters are
-  in `--out` so the first real sweep can settle it. See "What the
-  reapplication itself costs".
-- **A teardown that cannot account for every id exits non-zero.** Ids the
-  delete sweep answered `not_found` for are re-swept up to
-  `RECONCILE_MAX_PASSES` times; anything still unresolved is named on stderr
-  and the process exits `1`, with the table and `--out` file still written. So
-  a non-zero exit from this script does not necessarily mean the measurement
-  failed — read the stderr line to tell "the sweep did not finish" from "the
-  sweep finished but teardown could not be proved complete".
+- **Whether keeping `--heartbeat-interval` in force moves the knee is not
+  measured, and will not be measured from this repository.** Stated the same
+  way as the closing stop above, and for the same reason: it cannot be
+  established here, so it is a limitation rather than a task.
+
+  _What is measured._ The **collapse** — that one accepted boot costs one RPC
+  and not two. The smoke sweep reports `bootsObserved: 4, rpcsIssued: 2`
+  against a real daemon; removing the coalescing window makes it `4` and `4`.
+  That is two charge points on loopback against a mock CSMS, which is enough
+  to prove the collapse and nothing at all about the knee.
+
+  _What is only argued._ That the residual cannot perturb the measurement. One
+  RPC per reconnecting charge point — 2000 at the largest accepted fleet —
+  paced by the same token buckets as every other call, which cap total
+  control-plane traffic at `sustainableRpcPerSec(MAX_SOCKETS)` = **640 RPC/s**.
+  So a full reconnect wave drains in roughly 3s and cannot exceed the budget
+  the sweep was already validated against; on the idle axis `requiredRpcPerSec`
+  is zero, so it contends with nothing. Analytic, plus the pool's hard ceiling.
+  Not an observation.
+
+  _What would settle it._ One sweep against a real CSMS at fleet size with
+  reconnects induced at the knee, run twice — with the reapplication and
+  without it — comparing p95 at each `N`. Nothing smaller does: the effect
+  being looked for is a few seconds of extra control-plane traffic at exactly
+  the moment the daemon is already saturated, which no mock and no small fleet
+  reproduces. This repository has no CI or review environment with a real CSMS
+  at those sizes, which is the same reason
+  [Daemon → Measured scale ceiling](../../docs/entities/daemon.md#measured-scale-ceiling)
+  records a method and not a number.
+
+  _Which counters settle it when someone does._ `heartbeatOverride.bootsObserved`
+  and `heartbeatOverride.rpcsIssued` in `--out` (their ratio is the instrument's
+  own cost — 2:1 is healthy, approaching 1:1 means the window stopped
+  collapsing), `heartbeatOverride.failed`, the per-row `reconnects`, and the
+  `hb.load` column, which reads `drift` on any row where the cadence was not
+  the configured one. All of them are in every result file already, so the
+  perturbation is in the record and can be checked rather than re-argued.
+
+- **A teardown that cannot account for every id exits non-zero.** Two
+  categories, reported separately because they are different claims, and both
+  paired with exit `1`:
+
+  - _`not_found`_ — ambiguous, because a `cp.create_many` that outlived its
+    client deadline keeps registering. Re-swept up to `RECONCILE_MAX_PASSES`
+    times; anything still unresolved is named on stderr.
+  - _undeleted_ — unambiguous. `cp.delete` answered `disconnected`, `internal`
+    or `rate_limited`, or never ran at all because a timeout had already made
+    the sweep abandon its remaining ids. These charge points **are** still on
+    the daemon.
+
+  The second category used to be counted into a "cleanup gave up with N still
+  registered" WARNING and then dropped: nothing reconciled those ids and
+  nothing set an exit code, so a benchmark that leaked its entire fleet exited
+  `0` and the _next_ run's preflight refused the daemon for a reason this run
+  never reported. They are now collected by subtraction — everything the sweep
+  has no definitive "it is gone" for — rather than from the error branches,
+  because after a timeout the remaining workers return _before dequeuing_ and
+  so never reach a `catch` at all. That is precisely the case where a fleet is
+  left behind, and collecting error branches would have reported none of it.
+  An id that turns up in both categories is reported only as undeleted, the
+  stronger claim.
+
+  The table and the `--out` file are still written either way. So a non-zero
+  exit does not necessarily mean the measurement failed — read the stderr line
+  to tell "the sweep did not finish" from "the sweep finished but teardown
+  could not be proved complete".
+
 - **Every HTTP request carries a 30s deadline**, because `fetch` has none of
   its own. A daemon that accepts the connection and then stalls while serving
   `/metrics` — the condition at the top of a sweep, which is what this tool

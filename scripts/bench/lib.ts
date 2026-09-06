@@ -1481,6 +1481,20 @@ export interface StepResult {
   readonly evictions: number;
   readonly errors: number;
   readonly reconnects: number;
+  /** Reconnects observed since the event socket carrying accepted-boot events
+   *  was lost, or `null` while it is still up.
+   *
+   *  Since the **loss**, not since this window opened. A charge point that
+   *  reconnects during creation, settling or the warmup has already done so by
+   *  the time the `before` scrape is taken, so a window delta reads zero for
+   *  exactly the charge points whose heartbeat cadence has silently reverted
+   *  to the CSMS's. An upper bound — see `reconnectsAtOverrideLoss` in
+   *  `fleet-bench.ts` — because over-warning is the safe direction here. */
+  readonly reconnectsSinceOverrideLoss: number | null;
+  /** `start_heartbeat` reapplications that failed during this step. Each one
+   *  is a charge point that may be heartbeating at the CSMS's
+   *  `BootNotification` interval instead of `--heartbeat-interval`. */
+  readonly heartbeatOverrideFailures: number;
   readonly unconfirmedStarts: number;
   /** Transactions whose confirmation alone outlasted the configured hold, so
    *  they were already on longer than asked for by the time they could be
@@ -1507,6 +1521,34 @@ export interface StepResult {
 export function answeredAfterWatchdog(r: StepResult): number {
   const lastFiniteCount = r.aggregate.buckets.at(-1)?.count ?? 0;
   return Math.max(0, r.aggregate.count - lastFiniteCount);
+}
+
+/**
+ * Whether this row's heartbeat load is the one `--heartbeat-interval` asked
+ * for.
+ *
+ * `false` — rendered `drift` — when either mechanism that keeps the cadence in
+ * force has demonstrably failed for at least one charge point:
+ *
+ *  - a reapplication RPC failed (`heartbeatOverrideFailures`), or
+ *  - a charge point reconnected after the event socket that triggers
+ *    reapplication was lost (`reconnectsSinceOverrideLoss`), so nothing was
+ *    left to put the override back after its `BootNotification.conf`.
+ *
+ * Both were previously stderr warnings only, and one of them was suppressed
+ * outright whenever the reconnect happened before the measurement window
+ * opened. A row whose offered load is not the configured one has to say so
+ * where the numbers are read, which is the table — the same call `conn.src`
+ * makes for connectivity.
+ */
+export function heartbeatLoadIsConfigured(r: StepResult): boolean {
+  if (r.heartbeatOverrideFailures > 0) return false;
+  if (
+    r.reconnectsSinceOverrideLoss !== null &&
+    r.reconnectsSinceOverrideLoss > 0
+  )
+    return false;
+  return true;
 }
 
 /** Charge points that were connected when the step settled but not when it
@@ -1538,6 +1580,7 @@ export function row(r: StepResult): string[] {
     p95,
     hbP50,
     hbP95,
+    heartbeatLoadIsConfigured(r) ? "set" : "drift",
     r.timeouts === null ? "n/a" : String(r.timeouts),
     String(answeredAfterWatchdog(r)),
     String(r.errors),
@@ -1564,6 +1607,10 @@ export const STEP_COLUMNS = [
   "p95",
   "hb p50",
   "hb p95",
+  // Whether the heartbeat cadence this row measured is the one
+  // `--heartbeat-interval` asked for ("set"), or at least one charge point
+  // reverted to the CSMS's `BootNotification` interval ("drift").
+  "hb.load",
   "timeouts",
   "late>30s",
   "errors",
@@ -2358,6 +2405,63 @@ export async function reconcileMissingIds(
     passes,
     stoppedBecause: pending.length === 0 ? "resolved" : "budget",
   };
+}
+
+/**
+ * What one `cp.delete` sweep could establish about the ids it was given.
+ *
+ * Two lists rather than one, because "the daemon says it does not have it" and
+ * "the delete did not happen" need opposite handling. The first is ambiguous —
+ * a `cp.create_many` that outlived its client deadline keeps registering, so
+ * an id absent now can exist a moment later — and is re-swept. The second is
+ * not ambiguous at all: those charge points are still there, and the run must
+ * exit non-zero rather than report a clean teardown.
+ */
+export interface DeleteSweepOutcome {
+  /** Ids the daemon answered `not_found` for. Re-swept by
+   *  {@link reconcileMissingIds}. */
+  readonly notFound: readonly string[];
+  /** Ids this sweep could not account for at all: the delete failed with
+   *  something other than `not_found`, or the daemon stopped answering before
+   *  the id was even attempted. Still registered, as far as this process can
+   *  tell. */
+  readonly undeleted: readonly string[];
+  /** Whether a `cp.delete` timed out, which is what makes the sweep abandon
+   *  its remaining ids. Carried out of the sweep rather than re-derived from
+   *  `pool.anyConnected()` at the report site: a daemon can stop *answering*
+   *  while socket.io still considers the transport connected, and that is
+   *  exactly the case an operator needs named. */
+  readonly daemonUnresponsive: boolean;
+}
+
+/**
+ * The teardown line for charge points a sweep could not delete, or `null` when
+ * there were none.
+ *
+ * A sibling of {@link unresolvedIdsReport}, deliberately: the two say
+ * different things and the caller pairs both with a non-zero exit code. This
+ * one is the stronger claim — `cp.delete` answered `disconnected`, `internal`
+ * or `rate_limited`, or never got to run because the daemon had stopped
+ * answering — so these charge points are *known* to be left behind rather than
+ * merely unaccounted for.
+ *
+ * The gap this closes: these ids used to be counted into a local `left`
+ * variable, printed in a WARNING, and then dropped. Nothing reconciled them
+ * and nothing set an exit code, so a run that leaked its whole fleet exited 0.
+ */
+export function undeletedIdsReport(
+  ids: readonly string[],
+  runId: string,
+  daemonUnresponsive: boolean,
+): string | null {
+  if (ids.length === 0) return null;
+  return (
+    `[bench] ERROR: ${ids.length} charge point(s) from run ${runId} were NOT ` +
+    `deleted${daemonUnresponsive ? " (the daemon stopped answering)" : ""}. ` +
+    `They are still registered on the daemon, so the next run's preflight ` +
+    `will refuse it until they are gone. Delete them by hand: ` +
+    `${ids.join(", ")}\n`
+  );
 }
 
 /**

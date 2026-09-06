@@ -41,6 +41,7 @@ import {
   fleetGauge,
   formatTable,
   HeartbeatOverride,
+  heartbeatLoadIsConfigured,
   histogramQuantile,
   holdSec,
   machineReport,
@@ -65,9 +66,11 @@ import {
   STEP_COLUMNS,
   sustainableRpcPerSec,
   unpredictedCreatedIds,
+  undeletedIdsReport,
   unresolvedIdsReport,
   validateOptions,
   type BenchOptions,
+  type DeleteSweepOutcome,
   type FleetGauge,
   type Sample,
   type StartWaitBudget,
@@ -541,6 +544,15 @@ interface Preflight {
    *  target and connected count is relative to it, so a run with
    *  `--allow-existing` still reports its own fleet rather than the daemon's. */
   readonly baseline: FleetGauge;
+  /** `ocppcp_ws_reconnects_total` before this run created anything.
+   *
+   *  Needed because that counter is cumulative since **daemon** start, not
+   *  since this run started. Seeding "reconnects seen so far" with 0 instead
+   *  would make the first reading after an early event-socket loss include
+   *  every reconnect the daemon had ever recorded — so `hb.load` would read
+   *  `drift` on any daemon that had been up for a while, which is a marker
+   *  that means nothing. */
+  readonly reconnectsAtStart: number;
 }
 
 async function preflight(
@@ -614,6 +626,7 @@ async function preflight(
   return {
     daemonVersion: health.version ?? "unknown",
     baseline: fleetGauge(samples),
+    reconnectsAtStart: reconnectsTotal(samples),
   };
 }
 
@@ -747,7 +760,7 @@ async function waitForSettle(
   opts: BenchOptions,
   targetConnected: number,
   timeoutSec: number,
-): Promise<{ gauge: FleetGauge; notSettled: number }> {
+): Promise<{ gauge: FleetGauge; notSettled: number; reconnects: number }> {
   const deadline = Date.now() + timeoutSec * 1000;
   for (;;) {
     const samples = await fetchMetrics(opts.daemonUrl, opts.daemonBasicAuth);
@@ -759,10 +772,22 @@ async function waitForSettle(
         // whether the reading is this run's fleet or a daemon-wide count with
         // a baseline subtracted, and `total` is what says so.
         notSettled: Math.max(0, targetConnected - gauge.connected),
+        // Read off a scrape this poll was making anyway. It tightens the
+        // "reconnects since the event socket was lost" bound by one stage —
+        // without it the last known value before a loss during settle or
+        // warmup is the *previous* step's final scrape.
+        reconnects: reconnectsTotal(samples),
       };
     }
     await sleep(500);
   }
+}
+
+/** `ocppcp_ws_reconnects_total`, or 0 when the daemon does not expose it. */
+function reconnectsTotal(samples: readonly Sample[]): number {
+  return (
+    samples.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ?? 0
+  );
 }
 
 /** Arm each given CP's heartbeat at the configured cadence and, in active
@@ -1010,6 +1035,16 @@ function armLoad(
     // Returning here is what preserves the transaction: no stop is sent, the
     // charge point stays in `openTransactions`, and teardown closes it. That is
     // the point — see `dispositionAfterStart`.
+    //
+    // **Verified by reading, not by test.** `dispositionAfterStart` is unit
+    // tested and mutation-checked, but this line is not: `cycle` lives inside
+    // `armLoad`, neither is exported, and `fleet-bench.ts` calls `main()` on
+    // import, so `lib.bun.test.ts` cannot drive it. The smoke test cannot
+    // reach it either — retirement needs the assigned-id budget to expire,
+    // which is 95s from the local start, well past any smoke budget, and there
+    // is no way to inject a shorter one. So a mutation that sends the stop
+    // anyway would pass every test in this repository. Treat this `if` as
+    // load-bearing and unguarded.
     if (!disposition.stop) return;
 
     // The awaits above can span a `stop()`; without this check the callback
@@ -1288,8 +1323,9 @@ async function deleteFleet(
   pool: SocketPool,
   runId: string,
   cpIds: readonly string[],
-): Promise<string[]> {
-  if (cpIds.length === 0) return [];
+): Promise<DeleteSweepOutcome> {
+  if (cpIds.length === 0)
+    return { notFound: [], undeleted: [], daemonUnresponsive: false };
   if (!pool.anyConnected()) {
     process.stderr.write(
       `[bench] skipping cleanup: no control-plane socket is connected, so ` +
@@ -1297,14 +1333,21 @@ async function deleteFleet(
         `the daemon. Restart it, or delete them before the next run — the ` +
         `preflight refuses a daemon that already holds charge points.\n`,
     );
-    return [];
+    // Every one of them is still registered as far as this process knows, and
+    // saying so is the point: this used to return "nothing to reconcile",
+    // which the caller could not tell from "everything was deleted".
+    return { notFound: [], undeleted: [...cpIds], daemonUnresponsive: false };
   }
   process.stderr.write(
     `[bench] cleaning up ${cpIds.length} charge point(s) (up to ${CLEANUP_BUDGET_MS / 1000}s)\n`,
   );
   const deadline = Date.now() + CLEANUP_BUDGET_MS;
   let next = 0;
-  let deleted = 0;
+  /** Ids this sweep has a definitive "it is gone" for — a successful
+   *  `cp.delete`, or a `not_found`. Identity, not a count: the count could
+   *  say *how many* were left behind but never *which*, and the caller needs
+   *  the ids to reconcile them and to name them on stderr. */
+  const accountedFor = new Set<string>();
   /** Ids the daemon said it did not have. Under a `cp.create_many` whose
    *  client deadline expired while the server kept creating, an id can be
    *  absent now and registered a moment later, so these are re-swept. */
@@ -1326,7 +1369,7 @@ async function deleteFleet(
           undefined,
           remainingMs,
         );
-        deleted++;
+        accountedFor.add(cpIds[i]!);
       } catch (err) {
         if (err instanceof RpcFailedError && err.code === "timeout") {
           daemonUnresponsive = true;
@@ -1334,27 +1377,34 @@ async function deleteFleet(
           // Recorded, because "not there yet" and "already gone" look the same
           // from here — see the reconciliation pass in `cleanup`.
           notFound.add(cpIds[i]!);
-          // Already gone — the outcome cleanup wanted, so it counts as done
-          // rather than inflating the "still registered" tally below.
-          deleted++;
+          // Already gone — the outcome cleanup wanted, so it counts as
+          // accounted for rather than as still registered.
+          accountedFor.add(cpIds[i]!);
         }
-        // Anything else is best-effort and simply left behind.
+        // Anything else — `disconnected`, `internal`, `rate_limited` — leaves
+        // the id out of `accountedFor` and therefore in `undeleted` below.
       }
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(CLEANUP_CONCURRENCY, cpIds.length) }, worker),
   );
-  const left = cpIds.length - deleted;
-  if (left > 0) {
+  // **Everything this sweep could not account for**, by subtraction rather
+  // than by collecting the error branches. The two differ in the case that
+  // matters most: after a timeout sets `daemonUnresponsive`, every remaining
+  // worker returns *before dequeuing*, so those ids never reach a `catch` at
+  // all. Collecting error branches would have reported none of them, and
+  // "the daemon stopped answering" is precisely when a fleet is left behind.
+  const undeleted = cpIds.filter((id) => !accountedFor.has(id));
+  if (undeleted.length > 0) {
     process.stderr.write(
-      `[bench] cleanup gave up with ${left} charge point(s) still registered ` +
+      `[bench] cleanup gave up with ${undeleted.length} charge point(s) still registered ` +
         `(they are the ones named ${BENCH_ID_ROOT}-${runId}-*)` +
         `${daemonUnresponsive ? " (the daemon stopped answering)" : ""}. The next ` +
         `run's preflight will refuse this daemon until they are gone.\n`,
     );
   }
-  return [...notFound];
+  return { notFound: [...notFound], undeleted, daemonUnresponsive };
 }
 
 async function main(): Promise<void> {
@@ -1383,7 +1433,10 @@ async function main(): Promise<void> {
   process.stderr.write(
     `[bench] run id ${runId}: charge points are created as ${benchIdPattern(runId)}\n`,
   );
-  const { daemonVersion, baseline } = await preflight(opts, runId);
+  const { daemonVersion, baseline, reconnectsAtStart } = await preflight(
+    opts,
+    runId,
+  );
 
   process.stderr.write(machineInfo(opts.daemonUrl, daemonVersion) + "\n");
   process.stderr.write(
@@ -1471,6 +1524,28 @@ async function main(): Promise<void> {
    *  reapplying `--heartbeat-interval`, so every later row that also saw a
    *  reconnect carries a heartbeat load that is not the configured one. */
   let overrideLostAtN: number | null = null;
+  /** `ocppcp_ws_reconnects_total` as of the most recent scrape this process
+   *  has made. Updated at every settle poll and both measurement scrapes.
+   *
+   *  Seeded from the **preflight** scrape rather than from 0, because the
+   *  counter is cumulative since daemon start. From 0, an event-socket loss
+   *  before the first settle poll would make the next row's "reconnects since
+   *  the loss" the daemon's whole lifetime total, and `hb.load` would read
+   *  `drift` on every row of every run against a daemon that had been up for a
+   *  while — over-warning so badly the column would stop meaning anything.
+   *  Seeded here, the worst case is "since preflight", which is this run's own
+   *  lifetime. */
+  let lastReconnectsSeen = reconnectsAtStart;
+  /** {@link lastReconnectsSeen} at the instant the event socket was lost, or
+   *  `null` while it is still up.
+   *
+   *  A **lower bound** on the true cumulative count at that instant — a
+   *  reconnect between the last scrape and the loss is not in it — which makes
+   *  every `reconnectsAfter - reconnectsAtOverrideLoss` an **upper** bound on
+   *  reconnects since the loss. That is the conservative direction: it can
+   *  over-warn, never under-warn, and under-warning is the defect being
+   *  fixed. */
+  let reconnectsAtOverrideLoss: number | null = null;
   const results: StepResult[] = [];
   // One stop handle per step's `armLoad` call — steps only ever *add* CPs, so
   // each step arms just the CPs it created and earlier steps' handles keep
@@ -1590,7 +1665,15 @@ async function main(): Promise<void> {
       heartbeatOverride.close();
       await heartbeatOverride.idle();
       watcher?.close();
-      const notFound = await deleteFleet(pool, runId, [...cleanupIds]);
+      const sweep = await deleteFleet(pool, runId, [...cleanupIds]);
+      const notFound = sweep.notFound;
+      /** Ids no sweep — the first one or any reconciliation pass — could
+       *  account for. Accumulated across passes because a pass drops whatever
+       *  it could not delete out of `pending`, so an id that answered
+       *  `not_found` in the first sweep and `internal` in a later pass would
+       *  otherwise vanish between the two: the same defect one level down. */
+      const undeleted = new Set<string>(sweep.undeleted);
+      let deleteTimedOut = sweep.daemonUnresponsive;
       // A `cp.create_many` whose *client* deadline expired does not stop the
       // daemon's sequential handler, which keeps creating charge points. The
       // sweep above then answered `not_found` for ids the handler registered
@@ -1607,7 +1690,12 @@ async function main(): Promise<void> {
       if (notFound.length > 0) {
         const outcome = await reconcileMissingIds(notFound, {
           delay: () => sleep(RECONCILE_DELAY_MS),
-          deleteMissing: (ids) => deleteFleet(pool, runId, ids),
+          deleteMissing: async (ids) => {
+            const pass = await deleteFleet(pool, runId, ids);
+            for (const id of pass.undeleted) undeleted.add(id);
+            deleteTimedOut = deleteTimedOut || pass.daemonUnresponsive;
+            return pass.notFound;
+          },
           connected: () => pool.anyConnected(),
         });
         if (outcome.resolved > 0) {
@@ -1621,11 +1709,45 @@ async function main(): Promise<void> {
         // point the daemon registers after this gives up survives the run, and
         // the next run's preflight refuses that daemon — a WARNING lost in a
         // sweep's worth of stderr is not a report.
-        const unresolved = unresolvedIdsReport(outcome, runId);
+        //
+        // Ids that turned out to be undeleted are dropped from this report:
+        // `undeleted` is the stronger, unambiguous claim about the same id and
+        // it is reported below, so naming it twice under two different reasons
+        // would misrepresent one charge point as two problems.
+        const unresolved = unresolvedIdsReport(
+          {
+            ...outcome,
+            unresolved: outcome.unresolved.filter((id) => !undeleted.has(id)),
+          },
+          runId,
+        );
         if (unresolved !== null) {
           process.exitCode = 1;
           process.stderr.write(unresolved);
         }
+      }
+      // The same instrument as the reconciliation report above, for the case
+      // it never covered: a `cp.delete` that failed with anything other than
+      // `not_found`, or that never ran because the daemon stopped answering.
+      // Those ids used to reach a WARNING and nothing else, so a run that
+      // leaked its entire fleet still exited 0.
+      //
+      // Verified by reading, not by test: `cleanup` is a closure inside
+      // `main()` and `fleet-bench.ts` calls `main()` on import, so nothing in
+      // `lib.bun.test.ts` can drive this wiring. `undeletedIdsReport` is unit
+      // tested; `deleteFleet`'s subtraction and this call site's pairing with
+      // `process.exitCode = 1` are not — every smoke test runs against a
+      // daemon that answers every delete, so `undeleted` is empty in all of
+      // them and a mutation emptying it changes nothing observable. Confirmed
+      // vacuous rather than assumed: the mutation was run.
+      const undeletedReport = undeletedIdsReport(
+        [...undeleted],
+        runId,
+        deleteTimedOut || !pool.anyConnected(),
+      );
+      if (undeletedReport !== null) {
+        process.exitCode = 1;
+        process.stderr.write(undeletedReport);
       }
       await pool.closeAll();
     })();
@@ -1668,7 +1790,17 @@ async function main(): Promise<void> {
         opts.daemonBasicAuth,
         (cpId) => heartbeatOverride.noteBootAccepted(cpId),
         () => {
-          if (overrideLostAtN === null) overrideLostAtN = currentN;
+          if (overrideLostAtN !== null) return;
+          overrideLostAtN = currentN;
+          // Verified by reading, not by test. A mutation here that snapshots
+          // the *current* counter instead of the last-seen one makes
+          // `reconnectsSinceOverrideLoss` permanently 0 and `hb.load`
+          // permanently `set` — the exact suppression the finding describes,
+          // moved one line — and nothing in this repository catches it: the
+          // lib tests cannot reach `fleet-bench.ts`, and no smoke test loses
+          // the event socket during a measured step. Confirmed vacuous rather
+          // than assumed: the mutation was run.
+          reconnectsAtOverrideLoss = lastReconnectsSeen;
         },
       );
       watcher = events;
@@ -1757,6 +1889,7 @@ async function main(): Promise<void> {
           allCpIds.length,
         );
         const notSettled = settle.notSettled;
+        lastReconnectsSeen = settle.reconnects;
         if (notSettled > 0) {
           process.stderr.write(
             `[bench] N=${n}: ${notSettled} CP(s) did not report connected within ` +
@@ -1835,12 +1968,12 @@ async function main(): Promise<void> {
         const errorsBefore = before
           .filter((s) => s.name === "ocppcp_ocpp_call_errors_total")
           .reduce((sum, s) => sum + s.value, 0);
-        const reconnectsAfter =
-          after.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ??
-          0;
-        const reconnectsBefore =
-          before.find((s) => s.name === "ocppcp_ws_reconnects_total")?.value ??
-          0;
+        const reconnectsAfter = reconnectsTotal(after);
+        const reconnectsBefore = reconnectsTotal(before);
+        // The `before` scrape too, not only `after`: a loss during the
+        // measurement window itself should snapshot the window's opening
+        // count rather than the previous step's closing one.
+        lastReconnectsSeen = Math.max(lastReconnectsSeen, reconnectsBefore);
         const timeoutsAfter = after
           .filter((s) => s.name === CALL_TIMEOUTS_METRIC)
           .reduce((sum, s) => sum + s.value, 0);
@@ -1919,22 +2052,35 @@ async function main(): Promise<void> {
               `for ${hbBoots} observed accepted-boot event(s)\n`,
           );
         }
+        // **Since the socket was lost, not since this window opened.** The
+        // window delta was the defect: a charge point that reconnects during
+        // creation, settling or the warmup has already reconnected by the time
+        // the `before` scrape is taken, so the delta is zero and the warning
+        // was suppressed — while `BootNotification.conf` had in fact replaced
+        // the configured interval and no watcher was left to put it back. The
+        // row then measured a different load and said nothing.
+        const reconnectsSinceOverrideLoss =
+          reconnectsAtOverrideLoss === null
+            ? null
+            : Math.max(0, reconnectsAfter - reconnectsAtOverrideLoss);
         if (
-          overrideLostAtN !== null &&
-          Math.max(0, reconnectsAfter - reconnectsBefore) > 0
+          reconnectsSinceOverrideLoss !== null &&
+          reconnectsSinceOverrideLoss > 0
         ) {
           // The idle axis's degrade, made loud exactly where it bites. The run
           // kept going after the event socket dropped, which is right — but a
-          // row that also saw reconnects contains charge points that rebooted
-          // with nobody left to put the override back, so their heartbeat
-          // cadence is now the CSMS's.
+          // row at or after that point whose fleet has reconnected contains
+          // charge points that rebooted with nobody left to put the override
+          // back, so their heartbeat cadence is now the CSMS's.
           process.stderr.write(
             `[bench] N=${n}: WARNING: the event socket dropped at N=${overrideLostAtN}, ` +
-              `so --heartbeat-interval is no longer being reapplied, and this row saw ` +
-              `${Math.max(0, reconnectsAfter - reconnectsBefore)} reconnect(s). Every ` +
-              `charge point that reconnected is heartbeating at the CSMS's ` +
-              `BootNotification interval, so this row's heartbeat load is not the ` +
-              `configured one.\n`,
+              `so --heartbeat-interval is no longer being reapplied, and at most ` +
+              `${reconnectsSinceOverrideLoss} reconnect(s) have happened since then ` +
+              `(an upper bound: the count at the moment of the drop is only known ` +
+              `as of the last scrape before it). Every charge point that reconnected ` +
+              `is heartbeating at the CSMS's BootNotification interval, so this ` +
+              `row's heartbeat load is not the configured one. The row is marked ` +
+              `"drift" in the hb.load column.\n`,
           );
         }
         if (hbFailures > 0) {
@@ -1972,6 +2118,8 @@ async function main(): Promise<void> {
           evictions,
           errors: Math.max(0, errorsAfter - errorsBefore),
           reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
+          reconnectsSinceOverrideLoss,
+          heartbeatOverrideFailures: hbFailures,
           unconfirmedStarts: unconfirmedStarts - unconfirmedStartsBefore,
           lateHolds: lateHolds - lateHoldsBefore,
           retired: retired - retiredBefore,
@@ -1979,6 +2127,7 @@ async function main(): Promise<void> {
         unconfirmedStartsBefore = unconfirmedStarts;
         lateHoldsBefore = lateHolds;
         retiredBefore = retired;
+        lastReconnectsSeen = Math.max(lastReconnectsSeen, reconnectsAfter);
       }
     })();
     sweepSettled = sweep;
@@ -2060,6 +2209,15 @@ async function main(): Promise<void> {
           answeredAfterWatchdog: answeredAfterWatchdog(r),
           errors: r.errors,
           reconnects: r.reconnects,
+          // Since the event socket was lost, not since this window opened —
+          // `null` while it is still up. An upper bound; see StepResult.
+          reconnectsSinceOverrideLoss: r.reconnectsSinceOverrideLoss,
+          heartbeatOverrideFailures: r.heartbeatOverrideFailures,
+          // The `hb.load` column, machine-readable: `false` means at least one
+          // charge point in this row was heartbeating at the CSMS's
+          // `BootNotification` interval rather than `--heartbeat-interval`, so
+          // the row's offered load is not the configured one.
+          heartbeatLoadConfigured: heartbeatLoadIsConfigured(r),
           unconfirmedTransactionStarts: r.unconfirmedStarts,
           lateHolds: r.lateHolds,
           retiredChargePoints: r.retired,

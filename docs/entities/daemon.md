@@ -298,8 +298,12 @@ are exactly what start happening near the knee. See
 [Source: bench README](../sources/bench-readme.md) for what that does and does
 not cover, including what the reapplication itself costs the measurement (one
 control-plane RPC per accepted boot, paced inside the socket pool's existing
-ceiling) and the fact that whether it moves the knee is argued rather than
-demonstrated, for want of the same real CSMS this section is waiting on. The
+ceiling). **Whether that moves the knee is a stated limitation, not pending
+work**: the collapse to one RPC per boot is measured, the residual's bound is
+argued from the pool's 640 RPC/s ceiling, and settling it needs a sweep against
+a real CSMS at fleet size run with and without the reapplication — the same
+missing ingredient as the number this section is waiting on. Every result file
+already carries the counters that would settle it. The
 same README also states the teardown ceiling an operator meets on Ctrl-C:
 about ten and a half minutes worst case on OCPP 1.6, and only against a daemon
 that is answering but has not finished creating.

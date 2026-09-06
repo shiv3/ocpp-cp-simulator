@@ -46,6 +46,7 @@ import {
   BOOT_COALESCE_MS,
   formatTable,
   HeartbeatOverride,
+  heartbeatLoadIsConfigured,
   histogramQuantile,
   mergeHistogramDeltas,
   parseArgv,
@@ -70,6 +71,7 @@ import {
   START_CONFIRM_MARGIN_SEC,
   START_CONFIRM_TIMEOUT_MS,
   sustainableRpcPerSec,
+  undeletedIdsReport,
   unpredictedCreatedIds,
   unresolvedIdsReport,
   validateOptions,
@@ -1077,6 +1079,8 @@ describe("a step's reported row (#302)", () => {
       evictions: 0,
       errors: 0,
       reconnects: 0,
+      reconnectsSinceOverrideLoss: null,
+      heartbeatOverrideFailures: 0,
       unconfirmedStarts: 0,
       lateHolds: 0,
       retired: 0,
@@ -1595,6 +1599,8 @@ describe("attributing connectivity to this run's own fleet (#302)", () => {
       evictions: 0,
       errors: 0,
       reconnects: 0,
+      reconnectsSinceOverrideLoss: null,
+      heartbeatOverrideFailures: 0,
       unconfirmedStarts: 0,
       lateHolds: 0,
       retired: 0,
@@ -1605,6 +1611,109 @@ describe("attributing connectivity to this run's own fleet (#302)", () => {
         STEP_COLUMNS.indexOf("conn.src")
       ],
     ).toBe("est");
+  });
+});
+
+describe("a row discloses a heartbeat load that drifted (#302)", () => {
+  const base: StepResult = {
+    requested: 10,
+    fleet: 10,
+    connectedAtSettle: 10,
+    connectedAtEnd: 10,
+    connectivityAttributable: true,
+    notSettled: 0,
+    aggregate: mergeHistogramDeltas(new Map()),
+    heartbeat: null,
+    timeouts: 0,
+    evictions: 0,
+    errors: 0,
+    reconnects: 0,
+    reconnectsSinceOverrideLoss: null,
+    heartbeatOverrideFailures: 0,
+    unconfirmedStarts: 0,
+    lateHolds: 0,
+    retired: 0,
+  };
+
+  it("reads `set` while both reapplication mechanisms are intact", () => {
+    expect(heartbeatLoadIsConfigured(base)).toBe(true);
+    expect(row(base)[STEP_COLUMNS.indexOf("hb.load")]).toBe("set");
+  });
+
+  it("reads `drift` when a reapplication RPC failed", () => {
+    // Previously a stderr WARNING and nothing else, so a collected result file
+    // and a pasted table both said the load was the configured one.
+    const r: StepResult = { ...base, heartbeatOverrideFailures: 1 };
+    expect(heartbeatLoadIsConfigured(r)).toBe(false);
+    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
+  });
+
+  it("reads `drift` when a charge point reconnected after the watcher was lost", () => {
+    const r: StepResult = { ...base, reconnectsSinceOverrideLoss: 1 };
+    expect(heartbeatLoadIsConfigured(r)).toBe(false);
+    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
+  });
+
+  it("counts reconnects since the LOSS, not since the window opened", () => {
+    // THE finding. A charge point that reconnects during creation, settling or
+    // the warmup has already reconnected by the time the `before` scrape is
+    // taken, so a window delta reads zero — and the old warning was gated on
+    // that delta. The row then measured a load nobody asked for and said
+    // nothing. `reconnects` (the window delta) being 0 must NOT make the row
+    // read `set`.
+    const r: StepResult = {
+      ...base,
+      reconnects: 0,
+      reconnectsSinceOverrideLoss: 2,
+    };
+    expect(row(r)[STEP_COLUMNS.indexOf("reconnects")]).toBe("0");
+    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
+  });
+
+  it("stays `set` while the socket is up, however many reconnects the window saw", () => {
+    // A reconnect with the watcher still up is reapplied, so the cadence
+    // holds. `null` is what says "still up", and it must not be confused with
+    // zero.
+    const r: StepResult = { ...base, reconnects: 9 };
+    expect(r.reconnectsSinceOverrideLoss).toBe(null);
+    expect(heartbeatLoadIsConfigured(r)).toBe(true);
+    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("set");
+  });
+
+  it("stays `set` after a loss that no charge point reconnected through", () => {
+    // Losing the socket is not itself drift: the override only needs
+    // reapplying after an accepted boot, so a fleet that never reconnects
+    // keeps the configured cadence and the row is honest to say so.
+    const r: StepResult = { ...base, reconnectsSinceOverrideLoss: 0 };
+    expect(heartbeatLoadIsConfigured(r)).toBe(true);
+    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("set");
+  });
+});
+
+describe("naming the charge points a sweep could not delete (#302)", () => {
+  it("says nothing when everything was deleted", () => {
+    expect(undeletedIdsReport([], "abc-1234", false)).toBe(null);
+  });
+
+  it("names every undeleted id, so the operator can remove them by hand", () => {
+    // The finding: these ids reached a WARNING and were then dropped. Nothing
+    // reconciled them and nothing set an exit code, so a run that leaked its
+    // whole fleet exited 0 — and the *next* run's preflight refused the daemon
+    // for reasons this run never reported.
+    const report = undeletedIdsReport(["BENCH-a-1", "BENCH-a-2"], "abc", false);
+    expect(report).not.toBe(null);
+    expect(report).toContain("BENCH-a-1");
+    expect(report).toContain("BENCH-a-2");
+    expect(report).toContain("NOT");
+    expect(report).toContain("abc");
+  });
+
+  it("says when the daemon stopped answering, because that is the leaking case", () => {
+    // A timeout sets `daemonUnresponsive` and every remaining worker returns
+    // before dequeuing, so most ids never reach a catch branch at all. They
+    // are undeleted by subtraction, and the reason belongs in the report.
+    const report = undeletedIdsReport(["BENCH-a-1"], "abc", true);
+    expect(report).toContain("stopped answering");
   });
 });
 
@@ -1620,6 +1729,8 @@ describe("end-of-window connectivity (#302)", () => {
     evictions: 0,
     errors: 0,
     reconnects: 0,
+    reconnectsSinceOverrideLoss: null,
+    heartbeatOverrideFailures: 0,
     unconfirmedStarts: 0,
     lateHolds: 0,
     retired: 0,
@@ -2023,6 +2134,8 @@ describe("a row discloses a duty cycle that slipped (#302)", () => {
     evictions: 0,
     errors: 0,
     reconnects: 0,
+    reconnectsSinceOverrideLoss: null,
+    heartbeatOverrideFailures: 0,
     unconfirmedStarts: 0,
     lateHolds: 0,
     retired: 0,

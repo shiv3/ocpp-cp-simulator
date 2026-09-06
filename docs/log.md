@@ -1427,3 +1427,35 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   has one or both — re-runs the step as a no-op, keeping its rows, because every
   statement is `CREATE TABLE IF NOT EXISTS` or guarded by a `PRAGMA table_info`
   check.
+
+## [2026-09-06] ingest | `--watch`: `applied` waits for the write, and the baseline invariant is enumerated (#314, PR #317)
+
+- A scenario reload is no longer announced, and its bytes do not become the
+  baseline, until the durable write settles. `loadScenario` installs
+  synchronously and persists in the background with the rejection swallowed, so
+  a `SQLITE_BUSY` or a full disk produced `applied` for a change a restart
+  undoes — and then suppressed the operator's retry of the same bytes as a
+  duplicate. A failed write is reported `rejected`, saying the definition is
+  live until the daemon restarts. The in-memory copy is deliberately not rolled
+  back: reloading the previous definition can tear down a run this one has
+  already auto-started, which trades a durability failure for a liveness one.
+- Chosen over merely retaining the baseline because only observing the write
+  makes `applied` mean what it says. It needed no change to `loadScenario`'s
+  synchronous contract — an optional `onPersisted` callback, ignored by every
+  caller that does not report an outcome.
+- The sibling was checked rather than assumed: the idTag path already persists
+  **before** touching the live pool, so a failed write leaves the daemon
+  unchanged and its `rejected` is already true of everything. No change there.
+- [Daemon](entities/daemon.md) — third consecutive round in which the
+  duplicate-suppression baseline was the defect, each finding a different sense
+  in which "these bytes landed" was untrue: true of every code path but not
+  across a debounce; true of the charge points being reconciled but not of the
+  other consumers of the file; true in memory but not on disk. That is one field
+  whose invariant was never pinned down, discovered a caller at a time. What
+  "holds" must mean is now enumerated where the field is declared — in memory,
+  for every consumer of the path, and durably under `--state-db` — together with
+  what is assumed about **ordering** (a held edit claims the baseline when
+  accepted, not when applied) and about **failure** (every way an accepted
+  reload can still fail to hold clears it). An audit that lists callers but not
+  what happens when one fails halfway is the same shape of incomplete as one
+  that ignores interleavings.

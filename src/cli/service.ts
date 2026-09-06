@@ -1086,7 +1086,15 @@ export class CLIChargePointService {
   loadScenario(
     connectorId: number,
     definition: ScenarioDefinition,
-    options: { readonly autoStart?: boolean } = {},
+    options: {
+      readonly autoStart?: boolean;
+      /**
+       * Called once when the durable write for this definition settles: `null`
+       * on success, the error on failure. Optional so the synchronous contract
+       * is unchanged for callers that do not report an outcome (#314).
+       */
+      readonly onPersisted?: (error: unknown | null) => void;
+    } = {},
   ): string {
     // Hard gate on the fields the runtime map and every scenario RPC key on.
     // Without it a definition with no `id` was stored under the key
@@ -1104,14 +1112,27 @@ export class CLIChargePointService {
     // failure here would mask a successful in-memory load. `save` on the
     // bun:sqlite path is effectively sync but typed Promise; either way
     // a failure surfaces in stderr and the in-memory copy stays usable.
+    //
+    // `onPersisted` lets a caller that *reports an outcome* observe how that
+    // write ended without changing this method's synchronous contract for the
+    // callers that do not care. `--watch` is the one that does: it announces
+    // `applied` and advances its duplicate-suppression baseline, and both of
+    // those are claims about durable state, so a swallowed `SQLITE_BUSY` made
+    // it announce a change a restart undoes and then suppress the operator's
+    // retry of the very same bytes (#314). Called exactly once, with `null` on
+    // success and the error on failure.
     void this._scenarioRepo
       .save(this._chargePoint.id, connectorId, definition)
+      .then(() => {
+        options.onPersisted?.(null);
+      })
       .catch((err) => {
         process.stderr.write(
           `[CLI] Failed to persist scenario ${definition.id}: ${
             err instanceof Error ? err.message : err
           }\n`,
         );
+        options.onPersisted?.(err);
       });
     // Scenarios may be loaded after the CP is already connected (e.g. via
     // the JSON `load_scenario` command on a long-running daemon). The CP

@@ -238,6 +238,18 @@ reads and then keeps a copy of:
 
 The rules, in the order they bite:
 
+- **`applied` is a claim about durable state.** With `--state-db`, a scenario
+  reload is not announced until its write to the `scenarios` table has settled.
+  `loadScenario` installs the definition synchronously and persists in the
+  background, so a rejected write (`SQLITE_BUSY`, a full disk) used to be
+  swallowed and the reload reported `applied` for a change a restart would undo.
+  A reload whose write fails is reported **`rejected`**, with a message saying
+  the definition is live until the daemon restarts — the in-memory copy is
+  deliberately not rolled back, because reloading the previous definition can
+  tear down a run this one has already auto-started, trading a durability
+  failure for a liveness one. The idTag half has no such gap: its pool is
+  persisted **before** the live pool is touched, so a failed write leaves the
+  daemon untouched and `rejected` is true of everything.
 - **The duplicate-bytes baseline is per file and means "everyone has these".**
   A watched idTag file's cached copy records the bytes _every_ charge point
   drawing from that path currently holds, not merely the bytes of the last

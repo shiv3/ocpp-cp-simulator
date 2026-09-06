@@ -112,15 +112,38 @@ interface ScenarioEntry extends ScenarioFileRegistration {
   readonly absolutePath: string;
   unwatch: () => void;
   /**
-   * The last text this manager took responsibility for: applied, or held for a
-   * session that will apply it. `null` means "no baseline to trust", so the
-   * next read is judged on its merits rather than dismissed as unchanged.
+   * The bytes this scenario **currently holds everywhere it has to hold them**.
+   * `null` means "no baseline to trust", so the next read is judged on its
+   * merits rather than dismissed as unchanged.
    *
-   * Three rules, one invariant. It is advanced only when the text was accepted
-   * (`reloadScenario`), it is never advanced by a rejection, and it is cleared
-   * when a held text is refused at drain time (`drainPending`) — because the
-   * connector then keeps the older definition and a baseline claiming otherwise
-   * makes the operator's next save of those exact bytes a silent no-op.
+   * The suppression this drives is why the wording keeps having to get
+   * stronger: `reloadScenario` early-outs when the file still equals this, so
+   * anything it claims falsely cancels a reload that was owed. Three review
+   * rounds each found a different sense in which "landed" was untrue, so
+   * "holds" is enumerated here rather than left to the next reader to
+   * rediscover. It must be true:
+   *
+   * 1. **In memory** — the connector's runtime definition is these bytes.
+   * 2. **For every consumer of the path**, not only the one being reconciled.
+   *    The idTag half of this feature keys its baseline per *file* while charge
+   *    points are reconciled one at a time; see `idTagText`.
+   * 3. **Durably, when `--state-db` is on.** `loadScenario` installs
+   *    synchronously and persists in the background, so a rejected write leaves
+   *    memory and disk disagreeing. A baseline set on the strength of the
+   *    in-memory half alone announced `applied` for a change a restart undoes,
+   *    and then suppressed the operator's retry of the same bytes.
+   *
+   * What that leaves, stated as ordering and failure rather than as a list of
+   * callers — the two things the audits that missed 2 and 3 did not say:
+   *
+   * - **Ordering.** A held edit claims the baseline when it is *accepted*, not
+   *   when it is applied; between those two points it is a promise, and the
+   *   drain that finally applies it re-decides. Nothing else may write here
+   *   between them.
+   * - **Failure.** Every way an accepted reload can still fail to hold — a
+   *   parse that never happened, an apply refused at drain time, a durable
+   *   write that rejects — clears this. `finishApply` is where the last of
+   *   those lands, and it is the only place that learns of it.
    */
   lastText: string | null;
   pending: ScenarioDefinition | null;
@@ -737,7 +760,10 @@ export class FileReloadManager {
     // content an early-out: no retry, no event, and the connector left on the
     // old definition until the bytes happened to change again. The idTag path
     // has always worked this way; these two must not disagree.
-    if (this.applyOrDefer(entry, definition)) entry.lastText = text;
+    // The baseline is `applyOrDefer`'s to move: whether these bytes may claim it
+    // depends on how the reload ends, and for an applied one that is not known
+    // until the durable write settles.
+    this.applyOrDefer(entry, definition, text);
   }
 
   /**
@@ -826,6 +852,10 @@ export class FileReloadManager {
   private applyOrDefer(
     entry: ScenarioEntry,
     definition: ScenarioDefinition,
+    /** The bytes `definition` was parsed from, or `null` when the caller has no
+     *  text to make a baseline of. Owned here, because whether they may become
+     *  the baseline is decided by the same outcomes this method reports. */
+    text: string | null,
   ): boolean {
     const service = this.registry.get(entry.cpId);
     // Held, not dropped, in both of the cases below — `drainPending` has
@@ -886,27 +916,26 @@ export class FileReloadManager {
       this.log(
         `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reload held until the current session ends`,
       );
+      // Held bytes become the baseline: they have been accepted, and the drain
+      // that installs them later re-decides whether they may keep it.
+      if (text !== null) entry.lastText = text;
       return true;
     }
     try {
-      service.loadScenario(entry.connectorId, definition);
+      // `applied` and the baseline are both claims about durable state, so
+      // neither is made until the write settles. `loadScenario` installs the
+      // definition synchronously and persists in the background, swallowing a
+      // rejected write — so reporting on its return announced a change that a
+      // restart undoes, and then suppressed the operator's retry of the very
+      // same bytes as a duplicate (#314).
+      service.loadScenario(entry.connectorId, definition, {
+        onPersisted: (error) => this.finishApply(entry, text, error),
+      });
     } catch (err) {
       this.rejectScenario(entry, err);
       return false;
     }
     entry.pending = null;
-    this.emit({
-      target: "scenario",
-      path: entry.absolutePath,
-      cpId: entry.cpId,
-      connectorId: entry.connectorId,
-      scenarioId: entry.scenarioId,
-      outcome: "applied",
-      error: null,
-    });
-    this.log(
-      `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reloaded from ${entry.absolutePath}`,
-    );
     // Last, and outside the try: the definition is live either way, and a
     // console that cannot be told must not be able to fail the reload.
     try {
@@ -924,6 +953,60 @@ export class FileReloadManager {
       );
     }
     return true;
+  }
+
+  /**
+   * Report a reload once its durable write has settled.
+   *
+   * On success the definition is live *and* durable, so `applied` is announced
+   * and the bytes become the baseline. On failure it is live but not durable —
+   * a restart brings back the previous definition — so `rejected` is announced
+   * and the baseline is cleared, which is what lets the operator's next save of
+   * the same content be judged rather than dismissed.
+   *
+   * The in-memory definition is deliberately **not** rolled back. Rolling back
+   * means loading the previous definition again, which can tear down a run the
+   * reload has already auto-started — trading a durability failure for a
+   * liveness one, and adding a second write that can fail the same way. What is
+   * reported is therefore precise about which half failed, rather than pretending
+   * nothing happened.
+   */
+  private finishApply(
+    entry: ScenarioEntry,
+    text: string | null,
+    error: unknown | null,
+  ): void {
+    if (this.closed) return;
+    if (error) {
+      entry.lastText = null;
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(
+        `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reloaded into memory but could not be stored: ${message}`,
+      );
+      this.emit({
+        target: "scenario",
+        path: entry.absolutePath,
+        cpId: entry.cpId,
+        connectorId: entry.connectorId,
+        scenarioId: entry.scenarioId,
+        outcome: "rejected",
+        error: `scenario could not be stored: ${message}; it is live until the daemon restarts`,
+      });
+      return;
+    }
+    if (text !== null) entry.lastText = text;
+    this.emit({
+      target: "scenario",
+      path: entry.absolutePath,
+      cpId: entry.cpId,
+      connectorId: entry.connectorId,
+      scenarioId: entry.scenarioId,
+      outcome: "applied",
+      error: null,
+    });
+    this.log(
+      `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reloaded from ${entry.absolutePath}`,
+    );
   }
 
   /** Whether the charge point still holds the scenario this registration was
@@ -1005,7 +1088,11 @@ export class FileReloadManager {
       // direct path already advances the baseline only on success and a failed
       // idTag persist already clears its cache; this is the same rule reaching
       // the third of the three ways a reload can end (#314).
-      if (!this.applyOrDefer(entry, pending)) entry.lastText = null;
+      // The held bytes are already the baseline. A drain that ends in a
+      // rejection — a sibling grew past the envelope cap, or the write failed —
+      // takes it back with it, so the same edit saved again is judged afresh.
+      const held = entry.lastText;
+      if (!this.applyOrDefer(entry, pending, held)) entry.lastText = null;
     }
   }
 

@@ -6,6 +6,7 @@ import * as path from "path";
 import type { Socket } from "socket.io-client";
 
 import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "../../../cp/domain/persistence/Database";
 import {
   startMockCsms,
   type MockCsms,
@@ -171,7 +172,10 @@ function writeFile(dir: string, name: string, contents: string): string {
 
 async function startWatchingServer(
   backend: TestWatchBackend,
-  database: BunSqliteDatabase | null = null,
+  // `Database`, not the concrete adapter: one test substitutes a wrapper that
+  // fails a write once, which is the only way to exercise a *transient* store
+  // failure (#314).
+  database: Database | null = null,
 ): Promise<TestServer> {
   const server = await startTestServer({
     database,
@@ -2612,6 +2616,177 @@ describe("a new charge point is reconciled against disk (#314)", () => {
       () => events.some((e) => e.outcome === "applied"),
       "the reload of the re-saved file to be announced",
     );
+  });
+});
+
+describe("a reload that could not be stored is not `applied` (#314)", () => {
+  it("reports rejected and keeps the bytes retryable when the write fails", async () => {
+    // `loadScenario` installs the definition synchronously and persists in the
+    // background, swallowing a rejected write — so reporting on its return
+    // announced `applied` for a change a restart undoes, and advanced the
+    // baseline so the operator's retry of the very same bytes was dismissed as
+    // a duplicate. Both are claims about durable state, so both now wait for
+    // the write to settle.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("nodisk", 11));
+    const db = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(db);
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, db);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-NODISK",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-NODISK");
+
+    // The store goes away — a full disk or a SQLITE_BUSY looks the same from
+    // here: the write rejects and the in-memory load does not.
+    db.close();
+    backend.save(file, scenario("nodisk", 22));
+
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the failed write to be reported as a rejection",
+    );
+    const rejection = events.find((e) => e.outcome === "rejected");
+    expect(rejection?.error).toContain("could not be stored");
+    // Never `applied`: that is the claim the operator would have acted on.
+    expect(events.some((e) => e.outcome === "applied")).toBe(false);
+    // The definition really is live — the report says so rather than
+    // pretending nothing happened.
+    expect(loadedDelay(server, "CP-NODISK", "nodisk")).toBe(22);
+  });
+
+  it("clears the baseline a held edit had already claimed when its write fails", async () => {
+    // The interleaving the other two miss. A deferred edit becomes the baseline
+    // when it is *accepted*, long before it is applied — so when the drain
+    // finally installs it and the durable write then fails, the bytes are
+    // already sitting in the baseline claiming to have landed. `applyOrDefer`
+    // returned "accepted", so the drain's own clearing does not fire; only the
+    // report of the failed write can take it back.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("held-nodisk", 11));
+    const real = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(real);
+    let failNextScenarioWrite = false;
+    const flaky: Database = {
+      exec: (sql) => real.exec(sql),
+      run: (sql, params) => {
+        if (failNextScenarioWrite && sql.includes("scenarios")) {
+          failNextScenarioWrite = false;
+          throw new Error("database is locked");
+        }
+        real.run(sql, params);
+      },
+      all: (sql, params) => real.all(sql, params),
+      get: (sql, params) => real.get(sql, params),
+      close: () => real.close(),
+    };
+
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, flaky);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-HELD-NODISK");
+    await rpc(
+      socket,
+      "load_scenario",
+      { connector: 1, file },
+      "CP-HELD-NODISK",
+    );
+
+    // Mid-session, so the edit is held rather than applied.
+    expect(await openSession(server, "CP-HELD-NODISK", "TAG-HN")).toBe(
+      "TAG-HN",
+    );
+    const edited = scenario("held-nodisk", 22);
+    backend.save(file, edited);
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the edit to be held for the open session",
+    );
+
+    // The session ends, the drain installs it — and the write fails.
+    failNextScenarioWrite = true;
+    await closeSession(server, "CP-HELD-NODISK");
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the failed write behind the drained edit to be reported",
+    );
+
+    // The same bytes again must be judged, not written off as the baseline.
+    backend.save(file, edited);
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held bytes to be retryable after their write failed",
+    );
+  });
+
+  it("re-judges the same bytes once the store recovers", async () => {
+    // The other half of the rejection: the baseline goes back with it, so the
+    // operator saving the very same content again is judged rather than
+    // dismissed as unchanged. Without that the only way out of a transient
+    // `SQLITE_BUSY` is to edit the file into something different.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", scenario("flaky", 11));
+    const real = BunSqliteDatabase.open(path.join(dir, "state.sqlite"));
+    databases.push(real);
+    // Fails the *next* scenario write and then behaves, which is what a
+    // transient lock looks like from here.
+    let failNextScenarioWrite = false;
+    const flaky: Database = {
+      exec: (sql) => real.exec(sql),
+      run: (sql, params) => {
+        if (failNextScenarioWrite && sql.includes("scenarios")) {
+          failNextScenarioWrite = false;
+          throw new Error("database is locked");
+        }
+        real.run(sql, params);
+      },
+      all: (sql, params) => real.all(sql, params),
+      get: (sql, params) => real.get(sql, params),
+      close: () => real.close(),
+    };
+
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend, flaky);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await rpc(socket, "cp.create", {
+      cpId: "CP-FLAKY",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+    });
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-FLAKY");
+
+    const edited = scenario("flaky", 22);
+    failNextScenarioWrite = true;
+    backend.save(file, edited);
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "the failed write to be reported as a rejection",
+    );
+
+    // The very same bytes again. The baseline was cleared with the rejection,
+    // so this is a reload rather than an early-out — and it now stores.
+    backend.save(file, edited);
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the identical bytes to be re-judged once the store recovered",
+    );
+    const stored = real.all<{ definition: string }>(
+      "SELECT definition FROM scenarios WHERE scenario_id = ?",
+      ["flaky"],
+    );
+    expect(
+      JSON.parse(stored[0]?.definition ?? "{}").nodes?.[0]?.data?.duration,
+    ).toBe(22);
   });
 });
 

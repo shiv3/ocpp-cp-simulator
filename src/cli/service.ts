@@ -277,6 +277,52 @@ function connectorStateSnapshot(connector: Connector): ScenarioStateSnapshot {
   };
 }
 
+/**
+ * Whether a run that is ending should release the connector's EV settings
+ * override.
+ *
+ * Three conditions, and a formulation satisfying only two of them has shipped
+ * twice — so they are three named clauses in one pure function rather than a
+ * conjunction inside a `finally`, and they have a truth table of their own.
+ *
+ * 1. **Release only what this run set (#105).** A scenario that never declared
+ *    `evSettings` never touched the override, so it must not release an
+ *    explicit `set_ev_settings` an operator applied to the connector.
+ * 2. **Do not release what someone else claimed since (#314).** The flag is a
+ *    single boolean on the connector with no per-run owner, so if a
+ *    *replacement* declaring its own `evSettings` now occupies the id, it has
+ *    already set the override and clearing would unmark a live one.
+ * 3. **Do release on ordinary completion (#314).** This is the one presence
+ *    could never express. On a normal finish nothing removes the definition, so
+ *    the thing installed under the id *is* the run's own — "a definition with
+ *    `evSettings` is installed" is true of a replacement and equally true of
+ *    the run that is ending, and a rule keyed on it skipped the run's own
+ *    cleanup and left the connector permanently marked.
+ *
+ * So the question is **identity, not presence**: has a *different* definition
+ * been installed under this id? `loadScenario` and
+ * `syncConnectorRuntimeScenarios` both store the object they are given, so a
+ * replacement is a different reference and a survivor is the same one.
+ *
+ * Ordering assumption, stated because it is what the presence test got wrong:
+ * `_scenarios` does **not** reflect the end of a run. Nothing removes the entry
+ * on completion — only `removeScenario` and a definitions replace do — so
+ * reading it says what is installed, never what is finished.
+ */
+export function shouldReleaseEvSettingsOverride(
+  ending: ScenarioDefinition,
+  installed: ScenarioDefinition | undefined,
+): boolean {
+  // 1. Not mine to release.
+  if (!ending.evSettings) return false;
+  // 3. Nothing else has taken the id — including the case where the scenario
+  //    was removed outright, where nobody claimed anything.
+  const replaced = installed !== undefined && installed !== ending;
+  if (!replaced) return true;
+  // 2. Replaced: release only if the newcomer did not claim the override.
+  return !installed.evSettings;
+}
+
 export class CLIChargePointService {
   private readonly _chargePoint: ChargePoint;
   private readonly _soapServer: OCPPSoapServer | null;
@@ -1665,20 +1711,10 @@ export class CLIChargePointService {
    * they hang off the **connector**, nobody else will ever clear them, and they
    * are owed whether or not a replacement has taken the id.
    *
-   * The EV settings override needs **two** conditions, and dropping either one
-   * breaks a guarantee:
-   *
-   * - The ending run releases only what it set. A scenario that never declared
-   *   `evSettings` never touched the override, so it must not release an
-   *   explicit `set_ev_settings` an operator applied to the connector (#105).
-   * - …and only if the new occupant has not **claimed** it since. The flag is a
-   *   single boolean on the connector with no per-run owner, so when the
-   *   definition now loaded under this id declares `evSettings` of its own the
-   *   replacement has already set it, and clearing would unmark a live
-   *   override and let default propagation overwrite it (#314).
-   *
-   * Ownership transferring is not the same as the stale value being replaced,
-   * and neither question answers the other.
+   * The decision itself is {@link shouldReleaseEvSettingsOverride} — a pure
+   * function with its own truth table, because three conditions have to hold at
+   * once and two formulations that satisfied two of the three have already
+   * shipped.
    *
    * The scenario position needs no equivalent, because acquisition does the
    * work: `runScenario` clears it when it starts a run that is not resuming, so
@@ -1695,9 +1731,10 @@ export class CLIChargePointService {
     endingDefinition: ScenarioDefinition,
   ): void {
     if (!connector) return;
-    if (!endingDefinition.evSettings) return;
-    const current = this._scenarios.get(scenarioId)?.definition;
-    if (!current?.evSettings) connector.clearEvSettingsOverride();
+    const installed = this._scenarios.get(scenarioId)?.definition;
+    if (shouldReleaseEvSettingsOverride(endingDefinition, installed)) {
+      connector.clearEvSettingsOverride();
+    }
   }
 
   /** Tell {@link onSessionSettled} subscribers a gate has opened. A throwing
@@ -2153,7 +2190,10 @@ export class CLIChargePointService {
     // Release the EV settings override (#105) — only when this scenario
     // declared evSettings and therefore owns it; see runScenario's
     // executor.start().finally() for the natural-completion counterpart.
-    if (this._scenarios.get(scenarioId)?.definition.evSettings) {
+    // The same rule as a natural finish, through the same function — a second
+    // copy of a three-condition rule is how the first two formulations drifted.
+    const stopping = this._scenarios.get(scenarioId)?.definition;
+    if (stopping && shouldReleaseEvSettingsOverride(stopping, stopping)) {
       this._chargePoint.connectors.get(connectorId)?.clearEvSettingsOverride();
     }
     // Surface the stop to remote subscribers — executor.stop() bypasses

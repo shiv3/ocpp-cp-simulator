@@ -301,10 +301,14 @@ The rules, in the order they bite:
   ending, because nothing else will clear them. The scenario position is claimed
   by acquisition — a run that starts without resuming clears it, and writes that
   through, so a restart in the window before its first node completes cannot
-  resume the new graph from the old graph's node ids. The EV settings override
-  is released by the outgoing run unless the definition now loaded under that id
-  declares `evSettings` of its own, in which case the replacement has already
-  claimed it.
+  resume the new graph from the old graph's node ids. The EV settings
+  override is released by the run that set it — on an ordinary completion as
+  well as a replacement — unless a **different** definition has since been
+  installed under that id and declares `evSettings` of its own, in which case
+  the replacement already claimed it. The question is identity, not presence: on
+  a normal finish nothing removes the definition, so "a definition with
+  `evSettings` is installed" is equally true of a replacement and of the run
+  that is ending.
 - **A hold is never left waiting on something that is gone.** A reload held for
   a connector is released when that connector's session ends, when the
   scenario's own run settles, or when a `cp.update` rebuilds the charge point.

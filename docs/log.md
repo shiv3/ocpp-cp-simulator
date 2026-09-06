@@ -1556,3 +1556,34 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   on _both_ branches of the guard closes it on every one of those paths; this PR
   fixes pre-existing behaviour there deliberately, rather than absorbing an
   unrelated bug by accident.
+
+## [2026-09-06] ingest | `--watch`: identity not presence, and the test that should have existed (#314, PR #317)
+
+- The previous round's EV-settings rule asked whether _a_ definition declaring
+  `evSettings` was installed under the id. On a replacement that is the right
+  question; on an ordinary completion it is not, because nothing removes a
+  definition when its run ends — so the run's own settings prevented the run's
+  own cleanup and the connector stayed permanently marked as overridden, with
+  every later default propagation a no-op. The question is **identity**: has a
+  _different_ definition been installed since. `loadScenario` and
+  `syncConnectorRuntimeScenarios` both store the object they are handed, so a
+  replacement is a different reference and a survivor is the same one.
+- Three conditions now have to hold at once — release only what this run set
+  (#105), not what someone else has claimed since, and _do_ release on ordinary
+  completion — and two formulations satisfying two of the three have shipped. So
+  the rule is a pure function, `shouldReleaseEvSettingsOverride`, with the three
+  clauses named and its own truth table, and the stop path was routed through it
+  too: a second copy of a three-condition rule is how the first two drifted.
+- **Why no test noticed, which is the more useful finding.** The suite covered a
+  scenario _without_ `evSettings` completing (the override must survive) and a
+  scenario _with_ them being **stopped** (it must be released) — and the stop
+  path clears the override itself, so that test passed no matter what this rule
+  said. The one combination nothing exercised was a scenario declaring
+  `evSettings` running to its natural end, which is precisely where the rule is
+  the only thing that acts. That test now exists, and so does the truth table
+  that covers all six combinations in six lines. Three earlier over-wide rules
+  on this branch were caught by existing tests; relying on that was the mistake.
+- A **trigger** failure of a different kind from the previous round's. That one
+  was "nothing re-reads the condition"; this was "the condition reads a state
+  that has not changed yet". The assumption is now written next to the rule:
+  `_scenarios` reflects what is _installed_, never what is _finished_.

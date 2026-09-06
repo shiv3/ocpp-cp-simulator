@@ -2,6 +2,10 @@
 // exposition parser, and histogram diffing/quantile math. Runs under `bun
 // test` (picked up by `bun.test` name filter, see package.json's `test:bun`).
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
+// The real daemon-side cap the bench's literal stands in for. Imported here,
+// not in lib.ts, which stays zod-free.
+import { ARRAY_1000 } from "../../src/protocol/limits.ts";
 import {
   benchIdPattern,
   BENCH_ID_ROOT,
@@ -47,6 +51,9 @@ import {
   formatTable,
   HeartbeatOverride,
   heartbeatLoadIsConfigured,
+  subscriptionSnapshotFits,
+  assertSubscriptionSnapshotFits,
+  SUBSCRIBE_SNAPSHOT_CAP,
   histogramQuantile,
   mergeHistogramDeltas,
   parseArgv,
@@ -1080,6 +1087,8 @@ describe("a step's reported row (#302)", () => {
       errors: 0,
       reconnects: 0,
       reconnectsSinceOverrideLoss: null,
+      heartbeatOverrideLost: false,
+      heartbeatArmFailures: 0,
       heartbeatOverrideFailures: 0,
       unconfirmedStarts: 0,
       lateHolds: 0,
@@ -1600,6 +1609,8 @@ describe("attributing connectivity to this run's own fleet (#302)", () => {
       errors: 0,
       reconnects: 0,
       reconnectsSinceOverrideLoss: null,
+      heartbeatOverrideLost: false,
+      heartbeatArmFailures: 0,
       heartbeatOverrideFailures: 0,
       unconfirmedStarts: 0,
       lateHolds: 0,
@@ -1629,13 +1640,15 @@ describe("a row discloses a heartbeat load that drifted (#302)", () => {
     errors: 0,
     reconnects: 0,
     reconnectsSinceOverrideLoss: null,
+    heartbeatOverrideLost: false,
+    heartbeatArmFailures: 0,
     heartbeatOverrideFailures: 0,
     unconfirmedStarts: 0,
     lateHolds: 0,
     retired: 0,
   };
 
-  it("reads `set` while both reapplication mechanisms are intact", () => {
+  it("reads `set` only when every condition for the claim holds", () => {
     expect(heartbeatLoadIsConfigured(base)).toBe(true);
     expect(row(base)[STEP_COLUMNS.indexOf("hb.load")]).toBe("set");
   });
@@ -1648,45 +1661,132 @@ describe("a row discloses a heartbeat load that drifted (#302)", () => {
     expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
   });
 
-  it("reads `drift` when a charge point reconnected after the watcher was lost", () => {
-    const r: StepResult = { ...base, reconnectsSinceOverrideLoss: 1 };
+  it("reads `drift` when a charge point's INITIAL arm failed", () => {
+    // The marker over-claiming. `armLoad`'s first `start_heartbeat` per charge
+    // point could fail, be printed, and be forgotten: `ready` still resolved,
+    // that charge point stayed on its `BootNotification.conf` interval for the
+    // whole run, and every row said `set`.
+    const r: StepResult = { ...base, heartbeatArmFailures: 1 };
     expect(heartbeatLoadIsConfigured(r)).toBe(false);
     expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
   });
 
-  it("counts reconnects since the LOSS, not since the window opened", () => {
-    // THE finding. A charge point that reconnects during creation, settling or
-    // the warmup has already reconnected by the time the `before` scrape is
-    // taken, so a window delta reads zero — and the old warning was gated on
-    // that delta. The row then measured a load nobody asked for and said
-    // nothing. `reconnects` (the window delta) being 0 must NOT make the row
-    // read `set`.
+  it("keeps reading `drift` on later rows that added no new failures", () => {
+    // The lib side of the CUMULATIVE contract: a row carrying a standing
+    // failure count reads `drift` even though its own window added nothing.
+    // The reason the counts are cumulative is that a failure in step 3 leaves
+    // that charge point on the CSMS's cadence in steps 4, 5 and 6 — nothing
+    // re-arms it — so a per-step delta would read 0 there and the row would go
+    // back to claiming `set`.
+    //
+    // That `fleet-bench.ts` actually passes a cumulative value is verified by
+    // reading, NOT by this test: mutation H put it back to a per-step delta and
+    // the whole smoke suite still passed, because every smoke run has
+    // `failed === 0` and both readings are then 0. No test in this repository
+    // discriminates that choice.
+    const later: StepResult = {
+      ...base,
+      reconnects: 0,
+      heartbeatArmFailures: 1,
+      heartbeatOverrideFailures: 2,
+    };
+    expect(row(later)[STEP_COLUMNS.indexOf("reconnects")]).toBe("0");
+    expect(row(later)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
+  });
+
+  it("reads `drift` once the watcher is lost, ZERO reconnects included", () => {
+    // The inversion. This case used to assert `set`, on the reasoning that
+    // "the override only needs reapplying after an accepted boot, so a fleet
+    // that never reconnects keeps the cadence". That reasoning was wrong: it
+    // used `ocppcp_ws_reconnects_total` as a stand-in for "a charge point
+    // booted", and a charge point's *first* boot carries a
+    // `BootNotification.conf` interval without necessarily incrementing that
+    // counter. A fleet grown after the loss therefore drifted with the counter
+    // reading 0 — and the marker built to stop silent over-claiming was itself
+    // silently over-claiming.
+    //
+    // Nor is a sound boot signal enough: the socket can die between observing
+    // a boot and issuing its reapplication, leaving a charge point owed one
+    // that nothing will ever issue. So the rule is the blunt one — once the
+    // reapplier is gone, nothing later can be established, and what cannot be
+    // established reads `drift`.
+    const r: StepResult = {
+      ...base,
+      heartbeatOverrideLost: true,
+      reconnectsSinceOverrideLoss: 0,
+    };
+    expect(heartbeatLoadIsConfigured(r)).toBe(false);
+    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
+  });
+
+  it("keeps the reconnect count as a diagnostic beside the marker", () => {
+    // It is no longer what `hb.load` is derived from, but it is still the
+    // "how many" under the marker's "whether", and a window delta of 0 must
+    // not be mistaken for it: a charge point that reconnects during creation,
+    // settling or the warmup has already done so by the time the `before`
+    // scrape is taken.
     const r: StepResult = {
       ...base,
       reconnects: 0,
+      heartbeatOverrideLost: true,
       reconnectsSinceOverrideLoss: 2,
     };
     expect(row(r)[STEP_COLUMNS.indexOf("reconnects")]).toBe("0");
+    expect(r.reconnectsSinceOverrideLoss).toBe(2);
     expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("drift");
   });
 
   it("stays `set` while the socket is up, however many reconnects the window saw", () => {
     // A reconnect with the watcher still up is reapplied, so the cadence
-    // holds. `null` is what says "still up", and it must not be confused with
-    // zero.
+    // holds. `heartbeatOverrideLost: false` is what says "still up", and
+    // `reconnectsSinceOverrideLoss: null` must not be confused with zero.
     const r: StepResult = { ...base, reconnects: 9 };
+    expect(r.heartbeatOverrideLost).toBe(false);
     expect(r.reconnectsSinceOverrideLoss).toBe(null);
     expect(heartbeatLoadIsConfigured(r)).toBe(true);
     expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("set");
   });
+});
 
-  it("stays `set` after a loss that no charge point reconnected through", () => {
-    // Losing the socket is not itself drift: the override only needs
-    // reapplying after an accepted boot, so a fleet that never reconnects
-    // keeps the configured cadence and the row is honest to say so.
-    const r: StepResult = { ...base, reconnectsSinceOverrideLoss: 0 };
-    expect(heartbeatLoadIsConfigured(r)).toBe(true);
-    expect(row(r)[STEP_COLUMNS.indexOf("hb.load")]).toBe("set");
+describe("--allow-existing is refused above the subscription snapshot cap (#302)", () => {
+  it("matches the daemon-side ARRAY_1000 cap it is standing in for", () => {
+    // `lib.ts` is deliberately zod-free, so the cap is a literal there. This
+    // test is what keeps the literal honest: a change to `ARRAY_1000` fails
+    // here rather than turning back into a Zod error mid-sweep.
+    const parsed = ARRAY_1000(z.string()).safeParse(
+      Array.from({ length: SUBSCRIBE_SNAPSHOT_CAP }, () => "cp"),
+    );
+    expect(parsed.success).toBe(true);
+    const over = ARRAY_1000(z.string()).safeParse(
+      Array.from({ length: SUBSCRIBE_SNAPSHOT_CAP + 1 }, () => "cp"),
+    );
+    expect(over.success).toBe(false);
+  });
+
+  it("admits a daemon holding exactly the cap and refuses one over it", () => {
+    expect(subscriptionSnapshotFits(0)).toBe(true);
+    expect(subscriptionSnapshotFits(SUBSCRIBE_SNAPSHOT_CAP)).toBe(true);
+    expect(subscriptionSnapshotFits(SUBSCRIBE_SNAPSHOT_CAP + 1)).toBe(false);
+    expect(() =>
+      assertSubscriptionSnapshotFits(SUBSCRIBE_SNAPSHOT_CAP),
+    ).not.toThrow();
+  });
+
+  it("names the condition and both numbers, not the schema that failed", () => {
+    // The finding: with more than 1000 pre-existing charge points the wildcard
+    // `events.subscribe` fails every time, because its ack carries the whole
+    // registry through `ARRAY_1000` regardless of the requested scope. The run
+    // died inside a Zod error after the banner. A documented mode that cannot
+    // start under a documented condition has to say the condition.
+    let message = "";
+    try {
+      assertSubscriptionSnapshotFits(1500);
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain("--allow-existing");
+    expect(message).toContain("1000");
+    expect(message).toContain("1500");
   });
 });
 
@@ -1730,6 +1830,8 @@ describe("end-of-window connectivity (#302)", () => {
     errors: 0,
     reconnects: 0,
     reconnectsSinceOverrideLoss: null,
+    heartbeatOverrideLost: false,
+    heartbeatArmFailures: 0,
     heartbeatOverrideFailures: 0,
     unconfirmedStarts: 0,
     lateHolds: 0,
@@ -2135,6 +2237,8 @@ describe("a row discloses a duty cycle that slipped (#302)", () => {
     errors: 0,
     reconnects: 0,
     reconnectsSinceOverrideLoss: null,
+    heartbeatOverrideLost: false,
+    heartbeatArmFailures: 0,
     heartbeatOverrideFailures: 0,
     unconfirmedStarts: 0,
     lateHolds: 0,

@@ -23,6 +23,7 @@ import {
   TokenBucket,
   answeredAfterWatchdog,
   assertDaemonEmpty,
+  assertSubscriptionSnapshotFits,
   assertMetricsAreCurrent,
   attributeConnectivity,
   BENCH_ID_ROOT,
@@ -343,7 +344,15 @@ class SocketPool {
  *  off on purpose: room membership is per-connection server-side, and
  *  re-subscribing once the fleet is past 1000 charge points would fail
  *  `subscribeResultSchema`'s `ARRAY_1000` cap on the snapshot it returns. The
- *  subscribe therefore happens once, before the first charge point exists. */
+ *  subscribe therefore happens once, before the first charge point exists.
+ *
+ *  That ordering hides the cap from a run starting on an empty daemon and only
+ *  from that run: `captureSubscribeSnapshot` fills the snapshot with the whole
+ *  registry whatever scope is asked for, so a daemon that *already* holds more
+ *  than 1000 charge points cannot be subscribed to at all. That is the one case
+ *  `--allow-existing` cannot run, and the preflight refuses it by name — see
+ *  {@link assertSubscriptionSnapshotFits} — rather than letting the sweep die
+ *  in a Zod error here. */
 class FleetWatcher {
   /** The invariants — arm/confirm, and what a lost stream does to a run — live
    *  in `lib.ts` so they can be unit-tested; this class is the socket. */
@@ -612,6 +621,23 @@ async function preflight(
   // reads as "no problem" rather than "not measured".
   assertMetricsAreCurrent(samples);
   const preExisting = assertDaemonEmpty(samples, opts.allowExisting);
+  // Before the banner and before anything is created, because this is the one
+  // condition under which `--allow-existing` cannot run at all: the bench's
+  // `events.subscribe` ack carries the daemon's whole registry through a
+  // 1000-element schema cap. Discovered here it names the condition; discovered
+  // inside `FleetWatcher.open` it was a Zod error about `snapshot.cps`.
+  // `preExisting` is the `ocppcp_charge_points` gauge total, used here as a
+  // stand-in for `snapshot.cps.length`. The stand-in is **exact**, not
+  // approximate: `renderMetrics` and `listChargePointSnapshots` both walk
+  // `registry.list()` and both drop exactly the entries whose `getStatus()` is
+  // falsy, so the two counts cannot differ.
+  //
+  // Verified by reading, not by test: removing this call — the mutation was
+  // run — passes, because the `--allow-existing` smoke test puts one charge
+  // point on the daemon and reaching the cap needs 1001. The predicate and the
+  // message it throws are unit-tested in `lib.ts`; what is untested is only
+  // that the preflight calls it.
+  assertSubscriptionSnapshotFits(preExisting);
   if (preExisting > 0) {
     process.stderr.write(
       `[bench] WARNING: --allow-existing: ${preExisting} pre-existing charge ` +
@@ -808,6 +834,12 @@ function armLoad(
   unconfirmedStarts: () => number;
   lateHolds: () => number;
   retired: () => number;
+  /** Initial `start_heartbeat` calls that failed for this cohort. Monotone: a
+   *  charge point that never got its override stays on the CSMS's cadence, so
+   *  the count is read as a standing total rather than a per-step delta. Feeds
+   *  `hb.load` — a failure here used to be a stderr line and nothing more,
+   *  while the row went on claiming the configured heartbeat load. */
+  armFailures: () => number;
   /** Charge points believed to have a transaction open right now. Teardown
    *  closes these before deleting anything — see {@link closeOpenTransactions}.
    *  Includes every charge point retired for a missing transaction id: those
@@ -830,6 +862,7 @@ function armLoad(
   let unconfirmedStarts = 0;
   let lateHolds = 0;
   let retired = 0;
+  let armFailures = 0;
   /** Charge points whose transaction this handle has started and not yet
    *  stopped. Populated before the start RPC rather than after it: a start
    *  whose ack never came may still have opened a transaction at the CSMS, and
@@ -895,6 +928,12 @@ function armLoad(
           cpId,
         );
       } catch (err) {
+        // Counted, not just printed. `ready` still resolves — one charge point
+        // failing to arm is not a reason to abandon the run — but that charge
+        // point is now heartbeating at whatever interval its
+        // `BootNotification.conf` carried, so every row from here on has to say
+        // so. See `heartbeatLoadIsConfigured`.
+        armFailures++;
         process.stderr.write(
           `[bench] start_heartbeat failed for ${cpId}: ${redactUrlsInText(String(err))}\n`,
         );
@@ -1114,6 +1153,7 @@ function armLoad(
     unconfirmedStarts: () => unconfirmedStarts,
     lateHolds: () => lateHolds,
     retired: () => retired,
+    armFailures: () => armFailures,
     openTransactions: () => [...openTransactions],
     stopsAwaitingWire: () => [...stopsAwaitingWire],
     stopsAcked: () => stopsAcked,
@@ -1557,6 +1597,7 @@ async function main(): Promise<void> {
     unconfirmedStarts: () => number;
     lateHolds: () => number;
     retired: () => number;
+    armFailures: () => number;
     openTransactions: () => string[];
     stopsAwaitingWire: () => string[];
     stopsAcked: () => number;
@@ -2002,6 +2043,16 @@ async function main(): Promise<void> {
         );
         const lateHolds = loads.reduce((sum, l) => sum + l.lateHolds(), 0);
         const retired = loads.reduce((sum, l) => sum + l.retired(), 0);
+        // Cumulative on purpose, unlike `retired` and the two above it, which
+        // are differenced below. Those are per-window events; an arm failure is
+        // a standing condition — the charge point stayed on the CSMS's cadence
+        // and no later step re-arms it — so differencing would make it vanish
+        // from every row after the one it happened in, which is exactly the
+        // over-claim being fixed.
+        const hbArmFailures = loads.reduce(
+          (sum, l) => sum + l.armFailures(),
+          0,
+        );
 
         // Read from the *final* scrape, not from the settle poll: a charge point
         // that dropped during the warmup or the window would otherwise still be
@@ -2036,8 +2087,16 @@ async function main(): Promise<void> {
         // reinstalls the CSMS interval, which this puts back. Failures are
         // called out separately: those charge points may now be heartbeating at
         // the CSMS's interval, which is a load this row does not describe.
-        const hbFailures =
-          heartbeatOverride.failures() - hbOverrideFailuresBefore;
+        // Cumulative, for the same reason as `hbArmFailures`: a reapplication
+        // that failed leaves that charge point on the CSMS's interval until
+        // some later boot happens to re-arm it, and nothing guarantees one. The
+        // per-step delta this used to be read 0 — and so `set` — on every row
+        // after the failure.
+        const hbFailures = heartbeatOverride.failures();
+        const hbFailuresThisStep = Math.max(
+          0,
+          hbFailures - hbOverrideFailuresBefore,
+        );
         const hbRpcs = heartbeatOverride.rpcsIssued() - hbRpcsBefore;
         const hbBoots = heartbeatOverride.bootsObserved() - hbBootsBefore;
         if (hbRpcs > 0) {
@@ -2063,35 +2122,70 @@ async function main(): Promise<void> {
           reconnectsAtOverrideLoss === null
             ? null
             : Math.max(0, reconnectsAfter - reconnectsAtOverrideLoss);
-        if (
-          reconnectsSinceOverrideLoss !== null &&
-          reconnectsSinceOverrideLoss > 0
-        ) {
-          // The idle axis's degrade, made loud exactly where it bites. The run
-          // kept going after the event socket dropped, which is right — but a
-          // row at or after that point whose fleet has reconnected contains
-          // charge points that rebooted with nobody left to put the override
-          // back, so their heartbeat cadence is now the CSMS's.
+        // Evaluated here, per row, rather than read from `overrideLostAtN` when
+        // the `--out` file is written: a loss at N=500 must not retro-mark the
+        // rows at N=100 and N=250, which were measured while the reapplier was
+        // alive.
+        //
+        // A row counts as affected once the disconnect has been **observed**,
+        // which is not the same as once it happened, and the gap is not small.
+        // A server-side close is seen at once, but a network partition is only
+        // detected by socket.io's ping timeout — `SOCKET_IO_PING_INTERVAL_MS +
+        // SOCKET_IO_PING_TIMEOUT_MS` = 45s on this daemon. On a 60s window the
+        // socket can therefore be dead for most of a step whose row still reads
+        // `set`, with the *next* row reading `drift`. The visible symptom is an
+        // `--out` file whose `eventSocketLostAtN` is `k` while row `k` has
+        // `heartbeatOverrideLost: false`; that inconsistency is the honest
+        // record of when the loss was learned, not a bug in this line. Nothing
+        // here can close it — the run has no earlier evidence of the partition
+        // than the transport does.
+        //
+        // Verified by reading, not by test. Hardcoding this to `false` — the
+        // mutation was run — passes the whole smoke suite: nothing there loses
+        // the event socket during a measured step and then keeps going. The
+        // same holds for the arm-failure counter and for making these two
+        // counts cumulative. All four were confirmed vacuous rather than
+        // assumed so.
+        const heartbeatOverrideLost = overrideLostAtN !== null;
+        if (heartbeatOverrideLost) {
+          // Unconditional now, not gated on a non-zero reconnect count. The
+          // gate was the second over-claim: an *initial* boot carries a
+          // `BootNotification.conf` interval exactly like a reconnect's but
+          // need not increment `ocppcp_ws_reconnects_total`, so a fleet grown
+          // after the loss drifted while the counter — and therefore the
+          // warning and the marker — read zero. The reconnect count stays as
+          // the "how many", underneath a "whether" that no longer depends on
+          // it.
           process.stderr.write(
             `[bench] N=${n}: WARNING: the event socket dropped at N=${overrideLostAtN}, ` +
-              `so --heartbeat-interval is no longer being reapplied, and at most ` +
-              `${reconnectsSinceOverrideLoss} reconnect(s) have happened since then ` +
-              `(an upper bound: the count at the moment of the drop is only known ` +
-              `as of the last scrape before it). Every charge point that reconnected ` +
-              `is heartbeating at the CSMS's BootNotification interval, so this ` +
-              `row's heartbeat load is not the configured one. The row is marked ` +
+              `so --heartbeat-interval is no longer being reapplied after any ` +
+              `BootNotification. At most ${reconnectsSinceOverrideLoss} reconnect(s) ` +
+              `have happened since then (an upper bound: the count at the moment of ` +
+              `the drop is only known as of the last scrape before it), and charge ` +
+              `points created after the drop booted for the first time with nothing ` +
+              `left to arm them — that is not counted at all. This row's heartbeat ` +
+              `load cannot be shown to be the configured one, so it is marked ` +
               `"drift" in the hb.load column.\n`,
           );
         }
-        if (hbFailures > 0) {
+        if (hbArmFailures > 0) {
           process.stderr.write(
-            `[bench] N=${n}: WARNING: ${hbFailures} heartbeat reapplication(s) ` +
+            `[bench] N=${n}: WARNING: ${hbArmFailures} initial start_heartbeat ` +
+              `call(s) have failed over this run, so that many charge point(s) are ` +
+              `heartbeating at the CSMS's BootNotification interval rather than the ` +
+              `${opts.heartbeatIntervalSec}s this row assumes. The row is marked ` +
+              `"drift" in the hb.load column.\n`,
+          );
+        }
+        if (hbFailuresThisStep > 0) {
+          process.stderr.write(
+            `[bench] N=${n}: WARNING: ${hbFailuresThisStep} heartbeat reapplication(s) ` +
               `failed, so that many charge point(s) may be heartbeating at the ` +
               `CSMS's BootNotification interval rather than the ` +
               `${opts.heartbeatIntervalSec}s this row assumes.\n`,
           );
         }
-        hbOverrideFailuresBefore = heartbeatOverride.failures();
+        hbOverrideFailuresBefore = hbFailures;
         hbRpcsBefore = heartbeatOverride.rpcsIssued();
         hbBootsBefore = heartbeatOverride.bootsObserved();
 
@@ -2119,6 +2213,8 @@ async function main(): Promise<void> {
           errors: Math.max(0, errorsAfter - errorsBefore),
           reconnects: Math.max(0, reconnectsAfter - reconnectsBefore),
           reconnectsSinceOverrideLoss,
+          heartbeatOverrideLost,
+          heartbeatArmFailures: hbArmFailures,
           heartbeatOverrideFailures: hbFailures,
           unconfirmedStarts: unconfirmedStarts - unconfirmedStartsBefore,
           lateHolds: lateHolds - lateHoldsBefore,
@@ -2212,11 +2308,20 @@ async function main(): Promise<void> {
           // Since the event socket was lost, not since this window opened —
           // `null` while it is still up. An upper bound; see StepResult.
           reconnectsSinceOverrideLoss: r.reconnectsSinceOverrideLoss,
+          // Whether the reapplier was gone as of this row. Per row, captured
+          // when the row was measured — an early row is not retro-marked by a
+          // loss that happened later in the sweep.
+          heartbeatOverrideLost: r.heartbeatOverrideLost,
+          // Both cumulative over the run, not per-window: a charge point whose
+          // arm or reapplication failed stays on the CSMS's cadence, so the
+          // condition is standing and every later row inherits it.
+          heartbeatArmFailures: r.heartbeatArmFailures,
           heartbeatOverrideFailures: r.heartbeatOverrideFailures,
-          // The `hb.load` column, machine-readable: `false` means at least one
-          // charge point in this row was heartbeating at the CSMS's
-          // `BootNotification` interval rather than `--heartbeat-interval`, so
-          // the row's offered load is not the configured one.
+          // The `hb.load` column, machine-readable: `false` means this row
+          // cannot be shown to have heartbeated at `--heartbeat-interval`
+          // throughout — either a charge point demonstrably did not, or the
+          // mechanism that would have kept it there was gone. Not the same as
+          // "a charge point demonstrably drifted": it deliberately over-warns.
           heartbeatLoadConfigured: heartbeatLoadIsConfigured(r),
           unconfirmedTransactionStarts: r.unconfirmedStarts,
           lateHolds: r.lateHolds,

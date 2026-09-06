@@ -285,8 +285,12 @@ timeout column reads `n/a` rather than `0`, since only the 1.6J handler has the
 per-CALL watchdog that feeds it (see [Metrics](#metrics)). It refuses to run against a daemon that
 already holds charge points, because `/metrics` has no `cpId` label and their
 traffic would land in the same histogram as the bench fleet's. `--allow-existing`
-waives that refusal, and every row of such a run is then marked `est` in its
-`conn.src` column: with no `cpId` label the connected count can only be a
+waives that refusal — but only up to 1000 pre-existing charge points, above
+which the preflight refuses by name: the bench's `events.subscribe` ack carries
+the daemon's whole registry through the control plane's `ARRAY_1000` cap
+whatever scope it asks for, so the subscription the run depends on cannot be
+established at all. Every row of an `--allow-existing` run is marked `est` in
+its `conn.src` column: with no `cpId` label the connected count can only be a
 daemon-wide gauge minus a preflight baseline, and a bystander's churn moves that
 in either direction undetectably. The latency numbers are unaffected — what
 cannot be attributed is the fleet size they are reported against. Its
@@ -298,7 +302,10 @@ are exactly what start happening near the knee. See
 [Source: bench README](../sources/bench-readme.md) for what that does and does
 not cover, including what the reapplication itself costs the measurement (one
 control-plane RPC per accepted boot, paced inside the socket pool's existing
-ceiling). **Whether that moves the knee is a stated limitation, not pending
+ceiling). The contract is audited per row in the `hb.load` column, which reads
+`set` only when all three of its preconditions hold — the initial arm
+succeeded, every reapplication succeeded, and the event socket driving them is
+still up — and `drift` for anything it cannot establish. **Whether that moves the knee is a stated limitation, not pending
 work**: the collapse to one RPC per boot is measured, the residual's bound is
 argued from the pool's 640 RPC/s ceiling, and settling it needs a sweep against
 a real CSMS at fleet size run with and without the reapplication — the same

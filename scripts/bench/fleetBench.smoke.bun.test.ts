@@ -598,6 +598,9 @@ describe("fleet-bench end to end (#302)", () => {
         results: {
           reconnects: number;
           reconnectsSinceOverrideLoss: number | null;
+          heartbeatOverrideLost: boolean;
+          heartbeatArmFailures: number;
+          heartbeatOverrideFailures: number;
           heartbeatLoadConfigured: boolean;
         }[];
       };
@@ -618,6 +621,13 @@ describe("fleet-bench end to end (#302)", () => {
       // is supposed to be trusted.
       for (const r of report.results) {
         expect(r.reconnectsSinceOverrideLoss).toBe(null);
+        // Each of the three conditions `set` now claims, checked separately —
+        // the marker is a claim and gets the same audit as the number it
+        // qualifies, so a row reading `set` for the wrong reason is a failure
+        // here and not a pass.
+        expect(r.heartbeatOverrideLost).toBe(false);
+        expect(r.heartbeatArmFailures).toBe(0);
+        expect(r.heartbeatOverrideFailures).toBe(0);
         expect(r.heartbeatLoadConfigured).toBe(true);
       }
       // Not vacuous on an empty list: there is at least one row to check.

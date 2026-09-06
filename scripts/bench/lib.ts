@@ -1193,6 +1193,48 @@ export function assertDaemonEmpty(
   return total;
 }
 
+/** The most charge points an `events.subscribe` ack can carry.
+ *
+ *  `subscribeResultSchema` (`src/protocol/envelope.ts`) puts `snapshot.cps`
+ *  through `ARRAY_1000` (`src/protocol/limits.ts`), and
+ *  `captureSubscribeSnapshot` (`src/cli/server/socketServer.ts`) fills that
+ *  snapshot with the daemon's whole registry **regardless of the requested
+ *  scope** — the client uses it unconditionally to refresh its cache. So there
+ *  is no narrower subscription the bench could ask for instead: over 1000
+ *  charge points, every subscribe fails schema validation.
+ *
+ *  A bounded array size is a control-plane invariant, not an oversight, so the
+ *  refusal belongs here. Asserted in the unit tests so a change to the
+ *  daemon-side cap fails loudly on this side rather than turning back into a
+ *  schema error mid-sweep. */
+export const SUBSCRIBE_SNAPSHOT_CAP = 1000;
+
+/** Whether a daemon holding `total` charge points can still answer the
+ *  bench's `events.subscribe`. */
+export function subscriptionSnapshotFits(total: number): boolean {
+  return total <= SUBSCRIBE_SNAPSHOT_CAP;
+}
+
+/** Refuse `--allow-existing` on a daemon too full to answer the subscribe.
+ *
+ *  Checked in the preflight rather than discovered when `FleetWatcher.open`
+ *  dies inside a Zod error: the run would otherwise fail after the banner, with
+ *  a message naming a schema rather than the condition. The bench's own fleet
+ *  is created *after* the subscribe, so only the pre-existing count matters —
+ *  which is why this can only bite under `--allow-existing`. */
+export function assertSubscriptionSnapshotFits(total: number): void {
+  if (subscriptionSnapshotFits(total)) return;
+  throw new Error(
+    `--allow-existing needs a subscription snapshot of at most ` +
+      `${SUBSCRIBE_SNAPSHOT_CAP} charge points; the daemon holds ${total}. The ` +
+      `bench subscribes to the daemon's event stream before creating anything, ` +
+      `and the ack carries a snapshot of the whole registry through a ` +
+      `${SUBSCRIBE_SNAPSHOT_CAP}-element schema cap, so the subscribe would ` +
+      `fail. Delete the pre-existing charge points, or point --daemon-url at a ` +
+      `dedicated bench daemon.`,
+  );
+}
+
 export interface HistogramBucketDelta {
   readonly le: number;
   readonly count: number;
@@ -1489,11 +1531,35 @@ export interface StepResult {
    *  the time the `before` scrape is taken, so a window delta reads zero for
    *  exactly the charge points whose heartbeat cadence has silently reverted
    *  to the CSMS's. An upper bound — see `reconnectsAtOverrideLoss` in
-   *  `fleet-bench.ts` — because over-warning is the safe direction here. */
+   *  `fleet-bench.ts` — because over-warning is the safe direction here.
+   *
+   *  **A diagnostic, not the basis of `hb.load`.** It used to be the test for
+   *  drift; it is not sound as one, because an initial boot carries a
+   *  `BootNotification.conf` interval without necessarily incrementing
+   *  `ocppcp_ws_reconnects_total`. See {@link heartbeatLoadIsConfigured}, which
+   *  reads {@link StepResult.heartbeatOverrideLost} instead. What this number
+   *  still says is *how many* reconnects are known to have happened with
+   *  nothing left to re-arm them. */
   readonly reconnectsSinceOverrideLoss: number | null;
-  /** `start_heartbeat` reapplications that failed during this step. Each one
-   *  is a charge point that may be heartbeating at the CSMS's
-   *  `BootNotification` interval instead of `--heartbeat-interval`. */
+  /** Whether the event socket that triggers heartbeat reapplication was lost
+   *  at or before this row. Per row, evaluated when the row is assembled: rows
+   *  before the loss are unaffected and must not be retro-marked, and the row
+   *  the loss happened *during* counts as affected because nothing says where
+   *  in the window it fell. */
+  readonly heartbeatOverrideLost: boolean;
+  /** Initial `start_heartbeat` calls that have failed, **cumulatively across
+   *  every step so far**, not just this one.
+   *
+   *  Cumulative because the condition is standing, not an event: a charge point
+   *  whose arm failed in step 3 is still on the CSMS's cadence in steps 4, 5
+   *  and 6, and a per-step delta would read 0 there and call the load
+   *  configured. */
+  readonly heartbeatArmFailures: number;
+  /** `start_heartbeat` reapplications that have failed, **cumulatively across
+   *  every step so far**, for the same reason as
+   *  {@link StepResult.heartbeatArmFailures}: a reapplication that failed
+   *  leaves that charge point on the CSMS's `BootNotification` interval until
+   *  some later boot happens to re-arm it, which nothing guarantees. */
   readonly heartbeatOverrideFailures: number;
   readonly unconfirmedStarts: number;
   /** Transactions whose confirmation alone outlasted the configured hold, so
@@ -1527,27 +1593,50 @@ export function answeredAfterWatchdog(r: StepResult): number {
  * Whether this row's heartbeat load is the one `--heartbeat-interval` asked
  * for.
  *
- * `false` — rendered `drift` — when either mechanism that keeps the cadence in
- * force has demonstrably failed for at least one charge point:
+ * `set` is a **claim**: *every charge point in this row heartbeated at
+ * `--heartbeat-interval` for the whole window*. It is therefore derived from
+ * what has to be true for that claim to hold, not from the ways the run
+ * happens to notice it failing — the earlier version enumerated detections and
+ * over-claimed wherever a real failure produced no detection:
  *
- *  - a reapplication RPC failed (`heartbeatOverrideFailures`), or
- *  - a charge point reconnected after the event socket that triggers
- *    reapplication was lost (`reconnectsSinceOverrideLoss`), so nothing was
- *    left to put the override back after its `BootNotification.conf`.
+ *  1. **The arm succeeded.** Every charge point got its initial
+ *     `start_heartbeat` (`heartbeatArmFailures`). A failure there was
+ *     previously printed to stderr and nothing else; the charge point stayed on
+ *     the CSMS's `BootNotification` interval for the rest of the run while the
+ *     row said `set`.
+ *  2. **Every reapplication succeeded.** `heartbeatOverrideFailures` — and
+ *     cumulatively, because a failed reapplication is a standing condition and
+ *     not a per-window event.
+ *  3. **The reapplier still exists.** `heartbeatOverrideLost`. Once the event
+ *     socket is gone, no accepted boot can be observed and no override can be
+ *     put back, so nothing downstream can be established for any later row.
  *
- * Both were previously stderr warnings only, and one of them was suppressed
- * outright whenever the reconnect happened before the measurement window
- * opened. A row whose offered load is not the configured one has to say so
- * where the numbers are read, which is the table — the same call `conn.src`
- * makes for connectivity.
+ * Point 3 replaces the previous test, which asked instead whether the fleet had
+ * reconnected since the loss (`reconnectsSinceOverrideLoss`). That was unsound
+ * in two independent ways, and the reasoning behind it — the reconnect counter
+ * as a stand-in for "a charge point booted again" — is simply wrong:
+ *
+ *  - **trigger.** A charge point's *initial* boot need not increment
+ *    `ocppcp_ws_reconnects_total` at all, yet it carries a
+ *    `BootNotification.conf` interval exactly like a reconnect's. A fleet grown
+ *    after the loss therefore drifted with the counter reading 0.
+ *  - **ordering / destruction.** The socket can die between the boot being
+ *    observed and its reapplication RPC being issued, so even a sound boot
+ *    signal would leave an in-flight window in which a charge point is owed a
+ *    reapplication that nothing will ever issue.
+ *
+ * No cheap signal closes both, so the rule is the blunt one: whatever cannot be
+ * established reads `drift`. This over-warns — a socket lost in the last second
+ * of a run where nothing booted afterwards still marks the row — and that is
+ * the intended direction. `reconnectsSinceOverrideLoss` survives as a
+ * diagnostic beside the marker — an upper bound on the reconnects since the
+ * loss, which is a useful "how bad" next to the marker's "whether" — not as the
+ * basis of the claim.
  */
 export function heartbeatLoadIsConfigured(r: StepResult): boolean {
+  if (r.heartbeatArmFailures > 0) return false;
   if (r.heartbeatOverrideFailures > 0) return false;
-  if (
-    r.reconnectsSinceOverrideLoss !== null &&
-    r.reconnectsSinceOverrideLoss > 0
-  )
-    return false;
+  if (r.heartbeatOverrideLost) return false;
   return true;
 }
 

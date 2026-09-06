@@ -76,7 +76,7 @@ diverge from this baseline as N grows.
 | `--csms-url <url>`               | Yes      | —                    | CSMS the benchmarked fleet connects to. **`ws://` or `wss://` only** — OCPP-J. An `http(s)://` URL is rejected; see "Known limitations" for why SOAP is out of scope.                                                                                                                 |
 | `--daemon-url <url>`             | Yes      | —                    | This simulator's daemon control plane (`http(s)://`, no trailing slash needed).                                                                                                                                                                                                       |
 | `--counts <n,n,...>`             | No       | `10,50,100,200`      | Ascending, comma-separated fleet sizes to sweep. Each step creates only the delta since the previous step. Capped at 20 points, each ≤ 2000.                                                                                                                                          |
-| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. See "Preflight" below.                                                                                                                   |
+| `--allow-existing`               | No       | off                  | Run even though the daemon already holds charge points. Off by default, and the pre-existing count is recorded in the report and in `--out`. **Refused above 1000 pre-existing charge points** — see "Preflight" below.                                                               |
 | `--duration <seconds>`           | No       | `60`                 | Measurement window per step, once that step's new CPs have settled. 5–3600. Must be ≥ 2× `--heartbeat-interval`.                                                                                                                                                                      |
 | `--heartbeat-interval <sec>`     | No       | `5`                  | Heartbeat cadence applied to every CP via `start_heartbeat`, overriding the CSMS's own BootNotification interval so a run is comparable across CSMS peers. **Reapplied after every accepted boot**, not only at creation — see "The heartbeat override survives a reconnect". 1–3600. |
 | `--tx-interval <seconds>`        | No       | `0`                  | `0` = **idle axis**: heartbeat only. `>0` = **active axis**: each CP cycles `start_transaction`/`stop_transaction` on connector 1 at this period, staggered across CPs. Bounded by the pool ceiling: **N ≤ 320 × `--tx-interval`** (see "Why a socket pool").                         |
@@ -169,6 +169,23 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    counts only the charge points this script created — the N-vs-latency curve
    would then not be the curve it claims to be. `--allow-existing` waives the
    refusal and records the pre-existing count in the report and in `--out`.
+
+   **`--allow-existing` is itself refused above 1000 pre-existing charge
+   points**, and the preflight says so by name rather than letting the sweep
+   die later. The bench subscribes to the daemon's event stream — that
+   subscription is what reapplies `--heartbeat-interval` after a reboot and
+   what confirms transaction starts — before creating anything, precisely so
+   its own fleet stays out of the ack's snapshot. But the ack carries the
+   daemon's **whole** registry through `subscribeResultSchema`'s `ARRAY_1000`
+   cap regardless of the scope asked for, so a daemon that already holds more
+   than 1000 charge points cannot be subscribed to at all. The cap is a
+   control-plane invariant, not an oversight, so the bench refuses rather than
+   asking for it to be raised: delete the pre-existing charge points, or point
+   `--daemon-url` at a dedicated bench daemon. The default mode is unaffected —
+   it starts from an empty daemon, and the watcher never re-subscribes
+   (`reconnection` is off on that socket), so a fleet growing past 1000 during
+   the sweep is fine.
+
 2. **Grow, don't reset.** Each step creates only the CPs it needs
    (`startIndex` into the running total) via `cp.create_many`, chunked at
    `CP_CREATE_MANY_MAX` (200) per call. The fleet is never torn down between
@@ -277,35 +294,64 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    attributes them to, not the histogram.
 
    **`hb.load` — whether this row's heartbeat cadence is the configured one.**
-   `set` means both mechanisms that hold `--heartbeat-interval` in force were
-   intact for the whole step. `drift` means at least one charge point was
-   heartbeating at the CSMS's `BootNotification` interval instead, for one of
-   two reasons: a `start_heartbeat` reapplication RPC failed, or a charge point
-   reconnected _after_ the event socket that triggers reapplication was lost,
-   leaving nothing to put the override back.
+   `set` is a claim: _every charge point in this row heartbeated at
+   `--heartbeat-interval` for the whole window_. It is derived from what has to
+   be true for that claim, not from the ways a run happens to notice it
+   failing, and all three conditions have to hold:
 
-   The second reason used to be reported off the wrong number. The warning was
-   gated on the measurement window's `reconnects` delta — but a charge point
-   that reconnects during creation, settling or the warmup has already
-   reconnected by the time the `before` scrape is taken, so the delta reads
-   zero for exactly the charge points whose cadence has silently reverted. The
-   row then measured a different load and said nothing. The count is now taken
-   **since the socket was lost**, not since the window opened, and it is an
-   upper bound: the cumulative reconnect total at the instant of the loss is
-   only known as of the last scrape before it, so a reconnect in that gap is
-   attributed to the loss. Over-warning is the safe direction; under-warning
-   was the defect. The "last scrape" is seeded from the **preflight** scrape,
-   not from zero — `ocppcp_ws_reconnects_total` is cumulative since _daemon_
-   start, so seeding at zero would charge a loss with every reconnect the
-   daemon had ever recorded and make `hb.load` read `drift` on every row of
-   every run against a daemon that had been up a while. Seeded at preflight,
-   the worst case is "since this run started". `reconnectsSinceOverrideLoss` and
-   `heartbeatOverrideFailures` are on every `--out` row beside
-   `heartbeatLoadConfigured`.
+   1. every charge point's **initial** `start_heartbeat` succeeded
+      (`heartbeatArmFailures` is 0),
+   2. every **reapplication** after a `BootNotification.conf` succeeded
+      (`heartbeatOverrideFailures` is 0), and
+   3. the event socket that triggers those reapplications is still up
+      (`heartbeatOverrideLost` is false).
 
-   Losing the socket is not itself `drift`: the override only needs reapplying
-   after an accepted boot, so a fleet that never reconnects keeps the
-   configured cadence and the row says so.
+   Anything that cannot be established reads `drift`. That deliberately
+   over-warns — a socket lost in the last second of a run where nothing booted
+   afterwards still marks the row — and over-warning is the right direction for
+   a marker whose entire job is to stop a row claiming a workload it did not
+   have.
+
+   **One gap the marker cannot close**: condition 3 fires when the disconnect
+   is _observed_, not when it happens. A server-side close is seen at once, but
+   a network partition is only detected by socket.io's ping timeout — 25s +
+   20s = 45s against this daemon — so on a 60s window the socket can be dead
+   for most of a step whose row still reads `set`, with the next row reading
+   `drift`. The symptom in `--out` is `eventSocketLostAtN: k` alongside a row
+   `k` whose `heartbeatOverrideLost` is `false`. That is the honest record of
+   when the loss was learned; the run has no earlier evidence of a partition
+   than the transport does.
+
+   Both failure counts are **cumulative over the run**, not per-window. A
+   charge point whose arm or reapplication failed in step 3 is still on the
+   CSMS's cadence in steps 4, 5 and 6, because nothing re-arms it; a per-step
+   delta would read 0 there and the row would go back to saying `set`.
+
+   Condition 3 replaced an earlier test that asked instead whether the fleet
+   had _reconnected_ since the loss. That was unsound: it used
+   `ocppcp_ws_reconnects_total` as a stand-in for "a charge point booted", and
+   a charge point's **first** boot carries a `BootNotification.conf` interval
+   without necessarily incrementing that counter — so a fleet grown after the
+   loss drifted while the counter read 0. Nor would a sound boot signal be
+   enough: the socket can die between a boot being observed and its
+   reapplication being issued, leaving a charge point owed one that nothing
+   will ever send. Hence the blunt rule.
+
+   `reconnectsSinceOverrideLoss` survives as a **diagnostic** beside the marker
+   — the "how many" under the marker's "whether" — and it is counted **since
+   the socket was lost**, not since the window opened. That distinction was
+   itself a fix: a charge point that reconnects during creation, settling or
+   the warmup has already reconnected by the time the `before` scrape is taken,
+   so a window delta reads zero for exactly the charge points whose cadence has
+   reverted. It is an upper bound — the cumulative reconnect total at the
+   instant of the loss is only known as of the last scrape before it, so a
+   reconnect in that gap is attributed to the loss — and the "last scrape" is
+   seeded from the **preflight** scrape, not from zero, because
+   `ocppcp_ws_reconnects_total` is cumulative since _daemon_ start and seeding
+   at zero would charge a loss with every reconnect the daemon had ever
+   recorded. `reconnectsSinceOverrideLoss`, `heartbeatOverrideLost`,
+   `heartbeatArmFailures` and `heartbeatOverrideFailures` are all on every
+   `--out` row beside `heartbeatLoadConfigured`.
 
    `own` is also not unconditional in the default mode: if the daemon's total
    ever exceeds what this run created, the row degrades to `est`. Two causes,
@@ -1018,8 +1064,8 @@ a spare machine and a CSMS.
   and `heartbeatOverride.rpcsIssued` in `--out` (their ratio is the instrument's
   own cost — 2:1 is healthy, approaching 1:1 means the window stopped
   collapsing), `heartbeatOverride.failed`, the per-row `reconnects`, and the
-  `hb.load` column, which reads `drift` on any row where the cadence was not
-  the configured one. All of them are in every result file already, so the
+  `hb.load` column, which reads `drift` on any row whose cadence could not be
+  shown to be the configured one. All of them are in every result file already, so the
   perturbation is in the record and can be checked rather than re-argued.
 
 - **A teardown that cannot account for every id exits non-zero.** Two

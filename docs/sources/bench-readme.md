@@ -115,7 +115,9 @@ was abandoned.
 design, so charge points the bench did not create would put their traffic in
 the same histogram while the reported `N` counted only the bench's own fleet.
 `--allow-existing` waives the refusal and records the pre-existing count in the
-report and in the `--out` file.
+report and in the `--out` file — but only up to 1000 pre-existing charge
+points; above that the subscription the run depends on cannot be established at
+all (see `hb.load` below).
 
 **Timeouts are their own counter.** The headline knee signal is the
 `ocppcp_ocpp_call_timeouts_total` delta (the `timeouts` column), not the
@@ -145,25 +147,58 @@ the `reconnects` column at zero. Both ends of the step are in `--out`
 stderr.
 
 **`hb.load` says whether the row's heartbeat cadence is the configured one.**
-`set` means both mechanisms holding `--heartbeat-interval` in force were intact
-all step; `drift` means at least one charge point was heartbeating at the
-CSMS's `BootNotification` interval instead — either a reapplication RPC failed,
-or a charge point reconnected after the event socket that triggers
-reapplication was lost, leaving nothing to put the override back. The second
-reason was previously reported off the measurement window's `reconnects` delta,
-which reads **zero** for a charge point that reconnected during creation,
-settling or the warmup — so the warning was suppressed for exactly the charge
-points whose cadence had silently reverted, and the row measured a load nobody
-asked for. It is now counted since the socket was **lost**, and as an upper
-bound: the cumulative total at the instant of the loss is only known as of the
-last scrape before it, so a reconnect in that gap is attributed to the loss.
-Over-warning is the safe direction. That "last scrape" is seeded from the
-preflight one rather than from zero, because `ocppcp_ws_reconnects_total` is
-cumulative since _daemon_ start — seeding at zero would charge a loss with
-every reconnect the daemon had ever recorded and make `drift` the permanent
-reading on any daemon that had been up a while. Losing the socket is not itself `drift` —
-the override only needs reapplying after an accepted boot, so a fleet that
-never reconnects keeps the configured cadence.
+`set` is a claim — _every charge point in this row heartbeated at
+`--heartbeat-interval` for the whole window_ — and it is derived from what has
+to be true for that claim rather than from the ways a run happens to notice it
+failing. Three conditions: every charge point's **initial** `start_heartbeat`
+succeeded (`heartbeatArmFailures`), every **reapplication** after a
+`BootNotification.conf` succeeded (`heartbeatOverrideFailures`), and the event
+socket that triggers those reapplications is still up
+(`heartbeatOverrideLost`). Anything that cannot be established reads `drift`;
+it over-warns on purpose. One gap it cannot close: the third condition fires
+when the disconnect is _observed_, and a network partition is only detected by
+socket.io's ping timeout (25s + 20s), so a row assembled inside that window
+still reads `set` while the next one reads `drift` — visible in `--out` as an
+`eventSocketLostAtN` of `k` beside a row `k` whose `heartbeatOverrideLost` is
+`false`. Both failure counts are **cumulative over the run**,
+not per-window — a charge point whose arm or reapplication failed in step 3 is
+still on the CSMS's cadence in step 6, so a per-step delta would read 0 there
+and the row would go back to claiming `set`.
+
+The third condition replaced an earlier test that asked whether the fleet had
+_reconnected_ since the loss. That was the marker over-claiming: it used
+`ocppcp_ws_reconnects_total` as a stand-in for "a charge point booted", and a
+charge point's **first** boot carries a `BootNotification.conf` interval
+without necessarily incrementing that counter, so a fleet grown after the loss
+drifted with the counter reading 0. A sound boot signal would not have been
+enough either — the socket can die between a boot being observed and its
+reapplication being issued. The initial-arm failure was the same shape from the
+other direction: printed to stderr, never counted, and the row went on saying
+`set` while that charge point sat on the CSMS's interval for the rest of the
+run.
+
+`reconnectsSinceOverrideLoss` survives as a diagnostic beside the marker. It is
+counted since the socket was **lost**, not since the window opened — the
+measurement window's `reconnects` delta reads **zero** for a charge point that
+reconnected during creation, settling or the warmup — and it is an upper bound,
+because the cumulative total at the instant of the loss is only known as of the
+last scrape before it. That "last scrape" is seeded from the preflight one
+rather than from zero, because `ocppcp_ws_reconnects_total` is cumulative since
+_daemon_ start; seeding at zero would charge a loss with every reconnect the
+daemon had ever recorded and make `drift` the permanent reading on any daemon
+that had been up a while.
+
+**`--allow-existing` cannot start above 1000 pre-existing charge points, and
+the preflight says so.** The bench subscribes to the daemon's event stream
+before creating anything — that subscription is what reapplies the heartbeat
+override and confirms transaction starts — but the `events.subscribe` ack
+carries the daemon's whole registry through `subscribeResultSchema`'s
+`ARRAY_1000` cap _regardless of the requested scope_
+([envelope](../concepts/control-plane.md)), so there is no narrower
+subscription to ask for. The bounded array is a control-plane invariant, so the
+refusal is on the bench side and names the condition and both numbers instead
+of failing inside a schema error after the banner. The default mode is
+unaffected: it starts on an empty daemon and the watcher never re-subscribes.
 
 **`conn.src` says whether those numbers are counted or inferred.**
 `ocppcp_charge_points` is a daemon-wide gauge with no `cpId` label, so "how many
@@ -539,7 +574,8 @@ something still owed would let it quietly become a claim nobody checks.
 - _Counters that settle it_: `heartbeatOverride.bootsObserved` / `rpcsIssued`
   (their ratio is the instrument's own cost — 2:1 healthy, 1:1 means the window
   stopped collapsing), `heartbeatOverride.failed`, the per-row `reconnects`,
-  and the `hb.load` column. All already in every `--out` file.
+  and the `hb.load` column, which reads `drift` on any row whose cadence could
+  not be shown to be the configured one. All already in every `--out` file.
 
 **Cleanup deletes what this run created, and refuses to touch anything else.**
 An id enters the delete list when it is _offered_ to `cp.create_many`, before

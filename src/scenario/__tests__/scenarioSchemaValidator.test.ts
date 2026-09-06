@@ -200,4 +200,54 @@ describe("validateScenarioSchema", () => {
     );
     expect(result.valid).toBe(false);
   });
+
+  describe("evSettings.powerFactor (#301)", () => {
+    function scenarioWithPowerFactor(powerFactor: number): unknown {
+      return {
+        ...minimalScenario(),
+        evSettings: {
+          modelName: "Test EV",
+          batteryCapacityKwh: 75,
+          maxChargingPowerKw: 22,
+          initialSoc: 20,
+          targetSoc: 80,
+          currentType: "AC",
+          powerFactor,
+        },
+      };
+    }
+
+    it("rejects 0, which would make the derived current infinite", () => {
+      // cos phi = 0 means no real power flows, so
+      // I = P / (V x phases x cos phi) has no finite answer. The schema was
+      // `minimum: 0`, which accepted the value the domain then had to
+      // substitute unity for.
+      const result = validateScenarioSchema(scenarioWithPowerFactor(0));
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(" ")).toContain("powerFactor");
+    });
+
+    it("accepts the smallest value the browser panels can express", () => {
+      expect(validateScenarioSchema(scenarioWithPowerFactor(0.01)).valid).toBe(
+        true,
+      );
+    });
+
+    it("accepts a value finer than the UI step, and unity", () => {
+      // The UI floor is a control-granularity limit, not the schema contract:
+      // any powerFactor in (0, 1] is a valid scenario file.
+      expect(validateScenarioSchema(scenarioWithPowerFactor(0.004)).valid).toBe(
+        true,
+      );
+      expect(validateScenarioSchema(scenarioWithPowerFactor(1)).valid).toBe(
+        true,
+      );
+    });
+
+    it("rejects a value above 1", () => {
+      expect(validateScenarioSchema(scenarioWithPowerFactor(1.5)).valid).toBe(
+        false,
+      );
+    });
+  });
 });

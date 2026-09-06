@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download, Upload, Home } from "lucide-react";
+import { Download, Upload, Home, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,54 @@ import {
   EV_PRESETS,
   defaultEVSettings,
 } from "../cp/domain/connector/EVSettings";
+import {
+  DEFAULT_VOLTAGE_V,
+  MIN_UI_POWER_FACTOR,
+  withNormalizedChargingCurve,
+} from "../cp/domain/connector/ChargingCurve";
+
+/**
+ * The electrical values the Default EV Settings controls are showing, filled
+ * in wherever the draft leaves one `undefined`.
+ *
+ * Each control renders a fallback — `currentType ?? "AC"`, `phases ?? 1`,
+ * `voltageV ?? 230`, `powerFactor ?? 1` — so a user who never touches them
+ * still sees a complete, specific electrical model. Saving that model is the
+ * only reading of Apply that matches the page; leaving the fields unset would
+ * silently select the legacy conversion instead (#301).
+ *
+ * `phases` and `powerFactor` are meaningless on DC and the controls for them
+ * are disabled there, but the values displayed are saved anyway so that the
+ * stored settings and the page never disagree; `resolveActivePhases` and
+ * `effectivePowerFactor` both ignore them on DC.
+ */
+function displayedElectricalDefaults(draft: EVSettings): Partial<EVSettings> {
+  return {
+    currentType: draft.currentType ?? "AC",
+    phases: draft.phases ?? 1,
+    voltageV: draft.voltageV ?? DEFAULT_VOLTAGE_V,
+    powerFactor: draft.powerFactor ?? 1,
+  };
+}
+
+/**
+ * Seed the editable draft with the model the controls will show.
+ *
+ * The draft is what Apply saves and what `evDirty` compares, so it has to hold
+ * the same values the panel renders or the button that would change something
+ * is disabled. Straight after load with no stored override — and straight
+ * after Reset — the draft used to equal `defaultEVSettings` exactly, `evDirty`
+ * was false, and Apply was greyed out: the page showed AC / single-phase /
+ * 230 V / unity while the connector kept the legacy no-model conversion, which
+ * reads an amp limit with no `numberPhases` as three-phase and reports 48 A
+ * for a 16 A profile. Materializing the draft here makes it dirty against the
+ * stored state precisely when the screen and the stored state disagree, which
+ * is when Apply should be pressable (#301).
+ */
+function seedDraftEv(stored: EVSettings | null): EVSettings {
+  const base = stored ?? { ...defaultEVSettings };
+  return { ...base, ...displayedElectricalDefaults(base) };
+}
 
 const Settings: React.FC = () => {
   const { config, setConfig: persistConfig, isLoading } = useConfig();
@@ -26,8 +74,8 @@ const Settings: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
-  const [draftEv, setDraftEv] = useState<EVSettings>(
-    defaultEvSettings ?? { ...defaultEVSettings },
+  const [draftEv, setDraftEv] = useState<EVSettings>(() =>
+    seedDraftEv(defaultEvSettings),
   );
   const { tagIds: globalTagIds, setTagIds: persistGlobalTagIds } =
     useGlobalTagIds();
@@ -56,7 +104,7 @@ const Settings: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    setDraftEv(defaultEvSettings ?? { ...defaultEVSettings });
+    setDraftEv(seedDraftEv(defaultEvSettings));
   }, [defaultEvSettings]);
 
   const [resetState, setResetState] = useState<"idle" | "running" | "error">(
@@ -91,7 +139,23 @@ const Settings: React.FC = () => {
   }, [chargePointService]);
 
   const handleApplyDefaultEv = () => {
-    setDefaultEvSettings(draftEv);
+    // Normalized here rather than relied on downstream: a fresh Connector
+    // reads `getDefaultEVSettings()` straight into its field initializer,
+    // bypassing the `evSettings` setter's normalization (#301).
+    //
+    // The four electrical fields are also materialized to exactly what the
+    // controls display. Left `undefined` they made the form save something
+    // other than what it showed: the panel reads "AC, single-phase, 230 V,
+    // 1.0", but `electricalModelOf` saw no model at all and the domain fell
+    // back to the pre-1.2 conversion, which reads an amp-based profile limit
+    // as three-phase. A 16 A profile then metered as 48 A while the page
+    // claimed single-phase. Apply now means what the page says (#301).
+    setDefaultEvSettings(
+      withNormalizedChargingCurve({
+        ...draftEv,
+        ...displayedElectricalDefaults(draftEv),
+      }),
+    );
     setSuccess(
       "Default EV settings saved. New connectors will start with these values.",
     );
@@ -388,6 +452,211 @@ const Settings: React.FC = () => {
                 }
                 className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
               />
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-2">
+              Electrical characteristics
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="default-ev-current-type"
+                  className="block text-xs font-semibold mb-1"
+                >
+                  Current Type
+                </label>
+                <select
+                  id="default-ev-current-type"
+                  value={draftEv.currentType ?? "AC"}
+                  onChange={(e) => {
+                    const currentType = e.target.value as "AC" | "DC";
+                    setDraftEv({
+                      ...draftEv,
+                      currentType,
+                      // DC has no phases; drop a stale 3-phase setting so it
+                      // doesn't linger unused if the user switches back.
+                      phases: currentType === "DC" ? undefined : draftEv.phases,
+                    });
+                  }}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="AC">AC</option>
+                  <option value="DC">DC</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="default-ev-phases"
+                  className="block text-xs font-semibold mb-1"
+                >
+                  Phases
+                </label>
+                <select
+                  id="default-ev-phases"
+                  value={String(draftEv.phases ?? 1)}
+                  disabled={draftEv.currentType === "DC"}
+                  onChange={(e) =>
+                    setDraftEv({
+                      ...draftEv,
+                      phases: (e.target.value === "3" ? 3 : 1) as 1 | 3,
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                >
+                  <option value="1">1 (single-phase)</option>
+                  <option value="3">3 (three-phase)</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="default-ev-voltage"
+                  className="block text-xs font-semibold mb-1"
+                >
+                  Voltage (V)
+                </label>
+                <input
+                  id="default-ev-voltage"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draftEv.voltageV ?? 230}
+                  onChange={(e) =>
+                    setDraftEv({
+                      ...draftEv,
+                      voltageV: Math.max(1, parseFloat(e.target.value) || 230),
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="default-ev-power-factor"
+                  className="block text-xs font-semibold mb-1"
+                >
+                  Power Factor
+                </label>
+                <input
+                  id="default-ev-power-factor"
+                  type="number"
+                  min={MIN_UI_POWER_FACTOR}
+                  max={1}
+                  step={0.01}
+                  value={draftEv.powerFactor ?? 1}
+                  disabled={draftEv.currentType === "DC"}
+                  onChange={(e) => {
+                    // Clamped to MIN_UI_POWER_FACTOR, never 0: a cos phi of 0
+                    // means no real power flows, so the derived current would
+                    // be infinite. The domain would fall back to unity, which
+                    // is not what someone typing 0 asked for (#301).
+                    const parsed = parseFloat(e.target.value);
+                    setDraftEv({
+                      ...draftEv,
+                      powerFactor: Number.isFinite(parsed)
+                        ? Math.min(1, Math.max(MIN_UI_POWER_FACTOR, parsed))
+                        : 1,
+                    });
+                  }}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">
+              Charging curve
+            </p>
+            <p className="text-muted-foreground text-xs mb-2">
+              Battery-acceptance fraction of Max Power at each SoC. Empty (no
+              points) means flat acceptance at Max Power for the whole session,
+              matching the pre-curve behaviour.
+            </p>
+            <div className="space-y-2">
+              {(draftEv.chargingCurve ?? []).map((point, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    aria-label={`Charging curve point ${index + 1} SoC percent`}
+                    value={point.socPercent}
+                    onChange={(e) => {
+                      const curve = [...(draftEv.chargingCurve ?? [])];
+                      curve[index] = {
+                        ...curve[index]!,
+                        socPercent: Math.min(
+                          100,
+                          Math.max(0, parseFloat(e.target.value) || 0),
+                        ),
+                      };
+                      setDraftEv({ ...draftEv, chargingCurve: curve });
+                    }}
+                    className="w-24 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                  <span className="text-xs text-muted-foreground">% SoC →</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    aria-label={`Charging curve point ${index + 1} power fraction`}
+                    value={point.powerFraction}
+                    onChange={(e) => {
+                      const curve = [...(draftEv.chargingCurve ?? [])];
+                      curve[index] = {
+                        ...curve[index]!,
+                        powerFraction: Math.min(
+                          1,
+                          Math.max(0, parseFloat(e.target.value) || 0),
+                        ),
+                      };
+                      setDraftEv({ ...draftEv, chargingCurve: curve });
+                    }}
+                    className="w-24 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    fraction of Max Power
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`Remove charging curve point ${index + 1}`}
+                    onClick={() => {
+                      const curve = (draftEv.chargingCurve ?? []).filter(
+                        (_, i) => i !== index,
+                      );
+                      setDraftEv({
+                        ...draftEv,
+                        chargingCurve: curve.length > 0 ? curve : undefined,
+                      });
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  setDraftEv({
+                    ...draftEv,
+                    chargingCurve: [
+                      ...(draftEv.chargingCurve ?? []),
+                      { socPercent: 0, powerFraction: 1 },
+                    ],
+                  })
+                }
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add point
+              </Button>
             </div>
           </div>
 

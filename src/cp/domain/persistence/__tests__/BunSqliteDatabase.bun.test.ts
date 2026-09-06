@@ -305,3 +305,98 @@ describe("BunSqliteDatabase", () => {
     }
   });
 });
+
+describe("connector_runtime.soc_awaits_next_transaction (#301)", () => {
+  const base: ConnectorRuntimeSnapshot = {
+    status: OCPPStatus.Charging,
+    availability: "Operative",
+    scheduledAvailability: null,
+    transaction: null,
+    meterValueWh: 4200,
+    socPercent: 82.3,
+    lastAutoStartedScenarioKey: null,
+  };
+
+  it("round-trips the waiting marker", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(true);
+
+      repo.save("cp-soc", 2, { ...base, socAwaitsNextTransaction: false });
+      expect(repo.load("cp-soc", 2)?.socAwaitsNextTransaction).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("updates the marker on conflict rather than keeping the first write", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: false });
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reads a pre-v12 row, which has no column value, as not waiting", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // Simulate the migrated-in column on a row written before it existed:
+      // ALTER TABLE ADD COLUMN leaves NULL on every existing row, and the
+      // fresh CREATE TABLE declares the column nullable for exactly that
+      // reason — a fresh DB and a migrated one must not differ.
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      db.run(
+        "UPDATE connector_runtime SET soc_awaits_next_transaction = NULL " +
+          "WHERE cp_id = ? AND connector_id = ?",
+        ["cp-soc", 1],
+      );
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates an existing v10 database by adding the column", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // Rebuild the pre-v12 shape: drop the column and stamp version 10.
+      db.exec("DROP TABLE connector_runtime");
+      db.exec(
+        "CREATE TABLE connector_runtime (" +
+          "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
+          "status TEXT NOT NULL, availability TEXT NOT NULL, " +
+          "scheduled_availability TEXT, transaction_json TEXT, " +
+          "meter_value_wh INTEGER NOT NULL DEFAULT 0, soc_percent REAL, " +
+          "last_auto_started_scenario_key TEXT, scenario_position_json TEXT, " +
+          "updated_at TEXT NOT NULL, PRIMARY KEY (cp_id, connector_id))",
+      );
+      db.run(
+        "INSERT INTO schema_meta (key, value) VALUES ('version', '10') " +
+          "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      );
+      runMigrations(db);
+
+      const cols = db.all<{ name: string }>(
+        "PRAGMA table_info(connector_runtime)",
+      );
+      expect(cols.map((c) => c.name)).toContain("soc_awaits_next_transaction");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      repo.save("cp-soc", 1, { ...base, socAwaitsNextTransaction: true });
+      expect(repo.load("cp-soc", 1)?.socAwaitsNextTransaction).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+});

@@ -53,7 +53,7 @@ runtime model.
 | 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped     | #298  |
 | 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped     | #299  |
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300  |
-| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | planned     | #301  |
+| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped     | #301  |
 | 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | 4a         | not filed   | —     |
 | 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | planned     | #302  |
 | 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |
@@ -356,6 +356,11 @@ voltageV?: number
 powerFactor?: number        // AC only
 ```
 
+(As shipped: `rampShape` was dropped before release — wiring a session-start
+ramp needs a ramp-duration setting this shape doesn't have, and shipping the
+field inert would be worse than not shipping it. See the [Charging curve
+section](../concepts/scenario-format.md#charging-curve-v12).)
+
 `MeterValueBuilder` then derives `Power.Active.Import` from the curve at the
 current SoC and current from the type-appropriate relation — DC has no
 reactive component, so `I = P / V`; AC is `I = P / (V × phases × powerFactor)`
@@ -370,6 +375,18 @@ charging cap already works
 `Connector.resolveEffectiveLimitWatts`) and must keep winning; the curve only
 lowers demand, never raises it above a profile.
 
+(As shipped: a profile in `ChargingRateUnit=A` also has to survive the trip
+into watts and back into the reported `Current.Import`. For a connector that
+declares an electrical model, both directions now use its own volts, phases
+and cos φ — with the phase count `min(connector phases, the period's
+numberPhases)` — so the reported current never exceeds the amperage the CSMS
+set; a connector that declares none keeps the 230 V reference conversion. And
+because the curve newly supplies a small finite cap, the auto-meter carries
+the sub-watt-hour remainder between ticks: a curve tapering below 1800 W at a
+1-second interval delivers under 0.5 Wh a tick, which integer-watt-hour
+rounding used to discard outright. Both in the [Charging curve
+section](../concepts/scenario-format.md#charging-curve-v12).)
+
 **This is the fan-out item.** It reaches `EVSettings.ts`,
 `MeterValueBuilder.ts`, the `evSettings` block in the
 [scenario format](../concepts/scenario-format.md) — which needs a **schema
@@ -378,6 +395,16 @@ version bump and a changelog entry** — `schema/scenario.schema.json`,
 UI, and `EvSettingsJson` in `src/cli/exportK6/runtime/types.ts`. Decide up
 front: **the k6 export ignores the curve in v1** and keeps its flat rate,
 rather than porting the model into the k6 runtime.
+
+(As shipped: the browser EV settings UI landed too —
+`src/components/Settings.tsx`'s "Default EV Settings" panel and
+`src/components/scenario/ScenarioEditor.tsx`'s "Scenario EV Settings" panel
+both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
+editable `chargingCurve` point list, not just the five pre-1.2 fields.
+`powerFactor` shipped as `(0, 1]`, not `[0, 1]`: cos φ = 0 makes the AC
+current derivation infinite, so 0 is invalid per the schema — which warns,
+being advisory — and unreachable from both panels, rather than accepted and
+replaced with 1.)
 
 **Acceptance.** Old scenarios without a curve produce byte-identical
 MeterValues (the curve is opt-in); a curved DC session shows power tapering

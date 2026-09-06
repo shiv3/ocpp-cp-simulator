@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
   transaction_json                 TEXT,
   meter_value_wh                   INTEGER NOT NULL DEFAULT 0,
   soc_percent                      REAL,
+  soc_awaits_next_transaction      INTEGER,
   last_auto_started_scenario_key   TEXT,
   scenario_position_json           TEXT,
   updated_at                       TEXT NOT NULL,
@@ -375,6 +376,32 @@ export function runMigrations(db: Database): void {
     );
     if (!new Set(cols.map((c) => c.name)).has("auto_traffic")) {
       db.exec("ALTER TABLE connector_settings ADD COLUMN auto_traffic TEXT");
+    }
+  }
+
+  // v10 → v12: persist whether `soc_percent` is waiting for the transaction
+  // that starts next, rather than describing one that has already run (#301).
+  // A restored connector otherwise cannot tell a value left behind by a
+  // finished session from one a user set while the connector was idle, and the
+  // next transaction inherits the previous car's charge. Rows written before
+  // this column have NULL, read as `false` — treated as a leftover, which is
+  // the safe direction.
+  //
+  // There is no separate v11 step: v11 added `soc_is_meter_derived` for the
+  // same feature, was never released, and recorded how the value arrived
+  // rather than whose it is — a distinction that turned out not to drive any
+  // behaviour and could not represent this case. A database stamped 11 by an
+  // earlier build of that branch migrates forward here and simply carries the
+  // unused column.
+  if (stored < 12) {
+    const cols = db.all<{ name: string }>(
+      "PRAGMA table_info(connector_runtime)",
+    );
+    if (!new Set(cols.map((c) => c.name)).has("soc_awaits_next_transaction")) {
+      db.exec(
+        "ALTER TABLE connector_runtime " +
+          "ADD COLUMN soc_awaits_next_transaction INTEGER",
+      );
     }
   }
 

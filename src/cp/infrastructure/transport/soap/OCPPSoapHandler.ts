@@ -212,11 +212,17 @@ interface ClientWireProfile {
     },
   ): SoapPayload;
 
+  /**
+   * Build the MeterValues request for this dialect, or `null` when the dialect
+   * supports none of the configured measurands and the request would therefore
+   * carry no samples at all. OCPP requires at least one, so the caller skips
+   * the send rather than putting an empty request on the wire (#301).
+   */
   toMeterValuesRequest(
     connectorId: number,
     transactionId: number | undefined,
     sampledValues: SampledValue[],
-  ): SoapPayload;
+  ): SoapPayload | null;
 
   toStartTransactionRequest(
     transaction: Transaction,
@@ -456,13 +462,19 @@ function toOcpp15Measurand(
     case "Voltage":
     case "Temperature":
       return measurand;
-    case "Power.Offered":
-      return "Power.Active.Import";
-    case "Current.Offered":
-      return "Current.Import";
     default:
-      // OCPP 1.5 has no Power.Factor, SoC, Frequency, RPM, phase-aware, or
-      // custom measurand equivalent; drop the sample instead of mislabeling it.
+      // OCPP 1.5 has no Power.Offered, Current.Offered, Power.Factor, SoC,
+      // Frequency, RPM, phase-aware, or custom measurand equivalent; drop the
+      // sample instead of mislabeling it.
+      //
+      // The two Offered measurands used to be aliased onto
+      // Power.Active.Import / Current.Import, which was harmless only while
+      // Offered and Import always carried the same number. #301 makes them
+      // differ (Offered is the EVSE's offer, Import is what the curve says
+      // the battery accepts), so a connector sampling both would have put two
+      // identically labelled samples with contradictory values into one
+      // MeterValue. Dropping the unsupported sample is the lesser loss: a 1.5
+      // CSMS sees fewer measurands, never two answers to the same question.
       return null;
   }
 }
@@ -506,6 +518,14 @@ function toOcpp15Location(
 }
 
 function toOcpp15MeterSample(sample: SampledValue): Ocpp15MeterSample | null {
+  // OCPP 1.5's SampledValue has no phase attribute (no Errata-3-era additions
+  // like 1.6/2.0.1 have). Emitting the L1/L2/L3 samples anyway would produce
+  // duplicates indistinguishable from the aggregate — same measurand,
+  // context, unit and value shape, just missing the one field that told them
+  // apart — so drop the per-phase extras rather than confuse a CSMS with
+  // four identical-looking Current.Import/Power.Active.Import samples
+  // (#301). The aggregate sample (no `phase`) still goes through.
+  if (sample.phase) return null;
   const measurand = toOcpp15Measurand(sample.measurand);
   if (measurand === null) return null;
   const context = toOcpp15ReadingContext(sample.context);
@@ -559,17 +579,18 @@ const OCPP15_WIRE_PROFILE: ClientWireProfile = {
   },
 
   toMeterValuesRequest(connectorId, transactionId, sampledValues) {
+    const value = sampledValues
+      .map(toOcpp15MeterSample)
+      .filter((sample): sample is Ocpp15MeterSample => sample !== null);
+    // Every configured measurand was one 1.5 does not define — a connector
+    // sampling only `Power.Offered` / `Current.Offered` is the reachable case
+    // (#301). A 1.5 MeterValues.req must carry at least one value, so an empty
+    // one would be rejected by a conforming CSMS; the caller skips the send.
+    if (value.length === 0) return null;
     const payload: Ocpp15MeterValuesRequest = {
       connectorId,
       ...(transactionId !== undefined ? { transactionId } : {}),
-      values: [
-        {
-          timestamp: new Date().toISOString(),
-          value: sampledValues
-            .map(toOcpp15MeterSample)
-            .filter((sample): sample is Ocpp15MeterSample => sample !== null),
-        },
-      ],
+      values: [{ timestamp: new Date().toISOString(), value }],
     };
     return soapPayload(payload);
   },
@@ -806,6 +827,19 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       transactionId,
       sampledValue,
     );
+    if (!payload) {
+      // The dialect defines none of the configured measurands, so the request
+      // would carry no samples — and an empty MeterValues.req is rejected
+      // outright, which is worse than not sending one. Warned rather than
+      // silent: from the CSMS side "no MeterValues at all" and "MeterValues
+      // the CP could not express" look identical, so the operator needs the
+      // reason here (#301).
+      this._logger.warn(
+        `MeterValues not sent for connector ${connectorId}: ${this._dialect.version} supports none of the configured measurands (${measurands.join(", ")})`,
+        LogType.METER_VALUE,
+      );
+      return;
+    }
     this.enqueueRequest("MeterValues", payload, (env) => {
       new MeterValuesResultHandler(payload).handle(
         env.payload as MeterValuesResponseV16,

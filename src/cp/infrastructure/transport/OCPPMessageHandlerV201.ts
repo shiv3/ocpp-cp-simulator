@@ -577,6 +577,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       value: Number(sv.value),
       measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
       unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
+      // 2.0.1/2.1 SampledValueType carries `phase` (§2.36 / §2.44) — pass the
+      // builder's L1/L2/L3 tag through rather than letting a CSMS receive
+      // four indistinguishable samples per measurand (#301).
+      ...(sv.phase
+        ? { phase: sv.phase as V201MeterValuesSampledValue["phase"] }
+        : {}),
     })) as [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]];
 
     const payload: MeterValuesRequestV201 = {

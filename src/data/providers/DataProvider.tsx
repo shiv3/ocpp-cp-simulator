@@ -23,12 +23,28 @@ import {
   defaultEVSettings,
   setUserDefaultEVSettings,
 } from "../../cp/domain/connector/EVSettings";
+import { withNormalizedChargingCurve } from "../../cp/domain/connector/ChargingCurve";
 
 const DEFAULT_EV_STORAGE_KEY = "ocpp-cp.default-ev-settings";
 const DEFAULT_SERVER_URL = "http://127.0.0.1:9700";
 
-function loadDefaultEvFromStorage(): EVSettings | null {
-  const raw = readStorage(DEFAULT_EV_STORAGE_KEY);
+/**
+ * Parse the stored Default EV Settings blob, or `null` when there is nothing
+ * usable there.
+ *
+ * The `chargingCurve` is normalized here, at the one place the stored value is
+ * read (#301). Both consumers take it from this function — the module-level
+ * seed into `setUserDefaultEVSettings` below, and the React state that the
+ * Settings page's editor renders — so a `chargingCurve` of `{}` or `[null]`
+ * left in localStorage by an older build, a hand-edit or a raw RPC round trip
+ * neither reaches a connector's curve evaluation nor throws while the panel
+ * maps over its points. Guarding only the domain copy left the page itself
+ * uninhabitable for exactly the input the guard exists to tolerate.
+ *
+ * Exported for tests: this is the boundary, and it is the only piece of the
+ * provider that can be exercised without a React tree.
+ */
+export function parseStoredDefaultEv(raw: string | null): EVSettings | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<EVSettings>;
@@ -37,12 +53,16 @@ function loadDefaultEvFromStorage(): EVSettings | null {
       typeof parsed === "object" &&
       typeof parsed.batteryCapacityKwh === "number"
     ) {
-      return { ...defaultEVSettings, ...parsed };
+      return withNormalizedChargingCurve({ ...defaultEVSettings, ...parsed });
     }
   } catch {
     // ignore
   }
   return null;
+}
+
+function loadDefaultEvFromStorage(): EVSettings | null {
+  return parseStoredDefaultEv(readStorage(DEFAULT_EV_STORAGE_KEY));
 }
 
 // Seed the in-memory user override before any Connector is constructed. The

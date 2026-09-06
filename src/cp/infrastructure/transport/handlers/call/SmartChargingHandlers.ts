@@ -364,9 +364,11 @@ export class ClearChargingProfileHandler implements CallHandler<
 
 function wattsToUnit(watts: number, unit: ChargingRateUnitType): number {
   if (unit === ChargingRateUnitType.W) return watts;
-  // W → A: divide by phase voltage × phases. Mirrors the inverse used by
-  // the resolver. Caller is responsible for rounding semantics; we return
-  // the raw float here.
+  // W → A: divide by phase voltage × phases. Mirrors the reference-voltage
+  // branch `buildCompositeWattsSchedule` resolves with — that builder is
+  // deliberately not given a connector's electrical model (#301), so this
+  // pair stays each other's exact inverse. Caller is responsible for rounding
+  // semantics; we return the raw float here.
   return watts / REFERENCE_PHASE_VOLTAGE / DEFAULT_PHASES;
 }
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.1)",
-  "$comment": "Scenario file format v1.1 (issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.2)",
+  "$comment": "Scenario file format v1.2 (issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -110,7 +110,29 @@
         "batteryCapacityKwh": { "type": "number" },
         "maxChargingPowerKw": { "type": "number" },
         "initialSoc": { "type": "number" },
-        "targetSoc": { "type": "number" }
+        "targetSoc": { "type": "number" },
+        "chargingCurve": {
+          "type": "array",
+          "description": "Piecewise-linear power acceptance against SoC (v1.2, issue #301). Absent means flat acceptance at maxChargingPowerKw, which is the pre-1.2 behaviour.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["socPercent", "powerFraction"],
+            "properties": {
+              "socPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+              "powerFraction": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "currentType": { "type": "string", "enum": ["AC", "DC"] },
+        "phases": { "type": "number", "enum": [1, 3] },
+        "voltageV": { "type": "number", "exclusiveMinimum": 0 },
+        "powerFactor": {
+          "description": "cos phi, AC only (v1.2, issue #301). A power factor of 0 means no real power flows, so I = P / (V x phases x cos phi) would be infinite; 0 is rejected rather than silently treated as unity.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
       }
     },
     "assertion": {

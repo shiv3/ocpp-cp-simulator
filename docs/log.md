@@ -1517,3 +1517,42 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
 - Recorded for the method: enumerate a hold's **ordering**, its **failure**, its
   **destruction** — and its **trigger**. The first three were already written
   down and were not enough.
+
+## [2026-09-06] ingest | `--watch`: whose bookkeeping vs whose cleanup, in a replacement race (#314, PR #317)
+
+- A run replaced under the same id skipped its own connector cleanup. The guard
+  that protects the _executor slot_ from a run that no longer owns it answered
+  two questions with one early return, so the outgoing run's connector-scoped
+  artifacts — the scenario position and the EV settings override — went with it.
+  They are separated now: slot bookkeeping belongs to whoever holds the slot,
+  connector artifacts are owed by the run that is ending, and
+  `releaseConnectorArtifacts` is a named thing so the two cannot be merged back.
+- **Severity note.** The stale position is not only in memory: it is written
+  through to `connector_runtime.scenario_position_json` by the next persist, so
+  a replacement did not merely misbehave — it misbehaved after a restart too,
+  resuming the _new_ graph from the _old_ graph's node ids wherever they still
+  resolved.
+- The mirror of #310, which is worth naming because the two halves keep coming
+  apart. There a bit correctly recorded that a value belonged to a finished
+  session and nothing **replaced** it when the next one opened; here the guard
+  correctly identified that the slot belongs to the replacement and dropped the
+  old owner's **obligations**. Ownership and replacement are different
+  questions, and getting one right does not answer the other. So the position is
+  handled by _acquisition_ — a run that starts without resuming clears it, and
+  writes that through — while the override, which has no per-run owner, is
+  released by the outgoing run unless the new definition declares `evSettings`
+  of its own.
+- The override needs **two** conditions and the first version had only one. An
+  existing test (#105) caught it: a scenario that never declared `evSettings`
+  must not release an explicit `set_ev_settings` an operator applied to the
+  connector. So the outgoing run releases only what it set, _and_ only if the
+  new occupant has not claimed one since. Widening a rule until it swallows a
+  neighbouring guarantee is the third time this branch has done that, and each
+  time an existing test was what noticed.
+- Checked rather than assumed, and it changed the answer: the override leak was
+  also reachable through `discardScenarioRun` from `remove_scenario` and from a
+  console upload, with no reload involved — so it was pre-existing rather than
+  `--watch`-specific. It needs no tracking issue because releasing the artifacts
+  on _both_ branches of the guard closes it on every one of those paths; this PR
+  fixes pre-existing behaviour there deliberately, rather than absorbing an
+  unrelated bug by accident.

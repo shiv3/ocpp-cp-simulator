@@ -292,6 +292,19 @@ The rules, in the order they bite:
   answered with a CALLERROR returns the connector to Available without ending a
   session that never began), because the condition clearing and the
   notification are separate events.
+- **A replaced run still settles its own connector.** When a scenario is
+  replaced under the same id — a `scenario.definitions.replace` upload, or a
+  reload draining into a connector whose previous run has not finished
+  unwinding — the new run owns the executor slot, the run id and the transcript,
+  and the outgoing run touches none of them. The artifacts that hang off the
+  **connector** are a separate question: they are owed by the run that is
+  ending, because nothing else will clear them. The scenario position is claimed
+  by acquisition — a run that starts without resuming clears it, and writes that
+  through, so a restart in the window before its first node completes cannot
+  resume the new graph from the old graph's node ids. The EV settings override
+  is released by the outgoing run unless the definition now loaded under that id
+  declares `evSettings` of its own, in which case the replacement has already
+  claimed it.
 - **A hold is never left waiting on something that is gone.** A reload held for
   a connector is released when that connector's session ends, when the
   scenario's own run settles, or when a `cp.update` rebuilds the charge point.

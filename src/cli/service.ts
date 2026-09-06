@@ -1515,6 +1515,27 @@ export class CLIChargePointService {
         ...pending!,
         scenarioKey: scenarioId,
       });
+    } else {
+      // Acquisition, not cleanup: a run that is *not* resuming starts at the
+      // beginning, so the connector's position is this run's from here and
+      // whatever was there belongs to a run that is over. Clearing it on
+      // acquire rather than leaving it for the previous run's `finally` is what
+      // makes the position correct across a replacement — the outgoing run may
+      // still be unwinding, and if it has been replaced it must not touch
+      // connector state the new occupant now owns. Left behind, a restart in
+      // the window before this run completes its first node resumed the *new*
+      // graph from the *old* graph's node ids, which is persisted state and so
+      // survives the restart that reads it (#314).
+      this._scenarioPositionByConnector.delete(connectorId);
+      // Written through, not just dropped in memory. The artifact that outlives
+      // a restart is the `connector_runtime` row, and it keeps the previous
+      // graph's node ids until something persists over them — which, without
+      // this, is the replacement's first completed node. A restart inside that
+      // window is exactly the case being closed.
+      this.persistConnectorRuntime(
+        this._chargePoint.connectors.get(connectorId),
+        connectorId,
+      );
     }
 
     const executor = new ScenarioExecutor(
@@ -1562,11 +1583,27 @@ export class CLIChargePointService {
         // resumed the scenario the operator had stopped. Cleared here rather
         // than in each stop path: this callback runs whichever path stopped the
         // run, and there are two of them today (#314).
+        //
+        // The two questions are answered separately, because one early return
+        // that answered both is what stranded the old run's obligations. *Whose
+        // bookkeeping is this?* — the executor slot, the run id, the transcript,
+        // the terminal status — belongs to whoever holds the slot now, so a
+        // replaced run touches none of it. *Whose cleanup is owed?* — the
+        // connector-scoped artifacts this run leaves behind — is owed whatever
+        // happens to the slot, because nobody else will ever clear them.
         if (registered === undefined) {
+          // Nothing owns the slot: this run's own bookkeeping is still its to
+          // clear. The stop paths freeze the terminal status and finalize the
+          // run themselves (redoing either here would overwrite their pre-stop
+          // snapshot with a post-stop one), but they do not clear the persisted
+          // scenario position — so skipping this left a manually stopped run's
+          // last node in `connector_runtime`, and with `--state-db` the next
+          // boot resumed the scenario the operator had stopped (#314).
           this._executorConnectorIds.delete(scenarioId);
           this._scenarioPositionByConnector.delete(connectorId);
-          this.persistConnectorRuntime(connector, connectorId);
         }
+        this.releaseConnectorArtifacts(connector, scenarioId, entry.definition);
+        this.persistConnectorRuntime(connector, connectorId);
         this.notifySessionSettled({ connectorId, scenarioId });
         return;
       }
@@ -1588,14 +1625,7 @@ export class CLIChargePointService {
       // connector_runtime row's transaction_json itself is already
       // null by the time the Stop Transaction node ran).
       this._scenarioPositionByConnector.delete(connectorId);
-      // Release the EV settings override (#105) — but only if THIS scenario
-      // declared evSettings and therefore owns the override (ScenarioExecutor
-      // only calls onSetEVSettings for declared evSettings). A scenario that
-      // never touched EV settings must not release an explicit
-      // set_ev_settings override on the same connector.
-      if (entry.definition.evSettings) {
-        connector.clearEvSettingsOverride();
-      }
+      this.releaseConnectorArtifacts(connector, scenarioId, entry.definition);
       this.persistConnectorRuntime(connector, connectorId);
       // #179 Phase 2b: the run has settled (naturally or via error) --
       // stop capturing the transcript and compute this run's verdict. The
@@ -1624,6 +1654,50 @@ export class CLIChargePointService {
       // and then have this cleanup tear them down again.
       this.notifySessionSettled({ connectorId, scenarioId });
     });
+  }
+
+  /**
+   * Release the connector-scoped artifacts a finished run leaves behind.
+   *
+   * Separate from the executor slot on purpose. The slot, the run id, the
+   * transcript and the terminal status all belong to *whoever holds the slot
+   * now*, so a run that has been replaced must not touch them. These do not:
+   * they hang off the **connector**, nobody else will ever clear them, and they
+   * are owed whether or not a replacement has taken the id.
+   *
+   * The EV settings override needs **two** conditions, and dropping either one
+   * breaks a guarantee:
+   *
+   * - The ending run releases only what it set. A scenario that never declared
+   *   `evSettings` never touched the override, so it must not release an
+   *   explicit `set_ev_settings` an operator applied to the connector (#105).
+   * - …and only if the new occupant has not **claimed** it since. The flag is a
+   *   single boolean on the connector with no per-run owner, so when the
+   *   definition now loaded under this id declares `evSettings` of its own the
+   *   replacement has already set it, and clearing would unmark a live
+   *   override and let default propagation overwrite it (#314).
+   *
+   * Ownership transferring is not the same as the stale value being replaced,
+   * and neither question answers the other.
+   *
+   * The scenario position needs no equivalent, because acquisition does the
+   * work: `runScenario` clears it when it starts a run that is not resuming, so
+   * a replacement owns a clean slate from its first instruction rather than
+   * inheriting the previous graph's node ids.
+   *
+   * Ordering: this runs from `runScenario`'s `finally`, which is queued as a
+   * microtask, so a replacement started synchronously in the same tick is
+   * already visible here — that interleaving is the one this exists for.
+   */
+  private releaseConnectorArtifacts(
+    connector: ReturnType<typeof this._chargePoint.connectors.get>,
+    scenarioId: string,
+    endingDefinition: ScenarioDefinition,
+  ): void {
+    if (!connector) return;
+    if (!endingDefinition.evSettings) return;
+    const current = this._scenarios.get(scenarioId)?.definition;
+    if (!current?.evSettings) connector.clearEvSettingsOverride();
   }
 
   /** Tell {@link onSessionSettled} subscribers a gate has opened. A throwing

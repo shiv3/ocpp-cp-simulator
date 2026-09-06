@@ -356,3 +356,209 @@ describe("a manually stopped run leaves nothing to resume from (#314)", () => {
     restarted.cleanup(true);
   });
 });
+
+describe("a replacement run does not inherit the old graph's remains (#314)", () => {
+  function storedPosition(db: BunDb, cpId: string): string | null {
+    const rows = db.all<{ scenario_position_json: string | null }>(
+      "SELECT scenario_position_json FROM connector_runtime " +
+        "WHERE cp_id = ? AND connector_id = ?",
+      [cpId, 1],
+    );
+    return rows[0]?.scenario_position_json ?? null;
+  }
+
+  async function waitFor(
+    predicate: () => boolean,
+    what: string,
+  ): Promise<void> {
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  }
+
+  it("clears the connector position when a run starts without resuming", async () => {
+    // The ownership-versus-replacement split. When a scenario is replaced under
+    // the same id the new run takes the slot, but the *stale value* on the
+    // connector is not replaced until the new run completes its first node —
+    // and it is persisted, so a restart inside that window resumed the new
+    // graph from the old graph's node ids. Acquisition clears it instead, so
+    // the replacement starts from a clean slate.
+    const db = BunDb.open(":memory:");
+    const svc = new CLIChargePointService(
+      {
+        cpId: "replace-cp",
+        wsUrl: "ws://127.0.0.1:65534/never",
+        connectors: 1,
+        vendor: "v",
+        model: "m",
+        basicAuth: null,
+      },
+      db,
+    );
+
+    try {
+      const first = svc.loadScenario(1, buildParkedInstance(1));
+      svc.runScenario(1, first);
+      await waitFor(
+        () => storedPosition(db, "replace-cp") !== null,
+        "the first run to record a position",
+      );
+      expect(storedPosition(db, "replace-cp")).toContain("node-a");
+
+      // The replacement, under the same id, exactly as
+      // `scenario.definitions.replace` installs it — and started before the
+      // outgoing run's `finally` has run.
+      const replacement = {
+        ...buildParkedInstance(1),
+        id: first,
+        nodes: buildParkedInstance(1).nodes.map((n) =>
+          n.id === "node-a" ? { ...n, id: "different-node" } : n,
+        ),
+        edges: buildParkedInstance(1).edges.map((e) => ({
+          ...e,
+          source: e.source === "node-a" ? "different-node" : e.source,
+          target: e.target === "node-a" ? "different-node" : e.target,
+        })),
+      } as ScenarioDefinition;
+      // The production sequence for `scenario.definitions.replace`: the runtime
+      // map is reconciled — which discards the in-flight run and swaps the
+      // definition — and the replacement starts in the same tick, before the
+      // outgoing run's queued `finally` gets to run.
+      svc.syncConnectorRuntimeScenarios(1, [replacement]);
+      svc.runScenario(1, replacement.id);
+
+      // The old graph's node ids are gone from the connector immediately —
+      // before the replacement has completed anything of its own.
+      const after = storedPosition(db, "replace-cp");
+      expect(after === null || !after.includes("node-a")).toBe(true);
+
+      svc.stopScenario(1, replacement.id);
+      svc.cleanup(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("releases an EV settings override the replacement does not claim", async () => {
+    // The other connector-scoped artifact, and the half acquisition cannot
+    // cover: the override is one boolean on the connector with no per-run
+    // owner, so a replacement that declares no `evSettings` of its own never
+    // touches it. The outgoing run owes it — whether or not it kept the slot —
+    // and skipping that on the replaced path left default-EV-settings
+    // propagation blocked for the life of the connector.
+    const db = BunDb.open(":memory:");
+    const svc = new CLIChargePointService(
+      {
+        cpId: "evs-cp",
+        wsUrl: "ws://127.0.0.1:65534/never",
+        connectors: 1,
+        vendor: "v",
+        model: "m",
+        basicAuth: null,
+      },
+      db,
+    );
+    try {
+      const withEv = {
+        ...buildParkedInstance(1),
+        evSettings: { maxChargingPowerKw: 7 },
+      } as ScenarioDefinition;
+      const id = svc.loadScenario(1, withEv);
+      svc.runScenario(1, id);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Replaced under the same id by a definition with no EV settings, and
+      // started before the outgoing run unwinds.
+      const plain = { ...buildParkedInstance(1), id } as ScenarioDefinition;
+      svc.syncConnectorRuntimeScenarios(1, [plain]);
+      svc.runScenario(1, id);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const connector = (
+        svc as unknown as {
+          _chargePoint: {
+            getConnector(id: number):
+              | {
+                  applyDefaultEvSettings(s: unknown): void;
+                  evSettings: { maxChargingPowerKw?: number };
+                }
+              | undefined;
+          };
+        }
+      )._chargePoint.getConnector(1);
+      // The override is unmarked, so default propagation takes effect again.
+      connector?.applyDefaultEvSettings({ maxChargingPowerKw: 22 });
+      expect(connector?.evSettings.maxChargingPowerKw).toBe(22);
+
+      svc.stopScenario(1, id);
+      svc.cleanup(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves an override the replacement claimed for itself", async () => {
+    // The other half of "unless the new occupant has claimed it". When the
+    // replacement declares its own `evSettings` it has already set the
+    // override, and the outgoing run clearing it would unmark a live one —
+    // letting default propagation overwrite the settings the running scenario
+    // asked for. Ownership transferring is not permission to clean up.
+    const db = BunDb.open(":memory:");
+    const svc = new CLIChargePointService(
+      {
+        cpId: "evs-keep-cp",
+        wsUrl: "ws://127.0.0.1:65534/never",
+        connectors: 1,
+        vendor: "v",
+        model: "m",
+        basicAuth: null,
+      },
+      db,
+    );
+    try {
+      const first = {
+        ...buildParkedInstance(1),
+        evSettings: { maxChargingPowerKw: 7 },
+      } as ScenarioDefinition;
+      const id = svc.loadScenario(1, first);
+      svc.runScenario(1, id);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Replaced by a definition that declares EV settings of its own.
+      const claiming = {
+        ...buildParkedInstance(1),
+        id,
+        evSettings: { maxChargingPowerKw: 11 },
+      } as ScenarioDefinition;
+      svc.syncConnectorRuntimeScenarios(1, [claiming]);
+      svc.runScenario(1, id);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const connector = (
+        svc as unknown as {
+          _chargePoint: {
+            getConnector(id: number):
+              | {
+                  applyDefaultEvSettings(s: unknown): void;
+                  evSettings: { maxChargingPowerKw?: number };
+                }
+              | undefined;
+          };
+        }
+      )._chargePoint.getConnector(1);
+      const before = connector?.evSettings.maxChargingPowerKw;
+      // Still overridden, so the default cannot take it over.
+      connector?.applyDefaultEvSettings({ maxChargingPowerKw: 22 });
+      expect(connector?.evSettings.maxChargingPowerKw).toBe(before);
+      expect(connector?.evSettings.maxChargingPowerKw).not.toBe(22);
+
+      svc.stopScenario(1, id);
+      svc.cleanup(true);
+    } finally {
+      db.close();
+    }
+  });
+});

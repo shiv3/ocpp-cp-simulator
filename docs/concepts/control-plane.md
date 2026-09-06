@@ -192,7 +192,7 @@ running charge point; a daemon started with
 replaces the pool live, which is safe because the pool is drawn from once per
 session. The pool holds at most 1000 tags and is persisted in
 `charge_points.id_tags` / `id_tag_distribution` (schema v9) plus the source path
-in `id_tag_file` (schema v11), so a restart does not bring the charge point back
+in `id_tag_file` (schema v13), so a restart does not bring the charge point back
 drawing nothing — or, under `--watch`, watching nothing.
 
 An unrecognised `distribution` is refused rather than defaulted.

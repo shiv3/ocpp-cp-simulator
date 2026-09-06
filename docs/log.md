@@ -723,7 +723,6 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
 
 - The cross-runtime agreement table was deliberately **not** built. It cannot assert agreement while the interpolators differ, and a table pinning a known-wrong 15% gap as the expected answer would have to be rewritten the moment the real fix lands. The instrument that would actually catch the next divergence is one shared interpolator, which is a behaviour change to one runtime or the other and belongs with the bezier/linear issue rather than at a merge gate.
 
-
 ## [2026-09-04] ingest | `--watch` re-reads loaded idTag and scenario files (#314)
 
 - `entities/daemon.md` — new **File hot-reload** section (what is watched,
@@ -1394,3 +1393,37 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
 - The lesson worth keeping: this survived a round because the only test covered
   the one mode whose predicate was non-empty. Both predicates are now tested
   mode by mode, including the modes that must answer "nothing".
+
+## [2026-09-06] ingest | `--watch`: the baseline means "everyone has these", plus the v13 renumber (#314, PR #317)
+
+- The cached copy of a watched idTag file now records the bytes **every charge
+  point backed by that path holds**, not the bytes of the last reload that
+  landed. The weaker reading had a real window: a file changes, the debounced
+  re-read is scheduled, and a charge point created inside that window reads disk
+  itself and is already current — advancing the path-wide baseline on the
+  strength of that one made the pending callback exit as "unchanged", so every
+  _earlier_ charge point stayed on the old tags indefinitely. A healthy watcher
+  silently skipping a reload it owed, not degraded-mode staleness.
+- Recorded because the method failed, not just the code: the audit that kept the
+  narrower advance enumerated **callers** and concluded every path reaching it
+  had already set the cache to the same bytes in the same synchronous pass. That
+  was true of every path and false of the feature, because a 200 ms debounce is
+  exactly where "the same synchronous pass" stops being one pass. This is the
+  second audit on this branch a later round found a hole in, and both enumerated
+  code paths rather than interleavings. An audit that does not say what it
+  assumed about ordering has not finished.
+- [State persistence](concepts/state-persistence.md), [Daemon](entities/daemon.md)
+  — schema **v13**. `main` took 11 (a column that was never released) and then
+  12 (`soc_awaits_next_transaction`, #301) while this branch was in review, so
+  both of this feature's changes — `charge_points.id_tag_file` and
+  `watched_scenario_files` — now land in one `stored < 13` step. Collapsed
+  rather than renumbered separately because neither has ever been released, and
+  the step carries a comment saying which numbers were consumed and why, in the
+  style `main`'s own v11 note established: a skipped number with no explanation
+  is unauditable later.
+- Two migration conditions are tested rather than assumed: a database `main`
+  stamped 12 gains both of this feature's objects in the single v13 step, and a
+  database an earlier build of _this_ branch stamped 11 or 12 — which already
+  has one or both — re-runs the step as a no-op, keeping its rows, because every
+  statement is `CREATE TABLE IF NOT EXISTS` or guarded by a `PRAGMA table_info`
+  check.

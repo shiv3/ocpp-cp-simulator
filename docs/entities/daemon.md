@@ -238,6 +238,15 @@ reads and then keeps a copy of:
 
 The rules, in the order they bite:
 
+- **The duplicate-bytes baseline is per file and means "everyone has these".**
+  A watched idTag file's cached copy records the bytes _every_ charge point
+  drawing from that path currently holds, not merely the bytes of the last
+  reload that landed somewhere. The difference matters inside the debounce
+  window: a charge point created between an edit and its scheduled re-read
+  reads the file itself and is already current, and treating that as "the file
+  has been taken up" cancelled the pending reload that every earlier charge
+  point still needed. The baseline advances only when they all agree, and is
+  dropped outright when a parse or an apply fails.
 - **Debounced.** Editors save in bursts — write a temp file, rename it over the
   target, touch the mtime — so an undebounced watch fires two or three times per
   save and can read a truncated intermediate file. The watch waits 200 ms after
@@ -402,7 +411,7 @@ operator's file. See
 [Access control → Event scopes are not an authorization boundary](../concepts/access-control.md#event-scopes-are-not-an-authorization-boundary).
 
 Under `--state-db` the `idTagPool.file` path is persisted alongside the resolved
-tags (`charge_points.id_tag_file`, schema v11), so a daemon restarted with
+tags (`charge_points.id_tag_file`, schema v13), so a daemon restarted with
 `--watch` watches the same files again instead of coming back holding a frozen
 snapshot of a file it believes it is watching. The path is **resolved to an
 absolute path when the charge point is created** and stored that way, so a
@@ -410,7 +419,7 @@ daemon restarted from a different working directory still watches the file the
 operator meant. See [State persistence](../concepts/state-persistence.md).
 
 A **scenario** loaded over the control plane persists its source path the same
-way (`watched_scenario_files`, schema v12), so a restarted `--watch` daemon
+way (`watched_scenario_files`, schema v13), so a restarted `--watch` daemon
 re-establishes that watch and reconciles an edit made while it was down. The row
 is written **whether or not `--watch` is on**, for the same reason it is cleared
 that way: it is a fact about stored state, not about the feature that reads it.

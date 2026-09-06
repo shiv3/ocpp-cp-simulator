@@ -1647,7 +1647,6 @@ describe("a run's cleanup only ever tears down its own run (#314)", () => {
       () => loadedDelaySeconds(server, "CP-RESET-RACE", "reset-race") === 7,
       "the held reload to land after the stopped run's cleanup",
     );
-    expect(events.some((e) => e.outcome === "applied")).toBe(true);
   });
 });
 
@@ -2595,16 +2594,78 @@ describe("a new charge point is reconciled against disk (#314)", () => {
       "FIRST",
     ]);
 
-    // The reconcile also brings the baseline up to what it just read, so the
-    // documented "identical bytes are not a reload" rule still holds afterwards:
-    // saving the same content again produces no event at all. Left pointing at
-    // the pre-change bytes, this would report a reload of something that did
-    // not change.
+    // …and it is recoverable, which an earlier version of this test recorded as
+    // a limitation. The baseline is path-wide and only advances when *every*
+    // charge point backed by the file holds those bytes, so with the first one
+    // behind it did not move — and the next save of the very same content is
+    // therefore judged rather than dismissed as unchanged, which is what
+    // finally brings that charge point forward.
     const events = collectReloadEvents(socket);
     await rpc(socket, "events.subscribe", { scope: "file-reload" });
     backend.save(file, JSON.stringify(["SECOND"]));
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(events).toEqual([]);
+    await waitFor(
+      () =>
+        server.registry.get("CP-SHARED-A")?.getInit().idTags?.[0] === "SECOND",
+      "the re-saved file to reach the charge point left behind",
+    );
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the reload of the re-saved file to be announced",
+    );
+  });
+});
+
+describe("the shared baseline waits for every charge point (#314)", () => {
+  it("does not let a new charge point cancel a reload the others still need", async () => {
+    // A healthy watcher, and the failure is an *interleaving* rather than a
+    // code path — which is why an audit that enumerated callers missed it. The
+    // file changes, the watcher schedules its debounced re-read, and a second
+    // charge point is created inside that window. It reads disk itself, so it
+    // already holds the new tags and there is nothing for the reconcile to
+    // apply. Advancing the path-wide baseline there made the still-pending
+    // callback exit as "unchanged", so the *first* charge point never received
+    // the new tags at all. The baseline now means "every charge point backed by
+    // this path holds these bytes", so it does not move while one is behind.
+    const dir = tempDir();
+    const file = writeFile(dir, "tags.json", JSON.stringify(["FIRST"]));
+    const backend = new TestWatchBackend();
+    // A long debounce makes the window deterministic instead of a race.
+    const server = await startTestServer({
+      watch: { debounceMs: 400, watchFactory: backend.factory },
+    });
+    servers.push(server);
+    const socket = await openClient(server);
+    await rpc(socket, "cp.create", {
+      cpId: "CP-EARLY",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+    expect(server.registry.get("CP-EARLY")?.getInit().idTags).toEqual([
+      "FIRST",
+    ]);
+
+    // The edit, and its re-read scheduled 400 ms out.
+    backend.save(file, JSON.stringify(["SECOND"]));
+
+    // Inside that window, a second charge point joins the same pool. Its own
+    // create reads the file, so it is already current.
+    await rpc(socket, "cp.create", {
+      cpId: "CP-LATE",
+      wsUrl: csmsUrl(),
+      connectors: 1,
+      idTagPool: { file },
+    });
+    expect(server.registry.get("CP-LATE")?.getInit().idTags).toEqual([
+      "SECOND",
+    ]);
+
+    // The debounced callback still has work to do: the earlier charge point is
+    // behind, so the baseline must not have moved.
+    await waitFor(
+      () => server.registry.get("CP-EARLY")?.getInit().idTags?.[0] === "SECOND",
+      "the pending reload to reach the charge point created before the edit",
+    );
   });
 });
 

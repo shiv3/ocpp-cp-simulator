@@ -173,6 +173,24 @@ interface ScenarioEntry extends ScenarioFileRegistration {
 export class FileReloadManager {
   private readonly watcher: FileWatcher;
   private readonly idTagWatches = new Map<string, () => void>();
+  /**
+   * Per watched idTag file: the bytes **every charge point backed by that path
+   * currently holds**.
+   *
+   * Not "the bytes of the last reload that landed" — that weaker reading is
+   * what made a narrower advance look correct. The map is the watch path's
+   * duplicate-suppression baseline, and `reloadIdTags` early-outs when the file
+   * still matches it, so anything it claims on behalf of charge points that do
+   * not hold those bytes cancels a reload those charge points still need. The
+   * window is real on a healthy watcher: a file changes, the debounced re-read
+   * is scheduled, and a charge point created inside that window reads disk
+   * itself and is already current — advancing the path-wide baseline on the
+   * strength of that one made the pending callback exit as unchanged and left
+   * every earlier charge point on the old tags indefinitely (#314).
+   *
+   * So it advances only when every consumer of the path agrees, and is dropped
+   * outright when a parse or an apply fails.
+   */
   private readonly idTagText = new Map<string, string>();
   /**
    * Charge points already checked against the file they were loaded from, keyed
@@ -606,15 +624,23 @@ export class FileReloadManager {
       this.rejectAll(affected, "id-tags", absolutePath, err);
       return;
     }
+    // Every charge point drawing from this path, not just the ones this call is
+    // reconciling. The baseline is path-wide, so it may only move when *all* of
+    // them hold these bytes — see `rememberIfEveryoneHolds`.
+    const backedByPath = this.affectedByIdTagFile(absolutePath);
+    const rememberIfEveryoneHolds = (): void => {
+      const everyoneHolds = backedByPath.every((cpId) =>
+        sameTags(this.registry.get(cpId)?.getInit().idTags, tags),
+      );
+      if (everyoneHolds) this.idTagText.set(absolutePath, text);
+    };
     const stale = affected.filter(
       (cpId) => !sameTags(this.registry.get(cpId)?.getInit().idTags, tags),
     );
     if (stale.length === 0) {
-      // Nothing to apply because every affected charge point already holds
-      // these tags — so these bytes *are* what landed, and the baseline says so.
-      // Left pointing at older bytes it would make the next save of this exact
-      // content look like a change.
-      this.idTagText.set(absolutePath, text);
+      // Nothing for *this* call to apply. Whether the baseline may move is a
+      // different question, and one this branch used to answer wrongly.
+      rememberIfEveryoneHolds();
       return;
     }
     this.log(
@@ -624,16 +650,17 @@ export class FileReloadManager {
       // Two caches here, and they follow opposite rules on purpose. The
       // `reconciledCps` marker above is set *before* the attempt: it exists so
       // a file that has been broken on disk all along is reported once rather
-      // than at every registry sync. `idTagText` is a record of what actually
-      // landed, so a failed apply must not leave the current bytes cached — the
+      // than at every registry sync. `idTagText` says every charge point on the
+      // path holds these bytes, so a failed apply must not leave them cached — the
       // operator's next save of that same content would be discarded as
       // unchanged and the database could never catch up. Do not "make these
       // consistent": they answer different questions.
       this.idTagText.delete(absolutePath);
       return;
     }
-    // Applied everywhere, so the bytes that landed are the baseline.
-    this.idTagText.set(absolutePath, text);
+    // Applied to everyone this call was reconciling — which still says nothing
+    // about the charge points it was not.
+    rememberIfEveryoneHolds();
   }
 
   /** Whether every charge point took the new pool without throwing. A charge

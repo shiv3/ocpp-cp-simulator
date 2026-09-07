@@ -251,3 +251,94 @@ describe("validateScenarioSchema", () => {
     });
   });
 });
+
+/** A scenario carrying one auto-meter node with the given curve (#332). */
+function curveScenario(curvePoints: unknown): Record<string, unknown> {
+  const scenario = minimalScenario();
+  (scenario.nodes as unknown[]).splice(1, 0, {
+    id: "meter",
+    type: "meterValue",
+    position: { x: 0, y: 50 },
+    data: {
+      label: "Meter",
+      value: 0,
+      sendMessage: true,
+      autoIncrement: true,
+      useCurve: true,
+      curvePoints,
+    },
+  });
+  return scenario;
+}
+
+describe("auto-meter curve ordinates (#332)", () => {
+  it("accepts a non-decreasing curve", () => {
+    const result = validateScenarioSchema(
+      curveScenario([
+        { time: 0, value: 0 },
+        { time: 900, value: 25 },
+        { time: 1800, value: 50 },
+      ]),
+    );
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects a negative ordinate via the schema's own minimum", () => {
+    const result = validateScenarioSchema(
+      curveScenario([
+        { time: 0, value: 0 },
+        { time: 60, value: -1 },
+      ]),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain(
+      "/nodes/1/data/curvePoints/1/value must be >= 0",
+    );
+  });
+
+  it("rejects a descending-but-positive ordinate, which JSON Schema cannot express", () => {
+    const result = validateScenarioSchema(
+      curveScenario([
+        { time: 0, value: 0 },
+        { time: 60, value: 5 },
+        { time: 120, value: 3 },
+      ]),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual([
+      "/nodes/1/data/curvePoints/2/value must be >= 5, the value already " +
+        "delivered at an earlier time (a curve ordinate is cumulative energy in kWh)",
+    ]);
+  });
+
+  it("reports the descending point only once, not twice, when it is also negative", () => {
+    const result = validateScenarioSchema(
+      curveScenario([
+        { time: 0, value: 4 },
+        { time: 60, value: -2 },
+      ]),
+    );
+    // Ajv's `minimum` already names it; the ordering check deliberately skips
+    // negatives so the same point is not warned about twice.
+    expect(
+      result.errors.filter((e) => e.includes("/curvePoints/1/value")),
+    ).toEqual(["/nodes/1/data/curvePoints/1/value must be >= 0"]);
+  });
+
+  it("ignores curvePoints on nodes that are not meterValue nodes", () => {
+    const scenario = minimalScenario();
+    (scenario.nodes as Record<string, unknown>[])[0].data = {
+      label: "Start",
+      curvePoints: [
+        { time: 0, value: 5 },
+        { time: 60, value: 1 },
+      ],
+    };
+    expect(validateScenarioSchema(scenario).valid).toBe(true);
+  });
+
+  it("never throws on a malformed curve container", () => {
+    expect(() => validateScenarioSchema(curveScenario("nope"))).not.toThrow();
+    expect(() => validateScenarioSchema({ nodes: "nope" })).not.toThrow();
+  });
+});

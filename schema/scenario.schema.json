@@ -78,11 +78,16 @@
     },
     "curvePoint": {
       "type": "object",
+      "description": "One point of an auto-meter trajectory: cumulative energy delivered in this session (kWh) at an elapsed time (seconds). Time may be negative — a curve is allowed to begin before session start and cross t = 0.",
       "required": ["time", "value"],
       "additionalProperties": true,
       "properties": {
         "time": { "type": "number" },
-        "value": { "type": "number" }
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cumulative energy delivered, in kWh. Never negative, and never below the value the curve already reached at an earlier time: this ordinate is assigned to Energy.Active.Import.Register outright, so a descending trajectory drives the register backwards and can put meterStop below meterStart. JSON Schema cannot express the ordering rule, so it is checked alongside the schema by validateScenarioSchema (src/scenario/scenarioSchemaValidator.ts) and enforced at runtime by normalizeCurvePoints (src/cp/domain/connector/MeterValueCurve.ts)."
+        }
       }
     },
     "trigger": {

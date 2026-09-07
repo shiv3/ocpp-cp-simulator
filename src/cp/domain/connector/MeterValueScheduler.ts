@@ -79,8 +79,10 @@ export class MeterValueScheduler {
    *
    * Subtracting the curve's own starting ordinate is the other half of that.
    * Adding the register alone assumed every curve begins at zero; a curve is
-   * free not to — the editor allows any ordinate and `CurvePoint` forbids
-   * none — and a connector at 50 kWh running a 50→60 kWh curve would jump
+   * free not to — only negative and descending ordinates are out of contract
+   * (#332), and the editor's own number inputs carry no `min`, so it can
+   * write one anyway — and a connector at 50 kWh running a 50→60 kWh curve
+   * would jump
    * straight to 100 kWh and deliver twice the energy the curve describes.
    * "Session-relative" means offset by the curve's value at session start, not
    * by the register; the two coincide only for a zero-based curve, which is
@@ -286,6 +288,12 @@ export class MeterValueScheduler {
       const delivered = this.callbacks.getCurrentValue() + this.carryWh;
       const maxIncrement = Math.max(0, (cap * intervalSec) / 3600);
       rawNext = delivered + Math.min(idealWh - delivered, maxIncrement);
+      // Guards the *capped* arithmetic only: a cap below the trajectory's
+      // slope must not be read as a negative delta. It is deliberately not
+      // the curve's monotonicity guarantee — that lives at the boundary, in
+      // `normalizeCurvePoints`, so it holds for the uncapped tick below and
+      // for the exported k6 runtime, neither of which reaches this line
+      // (#332).
       rawNext = Math.max(delivered, rawNext);
     }
 

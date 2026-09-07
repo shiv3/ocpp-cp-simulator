@@ -7,7 +7,7 @@ sources:
 related:
   - ../log.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-05
+updated: 2026-09-07
 ---
 
 # Source: GitHub issues referenced by the wiki
@@ -60,5 +60,6 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #319                                             | Bundled desktop daemon exited 1 on spawn (`dist/` unreachable from a compiled binary)                  | [Desktop app](../entities/desktop-app.md#how-the-sidecar-finds-the-web-console), [CLI](../entities/cli.md), [Testing strategy](../analyses/testing-strategy.md#does-anything-actually-launch-the-desktop-daemon) |
 | #320                                             | Published CLI tarball could not start — `package.json#files` omitted four source trees                 | [CLI](../entities/cli.md#what-the-package-ships), [Docker image](../entities/docker-image.md#image-details)                                                                                                      |
 | #321                                             | `releases/latest` spans both tag trains; rolling `cli-latest` pointer instead                          | [CLI](../entities/cli.md#why-cli-latest-and-not-releaseslatest)                                                                                                                                                  |
+| #339                                             | `bun test src/cli/__tests__` failed on a clean tree; the `test:bun` filter hid it                      | [Testing strategy](../analyses/testing-strategy.md#where-the-two-runners-overlap)                                                                                                                                |
 | steve-community/steve #2068, #2069, #2070, #2074 | SteVe REST API gaps                                                                                    | [steve-verify](steve-verify-readme.md), [CSMS peers](../entities/csms-peers.md)                                                                                                                                  |
 | steve-community/steve #2093                      | OCTT certificate behaviors                                                                             | [Scenario format](../concepts/scenario-format.md#inboundpolicy-and-certificate-quirks-notes)                                                                                                                     |

@@ -1662,10 +1662,20 @@ export class CLIChargePointService {
         // imminent connector-field-change write (status/transaction/…)
         // picks it up. Then trigger a write directly so a daemon kill
         // *right now* still captures the just-finished node.
+        // Accumulated onto **this run's** trail only. The connector's slot can
+        // hold a neighbouring run's checkpoint — a run that starts beside one
+        // already in flight preserves it rather than clearing it (#314) — and
+        // appending to that produced a row mixing two graphs' node ids under
+        // the incoming run's `scenarioKey`. The structural resume check then
+        // found foreign ids in `executedNodes`, rejected the position, and
+        // replayed this scenario from its start node, re-firing every
+        // side-effecting node it had already run. Ownership changes here, so
+        // the trail restarts here.
         const existing = this._scenarioPositionByConnector.get(connectorId);
-        const executedNodes = existing
-          ? [...existing.executedNodes, data.nodeId]
-          : [data.nodeId];
+        const executedNodes =
+          existing && existing.scenarioKey === scenarioId
+            ? [...existing.executedNodes, data.nodeId]
+            : [data.nodeId];
         this._scenarioPositionByConnector.set(connectorId, {
           scenarioKey: scenarioId,
           lastCompletedNodeId: data.nodeId,

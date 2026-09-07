@@ -91,11 +91,11 @@ interface PersistedPosition {
 
 interface Harness {
   readonly svc: CLIChargePointService;
+  readonly db: ReturnType<typeof BunSqliteDatabase.open>;
   readonly position: () => PersistedPosition | null;
 }
 
-function newHarness(): Harness {
-  const db = BunSqliteDatabase.open(":memory:");
+function newHarness(db = BunSqliteDatabase.open(":memory:")): Harness {
   const svc = new CLIChargePointService(
     {
       cpId: "cp-checkpoint",
@@ -119,6 +119,7 @@ function newHarness(): Harness {
   )._runtimeRepo;
   return {
     svc,
+    db,
     position: () =>
       (repo.load("cp-checkpoint", 1)?.scenarioPosition as
         PersistedPosition | undefined) ?? null,
@@ -192,6 +193,71 @@ describe("a connector's checkpoint survives a neighbouring run starting (#314)",
       expect(position()).toBeNull();
     } finally {
       svc.cleanup(true);
+    }
+  });
+
+  it("does not mix a neighbour's node ids into this run's trail", async () => {
+    // The defect the preserve introduced. `node.complete` accumulated onto
+    // whatever the connector's slot held, so the incoming run appended its own
+    // node ids to the preserved neighbour's and stamped the result with its own
+    // `scenarioKey`. The row that survives a restart then names one graph and
+    // lists another's nodes, the structural resume check rejects it for the
+    // foreign ids, and the run replays from its start node — every
+    // side-effecting node it had already executed fires a second time. A
+    // corrupted checkpoint is worse than the cleared one it replaced.
+    const first = newHarness();
+    try {
+      const a = first.svc.loadScenario(1, linear("first", true), {
+        autoStart: false,
+      });
+      first.svc.runScenario(1, a);
+      await settle();
+      expect(first.position()?.scenarioKey).toBe("first");
+
+      const b = first.svc.loadScenario(1, linear("second", true), {
+        autoStart: false,
+      });
+      first.svc.runScenario(1, b);
+      await settle();
+
+      // The row is purely the writer's: same key, and no node from the graph
+      // that is still parked beside it.
+      expect(first.position()).toEqual({
+        scenarioKey: "second",
+        lastCompletedNodeId: "second-a",
+        executedNodes: ["second-start", "second-a"],
+      });
+    } finally {
+      first.svc.cleanup(false);
+    }
+
+    // The assertion that matters is what the next boot does with that row, not
+    // what the row looks like: a restart must resume the second scenario past
+    // the node it had finished, not replay it. Mixed, `executedNodes` carried
+    // `first-*` ids that resolve in no node of this graph, the structural check
+    // failed, and `second-a` ran again.
+    const second = newHarness(first.db);
+    try {
+      const b = second.svc.loadScenario(1, linear("second", true), {
+        autoStart: false,
+      });
+      second.svc.restoreConnectorRuntimeFromDatabase();
+      const executed: string[] = [];
+      second.svc.onEvent((ev) => {
+        if (
+          ev.event === "scenario_node_execute" &&
+          typeof ev.data.nodeId === "string"
+        ) {
+          executed.push(ev.data.nodeId);
+        }
+      });
+      second.svc.runScenario(1, b);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(executed).toContain("second-park");
+      expect(executed).not.toContain("second-a");
+    } finally {
+      second.svc.cleanup(true);
     }
   });
 });

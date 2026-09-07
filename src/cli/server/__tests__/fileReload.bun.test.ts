@@ -839,6 +839,66 @@ describe("a held scenario reload survives the run that blocked it (#314)", () =>
     );
     expect(loadedDelaySeconds(server, "CP-STOP", "stopped-run")).toBe(7);
   });
+
+  it("rejects an unloadable edit outright instead of holding it", async () => {
+    // `isScenarioShape` asks only for `id`, `nodes` and `edges`, so an edit that
+    // dropped `name` reached `applyOrDefer`, was held behind the run, and had
+    // its bytes recorded as the baseline — and `loadScenario`'s own gate then
+    // rejected them when the hold released. The reload was lost in the way that
+    // matters: the baseline said the charge point already held those bytes, so
+    // the next save of the *same* text would be a no-op. The reload path now
+    // runs the load's gate before accepting anything for deferral.
+    const dir = tempDir();
+    const file = writeFile(dir, "s.json", runnableScenario("gate-run", 30));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    await createConnectedCp(server, socket, "CP-GATE");
+    await rpc(socket, "load_scenario", { connector: 1, file }, "CP-GATE");
+
+    const service = server.registry.get("CP-GATE");
+    if (!service) throw new Error("CP-GATE missing");
+    service.runScenario(1, "gate-run");
+    expect(service.isScenarioRunning("gate-run")).toBe(true);
+
+    const nameless = JSON.parse(runnableScenario("gate-run", 7)) as Record<
+      string,
+      unknown
+    >;
+    delete nameless.name;
+    backend.save(file, JSON.stringify(nameless));
+    await waitFor(
+      () => events.some((e) => e.outcome === "rejected"),
+      "an immediate rejection",
+    );
+    // The discriminating pair: rejected, and never held. A hold would have been
+    // reported as `deferred` and would have cached these bytes.
+    expect(events.some((e) => e.outcome === "deferred")).toBe(false);
+    expect(events.find((e) => e.outcome === "rejected")?.error).toContain(
+      "name",
+    );
+    expect(loadedDelaySeconds(server, "CP-GATE", "gate-run")).toBe(30);
+
+    // And the baseline was not poisoned: a valid edit still defers and applies.
+    backend.save(file, runnableScenario("gate-run", 5));
+    await waitFor(
+      () => events.some((e) => e.outcome === "deferred"),
+      "the valid edit to be held behind the run",
+    );
+    await rpc(
+      socket,
+      "stop_scenario",
+      { connector: 1, scenarioId: "gate-run" },
+      "CP-GATE",
+    );
+    await waitFor(
+      () => events.some((e) => e.outcome === "applied"),
+      "the held valid edit to land",
+    );
+    expect(loadedDelaySeconds(server, "CP-GATE", "gate-run")).toBe(5);
+  });
 });
 
 describe("a scenario that is gone stays gone (#314)", () => {

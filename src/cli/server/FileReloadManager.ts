@@ -3,6 +3,7 @@ import * as path from "path";
 
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
+import { assertLoadableScenario } from "../../scenario/loadableScenario";
 import type { CPRegistry } from "./CPRegistry";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { FileWatcher } from "./FileWatcher";
@@ -870,7 +871,20 @@ export class FileReloadManager {
         `[watch] ${entry.absolutePath} does not match schema/scenario.schema.json (loading anyway): ${result.errors.slice(0, 5).join("; ")}`,
       );
     }
-    if (entry.prepare) return { ...prepared, id: entry.scenarioId };
+    // The same hard gate the initial load runs — `loadScenario` calls
+    // `assertLoadableScenario` on every definition it accepts (#214's advisory
+    // schema check is the other half, and stays advisory above). `isScenarioShape`
+    // above only asks for `id`, `nodes` and `edges`, so a file that lost its
+    // `name` in an edit passed it, was accepted for deferral, and had its bytes
+    // cached as the baseline — and `loadScenario` then rejected it once the
+    // session settled, with nothing left to re-apply because the baseline said
+    // the charge points already held those bytes. Rejected here instead: an
+    // unloadable file never becomes a held reload (#314).
+    const finalize = (definition: ScenarioDefinition): ScenarioDefinition => {
+      assertLoadableScenario(definition);
+      return definition;
+    };
+    if (entry.prepare) return finalize({ ...prepared, id: entry.scenarioId });
     // Pinned to the target the live definition carries — what the load
     // installed — rather than normalised to `entry.connectorId`, so a scenario
     // legitimately loaded against something other than its own connector keeps
@@ -886,7 +900,7 @@ export class FileReloadManager {
       // the only target this manager can vouch for.
       pinned.targetType = "connector";
       pinned.targetId = entry.connectorId;
-      return pinned;
+      return finalize(pinned);
     }
     pinned.targetType = live.targetType;
     // `undefined` is a value here, not a gap: a `chargePoint`-wide scenario has
@@ -896,7 +910,7 @@ export class FileReloadManager {
     // "missing" are different, so the key is dropped rather than defaulted.
     if (live.targetId === undefined) delete pinned.targetId;
     else pinned.targetId = live.targetId;
-    return pinned;
+    return finalize(pinned);
   }
 
   /** Whether the definition was accepted — applied now, or held for a session

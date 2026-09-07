@@ -2,7 +2,7 @@
 title: Wiki conventions
 type: conventions
 summary: How pages in docs/ are named, structured, linked and kept consistent — the human-readable companion to the LLM schema in CLAUDE.md.
-updated: 2026-09-07
+updated: 2026-09-03
 ---
 
 # Wiki conventions
@@ -78,14 +78,6 @@ English, present tense, second person for instructions. Keep the precise
 wording of behavioural guarantees (defaults, error codes, exit codes,
 "never rejects") — those sentences are the contract users rely on. Cite the
 issue number when a behaviour exists because of one.
-
-## Accepted limitations
-
-A "tolerable because X" belongs on the wiki page for the mechanism, not in a
-commit message. It is a claim about the surrounding code, so it expires when
-that code changes — and a commit message cannot be grepped by the round that
-changes X. State the limitation and the condition it rests on next to the rule
-it qualifies; #314 lost a P1 to one recorded only in a commit.
 
 ## Source of truth
 

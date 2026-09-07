@@ -1,12 +1,22 @@
 /**
- * Represents a point on the MeterValue curve
+ * The auto-meter time curve, as the simulator reads it.
+ *
+ * The evaluation itself lives in `src/cli/exportK6/runtime/curve.ts` and is
+ * re-exported here: the exported k6 runtime is a second implementation of these
+ * scenario semantics, and the two used to interpolate differently (Bezier here,
+ * piecewise-linear there). One module, imported by both, is what stops that
+ * recurring (#329). The module sits under the export runtime because an export
+ * bundle is a verbatim copy of that directory and every file in it must be free
+ * of repo imports; nothing else about the ownership changes.
  */
-export interface CurvePoint {
-  /** Time in **seconds** from transaction start */
-  time: number;
-  /** MeterValue in kWh */
-  value: number;
-}
+import {
+  calculateBezierPoint,
+  evaluateCurveKwh,
+  type CurvePoint,
+} from "../../../cli/exportK6/runtime/curve";
+
+export { calculateBezierPoint, evaluateCurveKwh };
+export type { CurvePoint };
 
 /**
  * Configuration for automatic MeterValue sending
@@ -30,55 +40,13 @@ export interface AutoMeterValueConfig {
 }
 
 /**
- * Calculate a point on a cubic Bezier curve
- */
-export function calculateBezierPoint(t: number, points: CurvePoint[]): number {
-  if (points.length === 0) return 0;
-  if (points.length === 1) return points[0].value;
-  if (points.length === 2) {
-    // Linear interpolation
-    return points[0].value + (points[1].value - points[0].value) * t;
-  }
-
-  // For multiple points, use De Casteljau's algorithm
-  const n = points.length - 1;
-  let tempPoints = [...points];
-
-  for (let i = 1; i <= n; i++) {
-    const newPoints: CurvePoint[] = [];
-    for (let j = 0; j <= n - i; j++) {
-      newPoints.push({
-        time: (1 - t) * tempPoints[j].time + t * tempPoints[j + 1].time,
-        value: (1 - t) * tempPoints[j].value + t * tempPoints[j + 1].value,
-      });
-    }
-    tempPoints = newPoints;
-  }
-
-  return tempPoints[0].value;
-}
-
-/**
  * Get MeterValue at a specific time based on the curve
  */
 export function getMeterValueAtTime(
   elapsedSeconds: number,
   config: AutoMeterValueConfig,
 ): number {
-  if (config.curvePoints.length === 0) return 0;
-
-  const sortedPoints = [...config.curvePoints].sort((a, b) => a.time - b.time);
-  const minTime = sortedPoints[0].time;
-  const maxTime = sortedPoints[sortedPoints.length - 1].time;
-
-  // Clamp elapsed time to curve range
-  const clampedTime = Math.max(minTime, Math.min(maxTime, elapsedSeconds));
-
-  // Normalize t to [0, 1] range
-  const t =
-    maxTime > minTime ? (clampedTime - minTime) / (maxTime - minTime) : 0;
-
-  return calculateBezierPoint(t, sortedPoints);
+  return evaluateCurveKwh(config.curvePoints, elapsedSeconds);
 }
 
 /**

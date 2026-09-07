@@ -1,68 +1,9 @@
 // src/cli/exportK6/__tests__/interpreter.test.ts
 import { describe, expect, it, vi } from "vitest";
-import { runScenario, type ScenarioHost } from "../runtime/interpreter";
+import { runScenario } from "../runtime/interpreter";
 import { wire16 } from "../runtime/wire/v16";
-import type { ScenarioJson, WireCall } from "../runtime/types";
-
-class FakeHost implements ScenarioHost {
-  connectorId = 1;
-  sent: WireCall[] = [];
-  status = "Available";
-  overrides: Array<[string, string]> = [];
-  configs: Array<[string, string]> = [];
-  unlock: string | null = null;
-  /** Scripted responses by action; default {} */
-  responses = new Map<string, Record<string, unknown>>();
-  /** Pending incoming-call waiters, resolved via emitCsmsCall(). */
-  private waiters: Array<{
-    actions: readonly string[];
-    resolve: (v: { action: string; payload: Record<string, unknown> }) => void;
-  }> = [];
-  slept: number[] = [];
-
-  async call(c: WireCall): Promise<Record<string, unknown>> {
-    this.sent.push(c);
-    return this.responses.get(c.action) ?? {};
-  }
-  waitForCsmsCall(actions: readonly string[], _timeoutMs: number | null) {
-    return new Promise<{ action: string; payload: Record<string, unknown> }>(
-      (resolve) => this.waiters.push({ actions, resolve }),
-    );
-  }
-  emitCsmsCall(action: string, payload: Record<string, unknown>): void {
-    const i = this.waiters.findIndex((w) => w.actions.includes(action));
-    if (i >= 0) this.waiters.splice(i, 1)[0].resolve({ action, payload });
-  }
-  async sleep(ms: number): Promise<void> {
-    this.slept.push(ms);
-    // Yield a real macrotask instead of resolving on the microtask queue.
-    // This lets the main walk and a background auto-meter loop take turns
-    // (each sleep is a discrete "tick") instead of one starving the other
-    // via an unbroken chain of microtasks — needed for the finally-stop test
-    // below, where the loop would otherwise spin forever ahead of the walk
-    // ever reaching runScenario's `finally`.
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  nowIso(): string {
-    return "2026-07-29T00:00:00.000Z";
-  }
-  getLocalStatus(): string {
-    return this.status;
-  }
-  setLocalStatus(status: string): void {
-    this.status = status;
-  }
-  async waitForLocalStatus(): Promise<void> {}
-  armResponseOverride(action: string, status: string): void {
-    this.overrides.push([action, status]);
-  }
-  setUnlockOutcome(outcome: string): void {
-    this.unlock = outcome;
-  }
-  setLocalConfig(key: string, value: string): void {
-    this.configs.push([key, value]);
-  }
-}
+import type { ScenarioJson } from "../runtime/types";
+import { FakeHost } from "./support/fakeHost";
 
 function scenario(
   nodes: Array<{ id: string; type: string; data?: Record<string, unknown> }>,
@@ -726,7 +667,7 @@ describe("k6 offsets a curve by its own start, not by the register (#301)", () =
 
 describe("k6 baselines a curve at session start, not at its earliest point (#301)", () => {
   /**
-   * `curveStartKwh` asked `interpolateCurveKwh` for `-Infinity`, which clamps
+   * `curveStartKwh` asked the interpolator for `-Infinity`, which clamps
    * to the curve's *earliest* point. `MeterValueScheduler` baselines with
    * `getMeterValueAtTime(0, config)` — the value at **session start**. The two
    * are the same answer for any curve beginning at or after `t = 0`, and
@@ -839,7 +780,7 @@ describe("k6 baselines a curve at session start, not at its earliest point (#301
   });
 
   it("is unchanged for a curve that begins after t=0", async () => {
-    // Also non-discriminating: `interpolateCurveKwh` clamps below the first
+    // Also non-discriminating: `evaluateCurveKwh` clamps below the first
     // point, so t=0 reads that point either way.
     const first = await firstSample(5000, [
       { time: 5, value: 2 },

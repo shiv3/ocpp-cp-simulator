@@ -3,6 +3,7 @@
 // Semantics mirror src/cp/application/scenario/ScenarioExecutor.ts, reduced
 // to what a load-test CP needs (no pause/step/resume, no persistence).
 import { deepPartialMatch } from "./assertions";
+import { evaluateCurveKwh, sortCurvePoints, type CurvePoint } from "./curve";
 import {
   bool,
   num,
@@ -318,11 +319,6 @@ async function executeNode(
   }
 }
 
-interface CurvePointJson {
-  time: number;
-  value: number; // kWh, absolute meter value
-}
-
 function startAutoMeter(
   d: Record<string, unknown>,
   host: ScenarioHost,
@@ -346,16 +342,33 @@ function startAutoMeter(
   const incrementWh =
     num(d.incrementAmount) ??
     Math.round((outputKw * 1000 * intervalSec) / 3600);
+  // Sorted once, here, and read in that order by everything downstream: the
+  // evaluator and `shouldStop`, which asks for the curve's *last* point. The
+  // schema does not require `curvePoints` to be ordered, and the two readers
+  // disagreed on a curve that is not — points `100, 0, 50` span 100 seconds to
+  // the evaluator and stopped the auto-meter at 50, dropping every MeterValue
+  // after it. `MeterValueScheduler` sorts before reading its own last point,
+  // so this is also what the simulator does (#329).
   const curve = bool(d.useCurve)
-    ? ((d.curvePoints as CurvePointJson[] | undefined) ?? [])
+    ? sortCurvePoints((d.curvePoints as CurvePoint[] | undefined) ?? [])
     : null;
   const startWh = ctx.meterWh;
   // What the curve's first point has to be shifted by to land on the register
   // this run starts from. Shifting by the register alone would double-count a
   // curve whose ordinates do not begin at zero — a run at 50 kWh on a
   // 50→60 kWh curve would jump to 100 kWh (#301).
+  // Baselined at the curve's ordinate at **session start** (`t = 0`), not at
+  // its earliest control point, mirroring what `MeterValueScheduler` does with
+  // `getMeterValueAtTime(0, config)` before its first tick. The two are the
+  // same reading for any curve beginning at or after `t = 0` — the ones anyone
+  // writes by hand — and differ for a curve that crosses session start, which
+  // `schema/scenario.schema.json` permits (`curvePoint.time` is a plain
+  // `number` with no minimum) and the editor's time input accepts. Points
+  // `(-10s, 5 kWh)` and `(10s, 15 kWh)` baselined at the earliest point, 5, so
+  // the exported run delivered 10 kWh by 10 seconds where the simulator,
+  // baselining at `t = 0` on 10, delivers 5 (#301).
   const curveOffsetWh =
-    curve && curve.length > 0 ? startWh - curveStartKwh(curve) * 1000 : 0;
+    curve && curve.length > 0 ? startWh - evaluateCurveKwh(curve, 0) * 1000 : 0;
   const send = bool(d.sendMessage) ?? false;
 
   const task = (async () => {
@@ -375,7 +388,7 @@ function startAutoMeter(
         // builders round, so a sub-watt-hour step accumulates rather than
         // being discarded.
         ctx.meterWh =
-          curveOffsetWh + interpolateCurveKwh(curve, elapsedSec) * 1000;
+          curveOffsetWh + evaluateCurveKwh(curve, elapsedSec) * 1000;
       } else {
         ctx.meterWh += incrementWh;
       }
@@ -404,9 +417,11 @@ function shouldStop(
   meterWh: number,
   startWh: number,
   elapsedSec: number,
-  curve: CurvePointJson[] | null,
+  curve: CurvePoint[] | null,
 ): boolean {
   if (curve && curve.length > 0) {
+    // `curve` is sorted by `startAutoMeter`, so this is the curve's greatest
+    // time and not merely the point that happened to be written last.
     return elapsedSec >= curve[curve.length - 1].time;
   }
   if (d.stopMode === "evSettings") {
@@ -419,35 +434,4 @@ function shouldStop(
   if (maxTime > 0 && elapsedSec >= maxTime) return true;
   if (maxValue > 0 && meterWh >= maxValue) return true;
   return false;
-}
-
-/** The curve's ordinate at **session start**, i.e. at `t = 0` — the value the
- *  register is baselined against, mirroring what `MeterValueScheduler` does
- *  with `getMeterValueAtTime(0, config)` before its first tick.
- *
- *  This asked for the *earliest point* instead (`interpolateCurveKwh` clamps
- *  below the first point, so -infinity returned it). The two are the same
- *  answer for the curves anyone writes by hand — one that begins at or after
- *  `t = 0` — and different for a curve that begins before it and crosses
- *  session start, which the schema permits (`curvePoint.time` is a plain
- *  `number` with no minimum) and the editor's time input accepts (no `min`).
- *  Points `(-10s, 5 kWh)` and `(10s, 15 kWh)` baselined at the earliest point,
- *  5, so the exported run delivered 10 kWh by 10 seconds where the simulator,
- *  baselining at `t = 0` on 10, delivers 5 (#301). */
-function curveStartKwh(curve: CurvePointJson[]): number {
-  return interpolateCurveKwh(curve, 0);
-}
-
-function interpolateCurveKwh(curve: CurvePointJson[], atSec: number): number {
-  const sorted = [...curve].sort((a, b) => a.time - b.time);
-  if (atSec <= sorted[0].time) return sorted[0].value;
-  for (let i = 1; i < sorted.length; i++) {
-    if (atSec <= sorted[i].time) {
-      const a = sorted[i - 1];
-      const b = sorted[i];
-      const f = b.time === a.time ? 1 : (atSec - a.time) / (b.time - a.time);
-      return a.value + (b.value - a.value) * f;
-    }
-  }
-  return sorted[sorted.length - 1].value;
 }

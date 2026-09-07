@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-09-05
+updated: 2026-09-07
 ---
 
 # Index
@@ -64,7 +64,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Choosing an interface](analyses/choosing-an-interface.md)                                | Use-case → interface table and a feature-coverage matrix across web / desktop / daemon / CLI                                                                              |
 | [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)                          | Feature checklist, minimal setup, MCP vs CLI vs socket.io-client, assertion patterns                                                                                      |
 | [REST → Socket.IO migration](analyses/rest-to-socketio-migration.md)                      | Endpoint-by-endpoint mapping from the removed REST / WebSocket / Unix-socket control surface                                                                              |
-| [Testing strategy](analyses/testing-strategy.md)                                          | Vitest vs Bun test, merged coverage, and the e2e / steve-verify / Testcontainers layers                                                                                   |
+| [Testing strategy](analyses/testing-strategy.md)                                          | Vitest vs Bun test, what the two runners must agree on in `src/cli/__tests__`, merged coverage, and the e2e / steve-verify / Testcontainers layers                        |
 | [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) | Sequenced plan for fleet-scale work: bulk create and blueprints, `/metrics`, seeded background traffic, charging-curve meter values, a measured scale ceiling, hot-reload |
 | [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md)              | What the OECS charger-spec schema holds, which fields map onto a blueprint, what has nowhere to land, and the decisions an importer (#331) must settle                    |
 

@@ -15,7 +15,7 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-09-05
+updated: 2026-09-07
 ---
 
 # Testing strategy
@@ -38,6 +38,70 @@ unlike Vitest's v8 report), and Bun tests that spawn a subprocess (e.g. the
 CLI-entry integration tests) only cover the parent process, so the child's
 lines are not attributed. The merged figure is therefore a floor for
 Bun-only-covered code, not a fully-representative number.
+
+## Where the two runners overlap
+
+The split above is enforced by **filename only** — `vite.config.ts` excludes
+`**/*.bun.test.ts` from Vitest, and `test:bun` passes `bun.test` to `bun test`
+as a path filter. Nothing stops a developer from typing the obvious command,
+`bun test src/cli/__tests__`, which runs _every_ file in that directory in one
+Bun process regardless of its name. On a clean tree that command failed
+(#339) and neither gate saw it, because neither gate runs it.
+
+Three distinct defects were stacked behind it, each masked by the one before:
+
+- `client.remote.test.ts` used `vi.hoisted()`. Bun aliases the `vitest`
+  module to `bun:test`, and Bun's `vi` implements only `fn`, `mock`, `spyOn`,
+  `restoreAllMocks` / `resetAllMocks` / `clearAllMocks` and the fake-timer
+  helpers — **no `hoisted`, `doMock`, `importActual`, `stubEnv` or
+  `resetModules`**. The file therefore died at module load under Bun.
+- With that fixed, real cross-file leakage appeared. Bun keeps **one module
+  registry for the whole run**, so `vi.mock()` (Bun's `mock.module`) stays in
+  force for every file that runs after the one that called it. The
+  `RemoteChargePointService` mock installed by `client.remote.test.ts` was
+  still installed when `client.socket.test.ts` ran next, so the file that
+  exists to drive the _real_ service against a live socket.io server got the
+  mock instead and asserted on a handshake that never happened. Vitest gives
+  each file its own registry, which is why the same pair is green there.
+- With _that_ fixed the directory run reported `127 pass, 0 fail` and still
+  **exited 1**. `process.exitCode` is process-global and the CLI entry points
+  under test write to it; the test restored it by assigning `undefined`, which
+  Node treats as "clear" but **Bun ignores outright**, so the `1` set by the
+  `--send` failure case survived to the end of the run. A green suite with a
+  red exit code is the worst of the three: CI would have failed with nothing
+  in the log to point at.
+
+`bun run test:bun:cli` (`bun test src/cli/__tests__`) now runs in CI, so the
+overlap is checked on every pull request. The rules that follow from it, for
+anything added to that directory:
+
+- use only the `vi` API listed above — the intersection of the two runners;
+- restore process-global state with a **concrete** value, never `undefined`:
+  `process.exitCode = undefined` is a no-op under Bun. Success cases here
+  assert `exitCode: 0` rather than `exitCode: undefined` for the same reason —
+  `0` means the same thing in both runners and does not depend on what an
+  earlier test, or an earlier file, left behind;
+- if a file calls `vi.mock()`, it must **undo it in an `afterAll`**
+  (capture the real export before the mock and re-register it via
+  `mock.module` from `bun:test`, guarded on the `Bun` global so Vitest skips
+  it). Bun has no per-file teardown for module mocks; `mock.restore()`
+  restores `spyOn` spies, not modules;
+- do not import the module under test statically alongside a `vi.mock()` of
+  one of its dependencies. Vitest hoists `vi.mock` above the file's imports,
+  so the factory runs before any module-scope state it closes over exists
+  (`ReferenceError: Cannot access '…' before initialization`) — the reason
+  `vi.hoisted` was reached for. A top-level `await import("…")` placed after
+  the `vi.mock` call is correct in both runners: Vitest calls the factory
+  lazily on first import of the mocked module, and Bun does not hoist at all.
+
+The cost is that the 7 non-`bun.test.ts` files in that directory are executed
+twice — once by Vitest (which is where their coverage and JUnit results come
+from) and once by Bun — for about 11 s. Renaming them to `*.bun.test.ts` was
+rejected for exactly that reason: it would move them off Vitest's coverage
+report and out of the JUnit upload. The alternative guard considered and
+rejected was a test asserting that every file in the directory is picked up
+by some gate; it passes on today's tree (Vitest's include-minus-exclude
+already covers all 7) and so would not have caught either defect.
 
 ## Layers beyond unit tests
 

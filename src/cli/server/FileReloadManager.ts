@@ -213,6 +213,19 @@ export class FileReloadManager {
    *
    * So it advances only when every consumer of the path agrees, and is dropped
    * outright when a parse or an apply fails.
+   *
+   * **Partial failure across a set is not the same as failure**, and a boolean
+   * cannot express it — the fifth distinct sense in which "these bytes landed"
+   * has been untrue here, after memory, every consumer of the path, durability,
+   * and the branches that merely *held* a definition. `applyIdTags` loops over
+   * every charge point sharing the file, so an earlier one can be changed —
+   * live pool and persisted row both — before a later one throws. The audit
+   * that cleared this half checked one iteration, where "the daemon is
+   * untouched and its `rejected` is true of everything" genuinely holds; it does
+   * not hold of the loop. Its single `false` therefore means *somewhere between
+   * none and all of them changed*, which is precisely when the baseline must
+   * claim nothing. Every write to this map on a reload path goes through
+   * {@link recordIdTagOutcome} so that one sentence has one implementation.
    */
   private readonly idTagText = new Map<string, string>();
   /**
@@ -592,9 +605,11 @@ export class FileReloadManager {
     // the text first left persisted state stale, emitted no outcome at all
     // (the throw reached the watcher's generic handler), and suppressed a retry
     // of the very same bytes. The baseline is a record of what landed.
-    if (this.applyIdTags(affected, absolutePath, tags)) {
-      this.idTagText.set(absolutePath, text);
-    }
+    this.recordIdTagOutcome(
+      absolutePath,
+      text,
+      this.applyIdTags(affected, absolutePath, tags),
+    );
   }
 
   /**
@@ -642,8 +657,12 @@ export class FileReloadManager {
     } catch (err) {
       // Same rule as the watch path: the baseline is dropped rather than left
       // pointing at bytes that never parsed, so the next save — good or bad —
-      // is judged fresh instead of being written off as a duplicate.
-      this.idTagText.delete(absolutePath);
+      // is judged fresh instead of being written off as a duplicate. (The watch
+      // path reaches the same place by a different route: there the unparsed
+      // bytes are not the cached ones, so the previous good baseline is
+      // correctly left standing and a re-save of the broken file complains
+      // again.)
+      this.recordIdTagOutcome(absolutePath, text, false);
       this.rejectAll(affected, "id-tags", absolutePath, err);
       return;
     }
@@ -655,7 +674,7 @@ export class FileReloadManager {
       const everyoneHolds = backedByPath.every((cpId) =>
         sameTags(this.registry.get(cpId)?.getInit().idTags, tags),
       );
-      if (everyoneHolds) this.idTagText.set(absolutePath, text);
+      if (everyoneHolds) this.recordIdTagOutcome(absolutePath, text, true);
     };
     const stale = affected.filter(
       (cpId) => !sameTags(this.registry.get(cpId)?.getInit().idTags, tags),
@@ -678,7 +697,7 @@ export class FileReloadManager {
       // operator's next save of that same content would be discarded as
       // unchanged and the database could never catch up. Do not "make these
       // consistent": they answer different questions.
-      this.idTagText.delete(absolutePath);
+      this.recordIdTagOutcome(absolutePath, text, false);
       return;
     }
     // Applied to everyone this call was reconciling — which still says nothing
@@ -686,9 +705,43 @@ export class FileReloadManager {
     rememberIfEveryoneHolds();
   }
 
+  /**
+   * Move or drop the path's baseline, according to whether these bytes are now
+   * held by every charge point behind it.
+   *
+   * One function because the rule had two implementations and therefore two
+   * behaviours: the reconciliation path dropped the baseline when an apply
+   * failed, and the watch path left the previous bytes cached. With several
+   * charge points on one file, an apply that changed some of them and threw on
+   * a later one returned `false` while the *old* text stayed cached — so an
+   * operator restoring the file to those old bytes hit the unchanged early-out
+   * and the charge points that had already moved were never rolled back. A
+   * forward edit would have been re-read anyway; the revert is the sequence
+   * that stayed broken, which is why it is the one the test drives.
+   *
+   * **What this does and does not do.** Dropping the baseline restores the
+   * *ability* to repair — the next event for this file is no longer suppressed
+   * and re-applies to everyone — but it repairs nothing by itself. If no
+   * further event arrives, the split persists: `reconcileIdTags` will not
+   * revisit a charge point it has already marked, so nothing on a quiet daemon
+   * re-syncs them. The two things that do are an operator touching the file
+   * again, and a restart, where the reconcile markers start empty and every
+   * charge point is compared against the file afresh. Stated as a limitation
+   * rather than claimed as a fix (#314).
+   */
+  private recordIdTagOutcome(
+    absolutePath: string,
+    text: string,
+    landedEverywhere: boolean,
+  ): void {
+    if (landedEverywhere) this.idTagText.set(absolutePath, text);
+    else this.idTagText.delete(absolutePath);
+  }
+
   /** Whether every charge point took the new pool without throwing. A charge
    *  point that simply has no pool to replace is reported and counts as
-   *  settled; a persistence failure does not. */
+   *  settled; a persistence failure does not. Note the aggregate: `false` means
+   *  *somewhere between none and all of them changed*, never "nothing did". */
   private applyIdTags(
     cpIds: readonly string[],
     absolutePath: string,

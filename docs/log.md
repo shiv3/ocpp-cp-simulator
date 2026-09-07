@@ -1887,3 +1887,52 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   event that reaches the registration re-resolves — a rename of the tracked
   name, the catch-all rescan, and an ordinary write, where the answer is
   unchanged and it costs one `realpath` call.
+
+## [2026-09-07] ingest | `--watch`: partial failure across a set is not failure (#314, PR #317)
+
+- **The fifth distinct sense in which "these bytes landed" has been untrue**,
+  after in memory, for every consumer of the path, durably, and in the branches
+  that merely _held_ a definition. This one: `applyIdTags` loops over every
+  charge point sharing an idTag file and **keeps going after a throw**, so its
+  single `false` means _somewhere between none and all of them changed_. The
+  watch path read that as "nothing changed" and left the previous bytes cached
+  as the baseline, so an operator restoring the file to those bytes hit the
+  unchanged early-out and the charge points that had already moved were never
+  brought back — live and persisted pools disagreeing with the file
+  indefinitely.
+- **Why the round-23 audit missed it, which is the more useful part.** That
+  audit checked the sibling rather than assuming, and concluded that
+  `applyIdTagReload` persists before touching the live pool, so a failed write
+  "leaves the daemon untouched and its `rejected` is true of everything". That
+  is exactly right **for one charge point** and false for the loop over them.
+  Every earlier miss on this branch has the same shape: the enumeration covered
+  the failure of _an_ operation and not the failure of _the loop over_
+  operations. It is now written next to the field: a boolean cannot express a
+  partial outcome.
+- **The asymmetry was the smell.** Two paths in the same file both end in "this
+  file's bytes did not fully land", and only the reconciliation path cleared the
+  baseline; the watch path did not. Same pattern as the release rule that lived
+  in two copies. All four writes to the baseline on a reload path now go through
+  one `recordIdTagOutcome`, so the sentence has one implementation.
+- **What re-syncs the charge points that did change: nothing automatic, and
+  that is stated rather than claimed.** Dropping the baseline restores the
+  _ability_ to repair — the next event for that file is no longer suppressed and
+  re-applies to everyone — but repairs nothing by itself. `reconcileIdTags` does
+  not revisit a charge point it has already marked, so on a quiet daemon the
+  split persists until the operator touches the file. A restart also repairs it,
+  because the reconcile markers start empty and every charge point is compared
+  against the file afresh. Recorded in
+  [Daemon → File hot-reload](entities/daemon.md#file-hot-reload) as a
+  limitation.
+- [Daemon](entities/daemon.md) — two rules said the idTag half has "no such
+  gap" and that a failed write "leaves the daemon exactly as it was". Both are
+  true per charge point and overstated across a set; both now say which, and a
+  new rule covers the partial case and its repair path. The doc carried the same
+  miss as the code, from the same audit.
+- **Failure**: a partial apply drops the baseline; a whole-file parse failure
+  drops it on the reconcile path and correctly leaves the previous good baseline
+  standing on the watch path, where the unparsed bytes are not the cached ones.
+  **Ordering**: the baseline is recorded after the apply returns, never before —
+  caching first was an earlier round's bug. **Destruction**: unwatching a file
+  drops its baseline with the watch. **Trigger**: the next filesystem event for
+  the file, which nothing guarantees — hence the limitation above.

@@ -247,9 +247,11 @@ The rules, in the order they bite:
   the definition is live until the daemon restarts — the in-memory copy is
   deliberately not rolled back, because reloading the previous definition can
   tear down a run this one has already auto-started, trading a durability
-  failure for a liveness one. The idTag half has no such gap: its pool is
-  persisted **before** the live pool is touched, so a failed write leaves the
-  daemon untouched and `rejected` is true of everything.
+  failure for a liveness one. The idTag half has no such gap **per charge
+  point**: its pool is persisted before the live pool is touched, so a charge
+  point whose write fails is left untouched, live and stored alike. Across a
+  _set_ of charge points sharing one file that is not the same thing — see the
+  next rule.
 - **The duplicate-bytes baseline is per file and means "everyone has these".**
   A watched idTag file's cached copy records the bytes _every_ charge point
   drawing from that path currently holds, not merely the bytes of the last
@@ -259,6 +261,21 @@ The rules, in the order they bite:
   has been taken up" cancelled the pending reload that every earlier charge
   point still needed. The baseline advances only when they all agree, and is
   dropped outright when a parse or an apply fails.
+- **A partly-applied idTag reload drops the baseline, and repairs on the next
+  event rather than by itself.** Several charge points can share one file, and
+  the apply loop keeps going after one of them throws — so a failed reload means
+  _somewhere between none and all of them changed_, never "nothing did". The
+  baseline therefore claims nothing, which is what lets the operator's next
+  save — **including a revert to the previous bytes** — be judged afresh rather
+  than discarded as unchanged; left cached, that revert was an early-out and the
+  charge points that had already moved were never brought back.
+  What this does **not** do is re-sync them on its own. Dropping the baseline
+  restores the ability to repair; the repair happens on the next event for that
+  file. On a quiet daemon there may be none — a charge point already reconciled
+  is not revisited — so until the operator touches the file again the fleet can
+  hold two different pools from one path. A restart also repairs it: the
+  reconcile markers start empty and every charge point is compared against the
+  file afresh.
 - **Debounced.** Editors save in bursts — write a temp file, rename it over the
   target, touch the mtime — so an undebounced watch fires two or three times per
   save and can read a truncated intermediate file. The watch waits 200 ms after
@@ -266,9 +283,12 @@ The rules, in the order they bite:
   no event.
 - **A malformed file never lands, and `rejected` is true of everything.** The
   reload path applies exactly the checks the load path applies, and an idTag
-  pool is written to `--state-db` **before** the live pool is touched — so a
-  write that fails leaves the daemon exactly as it was, and the event, the
-  running daemon and the stored state cannot disagree. (Persist-first rather
+  pool is written to `--state-db` **before** the live pool is touched — so the
+  charge point whose write fails is left exactly as it was, and its event, its
+  live pool and its stored state cannot disagree. Read that as the per-charge-
+  point guarantee it is: several charge points can share one file, and an
+  earlier one may already be changed when a later one's write fails (see
+  **A partly-applied idTag reload** above). (Persist-first rather
   than mutate-then-roll-back: a rollback would expose a window in which a
   concurrent draw presents a tag that is not durable.) A file that fails them is
   logged, reported as `rejected`, and the previous good copy stays in place — a half-saved file

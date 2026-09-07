@@ -469,6 +469,108 @@ describe("--watch reloads an idTag file (#314)", () => {
     expect(await drawnTag(server, "CP-B")).toBe("T2");
   });
 
+  it("re-judges the old bytes after a partly-applied reload", async () => {
+    // Partial failure across a set is not the same as failure, and the boolean
+    // `applyIdTags` returns cannot express it: the loop keeps going after a
+    // throw, so `false` means *somewhere between none and all of them changed*.
+    // The watch path treated it as "nothing changed" and left the previous
+    // bytes cached as the baseline — so an operator restoring the file to those
+    // bytes hit the unchanged early-out and the charge points that had already
+    // moved were never rolled back, their live and persisted pools disagreeing
+    // with the file indefinitely.
+    //
+    // The revert is the discriminator on purpose: a *forward* edit differs from
+    // the stale baseline and would be re-read either way, so it proves nothing.
+    const dir = tempDir();
+    const file = writeFile(dir, "partial.json", JSON.stringify(["T1"]));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    for (const cpId of ["CP-PARTIAL-A", "CP-PARTIAL-B"]) {
+      await createConnectedCp(server, socket, cpId, { idTagPool: { file } });
+    }
+
+    // One charge point's persist fails while the other's succeeds — the shape
+    // the audit of this half missed, because it checked one iteration rather
+    // than the loop over them.
+    const registry = server.registry as unknown as {
+      applyIdTagReload: (cpId: string, tags: readonly string[]) => boolean;
+    };
+    const realApply = registry.applyIdTagReload.bind(server.registry);
+    let failB = true;
+    registry.applyIdTagReload = (cpId, tags) => {
+      if (cpId === "CP-PARTIAL-B" && failB) {
+        throw new Error("simulated persistence failure");
+      }
+      return realApply(cpId, tags);
+    };
+
+    backend.save(file, JSON.stringify(["T2"]));
+    await waitFor(() => events.length >= 2, "both charge points to report");
+    // Genuinely partial: one moved, one did not.
+    expect(server.registry.get("CP-PARTIAL-A")?.getInit().idTags).toEqual([
+      "T2",
+    ]);
+    expect(server.registry.get("CP-PARTIAL-B")?.getInit().idTags).toEqual([
+      "T1",
+    ]);
+
+    // The operator puts the file back the way it was. With the baseline still
+    // claiming those bytes this is discarded as unchanged and nothing happens;
+    // with it dropped, the revert is a change and reaches everyone.
+    failB = false;
+    const before = events.length;
+    backend.save(file, JSON.stringify(["T1"]));
+    await waitFor(
+      () => events.length > before,
+      "the reverted bytes to be judged afresh",
+    );
+    await waitFor(
+      () => server.registry.get("CP-PARTIAL-A")?.getInit().idTags?.[0] === "T1",
+      "the charge point that had moved to be brought back",
+    );
+    expect(server.registry.get("CP-PARTIAL-B")?.getInit().idTags).toEqual([
+      "T1",
+    ]);
+  });
+
+  it("keeps applying to the rest after one charge point throws", async () => {
+    // The premise the previous test rests on, pinned separately: the apply loop
+    // continues past a failure. If it stopped at the first, `false` really
+    // would mean "nothing after this point changed" and the partial case would
+    // be much narrower — so this is the assertion that says the aggregate
+    // boolean is hiding a mixture rather than a prefix.
+    const dir = tempDir();
+    const file = writeFile(dir, "keepgoing.json", JSON.stringify(["K1"]));
+    const backend = new TestWatchBackend();
+    const server = await startWatchingServer(backend);
+    const socket = await openClient(server);
+    const events = collectReloadEvents(socket);
+    await rpc(socket, "events.subscribe", { scope: "file-reload" });
+    for (const cpId of ["CP-KEEP-A", "CP-KEEP-B"]) {
+      await createConnectedCp(server, socket, cpId, { idTagPool: { file } });
+    }
+
+    // The *first* charge point in registry order is the one that throws.
+    const registry = server.registry as unknown as {
+      applyIdTagReload: (cpId: string, tags: readonly string[]) => boolean;
+    };
+    const realApply = registry.applyIdTagReload.bind(server.registry);
+    registry.applyIdTagReload = (cpId, tags) => {
+      if (cpId === "CP-KEEP-A")
+        throw new Error("simulated persistence failure");
+      return realApply(cpId, tags);
+    };
+
+    backend.save(file, JSON.stringify(["K2"]));
+    await waitFor(() => events.length >= 2, "both charge points to report");
+    expect(server.registry.get("CP-KEEP-A")?.getInit().idTags).toEqual(["K1"]);
+    // Reached despite the earlier throw.
+    expect(server.registry.get("CP-KEEP-B")?.getInit().idTags).toEqual(["K2"]);
+  });
+
   it("stops watching a file once the charge point behind it is gone", async () => {
     const dir = tempDir();
     const file = writeFile(dir, "tags.json", JSON.stringify(["X"]));

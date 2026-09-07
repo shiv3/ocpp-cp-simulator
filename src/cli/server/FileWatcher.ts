@@ -14,9 +14,16 @@ export const DEFAULT_WATCH_DEBOUNCE_MS = 200;
 
 interface DirectoryEntry {
   watcher: fs.FSWatcher | null;
-  /** basename → subscribers. */
-  readonly files: Map<string, Set<() => void>>;
-  readonly timers: Map<string, ReturnType<typeof setTimeout>>;
+  /**
+   * basename → the *registered* paths that want events for it.
+   *
+   * Usually one, and usually itself. It is a set because a directory carries
+   * two different kinds of name: the registered files that live in it, and the
+   * symlink *targets* of registered files that live elsewhere — and one target
+   * can back several registrations (two charge points sharing one idTag file
+   * through two links is the ordinary case).
+   */
+  readonly names: Map<string, Set<string>>;
 }
 
 /**
@@ -41,7 +48,7 @@ export interface FileWatcherOptions {
 /**
  * Debounced `fs.watch` over a set of individual files (#314).
  *
- * Two implementation choices are load-bearing:
+ * Three implementation choices are load-bearing:
  *
  * - **It watches the containing directory, not the file.** `fs.watch` on a path
  *   resolves to an inode (inotify on Linux, kqueue on macOS). The moment an
@@ -49,14 +56,39 @@ export interface FileWatcherOptions {
  *   watched inode is the *old*, now-unlinked file, and every subsequent edit is
  *   silently missed. Watching the directory and filtering by basename survives
  *   the rename, which is the common case this feature exists for.
+ * - **It watches the resolved symlink target as well.** A directory watch sees
+ *   events for the names *in that directory*. When the registered path is a
+ *   symlink and its target is edited in place, the event fires in the
+ *   **target's** directory and the link's own directory hears nothing at all —
+ *   watcher open, no degradation reported, nothing ever delivered. Both watches
+ *   are kept, because they cover disjoint cases: the parent-directory watch
+ *   catches the link being *repointed* (the Kubernetes projected-volume
+ *   rotation, where `..data` is swapped and the tracked basename never
+ *   changes), and the target watch catches the target *changing under a link
+ *   that stays put*. Neither mechanism sees the other's case.
  * - **Failure is not fatal.** `fs.watch` is unreliable on network mounts and on
  *   some container filesystems, where it either throws immediately or emits an
  *   `error` later. Either way the daemon logs once and carries on unwatched;
  *   refusing to start because a nicety is unavailable would be worse than the
  *   nicety being unavailable.
+ *
+ * The debounce is keyed by **registered path**, not by directory and basename,
+ * and that is what makes two watches safe: an edit that fires in both
+ * directories, or a rotation that fires twice in one, still collapses into a
+ * single callback because both routes end at the same timer.
  */
 export class FileWatcher {
   private readonly dirs = new Map<string, DirectoryEntry>();
+  /** Registered absolute path → its subscribers. */
+  private readonly subscribers = new Map<string, Set<() => void>>();
+  /** Registered absolute path → its pending debounce. One per registration. */
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Registered absolute path → the resolved target currently being watched for
+   * it. Absent when the path is not a symlink, when it cannot be resolved, or
+   * when it resolves to itself.
+   */
+  private readonly linkTargets = new Map<string, string>();
   private readonly debounceMs: number;
   private readonly log: (message: string) => void;
   private readonly watchFactory: WatchFactory;
@@ -91,57 +123,143 @@ export class FileWatcher {
    */
   watch(filePath: string, onChange: () => void): () => void {
     const absolute = path.resolve(filePath);
-    const dir = path.dirname(absolute);
-    const base = path.basename(absolute);
-    let entry = this.dirs.get(dir);
-    if (!entry) {
-      entry = { watcher: null, files: new Map(), timers: new Map() };
-      this.dirs.set(dir, entry);
-      entry.watcher = this.openWatcher(dir, entry);
-    }
-    let subscribers = entry.files.get(base);
+    let subscribers = this.subscribers.get(absolute);
+    const first = subscribers === undefined;
     if (!subscribers) {
       subscribers = new Set();
-      entry.files.set(base, subscribers);
+      this.subscribers.set(absolute, subscribers);
     }
     subscribers.add(onChange);
+    if (first) {
+      this.addName(absolute, absolute);
+      this.refreshLinkTarget(absolute);
+    }
     return () => {
-      const current = this.dirs.get(dir);
-      if (!current) return;
-      const set = current.files.get(base);
+      const set = this.subscribers.get(absolute);
       if (!set) return;
       set.delete(onChange);
       if (set.size > 0) return;
-      current.files.delete(base);
-      const timer = current.timers.get(base);
+      this.subscribers.delete(absolute);
+      const timer = this.timers.get(absolute);
       if (timer) {
         clearTimeout(timer);
-        current.timers.delete(base);
+        this.timers.delete(absolute);
       }
-      if (current.files.size === 0) {
-        current.watcher?.close();
-        this.dirs.delete(dir);
+      const target = this.linkTargets.get(absolute);
+      if (target) {
+        this.removeName(target, absolute);
+        this.linkTargets.delete(absolute);
       }
+      this.removeName(absolute, absolute);
     };
   }
 
-  /** Every path currently watched, absolute. Test and log surface. */
+  /**
+   * Every path currently watched, absolute — the paths callers *registered*,
+   * not the directories or symlink targets opened to serve them. Test and log
+   * surface, and an operator reading the boot summary wants the file they named.
+   */
   watchedPaths(): string[] {
-    const out: string[] = [];
-    for (const [dir, entry] of this.dirs) {
-      for (const base of entry.files.keys()) out.push(path.join(dir, base));
-    }
-    return out.sort();
+    return [...this.subscribers.keys()].sort();
   }
 
   close(): void {
     this.closed = true;
-    for (const entry of this.dirs.values()) {
-      for (const timer of entry.timers.values()) clearTimeout(timer);
-      entry.timers.clear();
-      entry.watcher?.close();
-    }
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+    for (const entry of this.dirs.values()) entry.watcher?.close();
     this.dirs.clear();
+    this.subscribers.clear();
+    this.linkTargets.clear();
+  }
+
+  /** Register interest in `watchedPath`'s basename on behalf of `owner`. */
+  private addName(watchedPath: string, owner: string): void {
+    const dir = path.dirname(watchedPath);
+    const base = path.basename(watchedPath);
+    let entry = this.dirs.get(dir);
+    if (!entry) {
+      entry = { watcher: null, names: new Map() };
+      this.dirs.set(dir, entry);
+      entry.watcher = this.openWatcher(dir, entry);
+    }
+    let owners = entry.names.get(base);
+    if (!owners) {
+      owners = new Set();
+      entry.names.set(base, owners);
+    }
+    owners.add(owner);
+  }
+
+  private removeName(watchedPath: string, owner: string): void {
+    const dir = path.dirname(watchedPath);
+    const base = path.basename(watchedPath);
+    const entry = this.dirs.get(dir);
+    if (!entry) return;
+    const owners = entry.names.get(base);
+    if (!owners) return;
+    owners.delete(owner);
+    if (owners.size > 0) return;
+    entry.names.delete(base);
+    if (entry.names.size > 0) return;
+    entry.watcher?.close();
+    this.dirs.delete(dir);
+  }
+
+  /**
+   * Point the target watch at wherever `absolute` resolves to *now*.
+   *
+   * **When this runs is the whole question.** Resolving once, at registration,
+   * would leave the target watch on the old file the moment the link is
+   * repointed — and repointing is precisely what the projected-volume rotation
+   * does. So it runs again on every event that reaches this registration: a
+   * rename of the tracked name in its own directory, the catch-all rescan an
+   * unnamed or untracked-rename event triggers, and an ordinary write (where
+   * the answer is unchanged and this costs one `realpath` call). The parent
+   * watch is what makes re-resolution possible, which is the other reason it is
+   * kept rather than replaced.
+   *
+   * **A path that will not resolve is not a degraded filesystem.** A broken
+   * link (`ENOENT`) and a cycle (`ELOOP`) both throw here, and both are things
+   * an operator can create in one command; neither says anything about whether
+   * `fs.watch` works. They are absorbed as "no target to watch" — the parent
+   * directory watch is still live, so creating the missing target fires a
+   * rename there, this runs again, and the target watch appears. Reporting them
+   * through `reportDegraded` would be a false alarm *and* would consume the
+   * once-per-process slot that a real watch failure needs.
+   */
+  private refreshLinkTarget(absolute: string): void {
+    if (this.closed) return;
+    let target: string | null = null;
+    try {
+      // Gated on the registered path's *own* last component being a link, not
+      // on `realpath` differing. Those are not the same question: on macOS
+      // `/var` is a symlink to `/private/var`, `/tmp` likewise, and container
+      // bind mounts do the same to arbitrary ancestors — so "the resolved path
+      // differs" is true of ordinary files all over the filesystem. Watching
+      // their targets would double the descriptor count for no gain, because
+      // `fs.watch` resolves the directory it is given and the two watches would
+      // land on the same underlying directory. What the parent watch genuinely
+      // cannot see is a link *at the end* of the path, whose target lives in a
+      // directory nothing has opened. `realpathSync` still follows a whole
+      // chain from there, so link → link → file resolves in one call.
+      if (fs.lstatSync(absolute).isSymbolicLink()) {
+        const resolved = fs.realpathSync(absolute);
+        if (resolved !== absolute) target = resolved;
+      }
+    } catch {
+      target = null;
+    }
+    const current = this.linkTargets.get(absolute) ?? null;
+    if (current === target) return;
+    if (current) {
+      this.removeName(current, absolute);
+      this.linkTargets.delete(absolute);
+    }
+    if (target) {
+      this.addName(target, absolute);
+      this.linkTargets.set(absolute, target);
+    }
   }
 
   private openWatcher(dir: string, entry: DirectoryEntry): fs.FSWatcher | null {
@@ -149,16 +267,21 @@ export class FileWatcher {
       const watcher = this.watchFactory(dir, (eventType, filename) => {
         if (this.closed) return;
         const named = typeof filename === "string" && filename.length > 0;
-        if (named && entry.files.has(filename)) {
-          this.schedule(entry, filename);
-          return;
+        if (named) {
+          const owners = entry.names.get(filename);
+          if (owners) {
+            // Copied before iterating: `touch` re-resolves, which can add or
+            // remove names in this very map.
+            for (const owner of [...owners]) this.touch(owner);
+            return;
+          }
+          // A named event for something we do not track only tells us about our
+          // own files when it is a *rename*. A `change` on a neighbour says
+          // nothing about ours and is still ignored, so an unrelated write in a
+          // shared directory costs nothing.
+          if (eventType !== "rename") return;
         }
-        // A named event for something we do not track only tells us about our
-        // own files when it is a *rename*. A `change` on a neighbour says
-        // nothing about ours and is still ignored, so an unrelated write in a
-        // shared directory costs nothing.
-        if (named && eventType !== "rename") return;
-        // What is left re-checks every tracked file in this directory:
+        // What is left re-checks every tracked name in this directory:
         //
         // - **A rename naming something we do not track.** On a Kubernetes
         //   projected volume (ConfigMap, Secret) the tracked JSON files are
@@ -171,11 +294,13 @@ export class FileWatcher {
         //   the event can name the temp file rather than the target.
         // - **No name at all.** Some platforms report none.
         //
-        // Re-checking is cheap and self-limiting: it is debounced per file, and
-        // the reload path compares content and does nothing when the bytes are
-        // unchanged. Correctness here is worth reading a file that did not
-        // change (#314).
-        for (const base of entry.files.keys()) this.schedule(entry, base);
+        // Re-checking is cheap and self-limiting: it is debounced per
+        // registered path, and the reload path compares content and does
+        // nothing when the bytes are unchanged. Correctness here is worth
+        // reading a file that did not change (#314).
+        for (const owners of [...entry.names.values()]) {
+          for (const owner of [...owners]) this.touch(owner);
+        }
       });
       // An `error` after a successful open (a mount going away, an inotify
       // limit) is not an exception anywhere it can be caught, so it has to be
@@ -193,18 +318,25 @@ export class FileWatcher {
     }
   }
 
-  private schedule(entry: DirectoryEntry, base: string): void {
-    const existing = entry.timers.get(base);
+  /** One event, for one registration: re-resolve, then debounce. */
+  private touch(absolute: string): void {
+    if (!this.subscribers.has(absolute)) return;
+    this.refreshLinkTarget(absolute);
+    this.schedule(absolute);
+  }
+
+  private schedule(absolute: string): void {
+    const existing = this.timers.get(absolute);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
-      entry.timers.delete(base);
+      this.timers.delete(absolute);
       if (this.closed) return;
-      for (const subscriber of [...(entry.files.get(base) ?? [])]) {
+      for (const subscriber of [...(this.subscribers.get(absolute) ?? [])]) {
         try {
           subscriber();
         } catch (err) {
           this.log(
-            `[watch] reload handler failed for ${base}: ${
+            `[watch] reload handler failed for ${path.basename(absolute)}: ${
               err instanceof Error ? err.message : String(err)
             }`,
           );
@@ -213,7 +345,7 @@ export class FileWatcher {
     }, this.debounceMs);
     // A pending debounce must never be the reason the daemon will not exit.
     (timer as unknown as { unref?: () => void }).unref?.();
-    entry.timers.set(base, timer);
+    this.timers.set(absolute, timer);
   }
 
   private reportDegraded(dir: string, err: unknown): void {

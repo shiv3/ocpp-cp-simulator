@@ -1833,3 +1833,57 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   can already read every charge point's full config over `cp.list`, credentials
   included, so a filesystem path adds no reachable capability. The transport is
   the boundary, which is what `access-control.md` already says.
+
+## [2026-09-07] ingest | `--watch`: the other half of the symlink family (#314, PR #317)
+
+- Round 21 covered a symlink **moving** — the projected-volume rotation, where
+  `..data` is renamed and the tracked basename never changes. This is the
+  complementary case: an ordinary symlink whose **target is edited in place**.
+  The filesystem event fires in the _target's_ directory, which nothing watched,
+  so the reload never scheduled. Neither mechanism sees the other's case, which
+  is why the earlier fix did not close this.
+- The symptom is the one this branch has now closed three times: **the watcher
+  opens successfully, reports no degradation, and never fires.** "Opened" is not
+  "working", and each time the missing evidence was a different one.
+- `FileWatcher` now keeps the parent-directory watch **and** adds the resolved
+  target's directory. "As well" is load-bearing — dropping the parent watch
+  would reintroduce the rotation case, and it is also what makes re-resolution
+  possible.
+- **Three questions settled explicitly, because each has a wrong answer that
+  looks right.** _When to resolve_: on every event that reaches the
+  registration, not once at watch time — a link that is repointed would
+  otherwise leave the target watch on the old file, which is the rotation case
+  in a different costume. _Chains and loops_: `realpath` follows a chain in one
+  call; `ELOOP` and a broken link's `ENOENT` are absorbed as "no target to
+  watch", deliberately **not** through `reportDegraded` — an operator can create
+  either in one command, neither says anything about whether `fs.watch` works,
+  and reporting them would consume the once-per-process slot a real failure
+  needs. The parent watch is what makes that recoverable: creating the missing
+  target is a rename in a directory that is still watched. _Double-firing_: the
+  debounce is now keyed by **registered path** rather than by directory and
+  basename, so an edit seen by both watches, and a rotation seen twice in one
+  directory, both collapse to a single callback.
+- One thing the finding did not ask for and the implementation needs: resolution
+  is gated on the registered path's **own** last component being a symlink, not
+  on `realpath` differing. Those are different questions — on macOS `/var` and
+  `/tmp` are links, and bind mounts do the same to arbitrary ancestors, so
+  "resolved differs" is true of ordinary files everywhere. Watching their
+  targets would double the descriptor count for nothing, since `fs.watch`
+  resolves the directory it is given and both watches would land on the same
+  one.
+- [Daemon](entities/daemon.md) — new **Which layouts `--watch` supports** table
+  next to the degradation rules, because the answer was previously spread over
+  four paragraphs written across three rounds: plain files, write-then-rename
+  editors, in-place symlink target edits, rotations, chains, broken links and
+  cycles, symlinked ancestors, and the three unsupported shapes (no `fs.watch`,
+  a replaced watch directory, a `subPath` mount).
+- **Failure**: an unresolvable path watches nothing at the far end and is not
+  reported as degradation; a `fs.watch` that cannot open is, once.
+  **Ordering**: the target is resolved after the parent watch exists, and
+  re-resolved before each debounce is scheduled, so a repoint moves the watch
+  before the reload reads the file. **Destruction**: unsubscribing drops the
+  target's name and closes its directory watch when it was the last one, and a
+  repoint closes the old target's directory the same way. **Trigger**: every
+  event that reaches the registration re-resolves — a rename of the tracked
+  name, the catch-all rescan, and an ordinary write, where the answer is
+  unchanged and it costs one `realpath` call.

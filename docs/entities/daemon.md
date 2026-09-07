@@ -441,6 +441,42 @@ The rules, in the order they bite:
   neighbour is still ignored, so a shared directory costs nothing. The re-check
   is debounced and content-compared, so a file that did not change produces no
   event.
+- **A symlink is watched at both ends.** The daemon watches the directory
+  holding the path you named _and_ the directory holding whatever that path
+  resolves to. The two cover disjoint cases and neither sees the other's: the
+  first catches the link being **repointed** (the rotation above), the second
+  catches the target **changing under a link that stays put** — an ordinary
+  symlink into a shared config directory, edited in place, whose event fires in
+  the target's directory and nowhere else. The target is re-resolved on every
+  event that reaches the file, so repointing the link moves the second watch
+  with it. Only a link at the _end_ of the path gets this: a symlinked
+  _ancestor_ needs nothing extra, because `fs.watch` resolves the directory it
+  is given. A broken link or a symlink cycle is not an error — there is simply
+  no target to watch yet, and creating it is a rename in the directory that is
+  still watched, which brings the second watch up.
+
+### Which layouts `--watch` supports
+
+Assembled here because it was previously spread across the rules above and a
+reader deciding whether `--watch` works for their deployment should not have to
+reconstruct it.
+
+| Layout                                                            | Supported | How, or why not                                                                                                                    |
+| ----------------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| A plain file, edited in place                                     | Yes       | Directory watch, filtered by basename.                                                                                             |
+| A plain file, saved by write-then-rename (most editors)           | Yes       | The directory watch survives the rename; a rename naming the temp file re-checks every tracked file in that directory.             |
+| A symlink whose **target is edited in place**                     | Yes       | The target's directory is watched as well.                                                                                         |
+| A symlink that is **repointed** (Kubernetes projected volume)     | Yes       | The `..data` rename re-checks every tracked file, and the target is re-resolved on that event.                                     |
+| A symlink **chain**                                               | Yes       | `realpath` follows the whole chain; the final target's directory is watched.                                                       |
+| A **broken** symlink, or a symlink **cycle**                      | Yes\*     | No target to watch yet, reported as nothing rather than as a failure. Creating the target is a rename in the still-watched parent. |
+| A file whose **ancestor directory** is a symlink                  | Yes       | Nothing extra needed — `fs.watch` resolves the directory it is given.                                                              |
+| A file on a filesystem where `fs.watch` does not work             | No        | One log line, then the daemon carries on unwatched. See the degradation rule above.                                                |
+| The **watched directory itself** replaced (deleted and recreated) | No        | `fs.watch` binds to an inode; the watcher stays open and delivers nothing. Not distinguishable from a quiet file without polling.  |
+| A **`subPath`** ConfigMap mount                                   | No        | Kubernetes does not propagate updates into a `subPath` at all — there is nothing to watch. Mount the whole volume instead.         |
+
+\* The link resolves to nothing, so nothing is watched at the far end; the
+watch on the path you named is live throughout.
+
 - **Known limitation: a watch lives as long as the directory it was opened on.**
   `fs.watch` binds to an inode. If the _directory_ holding a watched file is
   itself replaced — deleted and recreated, or a bind-mount swapped underneath —

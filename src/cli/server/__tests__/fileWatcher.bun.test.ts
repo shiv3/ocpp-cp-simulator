@@ -11,7 +11,7 @@ import { tmpdir } from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { FileWatcher, type WatchFactory } from "../FileWatcher";
+import { FileWatcher, MAX_CHAIN_HOPS, type WatchFactory } from "../FileWatcher";
 
 /**
  * A stand-in for `fs.watch`.
@@ -519,12 +519,103 @@ describe("FileWatcher symlink targets (#314)", () => {
       calls += 1;
     });
 
-    // `realpathSync` follows the whole chain in one call, so it is the *final*
-    // directory that is watched — which is where an in-place edit fires.
-    expect(fake.opened.sort()).toEqual([root, finalDir].sort());
+    // Every hop's directory, not just the far end: each link in the chain lives
+    // in a directory of its own, and what happens to that link is only visible
+    // there.
+    expect(fake.opened.sort()).toEqual([root, midDir, finalDir].sort());
+    // An in-place edit of the real file emits in the final directory and
+    // nowhere else.
     fake.emit(finalDir, "change", "tags.json");
     await sleep(20);
     expect(calls).toBe(1);
+  });
+
+  it("watches past the first missing hop of a broken chain", async () => {
+    // The case the previous round's hedge admitted and the table's rows did not:
+    // with `/root/tags.json -> /mid/tags.json -> /final/tags.json` and the final
+    // file absent, `realpath` resolves nothing and a single-hop fallback watches
+    // only `/mid`. Creating the real file emits in `/final` — nowhere else — so
+    // the reload was silently missed while the row claimed chains and broken
+    // links both work.
+    const root = tempRoot();
+    const midDir = path.join(root, "mid");
+    const finalDir = path.join(root, "final");
+    mkdirSync(midDir);
+    mkdirSync(finalDir);
+    // `/final/tags.json` deliberately does not exist yet.
+    symlinkSync(
+      path.join(finalDir, "tags.json"),
+      path.join(midDir, "tags.json"),
+    );
+    const link = path.join(root, "tags.json");
+    symlinkSync(path.join(midDir, "tags.json"), link);
+
+    const fake = new FakeFs();
+    let calls = 0;
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(link, () => {
+      calls += 1;
+    });
+    expect(fake.opened.sort()).toEqual([root, midDir, finalDir].sort());
+    expect(watcher.degraded).toBe(false);
+
+    writeFileSync(path.join(finalDir, "tags.json"), "[]");
+    // Creating a file emits in its own directory only.
+    fake.emit(finalDir, "rename", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(1);
+  });
+
+  it("sees an intermediate link repointed after the chain resolved", async () => {
+    // Not a recovery case: the chain resolved cleanly, and then the *middle*
+    // link is swung somewhere else. That is a rename in the middle link's own
+    // directory — neither the registered path's nor the final target's — so
+    // with only those two watched the daemon keeps reading the file it was
+    // pointed away from.
+    const root = tempRoot();
+    const midDir = path.join(root, "mid");
+    const finalDir = path.join(root, "final");
+    const otherDir = path.join(root, "other");
+    mkdirSync(midDir);
+    mkdirSync(finalDir);
+    mkdirSync(otherDir);
+    writeFileSync(path.join(finalDir, "tags.json"), "[]");
+    writeFileSync(path.join(otherDir, "tags.json"), "[1]");
+    const mid = path.join(midDir, "tags.json");
+    symlinkSync(path.join(finalDir, "tags.json"), mid);
+    const link = path.join(root, "tags.json");
+    symlinkSync(mid, link);
+
+    const fake = new FakeFs();
+    let calls = 0;
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(link, () => {
+      calls += 1;
+    });
+    expect(fake.opened).toContain(finalDir);
+
+    rmSync(mid);
+    symlinkSync(path.join(otherDir, "tags.json"), mid);
+    // Replacing a symlink is a rename in the directory that holds it.
+    fake.emit(midDir, "rename", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(1);
+    expect(fake.opened).toContain(otherDir);
+    // The directory the chain no longer passes through is released…
+    expect(fake.closed).toContain(finalDir);
+    // …while the hops the chain still passes through are never closed. A
+    // rebuild-everything refresh would close and reopen them, and a closed
+    // watch, however briefly, is a window in which the next event is missed.
+    expect(fake.closed).not.toContain(midDir);
+    expect(fake.closed).not.toContain(root);
+
+    // …so an edit there is no longer ours, while one at the new tail is.
+    fake.emit(finalDir, "change", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(1);
+    fake.emit(otherDir, "change", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(2);
   });
 
   it("delivers an edit to a file under a symlinked ancestor", async () => {
@@ -584,10 +675,41 @@ describe("FileWatcher symlink targets (#314)", () => {
 
     const fake = new FakeFs();
     const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
-    // `realpathSync` throws ELOOP. An operator can create this in two
-    // commands, so it must be absorbed like any other unresolvable path.
+    // An operator can create this in two commands, so it must be absorbed like
+    // any other unresolvable path — and the chain walk must terminate on it
+    // rather than run to the hop cap. A hop already visited ends the walk, so
+    // `a → b → a` stops after one hop and the only directory opened is the one
+    // both links live in.
     expect(() => watcher.watch(a, () => {})).not.toThrow();
     expect(watcher.degraded).toBe(false);
     expect(watcher.watchedPaths()).toEqual([a]);
+    expect(fake.opened).toEqual([root]);
+  });
+
+  it("stops following a chain at the hop cap", () => {
+    // A bound that does not depend on the cycle guard: a long *acyclic* chain
+    // is followed only so far, because every hop is a directory watch.
+    const root = tempRoot();
+    const dirs: string[] = [];
+    for (let i = 0; i <= MAX_CHAIN_HOPS + 2; i += 1) {
+      const dir = path.join(root, `h${i}`);
+      mkdirSync(dir);
+      dirs.push(dir);
+    }
+    // h0/f -> h1/f -> h2/f -> … , with the last one a real file.
+    for (let i = 0; i < dirs.length - 1; i += 1) {
+      symlinkSync(
+        path.join(dirs[i + 1] as string, "f"),
+        path.join(dirs[i] as string, "f"),
+      );
+    }
+    writeFileSync(path.join(dirs[dirs.length - 1] as string, "f"), "[]");
+
+    const fake = new FakeFs();
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(path.join(dirs[0] as string, "f"), () => {});
+
+    // The registered path's own directory plus at most MAX_CHAIN_HOPS hops.
+    expect(fake.opened.length).toBe(MAX_CHAIN_HOPS + 1);
   });
 });

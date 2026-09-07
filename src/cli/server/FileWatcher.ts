@@ -12,6 +12,17 @@ import * as path from "path";
  */
 export const DEFAULT_WATCH_DEBOUNCE_MS = 200;
 
+/**
+ * How many symlink hops are followed from a watched path.
+ *
+ * Far below the kernel's own `ELOOP` limit (32–40) because a configuration
+ * layout that needs more than a handful of indirections is not a layout this
+ * feature is trying to serve, and every hop is a directory watch. This is what
+ * actually bounds a cycle; the visited-hop check in the walk ends one sooner
+ * but is not load-bearing on its own.
+ */
+export const MAX_CHAIN_HOPS = 8;
+
 interface DirectoryEntry {
   watcher: fs.FSWatcher | null;
   /**
@@ -84,11 +95,11 @@ export class FileWatcher {
   /** Registered absolute path → its pending debounce. One per registration. */
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
-   * Registered absolute path → the resolved target currently being watched for
-   * it. Absent when the path is not a symlink, when it cannot be resolved, or
-   * when it resolves to itself.
+   * Registered absolute path → **every hop** of the symlink chain currently
+   * being watched for it, in order, ending at the real file or at the first
+   * hop that does not exist. Empty for a path that is not itself a symlink.
    */
-  private readonly linkTargets = new Map<string, string>();
+  private readonly linkChains = new Map<string, readonly string[]>();
   private readonly debounceMs: number;
   private readonly log: (message: string) => void;
   private readonly watchFactory: WatchFactory;
@@ -145,11 +156,10 @@ export class FileWatcher {
         clearTimeout(timer);
         this.timers.delete(absolute);
       }
-      const target = this.linkTargets.get(absolute);
-      if (target) {
-        this.removeName(target, absolute);
-        this.linkTargets.delete(absolute);
+      for (const hop of this.linkChains.get(absolute) ?? []) {
+        this.removeName(hop, absolute);
       }
+      this.linkChains.delete(absolute);
       this.removeName(absolute, absolute);
     };
   }
@@ -170,7 +180,7 @@ export class FileWatcher {
     for (const entry of this.dirs.values()) entry.watcher?.close();
     this.dirs.clear();
     this.subscribers.clear();
-    this.linkTargets.clear();
+    this.linkChains.clear();
   }
 
   /** Register interest in `watchedPath`'s basename on behalf of `owner`. */
@@ -230,70 +240,93 @@ export class FileWatcher {
    */
   private refreshLinkTarget(absolute: string): void {
     if (this.closed) return;
-    let target: string | null = null;
-    try {
-      // Gated on the registered path's *own* last component being a link, not
-      // on `realpath` differing. Those are not the same question: on macOS
-      // `/var` is a symlink to `/private/var`, `/tmp` likewise, and container
-      // bind mounts do the same to arbitrary ancestors — so "the resolved path
-      // differs" is true of ordinary files all over the filesystem. Watching
-      // their targets would double the descriptor count for no gain, because
-      // `fs.watch` resolves the directory it is given and the two watches would
-      // land on the same underlying directory. What the parent watch genuinely
-      // cannot see is a link *at the end* of the path, whose target lives in a
-      // directory nothing has opened. `realpathSync` still follows a whole
-      // chain from there, so link → link → file resolves in one call.
-      if (fs.lstatSync(absolute).isSymbolicLink()) {
-        target = this.resolveLinkTarget(absolute);
-      }
-    } catch {
-      target = null;
+    const next = this.resolveChain(absolute);
+    const current = this.linkChains.get(absolute) ?? [];
+    if (
+      current.length === next.length &&
+      current.every((hop, i) => hop === next[i])
+    ) {
+      return;
     }
-    const current = this.linkTargets.get(absolute) ?? null;
-    if (current === target) return;
-    if (current) {
-      this.removeName(current, absolute);
-      this.linkTargets.delete(absolute);
+    // Diffed rather than torn down and rebuilt: a chain whose tail moved keeps
+    // its unchanged head, so the directories it shares are never closed and
+    // reopened — and closing one, however briefly, is a window in which the
+    // event this exists to catch would be missed.
+    const nextSet = new Set(next);
+    for (const hop of current) {
+      if (!nextSet.has(hop)) this.removeName(hop, absolute);
     }
-    if (target) {
-      this.addName(target, absolute);
-      this.linkTargets.set(absolute, target);
+    const currentSet = new Set(current);
+    for (const hop of next) {
+      if (!currentSet.has(hop)) this.addName(hop, absolute);
     }
+    if (next.length === 0) this.linkChains.delete(absolute);
+    else this.linkChains.set(absolute, next);
   }
 
   /**
-   * Where a symlink's far end is, **including while it is broken**.
+   * Every hop of `absolute`'s symlink chain, in order, through to the real file
+   * or the first hop that is not there.
    *
-   * `realpathSync` is the right answer whenever it has one: it follows a whole
-   * chain in a single call, so link → link → file lands on the real file's
-   * directory. But it throws the moment any hop is missing — and a target that
-   * is deleted and recreated is the ordinary way a file is replaced. Tearing
-   * the target watch down on that throw was a silent failure of its own: the
-   * recreation emits **only in the target's directory**, which is precisely the
-   * directory that had just been closed, so nothing ever fired again. The same
-   * held for a watch that starts broken, which is what a `--state-db` restore
-   * of a link whose target is not there yet looks like.
+   * **Why every hop and not just the far end.** A directory watch sees the
+   * names in *its own* directory, so each link in a chain needs the directory
+   * it lives in to be watched or the thing that happens to it is invisible.
+   * Two cases follow, and neither is exotic:
    *
-   * `readlinkSync` is the fallback because it reads the link itself rather than
-   * following it, so it still answers when the target does not exist. It gives
-   * one hop, resolved against the link's own directory — which is exactly where
-   * the missing thing will appear. On a longer chain that is the *first*
-   * missing hop rather than the final file, and that is enough: when it
-   * appears, the event fires in a directory now being watched, this runs again,
-   * `realpathSync` gets further, and the watch walks forward one hop per
-   * recreation. Progressive rather than complete, and strictly better than
-   * closing the only watch that could have seen it.
+   * - **A chain broken past the first missing hop.** `realpath` cannot resolve
+   *   it at all, and watching only the first missing hop means creating the
+   *   *final* file emits in a directory nothing has opened. Walking the chain
+   *   watches each directory the recreation could land in.
+   * - **An intermediate link repointed after the chain already resolved.**
+   *   `/a → /b/link → /c/file`, and `/b/link` is swung at `/c2/file`. That is a
+   *   rename in `/b`, which is neither the registered path's directory nor the
+   *   final target's — so with only those two watched it is silent, and the
+   *   daemon keeps reading the file it was pointed away from.
+   *
+   * Unlike the *ancestor* symlink case, which is documented as unsupported,
+   * this needs no directory watch to be reopened: the directories along a chain
+   * (`/b`, `/c`, `/c2`) are not themselves replaced — only the link inside one
+   * of them changes — so the watches opened on them stay valid and see it. That
+   * is the difference between the two, and it is why one is supported and the
+   * other is not.
+   *
+   * **Bounded by {@link MAX_CHAIN_HOPS}**, far below the kernel's own `ELOOP`
+   * limit of 32 to 40. The visited-hop check ends a cycle earlier than the cap
+   * would, but it is defence in depth rather than the bound: with it removed a
+   * cycle still terminates, and still opens no more directories, because the
+   * cap stops the walk and repeated hops dedupe into the same watches. Stated
+   * that way because it is what a mutation test showed. The registered path itself is not a hop — it is already watched as
+   * the primary — and a path that is not a symlink yields no hops at all, which
+   * is what keeps a symlinked *ancestor* from adding anything.
    */
-  private resolveLinkTarget(absolute: string): string | null {
-    try {
-      const resolved = fs.realpathSync(absolute);
-      return resolved === absolute ? null : resolved;
-    } catch {
-      // Broken, or a cycle. Read the link rather than following it.
-      const declared = fs.readlinkSync(absolute);
-      const hop = path.resolve(path.dirname(absolute), declared);
-      return hop === absolute ? null : hop;
+  private resolveChain(absolute: string): string[] {
+    const hops: string[] = [];
+    const seen = new Set<string>([absolute]);
+    let current = absolute;
+    for (let depth = 0; depth < MAX_CHAIN_HOPS; depth += 1) {
+      let isLink: boolean;
+      try {
+        isLink = fs.lstatSync(current).isSymbolicLink();
+      } catch {
+        // `current` does not exist. It is already the last hop pushed (or the
+        // registered path, which needs nothing), and its directory is watched,
+        // which is where its creation will fire.
+        break;
+      }
+      if (!isLink) break;
+      let declared: string;
+      try {
+        declared = fs.readlinkSync(current);
+      } catch {
+        break;
+      }
+      const next = path.resolve(path.dirname(current), declared);
+      if (seen.has(next)) break;
+      seen.add(next);
+      hops.push(next);
+      current = next;
     }
+    return hops;
   }
 
   private openWatcher(dir: string, entry: DirectoryEntry): fs.FSWatcher | null {

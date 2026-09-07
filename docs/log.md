@@ -1984,3 +1984,47 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   **Destruction**: deleting the target no longer closes its directory watch;
   unsubscribing still does. **Trigger**: unchanged — every event that reaches
   the registration re-resolves.
+
+## [2026-09-07] ingest | `--watch`: every hop of a symlink chain, not just its ends (#314, PR #317)
+
+- Last round's hedge, promoted to a finding and then to a fix. The single-hop
+  fallback watched the _first_ missing hop of a broken chain, so creating the
+  real file past it landed in a directory nothing had opened. And a case the
+  hedge did not name: **an intermediate link repointed after the chain already
+  resolved** is a rename in the middle link's own directory, which is neither
+  the registered path's nor the final target's, so the daemon kept reading the
+  file it had been pointed away from.
+- The walk now follows each hop with `readlink` and watches every hop's
+  directory, through to the real file or the first hop that is not there.
+  Bounded at **8 hops**, far below the kernel's `ELOOP` limit of 32–40, because
+  a layout needing more indirections than that is not one this serves and every
+  hop is a directory watch. Deduped by directory as before, so hops sharing a
+  directory — and registrations sharing a hop — share one watcher.
+- **The objection that made the ancestor case a `No` last round was checked
+  before committing, and does not apply here.** Repointing an _ancestor_
+  replaces the directory the primary watch is bound to, and nothing reopens a
+  directory watch. Repointing a link _inside_ a chain replaces no directory —
+  `/b`, `/c`, `/c2` all still exist and their watches stay valid — so the event
+  is seen with the machinery already present. That difference is now the reason
+  written next to both rows, so the next round does not have to rediscover it.
+- The refresh **diffs** the old chain against the new rather than tearing down
+  and rebuilding, so hops the chain still passes through are never closed. A
+  closed watch, however briefly, is a window in which the next event is missed —
+  and that property had no test until a mutation showed it did not.
+- **Two comments corrected for over-claiming**, which is the round-34 rule
+  applied to prose as well as to table rows: the walk's cycle guard was
+  described as what bounds a cycle. A mutation removing it changed nothing —
+  the hop cap stops the walk and repeated hops dedupe into the same watches — so
+  it is defence in depth, and now says so.
+- [Daemon](entities/daemon.md) — the chain and broken-link rows now describe
+  per-hop watching and name the cap; a new row covers an intermediate repoint;
+  and the prose rule says why a chain repoint is supported where an ancestor
+  repoint is not. Each of those rows is pinned by a test that dies when the walk
+  stops after one hop.
+- **Failure**: a hop that cannot be read ends the walk with its directory
+  already watched, and still reports no degradation. **Ordering**: hops are
+  added before old ones are dropped only in the sense that the diff never closes
+  a shared directory; the walk itself is strictly head-to-tail. **Destruction**:
+  unsubscribing releases every hop; a repoint releases only the hops the chain
+  no longer passes through. **Trigger**: unchanged — every event reaching the
+  registration re-walks the chain.

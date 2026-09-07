@@ -15,7 +15,7 @@ related:
   - ../concepts/state-persistence.md
   - ../concepts/log-format.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-05
+updated: 2026-09-07
 ---
 
 # Daemon (server mode)
@@ -302,13 +302,23 @@ The rules, in the order they bite:
   by acquisition — a run that starts without resuming clears it, and writes that
   through, so a restart in the window before its first node completes cannot
   resume the new graph from the old graph's node ids. The EV settings
-  override is released by the run that set it — on an ordinary completion as
-  well as a replacement — unless a **different** definition has since been
-  installed under that id and declares `evSettings` of its own, in which case
-  the replacement already claimed it. The question is identity, not presence: on
-  a normal finish nothing removes the definition, so "a definition with
-  `evSettings` is installed" is equally true of a replacement and of the run
-  that is ending.
+  override is released by the run that **actually applied** it — on an ordinary
+  completion as well as a replacement — and by no one else. The daemon records
+  the run id that applied EV settings to a connector at the moment it applies
+  them, so releasing is one comparison: the run that is ending is the run that
+  claimed. A run that never declared `evSettings` claimed nothing and so leaves
+  an operator's `set_ev_settings` alone (#105); an operator's `set_ev_settings`
+  takes the override over, so a run in flight when it lands no longer releases
+  it; and a replacement run that has applied its own settings owns them, so the
+  outgoing run does not clear a live override.
+  **Installed is not "has taken effect".** A replacement definition is stored
+  under the id _before_ it runs, and — with the outgoing run still holding the
+  executor slot, which blocks its auto-start — it may never run at all. Three
+  earlier rules read the definitions map instead of the claim (is a definition
+  with `evSettings` installed; is the installed definition mine; does the
+  replacement declare `evSettings`) and each was wrong wherever those two points
+  in time came apart. The map also never reflects the _end_ of a run: nothing
+  removes an entry on completion, only a removal or a replace.
 - **A hold is never left waiting on something that is gone.** A reload held for
   a connector is released when that connector's session ends, when the
   scenario's own run settles, or when a `cp.update` rebuilds the charge point.

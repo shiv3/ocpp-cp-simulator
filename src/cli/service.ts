@@ -281,46 +281,53 @@ function connectorStateSnapshot(connector: Connector): ScenarioStateSnapshot {
  * Whether a run that is ending should release the connector's EV settings
  * override.
  *
- * Three conditions, and a formulation satisfying only two of them has shipped
- * twice — so they are three named clauses in one pure function rather than a
- * conjunction inside a `finally`, and they have a truth table of their own.
+ * The override is a single boolean on the connector. For three rounds this
+ * function tried to reconstruct *whose* boolean it is from the state around it
+ * — is a definition with `evSettings` installed (presence), is the installed
+ * definition mine (identity), does the replacement declare `evSettings`
+ * (declaration) — and each reconstruction was right only for the cases someone
+ * had thought of. So the override now has an owner: the run id that actually
+ * applied it, recorded by `CLIChargePointService` at the moment
+ * `applyEvSettingsOverride` returns (the `onEvSettingsApplied` hook), and the
+ * question is one comparison.
  *
- * 1. **Release only what this run set (#105).** A scenario that never declared
- *    `evSettings` never touched the override, so it must not release an
- *    explicit `set_ev_settings` an operator applied to the connector.
- * 2. **Do not release what someone else claimed since (#314).** The flag is a
- *    single boolean on the connector with no per-run owner, so if a
- *    *replacement* declaring its own `evSettings` now occupies the id, it has
- *    already set the override and clearing would unmark a live one.
- * 3. **Do release on ordinary completion (#314).** This is the one presence
- *    could never express. On a normal finish nothing removes the definition, so
- *    the thing installed under the id *is* the run's own — "a definition with
- *    `evSettings` is installed" is true of a replacement and equally true of
- *    the run that is ending, and a rule keyed on it skipped the run's own
- *    cleanup and left the connector permanently marked.
+ * The three clauses fall out of it rather than being enumerated in the code:
  *
- * So the question is **identity, not presence**: has a *different* definition
- * been installed under this id? `loadScenario` and
- * `syncConnectorRuntimeScenarios` both store the object they are given, so a
- * replacement is a different reference and a survivor is the same one.
+ * 1. **Release only what this run set (#105).** A run that never declared
+ *    `evSettings` never claimed, so the owner is not it — an explicit
+ *    `set_ev_settings` an operator applied to the connector survives. So does
+ *    an operator set made *during* the run, because that clears the owner
+ *    (see `setEVSettings`): the last claim wins, and it is not this run's.
+ * 2. **Do not release what someone else claimed since (#314).** A replacement
+ *    run that has applied its own `evSettings` owns the override; clearing
+ *    would unmark a live one.
+ * 3. **Do release on ordinary completion (#314).** Nothing but a later claim
+ *    or an operator set overwrites the owner, so on a normal finish it is
+ *    still this run's — including when the scenario was removed outright,
+ *    where nobody claimed anything.
  *
- * Ordering assumption, stated because it is what the presence test got wrong:
- * `_scenarios` does **not** reflect the end of a run. Nothing removes the entry
- * on completion — only `removeScenario` and a definitions replace do — so
- * reading it says what is installed, never what is finished.
+ * **Ordering, which is what every earlier formulation got wrong:** a
+ * replacement definition is *installed before it runs, and may never run at
+ * all*. `_scenarios` therefore answers "what is installed", never "what has
+ * taken effect", and the two are different points in time. The owner is
+ * written only by a claim, so it answers the second question and cannot be
+ * fooled by the first. `_scenarios` also never reflects the *end* of a run —
+ * nothing removes the entry on completion — which is the other half of the
+ * same confusion.
+ *
+ * A run id is unique per invocation (`makeScenarioRunId`), so this never
+ * mistakes a later run of the same scenario for the one that is ending. An
+ * absent id — `null`, or the `""` the stop path falls back to when
+ * `_runIdByScenario` no longer holds one — means "no run" and matches nothing;
+ * a real owner is always a `makeScenarioRunId` string, so the two can never
+ * meet in the middle.
  */
 export function shouldReleaseEvSettingsOverride(
-  ending: ScenarioDefinition,
-  installed: ScenarioDefinition | undefined,
+  endingRunId: string | null,
+  ownerRunId: string | null,
 ): boolean {
-  // 1. Not mine to release.
-  if (!ending.evSettings) return false;
-  // 3. Nothing else has taken the id — including the case where the scenario
-  //    was removed outright, where nobody claimed anything.
-  const replaced = installed !== undefined && installed !== ending;
-  if (!replaced) return true;
-  // 2. Replaced: release only if the newcomer did not claim the override.
-  return !installed.evSettings;
+  if (!endingRunId || !ownerRunId) return false;
+  return endingRunId === ownerRunId;
 }
 
 export class CLIChargePointService {
@@ -351,6 +358,25 @@ export class CLIChargePointService {
     { readonly definition: ScenarioDefinition; readonly connectorId: number }
   > = new Map();
   private readonly _executors: Map<string, ScenarioExecutor> = new Map();
+  /**
+   * #314: which run currently owns each connector's EV settings override.
+   *
+   * Keyed by connectorId because the override is a per-connector boolean; the
+   * value is the run id (`_runIdByScenario`) of the run that last *applied* EV
+   * settings to it. Written only from the `onEvSettingsApplied` hook — never
+   * when a definition declaring `evSettings` is merely installed, because a
+   * replacement is installed before it runs and may never run at all. Deleted
+   * when an operator's `set_ev_settings` takes the override over, and when the
+   * owning run releases it.
+   *
+   * Deliberately here and not on the domain `Connector`:
+   * `applyEvSettingsOverride` has callers with no run id at all (the
+   * `set_ev_settings` RPC, `LocalChargePointService`, the browser's
+   * `ScenarioManager`), and a field they cannot maintain would just go stale.
+   * Nor is it persisted: `Connector._evSettingsOverridden` is in-memory only,
+   * so after a restart there is no override for an owner to refer to.
+   */
+  private readonly _evSettingsOwnerByConnector: Map<number, string> = new Map();
   private readonly _autoTraffic = new Map<number, AutoTrafficRunner>();
   private readonly _autoTrafficConfigs = new Map<number, AutoTrafficConfig>();
   // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
@@ -916,6 +942,11 @@ export class CLIChargePointService {
     // for the default-propagation counterpart, which respects this flag.
     const connector = this.requireConnector(connectorId);
     connector.applyEvSettingsOverride(settings);
+    // The operator now owns the override, so no run does — including one in
+    // flight that claimed it earlier. Without this, that run's completion
+    // released a set the operator made during it, which is #105's bug in a
+    // new costume (#314).
+    this._evSettingsOwnerByConnector.delete(connectorId);
   }
 
   getEVSettings(connectorId: number): EVSettings {
@@ -1499,6 +1530,13 @@ export class CLIChargePointService {
             data: { connectorId, scenarioId, error: error.message, runId },
           });
         },
+        // #314: this run has applied EV settings to the connector, so it owns
+        // the override until someone else claims it. The claim, not the
+        // declaration — a definition declaring `evSettings` that is installed
+        // but never runs never gets here, which is the whole point.
+        onEvSettingsApplied: () => {
+          this._evSettingsOwnerByConnector.set(connectorId, runId);
+        },
       },
     });
 
@@ -1648,7 +1686,7 @@ export class CLIChargePointService {
           this._executorConnectorIds.delete(scenarioId);
           this._scenarioPositionByConnector.delete(connectorId);
         }
-        this.releaseConnectorArtifacts(connector, scenarioId, entry.definition);
+        this.releaseConnectorArtifacts(connector, connectorId, runId);
         this.persistConnectorRuntime(connector, connectorId);
         this.notifySessionSettled({ connectorId, scenarioId });
         return;
@@ -1671,7 +1709,7 @@ export class CLIChargePointService {
       // connector_runtime row's transaction_json itself is already
       // null by the time the Stop Transaction node ran).
       this._scenarioPositionByConnector.delete(connectorId);
-      this.releaseConnectorArtifacts(connector, scenarioId, entry.definition);
+      this.releaseConnectorArtifacts(connector, connectorId, runId);
       this.persistConnectorRuntime(connector, connectorId);
       // #179 Phase 2b: the run has settled (naturally or via error) --
       // stop capturing the transcript and compute this run's verdict. The
@@ -1711,30 +1749,40 @@ export class CLIChargePointService {
    * they hang off the **connector**, nobody else will ever clear them, and they
    * are owed whether or not a replacement has taken the id.
    *
-   * The decision itself is {@link shouldReleaseEvSettingsOverride} — a pure
-   * function with its own truth table, because three conditions have to hold at
-   * once and two formulations that satisfied two of the three have already
-   * shipped.
+   * The decision itself is {@link shouldReleaseEvSettingsOverride}, asked
+   * against `_evSettingsOwnerByConnector`: three formulations that read the
+   * *definitions* map instead of the claim have already shipped, so the owner
+   * is recorded where the claim happens and this only compares run ids.
    *
    * The scenario position needs no equivalent, because acquisition does the
    * work: `runScenario` clears it when it starts a run that is not resuming, so
    * a replacement owns a clean slate from its first instruction rather than
-   * inheriting the previous graph's node ids.
+   * inheriting the previous graph's node ids. The override's owner is the same
+   * idea — written on acquisition, by the run that actually takes it.
    *
    * Ordering: this runs from `runScenario`'s `finally`, which is queued as a
    * microtask, so a replacement started synchronously in the same tick is
-   * already visible here — that interleaving is the one this exists for.
+   * already visible here — that interleaving is the one this exists for. What
+   * is visible, though, is the replacement's *installation*; whether it has
+   * claimed anything is a separate fact, and the owner is the only thing that
+   * records it.
    */
   private releaseConnectorArtifacts(
     connector: ReturnType<typeof this._chargePoint.connectors.get>,
-    scenarioId: string,
-    endingDefinition: ScenarioDefinition,
+    connectorId: number,
+    endingRunId: string,
   ): void {
     if (!connector) return;
-    const installed = this._scenarios.get(scenarioId)?.definition;
-    if (shouldReleaseEvSettingsOverride(endingDefinition, installed)) {
-      connector.clearEvSettingsOverride();
-    }
+    const owner = this._evSettingsOwnerByConnector.get(connectorId) ?? null;
+    if (!shouldReleaseEvSettingsOverride(endingRunId, owner)) return;
+    connector.clearEvSettingsOverride();
+    // Hygiene, not correctness: the entry named an override that is now
+    // released, and a run's teardown can reach here twice (a stop path
+    // releases, then that run's queued `finally` does). No behaviour depends
+    // on it — any competing claim rewrites this key (a later run) or deletes
+    // it (an operator set) before the second call, so a stale entry could only
+    // ever match the run that already released.
+    this._evSettingsOwnerByConnector.delete(connectorId);
   }
 
   /** Tell {@link onSessionSettled} subscribers a gate has opened. A throwing
@@ -2187,15 +2235,18 @@ export class CLIChargePointService {
     executor.stop();
     this._executors.delete(scenarioId);
     this._runIdByScenario.delete(scenarioId);
-    // Release the EV settings override (#105) — only when this scenario
-    // declared evSettings and therefore owns it; see runScenario's
-    // executor.start().finally() for the natural-completion counterpart.
-    // The same rule as a natural finish, through the same function — a second
-    // copy of a three-condition rule is how the first two formulations drifted.
-    const stopping = this._scenarios.get(scenarioId)?.definition;
-    if (stopping && shouldReleaseEvSettingsOverride(stopping, stopping)) {
-      this._chargePoint.connectors.get(connectorId)?.clearEvSettingsOverride();
-    }
+    // Release the EV settings override (#105) — only when this run actually
+    // claimed it; see runScenario's executor.start().finally() for the
+    // natural-completion counterpart. The same rule as a natural finish,
+    // through the same path — a second copy of this rule is how the first
+    // three formulations drifted. `runId` was captured above, before
+    // executor.stop() let the start() promise settle and clear it, so the
+    // owner comparison still has an id to make.
+    this.releaseConnectorArtifacts(
+      this._chargePoint.connectors.get(connectorId),
+      connectorId,
+      runId,
+    );
     // Surface the stop to remote subscribers — executor.stop() bypasses
     // the onStateChange("completed") path used by runScenario(), so the
     // browser's active-scenario tracker would otherwise still believe
@@ -2249,6 +2300,11 @@ export class CLIChargePointService {
     this._runStartByScenario.clear();
     // The scenario map is gone, so no id can be asked about any more.
     this._lastRunStatusByScenario.clear();
+    // Every run this service knew about is over, so no run owns a connector's
+    // EV settings override any more. The connectors go with the charge point
+    // below, and a `CPRegistry.update` rebuild installs fresh ones — an owner
+    // left here would name a run that cannot come back (#314).
+    this._evSettingsOwnerByConnector.clear();
     // Permanent deletion uses dispose() to cancel controller timers;
     // non-permanent (update, shutdown) uses disconnect().
     // Before the permanent/temporary split: `CPRegistry.update` cleans up with

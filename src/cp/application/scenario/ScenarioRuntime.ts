@@ -13,6 +13,19 @@ export interface ScenarioRuntimeHooks {
   onNodeExecute?: (nodeId: string) => void;
   onNodeProgress?: (nodeId: string, remaining: number, total: number) => void;
   onError?: (error: Error) => void;
+  /**
+   * Fired the moment this run has *actually* applied its EV settings to the
+   * connector — after `applyEvSettingsOverride` returns, never before, and
+   * never at all if it throws (#314).
+   *
+   * A run's owner of the connector's EV settings override is written here and
+   * nowhere else, because this is the only point at which a claim exists. A
+   * definition that merely *declares* `evSettings` has claimed nothing: it may
+   * be installed under an id whose run never starts. See
+   * `shouldReleaseEvSettingsOverride` in the CLI service, which is the only
+   * consumer today.
+   */
+  onEvSettingsApplied?: () => void;
   log?: (message: string, level?: "debug" | "info" | "warn" | "error") => void;
 }
 
@@ -650,6 +663,9 @@ export const createScenarioExecutorCallbacks = (
       // `evSettingsChange`, which surfaces to subscribers and (in remote
       // mode) the browser via the `connector_ev_settings` event.
       connector.applyEvSettingsOverride(settings);
+      // Only now — the claim is the write, not the declaration, and a throw
+      // above means this run never took the override (#314).
+      hooks?.onEvSettingsApplied?.();
     },
     onGetEVSettings: () => connector.evSettings,
     onSendNotification: async (messageType, payload) => {

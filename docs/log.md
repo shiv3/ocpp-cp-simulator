@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Log
@@ -1587,3 +1587,62 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   was "nothing re-reads the condition"; this was "the condition reads a state
   that has not changed yet". The assumption is now written next to the rule:
   `_scenarios` reflects what is _installed_, never what is _finished_.
+
+## [2026-09-07] ingest | `--watch`: the EV settings override gets an owner (#314, PR #317)
+
+- Three rounds, three proxies for the same question. Round 26 asked whether a
+  definition declaring `evSettings` was **installed** (presence); round 27
+  asked whether the installed definition was **mine** (identity); round 28's
+  finding is that the survivor still asked whether a replacement **declares**
+  `evSettings` (declaration). Each replaced one proxy with a better one, and
+  each was right only for the cases someone had thought of, because the root
+  cause was untouched: **the override is one boolean on the connector with no
+  per-run owner**, and every rule reconstructed the owner from the state
+  around it.
+- The override now has an owner. `CLIChargePointService` records the run id
+  that **applied** EV settings to a connector at the moment it applies them —
+  a new `onEvSettingsApplied` hook on `ScenarioRuntimeHooks`, fired after
+  `applyEvSettingsOverride` returns and not at all if it throws — and
+  releasing is one comparison. The three clauses fall out rather than being
+  enumerated: an operator's `set_ev_settings` has no run owner and survives
+  (#105), a replacement that claimed is a different owner, an ordinary
+  completion is still its own.
+- **The dimension is ordering: installed is not "has taken effect".** A
+  replacement definition is stored under the id before it runs and, with the
+  outgoing run holding the executor slot, may never run at all — so
+  "declares `evSettings`" was read as a claim that had not happened, and the
+  outgoing run left the connector marked forever. `_scenarios` answers what is
+  installed; the owner answers what has taken effect; only a claim writes the
+  owner, so the two questions can no longer be confused. (The map still never
+  reflects the _end_ of a run either — the previous round's sentence, still
+  true.)
+- **One behaviour change beyond the finding, stated because it is one.** An
+  operator's `set_ev_settings` now **clears** the run owner, so a run that was
+  in flight when the operator set arrived no longer releases it on completion.
+  Under every previous rule it did — #105's bug in a new costume, since the
+  ending run had declared `evSettings` and was therefore judged to own an
+  override the operator had taken over.
+- **Failure**: a claim that throws records no owner, so nothing is released
+  that was never taken. **Destruction**: `removeScenario` discards the run
+  without releasing, and the run's own `finally` still releases with its
+  captured run id (unchanged from the previous rule); `cleanup()` clears the
+  owner map, since every connector goes with the charge point. **Trigger**: a
+  resumed run applies its declared `evSettings` before its first node too, so
+  it claims like any other; the stop path compares with the run id captured
+  before `executor.stop()`, which is the only point it still exists.
+- **Scope, checked rather than assumed.** The owner lives in the CLI service,
+  not on the domain `Connector`: `applyEvSettingsOverride` has callers with no
+  run id at all (the `set_ev_settings` RPC, `LocalChargePointService`, the
+  browser's `ScenarioManager`), and a field they cannot maintain would go
+  stale. Nor does it need to survive a restart —
+  `Connector._evSettingsOverridden` is in-memory only and never serialized, so
+  after a restart there is no override for an owner to name.
+- **The test axis that was missing.** The old table covered combinations of
+  _declarations_ and had no axis for whether a run ever happened, which is
+  exactly the distinction that broke. The pure function's table is now
+  near-trivial by design, and the discriminating tests are at the service:
+  a replacement installed but never run (the finding), a replacement that
+  actually ran and parked, an operator set mid-run, and a plain run against an
+  operator override. Mutating the claim write to happen at **install** time
+  instead of at claim time fails the first of those and nothing else — the
+  finding, isolated to one assertion.

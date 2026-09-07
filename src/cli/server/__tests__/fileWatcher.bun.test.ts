@@ -433,31 +433,124 @@ describe("FileWatcher symlink targets (#314)", () => {
     expect(calls).toBe(2);
   });
 
-  it("treats a broken link as nothing to watch, not a degraded filesystem", async () => {
+  it("keeps watching the target's directory while the link is broken", async () => {
+    // The correction to what this test used to assert. It emitted the recovery
+    // event in the *link's* directory — a shape the filesystem does not
+    // produce. Creating `shared/tags.json` emits in `shared` and nowhere else,
+    // and `shared` was exactly the directory the old code closed when
+    // `realpathSync` threw. So the row promising this layout worked was a
+    // claim the code did not keep, and the test agreed with it only because the
+    // test chose the event.
     const root = tempRoot();
     const targetDir = path.join(root, "shared");
     mkdirSync(targetDir);
     const link = path.join(root, "tags.json");
+    // Deliberately dangling: this is also what a `--state-db` restore of a link
+    // whose target is not mounted yet looks like.
     symlinkSync(path.join(targetDir, "tags.json"), link);
 
     const fake = new FakeFs();
     let calls = 0;
     const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
     expect(() => watcher.watch(link, () => (calls += 1))).not.toThrow();
-    // `realpathSync` threw ENOENT. That says nothing about whether `fs.watch`
-    // works, so it must not consume the once-per-process degradation line a
-    // real watch failure needs.
+    // `realpathSync` throws ENOENT; `readlinkSync` still answers, so the
+    // directory the target *will* appear in is watched from the start.
+    expect(fake.opened.sort()).toEqual([root, targetDir].sort());
+    // And an unresolvable path is not a degraded filesystem: it must not
+    // consume the once-per-process line a real watch failure needs.
     expect(watcher.degraded).toBe(false);
-    expect(fake.opened).toEqual([root]);
 
-    // And the parent watch is what lets it recover: creating the target fires
-    // a rename in the link's directory, the resolution runs again, and the
-    // target's directory joins the watch.
     writeFileSync(path.join(targetDir, "tags.json"), "[]");
-    fake.emit(root, "rename", "tags.json");
+    fake.emit(targetDir, "rename", "tags.json");
     await sleep(20);
     expect(calls).toBe(1);
-    expect(fake.opened).toContain(targetDir);
+  });
+
+  it("keeps watching after the target is deleted and recreated", async () => {
+    // Delete-then-recreate is the ordinary way a file is replaced, and both
+    // events fire in the target's directory only. Closing that watch on the
+    // deletion meant the recreation was never seen.
+    const root = tempRoot();
+    const targetDir = path.join(root, "shared");
+    mkdirSync(targetDir);
+    const target = path.join(targetDir, "tags.json");
+    writeFileSync(target, "[]");
+    const link = path.join(root, "tags.json");
+    symlinkSync(target, link);
+
+    const fake = new FakeFs();
+    let calls = 0;
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(link, () => {
+      calls += 1;
+    });
+
+    rmSync(target);
+    fake.emit(targetDir, "rename", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(1);
+    expect(fake.closed).not.toContain(targetDir);
+
+    writeFileSync(target, "[1]");
+    fake.emit(targetDir, "rename", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(2);
+  });
+
+  it("follows a chain to the final target's directory", async () => {
+    // The row that claimed chains work had no test behind it.
+    const root = tempRoot();
+    const midDir = path.join(root, "mid");
+    const finalDir = path.join(root, "final");
+    mkdirSync(midDir);
+    mkdirSync(finalDir);
+    writeFileSync(path.join(finalDir, "tags.json"), "[]");
+    symlinkSync(
+      path.join(finalDir, "tags.json"),
+      path.join(midDir, "tags.json"),
+    );
+    const link = path.join(root, "tags.json");
+    symlinkSync(path.join(midDir, "tags.json"), link);
+
+    const fake = new FakeFs();
+    let calls = 0;
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(link, () => {
+      calls += 1;
+    });
+
+    // `realpathSync` follows the whole chain in one call, so it is the *final*
+    // directory that is watched — which is where an in-place edit fires.
+    expect(fake.opened.sort()).toEqual([root, finalDir].sort());
+    fake.emit(finalDir, "change", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(1);
+  });
+
+  it("delivers an edit to a file under a symlinked ancestor", async () => {
+    // The support half of the ancestor row, as opposed to the gate below.
+    // Nothing extra is needed *while the ancestor stays put*: `fs.watch`
+    // resolves the directory it is given, so the watch opened on the alias
+    // receives the directory's events. Repointing the alias is a different
+    // question and is documented as unsupported — the watch is bound to the
+    // old directory's inode and nothing reopens it.
+    const root = tempRoot();
+    const realDir = path.join(root, "real");
+    mkdirSync(realDir);
+    writeFileSync(path.join(realDir, "tags.json"), "[]");
+    const aliasDir = path.join(root, "alias");
+    symlinkSync(realDir, aliasDir);
+
+    const fake = new FakeFs();
+    let calls = 0;
+    const watcher = makeWatcher({ debounceMs: 5, watchFactory: fake.factory });
+    watcher.watch(path.join(aliasDir, "tags.json"), () => {
+      calls += 1;
+    });
+
+    fake.emit(aliasDir, "change", "tags.json");
+    await sleep(20);
+    expect(calls).toBe(1);
   });
 
   it("does not open a second watch for a symlinked ancestor", () => {

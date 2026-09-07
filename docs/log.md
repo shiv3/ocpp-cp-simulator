@@ -1936,3 +1936,51 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   caching first was an earlier round's bug. **Destruction**: unwatching a file
   drops its baseline with the watch. **Trigger**: the next filesystem event for
   the file, which nothing guarantees — hence the limitation above.
+
+## [2026-09-07] lint | `--watch`: two rows of the layouts table were claims, not guarantees (#314, PR #317)
+
+- The table written two rounds ago promised two layouts the code did not
+  deliver, and `CLAUDE.md` is explicit that a documented guarantee **is** the
+  contract — so a row claiming support that does not exist is worse than no row:
+  it turns an unknown into a false assurance a reader acts on.
+- **A broken symlink whose target lives elsewhere.** The recovery argument in
+  that row — "creating the target is a rename in the still-watched parent" —
+  holds only when the link and its target share a directory. When they do not,
+  the recreation fires **only** in the target's directory, and that was exactly
+  the directory torn down when `realpathSync` threw. The same applies to a watch
+  that starts broken, which is what a `--state-db` restore of a link whose
+  target is not mounted yet looks like. Fixed rather than downgraded:
+  `readlinkSync` reads the link instead of following it, so it still answers
+  while the target is missing, and the directory the target _will_ appear in is
+  watched from the start and kept while it is gone. On a longer chain that is
+  the first missing hop rather than the final file, and the watch walks forward
+  one hop per recreation — progressive, and stated as such.
+- **An ancestor symlink that is repointed** (`/config/current` → `v2`, the
+  release-directory pattern). Downgraded to **No**, deliberately. Seeing the
+  event would mean watching the parent of every symlinked ancestor — which
+  reintroduces exactly the cost the final-component gate avoids, since `/var`
+  and `/tmp` are symlinks and the walk would add watches on `/` — and, worse,
+  it would not be enough on its own: the primary directory watch is bound to the
+  old directory's inode and nothing reopens it. That is the
+  replaced-watch-directory limitation this page already documents as
+  unsupported, in a different costume, and the honest fix was to stop claiming
+  otherwise. The row now says what to do instead: point the flag at the stable
+  path inside the release directory, or restart after the swap.
+- **The rule that comes out of it, and the reason this is a `lint` entry:
+  before writing a `Yes` row, write the test.** Every `Yes` row is now pinned by
+  a test that fails when that row's mechanism is removed, verified by mutation
+  rather than by reading — the whole table was audited, not just the two rows
+  under review. Two rows had no such test at all (symlink chains, and the
+  _support_ half of the ancestor row as opposed to its cost gate), and one had a
+  test that passed only because it emitted an event the filesystem does not
+  produce. That last one is the sharpest lesson of the round: a test can agree
+  with a false contract when the test chooses the event.
+- Every `No` row now also says what to do instead, so the table is usable by
+  someone whose layout is not supported rather than only by someone whose is.
+- **Failure**: an unresolvable link keeps its best-known target directory rather
+  than dropping it, and still does not report a degraded filesystem.
+  **Ordering**: resolution is attempted with `realpath` first and falls back to
+  `readlink`, so a resolvable chain always wins over a one-hop guess.
+  **Destruction**: deleting the target no longer closes its directory watch;
+  unsubscribing still does. **Trigger**: unchanged — every event that reaches
+  the registration re-resolves.

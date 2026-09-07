@@ -244,8 +244,7 @@ export class FileWatcher {
       // directory nothing has opened. `realpathSync` still follows a whole
       // chain from there, so link → link → file resolves in one call.
       if (fs.lstatSync(absolute).isSymbolicLink()) {
-        const resolved = fs.realpathSync(absolute);
-        if (resolved !== absolute) target = resolved;
+        target = this.resolveLinkTarget(absolute);
       }
     } catch {
       target = null;
@@ -259,6 +258,41 @@ export class FileWatcher {
     if (target) {
       this.addName(target, absolute);
       this.linkTargets.set(absolute, target);
+    }
+  }
+
+  /**
+   * Where a symlink's far end is, **including while it is broken**.
+   *
+   * `realpathSync` is the right answer whenever it has one: it follows a whole
+   * chain in a single call, so link → link → file lands on the real file's
+   * directory. But it throws the moment any hop is missing — and a target that
+   * is deleted and recreated is the ordinary way a file is replaced. Tearing
+   * the target watch down on that throw was a silent failure of its own: the
+   * recreation emits **only in the target's directory**, which is precisely the
+   * directory that had just been closed, so nothing ever fired again. The same
+   * held for a watch that starts broken, which is what a `--state-db` restore
+   * of a link whose target is not there yet looks like.
+   *
+   * `readlinkSync` is the fallback because it reads the link itself rather than
+   * following it, so it still answers when the target does not exist. It gives
+   * one hop, resolved against the link's own directory — which is exactly where
+   * the missing thing will appear. On a longer chain that is the *first*
+   * missing hop rather than the final file, and that is enough: when it
+   * appears, the event fires in a directory now being watched, this runs again,
+   * `realpathSync` gets further, and the watch walks forward one hop per
+   * recreation. Progressive rather than complete, and strictly better than
+   * closing the only watch that could have seen it.
+   */
+  private resolveLinkTarget(absolute: string): string | null {
+    try {
+      const resolved = fs.realpathSync(absolute);
+      return resolved === absolute ? null : resolved;
+    } catch {
+      // Broken, or a cycle. Read the link rather than following it.
+      const declared = fs.readlinkSync(absolute);
+      const hop = path.resolve(path.dirname(absolute), declared);
+      return hop === absolute ? null : hop;
     }
   }
 

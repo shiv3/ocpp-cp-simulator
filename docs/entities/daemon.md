@@ -231,10 +231,10 @@ server-flag-only check and still be ignored.
 What is watched — and only these, because these are the only paths the daemon
 reads and then keeps a copy of:
 
-| File                               | Reached by                                                                                            | What a reload does                                                                                                     |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `idTagPool.file` on a charge point | `cp.create` / `cp.update` / `cp.create_many`, and a `--state-db` restore of any of them               | Replaces the pool **live** on every charge point that was created from that path. The next session draws the new tags. |
-| A scenario file                    | `--scenario`, `--scenario-template-file`, and the `load_scenario { file }` / `run_scenario_file` RPCs | Replaces the definition **under the same scenario id**, unless the connector is mid-session — see the rule below.      |
+| File                               | Reached by                                                                                            | What a reload does                                                                                                                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idTagPool.file` on a charge point | `cp.create` / `cp.update` / `cp.create_many`, and a `--state-db` restore of any of them               | Replaces the pool **live** on every charge point that was created from that path. The next session draws the new tags.                                                                    |
+| A scenario file                    | `--scenario`, `--scenario-template-file`, and the `load_scenario { file }` / `run_scenario_file` RPCs | Replaces the definition **under the same scenario id**, unless the connector is mid-session _or_ that scenario's own run is in flight — either one holds the reload; see the rules below. |
 
 The rules, in the order they bite:
 

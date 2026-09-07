@@ -12,7 +12,7 @@ related:
   - ../entities/cli.md
   - control-plane.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-04
+updated: 2026-09-07
 ---
 
 # Access control
@@ -92,11 +92,21 @@ authenticate the simulated CP's outgoing WebSocket to the CSMS
 ## Event scopes are not an authorization boundary
 
 `events.subscribe` accepts any scope from any connected client — `"*"`,
-`"registry"`, `"file-reload"`, a charge point id. There is no per-scope check,
-so **subscribing to one scope is not a privilege distinct from subscribing to
-another**: everything the daemon pushes is visible to everyone who got through
-the handshake. Redacting a field for `"*"` subscribers alone would only mean
-asking for it by name instead.
+`"registry"`, `"file-reload"`, a charge point id. Two separate facts, and
+conflating them overstates the gap in one direction and understates it in the
+other:
+
+- **Delivery is by room.** A client receives what the scopes it joined deliver,
+  and nothing else. A `"registry"` subscriber does not see `file-reloaded`
+  pushes; a `"CP001"` subscriber does not see another charge point's. The rooms
+  are a real filter and the tables in
+  [Control plane](control-plane.md#event-push-and-rooms) describe what each one
+  carries.
+- **Choosing a room is not a privilege.** There is no per-scope check, so
+  **subscribing to one scope is not a privilege distinct from subscribing to
+  another**: anything the daemon pushes is available to anyone who got through
+  the handshake, by asking for the scope that carries it. Redacting a field for
+  `"*"` subscribers alone would only mean asking for it by name instead.
 
 The boundary is therefore the transport, described above: loopback by default,
 and Basic Auth or an explicit `--unsafe-remote` for anything else. Two

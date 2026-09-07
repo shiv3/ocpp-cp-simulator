@@ -1777,3 +1777,59 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   started only by the start phase, because `tryAutoStartForConnector` skips
   those deliberately. That second path had no test before this round, which is
   why a mutation dropping the install's hand-off was initially vacuous.
+
+## [2026-09-07] lint | `--watch`: eleven review threads answered, four contract-text fixes (#314, PR #317)
+
+- **`onPersisted` is called exactly once.** `loadScenario` chained
+  `.then().catch()`, and `.catch` also sees what the success handler throws — so
+  a durable write that landed, followed by a callback that threw, was logged as
+  a persistence failure and reported a second time as the error. `--watch`'s
+  callback reaches `eventEnvelopeSchema.parse`, which throws on an oversized
+  snapshot, so a failure to _announce_ a reload was reported as a failure to
+  _persist_ it, inverting this method's whole guarantee. The rejection handler
+  is now `.then`'s second argument, and the callback runs inside a guard so a
+  throw can neither be re-reported nor escape as an unhandled rejection.
+- **The connector's scenario position gets an owner** — the third field on this
+  branch to need one, and deliberately not a third bespoke rule. The entry has
+  carried `scenarioKey` all along, so the cleanup asks the same question the EV
+  override's run id and the executor slot's reference identity ask: is the thing
+  I am about to clear still mine? The position is per _connector_ and the
+  cleanup is per _run_, and `_executors` cannot answer it — keyed by scenarioId,
+  a _different_ scenario starting on the same connector leaves the outgoing id's
+  slot empty and any guard reading it concludes nobody owns anything.
+  `resetScenario` also clears the position **before** returning the connector to
+  Available rather than after, because that transition is handled synchronously
+  and can auto-start the next run.
+- **Every branch that holds a reload advances the baseline**, not just the
+  session gate — the fourth round on `ScenarioEntry.lastText`, and recorded as
+  inert rather than oversold: `reloadScenario` answers both of the other two
+  branches' questions before it reads the file, so neither is reachable with
+  fresh text today, and the only other caller passes `entry.lastText` itself.
+  The invariant is now maintained uniformly so the next caller inherits it.
+- [Access control](concepts/access-control.md) — the event-scope section
+  overstated the gap. Two facts, not one: **delivery is by room** (a
+  `"registry"` subscriber does not see `file-reloaded`), and **choosing a room
+  is not a privilege** (no per-scope check, so anything pushed is available to
+  anyone past the handshake, by asking for the scope that carries it).
+- [Control plane](concepts/control-plane.md) — the `"*"` scope row listed only
+  CP and registry events; `registryEvents.ts` also broadcasts `config-changed`,
+  `scenario-definitions-changed` and `file-reloaded` to that room.
+- [Daemon](entities/daemon.md) — the watched-files table said a scenario reload
+  is held only when the connector is mid-session. The gate is
+  `hasOpenTransaction || isScenarioRunning`: a run in flight holds it too, with
+  no transaction open.
+- [Fleet roadmap](analyses/fleet-load-and-observability-roadmap.md) —
+  `charge_points.id_tag_file` was attributed to schema v11. It is added by the
+  v12 → v13 migration; `SCHEMA_VERSION` is 13.
+- [Conventions](conventions.md) — new rule: **an accepted limitation belongs on
+  the wiki page for the mechanism, not in a commit message.** It is a claim
+  about the surrounding code and expires when that code changes, and a commit
+  message cannot be grepped by the round that changes it. #314 lost a P1 to one
+  recorded only in a commit.
+- Two review items needed no change. The `socketHarness` `watchOptions`
+  annotation is already clean — the file is inside `tsconfig.cli.json` under
+  `strict` and contributes none of the 193 baseline errors. And the wildcard
+  file-reload subscription is not a widening: the same unauthenticated client
+  can already read every charge point's full config over `cp.list`, credentials
+  included, so a filesystem path adds no reachable capability. The transport is
+  the boundary, which is what `access-control.md` already says.

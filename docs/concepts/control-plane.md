@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-04
+updated: 2026-09-07
 ---
 
 # Socket.IO control plane
@@ -522,14 +522,14 @@ const ack = await socket.timeout(30_000).emitWithAck("rpc", {
 
 Scopes:
 
-| Scope                    | Push events received                                                                                  | Subscribe result snapshot                                                                  |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `"*"`                    | CP events for every CP and all registry changes                                                       | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
-| `"registry"`             | Registry `added`, `removed`, `updated`, and `reset` changes                                           | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
-| `"<cpId>"`               | CP events for that CP                                                                                 | `snapshot.cps` still includes registry entries; `snapshot.perCp` includes the selected CP. |
-| `"config"`               | `config-changed` pushes for the shared simulator config                                               | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
-| `"scenario-definitions"` | `scenario-definitions-changed` pushes, including the ones a `--watch` scenario reload produces (#314) | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
-| `"file-reload"`          | `file-reloaded` pushes from a `--watch` daemon (#314)                                                 | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| Scope                    | Push events received                                                                                                                                         | Subscribe result snapshot                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `"*"`                    | **Everything the daemon pushes**: CP events for every CP, all registry changes, `config-changed`, `scenario-definitions-changed`, and `file-reloaded` (#314) | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
+| `"registry"`             | Registry `added`, `removed`, `updated`, and `reset` changes                                                                                                  | `snapshot.cps` for the registry and `snapshot.perCp` for every CP.                         |
+| `"<cpId>"`               | CP events for that CP                                                                                                                                        | `snapshot.cps` still includes registry entries; `snapshot.perCp` includes the selected CP. |
+| `"config"`               | `config-changed` pushes for the shared simulator config                                                                                                      | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| `"scenario-definitions"` | `scenario-definitions-changed` pushes, including the ones a `--watch` scenario reload produces (#314)                                                        | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
+| `"file-reload"`          | `file-reloaded` pushes from a `--watch` daemon (#314)                                                                                                        | `snapshot.cps` only; `snapshot.perCp` is empty for this scope.                             |
 
 The subscribe ack is atomic: the room join and snapshot capture happen together,
 so clients can apply the snapshot before processing subsequent `event` pushes.

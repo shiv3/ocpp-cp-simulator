@@ -14,7 +14,7 @@ related:
   - ../entities/daemon.md
   - choosing-an-interface.md
   - ../sources/github-issues.md
-updated: 2026-09-04
+updated: 2026-09-07
 ---
 
 # Fleet, load and observability roadmap
@@ -476,7 +476,8 @@ does to a CP mid-transaction: nothing. The new definition is _held_ and applied
 when the session ends; it is never dropped. A malformed file is rejected and the
 previous good copy stays. Every reload pushes a `file-reload` event with an
 `applied` / `deferred` / `rejected` outcome. `charge_points.id_tag_file`
-(schema v11) persists the pool's source path so a restarted `--watch` daemon
+(added by the v12 → v13 migration; `SCHEMA_VERSION` is 13) persists the pool's
+source path so a restarted `--watch` daemon
 re-watches it.
 
 **Blueprints are deliberately out of it.** The issue's premise assumed a

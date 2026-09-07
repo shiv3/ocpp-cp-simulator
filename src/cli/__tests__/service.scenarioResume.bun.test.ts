@@ -308,9 +308,14 @@ describe("a manually stopped run leaves nothing to resume from (#314)", () => {
     svc.runScenario(1, id);
     // Parked in the 30s delay with node-a behind it, so there is a real
     // position on disk to lose.
+    // The predicate has to be at least as strong as the assertion under it:
+    // the executor emits `node.complete` for the START node first, so
+    // "a position exists" is satisfied by `start-1` and the assertion could run
+    // before `node-a` had completed. Waiting for the content the assertion
+    // checks removes the race rather than widening a sleep (#314).
     await waitFor(
-      () => storedPosition(db) !== null,
-      "the run to record a position",
+      () => storedPosition(db)?.includes("node-a") === true,
+      "the run to record node-a's position",
     );
     expect(storedPosition(db)).toContain("node-a");
 
@@ -402,9 +407,12 @@ describe("a replacement run does not inherit the old graph's remains (#314)", ()
     try {
       const first = svc.loadScenario(1, buildParkedInstance(1));
       svc.runScenario(1, first);
+      // Same reason as above: `start-1` completes first, so a predicate that
+      // only asks whether *a* position exists is weaker than the assertion it
+      // guards.
       await waitFor(
-        () => storedPosition(db, "replace-cp") !== null,
-        "the first run to record a position",
+        () => storedPosition(db, "replace-cp")?.includes("node-a") === true,
+        "the first run to record node-a's position",
       );
       expect(storedPosition(db, "replace-cp")).toContain("node-a");
 

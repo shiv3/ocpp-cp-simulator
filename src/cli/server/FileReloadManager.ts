@@ -861,8 +861,24 @@ export class FileReloadManager {
     // Held, not dropped, in both of the cases below — `drainPending` has
     // already cleared `entry.pending`, so returning without restoring it is
     // exactly how a validated edit goes missing.
+    //
+    // And held bytes become the baseline, in **every** branch that holds, not
+    // just the session gate further down. `lastText` names the bytes this
+    // manager has taken responsibility for, and holding is taking
+    // responsibility; a hold that skipped it would leave the drain recording
+    // the *previous* bytes as the baseline for the definition it just applied,
+    // so re-saving those previous bytes would early-out as unchanged and the
+    // connector would keep running the edit the operator had undone.
+    //
+    // Stated as inert rather than oversold, because it is: `reloadScenario`
+    // answers both of these questions *before* it reads the file, so neither
+    // branch is reachable with fresh text today, and the only other caller
+    // (`drainPending`) passes `entry.lastText` itself, which makes the write a
+    // no-op. This is the invariant being maintained uniformly so that the next
+    // caller of `applyOrDefer` inherits it, not a live bug being closed (#314).
     if (!service) {
       entry.pending = definition;
+      if (text !== null) entry.lastText = text;
       return true;
     }
     // Asked *before* the hold below, and that order is the fix rather than an
@@ -893,6 +909,9 @@ export class FileReloadManager {
     // edit.
     if (!this.stillLoaded(entry)) {
       entry.pending = definition;
+      // Held, so the same baseline rule as every other hold — see the branch
+      // above.
+      if (text !== null) entry.lastText = text;
       return true;
     }
     // Checked before anything is applied, because the alternative is the shape
@@ -982,7 +1001,10 @@ export class FileReloadManager {
         `[watch] ${entry.cpId}/connector ${entry.connectorId}: scenario ${entry.scenarioId} reload held until the current session ends`,
       );
       // Held bytes become the baseline: they have been accepted, and the drain
-      // that installs them later re-decides whether they may keep it.
+      // that installs them later re-decides whether they may keep it. The same
+      // line stands in the two hold branches above — this is the rule for
+      // *holding*, not a property of this particular gate, and having it in
+      // only one of the three places is what let a drain record stale bytes.
       if (text !== null) entry.lastText = text;
       return true;
     }

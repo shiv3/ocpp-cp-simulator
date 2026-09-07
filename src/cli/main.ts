@@ -24,6 +24,7 @@ import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
 import {
   startServer,
+  startupScenarioOptionConflict,
   DEFAULT_HTTP_PORT,
   DEFAULT_PID_PATH,
 } from "./server/startServer";
@@ -598,6 +599,22 @@ export function parseArgs(argv: string[]): CLIOptions {
   // negative would quietly bootstrap one, in both cases without saying so.
   if (!Number.isInteger(cpCount) || cpCount < 1) {
     process.stderr.write("Error: --cp-count must be a positive integer\n");
+    process.exit(1);
+  }
+  // Same reasoning as --cp-count: a startup flag that is silently ignored is
+  // worse than a refused one. `--scenario`, `--scenario-template` and
+  // `--scenario-template-file` each load a definition onto every connector, so
+  // two of them together is a question with no answer — and the daemon's three
+  // readers of these flags used to answer it differently, which showed up as
+  // restore rows held back for a scenario that was never loaded (#314).
+  const startupScenarioConflict = startupScenarioOptionConflict({
+    scenario,
+    scenarioTemplate,
+    scenarioTemplateFile,
+    scenarioConnector,
+  });
+  if (startupScenarioConflict) {
+    process.stderr.write(`Error: ${startupScenarioConflict}\n`);
     process.exit(1);
   }
   if (cpCount > 1 && !cpId) {

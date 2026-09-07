@@ -131,6 +131,16 @@ export interface ServerOptions {
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
+  // Refused before anything is opened. Two startup scenario flags used to be
+  // silently ranked, differently by each of the three functions that read them,
+  // and the disagreement showed up as restore rows held back for a scenario the
+  // boot was never going to load. The CLI refuses this at parse time with the
+  // same message; this is the door for every other caller, and it is here — not
+  // at the first read, several hundred lines in — so a refused daemon has not
+  // opened the state DB, registered metrics or restored a fleet first (#314).
+  const startupConflict = startupScenarioOptionConflict(opts.startupScenario);
+  if (startupConflict) throw new Error(startupConflict);
+
   // Open the persistent state DB up front so every CP we create (boot
   // bootstrap or via socket.io RPC) gets the same Database handle. Without
   // --state-db we stay in-memory; the log line below makes the choice
@@ -828,6 +838,11 @@ export function installStartupScenario(
   source: StartupScenarioFile | null = readStartupScenarioFile(opt),
 ): InstalledStartupScenario[] {
   const installed: InstalledStartupScenario[] = [];
+  // Which flag is in effect is asked once, through the same resolver
+  // `startupClaimedScenarioIds` and `readStartupScenarioFile` read, so the load
+  // and the prediction of it cannot pick different flags (#314).
+  const mode = resolveStartupScenarioMode(opt);
+  if (!mode) return installed;
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
     process.stderr.write(
@@ -837,16 +852,16 @@ export function installStartupScenario(
   }
 
   // 1) Built-in template by id — instantiate per connector.
-  if (opt.scenarioTemplate) {
+  if (mode.kind === "template") {
     for (const connectorId of connectors) {
       try {
         const scenarioId = svc.loadScenarioTemplate(
-          opt.scenarioTemplate,
+          mode.templateId,
           connectorId,
         );
         installed.push({ connectorId, scenarioId });
         process.stderr.write(
-          `[server] Scenario template "${opt.scenarioTemplate}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
+          `[server] Scenario template "${mode.templateId}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
       } catch (err) {
         process.stderr.write(
@@ -860,20 +875,20 @@ export function installStartupScenario(
   }
 
   // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
-  if (opt.scenarioTemplateFile) {
+  if (mode.kind === "templateFile") {
     if (!source?.definition || source.text === null) {
       process.stderr.write(
         `[server] Failed to read scenario template file: ${
           source?.error instanceof Error
             ? source.error.message
-            : (source?.error ?? opt.scenarioTemplateFile)
+            : (source?.error ?? mode.path)
         }\n`,
       );
       return installed;
     }
     const template = source.definition;
     const templateText = source.text;
-    warnOnScenarioSchemaMismatch(opt.scenarioTemplateFile, template);
+    warnOnScenarioSchemaMismatch(mode.path, template);
     for (const connectorId of connectors) {
       try {
         const instance = instantiateTemplate(template, connectorId);
@@ -883,7 +898,7 @@ export function installStartupScenario(
         // reload, so a fan-out across connectors keeps its independent copies
         // instead of collapsing onto the file's own targetId.
         fileReload?.registerScenarioFile({
-          filePath: opt.scenarioTemplateFile as string,
+          filePath: mode.path,
           cpId: svc.getInit().cpId,
           connectorId,
           scenarioId,
@@ -904,7 +919,7 @@ export function installStartupScenario(
         );
         installed.push({ connectorId, scenarioId });
         process.stderr.write(
-          `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
+          `[server] Scenario template file "${mode.path}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
       } catch (err) {
         process.stderr.write(
@@ -919,20 +934,20 @@ export function installStartupScenario(
 
   // 3) Single scenario file — for fan-out, treat it like a template (rewrite
   // ids per connector); for single-connector, behave as before.
-  if (opt.scenario) {
+  if (mode.kind === "file") {
     if (!source?.definition || source.text === null) {
       process.stderr.write(
         `[server] Failed to read scenario file: ${
           source?.error instanceof Error
             ? source.error.message
-            : (source?.error ?? opt.scenario)
+            : (source?.error ?? mode.path)
         }\n`,
       );
       return installed;
     }
     const definition = source.definition;
     const scenarioText = source.text;
-    warnOnScenarioSchemaMismatch(opt.scenario, definition);
+    warnOnScenarioSchemaMismatch(mode.path, definition);
     for (const connectorId of connectors) {
       try {
         // Re-evaluated per definition, not captured once (#314). A single
@@ -949,7 +964,7 @@ export function installStartupScenario(
         pruneLegacyStartupInstances(svc, connectorId, definition.id);
         const scenarioId = svc.loadScenario(connectorId, prepare(definition));
         fileReload?.registerScenarioFile({
-          filePath: opt.scenario as string,
+          filePath: mode.path,
           cpId: svc.getInit().cpId,
           connectorId,
           scenarioId,
@@ -967,7 +982,7 @@ export function installStartupScenario(
         );
         installed.push({ connectorId, scenarioId });
         process.stderr.write(
-          `[server] Scenario file "${opt.scenario}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
+          `[server] Scenario file "${mode.path}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
       } catch (err) {
         process.stderr.write(
@@ -1140,12 +1155,7 @@ export function startupTargetCpIds(
 export function isExplicitStartupScenario(
   startupScenario: ServerOptions["startupScenario"],
 ): boolean {
-  return (
-    !!startupScenario &&
-    (!!startupScenario.scenario ||
-      !!startupScenario.scenarioTemplate ||
-      !!startupScenario.scenarioTemplateFile)
-  );
+  return resolveStartupScenarioMode(startupScenario) !== null;
 }
 
 /**
@@ -1168,6 +1178,88 @@ export function scenarioFileTargetsConnector(
     definition.targetType === "connector" &&
     definition.targetId === connectorId
   );
+}
+
+/**
+ * Which startup scenario option this boot is running, as one value.
+ *
+ * The precedence question, asked in one place. Three functions used to derive
+ * something from the same three flags and each spelled out its own rule:
+ * {@link installStartupScenario} took `--scenario-template` first, then
+ * `--scenario-template-file`, then `--scenario`; {@link readStartupScenarioFile}
+ * read `scenarioTemplateFile ?? scenario`; {@link startupClaimedScenarioIds}
+ * looked only at whether either file flag was set. Pass `--scenario-template`
+ * *and* `--scenario` together and the third disagreed with the first: the load
+ * installed the built-in template and claimed nothing, while the prediction
+ * claimed the file's ids — so the first restore pass held rows back for
+ * scenarios that were never going to be loaded, and they stayed unwatched until
+ * the charge point dialled.
+ *
+ * The combination is now refused rather than ranked (see
+ * {@link startupScenarioOptionConflict}), so there is no precedence left to
+ * disagree about: at most one flag is set, and every caller reads the same
+ * discriminated union to find out which. A rule spelled out once cannot drift;
+ * spelled out three times it already had (#314).
+ */
+export type StartupScenarioMode =
+  | { readonly kind: "template"; readonly templateId: string }
+  | { readonly kind: "templateFile"; readonly path: string }
+  | { readonly kind: "file"; readonly path: string };
+
+/** The startup scenario flags, in the order a conflict message names them. */
+const STARTUP_SCENARIO_FLAGS = [
+  ["scenarioTemplate", "--scenario-template"],
+  ["scenarioTemplateFile", "--scenario-template-file"],
+  ["scenario", "--scenario"],
+] as const;
+
+/**
+ * The message for a startup that names more than one scenario option, or
+ * `null` when at most one is set.
+ *
+ * **Refused, not ranked.** Every ranking is a silent answer to a question the
+ * operator asked ambiguously, and the three derivations above ranked them
+ * differently. Refusing is the smaller invariant: no doc, example, compose file
+ * or test in this repository passes two of these flags, so nothing that works
+ * today stops working, and a combination that would have quietly ignored a flag
+ * now names the flags it cannot reconcile (#314).
+ *
+ * Returned rather than thrown so the CLI can refuse at parse time — see
+ * `src/cli/main.ts` — while {@link resolveStartupScenarioMode} throws for
+ * programmatic callers that never went through it.
+ */
+export function startupScenarioOptionConflict(
+  opt: ServerOptions["startupScenario"],
+): string | null {
+  if (!opt) return null;
+  const given = STARTUP_SCENARIO_FLAGS.filter(([key]) => !!opt[key]).map(
+    ([, flag]) => flag,
+  );
+  if (given.length < 2) return null;
+  return `${given.join(", ")} cannot be combined - pass exactly one startup scenario option`;
+}
+
+/**
+ * The one startup mode the flags name, or `null` when they name none.
+ *
+ * Throws on a conflicting combination. The daemon refuses it earlier and more
+ * politely (the CLI at parse time, {@link startServer} before it opens the
+ * database), so this throw is the backstop for a caller that built the options
+ * object itself: silently picking one flag is the behaviour this function
+ * exists to remove.
+ */
+export function resolveStartupScenarioMode(
+  opt: ServerOptions["startupScenario"],
+): StartupScenarioMode | null {
+  const conflict = startupScenarioOptionConflict(opt);
+  if (conflict) throw new Error(conflict);
+  if (!opt) return null;
+  if (opt.scenarioTemplate)
+    return { kind: "template", templateId: opt.scenarioTemplate };
+  if (opt.scenarioTemplateFile)
+    return { kind: "templateFile", path: opt.scenarioTemplateFile };
+  if (opt.scenario) return { kind: "file", path: opt.scenario };
+  return null;
 }
 
 /**
@@ -1210,8 +1302,9 @@ export interface StartupScenarioFile {
 export function readStartupScenarioFile(
   opt: ServerOptions["startupScenario"],
 ): StartupScenarioFile | null {
-  const filePath = opt?.scenarioTemplateFile ?? opt?.scenario;
-  if (!filePath) return null;
+  const mode = resolveStartupScenarioMode(opt);
+  if (!mode || mode.kind === "template") return null;
+  const filePath = mode.path;
   try {
     const text = fs.readFileSync(filePath, "utf-8");
     return {
@@ -1255,8 +1348,18 @@ export function startupClaimedScenarioIds(
   source: StartupScenarioFile | null,
 ): Set<string> {
   const claimed = new Set<string>();
-  if (!source || !opt) return claimed;
-  if (!opt.scenario && !opt.scenarioTemplateFile) return claimed;
+  // Resolved first, ahead of the `source` check, so a conflicting combination
+  // is refused here too rather than answered with an empty set that happens to
+  // look harmless.
+  const mode = resolveStartupScenarioMode(opt);
+  // A built-in `--scenario-template` claims nothing — `loadScenarioTemplate`
+  // mints that id and prunes its own prior instances. Asked through the same
+  // resolver the load reads, so the prediction and the load cannot disagree
+  // about which flag is in effect (#314).
+  if (!mode || mode.kind === "template") return claimed;
+  // A mode implies options, but only to a reader: narrowed for the compiler.
+  if (!opt) return claimed;
+  if (!source) return claimed;
   const baseId = source.definition?.id;
   if (!source.definition) return claimed;
   if (typeof baseId !== "string") return claimed;
@@ -1267,7 +1370,7 @@ export function startupClaimedScenarioIds(
     // template file always instantiates; a `--scenario` keeps its own id only
     // when it already targets its single connector.
     claimed.add(
-      !opt.scenarioTemplateFile &&
+      mode.kind === "file" &&
         scenarioFileTargetsConnector(
           source.definition,
           connectorId,

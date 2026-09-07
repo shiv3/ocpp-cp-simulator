@@ -505,6 +505,38 @@ export class CLIChargePointService {
    * scenario starting on the same connector leaves the outgoing id's slot
    * empty and the guard reading "nobody owns this".
    */
+  /**
+   * Whether this connector's checkpoint belongs to a *different* run that is
+   * still going.
+   *
+   * The acquisition half of the ownership rule (#314). Three cases, and only
+   * the middle one is a preserve:
+   *
+   * - **Same key** — a finished earlier run of this same scenario id; a live
+   *   one is refused by `runScenario`'s "already running" check before this is
+   *   reached. Clear: it is this id's own stale position.
+   * - **Another key, still in `_executors`** — a run in flight on this
+   *   connector. Preserve: it is still writing that position, and a restart
+   *   must resume *it*, not read its node ids as though they were this run's.
+   * - **Another key, not running** — dead, or stopped with its `finally` still
+   *   queued. Clear, which is the case the acquisition clear was written for:
+   *   left behind, a restart before this run's first node resumed the new graph
+   *   from the old graph's node ids.
+   *
+   * `_executors` is the authority for "still going": the stop paths delete from
+   * it synchronously, so a run stopped a moment ago does not keep holding a
+   * checkpoint the incoming run should own.
+   */
+  private scenarioPositionHeldByOtherLiveRun(
+    connectorId: number,
+    incomingScenarioId: string,
+  ): boolean {
+    const held = this._scenarioPositionByConnector.get(connectorId);
+    if (!held) return false;
+    if (held.scenarioKey === incomingScenarioId) return false;
+    return this._executors.has(held.scenarioKey);
+  }
+
   private clearScenarioPositionIfOwned(
     connectorId: number,
     scenarioId: string,
@@ -1686,16 +1718,32 @@ export class CLIChargePointService {
       // the window before this run completes its first node resumed the *new*
       // graph from the *old* graph's node ids, which is persisted state and so
       // survives the restart that reads it (#314).
-      this._scenarioPositionByConnector.delete(connectorId);
-      // Written through, not just dropped in memory. The artifact that outlives
-      // a restart is the `connector_runtime` row, and it keeps the previous
-      // graph's node ids until something persists over them — which, without
-      // this, is the replacement's first completed node. A restart inside that
-      // window is exactly the case being closed.
-      this.persistConnectorRuntime(
-        this._chargePoint.connectors.get(connectorId),
+      //
+      // "Belongs to a run that is over" is now asked rather than assumed. A
+      // connector can carry two runs at once — the shipped default
+      // (`essential-cp-behavior`, `triggerOn: connect`) auto-starts on every
+      // connector and parks on `remoteStartTrigger` until a CSMS acts, so the
+      // resting state of a default charge point is one run already in flight —
+      // and this clear used to throw away that run's checkpoint on its way in.
+      // The same ownership question `clearScenarioPositionIfOwned` asks on the
+      // way out, asked on the way in: a position whose owner is still running
+      // is not this run's to drop.
+      const heldByLiveRun = this.scenarioPositionHeldByOtherLiveRun(
         connectorId,
+        scenarioId,
       );
+      if (!heldByLiveRun) {
+        this._scenarioPositionByConnector.delete(connectorId);
+        // Written through, not just dropped in memory. The artifact that
+        // outlives a restart is the `connector_runtime` row, and it keeps the
+        // previous graph's node ids until something persists over them —
+        // which, without this, is the replacement's first completed node. A
+        // restart inside that window is exactly the case being closed.
+        this.persistConnectorRuntime(
+          this._chargePoint.connectors.get(connectorId),
+          connectorId,
+        );
+      }
     }
 
     const executor = new ScenarioExecutor(

@@ -11,10 +11,12 @@ import {
   installStartupScenario,
   legacyStartupInstanceIds,
   readStartupScenarioFile,
+  resolveStartupScenarioMode,
   runStartupScenario,
   startStartupScenario,
   startupClaimedScenarioIds,
   startupInstanceId,
+  startupScenarioOptionConflict,
 } from "../startServer";
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 
@@ -433,5 +435,128 @@ describe("startup scenario installs before the dial (#314)", () => {
     // executor running: `startScenarioIfNotAlreadyActive` is the guard that
     // turns "a stale run" into "a stale run nothing replaces".
     expect(await bootWithOrder("dial-then-install")).toBe(999);
+  });
+
+  it("refuses a startup that names more than one scenario option", () => {
+    // The finding (#314). Three functions derived from the same three flags
+    // and each ranked them differently: the load took `--scenario-template`
+    // first, the file read took `--scenario-template-file ?? --scenario`, and
+    // the claim looked only at whether either file flag was set. Pass
+    // `--scenario-template` and `--scenario` together and the claim named the
+    // file's ids while the load installed the built-in template — so the first
+    // restore pass held rows back for a scenario the boot never loaded, and
+    // they stayed unwatched until the charge point dialled.
+    //
+    // Not re-ranked: refused. Every reader now asks
+    // `resolveStartupScenarioMode`, which has one flag or none to report.
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-startup-conflict-"));
+    const file = join(tmpDir, "scenario.json");
+    writeFileSync(file, scenarioJson("targeted-scenario", 11));
+    const svc = newService(null, 1);
+    try {
+      const single = {
+        scenario: null,
+        scenarioTemplate: null,
+        scenarioTemplateFile: null,
+        scenarioConnector: "all",
+      };
+      // One flag, or none, is answered — never refused.
+      expect(startupScenarioOptionConflict(single)).toBeNull();
+      expect(startupScenarioOptionConflict(null)).toBeNull();
+      expect(
+        startupScenarioOptionConflict({ ...single, scenario: file }),
+      ).toBeNull();
+
+      const conflicting = {
+        ...single,
+        scenario: file,
+        scenarioTemplate: "essential-cp-behavior",
+      };
+      // The message names the flags it cannot reconcile — an operator who
+      // passed two has to be told which two.
+      expect(startupScenarioOptionConflict(conflicting)).toBe(
+        "--scenario-template, --scenario cannot be combined - pass exactly one startup scenario option",
+      );
+      expect(() => resolveStartupScenarioMode(conflicting)).toThrow(
+        /--scenario-template, --scenario cannot be combined/,
+      );
+
+      // Both sides of the disagreement now refuse the same input, which is the
+      // property that makes them unable to disagree. Before this they each
+      // answered, differently: `startupClaimedScenarioIds` returned
+      // ["targeted-scenario"] and `installStartupScenario` loaded the built-in
+      // template under an id nothing had claimed.
+      expect(() => startupClaimedScenarioIds(conflicting, 1, null)).toThrow(
+        /cannot be combined/,
+      );
+      expect(() => readStartupScenarioFile(conflicting)).toThrow(
+        /cannot be combined/,
+      );
+      expect(() => installStartupScenario(svc, conflicting, 1)).toThrow(
+        /cannot be combined/,
+      );
+      // Nothing was installed on the way to the refusal.
+      expect(svc.listScenarios(1)).toEqual([]);
+    } finally {
+      svc.cleanup(true);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("claims exactly the ids the load installs, in every single-flag mode", () => {
+    // The agreement the refusal exists to protect, asserted directly rather
+    // than inferred: for each mode, what `startupClaimedScenarioIds` predicts
+    // and what `installStartupScenario` actually loads are compared against the
+    // same read of the same file. `--scenario-template` is the one deliberate
+    // asymmetry — `loadScenarioTemplate` mints the id and prunes its own prior
+    // instances, so the claim is empty by design and the load is not.
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-startup-agree-"));
+    const file = join(tmpDir, "scenario.json");
+    writeFileSync(file, scenarioJson("targeted-scenario", 11));
+    const base = {
+      scenario: null,
+      scenarioTemplate: null,
+      scenarioTemplateFile: null,
+      scenarioConnector: "all",
+    };
+    const modes = [
+      // One connector the file already targets: loaded under its own id.
+      {
+        label: "--scenario (targeted)",
+        opt: { ...base, scenario: file },
+        connectors: 1,
+      },
+      // Two connectors: instantiated per connector, under stable ids.
+      {
+        label: "--scenario (fan-out)",
+        opt: { ...base, scenario: file },
+        connectors: 2,
+      },
+      // A template file always instantiates.
+      {
+        label: "--scenario-template-file",
+        opt: { ...base, scenarioTemplateFile: file },
+        connectors: 2,
+      },
+    ];
+    for (const { label, opt, connectors } of modes) {
+      const svc = newService(null, connectors);
+      try {
+        const source = readStartupScenarioFile(opt);
+        const claimed = [...startupClaimedScenarioIds(opt, connectors, source)];
+        const installed = installStartupScenario(
+          svc,
+          opt,
+          connectors,
+          null,
+          null,
+          source,
+        ).map((entry) => entry.scenarioId);
+        expect({ label, claimed }).toEqual({ label, claimed: installed });
+      } finally {
+        svc.cleanup(true);
+      }
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 });

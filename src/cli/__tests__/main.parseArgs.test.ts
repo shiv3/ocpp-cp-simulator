@@ -130,6 +130,43 @@ describe("parseArgs --watch (#314)", () => {
       "--watch cannot be combined with a client mode",
     );
   });
+
+  it("refuses two startup scenario options and names both", () => {
+    // #314: the three functions that derive from these flags each ranked them
+    // differently, so a combination did not merely pick one — the load and the
+    // prediction of the load picked *different* ones, and the restore held rows
+    // back for a scenario that was never loaded. Refused at parse time, so the
+    // daemon does not reach the readers at all.
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-S",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--scenario",
+      "/tmp/s.json",
+      "--scenario-template",
+      "essential-cp-behavior",
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--scenario-template, --scenario");
+    expect(result.stderr).toContain("cannot be combined");
+  });
+
+  it("accepts a single startup scenario option", () => {
+    // The other half of the guard: one flag is not a conflict. Without this the
+    // check could be inverted, or made unconditional, and nothing would say so.
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-S",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--scenario-template",
+      "essential-cp-behavior",
+    ]);
+
+    expect(result.status).toBe(0);
+  });
 });
 
 describe("parseArgs OCPP 1.6 security flags", () => {

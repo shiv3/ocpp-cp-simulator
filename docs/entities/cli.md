@@ -19,7 +19,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -546,6 +546,14 @@ validate the file against that schema at load time and warn (never reject)
 on a mismatch. Built-in template ids are listed in
 [Scenario templates](scenario-templates.md).
 
+**At most one of the three.** `--scenario`, `--scenario-template` and
+`--scenario-template-file` each load a definition onto every selected
+connector, so passing two is refused at parse time with a message naming the
+flags it cannot reconcile — the daemon does not start. They were silently
+ranked before, and the three places in the daemon that derive from these flags
+ranked them differently: see the startup rules in
+[Daemon](daemon.md#file-hot-reload).
+
 ### 4. Client Modes (`--send` / `--events` / `--stop`)
 
 The same binary doubles as a TCP Socket.IO client for a running daemon. Client
@@ -705,7 +713,7 @@ Events are emitted in all modes:
 | `--insecure-tls-key-perms`          | No       | -                                       | Allow a `--tls-key` file readable by group/other (local testing only)                                                                                                                                                                                                                                                                          |
 | `--vendor <vendor>`                 | No       | `CLI-Vendor`                            | Charge point vendor                                                                                                                                                                                                                                                                                                                            |
 | `--model <model>`                   | No       | `CLI-Model`                             | Charge point model                                                                                                                                                                                                                                                                                                                             |
-| `--scenario <file>`                 | No       | -                                       | Startup scenario JSON file (server mode)                                                                                                                                                                                                                                                                                                       |
+| `--scenario <file>`                 | No       | -                                       | Startup scenario JSON file (server mode). Mutually exclusive with `--scenario-template` / `--scenario-template-file`                                                                                                                                                                                                                           |
 | `--scenario-template <id>`          | No       | -                                       | Built-in scenario template id (server mode) — see [Scenario templates](scenario-templates.md)                                                                                                                                                                                                                                                  |
 | `--scenario-template-file <p>`      | No       | -                                       | Path to a cpId-independent template JSON                                                                                                                                                                                                                                                                                                       |
 | `--scenario-connector <list>`       | No       | `1`                                     | `all`, single id (`1`), or list (`1,2,3`)                                                                                                                                                                                                                                                                                                      |

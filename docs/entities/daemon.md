@@ -321,7 +321,22 @@ The rules, in the order they bite:
   ending, because nothing else will clear them. The scenario position is claimed
   by acquisition — a run that starts without resuming clears it, and writes that
   through, so a restart in the window before its first node completes cannot
-  resume the new graph from the old graph's node ids. The EV settings
+  resume the new graph from the old graph's node ids — **except when the
+  position belongs to a run that is still going.** A connector can carry two
+  runs at once, and normally does: `cp.create` seeds `essential-cp-behavior` on
+  every connector, it auto-starts on connect and then parks on
+  `remoteStartTrigger` until a CSMS acts, so an operator's `run_scenario`
+  arrives beside a run already in flight. The acquiring run asks the same
+  ownership question the ending run asks — is this position mine, or a live
+  neighbour's? — and leaves a live neighbour's alone. **What that cannot fix is
+  structural:** the daemon holds one scenario position per connector in memory
+  and one `connector_runtime` row per connector on disk, so the moment the
+  incoming run completes its first node it owns the slot and the neighbour's
+  checkpoint is gone. Two concurrent runs on one connector therefore share one
+  checkpoint, last writer wins, and only a per-run checkpoint would change that
+  — a schema change, deliberately not made. Refusing the second run instead is
+  not available either: with the seeded default running on every connector it
+  would refuse every operator `run_scenario` on a default daemon. The EV settings
   override is released by the run that **actually applied** it — on an ordinary
   completion as well as a replacement — and by no one else. The daemon records
   the run id that applied EV settings to a connector at the moment it applies
@@ -578,6 +593,22 @@ when the file already targets its connector, so it can collide with an earlier
 control-plane load of that id, and the abandoned row would otherwise be restored
 at the next start and applied before the bootstrap registered the configured
 scenario. That deletion, too, does not depend on `--watch`.
+
+**At most one startup scenario option is accepted.** `--scenario`,
+`--scenario-template` and `--scenario-template-file` each load a definition onto
+every selected connector, so two of them together is a question with no answer.
+The daemon refuses the combination — at parse time in the CLI, and again before
+`startServer` opens the state DB, with a message naming the flags it cannot
+reconcile — rather than ranking them. Ranking is what it did before, and it did
+it in three places that disagreed: the load preferred `--scenario-template`, the
+boot's single file read preferred `--scenario-template-file`, and the claim
+below looked only at whether either _file_ flag was set. Pass
+`--scenario-template` alongside `--scenario` and the claim named the file's ids
+while the load installed the built-in template, so the first pass held rows back
+for a scenario the boot never loaded and they stayed unwatched until the charge
+point dialled. Which flag is in effect is now resolved once, and every one of
+those three readers asks the same resolver, so the load and the prediction of
+the load cannot pick different flags.
 
 The restore itself runs in **two passes**, because three constraints have to
 hold at once and no single position satisfies all three:

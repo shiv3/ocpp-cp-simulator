@@ -2058,3 +2058,62 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   unsubscribing releases every hop; a repoint releases only the hops the chain
   no longer passes through. **Trigger**: unchanged — every event reaching the
   registration re-walks the chain.
+
+## [2026-09-07] ingest | startup flags: one option, one precedence; and a checkpoint has an owner on the way in too (#314, PR #317)
+
+Two P2 review findings, one shared shape: a rule spelled out in more than one
+place, and the copies disagreeing.
+
+- **Startup scenario options are now mutually exclusive.** Three functions
+  derived from `--scenario` / `--scenario-template` / `--scenario-template-file`
+  and each ranked them differently — the load took the built-in template first,
+  the boot's single file read took `--scenario-template-file ?? --scenario`, and
+  the claim of "which stored ids will this boot overwrite" looked only at
+  whether either _file_ flag was set. Pass `--scenario-template` beside
+  `--scenario` and the claim named the file's ids while the load installed the
+  template, so the first restore pass held rows back for a scenario the boot
+  never loaded and they went unwatched until the charge point dialled.
+  Refused rather than re-ranked: no doc, example, compose file or test in the
+  repository passes two of these flags, so nothing that worked stops working,
+  and a combination that used to ignore a flag silently now names the flags it
+  cannot reconcile. The CLI refuses at parse time; `startServer` refuses again
+  before it opens the state DB; and all three readers now ask one resolver that
+  returns the single mode in effect, so precedence is not merely agreed on — it
+  no longer exists to disagree about.
+- **The acquisition clear now asks who owns the position.** A run that starts
+  without resuming cleared the connector's checkpoint and wrote the deletion
+  through, on the reasoning that whatever was there belonged to a run that is
+  over. That is true of a replacement and false of a neighbour: `cp.create`
+  seeds `essential-cp-behavior` on every connector, it auto-starts on connect
+  and parks on `remoteStartTrigger` until a CSMS acts, so the resting state of a
+  default charge point is one run already in flight and every operator
+  `run_scenario` arrives beside it. The clear threw that run's checkpoint away,
+  and under `--state-db` it wrote the loss through to the row that survives a
+  restart. The ownership question the ending run already asks is now asked by
+  the acquiring one.
+- **The alternative was measured, not assumed.** Refusing a second run on an
+  occupied connector is the smaller invariant on paper — `tryAutoStartForConnector`
+  already enforces it and only the manual `run_scenario` RPC bypassed it — and
+  it was implemented before it was abandoned: six tests failed, all with one
+  root cause, because the daemon's own seeded default occupies connector 1 from
+  the moment a charge point connects. On a default daemon that rule would refuse
+  every operator `run_scenario`. Recorded here because the finding's two options
+  looked equally open until the failure named which one the shipped defaults
+  rule out.
+- **What the guard does not fix is structural and stated as such.** One position
+  per connector in memory, one `connector_runtime` row on disk: two concurrent
+  runs share one checkpoint and the last writer wins, so the neighbour's
+  position survives only until the incoming run completes its first node. A
+  per-run checkpoint would be a schema change; `SCHEMA_VERSION` stays 13 and the
+  limit is written on the page rather than left to be rediscovered.
+- [Daemon](entities/daemon.md) — a new paragraph on startup option exclusivity
+  ahead of the two-pass restore, and the replaced-run bullet now carries the
+  live-neighbour exception and the one-slot limit. [CLI](entities/cli.md) — the
+  exclusivity rule beside the scenario flags and on the `--scenario` row.
+- **Failure**: a conflicting combination is refused before anything is
+  installed, opened or dialled. **Ordering**: the position guard runs at
+  acquisition, before the executor is registered, so it sees the outgoing run's
+  entry and not its own. **Destruction**: a position whose owner is dead, or
+  stopped with its cleanup still queued, is still cleared — the case the
+  acquisition clear was written for. **Trigger**: every non-resuming
+  `runScenario`, and every startup-flag read on every boot.

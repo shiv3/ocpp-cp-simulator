@@ -516,6 +516,27 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     started,
     BOOTSTRAP_CONCURRENCY,
     async ({ svc, init }) => {
+      // Install BEFORE the dial, start after (#314). The two halves used to be
+      // one call placed after `connect()`, and with a restored `--state-db`
+      // that left the boot gate auto-starting the *previous* boot's copy of
+      // this very scenario: since a generated instance's id is stable, the
+      // load that followed found its own id already active, left the stale
+      // executor running, and never ran the current graph. Installing first
+      // makes what the gate auto-starts the configured definition, and gives
+      // `--watch`'s registration a chance to reconcile the captured copy
+      // against disk while nothing is in flight to defer the result behind.
+      const installed = opts.startupScenario
+        ? installStartupScenario(
+            svc,
+            opts.startupScenario,
+            init.connectors,
+            fileReload,
+            database,
+            // The same object `startupClaimedByCp` was built from: the claim
+            // and the load must describe the same bytes (#314).
+            startupScenarioSource,
+          )
+        : [];
       if (opts.autoConnect) {
         serverLog(`Connecting ${init.cpId} to CSMS...`);
         try {
@@ -527,18 +548,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
           );
         }
       }
-      if (opts.startupScenario) {
-        await runStartupScenario(
-          svc,
-          opts.startupScenario,
-          init.connectors,
-          fileReload,
-          database,
-          // The same object `startupClaimedByCp` was built from: the claim and
-          // the load must describe the same bytes (#314).
-          startupScenarioSource,
-        );
-      }
+      await startStartupScenario(svc, installed);
     },
   );
 
@@ -750,7 +760,51 @@ function startScenarioIfNotAlreadyActive(
   }
 }
 
-export async function runStartupScenario(
+/** One connector's worth of what {@link installStartupScenario} loaded. */
+export interface InstalledStartupScenario {
+  readonly connectorId: number;
+  readonly scenarioId: string;
+}
+
+/**
+ * Load — and, under `--watch`, register — what the startup flags configure,
+ * **without touching the network**.
+ *
+ * Split from starting it so the daemon can install *before* the charge point
+ * dials. That ordering is the whole point, and it closes two windows at once:
+ *
+ * - **A restored definition must not run in the flag's place.** With
+ *   `--state-db`, a charge point the flags configure comes back holding the
+ *   previous boot's copy of that scenario, and the moment its boot gate opens
+ *   the auto-start fires. Since #314 gave a generated instance a *stable* id,
+ *   the flag's load and the restored copy are the same key — so a run started
+ *   before the load leaves `startScenarioIfNotAlreadyActive` looking at an
+ *   already-active id, and the stale graph keeps running while the current one
+ *   never does. (While the ids differed, the flag's load installed a different
+ *   key and the restored run was orphaned against a definition no longer
+ *   installed, which is why this was recorded as tolerable — a judgement about
+ *   the surrounding code that expired when that code changed.) Installing
+ *   first means what auto-starts on the boot gate *is* the configured
+ *   definition.
+ * - **The captured copy must be reconciled before anything runs it.** The
+ *   file is read once per boot, well before the restored fleet's connect;
+ *   `registerScenarioFile` compares that copy against disk immediately, so an
+ *   edit saved in the window is applied here — before the gate opens, with
+ *   nothing in flight to defer it behind.
+ *
+ * Nothing here starts a run. `loadScenario`'s connect-auto-start is gated on
+ * `chargePoint.status === Available`, which an undialled charge point is not,
+ * so the installed definition sits inert until {@link startStartupScenario}
+ * (for a `manual`-triggered scenario) or the boot gate's auto-start (for a
+ * trigger-matching one) runs it.
+ *
+ * **Failure**: a per-connector failure is reported and the other connectors
+ * still install; an unreadable file installs nothing and reports it.
+ * **Destruction**: a previous build's clock-suffixed instance for the same
+ * file and connector is pruned first, so the connector never holds two.
+ * **Trigger**: called once per bootstrap charge point, before its dial.
+ */
+export function installStartupScenario(
   svc: CLIChargePointService,
   opt: NonNullable<ServerOptions["startupScenario"]>,
   connectorCount: number,
@@ -772,37 +826,15 @@ export async function runStartupScenario(
    * and nothing can disagree with it.
    */
   source: StartupScenarioFile | null = readStartupScenarioFile(opt),
-): Promise<void> {
+): InstalledStartupScenario[] {
+  const installed: InstalledStartupScenario[] = [];
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
     process.stderr.write(
       `[server] No matching connectors for --scenario-connector "${opt.scenarioConnector}"\n`,
     );
-    return;
+    return installed;
   }
-
-  // Wait (bounded) for each target connector's boot gate to open before
-  // firing anything. `svc.connect()` above only waits for the WebSocket
-  // to open, not for BootNotification.conf — a scenario with no leading
-  // delay before its first transaction node (e.g.
-  // cert16-tc005-ev-side-disconnect) can otherwise send StartTransaction
-  // while the boot gate is still closed. The boot gate silently drops
-  // gated outgoing CALLs sent before Accepted (see
-  // OCPPMessageHandler.sendRequest's isCallAllowed check), so the
-  // scenario would proceed with a locally fabricated transactionId that
-  // the CSMS never sees. See waitForBootAccepted() for the full
-  // rationale and the timeout policy (30s bound, warn-and-proceed).
-  await Promise.all(
-    connectors.map((connectorId) =>
-      svc.waitForBootAccepted(connectorId, {
-        onTimeout: () => {
-          process.stderr.write(
-            `[server] Warning: BootNotification not accepted within 30s for connector ${connectorId}; starting scenario anyway (its outgoing CALLs may be dropped by the boot gate until the CSMS accepts)\n`,
-          );
-        },
-      }),
-    ),
-  );
 
   // 1) Built-in template by id — instantiate per connector.
   if (opt.scenarioTemplate) {
@@ -812,19 +844,19 @@ export async function runStartupScenario(
           opt.scenarioTemplate,
           connectorId,
         );
-        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
+        installed.push({ connectorId, scenarioId });
         process.stderr.write(
-          `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
+          `[server] Scenario template "${opt.scenarioTemplate}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
       } catch (err) {
         process.stderr.write(
-          `[server] Failed to start scenario template on connector ${connectorId}: ${
+          `[server] Failed to load scenario template on connector ${connectorId}: ${
             err instanceof Error ? err.message : err
           }\n`,
         );
       }
     }
-    return;
+    return installed;
   }
 
   // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
@@ -837,7 +869,7 @@ export async function runStartupScenario(
             : (source?.error ?? opt.scenarioTemplateFile)
         }\n`,
       );
-      return;
+      return installed;
     }
     const template = source.definition;
     const templateText = source.text;
@@ -870,7 +902,7 @@ export async function runStartupScenario(
           connectorId,
           scenarioId,
         );
-        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
+        installed.push({ connectorId, scenarioId });
         process.stderr.write(
           `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
@@ -882,7 +914,7 @@ export async function runStartupScenario(
         );
       }
     }
-    return;
+    return installed;
   }
 
   // 3) Single scenario file — for fan-out, treat it like a template (rewrite
@@ -896,7 +928,7 @@ export async function runStartupScenario(
             : (source?.error ?? opt.scenario)
         }\n`,
       );
-      return;
+      return installed;
     }
     const definition = source.definition;
     const scenarioText = source.text;
@@ -933,19 +965,105 @@ export async function runStartupScenario(
           connectorId,
           scenarioId,
         );
-        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
+        installed.push({ connectorId, scenarioId });
         process.stderr.write(
-          `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
+          `[server] Scenario file "${opt.scenario}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
         );
       } catch (err) {
         process.stderr.write(
-          `[server] Failed to start scenario file on connector ${connectorId}: ${
+          `[server] Failed to load scenario file on connector ${connectorId}: ${
             err instanceof Error ? err.message : err
           }\n`,
         );
       }
     }
   }
+  return installed;
+}
+
+/**
+ * Start what {@link installStartupScenario} loaded, once the boot gate is open.
+ *
+ * Wait (bounded) for each target connector's boot gate before firing anything.
+ * `svc.connect()` only waits for the WebSocket to open, not for
+ * `BootNotification.conf` — a scenario with no leading delay before its first
+ * transaction node (e.g. cert16-tc005-ev-side-disconnect) can otherwise send
+ * `StartTransaction` while the gate is still closed. The gate silently drops
+ * gated outgoing CALLs sent before Accepted (see `OCPPMessageHandler
+ * .sendRequest`'s `isCallAllowed` check), so the scenario would proceed with a
+ * locally fabricated transactionId the CSMS never sees. See
+ * `waitForBootAccepted()` for the full rationale and the timeout policy (30s
+ * bound, warn-and-proceed).
+ *
+ * A scenario whose trigger matches has already been started by the boot gate's
+ * own auto-start by the time this runs, so `startScenarioIfNotAlreadyActive`
+ * is a no-op for it; a `manual`-triggered one is started only here, because
+ * `tryAutoStartForConnector` deliberately skips those. Either way exactly one
+ * run of the *installed* definition happens — which is the guarantee installing
+ * before the dial buys, since whatever the gate auto-starts is now the
+ * configured graph rather than a restored copy of the previous boot's (#314).
+ */
+export async function startStartupScenario(
+  svc: CLIChargePointService,
+  installed: readonly InstalledStartupScenario[],
+): Promise<void> {
+  if (installed.length === 0) return;
+  const connectors = [...new Set(installed.map((one) => one.connectorId))];
+  await Promise.all(
+    connectors.map((connectorId) =>
+      svc.waitForBootAccepted(connectorId, {
+        onTimeout: () => {
+          process.stderr.write(
+            `[server] Warning: BootNotification not accepted within 30s for connector ${connectorId}; starting scenario anyway (its outgoing CALLs may be dropped by the boot gate until the CSMS accepts)\n`,
+          );
+        },
+      }),
+    ),
+  );
+  for (const { connectorId, scenarioId } of installed) {
+    try {
+      startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
+      process.stderr.write(
+        `[server] Startup scenario started (id: ${scenarioId}, connector: ${connectorId})\n`,
+      );
+    } catch (err) {
+      process.stderr.write(
+        `[server] Failed to start startup scenario "${scenarioId}" on connector ${connectorId}: ${
+          err instanceof Error ? err.message : err
+        }\n`,
+      );
+    }
+  }
+}
+
+/**
+ * Install and then start, for callers that do both back to back.
+ *
+ * The daemon does **not** use this: it installs before the dial and starts
+ * after, which is the ordering the split exists for. Kept because a caller with
+ * nothing to interleave — a test, or any path where the charge point is already
+ * connected — wants one call, and because the composition is the definition of
+ * what the two halves add up to.
+ */
+export async function runStartupScenario(
+  svc: CLIChargePointService,
+  opt: NonNullable<ServerOptions["startupScenario"]>,
+  connectorCount: number,
+  fileReload: FileReloadManager | null = null,
+  database: Database | null = null,
+  source: StartupScenarioFile | null = readStartupScenarioFile(opt),
+): Promise<void> {
+  await startStartupScenario(
+    svc,
+    installStartupScenario(
+      svc,
+      opt,
+      connectorCount,
+      fileReload,
+      database,
+      source,
+    ),
+  );
 }
 
 /**

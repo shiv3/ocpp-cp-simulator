@@ -13,6 +13,7 @@ import { EventBus } from "../eventBus";
 import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import {
+  installStartupScenario,
   restoredDialsToDefer,
   readStartupScenarioFile,
   runStartupScenario,
@@ -931,6 +932,72 @@ describe("--watch over a startup scenario file (#314)", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+  it("reconciles the captured copy before anything can run it", async () => {
+    // The second half of the install-before-dial change (#314). The file is
+    // read once, early — before the restored fleet's connect — and an operator
+    // save in that window used to land only *after* the captured copy had been
+    // loaded and auto-started, so the current edit queued behind a stale run.
+    // Installing before the dial means `registerScenarioFile`'s reconcile
+    // happens with the charge point still undialled: nothing is running, so the
+    // edit is applied outright rather than deferred.
+    const registry = new CPRegistry(new EventBus());
+    const backend = new TestWatchBackend();
+    const fileReload = new FileReloadManager(registry, {
+      watcher: new FileWatcher({
+        debounceMs: 5,
+        watchFactory: backend.factory,
+      }),
+      log: () => {},
+    });
+    const svc = new CLIChargePointService({
+      cpId: "cp314",
+      wsUrl: "ws://127.0.0.1:65534/never",
+      connectors: 1,
+      vendor: "Vendor",
+      model: "Model",
+      basicAuth: null,
+    });
+    registry.registerExisting(svc);
+
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-reconcile-"));
+    const templateFile = join(tmpDir, "template.json");
+    writeFileSync(templateFile, template(11));
+
+    try {
+      // The boot's single read, taken before the fleet is restored.
+      const opt = {
+        scenario: null,
+        scenarioTemplate: null,
+        scenarioTemplateFile: templateFile,
+        scenarioConnector: "all",
+      };
+      const source = readStartupScenarioFile(opt);
+      expect(loadedDelay(svc, 1)).toBeNull();
+
+      // The window: the operator saves while the fleet is still coming up.
+      // Written directly, with no watch notification — there is no watch yet,
+      // which is exactly the case the registration's reconcile exists for.
+      writeFileSync(templateFile, template(22));
+
+      // Never connected, so nothing can auto-start: the whole point of doing
+      // this before the dial.
+      installStartupScenario(svc, opt, 1, fileReload, null, source);
+
+      await waitFor(
+        () => loadedDelay(svc, 1) === 22,
+        "the mid-boot edit to be reconciled at registration",
+      );
+      // …and it landed as an installed definition, not as a deferred reload
+      // queued behind a run.
+      expect(svc.listScenarios(1)[0]?.active).toBe(false);
+      expect(svc.listScenarios(1)[0]?.scenarioId).toBe("startup-template-c1");
+    } finally {
+      fileReload.close();
+      registry.shutdownAll();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("claims exactly the ids a startup flag will load", async () => {
     // The skip is only as good as this prediction, and it has to agree with the
     // `prepare` that `runStartupScenario` builds — which is why both read the

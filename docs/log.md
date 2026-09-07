@@ -1716,3 +1716,64 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   prune removes from memory and the DB both, so the next boot does not restore
   what it dropped. **Trigger**: only a boot that loads a startup scenario file
   onto that connector prunes anything.
+
+## [2026-09-07] ingest | `--watch`: install the startup definition before the dial (#314, PR #317)
+
+- **An accepted limitation is a claim about the surrounding code, and it
+  expires when that code changes.** Ten rounds ago a restored definition
+  auto-starting ahead of the startup flag's load was recorded as tolerable,
+  with the reason stated: the flag's load takes over the key anyway, so the
+  stale run ends against a definition that is no longer installed. That was
+  true _because generated ids carried the clock_ — the load always installed a
+  different key. Giving the instance a stable id (the previous round, and
+  correct on its own terms) made the two keys the same, and the sentence became
+  false: the load now finds its own id already active,
+  `startScenarioIfNotAlreadyActive` leaves the stale executor running, and the
+  configured graph never runs. The stale run stopped dying and started
+  surviving.
+- The close is the one named then and deferred then: **install before the dial,
+  start after.** `runStartupScenario` splits into `installStartupScenario`
+  (synchronous, no network: resolve connectors, prune, `loadScenario`,
+  `registerScenarioFile`, `forgetWatchedScenarioFile`) and
+  `startStartupScenario` (`waitForBootAccepted`, then start what was
+  installed); the bootstrap loop runs install → connect → start, and
+  `runStartupScenario` remains as the composition for callers with nothing to
+  interleave. Installing needs no network because the connect-auto-start is
+  gated on the charge point being Available, which an undialled one is not — so
+  the installed definition sits inert until the boot gate or the start phase
+  runs it.
+- It closes the round's second finding with the same change. The boot's single
+  read is taken before the restored fleet connects, and an operator save in
+  that window used to land only after the captured copy had been loaded _and
+  auto-started_, so the current edit queued behind a stale run.
+  `registerScenarioFile` reconciles against disk at registration; doing that
+  before the dial means nothing is in flight to defer the result behind.
+- **The deferral is now load-bearing rather than an optimisation.**
+  `restoredDialsToDefer` used to buy adjacency — the stale start and the load
+  next to each other instead of minutes apart. It now prevents the stale run
+  outright: a dial in `connectRestored` would auto-start the restored copy
+  under the key the install is about to take. Constraint 2 re-derived rather
+  than assumed: the bootstrap loop performs install, dial and start per charge
+  point over exactly the fleet `startupTargetCpIds` is built from, so nothing is
+  deferred that nothing subsequently dials. The mode table's rows are
+  unchanged; its "dialled afterwards by" column now reads _immediately after
+  its install_ for every mode.
+- **Audit of other conditional acceptances on this branch, as asked.** The tree
+  carries none — `grep -rn "tolerab"` over `src/` and `docs/` returns nothing,
+  and the two "safe because" sentences that exist (`concepts/control-plane.md`
+  on the idTag pool, `httpServer.ts` on the Basic Auth realm) are about code
+  this branch has not touched. The claim that expired lived in a **commit
+  message**, which is exactly where an expiring claim cannot be grepped later —
+  the reason this round's justification goes into `docs/entities/daemon.md`,
+  next to the rule it is about, rather than into the commit alone.
+- **Failure**: a per-connector install failure is reported and the others still
+  install; the start phase reports a failed start per scenario and continues.
+  **Ordering**: install strictly precedes the dial, and the start strictly
+  follows it; the boot-accepted wait stays in the start phase, so an
+  install-only path never waits on the network. **Destruction**: unchanged —
+  the legacy prune runs inside the install, before the load.
+  **Trigger**: a scenario whose trigger matches is auto-started by the boot
+  gate and the start phase is a no-op for it; a `manual`-triggered one is
+  started only by the start phase, because `tryAutoStartForConnector` skips
+  those deliberately. That second path had no test before this round, which is
+  why a mutation dropping the install's hand-off was initially vacuous.

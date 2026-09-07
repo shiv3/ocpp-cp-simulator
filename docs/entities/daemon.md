@@ -521,6 +521,21 @@ hold at once and no single position satisfies all three:
    else would, and the startup load's boot-accepted wait would time out on a
    charge point deliberately left unconnected.
 
+   **The deferral is now load-bearing, not an optimisation.** It used to exist
+   so that the restored copy's auto-start and the flag's load happened next to
+   each other rather than minutes apart: the stale run started, the flag's load
+   took a _different_ key (generated ids carried the clock), and the stale run
+   was orphaned against a definition no longer installed and died. Since a
+   generated instance's id is stable, the flag's load takes the **same** key —
+   so a dial that beats the install leaves `startScenarioIfNotAlreadyActive`
+   looking at an already-active id, the stale executor keeps running, and the
+   current graph never runs at all. The daemon therefore **installs the startup
+   definition before the charge point dials** and starts it afterwards; what the
+   boot gate auto-starts is then the configured definition rather than a
+   restored copy of the previous boot's. Installing needs no network — the
+   connect-auto-start is gated on the charge point being Available, which an
+   undialled one is not — so the two halves separate cleanly.
+
    Two different questions are involved and they must not share an answer.
    _Which stored scenario ids will a flag overwrite?_ decides which watch rows
    wait for the second pass, and it names exactly those ids — skip more than the
@@ -530,17 +545,22 @@ hold at once and no single position satisfies all three:
    built-in `--scenario-template`, whose id the daemon does not mint, so keying
    the dial on it left that mode dialling immediately.
 
-   | Startup mode                                          | Deferred? | Dialled afterwards by                           |
-   | ----------------------------------------------------- | --------- | ----------------------------------------------- |
-   | `--scenario` (file already targets its one connector) | yes       | the bootstrap loop, immediately before its load |
-   | `--scenario` (instantiated across connectors)         | yes       | the bootstrap loop                              |
-   | `--scenario-template`                                 | yes       | the bootstrap loop                              |
-   | `--scenario-template-file`                            | yes       | the bootstrap loop                              |
-   | restored charge point with no startup flag against it | no        | `connectRestored`, in the first round           |
+   | Startup mode                                          | Deferred? | Dialled afterwards by                             |
+   | ----------------------------------------------------- | --------- | ------------------------------------------------- |
+   | `--scenario` (file already targets its one connector) | yes       | the bootstrap loop, immediately after its install |
+   | `--scenario` (instantiated across connectors)         | yes       | the bootstrap loop, immediately after its install |
+   | `--scenario-template`                                 | yes       | the bootstrap loop, immediately after its install |
+   | `--scenario-template-file`                            | yes       | the bootstrap loop, immediately after its install |
+   | restored charge point with no startup flag against it | no        | `connectRestored`, in the first round             |
 
    Every deferred charge point is in the bootstrap fleet, and the bootstrap loop
    iterates exactly that fleet — which is what makes the widening safe: nothing
-   is deferred that nothing subsequently dials.
+   is deferred that nothing subsequently dials. That still holds under the
+   install-before-dial ordering, and for the same reason: the loop performs the
+   install, the dial and the start for each charge point in that order, so a
+   deferred dial is one the loop is about to make. Only the two `--scenario`
+   rows' "immediately before its load" wording changes — every mode now loads
+   before its dial rather than after.
 
    **A startup-generated scenario has a stable id.** `--scenario` fanned across
    connectors and `--scenario-template-file` both instantiate a per-connector
@@ -567,7 +587,10 @@ hold at once and no single position satisfies all three:
    previous boot's copy loaded on a connector this boot never touches.
 
    **The file is read once per boot**, and both the claim above and the load use
-   that read. They used to open it separately, minutes apart across the restored
+   that read. Because the load now happens before the dial, the registration's
+   reconcile-against-disk also happens before anything can run: an edit saved
+   while the fleet was still coming up is applied outright rather than deferred
+   behind a run of the captured copy. They used to open it separately, minutes apart across the restored
    fleet's connect, so an edit landing in the window made the claim describe a
    file that was no longer the one being loaded — the first pass held a row back
    under the old id while the bootstrap loaded and deleted a different one, and

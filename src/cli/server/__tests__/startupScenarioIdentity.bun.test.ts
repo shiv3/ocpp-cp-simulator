@@ -8,12 +8,15 @@ import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatab
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 import {
+  installStartupScenario,
   legacyStartupInstanceIds,
   readStartupScenarioFile,
   runStartupScenario,
+  startStartupScenario,
   startupClaimedScenarioIds,
   startupInstanceId,
 } from "../startServer";
+import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
  * A startup-generated scenario has a **stable identity** (#314).
@@ -258,5 +261,177 @@ describe("startup scenario identity across a restart (#314)", () => {
     // this id comes from the clock.
     expect(startupInstanceId("demo", 1)).toBe(startupInstanceId("demo", 1));
     expect(startupInstanceId("demo", 1)).not.toBe(startupInstanceId("demo", 2));
+  });
+});
+
+/**
+ * The startup definition is installed **before** the charge point dials
+ * (#314).
+ *
+ * This is the window a stable id opened. While generated ids carried the
+ * clock, a restored copy of the previous boot's scenario auto-started on the
+ * boot gate under a *different* key, and the flag's load then took its own key
+ * — the stale run was orphaned against a definition no longer installed and
+ * died. Recorded at the time as tolerable, which was a claim about the
+ * surrounding code, and it expired the moment the ids started matching: the
+ * load now finds its own id already active, `startScenarioIfNotAlreadyActive`
+ * leaves the stale executor running, and the current graph never runs.
+ *
+ * Installing first makes what the boot gate auto-starts *be* the configured
+ * definition, which is the close named ten rounds ago and out of scope then.
+ */
+describe("startup scenario installs before the dial (#314)", () => {
+  function autoStartScenario(meterValue: number): string {
+    return JSON.stringify({
+      id: "startup-template",
+      name: "Startup",
+      targetType: "connector",
+      targetId: 1,
+      nodes: [
+        {
+          id: "start-1",
+          type: "start",
+          position: { x: 0, y: 0 },
+          data: { label: "S", triggerOn: "connect" },
+        },
+        {
+          id: "mv-1",
+          type: "meterValue",
+          position: { x: 0, y: 1 },
+          data: { label: "MV", value: meterValue, sendMessage: false },
+        },
+        {
+          id: "end-1",
+          type: "end",
+          position: { x: 0, y: 2 },
+          data: { label: "E" },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "start-1", target: "mv-1" },
+        { id: "e2", source: "mv-1", target: "end-1" },
+      ],
+    });
+  }
+
+  /**
+   * One boot, in a chosen order. Returns the meter value the connector ends up
+   * holding, which is the discriminating observable: the two definitions write
+   * different numbers, so whichever graph actually ran says so.
+   */
+  async function bootWithOrder(
+    order: "install-then-dial" | "dial-then-install",
+  ): Promise<number | null | undefined> {
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-install-order-"));
+    const file = join(tmpDir, "template.json");
+    writeFileSync(file, autoStartScenario(999));
+    const db = BunSqliteDatabase.open(":memory:");
+    const csms = startMockCsms();
+    const init = {
+      cpId: "cp-order",
+      wsUrl: csms.url,
+      connectors: 1,
+      vendor: "v",
+      model: "m",
+      basicAuth: null,
+    };
+
+    let previous: CLIChargePointService | null = null;
+    let svc: CLIChargePointService | null = null;
+    try {
+      // The previous daemon run, doing exactly what a previous boot did — so
+      // the persisted row carries the id this boot's stable id also produces.
+      previous = new CLIChargePointService(init, db);
+      installStartupScenario(previous, templateOptions(file), 1, null, null);
+      previous.cleanup(false);
+
+      // The operator edits the file while the daemon is down.
+      writeFileSync(file, autoStartScenario(111));
+
+      svc = new CLIChargePointService(init, db);
+      expect(svc.restoreScenariosFromDatabase()).toBe(1);
+
+      const opt = templateOptions(file);
+      const accept = async (): Promise<void> => {
+        await svc!.connect();
+        const boot = await csms.waitForCall("BootNotification");
+        csms.replyCallResult(boot.messageId, {
+          currentTime: new Date().toISOString(),
+          interval: 300,
+          status: "Accepted",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      };
+
+      if (order === "install-then-dial") {
+        const installed = installStartupScenario(svc, opt, 1, null, null);
+        await accept();
+        await startStartupScenario(svc, installed);
+      } else {
+        await accept();
+        const installed = installStartupScenario(svc, opt, 1, null, null);
+        await startStartupScenario(svc, installed);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return svc.getStatus().connectors[0]?.meterValue;
+    } finally {
+      svc?.disconnect();
+      svc?.cleanup(true);
+      previous?.cleanup(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      db.close();
+      await csms.stop();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it("runs the current graph, not the restored copy of the previous boot's", async () => {
+    // 111 is the file as it reads now. The restored copy writes 999, so this
+    // number says which graph the boot gate actually ran.
+    expect(await bootWithOrder("install-then-dial")).toBe(111);
+  });
+
+  it("starts a manual-triggered startup scenario, which nothing auto-starts", async () => {
+    // The half of the split that has no auto-start behind it.
+    // `tryAutoStartForConnector` deliberately skips `trigger: { type:
+    // "manual" }` scenarios, so the start phase is the *only* thing that runs
+    // one — and separating install from start made that the one path where a
+    // dropped hand-off would be silent. The connector is Available, so the
+    // boot gate resolves without a CSMS.
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-manual-start-"));
+    const file = join(tmpDir, "template.json");
+    writeFileSync(file, scenarioJson("manual-startup", 60));
+
+    const svc = newService(null, 1);
+    try {
+      const installed = installStartupScenario(
+        svc,
+        templateOptions(file),
+        1,
+        null,
+        null,
+      );
+      expect(installed).toEqual([
+        { connectorId: 1, scenarioId: "manual-startup-c1" },
+      ]);
+      // Installed and inert: nothing has started it yet.
+      expect(svc.listScenarios(1)[0]?.active).toBe(false);
+
+      await startStartupScenario(svc, installed);
+      expect(svc.listScenarios(1)[0]?.active).toBe(true);
+    } finally {
+      svc.cleanup(true);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("would run the stale graph if it dialled first", async () => {
+    // The ordering `startServer` used until this round, kept as an assertion
+    // so the ordering is demonstrably what decides — not something else in the
+    // setup. The restored copy wins the boot gate and holds the id, so the
+    // load that follows finds its own id already active and leaves the stale
+    // executor running: `startScenarioIfNotAlreadyActive` is the guard that
+    // turns "a stale run" into "a stale run nothing replaces".
+    expect(await bootWithOrder("dial-then-install")).toBe(999);
   });
 });

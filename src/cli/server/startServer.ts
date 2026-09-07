@@ -233,11 +233,22 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   //
   // Per charge point for the first, because the connector count decides whether
   // `--scenario` keeps the file's own id or instantiates a fresh one.
+  //
+  // Read **once**, here, and handed to both the prediction and the load. The
+  // two used to open the file separately, minutes apart across the restored
+  // fleet's connect, so an edit in that window made the prediction describe a
+  // file that was no longer the one being loaded (#314). See
+  // {@link readStartupScenarioFile}.
+  const startupScenarioSource = readStartupScenarioFile(opts.startupScenario);
   const startupClaimedByCp = new Map<string, ReadonlySet<string>>(
     hasExplicitStartupScenario
       ? fleet.map((init) => [
           init.cpId,
-          startupClaimedScenarioIds(opts.startupScenario, init.connectors),
+          startupClaimedScenarioIds(
+            opts.startupScenario,
+            init.connectors,
+            startupScenarioSource,
+          ),
         ])
       : [],
   );
@@ -523,6 +534,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
           init.connectors,
           fileReload,
           database,
+          // The same object `startupClaimedByCp` was built from: the claim and
+          // the load must describe the same bytes (#314).
+          startupScenarioSource,
         );
       }
     },
@@ -750,6 +764,14 @@ export async function runStartupScenario(
    * start would reattach the abandoned file (#314).
    */
   database: Database | null = null,
+  /**
+   * The boot's single read of the scenario file (#314). The daemon always
+   * passes the same object it gave {@link startupClaimedScenarioIds}, so the
+   * claim and the load describe the same bytes; the default is for direct
+   * callers that have no claim to agree with, where this read *is* the load
+   * and nothing can disagree with it.
+   */
+  source: StartupScenarioFile | null = readStartupScenarioFile(opt),
 ): Promise<void> {
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
@@ -807,23 +829,23 @@ export async function runStartupScenario(
 
   // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
   if (opt.scenarioTemplateFile) {
-    let template: ScenarioDefinition;
-    let templateText: string;
-    try {
-      templateText = fs.readFileSync(opt.scenarioTemplateFile, "utf-8");
-      template = JSON.parse(templateText) as ScenarioDefinition;
-    } catch (err) {
+    if (!source?.definition || source.text === null) {
       process.stderr.write(
         `[server] Failed to read scenario template file: ${
-          err instanceof Error ? err.message : err
+          source?.error instanceof Error
+            ? source.error.message
+            : (source?.error ?? opt.scenarioTemplateFile)
         }\n`,
       );
       return;
     }
+    const template = source.definition;
+    const templateText = source.text;
     warnOnScenarioSchemaMismatch(opt.scenarioTemplateFile, template);
     for (const connectorId of connectors) {
       try {
         const instance = instantiateTemplate(template, connectorId);
+        pruneLegacyStartupInstances(svc, connectorId, template.id);
         const scenarioId = svc.loadScenario(connectorId, instance);
         // #314: `prepare` replays the same per-connector rewrite on every
         // reload, so a fan-out across connectors keeps its independent copies
@@ -866,19 +888,18 @@ export async function runStartupScenario(
   // 3) Single scenario file — for fan-out, treat it like a template (rewrite
   // ids per connector); for single-connector, behave as before.
   if (opt.scenario) {
-    let definition: ScenarioDefinition;
-    let scenarioText: string;
-    try {
-      scenarioText = fs.readFileSync(opt.scenario, "utf-8");
-      definition = JSON.parse(scenarioText) as ScenarioDefinition;
-    } catch (err) {
+    if (!source?.definition || source.text === null) {
       process.stderr.write(
         `[server] Failed to read scenario file: ${
-          err instanceof Error ? err.message : err
+          source?.error instanceof Error
+            ? source.error.message
+            : (source?.error ?? opt.scenario)
         }\n`,
       );
       return;
     }
+    const definition = source.definition;
+    const scenarioText = source.text;
     warnOnScenarioSchemaMismatch(opt.scenario, definition);
     for (const connectorId of connectors) {
       try {
@@ -893,6 +914,7 @@ export async function runStartupScenario(
           scenarioFileTargetsConnector(next, connectorId, connectors.length)
             ? next
             : instantiateTemplate(next, connectorId);
+        pruneLegacyStartupInstances(svc, connectorId, definition.id);
         const scenarioId = svc.loadScenario(connectorId, prepare(definition));
         fileReload?.registerScenarioFile({
           filePath: opt.scenario as string,
@@ -1031,44 +1053,218 @@ export function scenarioFileTargetsConnector(
 }
 
 /**
+ * The scenario file a startup flag names, read **once** for the whole boot.
+ *
+ * Both `--scenario` and `--scenario-template-file` used to be read twice: once
+ * early, to work out which stored scenario ids the flags were about to claim,
+ * and again per charge point inside the bootstrap loop, to load. Those are two
+ * different points in time with the whole restored fleet's connect between
+ * them — minutes against a slow CSMS — so an edit landing in the window made
+ * the prediction describe a file that was no longer being loaded: the first
+ * restore pass held back a row under the old id while the bootstrap loaded and
+ * deleted a different one, and the second pass then reattached the held row and
+ * reloaded the current file under an abandoned id. Two live copies out of one
+ * flag (#314).
+ *
+ * One read settles it. The claim is derived from the same bytes that are
+ * loaded, so the two cannot disagree — and an edit that lands mid-boot is not
+ * lost either: `registerScenarioFile` reconciles the registration against disk
+ * immediately, so `--watch` applies it the moment the watch goes on.
+ *
+ * `null` when no file flag is set, or when the file cannot be read or parsed —
+ * `runStartupScenario` reports that properly a moment later, and claiming
+ * nothing is the safe answer, since every row is then restored in the first
+ * pass exactly as with no flag at all.
+ */
+export interface StartupScenarioFile {
+  readonly path: string;
+  /**
+   * `null` when the file could not be read or parsed — `error` says why, and
+   * carrying the failure rather than collapsing it to a bare `null` is what
+   * keeps `runStartupScenario`'s diagnostic as specific as it was when it did
+   * its own read.
+   */
+  readonly text: string | null;
+  readonly definition: ScenarioDefinition | null;
+  readonly error: unknown;
+}
+
+export function readStartupScenarioFile(
+  opt: ServerOptions["startupScenario"],
+): StartupScenarioFile | null {
+  const filePath = opt?.scenarioTemplateFile ?? opt?.scenario;
+  if (!filePath) return null;
+  try {
+    const text = fs.readFileSync(filePath, "utf-8");
+    return {
+      path: filePath,
+      text,
+      definition: JSON.parse(text) as ScenarioDefinition,
+      error: null,
+    };
+  } catch (err) {
+    return { path: filePath, text: null, definition: null, error: err };
+  }
+}
+
+/**
  * The persisted scenario ids the startup flags will claim on this boot.
  *
- * Only `--scenario` on a file that already targets its single connector keeps a
- * stable id, so only that case can collide with a row a previous run stored.
- * Everything else goes through `instantiateTemplate`, whose ids carry
- * `Date.now()` and cannot match anything already on disk — which is why this
- * returns a *narrow* set rather than the charge point's whole row set. Skipping
- * a whole charge point instead would leave its other restored scenarios
- * unwatched right up to the moment it dials, and they would then auto-start
- * from the database copy rather than the file as it reads now (#314).
+ * **Exact, not narrow.** It used to be narrow because it had to be: only
+ * `--scenario` on a file that already targeted its single connector kept a
+ * predictable id, and everything else went through `instantiateTemplate`, whose
+ * ids carried `Date.now()` and could not be predicted — so those modes claimed
+ * nothing and their stored rows were reconciled in the first pass, under ids
+ * this boot was about to abandon. Now that a generated instance's id is
+ * {@link startupInstanceId} — derived from the file and the connector, the same
+ * across restarts — every id the boot will load is knowable here, and this
+ * returns exactly that set.
+ *
+ * Exact is still narrow in the sense that matters: it names the ids the flags
+ * will overwrite and no others. Skipping more than that leaves a charge point's
+ * *other* restored scenarios unwatched until it dials, which is the failure the
+ * first pass exists to prevent (#314).
+ *
+ * Takes the boot's single read rather than opening the file itself: a
+ * prediction with its own read is a prediction of a file that may not be the
+ * one loaded, which is the bug this signature exists to make unrepresentable.
+ * A built-in `--scenario-template` still claims nothing — `loadScenarioTemplate`
+ * mints that id and prunes its own prior instances.
  */
 export function startupClaimedScenarioIds(
   opt: ServerOptions["startupScenario"],
   connectorCount: number,
+  source: StartupScenarioFile | null,
 ): Set<string> {
   const claimed = new Set<string>();
-  if (!opt?.scenario) return claimed;
-  let definition: ScenarioDefinition;
-  try {
-    definition = JSON.parse(
-      fs.readFileSync(opt.scenario, "utf-8"),
-    ) as ScenarioDefinition;
-  } catch {
-    // Unreadable or unparseable: `runStartupScenario` reports it properly a
-    // moment later. Claiming nothing is the safe answer — every row is then
-    // restored in the first pass, which is what happens without the flag.
-    return claimed;
-  }
-  if (typeof definition?.id !== "string") return claimed;
+  if (!source || !opt) return claimed;
+  if (!opt.scenario && !opt.scenarioTemplateFile) return claimed;
+  const baseId = source.definition?.id;
+  if (!source.definition) return claimed;
+  if (typeof baseId !== "string") return claimed;
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   for (const connectorId of connectors) {
-    if (
-      scenarioFileTargetsConnector(definition, connectorId, connectors.length)
-    ) {
-      claimed.add(definition.id);
-    }
+    // The same branch `runStartupScenario` takes, through the same predicate —
+    // a second copy of the rule would drift from the load it predicts. A
+    // template file always instantiates; a `--scenario` keeps its own id only
+    // when it already targets its single connector.
+    claimed.add(
+      !opt.scenarioTemplateFile &&
+        scenarioFileTargetsConnector(
+          source.definition,
+          connectorId,
+          connectors.length,
+        )
+        ? baseId
+        : startupInstanceId(baseId, connectorId),
+    );
   }
   return claimed;
+}
+
+/**
+ * The id a startup flag gives its per-connector copy of a scenario file.
+ *
+ * **Stable across restarts, deliberately.** This used to carry `Date.now()`,
+ * which meant a daemon could not recognise its own previous output: with
+ * `--state-db`, a restart restored the previous boot's generated instance and
+ * then loaded a *second* one under a fresh id, so the operator's single
+ * configured scenario became two loaded graphs — the stale one unwatched (a
+ * startup registration is `persist: false`, so no source row survives to
+ * re-attach a watch to it) and able to auto-start alongside the new one. A
+ * restart producing duplicate OCPP traffic is the worst symptom this can have,
+ * and every part of it followed from the generated scenario having no stable
+ * identity.
+ *
+ * Derived from what is the same across restarts for the same configuration —
+ * the file's own scenario id and the connector — so the restored instance and
+ * the newly prepared one are the *same key*: `loadScenario` replaces rather
+ * than duplicates, and the watch attaches to the id that actually exists.
+ *
+ * The cost is a deterministic namespace: a scenario an operator authored under
+ * exactly `<file id>-c<connector>` on the same charge point is overwritten by
+ * the startup load instead of coexisting with it. That is the same collision
+ * `--scenario` already has when its file targets its single connector and
+ * keeps its own id, and it is much the better trade against duplicate traffic
+ * on every restart (#314).
+ */
+export function startupInstanceId(baseId: string, connectorId: number): string {
+  return `${baseId}-c${connectorId}`;
+}
+
+/**
+ * Instances a *previous* build of this daemon generated for the same file and
+ * connector, which this boot will not replace.
+ *
+ * An upgrade path, not a general prune. Builds through `0f6f951` minted
+ * `<base>-c<connector>-<epoch ms>`, so a `--state-db` written by one carries a
+ * row this boot's stable id can never match: left alone it stays loaded
+ * forever, unwatched, and auto-starts beside the configured graph. The pattern
+ * is exact — a 13-or-more-digit epoch suffix on this connector's own prefix —
+ * because that shape is only ever minted here. A wider rule ("anything that
+ * looks generated") would delete a scenario an operator authored and meant to
+ * keep, which is the objection to pruning as a strategy; this is narrow enough
+ * not to raise it.
+ *
+ * What it deliberately does **not** cover: a boot that narrows
+ * `--scenario-connector`, or a file whose own `id` changed, leaves the previous
+ * boot's instance loaded on a connector this boot never touches. Recognising
+ * those needs preparation metadata persisted alongside the scenario — a schema
+ * change — so they are named in `docs/entities/daemon.md` rather than guessed
+ * at here.
+ */
+export function legacyStartupInstanceIds(
+  loadedScenarioIds: readonly string[],
+  baseId: string,
+  connectorId: number,
+): string[] {
+  const legacy = new RegExp(
+    `^${escapeRegExp(baseId)}-c${connectorId}-\\d{13,}$`,
+  );
+  return loadedScenarioIds.filter((id) => legacy.test(id));
+}
+
+/**
+ * Drop the previous build's generated instances for this connector before the
+ * stable-id load replaces the current one.
+ *
+ * **Ordering**: before `loadScenario`, so the connector never holds two graphs
+ * at once. With `--auto-connect` the charge point has already dialled by the
+ * time `runStartupScenario` runs on it — that adjacency is deliberate, see
+ * `restoredDialsToDefer` — so a restored legacy instance with a matching
+ * trigger can have auto-started in the gap; `removeScenario` stops it, which is
+ * the point. **Failure**: a removal that throws is reported and the load
+ * continues, because a stale extra graph is a worse outcome than a noisy line
+ * but a better one than no configured scenario at all. **Destruction**: the row
+ * goes with the scenario — `removeScenario` deletes from memory and the DB
+ * both, so the next boot does not restore it again. **Trigger**: only a boot
+ * that loads a startup scenario file onto this connector; nothing else prunes.
+ */
+function pruneLegacyStartupInstances(
+  svc: CLIChargePointService,
+  connectorId: number,
+  baseId: string,
+): void {
+  const loaded = svc.listScenarios(connectorId).map((s) => s.scenarioId);
+  for (const staleId of legacyStartupInstanceIds(loaded, baseId, connectorId)) {
+    try {
+      svc.removeScenario(connectorId, staleId);
+      process.stderr.write(
+        `[server] Removed a previous run's generated scenario "${staleId}" on connector ${connectorId}; startup instances now use the stable id "${startupInstanceId(baseId, connectorId)}" (#314)\n`,
+      );
+    } catch (err) {
+      process.stderr.write(
+        `[server] Failed to remove stale startup scenario "${staleId}": ${
+          err instanceof Error ? err.message : err
+        }\n`,
+      );
+    }
+  }
+}
+
+/** Escape a string for literal use inside a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -1083,7 +1279,7 @@ function instantiateTemplate(
   const cloned = JSON.parse(JSON.stringify(template)) as ScenarioDefinition;
   return {
     ...cloned,
-    id: `${cloned.id}-c${connectorId}-${Date.now()}`,
+    id: startupInstanceId(cloned.id, connectorId),
     name: cloned.name
       ? `${cloned.name} (Connector ${connectorId})`
       : `Connector ${connectorId}`,

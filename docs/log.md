@@ -1646,3 +1646,73 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
   operator override. Mutating the claim write to happen at **install** time
   instead of at claim time fails the first of those and nothing else — the
   finding, isolated to one assertion.
+
+## [2026-09-07] ingest | `--watch`: a startup scenario gets a stable identity (#314, PR #317)
+
+- The identity theme, one level up from the previous round. That one was about
+  a rule asking the wrong question; this is about the thing being asked about
+  having **no stable identity at all**. A startup-generated instance was named
+  `<base>-c<connector>-<Date.now()>`, so a restarted daemon could not recognise
+  its own previous output: with `--state-db` it restored the previous boot's
+  copy and then loaded a second one under a fresh id. The stale graph stayed
+  loaded and unwatched — a startup registration is `persist: false`, so no
+  source row survives to re-attach a watch — and could auto-start beside the
+  new one. One configured scenario, two graphs' worth of OCPP traffic after
+  every restart, which is the worst symptom this feature has produced.
+- The id is now `startupInstanceId(baseId, connectorId)` =
+  `<base>-c<connector>`, derived from what is the same across restarts for the
+  same configuration. Everything downstream falls out: the restored instance
+  and the newly prepared one are the same key, so `loadScenario` replaces
+  instead of duplicating, and the watch attaches to the id that actually
+  exists. Of the three options in the finding this was the only one that
+  dissolves the problem rather than cleaning up after it — pruning needs the
+  identity option 1 supplies, and persisted preparation metadata is a schema
+  change on a branch already at `SCHEMA_VERSION = 13`.
+- **Collisions, checked rather than assumed.** Two daemons on one state DB
+  already collide on everything if they share a cpId, and are separate rows if
+  they do not; scenario rows are keyed per charge point, so the same file used
+  for two charge points does not collide. What a stable id does cost is a
+  deterministic namespace: a scenario an operator authored under exactly
+  `<base>-c<connector>` on the same charge point is overwritten by the startup
+  load. That is the collision `--scenario` already had whenever its file kept
+  its own id, and much the better trade against duplicate traffic on every
+  restart.
+- **One prune, narrow, as an upgrade path.** A state DB written by a build
+  through `0f6f951` carries clock-suffixed ids no stable id can match, so each
+  boot drops exactly `^<base>-c<connector>-\d{13,}$` before loading. The exact
+  shape is the answer to the objection that pruning deletes what an operator
+  meant to keep: nothing but this code ever mints it. Deliberately **not**
+  covered, and named as limitations rather than guessed at: a boot that narrows
+  `--scenario-connector`, and a file whose own `id` changed, both leave the
+  previous copy loaded on a connector this boot never touches. Recognising
+  those needs preparation metadata persisted with the scenario — a schema
+  change, so it is the maintainer's call.
+- **The file is read once per boot** (the round's second finding). The claim —
+  which stored ids a startup flag is about to overwrite — used to come from its
+  own read, taken minutes before the load's read across the restored fleet's
+  connect. An edit in that window made the prediction describe a file that was
+  no longer the one being loaded: the first restore pass held a row back under
+  the old id while the bootstrap loaded and deleted a different one, and the
+  second pass then reattached the held row and reloaded the current file under
+  an abandoned id — two live copies from one flag. `readStartupScenarioFile`
+  runs once and its result is handed to both, so they cannot disagree; a
+  mid-boot edit is still applied, because `registerScenarioFile` reconciles
+  against disk the moment the watch goes on.
+- The two findings shared one root — the startup path read the file twice and
+  minted ids from the clock — and the stable id made the second fix simpler
+  rather than harder: with a predictable id, `startupClaimedScenarioIds` is
+  **exact** instead of narrow-and-incomplete, because every id the boot will
+  load is knowable before it loads. A built-in `--scenario-template` still
+  claims nothing; `loadScenarioTemplate` mints that id and prunes its own prior
+  instances, which is why that mode never had this bug.
+- **Failure**: an unreadable or unparseable file carries its error on the read
+  result rather than collapsing to a bare `null`, so the diagnostic is as
+  specific as it was when the load did its own read, and the claim is empty —
+  every row is then restored in the first pass, exactly as with no flag.
+  **Ordering**: the prune runs before the load, so a connector never holds two
+  graphs at once; with `--auto-connect` the charge point has already dialled by
+  then, deliberately, so a restored legacy instance with a matching trigger can
+  have started in the gap and `removeScenario` stops it. **Destruction**: the
+  prune removes from memory and the DB both, so the next boot does not restore
+  what it dropped. **Trigger**: only a boot that loads a startup scenario file
+  onto that connector prunes anything.

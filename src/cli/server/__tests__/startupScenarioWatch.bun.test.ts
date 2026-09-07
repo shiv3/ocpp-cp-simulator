@@ -14,6 +14,7 @@ import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import {
   restoredDialsToDefer,
+  readStartupScenarioFile,
   runStartupScenario,
   startupClaimedRowSkip,
   startupClaimedScenarioIds,
@@ -930,11 +931,17 @@ describe("--watch over a startup scenario file (#314)", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
-  it("claims only the ids a startup flag will actually reuse", async () => {
-    // The narrow skip is only as good as this prediction, and it has to agree
-    // with the `prepare` that `runStartupScenario` builds — which is why both
-    // read the same `scenarioFileTargetsConnector` rule rather than each
-    // carrying a copy of it (#314).
+  it("claims exactly the ids a startup flag will load", async () => {
+    // The skip is only as good as this prediction, and it has to agree with the
+    // `prepare` that `runStartupScenario` builds — which is why both read the
+    // same `scenarioFileTargetsConnector` rule rather than each carrying a copy
+    // of it (#314).
+    //
+    // It used to be *incomplete* rather than exact: an instantiated copy's id
+    // carried `Date.now()`, so every fan-out mode claimed nothing and its
+    // stored rows were reconciled under ids the boot was about to abandon.
+    // `startupInstanceId` is stable across restarts, so every id the boot will
+    // load is knowable here.
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-claimed-"));
     const scenarioFile = join(tmpDir, "scenario.json");
     writeFileSync(scenarioFile, targeted(1, 11));
@@ -948,45 +955,50 @@ describe("--watch over a startup scenario file (#314)", () => {
         scenarioTemplateFile: null,
         scenarioConnector: "all",
       };
+      // The claim is derived from the boot's single read of the file, never
+      // from a read of its own — a prediction with its own read predicts a
+      // file that may not be the one loaded (#314).
+      const claimed = (
+        opt: Parameters<typeof startupClaimedScenarioIds>[0],
+        connectorCount: number,
+      ): string[] => [
+        ...startupClaimedScenarioIds(
+          opt,
+          connectorCount,
+          readStartupScenarioFile(opt),
+        ),
+      ];
+
       // One connector, and the file already targets it: loaded as-is, so its
       // own id is the key it will claim.
-      expect([
-        ...startupClaimedScenarioIds({ ...base, scenario: scenarioFile }, 1),
-      ]).toEqual(["targeted-scenario"]);
-      // Two connectors: every copy is instantiated with a fresh
-      // `Date.now()`-bearing id, so no stored row can collide.
-      expect([
-        ...startupClaimedScenarioIds({ ...base, scenario: scenarioFile }, 2),
-      ]).toEqual([]);
-      // …unless the operator narrowed the fan-out back to one connector.
-      expect([
-        ...startupClaimedScenarioIds(
-          { ...base, scenario: scenarioFile, scenarioConnector: "1" },
-          2,
-        ),
-      ]).toEqual(["targeted-scenario"]);
-      // A template file always instantiates, and so claims nothing.
-      expect([
-        ...startupClaimedScenarioIds(
-          { ...base, scenarioTemplateFile: templateFile },
-          1,
-        ),
-      ]).toEqual([]);
-      // Nor does a built-in template: `loadScenarioTemplate` mints the id.
-      expect([
-        ...startupClaimedScenarioIds(
-          { ...base, scenarioTemplate: "essential-cp-behavior" },
-          1,
-        ),
-      ]).toEqual([]);
+      expect(claimed({ ...base, scenario: scenarioFile }, 1)).toEqual([
+        "targeted-scenario",
+      ]);
+      // Two connectors: every copy is instantiated, and its id is now stable
+      // across restarts — so both are claimed rather than neither.
+      expect(claimed({ ...base, scenario: scenarioFile }, 2)).toEqual([
+        "targeted-scenario-c1",
+        "targeted-scenario-c2",
+      ]);
+      // …and with the fan-out narrowed back to one connector the file targets,
+      // it keeps its own id.
+      expect(
+        claimed({ ...base, scenario: scenarioFile, scenarioConnector: "1" }, 2),
+      ).toEqual(["targeted-scenario"]);
+      // A template file always instantiates, on every connector.
+      expect(
+        claimed({ ...base, scenarioTemplateFile: templateFile }, 2),
+      ).toEqual(["startup-template-c1", "startup-template-c2"]);
+      // A built-in template still claims nothing: `loadScenarioTemplate` mints
+      // that id and prunes its own prior instances.
+      expect(
+        claimed({ ...base, scenarioTemplate: "essential-cp-behavior" }, 1),
+      ).toEqual([]);
       // An unreadable file claims nothing rather than guessing: every row is
       // then restored in the first pass, exactly as with no flag at all.
-      expect([
-        ...startupClaimedScenarioIds(
-          { ...base, scenario: join(tmpDir, "missing.json") },
-          1,
-        ),
-      ]).toEqual([]);
+      expect(
+        claimed({ ...base, scenario: join(tmpDir, "missing.json") }, 1),
+      ).toEqual([]);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

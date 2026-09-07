@@ -523,12 +523,12 @@ hold at once and no single position satisfies all three:
 
    Two different questions are involved and they must not share an answer.
    _Which stored scenario ids will a flag overwrite?_ decides which watch rows
-   wait for the second pass, and being narrow is the point — skip more than the
+   wait for the second pass, and it names exactly those ids — skip more than the
    flag claims and the charge point's other restored scenarios go unwatched
    until it dials. _Which charge points is startup about to configure?_ decides
-   the dial, and being narrow there is wrong: only `--scenario` on a file that
-   already targets its single connector keeps a stable id, so keying the dial on
-   the id set left three of the four modes dialling immediately.
+   the dial, and the id set is the wrong answer for it: it is empty for a
+   built-in `--scenario-template`, whose id the daemon does not mint, so keying
+   the dial on it left that mode dialling immediately.
 
    | Startup mode                                          | Deferred? | Dialled afterwards by                           |
    | ----------------------------------------------------- | --------- | ----------------------------------------------- |
@@ -542,14 +542,50 @@ hold at once and no single position satisfies all three:
    iterates exactly that fleet — which is what makes the widening safe: nothing
    is deferred that nothing subsequently dials.
 
+   **A startup-generated scenario has a stable id.** `--scenario` fanned across
+   connectors and `--scenario-template-file` both instantiate a per-connector
+   copy, and that copy is named `<file's scenario id>-c<connector>` — derived
+   from the configuration, not from the clock, so it is the same id on every
+   boot. It has to be: with `--state-db`, a restart restores the previous boot's
+   copy, and unless the new one lands on the same key the daemon cannot
+   recognise its own previous output. It then loaded a **second** graph beside
+   the restored one, which stayed unwatched — a startup registration is not
+   persisted, so no source row survives to re-attach a watch — and could
+   auto-start, so one configured scenario produced two graphs' worth of traffic
+   after every restart. The cost is a deterministic namespace: a scenario an
+   operator authored under exactly that id on the same charge point is
+   overwritten by the startup load rather than coexisting with it, the same
+   collision `--scenario` already had whenever its file kept its own id.
+
+   A state DB written by a build through `0f6f951` carries the old
+   `<base>-c<connector>-<epoch ms>` ids, which no stable id can ever match. Each
+   boot drops exactly those — that shape, on that connector, for that base id,
+   and nothing else — before loading, so an upgrade self-cleans. Two cases are
+   deliberately **not** pruned, because recognising them needs preparation
+   metadata stored alongside the scenario: a boot that narrows
+   `--scenario-connector`, and a file whose own `id` changed, both leave the
+   previous boot's copy loaded on a connector this boot never touches.
+
+   **The file is read once per boot**, and both the claim above and the load use
+   that read. They used to open it separately, minutes apart across the restored
+   fleet's connect, so an edit landing in the window made the claim describe a
+   file that was no longer the one being loaded — the first pass held a row back
+   under the old id while the bootstrap loaded and deleted a different one, and
+   the second pass then reattached the held row and reloaded the current file
+   under an abandoned id. An edit that does land mid-boot is not lost: the
+   registration reconciles against disk immediately, so `--watch` applies it as
+   soon as the watch goes on.
+
 2. **A startup flag owns its keys before its rows are read.** A stored row can
-   name the id `--scenario` will claim, so the first pass skips **exactly those
+   name an id a startup flag will claim, so the first pass skips **exactly those
    ids** — neither applying nor pruning their rows — and a second pass after the
    startup scenarios picks up whatever the flags did not claim. By then a
-   takeover has deleted the rows they did. The prediction is narrow on purpose:
-   only `--scenario` on a file that already targets its single connector keeps a
-   stable id, everything else instantiates a fresh one that no stored row can
-   match. Skipping the whole charge point instead left its _other_ restored
+   takeover has deleted the rows they did. The prediction is exact because a
+   generated instance's id is now stable (below): every id the boot will load is
+   knowable before it loads. It used to be _incomplete_ rather than exact — an
+   instantiated copy's id carried the clock, so those modes claimed nothing and
+   their rows were reconciled under ids the boot was about to abandon. Skipping
+   the whole charge point instead of exactly those ids left its _other_ restored
    scenarios unwatched right up to the moment it dialled, so they auto-started
    from the database copy rather than from the file as it reads now — which is
    constraint 1 broken by constraint 2's own solution.

@@ -65,6 +65,12 @@ RUN for attempt in 1 2 3; do \
 # Source for the UI build: index.html + src/ + Vite/Tailwind/TS configs.
 COPY index.html ./
 COPY vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.cli.json ./
+# tsconfig.json references scripts/bench/tsconfig.json (#302, composite
+# project). Vite's rolldown resolves every project reference at build time,
+# so the file must be present or `bun run build` fails with
+# "Tsconfig not found /app/scripts/bench/tsconfig.json" — which is how the
+# v0.7.11 image never built. Only the tsconfig is needed, not the bench code.
+COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY src ./src

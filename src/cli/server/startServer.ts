@@ -33,6 +33,8 @@ import {
 } from "./metrics/MetricsRecorder";
 import { renderMetrics } from "./metrics/render";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
+import { FileReloadManager } from "./FileReloadManager";
+import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -118,9 +120,27 @@ export interface ServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms: boolean;
+  /**
+   * Re-read the blueprint-instantiated idTag files and scenario files this
+   * process loaded when they change on disk (#314). Off by default: a daemon
+   * that silently re-reads files under the operator is surprising, and the
+   * agent-driven workflows this project is built around go through the control
+   * plane, where there is nothing on disk to re-read.
+   */
+  readonly watch?: boolean;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
+  // Refused before anything is opened. Two startup scenario flags used to be
+  // silently ranked, differently by each of the three functions that read them,
+  // and the disagreement showed up as restore rows held back for a scenario the
+  // boot was never going to load. The CLI refuses this at parse time with the
+  // same message; this is the door for every other caller, and it is here — not
+  // at the first read, several hundred lines in — so a refused daemon has not
+  // opened the state DB, registered metrics or restored a fleet first (#314).
+  const startupConflict = startupScenarioOptionConflict(opts.startupScenario);
+  if (startupConflict) throw new Error(startupConflict);
+
   // Open the persistent state DB up front so every CP we create (boot
   // bootstrap or via socket.io RPC) gets the same Database handle. Without
   // --state-db we stay in-memory; the log line below makes the choice
@@ -180,6 +200,17 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   });
   registry.setNetworkSimManager(networkSimManager);
 
+  // #314: constructed before the charge points are restored below so the
+  // initial `syncFromRegistry()` sees them, and before attachSocketIo so the
+  // RPC layer can hand it the scenario files it loads. Its push sink is set
+  // once the socket.io bridge exists.
+  const fileReload = opts.watch
+    ? new FileReloadManager(registry, { log: serverLog, database })
+    : null;
+  if (fileReload) {
+    registry.onInitChange(() => fileReload.syncFromRegistry());
+  }
+
   const configRepository = createSocketConfigRepository(database);
   const scenarioRepository = new SqliteScenarioRepository(database);
   const chargePointService = new RegistryChargePointService(registry, {
@@ -188,18 +219,93 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     scenarioRepository,
     connectorSettingsRepository,
   });
+  // Computed here rather than at the bootstrap loop because the watch restore
+  // below needs it: these are the charge points a startup flag will load a
+  // scenario onto, and their rows wait for the second pass.
+  const fleet = expandBootstrap(opts);
+  const hasExplicitStartupScenario = isExplicitStartupScenario(
+    opts.startupScenario,
+  );
+  const seedDefault = !hasExplicitStartupScenario;
+  // Two questions, two predicates. They are not the same set and conflating
+  // them is what let a whole class of startup mode through (#314):
+  //
+  // - *Which stored scenario ids will a startup flag overwrite on this charge
+  //   point?* — `startupClaimedByCp`, below. Used to hold watch rows back for
+  //   the second pass, where being narrow is the entire point: skip more than
+  //   the flag claims and the other restored scenarios go unwatched until they
+  //   dial.
+  // - *Which charge points is startup about to configure at all?* —
+  //   `startupTargets`. Used to hold the dial back, where being narrow is
+  //   wrong: `--scenario-template` and `--scenario-template-file` instantiate a
+  //   fresh id every boot, so they claim nothing and answer the first question
+  //   with an empty set while still being about to reconfigure the connector.
+  //
+  // Per charge point for the first, because the connector count decides whether
+  // `--scenario` keeps the file's own id or instantiates a fresh one.
+  //
+  // Read **once**, here, and handed to both the prediction and the load. The
+  // two used to open the file separately, minutes apart across the restored
+  // fleet's connect, so an edit in that window made the prediction describe a
+  // file that was no longer the one being loaded (#314). See
+  // {@link readStartupScenarioFile}.
+  const startupScenarioSource = readStartupScenarioFile(opts.startupScenario);
+  const startupClaimedByCp = new Map<string, ReadonlySet<string>>(
+    hasExplicitStartupScenario
+      ? fleet.map((init) => [
+          init.cpId,
+          startupClaimedScenarioIds(
+            opts.startupScenario,
+            init.connectors,
+            startupScenarioSource,
+          ),
+        ])
+      : [],
+  );
+  const startupTargets = startupTargetCpIds(opts.startupScenario, fleet);
+
   // Re-create CPs that were registered before the previous daemon shut
   // down. Has to happen BEFORE the CLI bootstrap (`opts.bootstrap`) so a
   // re-run with the same --cp-id is treated as "update wsUrl/connectors"
   // rather than "create + collide".
-  const restored = await Promise.resolve(
-    chargePointService.restoreFromDatabase(),
-  );
+  //
+  // Rebuilt without dialling: the moment a restored charge point's boot gate
+  // opens, a persisted connect-triggered scenario starts, and it must start
+  // from the file as it reads now rather than as it read when the daemon
+  // stopped (#314). The watches go back on in between, and `connectRestored`
+  // below lets the fleet dial.
+  // Straight to the registry rather than through the facade: the facade's
+  // `restoreFromDatabase` is part of the shared `ChargePointService` interface
+  // the browser implements too, and deferring the dial is a daemon concern.
+  const restored = registry.restoreFromDatabase({ connect: false });
   if (restored.length > 0) {
     serverLog(
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
     );
   }
+  // First pass. See `finishWatchSetup` for the second, and for the three
+  // constraints this sequence has to satisfy at once.
+  fileReload?.restoreScenarioWatches({
+    skip: startupClaimedRowSkip(startupClaimedByCp),
+  });
+  // Split, not just deferred. A charge point that startup is about to configure
+  // must not dial here when the bootstrap loop is going to dial it anyway: the
+  // moment its boot gate opens, the *restored* copy of its scenarios
+  // auto-starts, and dialling this early leaves the whole bootstrap loop —
+  // every other charge point's connect, which can be minutes against a slow
+  // CSMS — between that start and the flag's load. Held back, the dial and the
+  // load happen in the same iteration, one immediately after the other.
+  //
+  // Only when `--auto-connect` is on, because that is what makes the bootstrap
+  // loop dial. Without it nothing else would, and `runStartupScenario`'s
+  // `waitForBootAccepted` would spend its full 30s timeout per connector on a
+  // charge point this function had deliberately left unconnected (#314).
+  const dialLater = restoredDialsToDefer(
+    restored,
+    startupTargets,
+    opts.autoConnect === true,
+  );
+  registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
@@ -210,15 +316,31 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     connectorSettingsRepository,
     blueprints,
     chargePointService,
+    fileReload,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },
   });
+  // The bridge only exists once socket.io is attached, so the sink is wired
+  // here rather than at construction.
+  fileReload?.setSink((event) =>
+    socketIo.registryEvents?.emitFileReloaded(event),
+  );
+  // #314: a reloaded scenario is a definition change like any other, and the
+  // console listens on the `scenario-definitions` scope, not on `file-reload`.
+  fileReload?.setScenarioDefinitionsSink((cpId, connectorId, definitions) =>
+    socketIo.registryEvents?.emitScenarioDefinitionsChanged(
+      cpId,
+      connectorId,
+      definitions,
+    ),
+  );
   lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
     onShutdownStart: () => {
+      fileReload?.close();
       void socketIo.close();
     },
   });
@@ -239,6 +361,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     connectorSettingsRepository,
     blueprints,
     chargePointService,
+    fileReload,
   });
   const mcpHandler = createMcpHandler(runtimeDeps);
 
@@ -349,13 +472,18 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 
   lifecycle.installSignalHandlers();
 
-  const fleet = expandBootstrap(opts);
-  const hasExplicitStartupScenario =
-    !!opts.startupScenario &&
-    (!!opts.startupScenario.scenario ||
-      !!opts.startupScenario.scenarioTemplate ||
-      !!opts.startupScenario.scenarioTemplateFile);
-  const seedDefault = !hasExplicitStartupScenario;
+  // ---------------------------------------------------------------------
+  // The daemon is now SERVING. `Bun.serve` is bound above, so socket.io and
+  // the HTTP routes accept requests from here on, and everything below runs
+  // concurrently with them: fleet creation, `--state-db` restore, the bounded
+  // connect loop (which awaits the network), `runStartupScenario`, and the
+  // watch restore at the end. There is no quiescent window after the listener
+  // opens, so anything below that reads persisted state has to treat what this
+  // process already holds as newer than what the database remembers — see
+  // `FileReloadManager.restoreScenarioWatches`. Listening later is not the
+  // answer: `cp.list` answering before an unreachable CSMS times out is the
+  // behaviour the ordering above exists for (#314).
+  // ---------------------------------------------------------------------
 
   // Register the whole fleet first. Creation is synchronous, so every charge
   // point is in the registry — and answering `cp.list` — before anything waits
@@ -384,7 +512,12 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     started.push({ svc, init });
   }
 
-  if (!opts.autoConnect && !opts.startupScenario) return;
+  fileReload?.syncFromRegistry();
+
+  if (!opts.autoConnect && !opts.startupScenario) {
+    finishWatchSetup(fileReload, serverLog);
+    return;
+  }
 
   // Bounded rather than unbounded: a fleet all dialling at once is a thundering
   // herd at the CSMS, and the point here is only that one slow connect must not
@@ -393,6 +526,27 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     started,
     BOOTSTRAP_CONCURRENCY,
     async ({ svc, init }) => {
+      // Install BEFORE the dial, start after (#314). The two halves used to be
+      // one call placed after `connect()`, and with a restored `--state-db`
+      // that left the boot gate auto-starting the *previous* boot's copy of
+      // this very scenario: since a generated instance's id is stable, the
+      // load that followed found its own id already active, left the stale
+      // executor running, and never ran the current graph. Installing first
+      // makes what the gate auto-starts the configured definition, and gives
+      // `--watch`'s registration a chance to reconcile the captured copy
+      // against disk while nothing is in flight to defer the result behind.
+      const installed = opts.startupScenario
+        ? installStartupScenario(
+            svc,
+            opts.startupScenario,
+            init.connectors,
+            fileReload,
+            database,
+            // The same object `startupClaimedByCp` was built from: the claim
+            // and the load must describe the same bytes (#314).
+            startupScenarioSource,
+          )
+        : [];
       if (opts.autoConnect) {
         serverLog(`Connecting ${init.cpId} to CSMS...`);
         try {
@@ -404,10 +558,68 @@ export async function startServer(opts: ServerOptions): Promise<void> {
           );
         }
       }
-      if (opts.startupScenario) {
-        await runStartupScenario(svc, opts.startupScenario, init.connectors);
-      }
+      await startStartupScenario(svc, installed);
     },
+  );
+
+  finishWatchSetup(fileReload, serverLog);
+}
+
+/**
+ * Second pass of the watch restore, then say what is being watched (#314).
+ *
+ * Three constraints have to hold at once, and no single position in the
+ * sequence satisfies all three — which is why the restore is split rather than
+ * moved again:
+ *
+ * 1. **A restored charge point must not run a stale graph.** Its persisted
+ *    connect-triggered scenarios start as soon as its boot gate opens, so the
+ *    watch has to be back and the file reconciled *before* it dials. The first
+ *    pass runs immediately after `restoreFromDatabase({ connect: false })` and
+ *    before `connectRestored`.
+ * 2. **A startup flag owns its keys before its rows are read.** A stored row
+ *    can name the id `--scenario` will claim, and reconciling it first would
+ *    put the abandoned graph on the connector and possibly start it. The first
+ *    pass therefore skips the bootstrap charge points; this second pass, after
+ *    `runStartupScenario`, picks up whatever the flags did not claim — by then
+ *    a takeover has deleted the rows they did.
+ * 3. **A restored row must not overwrite a live registration.** The listener is
+ *    bound before the bootstrap, so an RPC can register a watch at any point
+ *    in here. That one is *not* solved by position: `restoreScenarioWatches`
+ *    skips keys it already holds, in both passes. Keeping it out of the
+ *    ordering is what lets 1 and 2 be satisfied independently.
+ *
+ * This pass also does the pruning: a row whose scenario is no longer loaded is
+ * dropped here, once every path that could still load one has run.
+ */
+function finishWatchSetup(
+  fileReload: FileReloadManager | null,
+  serverLog: (message: string) => void,
+): void {
+  fileReload?.restoreScenarioWatches();
+  logWatchSummary(fileReload, serverLog);
+}
+
+/**
+ * Report what `--watch` ended up watching.
+ *
+ * Logged after the fleet exists *and* after `runStartupScenario` has registered
+ * whatever `--scenario` / `--scenario-template-file` loaded — those register
+ * inside the bootstrap loop, so counting before it told an operator "0 file(s)"
+ * about a daemon that was watching a scenario file (#314). An operator who sees
+ * nothing reload can then tell "--watch is off" from "--watch is on and no file
+ * is behind any of this daemon's state". A filesystem that cannot watch reports
+ * itself separately, once, from FileWatcher.
+ */
+function logWatchSummary(
+  fileReload: FileReloadManager | null,
+  serverLog: (message: string) => void,
+): void {
+  if (!fileReload) return;
+  const paths = fileReload.watchedPaths();
+  serverLog(
+    `Watch: enabled — re-reading ${paths.length} loaded file(s) on change (#314)` +
+      (paths.length > 0 ? `: ${paths.join(", ")}` : ""),
   );
 }
 
@@ -558,30 +770,260 @@ function startScenarioIfNotAlreadyActive(
   }
 }
 
-export async function runStartupScenario(
+/** One connector's worth of what {@link installStartupScenario} loaded. */
+export interface InstalledStartupScenario {
+  readonly connectorId: number;
+  readonly scenarioId: string;
+}
+
+/**
+ * Load — and, under `--watch`, register — what the startup flags configure,
+ * **without touching the network**.
+ *
+ * Split from starting it so the daemon can install *before* the charge point
+ * dials. That ordering is the whole point, and it closes two windows at once:
+ *
+ * - **A restored definition must not run in the flag's place.** With
+ *   `--state-db`, a charge point the flags configure comes back holding the
+ *   previous boot's copy of that scenario, and the moment its boot gate opens
+ *   the auto-start fires. Since #314 gave a generated instance a *stable* id,
+ *   the flag's load and the restored copy are the same key — so a run started
+ *   before the load leaves `startScenarioIfNotAlreadyActive` looking at an
+ *   already-active id, and the stale graph keeps running while the current one
+ *   never does. (While the ids differed, the flag's load installed a different
+ *   key and the restored run was orphaned against a definition no longer
+ *   installed, which is why this was recorded as tolerable — a judgement about
+ *   the surrounding code that expired when that code changed.) Installing
+ *   first means what auto-starts on the boot gate *is* the configured
+ *   definition.
+ * - **The captured copy must be reconciled before anything runs it.** The
+ *   file is read once per boot, well before the restored fleet's connect;
+ *   `registerScenarioFile` compares that copy against disk immediately, so an
+ *   edit saved in the window is applied here — before the gate opens, with
+ *   nothing in flight to defer it behind.
+ *
+ * Nothing here starts a run. `loadScenario`'s connect-auto-start is gated on
+ * `chargePoint.status === Available`, which an undialled charge point is not,
+ * so the installed definition sits inert until {@link startStartupScenario}
+ * (for a `manual`-triggered scenario) or the boot gate's auto-start (for a
+ * trigger-matching one) runs it.
+ *
+ * **Failure**: a per-connector failure is reported and the other connectors
+ * still install; an unreadable file installs nothing and reports it.
+ * **Destruction**: a previous build's clock-suffixed instance for the same
+ * file and connector is pruned first, so the connector never holds two.
+ * **Trigger**: called once per bootstrap charge point, before its dial.
+ */
+export function installStartupScenario(
   svc: CLIChargePointService,
   opt: NonNullable<ServerOptions["startupScenario"]>,
   connectorCount: number,
-): Promise<void> {
+  /** Null unless the daemon runs with `--watch` (#314). */
+  fileReload: FileReloadManager | null = null,
+  /**
+   * The `--state-db`, when there is one. Separate from `fileReload` because a
+   * startup registration's effect on stored state is not conditional on the
+   * watcher: taking over a key deletes whatever row was stored under it, and a
+   * daemon started without `--watch` must still do that or a later watched
+   * start would reattach the abandoned file (#314).
+   */
+  database: Database | null = null,
+  /**
+   * The boot's single read of the scenario file (#314). The daemon always
+   * passes the same object it gave {@link startupClaimedScenarioIds}, so the
+   * claim and the load describe the same bytes; the default is for direct
+   * callers that have no claim to agree with, where this read *is* the load
+   * and nothing can disagree with it.
+   */
+  source: StartupScenarioFile | null = readStartupScenarioFile(opt),
+): InstalledStartupScenario[] {
+  const installed: InstalledStartupScenario[] = [];
+  // Which flag is in effect is asked once, through the same resolver
+  // `startupClaimedScenarioIds` and `readStartupScenarioFile` read, so the load
+  // and the prediction of it cannot pick different flags (#314).
+  const mode = resolveStartupScenarioMode(opt);
+  if (!mode) return installed;
   const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
   if (connectors.length === 0) {
     process.stderr.write(
       `[server] No matching connectors for --scenario-connector "${opt.scenarioConnector}"\n`,
     );
-    return;
+    return installed;
   }
 
-  // Wait (bounded) for each target connector's boot gate to open before
-  // firing anything. `svc.connect()` above only waits for the WebSocket
-  // to open, not for BootNotification.conf — a scenario with no leading
-  // delay before its first transaction node (e.g.
-  // cert16-tc005-ev-side-disconnect) can otherwise send StartTransaction
-  // while the boot gate is still closed. The boot gate silently drops
-  // gated outgoing CALLs sent before Accepted (see
-  // OCPPMessageHandler.sendRequest's isCallAllowed check), so the
-  // scenario would proceed with a locally fabricated transactionId that
-  // the CSMS never sees. See waitForBootAccepted() for the full
-  // rationale and the timeout policy (30s bound, warn-and-proceed).
+  // 1) Built-in template by id — instantiate per connector.
+  if (mode.kind === "template") {
+    for (const connectorId of connectors) {
+      try {
+        const scenarioId = svc.loadScenarioTemplate(
+          mode.templateId,
+          connectorId,
+        );
+        installed.push({ connectorId, scenarioId });
+        process.stderr.write(
+          `[server] Scenario template "${mode.templateId}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to load scenario template on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+    }
+    return installed;
+  }
+
+  // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
+  if (mode.kind === "templateFile") {
+    if (!source?.definition || source.text === null) {
+      process.stderr.write(
+        `[server] Failed to read scenario template file: ${
+          source?.error instanceof Error
+            ? source.error.message
+            : (source?.error ?? mode.path)
+        }\n`,
+      );
+      return installed;
+    }
+    const template = source.definition;
+    const templateText = source.text;
+    warnOnScenarioSchemaMismatch(mode.path, template);
+    for (const connectorId of connectors) {
+      try {
+        const instance = instantiateTemplate(template, connectorId);
+        pruneLegacyStartupInstances(svc, connectorId, template.id);
+        const scenarioId = svc.loadScenario(connectorId, instance);
+        // #314: `prepare` replays the same per-connector rewrite on every
+        // reload, so a fan-out across connectors keeps its independent copies
+        // instead of collapsing onto the file's own targetId.
+        fileReload?.registerScenarioFile({
+          filePath: mode.path,
+          cpId: svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          prepare: (definition) => instantiateTemplate(definition, connectorId),
+          loadedText: templateText,
+          // Not persisted: a row cannot carry `prepare`, and this bootstrap
+          // runs again on every boot with a fresh instance id per connector.
+          // Persisting it left the next `--state-db` start with the previous
+          // run's watches restored prepare-less, reloading the file's own
+          // target over the prepared copies (#314).
+          persist: false,
+        });
+        forgetWatchedScenarioFile(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+        );
+        installed.push({ connectorId, scenarioId });
+        process.stderr.write(
+          `[server] Scenario template file "${mode.path}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to apply template file on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+    }
+    return installed;
+  }
+
+  // 3) Single scenario file — for fan-out, treat it like a template (rewrite
+  // ids per connector); for single-connector, behave as before.
+  if (mode.kind === "file") {
+    if (!source?.definition || source.text === null) {
+      process.stderr.write(
+        `[server] Failed to read scenario file: ${
+          source?.error instanceof Error
+            ? source.error.message
+            : (source?.error ?? mode.path)
+        }\n`,
+      );
+      return installed;
+    }
+    const definition = source.definition;
+    const scenarioText = source.text;
+    warnOnScenarioSchemaMismatch(mode.path, definition);
+    for (const connectorId of connectors) {
+      try {
+        // Re-evaluated per definition, not captured once (#314). A single
+        // connector whose `--scenario` already targets it is loaded as-is; edit
+        // `targetId` or `targetType` in that file and the answer changes, so a
+        // `prepare` that remembered the first answer left the definition
+        // registered on the original connector while its executor derived
+        // expectations from the edited target — waiting on a connector it was
+        // not attached to, and never firing.
+        const prepare = (next: ScenarioDefinition): ScenarioDefinition =>
+          scenarioFileTargetsConnector(next, connectorId, connectors.length)
+            ? next
+            : instantiateTemplate(next, connectorId);
+        pruneLegacyStartupInstances(svc, connectorId, definition.id);
+        const scenarioId = svc.loadScenario(connectorId, prepare(definition));
+        fileReload?.registerScenarioFile({
+          filePath: mode.path,
+          cpId: svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          prepare,
+          loadedText: scenarioText,
+          // As above: `prepare` decides per reload whether the file already
+          // targets this connector, and no persisted row can replay that.
+          persist: false,
+        });
+        forgetWatchedScenarioFile(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+        );
+        installed.push({ connectorId, scenarioId });
+        process.stderr.write(
+          `[server] Scenario file "${mode.path}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[server] Failed to load scenario file on connector ${connectorId}: ${
+            err instanceof Error ? err.message : err
+          }\n`,
+        );
+      }
+    }
+  }
+  return installed;
+}
+
+/**
+ * Start what {@link installStartupScenario} loaded, once the boot gate is open.
+ *
+ * Wait (bounded) for each target connector's boot gate before firing anything.
+ * `svc.connect()` only waits for the WebSocket to open, not for
+ * `BootNotification.conf` — a scenario with no leading delay before its first
+ * transaction node (e.g. cert16-tc005-ev-side-disconnect) can otherwise send
+ * `StartTransaction` while the gate is still closed. The gate silently drops
+ * gated outgoing CALLs sent before Accepted (see `OCPPMessageHandler
+ * .sendRequest`'s `isCallAllowed` check), so the scenario would proceed with a
+ * locally fabricated transactionId the CSMS never sees. See
+ * `waitForBootAccepted()` for the full rationale and the timeout policy (30s
+ * bound, warn-and-proceed).
+ *
+ * A scenario whose trigger matches has already been started by the boot gate's
+ * own auto-start by the time this runs, so `startScenarioIfNotAlreadyActive`
+ * is a no-op for it; a `manual`-triggered one is started only here, because
+ * `tryAutoStartForConnector` deliberately skips those. Either way exactly one
+ * run of the *installed* definition happens — which is the guarantee installing
+ * before the dial buys, since whatever the gate auto-starts is now the
+ * configured graph rather than a restored copy of the previous boot's (#314).
+ */
+export async function startStartupScenario(
+  svc: CLIChargePointService,
+  installed: readonly InstalledStartupScenario[],
+): Promise<void> {
+  if (installed.length === 0) return;
+  const connectors = [...new Set(installed.map((one) => one.connectorId))];
   await Promise.all(
     connectors.map((connectorId) =>
       svc.waitForBootAccepted(connectorId, {
@@ -593,102 +1035,457 @@ export async function runStartupScenario(
       }),
     ),
   );
+  for (const { connectorId, scenarioId } of installed) {
+    try {
+      startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
+      process.stderr.write(
+        `[server] Startup scenario started (id: ${scenarioId}, connector: ${connectorId})\n`,
+      );
+    } catch (err) {
+      process.stderr.write(
+        `[server] Failed to start startup scenario "${scenarioId}" on connector ${connectorId}: ${
+          err instanceof Error ? err.message : err
+        }\n`,
+      );
+    }
+  }
+}
 
-  // 1) Built-in template by id — instantiate per connector.
-  if (opt.scenarioTemplate) {
-    for (const connectorId of connectors) {
-      try {
-        const scenarioId = svc.loadScenarioTemplate(
-          opt.scenarioTemplate,
+/**
+ * Install and then start, for callers that do both back to back.
+ *
+ * The daemon does **not** use this: it installs before the dial and starts
+ * after, which is the ordering the split exists for. Kept because a caller with
+ * nothing to interleave — a test, or any path where the charge point is already
+ * connected — wants one call, and because the composition is the definition of
+ * what the two halves add up to.
+ */
+export async function runStartupScenario(
+  svc: CLIChargePointService,
+  opt: NonNullable<ServerOptions["startupScenario"]>,
+  connectorCount: number,
+  fileReload: FileReloadManager | null = null,
+  database: Database | null = null,
+  source: StartupScenarioFile | null = readStartupScenarioFile(opt),
+): Promise<void> {
+  await startStartupScenario(
+    svc,
+    installStartupScenario(
+      svc,
+      opt,
+      connectorCount,
+      fileReload,
+      database,
+      source,
+    ),
+  );
+}
+
+/**
+ * Which restored charge points must wait for the bootstrap loop to dial them.
+ *
+ * A charge point whose id a startup flag will claim has a restored copy of that
+ * very scenario loaded, and it auto-starts the moment its boot gate opens.
+ * Dialling it during the restore leaves the entire bootstrap loop — every other
+ * charge point's connect, minutes against a slow CSMS — between that start and
+ * the flag's load. Held back, the two happen one after the other in the same
+ * iteration.
+ *
+ * Only when the bootstrap loop is actually going to dial (`--auto-connect`).
+ * Without it nothing else would, and `runStartupScenario`'s
+ * `waitForBootAccepted` would burn its full 30s timeout per connector on a
+ * charge point that was deliberately left unconnected — the boot-accepted wait
+ * broken by the very hold-back meant to protect it (#314).
+ */
+export function restoredDialsToDefer(
+  restored: readonly string[],
+  startupTargets: ReadonlySet<string>,
+  autoConnect: boolean,
+): Set<string> {
+  if (!autoConnect) return new Set();
+  return new Set(restored.filter((cpId) => startupTargets.has(cpId)));
+}
+
+/**
+ * The first pass's row filter: hold back exactly the rows whose scenario id a
+ * startup flag will overwrite on that charge point.
+ *
+ * Narrow on purpose, and the counterpart of {@link startupTargetCpIds}: widen
+ * this to whole charge points and the *other* restored scenarios on them go
+ * unwatched until they dial, which is the failure the first pass exists to
+ * prevent. The two predicates answer different questions and neither one's
+ * answer is safe for the other's job (#314).
+ */
+export function startupClaimedRowSkip(
+  claimedByCp: ReadonlyMap<string, ReadonlySet<string>>,
+): (row: { readonly cp_id: string; readonly scenario_id: string }) => boolean {
+  return (row) => claimedByCp.get(row.cp_id)?.has(row.scenario_id) === true;
+}
+
+/**
+ * Which charge points a startup flag is about to configure.
+ *
+ * Answers "is startup going to reconfigure this charge point?", which is a
+ * different question from "which stored scenario ids will it overwrite?" — see
+ * {@link startupClaimedScenarioIds} for that one. Every bootstrap charge point
+ * is a target whenever any startup flag is set, because all three modes load a
+ * definition onto every one of them; only the *ids* differ by mode, and ids are
+ * irrelevant here.
+ *
+ * Keying the dial deferral on the id set instead let three of the four startup
+ * modes through: `--scenario-template` and `--scenario-template-file` mint a
+ * fresh id each boot and so claim nothing, as does a `--scenario` that has to
+ * be instantiated across connectors. Their restored charge points therefore
+ * dialled immediately and their persisted `triggerOn: connect` scenarios
+ * auto-started from the database, well before the configured definition
+ * loaded (#314).
+ *
+ * Everything deferred here is dialled afterwards by the bootstrap loop, which
+ * iterates exactly this fleet — see the mode table in `docs/entities/daemon.md`.
+ */
+export function startupTargetCpIds(
+  startupScenario: ServerOptions["startupScenario"],
+  fleet: readonly ChargePointInitOptions[],
+): Set<string> {
+  if (!isExplicitStartupScenario(startupScenario)) return new Set();
+  return new Set(fleet.map((init) => init.cpId));
+}
+
+/** Whether any startup flag names something to load. */
+export function isExplicitStartupScenario(
+  startupScenario: ServerOptions["startupScenario"],
+): boolean {
+  return resolveStartupScenarioMode(startupScenario) !== null;
+}
+
+/**
+ * Whether a `--scenario` definition already targets the connector it is being
+ * loaded onto, and therefore keeps its own id instead of an instantiated one.
+ *
+ * Shared, not duplicated: `runStartupScenario` uses it to build the `prepare`
+ * that runs on every reload, and the boot sequence uses it to work out which
+ * persisted scenario ids the startup flags are about to claim. Those two
+ * answers have to agree — a skip computed from a second copy of this rule would
+ * drift from the load it is meant to predict (#314).
+ */
+export function scenarioFileTargetsConnector(
+  definition: ScenarioDefinition,
+  connectorId: number,
+  connectorCount: number,
+): boolean {
+  return (
+    connectorCount === 1 &&
+    definition.targetType === "connector" &&
+    definition.targetId === connectorId
+  );
+}
+
+/**
+ * Which startup scenario option this boot is running, as one value.
+ *
+ * The precedence question, asked in one place. Three functions used to derive
+ * something from the same three flags and each spelled out its own rule:
+ * {@link installStartupScenario} took `--scenario-template` first, then
+ * `--scenario-template-file`, then `--scenario`; {@link readStartupScenarioFile}
+ * read `scenarioTemplateFile ?? scenario`; {@link startupClaimedScenarioIds}
+ * looked only at whether either file flag was set. Pass `--scenario-template`
+ * *and* `--scenario` together and the third disagreed with the first: the load
+ * installed the built-in template and claimed nothing, while the prediction
+ * claimed the file's ids — so the first restore pass held rows back for
+ * scenarios that were never going to be loaded, and they stayed unwatched until
+ * the charge point dialled.
+ *
+ * The combination is now refused rather than ranked (see
+ * {@link startupScenarioOptionConflict}), so there is no precedence left to
+ * disagree about: at most one flag is set, and every caller reads the same
+ * discriminated union to find out which. A rule spelled out once cannot drift;
+ * spelled out three times it already had (#314).
+ */
+export type StartupScenarioMode =
+  | { readonly kind: "template"; readonly templateId: string }
+  | { readonly kind: "templateFile"; readonly path: string }
+  | { readonly kind: "file"; readonly path: string };
+
+/** The startup scenario flags, in the order a conflict message names them. */
+const STARTUP_SCENARIO_FLAGS = [
+  ["scenarioTemplate", "--scenario-template"],
+  ["scenarioTemplateFile", "--scenario-template-file"],
+  ["scenario", "--scenario"],
+] as const;
+
+/**
+ * The message for a startup that names more than one scenario option, or
+ * `null` when at most one is set.
+ *
+ * **Refused, not ranked.** Every ranking is a silent answer to a question the
+ * operator asked ambiguously, and the three derivations above ranked them
+ * differently. Refusing is the smaller invariant: no doc, example, compose file
+ * or test in this repository passes two of these flags, so nothing that works
+ * today stops working, and a combination that would have quietly ignored a flag
+ * now names the flags it cannot reconcile (#314).
+ *
+ * Returned rather than thrown so the CLI can refuse at parse time — see
+ * `src/cli/main.ts` — while {@link resolveStartupScenarioMode} throws for
+ * programmatic callers that never went through it.
+ */
+export function startupScenarioOptionConflict(
+  opt: ServerOptions["startupScenario"],
+): string | null {
+  if (!opt) return null;
+  const given = STARTUP_SCENARIO_FLAGS.filter(([key]) => !!opt[key]).map(
+    ([, flag]) => flag,
+  );
+  if (given.length < 2) return null;
+  return `${given.join(", ")} cannot be combined - pass exactly one startup scenario option`;
+}
+
+/**
+ * The one startup mode the flags name, or `null` when they name none.
+ *
+ * Throws on a conflicting combination. The daemon refuses it earlier and more
+ * politely (the CLI at parse time, {@link startServer} before it opens the
+ * database), so this throw is the backstop for a caller that built the options
+ * object itself: silently picking one flag is the behaviour this function
+ * exists to remove.
+ */
+export function resolveStartupScenarioMode(
+  opt: ServerOptions["startupScenario"],
+): StartupScenarioMode | null {
+  const conflict = startupScenarioOptionConflict(opt);
+  if (conflict) throw new Error(conflict);
+  if (!opt) return null;
+  if (opt.scenarioTemplate)
+    return { kind: "template", templateId: opt.scenarioTemplate };
+  if (opt.scenarioTemplateFile)
+    return { kind: "templateFile", path: opt.scenarioTemplateFile };
+  if (opt.scenario) return { kind: "file", path: opt.scenario };
+  return null;
+}
+
+/**
+ * The scenario file a startup flag names, read **once** for the whole boot.
+ *
+ * Both `--scenario` and `--scenario-template-file` used to be read twice: once
+ * early, to work out which stored scenario ids the flags were about to claim,
+ * and again per charge point inside the bootstrap loop, to load. Those are two
+ * different points in time with the whole restored fleet's connect between
+ * them — minutes against a slow CSMS — so an edit landing in the window made
+ * the prediction describe a file that was no longer being loaded: the first
+ * restore pass held back a row under the old id while the bootstrap loaded and
+ * deleted a different one, and the second pass then reattached the held row and
+ * reloaded the current file under an abandoned id. Two live copies out of one
+ * flag (#314).
+ *
+ * One read settles it. The claim is derived from the same bytes that are
+ * loaded, so the two cannot disagree — and an edit that lands mid-boot is not
+ * lost either: `registerScenarioFile` reconciles the registration against disk
+ * immediately, so `--watch` applies it the moment the watch goes on.
+ *
+ * `null` when no file flag is set, or when the file cannot be read or parsed —
+ * `runStartupScenario` reports that properly a moment later, and claiming
+ * nothing is the safe answer, since every row is then restored in the first
+ * pass exactly as with no flag at all.
+ */
+export interface StartupScenarioFile {
+  readonly path: string;
+  /**
+   * `null` when the file could not be read or parsed — `error` says why, and
+   * carrying the failure rather than collapsing it to a bare `null` is what
+   * keeps `runStartupScenario`'s diagnostic as specific as it was when it did
+   * its own read.
+   */
+  readonly text: string | null;
+  readonly definition: ScenarioDefinition | null;
+  readonly error: unknown;
+}
+
+export function readStartupScenarioFile(
+  opt: ServerOptions["startupScenario"],
+): StartupScenarioFile | null {
+  const mode = resolveStartupScenarioMode(opt);
+  if (!mode || mode.kind === "template") return null;
+  const filePath = mode.path;
+  try {
+    const text = fs.readFileSync(filePath, "utf-8");
+    return {
+      path: filePath,
+      text,
+      definition: JSON.parse(text) as ScenarioDefinition,
+      error: null,
+    };
+  } catch (err) {
+    return { path: filePath, text: null, definition: null, error: err };
+  }
+}
+
+/**
+ * The persisted scenario ids the startup flags will claim on this boot.
+ *
+ * **Exact, not narrow.** It used to be narrow because it had to be: only
+ * `--scenario` on a file that already targeted its single connector kept a
+ * predictable id, and everything else went through `instantiateTemplate`, whose
+ * ids carried `Date.now()` and could not be predicted — so those modes claimed
+ * nothing and their stored rows were reconciled in the first pass, under ids
+ * this boot was about to abandon. Now that a generated instance's id is
+ * {@link startupInstanceId} — derived from the file and the connector, the same
+ * across restarts — every id the boot will load is knowable here, and this
+ * returns exactly that set.
+ *
+ * Exact is still narrow in the sense that matters: it names the ids the flags
+ * will overwrite and no others. Skipping more than that leaves a charge point's
+ * *other* restored scenarios unwatched until it dials, which is the failure the
+ * first pass exists to prevent (#314).
+ *
+ * Takes the boot's single read rather than opening the file itself: a
+ * prediction with its own read is a prediction of a file that may not be the
+ * one loaded, which is the bug this signature exists to make unrepresentable.
+ * A built-in `--scenario-template` still claims nothing — `loadScenarioTemplate`
+ * mints that id and prunes its own prior instances.
+ */
+export function startupClaimedScenarioIds(
+  opt: ServerOptions["startupScenario"],
+  connectorCount: number,
+  source: StartupScenarioFile | null,
+): Set<string> {
+  const claimed = new Set<string>();
+  // Resolved first, ahead of the `source` check, so a conflicting combination
+  // is refused here too rather than answered with an empty set that happens to
+  // look harmless.
+  const mode = resolveStartupScenarioMode(opt);
+  // A built-in `--scenario-template` claims nothing — `loadScenarioTemplate`
+  // mints that id and prunes its own prior instances. Asked through the same
+  // resolver the load reads, so the prediction and the load cannot disagree
+  // about which flag is in effect (#314).
+  if (!mode || mode.kind === "template") return claimed;
+  // A mode implies options, but only to a reader: narrowed for the compiler.
+  if (!opt) return claimed;
+  if (!source) return claimed;
+  const baseId = source.definition?.id;
+  if (!source.definition) return claimed;
+  if (typeof baseId !== "string") return claimed;
+  const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
+  for (const connectorId of connectors) {
+    // The same branch `runStartupScenario` takes, through the same predicate —
+    // a second copy of the rule would drift from the load it predicts. A
+    // template file always instantiates; a `--scenario` keeps its own id only
+    // when it already targets its single connector.
+    claimed.add(
+      mode.kind === "file" &&
+        scenarioFileTargetsConnector(
+          source.definition,
           connectorId,
-        );
-        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
-        process.stderr.write(
-          `[server] Scenario template "${opt.scenarioTemplate}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
-        );
-      } catch (err) {
-        process.stderr.write(
-          `[server] Failed to start scenario template on connector ${connectorId}: ${
-            err instanceof Error ? err.message : err
-          }\n`,
-        );
-      }
-    }
-    return;
+          connectors.length,
+        )
+        ? baseId
+        : startupInstanceId(baseId, connectorId),
+    );
   }
+  return claimed;
+}
 
-  // 2) Template JSON file — read once, instantiate per connector (cpId-independent).
-  if (opt.scenarioTemplateFile) {
-    let template: ScenarioDefinition;
+/**
+ * The id a startup flag gives its per-connector copy of a scenario file.
+ *
+ * **Stable across restarts, deliberately.** This used to carry `Date.now()`,
+ * which meant a daemon could not recognise its own previous output: with
+ * `--state-db`, a restart restored the previous boot's generated instance and
+ * then loaded a *second* one under a fresh id, so the operator's single
+ * configured scenario became two loaded graphs — the stale one unwatched (a
+ * startup registration is `persist: false`, so no source row survives to
+ * re-attach a watch to it) and able to auto-start alongside the new one. A
+ * restart producing duplicate OCPP traffic is the worst symptom this can have,
+ * and every part of it followed from the generated scenario having no stable
+ * identity.
+ *
+ * Derived from what is the same across restarts for the same configuration —
+ * the file's own scenario id and the connector — so the restored instance and
+ * the newly prepared one are the *same key*: `loadScenario` replaces rather
+ * than duplicates, and the watch attaches to the id that actually exists.
+ *
+ * The cost is a deterministic namespace: a scenario an operator authored under
+ * exactly `<file id>-c<connector>` on the same charge point is overwritten by
+ * the startup load instead of coexisting with it. That is the same collision
+ * `--scenario` already has when its file targets its single connector and
+ * keeps its own id, and it is much the better trade against duplicate traffic
+ * on every restart (#314).
+ */
+export function startupInstanceId(baseId: string, connectorId: number): string {
+  return `${baseId}-c${connectorId}`;
+}
+
+/**
+ * Instances a *previous* build of this daemon generated for the same file and
+ * connector, which this boot will not replace.
+ *
+ * An upgrade path, not a general prune. Builds through `0f6f951` minted
+ * `<base>-c<connector>-<epoch ms>`, so a `--state-db` written by one carries a
+ * row this boot's stable id can never match: left alone it stays loaded
+ * forever, unwatched, and auto-starts beside the configured graph. The pattern
+ * is exact — a 13-or-more-digit epoch suffix on this connector's own prefix —
+ * because that shape is only ever minted here. A wider rule ("anything that
+ * looks generated") would delete a scenario an operator authored and meant to
+ * keep, which is the objection to pruning as a strategy; this is narrow enough
+ * not to raise it.
+ *
+ * What it deliberately does **not** cover: a boot that narrows
+ * `--scenario-connector`, or a file whose own `id` changed, leaves the previous
+ * boot's instance loaded on a connector this boot never touches. Recognising
+ * those needs preparation metadata persisted alongside the scenario — a schema
+ * change — so they are named in `docs/entities/daemon.md` rather than guessed
+ * at here.
+ */
+export function legacyStartupInstanceIds(
+  loadedScenarioIds: readonly string[],
+  baseId: string,
+  connectorId: number,
+): string[] {
+  const legacy = new RegExp(
+    `^${escapeRegExp(baseId)}-c${connectorId}-\\d{13,}$`,
+  );
+  return loadedScenarioIds.filter((id) => legacy.test(id));
+}
+
+/**
+ * Drop the previous build's generated instances for this connector before the
+ * stable-id load replaces the current one.
+ *
+ * **Ordering**: before `loadScenario`, so the connector never holds two graphs
+ * at once. With `--auto-connect` the charge point has already dialled by the
+ * time `runStartupScenario` runs on it — that adjacency is deliberate, see
+ * `restoredDialsToDefer` — so a restored legacy instance with a matching
+ * trigger can have auto-started in the gap; `removeScenario` stops it, which is
+ * the point. **Failure**: a removal that throws is reported and the load
+ * continues, because a stale extra graph is a worse outcome than a noisy line
+ * but a better one than no configured scenario at all. **Destruction**: the row
+ * goes with the scenario — `removeScenario` deletes from memory and the DB
+ * both, so the next boot does not restore it again. **Trigger**: only a boot
+ * that loads a startup scenario file onto this connector; nothing else prunes.
+ */
+function pruneLegacyStartupInstances(
+  svc: CLIChargePointService,
+  connectorId: number,
+  baseId: string,
+): void {
+  const loaded = svc.listScenarios(connectorId).map((s) => s.scenarioId);
+  for (const staleId of legacyStartupInstanceIds(loaded, baseId, connectorId)) {
     try {
-      template = JSON.parse(
-        fs.readFileSync(opt.scenarioTemplateFile, "utf-8"),
-      ) as ScenarioDefinition;
+      svc.removeScenario(connectorId, staleId);
+      process.stderr.write(
+        `[server] Removed a previous run's generated scenario "${staleId}" on connector ${connectorId}; startup instances now use the stable id "${startupInstanceId(baseId, connectorId)}" (#314)\n`,
+      );
     } catch (err) {
       process.stderr.write(
-        `[server] Failed to read scenario template file: ${
+        `[server] Failed to remove stale startup scenario "${staleId}": ${
           err instanceof Error ? err.message : err
         }\n`,
       );
-      return;
     }
-    warnOnScenarioSchemaMismatch(opt.scenarioTemplateFile, template);
-    for (const connectorId of connectors) {
-      try {
-        const instance = instantiateTemplate(template, connectorId);
-        const scenarioId = svc.loadScenario(connectorId, instance);
-        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
-        process.stderr.write(
-          `[server] Scenario template file "${opt.scenarioTemplateFile}" applied (id: ${scenarioId}, connector: ${connectorId})\n`,
-        );
-      } catch (err) {
-        process.stderr.write(
-          `[server] Failed to apply template file on connector ${connectorId}: ${
-            err instanceof Error ? err.message : err
-          }\n`,
-        );
-      }
-    }
-    return;
   }
+}
 
-  // 3) Single scenario file — for fan-out, treat it like a template (rewrite
-  // ids per connector); for single-connector, behave as before.
-  if (opt.scenario) {
-    let definition: ScenarioDefinition;
-    try {
-      definition = JSON.parse(
-        fs.readFileSync(opt.scenario, "utf-8"),
-      ) as ScenarioDefinition;
-    } catch (err) {
-      process.stderr.write(
-        `[server] Failed to read scenario file: ${
-          err instanceof Error ? err.message : err
-        }\n`,
-      );
-      return;
-    }
-    warnOnScenarioSchemaMismatch(opt.scenario, definition);
-    for (const connectorId of connectors) {
-      try {
-        const instance =
-          connectors.length === 1 && connectorId === definition.targetId
-            ? definition
-            : instantiateTemplate(definition, connectorId);
-        const scenarioId = svc.loadScenario(connectorId, instance);
-        startScenarioIfNotAlreadyActive(svc, connectorId, scenarioId);
-        process.stderr.write(
-          `[server] Scenario file "${opt.scenario}" started (id: ${scenarioId}, connector: ${connectorId})\n`,
-        );
-      } catch (err) {
-        process.stderr.write(
-          `[server] Failed to start scenario file on connector ${connectorId}: ${
-            err instanceof Error ? err.message : err
-          }\n`,
-        );
-      }
-    }
-  }
+/** Escape a string for literal use inside a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -703,7 +1500,7 @@ function instantiateTemplate(
   const cloned = JSON.parse(JSON.stringify(template)) as ScenarioDefinition;
   return {
     ...cloned,
-    id: `${cloned.id}-c${connectorId}-${Date.now()}`,
+    id: startupInstanceId(cloned.id, connectorId),
     name: cloned.name
       ? `${cloned.name} (Connector ${connectorId})`
       : `Connector ${connectorId}`,

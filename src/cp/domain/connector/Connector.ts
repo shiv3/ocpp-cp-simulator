@@ -738,7 +738,7 @@ export class Connector {
    * attempt, which is precisely when an operator is most likely to be typing
    * an SoC before pressing Start (#301).
    */
-  private get hasRunningTransaction(): boolean {
+  get hasRunningTransaction(): boolean {
     return (
       this.transactionValue !== null && this.transactionValue.stopTime === null
     );

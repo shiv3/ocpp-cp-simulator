@@ -14,7 +14,7 @@ related:
   - ../entities/daemon.md
   - choosing-an-interface.md
   - ../sources/github-issues.md
-updated: 2026-09-04
+updated: 2026-09-12
 ---
 
 # Fleet, load and observability roadmap
@@ -57,10 +57,10 @@ runtime model.
 | 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | 4a         | not filed   | —     |
 | 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | planned     | #302  |
 | 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |
-| 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | not filed   | —     |
+| 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | shipped     | #314  |
 
-Two items are **not filed** as issues yet — 4b and 6 are the two whose payoff
-is narrowest, and neither blocks anything else.
+One item is **not filed** as an issue yet — 4b, the row whose payoff is
+narrowest, and it blocks nothing else.
 
 Two items are deliberately not unconditional. **5b** is gated on the number
 that **5a** produces — building a worker model before knowing where the single
@@ -459,14 +459,37 @@ daemon, and this phase should be dropped rather than built.
 
 ## Phase 6 — File hot-reload
 
-**Goal.** Edit a blueprint, scenario or idTag file and have running CPs pick it
-up without a restart.
+**Shipped** as `--watch` (#314). Full behaviour in
+[Daemon → File hot-reload](../entities/daemon.md#file-hot-reload); the reload
+rule for scenarios is in
+[Scenario format](../concepts/scenario-format.md#re-reading-a-scenario-file---watch)
+and the `file-reload` event envelope in
+[Control plane](../concepts/control-plane.md#event-push-and-rooms).
 
-**Shape.** `fs.watch` with debounce on the files 1c and 3a make loadable, a
-`--watch` flag to opt in, and an explicit rule for what a reload does to a CP
-mid-transaction (answer: nothing — new settings apply to the next session).
+**Goal.** Edit a scenario or idTag file and have running CPs pick it up without
+a restart.
 
-**Last on purpose.** Only meaningful once blueprints and idTag pools are
+**Shape.** `fs.watch` — on the containing directory, so an editor's temp-file
+rename does not orphan the watch on a dead inode — with a 200 ms trailing
+debounce, a `--watch` flag to opt in, and an explicit rule for what a reload
+does to a CP mid-transaction: nothing. The new definition is _held_ and applied
+when the session ends; it is never dropped. A malformed file is rejected and the
+previous good copy stays. Every reload pushes a `file-reload` event with an
+`applied` / `deferred` / `rejected` outcome. `charge_points.id_tag_file`
+(added by the v12 → v13 migration; `SCHEMA_VERSION` is 13) persists the pool's
+source path so a restarted `--watch` daemon
+re-watches it.
+
+**Blueprints are deliberately out of it.** The issue's premise assumed a
+blueprint file; there is none, and #297 declined one on purpose so the control
+plane stays the single source of truth for a blueprint. What a blueprint can
+reference — `params.idTagPool.file` — is a different matter: it is recorded as
+`idTagFile` on every CP that `cp.create_many { blueprintId }` instantiates, so
+under `--watch` an edit to it reaches those CPs live, the same as any CP
+created by hand. What is not watched is the blueprint row itself: a
+`blueprint.save` edit affects CPs created afterwards, never retroactively.
+
+**Last on purpose.** Only meaningful once idTag pools and scenarios were
 file-loadable, and this project's agent-driven workflows go through RPCs rather
 than files — so this serves the human editing a file by hand, which is the
 narrower audience.

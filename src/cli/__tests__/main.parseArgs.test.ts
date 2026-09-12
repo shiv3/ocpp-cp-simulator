@@ -45,6 +45,7 @@ function runParseArgs(args: string[]) {
     "  soapPath: options.soapPath,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "  traceOutput: options.traceOutput,",
+    "  watch: options.watch,",
     "}));",
   ].join("\n");
 
@@ -53,6 +54,120 @@ function runParseArgs(args: string[]) {
     encoding: "utf8",
   });
 }
+
+describe("parseArgs --watch (#314)", () => {
+  it("is off unless asked for", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--cp-id",
+      "CP-W",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+
+    expect(result.status).toBe(0);
+    // Opt-in by construction: a daemon that silently re-reads files under the
+    // operator is surprising, and the RPC workflows have nothing on disk.
+    expect(JSON.parse(result.stdout).watch).toBe(false);
+  });
+
+  it("turns file hot-reload on", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--watch",
+      "--cp-id",
+      "CP-W",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).watch).toBe(true);
+  });
+
+  it("refuses --watch outside a server mode instead of ignoring it", () => {
+    // The file watcher lives in the daemon. Without this the flag parses,
+    // the process runs a single standalone CP, and nothing is ever watched --
+    // the same silent-no-op #295's review rejected for --cp-count.
+    const result = runParseArgs([
+      "--watch",
+      "--cp-id",
+      "CP-W",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("--watch needs a server mode");
+  });
+
+  it("refuses --watch alongside a client mode even when a server flag is present", () => {
+    // The hole in the first version of this guard: `--http-port` makes
+    // `isServerMode` true, but with `--events` the process returns through the
+    // client path before any server starts — and there `--http-port` names the
+    // daemon to talk to, not a port to listen on. The flag parsed, passed the
+    // guard, and was silently ignored, which is the exact failure the guard
+    // exists to prevent.
+    const result = runParseArgs([
+      "--events",
+      "--all",
+      "--http-port",
+      "9000",
+      "--watch",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "--watch cannot be combined with a client mode",
+    );
+  });
+
+  it("still refuses --watch with a client mode and no server flag", () => {
+    const result = runParseArgs(["--stop", "--watch"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "--watch cannot be combined with a client mode",
+    );
+  });
+
+  it("refuses two startup scenario options and names both", () => {
+    // #314: the three functions that derive from these flags each ranked them
+    // differently, so a combination did not merely pick one — the load and the
+    // prediction of the load picked *different* ones, and the restore held rows
+    // back for a scenario that was never loaded. Refused at parse time, so the
+    // daemon does not reach the readers at all.
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-S",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--scenario",
+      "/tmp/s.json",
+      "--scenario-template",
+      "essential-cp-behavior",
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--scenario-template, --scenario");
+    expect(result.stderr).toContain("cannot be combined");
+  });
+
+  it("accepts a single startup scenario option", () => {
+    // The other half of the guard: one flag is not a conflict. Without this the
+    // check could be inverted, or made unconditional, and nothing would say so.
+    const result = runParseArgs([
+      "--cp-id",
+      "CP-S",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--scenario-template",
+      "essential-cp-behavior",
+    ]);
+
+    expect(result.status).toBe(0);
+  });
+});
 
 describe("parseArgs OCPP 1.6 security flags", () => {
   it("parses security profile, AuthorizationKey, and CPO name", () => {

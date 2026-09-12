@@ -19,7 +19,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -546,6 +546,14 @@ validate the file against that schema at load time and warn (never reject)
 on a mismatch. Built-in template ids are listed in
 [Scenario templates](scenario-templates.md).
 
+**At most one of the three.** `--scenario`, `--scenario-template` and
+`--scenario-template-file` each load a definition onto every selected
+connector, so passing two is refused at parse time with a message naming the
+flags it cannot reconcile — the daemon does not start. They were silently
+ranked before, and the three places in the daemon that derive from these flags
+ranked them differently: see the startup rules in
+[Daemon](daemon.md#file-hot-reload).
+
 ### 4. Client Modes (`--send` / `--events` / `--stop`)
 
 The same binary doubles as a TCP Socket.IO client for a running daemon. Client
@@ -705,7 +713,7 @@ Events are emitted in all modes:
 | `--insecure-tls-key-perms`          | No       | -                                       | Allow a `--tls-key` file readable by group/other (local testing only)                                                                                                                                                                                                                                                                          |
 | `--vendor <vendor>`                 | No       | `CLI-Vendor`                            | Charge point vendor                                                                                                                                                                                                                                                                                                                            |
 | `--model <model>`                   | No       | `CLI-Model`                             | Charge point model                                                                                                                                                                                                                                                                                                                             |
-| `--scenario <file>`                 | No       | -                                       | Startup scenario JSON file (server mode)                                                                                                                                                                                                                                                                                                       |
+| `--scenario <file>`                 | No       | -                                       | Startup scenario JSON file (server mode). Mutually exclusive with `--scenario-template` / `--scenario-template-file`                                                                                                                                                                                                                           |
 | `--scenario-template <id>`          | No       | -                                       | Built-in scenario template id (server mode) — see [Scenario templates](scenario-templates.md)                                                                                                                                                                                                                                                  |
 | `--scenario-template-file <p>`      | No       | -                                       | Path to a cpId-independent template JSON                                                                                                                                                                                                                                                                                                       |
 | `--scenario-connector <list>`       | No       | `1`                                     | `all`, single id (`1`), or list (`1,2,3`)                                                                                                                                                                                                                                                                                                      |
@@ -715,6 +723,7 @@ Events are emitted in all modes:
 | `--health-path <path>`              | No       | `/v1/healthz`                           | Absolute path for the unauthenticated health-check JSON. The browser UI build must use matching `VITE_HEALTH_PATH` when this changes.                                                                                                                                                                                                          |
 | `--metrics`                         | No       | off                                     | Server mode: serve `GET /metrics` (Prometheus text exposition). See [Daemon → Metrics](daemon.md#metrics)                                                                                                                                                                                                                                      |
 | `--metrics-no-auth`                 | No       | off                                     | Implies `--metrics` and serves it outside the Basic Auth gate. Trusted networks only                                                                                                                                                                                                                                                           |
+| `--watch`                           | No       | off                                     | Server mode: re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. **Refused outside a server mode** rather than silently ignored, like `--cp-count`. See [Daemon → File hot-reload](daemon.md#file-hot-reload) (#314)                                                                                  |
 | `--cors-origin <origin>`            | No       | loopback: open; remote: same-origin     | Restrict browser Origins. Repeatable. Pass literal `"*"` to opt into open CORS. See [Access control](../concepts/access-control.md).                                                                                                                                                                                                           |
 | `--trust-forwarded-headers`         | No       | -                                       | With same-origin CORS, also accept the public origin reported by `X-Forwarded-Proto` / `X-Forwarded-Host`. Use only behind a trusted reverse proxy.                                                                                                                                                                                            |
 

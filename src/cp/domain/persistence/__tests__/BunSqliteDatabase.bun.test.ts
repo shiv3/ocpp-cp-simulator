@@ -400,3 +400,126 @@ describe("connector_runtime.soc_awaits_next_transaction (#301)", () => {
     }
   });
 });
+
+describe("file hot-reload schema, v13 (#314)", () => {
+  /** Strip everything v13 adds and stamp the database at `version`. */
+  function rewindTo(db: BunSqliteDatabase, version: number): void {
+    db.exec("DROP TABLE IF EXISTS watched_scenario_files");
+    // SQLite cannot drop a column on older engines, so rebuild
+    // `charge_points` without `id_tag_file` from the shape v9 left.
+    db.exec("DROP TABLE IF EXISTS charge_points");
+    db.exec(
+      "CREATE TABLE charge_points (" +
+        "cp_id TEXT PRIMARY KEY, ws_url TEXT NOT NULL, " +
+        "supervision_urls TEXT, url_distribution TEXT, " +
+        "id_tags TEXT, id_tag_distribution TEXT, " +
+        "connectors INTEGER NOT NULL, vendor TEXT NOT NULL, " +
+        "model TEXT NOT NULL, ocpp_version TEXT, central_system_url TEXT, " +
+        "soap_callback_url TEXT, soap_path TEXT, security_profile INTEGER, " +
+        "authorization_key TEXT, cpo_name TEXT, tls_ca_path TEXT, " +
+        "tls_cert_path TEXT, tls_key_path TEXT, basic_auth TEXT, " +
+        "boot_notif TEXT, created_at TEXT NOT NULL)",
+    );
+    db.run(
+      "INSERT INTO schema_meta (key, value) VALUES ('version', ?) " +
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      [String(version)],
+    );
+  }
+
+  function columns(db: BunSqliteDatabase, table: string): string[] {
+    return db
+      .all<{ name: string }>(`PRAGMA table_info(${table})`)
+      .map((c) => c.name);
+  }
+
+  function tables(db: BunSqliteDatabase): string[] {
+    return db
+      .all<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table'",
+      )
+      .map((t) => t.name);
+  }
+
+  it("migrates a database `main` stamped 12 — the released number", () => {
+    // The case the renumber exists for. A database that came from `main` has
+    // `soc_awaits_next_transaction` and neither of this feature's tables, and
+    // one `stored < 13` step has to create both. This branch developed against
+    // 11 and then 12; both were taken on `main` before it merged, so the whole
+    // feature moved to 13 rather than skipping a number silently.
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      rewindTo(db, 12);
+      expect(columns(db, "charge_points")).not.toContain("id_tag_file");
+      expect(tables(db)).not.toContain("watched_scenario_files");
+      // `main` at 12 has this column, and the rewind must not have removed it.
+      expect(columns(db, "connector_runtime")).toContain(
+        "soc_awaits_next_transaction",
+      );
+
+      runMigrations(db);
+
+      expect(columns(db, "charge_points")).toContain("id_tag_file");
+      expect(tables(db)).toContain("watched_scenario_files");
+      expect(columns(db, "connector_runtime")).toContain(
+        "soc_awaits_next_transaction",
+      );
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is a no-op on a database an earlier build of this branch stamped 11 or 12", () => {
+    // Those builds already created one or both of these. The step has to be
+    // idempotent — `CREATE TABLE IF NOT EXISTS` and a `PRAGMA table_info`
+    // guard — or an operator who ran a pre-renumber build cannot start at all.
+    for (const stamped of [11, 12]) {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        // Fully migrated by this build, then re-stamped at the old number: the
+        // shape an earlier build of this branch left behind.
+        db.run(
+          "INSERT INTO schema_meta (key, value) VALUES ('version', ?) " +
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+          [String(stamped)],
+        );
+        db.run(
+          "INSERT INTO watched_scenario_files " +
+            "(cp_id, connector_id, scenario_id, path) VALUES (?, ?, ?, ?)",
+          ["cp-1", 1, "s-1", "/tmp/s.json"],
+        );
+
+        expect(() => runMigrations(db)).not.toThrow();
+
+        expect(columns(db, "charge_points")).toContain("id_tag_file");
+        expect(tables(db)).toContain("watched_scenario_files");
+        // Re-running the step must not have dropped and re-created the table.
+        expect(db.all("SELECT cp_id FROM watched_scenario_files")).toHaveLength(
+          1,
+        );
+        const version = db.get<{ value: string }>(
+          "SELECT value FROM schema_meta WHERE key = 'version'",
+        );
+        expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  it("migrates a fresh pre-feature database in one step", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      rewindTo(db, 10);
+      runMigrations(db);
+      expect(columns(db, "charge_points")).toContain("id_tag_file");
+      expect(tables(db)).toContain("watched_scenario_files");
+    } finally {
+      db.close();
+    }
+  });
+});

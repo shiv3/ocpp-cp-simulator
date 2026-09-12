@@ -12,7 +12,7 @@ related:
   - ../entities/cli.md
   - control-plane.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-04
+updated: 2026-09-12
 ---
 
 # Access control
@@ -88,6 +88,43 @@ its own `--http-basic-auth-user/pass` pair ([analyze](../entities/analyze.md)).
 The CSMS-facing `--basic-auth-user/pass` flags are unrelated; those
 authenticate the simulated CP's outgoing WebSocket to the CSMS
 ([Security profiles](security-profiles.md)).
+
+## Event scopes are not an authorization boundary
+
+`events.subscribe` accepts any scope from any connected client — `"*"`,
+`"registry"`, `"config"`, `"scenario-definitions"`, `"file-reload"`, a charge
+point id. Two separate facts, and
+conflating them overstates the gap in one direction and understates it in the
+other:
+
+- **Delivery is by room.** A client receives what the scopes it joined deliver,
+  and nothing else. A `"registry"` subscriber does not see `file-reloaded`
+  pushes; a `"CP001"` subscriber does not see another charge point's. The rooms
+  are a real filter and the tables in
+  [Control plane](control-plane.md#event-push-and-rooms) describe what each one
+  carries.
+- **Choosing a room is not a privilege.** There is no per-scope check, so
+  **subscribing to one scope is not a privilege distinct from subscribing to
+  another**: anything the daemon pushes is available to anyone who got through
+  the handshake, by asking for the scope that carries it. Redacting a field for
+  `"*"` subscribers alone would only mean asking for it by name instead.
+
+The boundary is therefore the transport, described above: loopback by default,
+and Basic Auth or an explicit `--unsafe-remote` for anything else. Two
+consequences worth stating, because `--watch` (#314) made them concrete:
+
+- **Filesystem paths are on the wire.** A `file-reload` event carries the
+  resolved absolute `path` of the file that changed — that is the field which
+  identifies the event, and a basename would be ambiguous across connectors
+  watching same-named files. It reveals the host's directory layout to any
+  subscriber, which is a reason to keep the socket behind the bind gate, not a
+  reason to make the event useless.
+- **File _contents_ are not, and must not become so.** A parser's own message
+  quotes the bytes it choked on, so a rejected reload reported with the raw
+  message would put a fragment of the operator's file on the control plane.
+  Both reload paths raise their own message instead — naming the file, never
+  its contents. Any new error text that reaches a client is held to the same
+  rule.
 
 ## CORS
 

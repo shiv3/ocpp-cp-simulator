@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # Log
@@ -774,3 +774,83 @@ Five unresolved CodeRabbit threads, reviewed against the tree as it stands rathe
 - Enumerated the input space empirically against `2020358` rather than reasoning about it, which was worth doing: the old tree threw at the **setter**, not at the first tick, for `undefined`, `null`, `0`, `{}`, `true`, `[null, undefined]` and a sparse array — `startConfiguredMeterValue` calls `getMeterValueAtTime` synchronously. Those still throw and are unchanged. Everything the old tree accepted in silence is accepted in silence now. Two deliberate behaviour changes, neither of them a throw: a point whose `time` / `value` are coercible strings is dropped rather than coerced (matching `isChargingCurvePoint` and the schema's `type: "number"`), and a `NaN` / `Infinity` ordinate is dropped instead of propagating `NaN` into the register and onto the wire.
 - Second review round: a corrected point was rebuilt as a bare `{ time, value }`, dropping any extension field the schema's `additionalProperties: true` allows and the opaque RPC payload can carry, while uncorrected neighbours kept theirs. Now spread-and-override. Discriminated by the one test whose corrected point carries a field; a point needing no correction already kept its fields and could not have.
 - Not touched: `src/cli/exportK6/`. The exported runtime carries no normalizer, and none was added — the schema gate in front of the exporter means it is never handed an out-of-contract curve. The bezier-vs-linear divergence quantified in the #310 round of this log is untouched and remains #329's.
+
+## [2026-09-07] ingest | `--watch`: the daemon re-reads the files it loaded (#314, PR #317)
+
+One entry for the whole feature. It landed over many rounds of review and this
+log carried one entry per round; the round-by-round archaeology is in the PR
+history, and what a reader needs six months from now is the feature and the
+contracts it established.
+
+**What shipped.** `--watch` (off by default, refused outside a server mode and
+alongside a client mode) makes the daemon re-read the two kinds of file it loads
+and keeps a copy of: a charge point's `idTagPool.file` and a scenario file
+loaded by `--scenario`, `--scenario-template-file`, `load_scenario { file }` or
+`run_scenario_file`. Each reload pushes a `file-reload` event carrying
+`applied` / `deferred` / `rejected`, and a scenario reload also pushes the
+ordinary `scenario-definitions-changed` snapshot. Schema v13 adds
+`charge_points.id_tag_file` and the `watched_scenario_files` table so a restart
+watches the same files again.
+
+**The contracts it established**, all stated on
+[Daemon → File hot-reload](entities/daemon.md#file-hot-reload) and derived on
+the new [File hot-reload](concepts/file-hot-reload.md) page:
+
+- `applied` is a claim about **durable** state, not just memory — a reload whose
+  `--state-db` write fails is `rejected`.
+- The duplicate-bytes baseline means "**everyone** holds these", so a partial
+  apply across a set of charge points drops it rather than advancing it.
+- An accepted reload always ends in `applied` or `rejected`; a hold is released
+  by the state actually clearing, never by the event that announces it, and a
+  connector status transition is the backstop that makes that a guarantee.
+- A reload replaces a definition and never **moves** a scenario: the id and the
+  connector are the ones it was loaded under.
+- A run's **bookkeeping** belongs to whoever holds the executor slot; a run's
+  **connector-scoped artifacts** are owed by the run that is ending. Both the EV
+  settings override and the scenario position are owned by the run that actually
+  claimed them, compared by run id rather than reconstructed from what is
+  installed — "installed" is not "has taken effect".
+- Watching **degrades**, never fails to start, and degraded is never worse than
+  unwatched: reconciliation compares against the file on disk.
+- A symlink is watched at every hop of its chain, capped at 8.
+- At most one startup scenario option; the combination is refused rather than
+  ranked, and one resolver answers "which flag is in effect" for every reader.
+
+**Known limitations, on the page rather than in a commit message**: a watch
+lives as long as the directory it was opened on (`fs.watch` binds to an inode),
+so a replaced directory and a `subPath` ConfigMap mount are not covered; a
+broken symlink is covered only where the target's directory already exists; and
+two concurrent runs on one connector share one checkpoint slot, last writer
+wins, because there is one `connector_runtime` row per connector.
+
+**Pages**: [Daemon](entities/daemon.md) (contract + the supported-layouts
+table), [File hot-reload](concepts/file-hot-reload.md) (new — the derivations
+and the restart behaviour, moved off the daemon page),
+[CLI](entities/cli.md) (`--watch` and the startup-flag exclusivity),
+[Control plane](concepts/control-plane.md) (the `file-reload` envelope and
+scope), [Scenario format](concepts/scenario-format.md) (re-reading a scenario
+file), [State persistence](concepts/state-persistence.md) (v13 columns),
+[github-issues](sources/github-issues.md).
+
+**Method note, kept because it changed how this branch was worked**: every
+`Yes` row of the layouts table is pinned by a test that fails when that row's
+mechanism is removed — two rows written ahead of their tests were found false
+within two rounds. The same rule applies to a contract sentence: it is a claim
+about the code, and it expires when that code changes.
+
+**Correction (2026-09-12, review of PR #317)**: the "Blueprints are not
+watched" contract on [Daemon](entities/daemon.md#file-hot-reload),
+[File hot-reload](concepts/file-hot-reload.md) and the
+[roadmap](analyses/fleet-load-and-observability-roadmap.md) said an edit to a
+blueprint's `params.idTagPool.file` reached only charge points created
+afterwards, never retroactively. False: `cp.create_many { blueprintId }` runs
+`createOneCp` → `parseCreateBody`, which records the file as the charge point's
+`idTagFile`, and `CPRegistry.onInitChange` registers it with the reloader — so
+under `--watch` blueprint-created charge points are reloaded live like any
+other. Reworded on all three pages to say what is and is not watched (the
+`blueprints` row is not; every file-backed pool is, through `cp.create`,
+`cp.create_many`, `cp.update` and a `--state-db` restore). Also fixed the
+`events.subscribe` / `events.unsubscribe` scope list on
+[Control plane](concepts/control-plane.md#daemon-methods) and
+[Access control](concepts/access-control.md), which omitted `config`,
+`scenario-definitions` and `file-reload`.

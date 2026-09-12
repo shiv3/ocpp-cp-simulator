@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
 import * as path from "path";
 import * as fs from "fs";
-import type { CLIOptions, ChargePointInitOptions } from "./types";
+import type {
+  CLIOptions,
+  ChargePointInitOptions,
+  SoapTunnelConfig,
+} from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
@@ -11,6 +15,7 @@ import {
   resolveSoapCallbackUrl,
   soapCallbackUrlSuffixWarning,
 } from "./soapCallbackUrl";
+import { DEFAULT_SOAP_PATH } from "./soapPath";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { hasIdPatternPlaceholder } from "../protocol";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
@@ -219,10 +224,15 @@ export function parseArgs(argv: string[]): CLIOptions {
   let soapCallbackUrl: string | null = null;
   let soapPublicBaseUrl: string | null = null;
   let soapTunnel: "none" | "ngrok" = "none";
-  let ngrokAuthToken: string | null = null;
-  let ngrokDomain: string | null = null;
-  let ngrokApiUrl: string | null = null;
-  let soapPath = "/ocpp/soap";
+  const ngrok: Record<
+    "--ngrok-auth-token" | "--ngrok-domain" | "--ngrok-api-url",
+    string | null
+  > = {
+    "--ngrok-auth-token": null,
+    "--ngrok-domain": null,
+    "--ngrok-api-url": null,
+  };
+  let soapPath: string = DEFAULT_SOAP_PATH;
   let securityProfile: CLIOptions["securityProfile"];
   let authorizationKey: string | undefined;
   let tlsCaPath: string | undefined;
@@ -488,35 +498,22 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       case "--ngrok-auth-token":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --ngrok-auth-token requires a token\n");
-          process.exit(1);
-        }
-        ngrokAuthToken = next;
-        i++;
-        break;
       case "--ngrok-domain":
+      case "--ngrok-api-url": {
         if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --ngrok-domain requires a domain\n");
+          process.stderr.write(`Error: ${arg} requires a value\n`);
           process.exit(1);
         }
-        ngrokDomain = next;
-        i++;
-        break;
-      case "--ngrok-api-url":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --ngrok-api-url requires a URL\n");
-          process.exit(1);
-        }
-        if (!isHttpUrl(next)) {
+        if (arg === "--ngrok-api-url" && !isHttpUrl(next)) {
           process.stderr.write(
             "Error: --ngrok-api-url must be an absolute http(s) URL\n",
           );
           process.exit(1);
         }
-        ngrokApiUrl = next;
+        ngrok[arg] = next;
         i++;
         break;
+      }
       case "--soap-path":
         if (!next || next.startsWith("--") || !next.startsWith("/")) {
           process.stderr.write(
@@ -701,12 +698,12 @@ export function parseArgs(argv: string[]): CLIOptions {
   // so token and domain cannot apply there. The callback server is the
   // daemon's listener, hence server mode. An explicit callback / public base
   // URL is refused alongside it: the tunnel *is* the public base.
+  const ngrokApiUrl = ngrok["--ngrok-api-url"];
+  const ngrokAuthToken = ngrok["--ngrok-auth-token"];
+  const ngrokDomain = ngrok["--ngrok-domain"];
+  let soapTunnelConfig: SoapTunnelConfig | null = null;
   if (soapTunnel === "none") {
-    const stray = [
-      ["--ngrok-auth-token", ngrokAuthToken],
-      ["--ngrok-domain", ngrokDomain],
-      ["--ngrok-api-url", ngrokApiUrl],
-    ].find(([, value]) => value != null);
+    const stray = Object.entries(ngrok).find(([, value]) => value != null);
     if (stray) {
       process.stderr.write(`Error: ${stray[0]} requires --soap-tunnel ngrok\n`);
       process.exit(1);
@@ -732,20 +729,25 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    const explicitFlag = soapCallbackUrl
-      ? "--soap-callback-url"
-      : soapPublicBaseUrl
-        ? "--soap-public-base-url"
-        : null;
-    if (explicitFlag) {
+    const explicit = [
+      ["--soap-callback-url", soapCallbackUrl],
+      ["--soap-public-base-url", soapPublicBaseUrl],
+    ].find(([, value]) => value != null);
+    if (explicit) {
       // Two sources for the same public base is a contradiction, not a
       // precedence: the operator either knows the origin or asks for one.
       process.stderr.write(
-        `Error: --soap-tunnel cannot be combined with ${explicitFlag} ` +
+        `Error: --soap-tunnel cannot be combined with ${explicit[0]} ` +
           "(the tunnel is what provides the public base)\n",
       );
       process.exit(1);
     }
+    soapTunnelConfig = {
+      provider: "ngrok",
+      authToken: ngrokAuthToken,
+      domain: ngrokDomain,
+      apiUrl: ngrokApiUrl,
+    };
   }
 
   if (metrics && healthPath === "/metrics") {
@@ -977,10 +979,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     soapCallbackUrl: resolvedSoapCallbackUrl,
     soapCallbackUrlExplicit: soapCallbackUrl,
     soapPublicBaseUrl,
-    soapTunnel,
-    ngrokAuthToken,
-    ngrokDomain,
-    ngrokApiUrl,
+    soapTunnel: soapTunnelConfig,
     soapPath,
     securityProfile,
     authorizationKey,
@@ -1299,8 +1298,6 @@ function createStandaloneChargePointRuntime(
   const bus = new EventBus();
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms,
-    soapPublicBaseUrl: options.soapPublicBaseUrl,
-    soapPath: options.soapPath,
   });
   const configRepository = createSocketConfigRepository(database);
   const scenarioRepository = new SqliteScenarioRepository(database);
@@ -1432,15 +1429,7 @@ async function main(): Promise<void> {
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
       soapPath: options.soapPath,
-      soapTunnel:
-        options.soapTunnel === "ngrok"
-          ? {
-              provider: "ngrok",
-              authToken: options.ngrokAuthToken,
-              domain: options.ngrokDomain,
-              apiUrl: options.ngrokApiUrl,
-            }
-          : null,
+      soapTunnel: options.soapTunnel,
       metrics: options.metrics,
       metricsNoAuth: options.metricsNoAuth,
       watch: options.watch,

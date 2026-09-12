@@ -18,11 +18,7 @@
  */
 
 import { redactSensitiveText } from "../cp/shared/redaction";
-import { isHttpUrl } from "./soapCallbackUrl";
-import { SOAP_SERVICE_SUFFIX, normalizeSoapPath } from "./soapPath";
-
-/** Default local address of the ngrok agent API (`web_addr`). */
-export const NGROK_DEFAULT_API_URL = "http://127.0.0.1:4040";
+import { isHttpUrl, joinSoapCallbackUrl } from "./soapCallbackUrl";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** How long to wait for stderr to drain once the agent has exited. */
@@ -33,6 +29,9 @@ export interface SoapTunnel {
   readonly mode: "spawn" | "attach";
   /** Public http(s) origin the CSMS can reach; feeds buildSoapCallbackUrl(). */
   readonly publicBaseUrl: string;
+  /** Where the tunnel forwards to — the daemon's HTTP listener. */
+  readonly localHost: string;
+  readonly localPort: number;
   /** Synchronous so it fits the daemon's shutdown path, which exits right after. */
   close(): void;
 }
@@ -74,12 +73,7 @@ export async function startSoapTunnel(
 ): Promise<SoapTunnel> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (opts.apiUrl) {
-    return attachNgrokTunnel(
-      opts.apiUrl,
-      opts.localPort,
-      timeoutMs,
-      opts.fetch ?? fetch,
-    );
+    return attachNgrokTunnel(opts, opts.apiUrl, timeoutMs, opts.fetch ?? fetch);
   }
   return spawnNgrokTunnel(opts, timeoutMs);
 }
@@ -216,13 +210,18 @@ async function spawnNgrokTunnel(
     return redactSensitiveText(scrubbed);
   };
 
+  // Only quoted when the agent dies before announcing a tunnel; once it is
+  // up the stream is drained and forgotten, so the buffer cannot grow with
+  // the daemon's lifetime.
+  let settled = false;
   let stderrText = "";
   const stderrDone = (async () => {
-    for await (const line of lines(proc.stderr)) stderrText += `${line}\n`;
+    for await (const line of lines(proc.stderr)) {
+      if (!settled) stderrText += `${line}\n`;
+    }
   })().catch(() => {});
 
   return new Promise<SoapTunnel>((resolve, reject) => {
-    let settled = false;
     let closed = false;
 
     // Whatever ends the daemon — the lifecycle's process.exit(), a startup
@@ -246,45 +245,63 @@ async function spawnNgrokTunnel(
       );
     }, timeoutMs);
 
-    const fail = (error: Error): void => {
+    const settle = (outcome: () => void): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      close();
-      reject(error);
+      outcome();
     };
+    const fail = (error: Error): void =>
+      settle(() => {
+        close();
+        reject(error);
+      });
 
-    const tunnel: SoapTunnel = {
-      provider: "ngrok",
-      mode: "spawn",
-      publicBaseUrl: "",
-      close,
+    const onLogLine = (raw: string): void => {
+      const line = parseLogLine(raw);
+      if (!line) return;
+      if (line.lvl === "eror") {
+        const detail =
+          typeof line.err === "string" && line.err ? ` (${line.err})` : "";
+        fail(
+          new Error(redact(`ngrok: ${String(line.msg ?? "error")}${detail}`)),
+        );
+        return;
+      }
+      if (
+        line.msg === "started tunnel" &&
+        typeof line.url === "string" &&
+        isHttpUrl(line.url)
+      ) {
+        const publicBaseUrl = line.url.replace(/\/+$/, "");
+        settle(() =>
+          resolve({
+            provider: "ngrok",
+            mode: "spawn",
+            publicBaseUrl,
+            localHost: opts.localHost,
+            localPort: opts.localPort,
+            close,
+          }),
+        );
+      }
     };
 
     void (async () => {
       try {
-        for await (const raw of lines(proc.stdout)) {
-          const line = parseLogLine(raw);
-          if (!line) continue;
-          if (line.lvl === "eror" && !settled) {
-            const detail =
-              typeof line.err === "string" && line.err ? ` (${line.err})` : "";
-            fail(
-              new Error(
-                redact(`ngrok: ${String(line.msg ?? "error")}${detail}`),
-              ),
-            );
-            return;
-          }
-          if (
-            !settled &&
-            line.msg === "started tunnel" &&
-            typeof line.url === "string" &&
-            isHttpUrl(line.url)
-          ) {
-            settled = true;
-            clearTimeout(timer);
-            resolve({ ...tunnel, publicBaseUrl: line.url.replace(/\/+$/, "") });
+        // One loop for the agent's whole life: parsed until the tunnel is
+        // announced, then only drained so ngrok is never back-pressured (it
+        // logs several lines per proxied request). Leaving the loop early
+        // would cancel the pipe and kill the agent with SIGPIPE instead.
+        const decoder = new TextDecoder();
+        let pending = "";
+        for await (const chunk of proc.stdout as unknown as AsyncIterable<Uint8Array>) {
+          if (settled) continue;
+          pending += decoder.decode(chunk, { stream: true });
+          let index: number;
+          while (!settled && (index = pending.indexOf("\n")) >= 0) {
+            onLogLine(pending.slice(0, index));
+            pending = pending.slice(index + 1);
           }
         }
       } catch (error) {
@@ -294,11 +311,11 @@ async function spawnNgrokTunnel(
 
     void proc.exited.then(async (code) => {
       if (settled) {
-        if (!closed) {
-          closed = true;
-          process.off("exit", killOnExit);
-          opts.onExit?.(code);
-        }
+        // Either the daemon closed it, or the agent died on its own; the
+        // teardown is the same, only the second is worth reporting.
+        const requested = closed;
+        close();
+        if (!requested) opts.onExit?.(code);
         return;
       }
       await Promise.race([
@@ -322,13 +339,13 @@ async function spawnNgrokTunnel(
 // ---------------------------------------------------------------------------
 
 /** Shape of one entry of the agent API's `GET /api/tunnels` response. */
-export interface NgrokApiTunnel {
+interface NgrokApiTunnel {
   public_url?: unknown;
   proto?: unknown;
   config?: { addr?: unknown } | null;
 }
 
-export type NgrokTunnelSelection =
+type NgrokTunnelSelection =
   { ok: true; publicUrl: string } | { ok: false; candidates: string[] };
 
 function addrPort(addr: unknown): number | null {
@@ -369,11 +386,12 @@ export function selectNgrokTunnel(
 }
 
 async function attachNgrokTunnel(
+  opts: SoapTunnelOptions,
   apiUrl: string,
-  localPort: number,
   timeoutMs: number,
   fetchImpl: typeof fetch,
 ): Promise<SoapTunnel> {
+  const { localPort } = opts;
   const base = apiUrl.replace(/\/+$/, "");
   const endpoint = `${base}/api/tunnels`;
   let response: Response;
@@ -411,6 +429,8 @@ async function attachNgrokTunnel(
     provider: "ngrok",
     mode: "attach",
     publicBaseUrl: selection.publicUrl,
+    localHost: opts.localHost,
+    localPort,
     close: () => {},
   };
 }
@@ -421,8 +441,6 @@ async function attachNgrokTunnel(
 
 export interface SoapTunnelStartupInput {
   readonly tunnel: SoapTunnel;
-  readonly localHost: string;
-  readonly localPort: number;
   readonly soapPath: string;
   /** null for a fleet: the route is described with a `<cp-id>` placeholder. */
   readonly cpId: string | null;
@@ -435,12 +453,14 @@ export interface SoapTunnelStartupInput {
 export function soapTunnelStartupLines(
   input: SoapTunnelStartupInput,
 ): string[] {
-  const path = normalizeSoapPath(input.soapPath);
-  const prefix = path === "/" ? "" : path;
-  const segment = input.cpId ? encodeURIComponent(input.cpId) : "<cp-id>";
-  const callbackUrl = `${input.tunnel.publicBaseUrl}${prefix}/${segment}/${SOAP_SERVICE_SUFFIX}`;
+  const { tunnel } = input;
+  const callbackUrl = joinSoapCallbackUrl(
+    tunnel.publicBaseUrl,
+    input.cpId ? encodeURIComponent(input.cpId) : "<cp-id>",
+    input.soapPath,
+  );
   return [
-    `SOAP tunnel (${input.tunnel.provider}, ${input.tunnel.mode}): ${input.tunnel.publicBaseUrl} -> http://${input.localHost}:${input.localPort}`,
+    `SOAP tunnel (${tunnel.provider}, ${tunnel.mode}): ${tunnel.publicBaseUrl} -> http://${tunnel.localHost}:${tunnel.localPort}`,
     `Warning: SOAP callback endpoint is publicly reachable through the tunnel at ${callbackUrl}; ` +
       "charge-point identity checks stay enforced, and temporary ngrok URLs change between runs.",
   ];

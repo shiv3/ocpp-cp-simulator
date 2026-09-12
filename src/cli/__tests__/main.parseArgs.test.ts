@@ -44,9 +44,6 @@ function runParseArgs(args: string[]) {
     "  soapCallbackUrl: options.soapCallbackUrl,",
     "  soapPath: options.soapPath,",
     "  soapTunnel: options.soapTunnel,",
-    "  ngrokAuthToken: options.ngrokAuthToken,",
-    "  ngrokDomain: options.ngrokDomain,",
-    "  ngrokApiUrl: options.ngrokApiUrl,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "  traceOutput: options.traceOutput,",
     "  watch: options.watch,",
@@ -544,12 +541,7 @@ describe("parseArgs --ocpp-version", () => {
     it("defaults to no tunnel", () => {
       const result = runParseArgs(soapDaemon);
       expect(result.status).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({
-        soapTunnel: "none",
-        ngrokAuthToken: null,
-        ngrokDomain: null,
-        ngrokApiUrl: null,
-      });
+      expect(JSON.parse(result.stdout)).toMatchObject({ soapTunnel: null });
     });
 
     it("accepts the ngrok provider with its options in server mode", () => {
@@ -564,10 +556,12 @@ describe("parseArgs --ocpp-version", () => {
       ]);
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
-        soapTunnel: "ngrok",
-        ngrokAuthToken: "tok-123",
-        ngrokDomain: "cp.example.ngrok.app",
-        ngrokApiUrl: null,
+        soapTunnel: {
+          provider: "ngrok",
+          authToken: "tok-123",
+          domain: "cp.example.ngrok.app",
+          apiUrl: null,
+        },
         // Resolved later, once the tunnel is up.
         soapCallbackUrl: null,
       });
@@ -584,8 +578,7 @@ describe("parseArgs --ocpp-version", () => {
       ]);
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
-        soapTunnel: "ngrok",
-        ngrokApiUrl: "http://ngrok:4040",
+        soapTunnel: { provider: "ngrok", apiUrl: "http://ngrok:4040" },
       });
     });
 

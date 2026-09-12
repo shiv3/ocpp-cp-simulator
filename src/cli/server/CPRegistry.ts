@@ -551,18 +551,15 @@ export class CPRegistry {
 
   /**
    * Fill in the SOAP callback URL from the daemon's public base when the
-   * charge point has none. Done at instantiation — not in create()/update()
-   * before the persist — so the derived value stays out of the DB row and a
+   * charge point has none. Done at instantiation — after create()/update()
+   * have persisted the operator's own init — so the derived value never
+   * reaches the DB row (a free-tier tunnel URL changes between runs) and a
    * restore re-derives it from whatever base the daemon has *now*.
    */
   private withDerivedSoapCallback(
     init: ChargePointInitOptions,
   ): ChargePointInitOptions {
-    if (init.soapCallbackUrl) {
-      return init.soapCallbackUrlDerived
-        ? { ...init, soapCallbackUrlDerived: false }
-        : init;
-    }
+    if (init.soapCallbackUrl) return init;
     const base = this.options.soapPublicBaseUrl;
     if (!base || !isSoapVersion(init.ocppVersion)) return init;
     return {
@@ -669,9 +666,7 @@ export class CPRegistry {
         init.model,
         init.ocppVersion ?? "OCPP-1.6J",
         init.centralSystemUrl ?? init.wsUrl,
-        // A derived URL is a function of the daemon's current base, not of
-        // the charge point; persisting it would come back stale.
-        init.soapCallbackUrlDerived ? null : (init.soapCallbackUrl ?? null),
+        init.soapCallbackUrl ?? null,
         init.soapPath ?? null,
         init.securityProfile ?? null,
         init.authorizationKey ?? null,

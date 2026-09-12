@@ -94,7 +94,6 @@ const COMMON_CORS_HEADERS: Record<string, string> = {
   "access-control-max-age": "86400",
 };
 
-export { DEFAULT_SOAP_PATH };
 export const MAX_SOAP_REQUEST_BODY_BYTES = 256 * 1024;
 export const MAX_MCP_REQUEST_BODY_BYTES = 1024 * 1024;
 

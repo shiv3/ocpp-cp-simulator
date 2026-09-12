@@ -3,18 +3,14 @@ import type { Server } from "bun";
 import { CLIChargePointService } from "../service";
 
 type AnyServer = Server<unknown>;
-import type { ChargePointInitOptions } from "../types";
+import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { CPRegistry } from "./CPRegistry";
 import { NetworkSimManager } from "./NetworkSimManager";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
-import {
-  DEFAULT_SOAP_PATH,
-  createHttpHandlers,
-  type CorsPolicy,
-} from "./httpServer";
+import { createHttpHandlers, type CorsPolicy } from "./httpServer";
 import {
   attachSocketIo,
   createSocketConfigRepository,
@@ -28,7 +24,6 @@ import type { Database } from "../../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
-import { appVersion } from "../appVersion";
 import { expandIdPattern } from "../../protocol";
 import {
   localHostForTunnel,
@@ -36,7 +31,7 @@ import {
   startSoapTunnel,
   type SoapTunnel,
 } from "../soapTunnel";
-import { soapCallbackRouteCpId } from "./socketServer";
+import { buildServerInfo, soapCallbackRouteCpId } from "./socketServer";
 import {
   MetricsRecorder,
   setGlobalMetricsRecorder,
@@ -67,13 +62,6 @@ function serverLog(message: string): void {
   process.stderr.write(`[server] ${message}\n`);
 }
 
-export interface SoapTunnelConfig {
-  readonly provider: "ngrok";
-  readonly authToken?: string | null;
-  readonly domain?: string | null;
-  readonly apiUrl?: string | null;
-}
-
 export interface ServerOptions {
   readonly httpPort: number | null;
   readonly httpHost: string;
@@ -95,13 +83,11 @@ export interface ServerOptions {
   readonly soapCallbackUrlExplicit?: string | null;
   readonly soapPublicBaseUrl?: string | null;
   /** `--soap-path`; the daemon-wide default for derived callback URLs. */
-  readonly soapPath?: string;
+  readonly soapPath: string;
   /**
    * `--soap-tunnel ngrok` (#183): expose the listener through ngrok and use
-   * the tunnel's public origin as the SOAP public base. Only consulted when
-   * neither `soapCallbackUrlExplicit` nor `soapPublicBaseUrl` is set — the
-   * CLI already resets it in that case, but the precedence is enforced here
-   * too for other callers.
+   * the tunnel's public origin as the SOAP public base. Refused together
+   * with `soapCallbackUrlExplicit` / `soapPublicBaseUrl`, as the CLI does.
    */
   readonly soapTunnel?: SoapTunnelConfig | null;
   /** Serve `GET /metrics`. Off by default; `--metrics` turns it on. */
@@ -230,7 +216,7 @@ export async function startServer(inputOpts: ServerOptions): Promise<void> {
       // Every SOAP charge point without a callback URL — bootstrapped,
       // restored or created over RPC — derives one from this base (#183).
       soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
-      soapPath: opts.soapPath ?? DEFAULT_SOAP_PATH,
+      soapPath: opts.soapPath,
     },
     connectorSettingsRepository,
   );
@@ -361,15 +347,12 @@ export async function startServer(inputOpts: ServerOptions): Promise<void> {
     registry,
     bus,
     database,
-    serverInfo: () => ({
-      version: appVersion(),
-      soap: {
-        publicBaseUrl: opts.soapPublicBaseUrl ?? null,
-        path: opts.soapPath ?? DEFAULT_SOAP_PATH,
-        tunnel: soapTunnel
-          ? { provider: soapTunnel.provider, mode: soapTunnel.mode }
-          : null,
-      },
+    serverInfo: buildServerInfo({
+      soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
+      soapPath: opts.soapPath,
+      tunnel: soapTunnel
+        ? { provider: soapTunnel.provider, mode: soapTunnel.mode }
+        : null,
     }),
     configRepository,
     scenarioRepository,
@@ -533,9 +516,7 @@ export async function startServer(inputOpts: ServerOptions): Promise<void> {
     // and is deliberately not part of these lines.
     for (const line of soapTunnelStartupLines({
       tunnel: soapTunnel,
-      localHost: localHostForTunnel(opts.httpHost),
-      localPort: soapTunnelLocalPort(opts),
-      soapPath: opts.bootstrap?.soapPath ?? DEFAULT_SOAP_PATH,
+      soapPath: opts.bootstrap?.soapPath ?? opts.soapPath,
       cpId:
         (opts.bootstrapCount ?? 1) > 1 ? null : (opts.bootstrap?.cpId ?? null),
     })) {
@@ -737,24 +718,18 @@ function expandBootstrap(
   const fleet: ChargePointInitOptions[] = [];
   for (let i = 1; i <= count; i++) {
     const cpId = expandIdPattern(pattern, i);
+    const explicit = opts.soapCallbackUrlExplicit?.trim();
     fleet.push({
       ...opts.bootstrap,
       cpId,
-      soapCallbackUrl: fleetSoapCallbackUrl(opts, cpId, i),
+      // Without an explicit URL the registry derives one per station from
+      // the daemon's SOAP public base at instantiation (#183).
+      ...(explicit
+        ? { soapCallbackUrl: expandExplicitSoapCallbackUrl(explicit, cpId, i) }
+        : {}),
     });
   }
   return fleet;
-}
-
-/** The listener the tunnel forwards to: the API port, else the console's. */
-function soapTunnelLocalPort(opts: ServerOptions): number {
-  const port = opts.httpPort ?? opts.webConsolePort;
-  if (port == null) {
-    throw new Error(
-      "--soap-tunnel needs a listener (--http-port or --web-console)",
-    );
-  }
-  return port;
 }
 
 async function openSoapTunnel(
@@ -763,9 +738,17 @@ async function openSoapTunnel(
 ): Promise<SoapTunnel | null> {
   if (!opts.soapTunnel) return null;
   if (opts.soapCallbackUrlExplicit?.trim() || opts.soapPublicBaseUrl?.trim()) {
-    return null;
+    throw new Error(
+      "--soap-tunnel cannot be combined with --soap-callback-url or --soap-public-base-url",
+    );
   }
-  const localPort = soapTunnelLocalPort(opts);
+  // The tunnel forwards to the API listener, else the console's.
+  const localPort = opts.httpPort ?? opts.webConsolePort;
+  if (localPort == null) {
+    throw new Error(
+      "--soap-tunnel needs a listener (--http-port or --web-console)",
+    );
+  }
   return startSoapTunnel({
     localHost: localHostForTunnel(opts.httpHost),
     localPort,
@@ -777,36 +760,30 @@ async function openSoapTunnel(
 }
 
 /**
- * The SOAP callback address for one charge point in a fleet.
+ * Expand an explicit `--soap-callback-url` for one charge point of a fleet.
  *
  * The daemon routes inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService`
  * and advertises this URL verbatim, so a fleet sharing one address would send
- * every station's callbacks to the first station's route. An explicit
- * `--soap-callback-url` therefore carries the same `{n}` placeholder as the id
- * pattern (the CLI refuses one that does not). Without one, the registry
- * derives each station's URL from the daemon's SOAP public base at
- * instantiation (#183), so nothing is resolved here.
+ * every station's callbacks to the first station's route. The explicit URL
+ * therefore carries the same `{n}` placeholder as the id pattern (the CLI
+ * refuses one that does not), and its expansion is checked against the route.
  */
-function fleetSoapCallbackUrl(
-  opts: ServerOptions,
+function expandExplicitSoapCallbackUrl(
+  explicit: string,
   cpId: string,
   index: number,
-): string | undefined {
-  const explicit = opts.soapCallbackUrlExplicit?.trim();
-  if (explicit) {
-    const expanded = expandIdPattern(explicit, index);
-    // Same rule the RPC enforces, checked the same way — through the router's
-    // own pattern and percent-decoding, so the two cannot disagree about an id
-    // that needs encoding or a path with an extra segment.
-    if (soapCallbackRouteCpId(expanded) !== cpId) {
-      throw new Error(
-        `--soap-callback-url expands to "${expanded}", whose charge point route segment is not "${cpId}". ` +
-          `The daemon routes inbound SOAP calls by that segment, so the CSMS would get 404s.`,
-      );
-    }
-    return expanded;
+): string {
+  const expanded = expandIdPattern(explicit, index);
+  // Same rule the RPC enforces, checked the same way — through the router's
+  // own pattern and percent-decoding, so the two cannot disagree about an id
+  // that needs encoding or a path with an extra segment.
+  if (soapCallbackRouteCpId(expanded) !== cpId) {
+    throw new Error(
+      `--soap-callback-url expands to "${expanded}", whose charge point route segment is not "${cpId}". ` +
+        `The daemon routes inbound SOAP calls by that segment, so the CSMS would get 404s.`,
+    );
   }
-  return undefined;
+  return expanded;
 }
 
 /**

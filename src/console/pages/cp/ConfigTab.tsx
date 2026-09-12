@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type {
-  ChargePointConfig,
-  SoapPublicBase,
+import {
+  describeSoapPublicBase,
+  type ChargePointConfig,
+  type SoapPublicBase,
 } from "@/components/ChargePointConfigModal";
 import { isSoapVersion } from "@/cp/domain/types/OcppVersion";
 
@@ -23,9 +24,9 @@ export interface ConfigTabProps {
  */
 const SoapCallbackUrlRow: React.FC<{
   url: string;
-  derived: boolean;
-  soapPublicBase: SoapPublicBase | null | undefined;
-}> = ({ url, derived, soapPublicBase }) => {
+  /** Where a derived URL came from; null for an explicit one. */
+  note: string | null;
+}> = ({ url, note }) => {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
@@ -41,11 +42,6 @@ const SoapCallbackUrlRow: React.FC<{
     }
     setTimeout(() => setCopyState("idle"), 1500);
   };
-  const source = derived
-    ? soapPublicBase?.tunnel
-      ? `derived from the ${soapPublicBase.tunnel.provider} tunnel — the URL may change between daemon runs`
-      : "derived from the daemon's SOAP public base"
-    : null;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-start gap-2">
@@ -65,9 +61,9 @@ const SoapCallbackUrlRow: React.FC<{
               : "Copy"}
         </Button>
       </div>
-      {source && (
+      {note && (
         <span className="font-sans text-xs text-gray-500 dark:text-gray-400">
-          {source}
+          {note}
         </span>
       )}
     </div>
@@ -109,10 +105,12 @@ const ConfigTab: React.FC<ConfigTabProps> = ({
     rows.push([
       "SOAP callback URL",
       <SoapCallbackUrlRow
-        key="soap-callback-url"
         url={config.soapCallbackUrl}
-        derived={config.soapCallbackUrlDerived === true}
-        soapPublicBase={soapPublicBase}
+        note={
+          config.soapCallbackUrlDerived
+            ? `derived from the ${describeSoapPublicBase(soapPublicBase)} — the URL may change between daemon runs`
+            : null
+        }
       />,
     ]);
   }

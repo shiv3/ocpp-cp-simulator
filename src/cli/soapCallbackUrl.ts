@@ -63,10 +63,22 @@ export function buildSoapCallbackUrl(
       `Invalid SOAP public base URL: ${publicBaseUrl} (expected an absolute http(s) URL)`,
     );
   }
+  return joinSoapCallbackUrl(publicBaseUrl, encodeURIComponent(cpId), soapPath);
+}
+
+/**
+ * `{base}{soapPath}/{segment}/ChargePointService` with the route segment used
+ * verbatim — for callers that pass a placeholder (a fleet's `<cp-id>`) rather
+ * than a charge point id. buildSoapCallbackUrl() is the encoding front door.
+ */
+export function joinSoapCallbackUrl(
+  publicBaseUrl: string,
+  segment: string,
+  soapPath: string,
+): string {
   const base = publicBaseUrl.replace(/\/+$/, "");
   const path = normalizeSoapPath(soapPath);
   const prefix = path === "/" ? "" : path;
-  const segment = encodeURIComponent(cpId);
   return `${base}${prefix}/${segment}/${SOAP_SERVICE_SUFFIX}`;
 }
 

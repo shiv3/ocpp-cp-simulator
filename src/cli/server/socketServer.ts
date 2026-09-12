@@ -149,7 +149,7 @@ export interface SocketIoDeps {
   readonly database?: Database | null;
   readonly requestShutdown?: () => void;
   /** `server.info`; absent → version only, no SOAP public base. */
-  readonly serverInfo?: () => ServerInfo;
+  readonly serverInfo?: ServerInfo;
   readonly webConsoleBasicAuth?: {
     readonly username: string;
     readonly password: string;
@@ -1496,12 +1496,30 @@ function shutdownServer(deps: RuntimeSocketIoDeps): { ok: true } {
   return { ok: true };
 }
 
+/** Fixed for the daemon's lifetime, so built once by startServer. */
+export function buildServerInfo(soap: {
+  soapPublicBaseUrl: string | null;
+  soapPath: string;
+  tunnel: ServerInfo["soap"]["tunnel"];
+}): ServerInfo {
+  return {
+    version: appVersion(),
+    soap: {
+      publicBaseUrl: soap.soapPublicBaseUrl,
+      path: soap.soapPath,
+      tunnel: soap.tunnel,
+    },
+  };
+}
+
 function serverInfo(deps: RuntimeSocketIoDeps): ServerInfo {
   return (
-    deps.serverInfo?.() ?? {
-      version: appVersion(),
-      soap: { publicBaseUrl: null, path: DEFAULT_SOAP_PATH, tunnel: null },
-    }
+    deps.serverInfo ??
+    buildServerInfo({
+      soapPublicBaseUrl: null,
+      soapPath: DEFAULT_SOAP_PATH,
+      tunnel: null,
+    })
   );
 }
 

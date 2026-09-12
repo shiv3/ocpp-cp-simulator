@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  NGROK_DEFAULT_API_URL,
   localHostForTunnel,
   selectNgrokTunnel,
   soapTunnelStartupLines,
@@ -209,6 +208,41 @@ describe("startSoapTunnel (spawn mode)", () => {
     expect(fake.kill).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps stdout open after the tunnel is up (cancelling the pipe would SIGPIPE ngrok)", async () => {
+    const cancelled = vi.fn();
+    const encoder = new TextEncoder();
+    let push: (line: string) => void = () => {};
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (line) => controller.enqueue(encoder.encode(`${line}\n`));
+        push(STARTED_TUNNEL_LINE);
+      },
+      cancel: cancelled,
+    });
+    const spawn: SoapTunnelSpawnFn = () => ({
+      stdout,
+      stderr: streamOf([]),
+      exited: new Promise(() => {}),
+      kill: () => {},
+    });
+
+    const tunnel = await startSoapTunnel({
+      localHost: "127.0.0.1",
+      localPort: 9700,
+      spawn,
+    });
+    expect(tunnel.publicBaseUrl).toBe(
+      "https://94b1-82-67-199-224.ngrok-free.app",
+    );
+
+    // ngrok keeps logging (one line per proxied request); the reader must
+    // still be attached and consuming.
+    for (let i = 0; i < 50; i++) push(NOISE_LINES[1]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(cancelled).not.toHaveBeenCalled();
+    tunnel.close();
+  });
+
   it("reports an unexpected exit after the tunnel is up, but not after close()", async () => {
     const onExit = vi.fn();
     const fake = fakeSpawn([STARTED_TUNNEL_LINE], { holdStdout: true });
@@ -402,10 +436,10 @@ describe("soapTunnelStartupLines", () => {
         provider: "ngrok",
         mode: "spawn",
         publicBaseUrl: "https://cp.ngrok-free.app",
+        localHost: "127.0.0.1",
+        localPort: 9700,
         close: () => {},
       },
-      localHost: "127.0.0.1",
-      localPort: 9700,
       soapPath: "/ocpp/soap",
       cpId: "CP1",
     });
@@ -428,10 +462,10 @@ describe("soapTunnelStartupLines", () => {
         provider: "ngrok",
         mode: "attach",
         publicBaseUrl: "https://cp.ngrok-free.app",
+        localHost: "0.0.0.0",
+        localPort: 9700,
         close: () => {},
       },
-      localHost: "0.0.0.0",
-      localPort: 9700,
       soapPath: "/",
       cpId: null,
     });
@@ -439,11 +473,5 @@ describe("soapTunnelStartupLines", () => {
     expect(lines[1]).toContain(
       "https://cp.ngrok-free.app/<cp-id>/ChargePointService",
     );
-  });
-});
-
-describe("NGROK_DEFAULT_API_URL", () => {
-  it("is the agent's default local address", () => {
-    expect(NGROK_DEFAULT_API_URL).toBe("http://127.0.0.1:4040");
   });
 });

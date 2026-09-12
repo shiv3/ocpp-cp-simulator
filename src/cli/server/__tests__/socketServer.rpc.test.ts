@@ -464,14 +464,14 @@ describe("socket.io rpc dispatch", () => {
       registry,
       bus,
       database: null,
-      serverInfo: () => ({
+      serverInfo: {
         version: "1.2.3",
         soap: {
           publicBaseUrl: "https://a1b2.ngrok-free.app",
           path: "/ocpp/soap",
           tunnel: { provider: "ngrok", mode: "spawn" },
         },
-      }),
+      },
     });
     io.connect(socket);
 

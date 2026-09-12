@@ -5,6 +5,16 @@ import type {
 import type { UrlDistribution } from "../cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "../cp/domain/auth/IdTagPool";
 
+export interface SoapTunnelConfig {
+  readonly provider: "ngrok";
+  /** `--ngrok-auth-token`; never logged, handed to ngrok via its environment. */
+  readonly authToken: string | null;
+  /** `--ngrok-domain`: reserved domain requested from ngrok. */
+  readonly domain: string | null;
+  /** `--ngrok-api-url`: attach to a running agent instead of spawning one. */
+  readonly apiUrl: string | null;
+}
+
 export interface CLIOptions {
   readonly wsUrl: string;
   readonly cpId: string | null;
@@ -27,17 +37,12 @@ export interface CLIOptions {
   readonly soapCallbackUrlExplicit: string | null;
   readonly soapPublicBaseUrl: string | null;
   /**
-   * `--soap-tunnel`: expose the SOAP callback endpoint through a tunnel and
-   * derive the public base from it (#183). parseArgs refuses it alongside an
-   * explicit callback / public base URL.
+   * `--soap-tunnel ngrok` with its `--ngrok-*` options, or null (#183):
+   * expose the SOAP callback endpoint through a tunnel and derive the public
+   * base from it. parseArgs refuses it alongside an explicit callback /
+   * public base URL.
    */
-  readonly soapTunnel: "none" | "ngrok";
-  /** `--ngrok-auth-token`; never logged, handed to ngrok via its environment. */
-  readonly ngrokAuthToken: string | null;
-  /** `--ngrok-domain`: reserved domain requested from ngrok. */
-  readonly ngrokDomain: string | null;
-  /** `--ngrok-api-url`: attach to a running agent instead of spawning one. */
-  readonly ngrokApiUrl: string | null;
+  readonly soapTunnel: SoapTunnelConfig | null;
   /** Serve `GET /metrics` (Prometheus text exposition) in server mode. */
   readonly metrics: boolean;
   /**

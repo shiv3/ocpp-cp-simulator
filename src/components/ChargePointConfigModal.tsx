@@ -3,6 +3,7 @@ import { Save, X } from "lucide-react";
 import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
+import { buildSoapCallbackUrl } from "../cli/soapCallbackUrl";
 import type { ServerInfo } from "../protocol";
 import {
   adaptCentralSystemUrlScheme,
@@ -89,18 +90,25 @@ interface ChargePointConfigModalProps {
 
 export type SoapPublicBase = ServerInfo["soap"];
 
-/** `{base}{soapPath}/{cpId}/ChargePointService`, as the daemon derives it. */
+/** The URL the daemon will derive — same helper the registry uses. */
 export function previewDerivedSoapCallbackUrl(
   base: SoapPublicBase | null | undefined,
   cpId: string,
   soapPath: string | undefined,
 ): string | null {
   if (!base?.publicBaseUrl) return null;
-  const origin = base.publicBaseUrl.replace(/\/+$/, "");
-  const rawPath = soapPath?.trim() || base.path;
-  const withLeading = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
-  const path = withLeading.replace(/\/+$/, "");
-  return `${origin}${path}/${encodeURIComponent(cpId)}/ChargePointService`;
+  return buildSoapCallbackUrl(
+    base.publicBaseUrl,
+    cpId,
+    soapPath?.trim() || base.path,
+  );
+}
+
+/** "ngrok tunnel" / "SOAP public base" — where a derived URL comes from. */
+export function describeSoapPublicBase(
+  base: SoapPublicBase | null | undefined,
+): string {
+  return base?.tunnel ? `${base.tunnel.provider} tunnel` : "SOAP public base";
 }
 
 /**
@@ -171,8 +179,9 @@ export const defaultChargePointConfig: ChargePointConfig = {
 function withoutDerivedSoapCallbackUrl(
   config: ChargePointConfig,
 ): ChargePointConfig {
-  if (!config.soapCallbackUrlDerived) return config;
-  return { ...config, soapCallbackUrl: "", soapCallbackUrlDerived: false };
+  return config.soapCallbackUrlDerived
+    ? { ...config, soapCallbackUrl: "" }
+    : config;
 }
 
 const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
@@ -199,6 +208,16 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
     config.cpId,
     config.soapPath,
   );
+  // Local mode has no callback endpoint at all; remote mode can leave the
+  // field to the daemon once it has a public base to derive from.
+  const soapCallbackOptional =
+    mode === "local" || derivedSoapCallbackUrl != null;
+  const soapCallbackHelp =
+    mode === "local"
+      ? "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required only when using the daemon."
+      : derivedSoapCallbackUrl
+        ? `Leave empty to use the daemon's ${describeSoapPublicBase(soapPublicBase)}: ${derivedSoapCallbackUrl}`
+        : "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required.";
 
   const handleSave = () => {
     const profile = config.securityProfile ?? 0;
@@ -213,10 +232,9 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
       return;
     }
     if (
-      mode === "remote" &&
+      !soapCallbackOptional &&
       isSoapVersion(config.ocppVersion) &&
-      !config.soapCallbackUrl?.trim() &&
-      !derivedSoapCallbackUrl
+      !config.soapCallbackUrl?.trim()
     ) {
       setSaveError(
         "SOAP Callback URL is required in remote mode for SOAP versions.",
@@ -506,7 +524,7 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                         className="mb-2 logger-label"
                       >
                         SOAP Callback URL
-                        {(mode === "local" || derivedSoapCallbackUrl) && (
+                        {soapCallbackOptional && (
                           <span className="text-xs text-muted ml-1">
                             (optional)
                           </span>
@@ -523,19 +541,11 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
                           derivedSoapCallbackUrl ??
                           "http://cp-host:8080/ocpp/soap/CP001"
                         }
-                        required={mode === "remote" && !derivedSoapCallbackUrl}
+                        required={!soapCallbackOptional}
                         className="logger-input"
                       />
                       <p className="text-xs text-muted mt-1">
-                        {mode === "local"
-                          ? "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required only when using the daemon."
-                          : derivedSoapCallbackUrl
-                            ? `Leave empty to use the daemon's public base${
-                                soapPublicBase?.tunnel
-                                  ? ` (${soapPublicBase.tunnel.provider} tunnel)`
-                                  : ""
-                              }: ${derivedSoapCallbackUrl}`
-                            : "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required."}
+                        {soapCallbackHelp}
                       </p>
                     </div>
                     <div>

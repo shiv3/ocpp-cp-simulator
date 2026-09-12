@@ -854,3 +854,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 [Control plane](concepts/control-plane.md#daemon-methods) and
 [Access control](concepts/access-control.md), which omitted `config`,
 `scenario-definitions` and `file-reload`.
+
+## [2026-09-12] ingest | The profile-2-behind-a-TLS-edge case has a measured write-up (#289)
+
+- [Security profiles](concepts/security-profiles.md#the-csms-gets-a-vote) now links juherr's gist — the full case the page's section summarises: `401` surfacing as `code=1002, Expected 101 status code`, why a TLS-terminating edge makes the CSMS refuse a correct profile-2 station, a three-probe procedure with a profile-1 witness station that rules the password out, the configure-CSMS-first ordering trap, and the two edge behaviours after the handshake (idle timeouts versus `HeartbeatInterval`; a public certificate needing no `--tls-ca`, which is this page's #289 point 1). Measured on 0.7.8 against SteVe 3.14.1 behind Traefik and Cloudflare; the author offered it CC-free in #289 on 2026-09-03.
+- Added to the page's `sources:` as an external document rather than summarised into a `sources/` page: the section already carries the contract sentences, and the gist is the evidence, not a new mechanism.

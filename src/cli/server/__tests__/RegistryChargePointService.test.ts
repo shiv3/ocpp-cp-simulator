@@ -434,6 +434,44 @@ describe("RegistryChargePointService", () => {
     expect(perCp.getEVSettings(1)).toEqual(overrideSettings);
   });
 
+  it("releases a scenario's evSettings override when the scenario completes normally (#105)", async () => {
+    // The combination nothing covered, and the one a presence-based rule got
+    // wrong: a scenario that *declares* evSettings running to its natural end.
+    // The stop path clears the override itself, so the stopped case passed
+    // while the completed case left the connector permanently marked and every
+    // later default propagation a no-op.
+    const { registry, service } = createFacade();
+    const perCp = registry.create(
+      {
+        cpId: "cp-ev-scenario-complete",
+        wsUrl: "ws://example.test/ocpp",
+        connectors: 1,
+        vendor: "FacadeVendor",
+        model: "FacadeModel",
+        basicAuth: null,
+      },
+      { seedDefault: false },
+    );
+
+    const scenarioId = perCp.loadScenario(1, {
+      ...runnableScenario("scenario-ev-completes", 1),
+      evSettings: { targetSoc: 50 },
+    });
+    perCp.runScenario(1, scenarioId);
+    await waitForScenarioIdle(perCp, 1, scenarioId);
+    expect(perCp.getEVSettings(1).targetSoc).toBe(50);
+
+    // The run is over and it owned the override, so the next default applies.
+    await service.applyDefaultEVSettings({
+      modelName: "Generic EV",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 150,
+      initialSoc: 20,
+      targetSoc: 80,
+    });
+    expect(perCp.getEVSettings(1).targetSoc).toBe(80);
+  });
+
   it("releases a scenario's evSettings override when the scenario is stopped (#105)", async () => {
     const { registry, service } = createFacade();
     const perCp = registry.create(

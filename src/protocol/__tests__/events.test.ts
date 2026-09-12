@@ -288,7 +288,123 @@ describe("envelopes", () => {
       }).success,
     ).toBe(true);
     expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "id-tags",
+        path: "/srv/tags.json",
+        cpId: "CP1",
+        connectorId: null,
+        scenarioId: null,
+        outcome: "applied",
+        error: null,
+      }).success,
+    ).toBe(true);
+    expect(
       eventEnvelopeSchema.safeParse({ cpId: "CP1", evt: {} }).success,
+    ).toBe(false);
+  });
+
+  it("file-reload envelopes accept a path as long as the input side does (#314)", () => {
+    // The bound used to be STR_1K while `load_scenario`'s and
+    // `run_scenario_file`'s `file` params are STR_64K. A path over 1024
+    // characters is legal under Linux's PATH_MAX, so the reload was applied and
+    // then the envelope failed validation — the manager caught the throw and
+    // subscribers silently got nothing for a change that had happened. `--watch`
+    // emits the *resolved absolute* path, which is longer still.
+    const longPath = `/srv/${"d".repeat(2_000)}/tags.json`;
+    expect(longPath.length).toBeGreaterThan(1_024);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "id-tags",
+        path: longPath,
+        cpId: "CP1",
+        connectorId: null,
+        scenarioId: null,
+        outcome: "applied",
+        error: null,
+      }).success,
+    ).toBe(true);
+    // The rejection messages quote the path, so the error field has to hold one
+    // too or the same event goes missing on the outcome that matters most.
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "id-tags",
+        path: longPath,
+        cpId: "CP1",
+        connectorId: null,
+        scenarioId: null,
+        outcome: "rejected",
+        error: `idTagPool.file "${longPath}" is not valid JSON`,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("file-reload envelopes accept any id a definition can carry (#314)", () => {
+    // A file-backed scenario gets only a minimal shape check, so an id past the
+    // generic 64 KB string cap is accepted while the definition stays under its
+    // own size gate — and the reload then applied while this envelope rejected
+    // it, swallowing the event. The bound is the definition's, so an id inside
+    // a definition that passed the size gate always fits.
+    const longId = "s".repeat(70_000);
+    expect(longId.length).toBeGreaterThan(65_536);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        kind: "file-reload",
+        event: "file-reloaded",
+        target: "scenario",
+        path: "/srv/s.json",
+        cpId: "CP1",
+        connectorId: 1,
+        scenarioId: longId,
+        outcome: "applied",
+        error: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("file-reload envelopes carry the outcome the consumer branches on (#314)", () => {
+    // The three outcomes are the contract: applied means the new copy is live,
+    // deferred means it is held until the session ends, rejected means the
+    // previous good copy is untouched. A fourth value would silently reach a
+    // console that only knows these three.
+    const base = {
+      kind: "file-reload" as const,
+      event: "file-reloaded" as const,
+      target: "scenario" as const,
+      path: "/srv/s.json",
+      cpId: "CP1",
+      connectorId: 1,
+      scenarioId: "s1",
+      error: null,
+    };
+    for (const outcome of ["applied", "deferred", "rejected"]) {
+      expect(eventEnvelopeSchema.safeParse({ ...base, outcome }).success).toBe(
+        true,
+      );
+    }
+    expect(
+      eventEnvelopeSchema.safeParse({ ...base, outcome: "maybe" }).success,
+    ).toBe(false);
+    expect(
+      eventEnvelopeSchema.safeParse({
+        ...base,
+        outcome: "applied",
+        target: "blueprint",
+      }).success,
+    ).toBe(false);
+    // connectorId is nullable but never 0: an idTag reload is charge-point
+    // wide, and a connector id is 1-based everywhere else on this wire.
+    expect(
+      eventEnvelopeSchema.safeParse({
+        ...base,
+        outcome: "applied",
+        connectorId: 0,
+      }).success,
     ).toBe(false);
   });
 

@@ -74,6 +74,29 @@ jobs:
       - name: Runtime tests (bun)
         run: bun run test:bun
 
+      # `test:bun` filters on `*.bun.test.ts`, so it never runs the whole
+      # src/cli/__tests__ directory in one process — and that is where the
+      # two runners overlap. `bun test src/cli/__tests__` is what a developer
+      # types while debugging, and on a clean tree it failed, with three
+      # defects stacked in client.remote.test.ts, each masked by the one
+      # before (#339): it used vitest-only `vi.hoisted` and so could not even
+      # load; its `vi.mock()` is process-global under bun and leaked into
+      # client.socket.test.ts, which exists to drive the REAL service; and it
+      # restored `process.exitCode` by assigning `undefined`, which bun
+      # ignores, so the run exited 1 with every test green. Neither runner's
+      # own gate saw any of it.
+      #
+      # Running the directory here keeps that overlap honest: every file in it
+      # must load and pass under BOTH runners, which restricts it to the `vi`
+      # API bun implements (fn, mock, spyOn, the *AllMocks helpers, fake
+      # timers), forces any process-global module mock to be undone in an
+      # afterAll, and forces process-global state to be restored with a
+      # concrete value rather than `undefined`. The 7 non-`bun.test.ts` files
+      # there are run twice — once by vitest for coverage/junit, once here —
+      # which costs ~11s.
+      - name: CLI tests, whole directory in one bun process
+        run: bun run test:bun:cli
+
       - name: Coverage (non-blocking)
         run: bun run test:coverage
         continue-on-error: true

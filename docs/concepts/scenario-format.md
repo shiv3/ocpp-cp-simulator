@@ -15,7 +15,7 @@ sources:
   - src/cp/domain/connector/MeterValueScheduler.ts
   - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
-  - "issues #214, #240, #247, #239, #301"
+  - "issues #214, #240, #247, #239, #301, #332"
 related:
   - ../sources/scenario-json-schema.md
   - ../entities/scenario-templates.md
@@ -23,7 +23,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-06
+updated: 2026-09-12
 ---
 
 # Scenario File Format (v1.2)
@@ -259,7 +259,7 @@ Each assertion optionally carries a `severity` field (`"failure"` or `"warning"`
 - **`"failure"` (default)**: A normative OCPP conformance check. If it fails, the run's `conformanceVerdict` is `FAIL` and the overall scenario verdict fails.
 - **`"warning"`**: A compatibility observation (e.g., an OCTT certification quirk): behavior that is legal per the OCPP specification but has been observed to trip a particular peer. If it fails, the run's `compatibilityVerdict` is `WARNING` and the run does **not** fail. Strict mode promotes such warnings to failures when either:
   - the scenario sets `strictCompatibility: true`, or
-  - the run is started with `strict: true` (accepted by the `run_scenario`, `run_scenario_file`, and `run_scenario_template` RPCs; overrides the scenario-level setting).
+  - the run is started with `strict: true` (accepted by the `run_scenario`, `run_scenario_file`, and `run_scenario_template` RPCs; overrides the scenario-level setting). `run_scenario_file` suppresses the connector's auto-start gate for its own load so that the run it starts is the run the flag applies to (#314).
 
 The run report carries both axes alongside the overall `verdict`: `conformanceVerdict` (`PASS`/`FAIL`/`BLOCKED`/`SKIPPED`, from failure-severity assertions only) and `compatibilityVerdict` (`PASS`/`WARNING`/`FAIL`/`SKIPPED`, from warning-severity assertions only), plus the effective `strict` flag.
 
@@ -297,6 +297,46 @@ The simulator itself calls this at every import point (browser upload,
 `--scenario` / `--scenario-template-file`, and the `load_scenario` /
 `run_scenario_file` Socket.IO methods) and only ever warns — see [Status &
 scope](#status--scope).
+
+## Re-reading a scenario file (`--watch`)
+
+A scenario file is read once, at load, and the in-memory definition is
+authoritative from then on. A daemon started with
+[`--watch`](../entities/daemon.md#file-hot-reload) (#314) also re-reads the file
+a scenario was loaded from — via `--scenario`, `--scenario-template-file`,
+`load_scenario { file }` or `run_scenario_file` — when it changes on disk, so
+editing a graph by hand does not mean recreating the charge point. Five rules,
+all of them contracts:
+
+- The reload is **debounced** and a file whose bytes did not change is not a
+  reload.
+- A file that no longer parses is **rejected**: the previous good definition
+  stays loaded, and nothing is half-applied.
+- The reload **never mutates a connector mid-session**. With an open
+  transaction, or with a run of that scenario in flight, the new definition is
+  _held_ and installed when the session ends — an in-flight run always finishes
+  on the graph it started with. Held, never dropped: the definition lands when
+  the transaction is actually cleared, when the run's cleanup completes
+  (including a run that simply reaches the end of its graph), or when a
+  `cp.update` rebuilds the charge point out from under the session. "Cleared",
+  not "announced": the `transaction_stopped` event fires before the transaction
+  is dropped, so a reload released on it would still see the connector busy —
+  which is why this holds with `set_auto_reset_to_available` off too.
+- The reloaded definition keeps **the scenario id it was loaded under**, even if
+  the file's own `id` was edited. Honouring a changed id would load a second
+  scenario and leave the first one running on the old graph.
+- A scenario that is **removed, or replaced** — by an inline `load_scenario`
+  under the same id, or by a `scenario.definitions.replace` upload from the
+  console — stops being watched, and an edit to the abandoned file never
+  re-creates it or overwrites the replacement. The file is only authoritative
+  for as long as the scenario it was loaded as is still the one on the
+  connector.
+
+Reloading replaces the definition; it does not itself start a run. It does go
+through the ordinary auto-start gate, though, so a reloaded scenario whose
+trigger already matches the connector's current state — a `connect` trigger on
+an already-connected charge point, for instance — **may start immediately** on
+the new graph. Anything else is run explicitly, as before.
 
 ## Template instances
 
@@ -490,15 +530,85 @@ moves backwards between sessions, and a curve whose maximum is below the
 current register still delivers.
 
 The shift is by the curve's own starting ordinate, not by the register alone.
-A curve may legitimately begin above zero — nothing forbids it, and the editor
-allows any ordinate — and adding the register to such a curve would deliver
+A curve may legitimately begin above zero — only _negative_ and _descending_
+ordinates are forbidden (below), and the curve editor's number inputs carry no
+`min`, so it can still write one — and adding the register to such a curve
+would deliver
 twice what it describes: a connector at 50 kWh running a 50→60 kWh curve would
 jump to 100 kWh. What a curve fixes is the **shape** of a session's delivery;
 where its ordinates start says nothing about where the register is. The two
 readings coincide for a zero-based curve, which is every curve written so
 far.
 
-**A tapering curve slows the energy register; it never freezes it.** The
+**A tapering curve slows the energy register; it never freezes it, and it
+never decreases it.** `curvePoint.value` is _cumulative_ energy delivered in
+the session, in kWh, and the auto-meter assigns it to the register outright
+rather than adding a delta, so a trajectory that descends over elapsed time
+drove `Energy.Active.Import.Register` backwards, below `meterStart`, and a
+`meterStop` below `meterStart` is a protocol violation a strict CSMS rejects
+(issue #332). The scheduler's own `Math.max(delivered, …)` never caught it: that
+clamp lives inside the branch that applies a charging-profile cap, so it ran
+only while a profile was in force — the _unusual_ case. The rule is therefore
+stated where both runtimes can see it: `curvePoint.value` carries
+`minimum: 0` in [`schema/scenario.schema.json`](../../schema/scenario.schema.json),
+and the ordering rule — which JSON Schema cannot express — is checked
+alongside it by `validateScenarioSchema`.
+
+**An out-of-contract curve is normalized on load, not rejected.** Schema
+validation is advisory by design — no scenario file, including one authored
+before a rule existed, is ever refused for a schema mismatch — so a descending
+curve keeps loading and every load path logs the warning it already logged for
+any other mismatch, naming the offending point:
+`/nodes/1/data/curvePoints/2/value must be >= 5, the value already delivered at
+an earlier time`. At runtime `normalizeCurvePoints` sorts the curve by time,
+raises every ordinate to the running maximum (floor 0) and discards entries
+that are not `{ time, value }` pairs of finite numbers, logging one line per
+correction on the connector's own logger. A corrected point keeps every other
+field it carried — `curvePoint` is `additionalProperties: true`, so a point may
+hold metadata, and a read-back must not lose it from the corrected points only. The register then **plateaus** where
+the curve descends: energy already delivered is never un-delivered. The
+correction clamps rather than drops, so the curve's time span — which
+`autoCalculateInterval` divides into a tick interval, and which the exported
+k6 runtime reads as the auto-meter's stop condition — survives intact.
+
+That normalization sits on `Connector`'s `autoMeterValueConfig` setter, the
+one boundary every path that can configure an auto-meter funnels through:
+the browser panels, the CLI's own service, and the control plane's
+[`set_auto_meter_config`](control-plane.md#cp-command-methods), whose payload schema
+validates no field of the config at all. The stored _and emitted_ config is
+the normalized one, so a read-back and a subscribed UI both see the trajectory
+the scheduler will actually run. A curve already within contract is returned by
+identity and fires no change event.
+
+**A malformed `curvePoints` is discarded, never thrown on** — the same
+disposition `chargingCurve` has, and for the same reason: `set_auto_meter_config`
+validates no field of the config it is handed, so a value that is not an array
+at all, or an array of nulls, strings, or objects missing `time` or `value`,
+genuinely reaches the normalizer. Every such entry is dropped and the result is
+an empty curve, which the scheduler reads as a register that holds still. What
+must not happen is a _throw_: a value the connector previously accepted in
+silence — `""`, `{ length: 0 }`, `["a", 1]`, `[{ time: 0 }]` — has to stay
+accepted, because throwing out of the setter takes the RPC and the connector's
+configuration with it. `time` and `value` must both be finite values of type
+`number`; a coercible string like `"5"` is dropped rather than coerced, which
+matches `chargingCurve` and the schema's own `type: "number"`. A `curvePoints`
+that is absent or `null` is the one case that still throws, exactly as it did
+before — the field is required, and inventing an empty curve for it would add a
+key the caller did not write.
+
+Nothing normalizes a curve on the way _out_: the editor writes the points it
+was given into the node's `curvePoints`, so a file it exports can still be one
+that warns on load. That matches `chargingCurve`, which is likewise guarded on
+the way in and not on the way out — the file is a record of what was asked
+for, and the correction is the runtime's.
+
+The one caller that treats a schema failure as fatal is `export-k6`, which is
+a build step rather than a load: `ocpp-cp-sim export-k6` on a scenario with a
+descending curve exits with the diagnostic above and writes nothing, so the
+generated k6 script — which carries no normalizer of its own — can never be
+handed a trajectory that runs the register backwards.
+
+The
 register is integer watt-hours — a fractional `meterStop` is rejected by a
 strict CSMS with a `FormationViolation` that leaves the transaction stranded
 in Charging — so the auto-meter rounds what it reports and carries the
@@ -745,6 +855,14 @@ does not hold.
 
 ## Changelog
 
+- **v1.2 (amended)**: Issue #332. `curvePoint.value` gains `minimum: 0`, and
+  the prose rule that a curve's ordinates never decrease with time. **No
+  version bump**: this narrows an existing field rather than adding one, and
+  the values it now rejects were never meaningful — an ordinate is cumulative
+  energy delivered, so a descending one drove the register backwards. It is
+  not a compatibility break either, because schema validation is advisory:
+  such a file still loads, warns naming the point, and runs a normalized
+  curve. Only `export-k6`, which treats a schema failure as fatal, refuses it.
 - **v1.2**: Issue #301. Adds the charging-curve and electrical fields to
   `evSettings` — `chargingCurve`, `currentType`, `phases`, `voltageV`,
   `powerFactor` (`(0, 1]`). All optional: settings without a `chargingCurve` keep flat

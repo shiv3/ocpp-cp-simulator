@@ -11,6 +11,8 @@ import type { Database } from "../../../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../../data/sqlite/SqliteConnectorSettingsRepository";
 import { CPRegistry } from "../CPRegistry";
+import { FileReloadManager } from "../FileReloadManager";
+import { FileWatcher, type WatchFactory } from "../FileWatcher";
 import { EventBus } from "../eventBus";
 import { createHttpHandlers, type CorsPolicy } from "../httpServer";
 import { createLifecycle } from "../lifecycle";
@@ -35,6 +37,22 @@ export interface TestServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms?: boolean;
+  /**
+   * Run this test daemon as if it had been started with `--watch` (#314).
+   * `debounceMs` is exposed so a test does not have to sleep for the
+   * production 200 ms trailing debounce on every save.
+   */
+  /** Mirror the daemon's two-step restore: rebuild the fleet without dialling,
+   *  restore the watches, and leave the dial to `TestServer.connectRestored`
+   *  (#314). */
+  readonly deferRestoredConnect?: boolean;
+  readonly watch?:
+    | {
+        readonly debounceMs?: number;
+        /** Injected so a test does not depend on the host's `fs.watch`. */
+        readonly watchFactory?: WatchFactory;
+      }
+    | boolean;
 }
 
 export interface TestServer {
@@ -45,6 +63,11 @@ export interface TestServer {
   readonly url: string;
   readonly port: number;
   readonly restored: ReadonlyArray<string>;
+  /** Non-null only when `watch` was requested. */
+  readonly fileReload: FileReloadManager | null;
+  /** Dial the charge points the restore rebuilt. A no-op unless the server was
+   *  started with `deferRestoredConnect`. */
+  readonly connectRestored: () => void;
   close(): Promise<void>;
 }
 
@@ -70,9 +93,37 @@ export async function startTestServer(
     scenarioRepository,
     connectorSettingsRepository,
   });
-  const restored = await Promise.resolve(
-    chargePointService.restoreFromDatabase(),
+  const watchOptions =
+    options.watch === true
+      ? {}
+      : options.watch === false
+        ? null
+        : options.watch;
+  // Constructed and subscribed BEFORE the restore, exactly as `startServer`
+  // does it (#314). The restore re-creates charge points one at a time and each
+  // fires its own `onInitChange`, so a harness that built the reloader
+  // afterwards would only ever exercise a single sync over the whole fleet —
+  // and would not reproduce what the daemon does at boot.
+  const fileReload = watchOptions
+    ? new FileReloadManager(registry, {
+        watcher: new FileWatcher({
+          debounceMs: watchOptions.debounceMs ?? 20,
+          watchFactory: watchOptions.watchFactory,
+        }),
+        database,
+      })
+    : null;
+  if (fileReload) {
+    registry.onInitChange(() => fileReload.syncFromRegistry());
+  }
+  // Straight to the registry, the way `startServer` does it: the dial is
+  // deferred so the watches can go back on before a restored charge point's
+  // connect-triggered scenarios can start (#314).
+  const restored = registry.restoreFromDatabase(
+    options.deferRestoredConnect ? { connect: false } : {},
   );
+  fileReload?.syncFromRegistry();
+  fileReload?.restoreScenarioWatches();
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
@@ -82,15 +133,29 @@ export async function startTestServer(
     scenarioRepository,
     connectorSettingsRepository,
     chargePointService,
+    fileReload,
     webConsoleBasicAuth: options.webConsoleBasicAuth ?? null,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },
   });
+  fileReload?.setSink((event) =>
+    socketIo.registryEvents?.emitFileReloaded(event),
+  );
+  // #314: a reloaded scenario is a definition change like any other, and the
+  // console listens on the `scenario-definitions` scope, not on `file-reload`.
+  fileReload?.setScenarioDefinitionsSink((cpId, connectorId, definitions) =>
+    socketIo.registryEvents?.emitScenarioDefinitionsChanged(
+      cpId,
+      connectorId,
+      definitions,
+    ),
+  );
   lifecycle = createLifecycle({
     pidPath: null,
     registry,
     onShutdownStart: () => {
+      fileReload?.close();
       void socketIo.close();
     },
   });
@@ -131,9 +196,12 @@ export async function startTestServer(
     url,
     port: server.port ?? 0,
     restored,
+    fileReload,
+    connectRestored: () => registry.connectRestored(restored),
     async close() {
       if (closed) return;
       closed = true;
+      fileReload?.close();
       await closeSocketIo(socketIo);
       server.stop(true);
       registry.shutdownAll();

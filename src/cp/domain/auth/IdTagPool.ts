@@ -29,7 +29,7 @@ export const DEFAULT_ID_TAG_DISTRIBUTION: IdTagDistribution = "round-robin";
  * distribution semantics are testable without a charge point.
  */
 export class IdTagPool {
-  private readonly tags: readonly string[];
+  private tags: readonly string[];
   private readonly rng: () => number;
   private cursor = 0;
 
@@ -71,6 +71,21 @@ export class IdTagPool {
   /** The tags, for reporting. */
   list(): readonly string[] {
     return this.tags;
+  }
+
+  /**
+   * Swap the tag list in place, keeping the draw state (#314).
+   *
+   * The RNG is deliberately **not** re-seeded and the round-robin cursor is
+   * deliberately **not** reset: a `--watch` reload is an edit to the list, not
+   * a new run, and re-seeding would make an otherwise-identical seeded run
+   * replay differently depending on whether anyone happened to touch the file.
+   * The cursor is taken modulo the list length on every draw, so a shorter
+   * list needs no adjustment either.
+   */
+  replaceTags(tags: readonly string[]): void {
+    if (tags.length === 0) throw new Error("IdTagPool needs at least one tag");
+    this.tags = tags;
   }
 }
 

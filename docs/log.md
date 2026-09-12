@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-06
+updated: 2026-09-12
 ---
 
 # Log
@@ -898,3 +898,135 @@ The previous round's fix for "the instrument changes the workload at the knee" i
 - [Source: bench README → `hb.load`](sources/bench-readme.md): **one gap stated rather than left to be found.** The loss condition fires when the disconnect is _observed_, not when it happens, and socket.io only detects a network partition by ping timeout (25s + 20s against this daemon), so on a 60s window the socket can be dead for most of a step whose row still reads `set`. The symptom in `--out` is `eventSocketLostAtN: k` beside a row `k` whose `heartbeatOverrideLost` is `false`. Recorded as the honest record of when the loss was learned: the run has no earlier evidence of a partition than the transport does.
 - The preflight's cap check reads the `ocppcp_charge_points` gauge total as a stand-in for `snapshot.cps.length`. Checked rather than assumed: `renderMetrics` and `listChargePointSnapshots` both walk `registry.list()` and both drop exactly the entries whose `getStatus()` is falsy, so the stand-in is exact and a daemon at 1001 cannot slip past the refusal.
 - Raw sources changed in the same commit: `scripts/bench/lib.ts`, `scripts/bench/fleet-bench.ts`, `scripts/bench/lib.bun.test.ts`, `scripts/bench/fleetBench.smoke.bun.test.ts`, `scripts/bench/README.md`.
+
+## [2026-09-05] query | OECS as an external charger model source (#331)
+
+- New page [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md): what the ChargePi/oecs schema contains (modules, versions 1.0.0-2.0.0, MIT, required fields, shipped examples), the two prospective document providers (EVSEDB #241 and OECS Hub), a field-by-field OECS -> blueprint mapping table, and the parts of OECS the current blueprint cannot represent - per-connector hardware, a charger-side power cap distinct from `evSettings.maxChargingPowerKw`, power sharing, configuration-key defaults, supported OCPP profiles, provenance.
+- Verified against the code rather than the issue text: `params.connectors` is a count and `Connector` carries no connector type or rating; `ConfigurationStore` is seeded from `defaultConfiguration(cp)` with no create-time override; `blueprintSchema` strips unknown keys, but `BlueprintRepository` stores a JSON blob, so provenance needs a schema change and no SQLite migration.
+- [Index](index.md), [GitHub issues](sources/github-issues.md) (#331 / #241 row).
+
+## [2026-09-07] lint | OECS page: three review findings on the plan itself (#331)
+
+- [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md): the connector mapping now states a **rule**, not only a hazard. `params.connectors` is a count of _independent_ connectors while OECS `hardware.connectors[]` lists _plugs_, and multi-head hardware routinely puts several plugs on one power path — so the importer must group plugs by power path or reject the document with a diagnostic. Taking `.length` is the one wrong option: it yields a station that passes every test and models hardware that cannot exist. OECS has no explicit power-path field, so which of the two the first slice implements is an open question, now recorded as one.
+- Same page: adding `schemaVersion` has to define how **existing rows** are read. `BlueprintRepository.safeParse` validates with `blueprintSchema`, `list()` omits rows that fail and `get()` returns `null`, so a required field with no default would make every pre-versioned blueprint vanish from the console silently. A pre-versioned row surviving a restart is the acceptance test, in the same commit as the field.
+- Same page: MIT permits vendoring and adapting the OECS bundles **only with the copyright and permission notices retained** — the schema files plus OECS's `LICENSE.md` and a `NOTICE` naming the upstream commit. An adapter derived from the schema carries the same obligation. It is the one step in the plan that cannot be deferred to a later PR.
+
+## [2026-09-07] lint | OECS page: a verified claim that was not (#331)
+
+- [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md): the page named `Connector.currentScheduleLimitWatts()` as "the single choke point both readers already share". **It is not, and the error inverted the failure the bullet exists to prevent.** `MeterValueBuilder` reads `connector.scheduleConstraints()`, which resolves against its own instant and never calls `currentScheduleLimitWatts()`; `MeterValueScheduler` reads `getScheduleLimitWatts()` → `effectiveMeterCapWatts()`, which does. A hardware cap added at `currentScheduleLimitWatts()` would therefore narrow the energy register while leaving reported `Power.Active.Import` unbounded. The point both paths actually pass through is the private `resolveScheduleConstraints(now)`, and the page now says so with a test obligation attached.
+- Same page: `hardware.electrical.output.maxPower` no longer maps to `evSettings.maxChargingPowerKw` even "under protest" — that row contradicted the plan two sections later. The charger's rating is not the EV's acceptance, and `applyBlueprintDefaults` marks the connector `_evSettingsOverridden`, so the wrong value would be **sticky** against `ev_settings.apply_default`.
+- Same page: `documentSha256` now pins its input — the **source bytes as supplied**, not canonical JSON and not the normalized object. It decides same-id overwrite, so hashing after normalization would make a real source change invisible whenever it normalizes away.
+- Method note: all three were found by review against the code, and the first is the sharper lesson — the page presented it as verified. A claim about which function two callers share is exactly the kind that reads as checked and is cheap to get wrong by reading one caller.
+
+## [2026-09-05] lint | OECS page corrected after two design reviews (#331)
+
+- [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md) reviewed by two independent models reading the code; three claims in the first draft were wrong and are now fixed. (a) `software.protocols[].securityProfile` is a **capability**, not a deployment choice, and OECS allows name-only values, so it maps to nothing rather than to `params.securityProfile`. (b) OECS has no meter serial, so `meterSerialNumber` must not be synthesized from model-level data. (c) A new RPC does **not** force a curated MCP tool (`mcpToolSchemaParity` constrains curated tools only — `blueprint.delete` has a method and no tool), and the daemon already loads Ajv's Draft 2020-12 build, so an importer adds no JSON-Schema engine.
+- New material: the reviewed position on the six open decisions, the recorded disagreement over how much hardware belongs in the first slice, aggregate-vs-per-connector power, connector ordering and units, and two storage risks — the blueprint has no `schemaVersion` while both the zod schema and the repository strip unknown keys (a newer blueprint read by an older daemon is silently downgraded), and `charge_points` persists creation params as explicit columns, so new simulated hardware needs a migration even though provenance does not.
+- Raw sources verified in this pass: `src/protocol/methods.ts`, `src/cli/server/socketServer.ts` (`applyBlueprintDefaults` marks connectors `_evSettingsOverridden`), `src/cp/domain/persistence/BlueprintRepository.ts` (`ON CONFLICT DO UPDATE`), `src/cp/domain/types/OcppVersion.ts` (`parseOcppVersion` falls back to 1.6J), `src/scenario/scenarioSchemaValidator.ts`, `src/cli/server/__tests__/mcpToolSchemaParity.test.ts`.
+
+## [2026-09-06] query | first-slice scope for the OECS importer, resolved between the two reviewers (#331)
+
+- The one disagreement from the previous entry was argued out: Codex conceded that its rule was "no hardware without a reader", not "no hardware", and that with the charger-side power cap already in scope an identity-only importer is an artificial boundary. [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md) now records the agreed first slice (`schemaVersion` first; identity + selected protocol + hashed provenance + unmapped diagnostics; `hardware.connectors[].maxDeliveryPowerW` in watts, carried through blueprint → `ChargePointInitOptions` / `charge_points` → runtime; one effective-limit calculation; built-ins fixed in the same change), the deferred list, the PR order, and the single still-open call — connector `type`.
+- Verified against the code for this entry: `MeterValueScheduler` throttles per-tick energy by `getScheduleLimitWatts()` alone (EV max is not applied there), so a cap wired only into `derivedInstantaneousPowerW` would be reported but not delivered; `Connector.currentScheduleLimitWatts()` is the shared choke point.
+
+## [2026-09-07] ingest | `bun test src/cli/__tests__` was red on a clean tree, and no gate ran it (#339)
+
+- [Testing strategy](analyses/testing-strategy.md#where-the-two-runners-overlap): new section on the one directory both runners cover. The Vitest/Bun split is enforced by **filename only** — `vite.config.ts` excludes `**/*.bun.test.ts`, `test:bun` filters on `bun.test` — so `bun test src/cli/__tests__`, the command a developer actually types, is run by neither gate. It failed on `0f6f951` with `1 fail, 1 error`.
+- The issue's diagnosis was cross-test interference. Bisection refuted it as stated and then found a real leak underneath it. Running each of the 19 files alone sums to exactly the directory run's 123 passes, and `client.remote.test.ts` fails **alone**: it used `vi.hoisted()`, which Bun's `vitest`→`bun:test` alias does not implement (its `vi` is `fn`, `mock`, `spyOn`, the `*AllMocks` helpers and fake timers, nothing else), so the file died at module load. That error is what the reported "1 fail, 1 error" was.
+- With the load error removed the interference appeared, 4 failures where there had been none: Bun keeps **one module registry per run**, so the `RemoteChargePointService` mock `client.remote.test.ts` installs was still installed when `client.socket.test.ts` ran next and drove what should have been the real service against a live socket.io server. `expect(srv.lastAuth()).toEqual({…})` read `undefined` — no handshake ever happened. Vitest isolates per file, which is why the same pair is green there and why the leak needed the directory-wide run to surface at all.
+- A third defect sat under the second: with the mock restored the directory run reported `127 pass, 0 fail` and still **exited 1**. The file saved and restored `process.exitCode` — which the CLI entry points under test write — by assigning `undefined`. Node treats that as "clear"; Bun **ignores the assignment**, so the `1` set by the `--send` failure case survived to the end of the run. Restores now write a concrete `0` (`value ?? 0`), and the two success cases assert `exitCode: 0` instead of `exitCode: undefined`, which is order- and neighbour-independent in both runners rather than depending on nothing earlier having touched the global.
+- Fixed at the source rather than by isolating: the mock is undone in an `afterAll` (real export captured before the mock, re-registered through `mock.module`, guarded on the `Bun` global so Vitest skips it), and `vi.hoisted` is replaced by a top-level `await import("../client")` placed after the `vi.mock` call — correct in both runners, since Vitest calls the mock factory lazily on first import and Bun does not hoist `vi.mock` at all. `--isolate` would have made the command green while leaving the process-global mock in place.
+- The gate: `bun run test:bun:cli` (`bun test src/cli/__tests__`) added to `ci.yml`. The alternative the issue offered — a test asserting every file in the directory is picked up by `test:bun` — was rejected as wrong for this repo: 7 files there legitimately run under Vitest, and Vitest's include-minus-exclude already covers them, so such a test passes on today's tree and would have caught neither defect. Cost of the chosen guard: those 7 files run twice, ~11 s.
+
+## [2026-09-07] ingest | auto-meter curve ordinates are non-negative and non-decreasing (#332)
+
+- `curvePoint.value` is cumulative energy delivered, and `MeterValueScheduler` assigns it to the register outright, so a trajectory descending over elapsed time drove `Energy.Active.Import.Register` backwards — measured 5000 → 4000 Wh on a `0 → -1` kWh curve — and put `meterStop` below `meterStart`, which a strict CSMS rejects. The scheduler's `Math.max(delivered, rawNext)` never covered it: that clamp sits inside the `cap !== Infinity` branch and runs only while a charging profile is in force, i.e. the unusual case.
+- The invariant went into the schema rather than into that clamp. [`schema/scenario.schema.json`](../schema/scenario.schema.json) gives `curvePoint.value` a `minimum: 0` and states the ordering rule in prose; because JSON Schema cannot express "non-decreasing", `validateScenarioSchema` now checks it alongside Ajv and reports it in Ajv's own `<instancePath> <message>` shape. `curvePoint.time` deliberately keeps **no** minimum — a curve crossing `t = 0` is legal and the baseline rule depends on it.
+- **Compatibility: normalize, do not reject.** `scenarioSchemaValidator.ts` states as a contract that no scenario file, including one predating a rule, ever fails to load for a schema mismatch, and every load path (`scenarioFile.ts`, `startServer`, `socketServer`, `RegistryChargePointService`) logs and keeps going. Rejecting would have contradicted that shipped sentence. So a bad file still loads, warns naming the point, and runs a normalized curve. The one caller that treats a schema failure as fatal is `export-k6` — a build step, not a load — which now refuses to generate a script from a descending curve, verified end-to-end.
+- Runtime enforcement is `normalizeCurvePoints` / `withNormalizedCurvePoints` in `MeterValueCurve.ts`, applied on `Connector`'s `autoMeterValueConfig` setter — the boundary analogue of `withNormalizedChargingCurve` on the `evSettings` setter, and the one place the browser panels, the CLI service and `set_auto_meter_config` all funnel through. Ordinates are clamped to the running maximum (floor 0) rather than dropped, so the curve's time span survives for `autoCalculateInterval` and the k6 stop condition; the register plateaus where the curve descends. A curve already within contract is returned by identity and fires no `autoMeterValueChange`.
+- Pages touched: [Scenario file format](concepts/scenario-format.md) — the "tapering curve slows the register" guarantee now also says it never _decreases_ it, plus what an invalid curve does at load and where the normalization sits; the stale "the editor allows any ordinate, `CurvePoint` forbids none" sentence corrected there and in `MeterValueScheduler`'s own docblock.
+- The running maximum is taken in **time** order, not written order: `normalizeCurvePoints` sorts before it walks, so an out-of-order curve is compared against its true predecessor rather than the entry that happens to precede it in the array. It emits the sorted curve, so the config stored on the connector is sorted too. Nothing in the simulator reads a curve unsorted — `getMeterValueAtTime` and `calculateAutoInterval` both sort their own copy. The exported k6 runtime's `shouldStop` does read `curve[curve.length - 1].time` unsorted, which is a live question on #340 and was deliberately not reached across into here.
+- **A regression caught in review, and the lesson from it.** The first cut ran its identity check — `sameOrder`, which reads `.length` and then calls `.every` — before establishing that the value was an array. Any non-array whose `length` happens to be 0 (`""`, `{ length: 0 }`) passed the length test and threw on the missing `every`, out of the setter, taking the RPC with it. Both values were _quietly accepted_ before #332. The sharp part: the same change argued the normalizer belongs on the setter **because** `set_auto_meter_config` validates no field of the config — correct reasoning that then assumed an array anyway. "This boundary is unvalidated" is a claim about the function's own inputs, not only about why the function needs to exist.
+- Enumerated the input space empirically against `2020358` rather than reasoning about it, which was worth doing: the old tree threw at the **setter**, not at the first tick, for `undefined`, `null`, `0`, `{}`, `true`, `[null, undefined]` and a sparse array — `startConfiguredMeterValue` calls `getMeterValueAtTime` synchronously. Those still throw and are unchanged. Everything the old tree accepted in silence is accepted in silence now. Two deliberate behaviour changes, neither of them a throw: a point whose `time` / `value` are coercible strings is dropped rather than coerced (matching `isChargingCurvePoint` and the schema's `type: "number"`), and a `NaN` / `Infinity` ordinate is dropped instead of propagating `NaN` into the register and onto the wire.
+- Second review round: a corrected point was rebuilt as a bare `{ time, value }`, dropping any extension field the schema's `additionalProperties: true` allows and the opaque RPC payload can carry, while uncorrected neighbours kept theirs. Now spread-and-override. Discriminated by the one test whose corrected point carries a field; a point needing no correction already kept its fields and could not have.
+- Not touched: `src/cli/exportK6/`. The exported runtime carries no normalizer, and none was added — the schema gate in front of the exporter means it is never handed an out-of-contract curve. The bezier-vs-linear divergence quantified in the #310 round of this log is untouched and remains #329's.
+
+## [2026-09-07] ingest | `--watch`: the daemon re-reads the files it loaded (#314, PR #317)
+
+One entry for the whole feature. It landed over many rounds of review and this
+log carried one entry per round; the round-by-round archaeology is in the PR
+history, and what a reader needs six months from now is the feature and the
+contracts it established.
+
+**What shipped.** `--watch` (off by default, refused outside a server mode and
+alongside a client mode) makes the daemon re-read the two kinds of file it loads
+and keeps a copy of: a charge point's `idTagPool.file` and a scenario file
+loaded by `--scenario`, `--scenario-template-file`, `load_scenario { file }` or
+`run_scenario_file`. Each reload pushes a `file-reload` event carrying
+`applied` / `deferred` / `rejected`, and a scenario reload also pushes the
+ordinary `scenario-definitions-changed` snapshot. Schema v13 adds
+`charge_points.id_tag_file` and the `watched_scenario_files` table so a restart
+watches the same files again.
+
+**The contracts it established**, all stated on
+[Daemon → File hot-reload](entities/daemon.md#file-hot-reload) and derived on
+the new [File hot-reload](concepts/file-hot-reload.md) page:
+
+- `applied` is a claim about **durable** state, not just memory — a reload whose
+  `--state-db` write fails is `rejected`.
+- The duplicate-bytes baseline means "**everyone** holds these", so a partial
+  apply across a set of charge points drops it rather than advancing it.
+- An accepted reload always ends in `applied` or `rejected`; a hold is released
+  by the state actually clearing, never by the event that announces it, and a
+  connector status transition is the backstop that makes that a guarantee.
+- A reload replaces a definition and never **moves** a scenario: the id and the
+  connector are the ones it was loaded under.
+- A run's **bookkeeping** belongs to whoever holds the executor slot; a run's
+  **connector-scoped artifacts** are owed by the run that is ending. Both the EV
+  settings override and the scenario position are owned by the run that actually
+  claimed them, compared by run id rather than reconstructed from what is
+  installed — "installed" is not "has taken effect".
+- Watching **degrades**, never fails to start, and degraded is never worse than
+  unwatched: reconciliation compares against the file on disk.
+- A symlink is watched at every hop of its chain, capped at 8.
+- At most one startup scenario option; the combination is refused rather than
+  ranked, and one resolver answers "which flag is in effect" for every reader.
+
+**Known limitations, on the page rather than in a commit message**: a watch
+lives as long as the directory it was opened on (`fs.watch` binds to an inode),
+so a replaced directory and a `subPath` ConfigMap mount are not covered; a
+broken symlink is covered only where the target's directory already exists; and
+two concurrent runs on one connector share one checkpoint slot, last writer
+wins, because there is one `connector_runtime` row per connector.
+
+**Pages**: [Daemon](entities/daemon.md) (contract + the supported-layouts
+table), [File hot-reload](concepts/file-hot-reload.md) (new — the derivations
+and the restart behaviour, moved off the daemon page),
+[CLI](entities/cli.md) (`--watch` and the startup-flag exclusivity),
+[Control plane](concepts/control-plane.md) (the `file-reload` envelope and
+scope), [Scenario format](concepts/scenario-format.md) (re-reading a scenario
+file), [State persistence](concepts/state-persistence.md) (v13 columns),
+[github-issues](sources/github-issues.md).
+
+**Method note, kept because it changed how this branch was worked**: every
+`Yes` row of the layouts table is pinned by a test that fails when that row's
+mechanism is removed — two rows written ahead of their tests were found false
+within two rounds. The same rule applies to a contract sentence: it is a claim
+about the code, and it expires when that code changes.
+
+**Correction (2026-09-12, review of PR #317)**: the "Blueprints are not
+watched" contract on [Daemon](entities/daemon.md#file-hot-reload),
+[File hot-reload](concepts/file-hot-reload.md) and the
+[roadmap](analyses/fleet-load-and-observability-roadmap.md) said an edit to a
+blueprint's `params.idTagPool.file` reached only charge points created
+afterwards, never retroactively. False: `cp.create_many { blueprintId }` runs
+`createOneCp` → `parseCreateBody`, which records the file as the charge point's
+`idTagFile`, and `CPRegistry.onInitChange` registers it with the reloader — so
+under `--watch` blueprint-created charge points are reloaded live like any
+other. Reworded on all three pages to say what is and is not watched (the
+`blueprints` row is not; every file-backed pool is, through `cp.create`,
+`cp.create_many`, `cp.update` and a `--state-db` restore). Also fixed the
+`events.subscribe` / `events.unsubscribe` scope list on
+[Control plane](concepts/control-plane.md#daemon-methods) and
+[Access control](concepts/access-control.md), which omitted `config`,
+`scenario-definitions` and `file-reload`.

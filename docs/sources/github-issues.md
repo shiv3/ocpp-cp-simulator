@@ -7,7 +7,7 @@ sources:
 related:
   - ../log.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # Source: GitHub issues referenced by the wiki
@@ -57,6 +57,7 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #301                                             | Charging-curve EV model behind MeterValues                                                             | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                                                                                                     |
 | #302                                             | Measured per-daemon charge-point ceiling                                                               | [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)                                                                                                                     |
 | #331 / #241                                      | OECS as an external charger model source for blueprints                                                | [OECS as a charger model source](../analyses/oecs-as-a-charger-model-source.md)                                                                                                                                  |
+| #332                                             | auto-meter: a descending `curvePoints` trajectory drove the energy register backwards                  | [Scenario format](../concepts/scenario-format.md#charging-curve-v12)                                                                                                                                             |
 | #319                                             | Bundled desktop daemon exited 1 on spawn (`dist/` unreachable from a compiled binary)                  | [Desktop app](../entities/desktop-app.md#how-the-sidecar-finds-the-web-console), [CLI](../entities/cli.md), [Testing strategy](../analyses/testing-strategy.md#does-anything-actually-launch-the-desktop-daemon) |
 | #320                                             | Published CLI tarball could not start — `package.json#files` omitted four source trees                 | [CLI](../entities/cli.md#what-the-package-ships), [Docker image](../entities/docker-image.md#image-details)                                                                                                      |
 | #321                                             | `releases/latest` spans both tag trains; rolling `cli-latest` pointer instead                          | [CLI](../entities/cli.md#why-cli-latest-and-not-releaseslatest)                                                                                                                                                  |

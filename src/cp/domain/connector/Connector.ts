@@ -3,6 +3,7 @@ import type { Logger } from "../../shared/Logger";
 import {
   type AutoMeterValueConfig,
   defaultAutoMeterValueConfig,
+  withNormalizedCurvePoints,
 } from "./MeterValueCurve";
 import {
   MeterValueScheduler,
@@ -1010,9 +1011,27 @@ export class Connector {
     return this.autoConfig;
   }
 
+  /**
+   * Every path that can configure the auto-meter funnels through here — the
+   * browser panels via `LocalChargePointService`, the CLI's `service.ts`, and
+   * the control plane's `set_auto_meter_config`, whose payload schema
+   * validates no field of the config at all — so this is where the curve's
+   * contract is enforced (#332).
+   *
+   * The stored **and emitted** config is the normalized one: a subscriber that
+   * renders the curve, and a `get_auto_meter_value_config` read-back, must see
+   * the trajectory the scheduler will actually run, not the one that was
+   * rejected. A curve already within contract is stored by identity, so this
+   * adds no spurious change event.
+   */
   set autoMeterValueConfig(config: AutoMeterValueConfig) {
-    this.autoConfig = config;
-    this.eventsEmitter.emit("autoMeterValueChange", { config });
+    const normalized = withNormalizedCurvePoints(config, (message) =>
+      this.logger.warn(
+        `[Connector ${this.connectorId}] auto-meter curve: ${message}`,
+      ),
+    );
+    this.autoConfig = normalized;
+    this.eventsEmitter.emit("autoMeterValueChange", { config: normalized });
 
     if (this.transactionValue) {
       this.startConfiguredMeterValue();

@@ -6,12 +6,13 @@ sources:
   - README.md (Security Profiles section, PR #97 / issue #94)
   - src/cli/
   - src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
+  - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:
   - ../entities/cli.md
   - ../entities/csms-peers.md
   - access-control.md
   - scenario-format.md
-updated: 2026-09-04
+updated: 2026-09-12
 ---
 
 # OCPP 1.6 security profiles
@@ -132,6 +133,17 @@ The same reasoning covers the daemon's own
 
 **Configure the CSMS first, then switch the station over.** In the other
 order the station is locked out in between.
+
+The whole case — symptom, why the edge causes it, a three-probe procedure
+that proves which side is at fault, the ordering trap, and the two edge
+behaviours that bite afterwards (idle timeouts versus `HeartbeatInterval`;
+a publicly-issued certificate needing no `--tls-ca`) — is written up with
+measurements in [OCPP 1.6 security profile 2 against a CSMS behind a
+TLS-terminating edge](https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160)
+(juherr, 2026-09-03; simulator 0.7.8 against SteVe 3.14.1 behind Traefik
+and Cloudflare). The witness probe there — a profile-1 station with the same
+credentials answering `101` — is what rules the password out before the
+proxy is suspected.
 
 ## Examples (against SteVe)
 

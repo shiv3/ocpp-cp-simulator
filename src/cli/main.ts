@@ -879,6 +879,18 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
+  // A tunnel forwards the whole listener — control plane, console, MCP —
+  // to the internet, so a loopback bind behind it is a remote bind in
+  // practice and the same gate applies (#183).
+  if (soapTunnelConfig && !webConsoleBasicAuth && !unsafeRemote) {
+    process.stderr.write(
+      "Error: --soap-tunnel exposes the daemon listener publicly; configure " +
+        "--web-console-basic-auth-user and --web-console-basic-auth-pass, " +
+        "or pass --unsafe-remote to override.\n",
+    );
+    process.exit(1);
+  }
+
   // Same all-or-nothing rule for the client-side credentials.
   if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
     process.stderr.write(
@@ -1185,8 +1197,10 @@ Options:
                            from PATH; the public URL is logged at startup and
                            reported by the server.info RPC, and every SOAP
                            charge point created without a callback URL gets
-                           one derived from it. The endpoint is then reachable
-                           from the internet — see the warning.
+                           one derived from it. The whole listener is then
+                           reachable from the internet, so the tunnel requires
+                           --web-console-basic-auth-user/pass or
+                           --unsafe-remote, like a non-loopback bind.
   --ngrok-auth-token <token>
                            ngrok authtoken, handed to the agent through its
                            environment (never on its command line or in logs).

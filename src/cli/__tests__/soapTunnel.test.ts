@@ -454,6 +454,11 @@ describe("soapTunnelStartupLines", () => {
     );
     expect(lines[1]).toMatch(/identity checks/);
     expect(lines[1]).toMatch(/change between runs/);
+    expect(lines[2]).toMatch(
+      /^Warning: the tunnel forwards the whole listener on port 9700/,
+    );
+    expect(lines[2]).toMatch(/control plane/);
+    expect(lines.join("\n")).not.toContain("tok-");
   });
 
   it("uses the <cp-id> placeholder for fleets", () => {

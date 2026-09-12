@@ -536,7 +536,39 @@ describe("parseArgs --ocpp-version", () => {
       "http://127.0.0.1:8180/steve/services/CentralSystemService",
       "--ocpp-version",
       "OCPP-1.6S",
+      // The tunnel forwards the whole listener, so it is subject to the same
+      // gate as a non-loopback bind.
+      "--unsafe-remote",
     ];
+
+    it("refuses the tunnel without Basic Auth or --unsafe-remote, like a non-loopback bind", () => {
+      const result = runParseArgs([
+        ...soapDaemon.filter((arg) => arg !== "--unsafe-remote"),
+        "--soap-tunnel",
+        "ngrok",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("--soap-tunnel");
+      expect(result.stderr).toContain("--web-console-basic-auth-user");
+      expect(result.stderr).toContain("--unsafe-remote");
+    });
+
+    it("accepts the tunnel with web-console Basic Auth", () => {
+      const result = runParseArgs([
+        ...soapDaemon.filter((arg) => arg !== "--unsafe-remote"),
+        "--soap-tunnel",
+        "ngrok",
+        "--web-console-basic-auth-user",
+        "operator",
+        "--web-console-basic-auth-pass",
+        "secret",
+      ]);
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        soapTunnel: { provider: "ngrok" },
+        hasWebConsoleBasicAuth: true,
+      });
+    });
 
     it("defaults to no tunnel", () => {
       const result = runParseArgs(soapDaemon);

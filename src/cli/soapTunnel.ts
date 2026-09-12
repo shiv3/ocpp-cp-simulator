@@ -463,5 +463,7 @@ export function soapTunnelStartupLines(
     `SOAP tunnel (${tunnel.provider}, ${tunnel.mode}): ${tunnel.publicBaseUrl} -> http://${tunnel.localHost}:${tunnel.localPort}`,
     `Warning: SOAP callback endpoint is publicly reachable through the tunnel at ${callbackUrl}; ` +
       "charge-point identity checks stay enforced, and temporary ngrok URLs change between runs.",
+    `Warning: the tunnel forwards the whole listener on port ${tunnel.localPort} — control plane, ` +
+      "web console and MCP routes included — so Basic Auth or another boundary must protect it.",
   ];
 }

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # Log
@@ -824,3 +824,20 @@ file), [State persistence](concepts/state-persistence.md) (v13 columns),
 mechanism is removed — two rows written ahead of their tests were found false
 within two rounds. The same rule applies to a contract sentence: it is a claim
 about the code, and it expires when that code changes.
+
+**Correction (2026-09-12, review of PR #317)**: the "Blueprints are not
+watched" contract on [Daemon](entities/daemon.md#file-hot-reload),
+[File hot-reload](concepts/file-hot-reload.md) and the
+[roadmap](analyses/fleet-load-and-observability-roadmap.md) said an edit to a
+blueprint's `params.idTagPool.file` reached only charge points created
+afterwards, never retroactively. False: `cp.create_many { blueprintId }` runs
+`createOneCp` → `parseCreateBody`, which records the file as the charge point's
+`idTagFile`, and `CPRegistry.onInitChange` registers it with the reloader — so
+under `--watch` blueprint-created charge points are reloaded live like any
+other. Reworded on all three pages to say what is and is not watched (the
+`blueprints` row is not; every file-backed pool is, through `cp.create`,
+`cp.create_many`, `cp.update` and a `--state-db` restore). Also fixed the
+`events.subscribe` / `events.unsubscribe` scope list on
+[Control plane](concepts/control-plane.md#daemon-methods) and
+[Access control](concepts/access-control.md), which omitted `config`,
+`scenario-definitions` and `file-reload`.

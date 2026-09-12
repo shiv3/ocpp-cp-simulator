@@ -14,7 +14,7 @@ related:
   - ../entities/daemon.md
   - choosing-an-interface.md
   - ../sources/github-issues.md
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # Fleet, load and observability roadmap
@@ -483,9 +483,11 @@ re-watches it.
 **Blueprints are deliberately out of it.** The issue's premise assumed a
 blueprint file; there is none, and #297 declined one on purpose so the control
 plane stays the single source of truth for a blueprint. What a blueprint can
-reference — `params.idTagPool.file` — is re-read at every `cp.create_many`
-instantiation, which is exactly the stated semantics: editing it affects CPs
-created from the blueprint afterwards, never retroactively.
+reference — `params.idTagPool.file` — is a different matter: it is recorded as
+`idTagFile` on every CP that `cp.create_many { blueprintId }` instantiates, so
+under `--watch` an edit to it reaches those CPs live, the same as any CP
+created by hand. What is not watched is the blueprint row itself: a
+`blueprint.save` edit affects CPs created afterwards, never retroactively.
 
 **Last on purpose.** Only meaningful once idTag pools and scenarios were
 file-loadable, and this project's agent-driven workflows go through RPCs rather

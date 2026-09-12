@@ -14,7 +14,7 @@ related:
   - state-persistence.md
   - control-plane.md
   - scenario-format.md
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # File hot-reload (`--watch`)
@@ -243,14 +243,24 @@ explanation that has fallen behind.
     `targetId`: a `chargePoint`-wide scenario has none on purpose, and filling
     it in from the registration would advertise connector-specific constraints
     for a definition that deliberately has none.
-- **Blueprints are not watched, and do not need to be.** A blueprint is stored
-  through `blueprint.save` and lives in the `blueprints` table, not in a file
-  (#297 declined a watched blueprint file deliberately, so the control plane
-  stays the single source of truth). The file a blueprint can _reference_ — its
-  `params.idTagPool.file` — is re-read at every `cp.create_many` instantiation,
-  which is why editing it affects charge points created from the blueprint
-  **afterwards** and never retroactively: charge points instantiated from a
-  blueprint are independent copies, not live views of it.
+- **Blueprints are not watched; the file a blueprint names is.** A blueprint is
+  stored through `blueprint.save` and lives in the `blueprints` table, not in a
+  file (#297 declined a watched blueprint file deliberately, so the control
+  plane stays the single source of truth). Editing the blueprint therefore
+  never reaches a charge point that already exists: charge points instantiated
+  from a blueprint are independent copies, not live views of it. The file a
+  blueprint can _reference_ — its `params.idTagPool.file` — is another matter.
+  `cp.create_many { blueprintId }` merges the blueprint's `params` into the
+  create body and runs the same `createOneCp` → `parseCreateBody` path as a
+  plain `cp.create`, which resolves the path absolute and records it as the
+  charge point's `idTagFile`; `CPRegistry.onInitChange` then hands it to the
+  reloader. So under `--watch` an edit to that file reaches every live charge
+  point drawing from it — blueprint-created or not — and without `--watch` it
+  is read once, at creation. The registration is driven off the registry
+  rather than off any one RPC, so `cp.create`, `cp.create_many`, `cp.update`
+  and a `--state-db` restore all register the file without each having to
+  remember to; only a pool given inline as `idTagPool.tags` has no file to
+  watch.
 - **Watching degrades, it never fails to start.** `fs.watch` is unreliable on
   network mounts and some container filesystems. When it cannot be established
   the daemon logs one line saying watching is unavailable and carries on

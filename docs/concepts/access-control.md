@@ -12,7 +12,7 @@ related:
   - ../entities/cli.md
   - control-plane.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # Access control
@@ -92,7 +92,8 @@ authenticate the simulated CP's outgoing WebSocket to the CSMS
 ## Event scopes are not an authorization boundary
 
 `events.subscribe` accepts any scope from any connected client — `"*"`,
-`"registry"`, `"file-reload"`, a charge point id. Two separate facts, and
+`"registry"`, `"config"`, `"scenario-definitions"`, `"file-reload"`, a charge
+point id. Two separate facts, and
 conflating them overstates the gap in one direction and understates it in the
 other:
 

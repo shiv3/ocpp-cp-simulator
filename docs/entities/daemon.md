@@ -16,7 +16,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/file-hot-reload.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-07
+updated: 2026-09-12
 ---
 
 # Daemon (server mode)
@@ -305,11 +305,17 @@ The rules, in the order they bite:
   and `--scenario-template-file` each load a definition onto every selected
   connector, so passing two is refused — at parse time, with a message naming
   the flags it cannot reconcile — rather than silently ranked.
-- **Blueprints are not watched, and do not need to be.** A blueprint lives in
-  the `blueprints` table (#297 declined a watched blueprint file deliberately).
-  The `params.idTagPool.file` it can reference is re-read at every
-  `cp.create_many` instantiation, so an edit reaches charge points created
-  **afterwards** and never retroactively.
+- **Blueprints are not watched; the file a blueprint names is.** A blueprint
+  lives in the `blueprints` table (#297 declined a watched blueprint file
+  deliberately), so a `blueprint.save` edit never reaches a charge point that
+  already exists. Its `params.idTagPool.file` is a different matter:
+  `cp.create_many { blueprintId }` spreads the blueprint's `params` into the
+  same create body a plain `cp.create` uses, so a charge point instantiated
+  from a blueprint records that path as its own `idTagFile` and is watched and
+  reloaded **live**, exactly like one created by hand. Every path that sets a
+  charge point's init block registers the file — `cp.create`, `cp.create_many`
+  (with or without a blueprint), `cp.update` and a `--state-db` restore; a pool
+  given inline as `idTagPool.tags` has no file and is never reloaded.
 - **Watching degrades, it never fails to start.** Where `fs.watch` cannot be
   established the daemon logs one line and carries on unwatched. Degraded is
   never _worse_ than unwatched: a charge point being reconciled is measured

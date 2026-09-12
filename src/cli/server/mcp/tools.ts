@@ -9,6 +9,12 @@ import {
   RpcFailure,
 } from "../../../protocol";
 import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
+import {
+  METER_READING_CONTEXTS,
+  STOP_REASONS,
+  TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "../../../cp/domain/connector/Transaction";
 import type { RuntimeSocketIoDeps } from "../socketServer";
 
 function successResult(data: unknown): ToolCallResult {
@@ -228,6 +234,18 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "RFID tag or user ID for authorization. Omit to draw from the charge point's idTagPool",
         ),
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Started) triggerReason (#335); default Authorized. Ignored on OCPP 1.6",
+        ),
+      chargingState: z
+        .enum(TRANSACTION_CHARGING_STATES)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Started) chargingState (#335); default Charging. Ignored on OCPP 1.6",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -237,6 +255,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           params: {
             connector: args.connector,
             tagId: args.tagId,
+            triggerReason: args.triggerReason,
+            chargingState: args.chargingState,
           },
         });
         return successResult(result);
@@ -247,10 +267,23 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   mcp.tool("stop_transaction", {
-    description: "Stop a transaction on a connector",
+    description:
+      "Stop a transaction on a connector. reason (#335) accepts both the OCPP 1.6 StopTransaction.req and the 2.0.1 stoppedReason vocabularies.",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
       connector: z.number().int().min(1).describe("Connector identifier"),
+      reason: z
+        .enum(STOP_REASONS)
+        .optional()
+        .describe(
+          "StopTransaction.req reason (1.6) / TransactionEvent(Ended) stoppedReason (2.x); default Local",
+        ),
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Ended) triggerReason; default StopAuthorized. Ignored on OCPP 1.6",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -259,6 +292,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           method: "stop_transaction",
           params: {
             connector: args.connector,
+            reason: args.reason,
+            triggerReason: args.triggerReason,
           },
         });
         return successResult(result);
@@ -385,6 +420,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
       connector: z.number().int().min(1).describe("Connector identifier"),
+      context: z
+        .enum(METER_READING_CONTEXTS)
+        .optional()
+        .describe(
+          "sampledValue.context the readings carry (#335); default Sample.Periodic",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -393,6 +434,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           method: "send_meter_value",
           params: {
             connector: args.connector,
+            context: args.context,
           },
         });
         return successResult(result);

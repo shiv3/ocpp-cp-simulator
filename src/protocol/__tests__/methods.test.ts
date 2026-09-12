@@ -16,6 +16,7 @@ const JSONMODE_COMMAND_IDS = [
   "status",
   "start_transaction",
   "stop_transaction",
+  "transaction_event",
   "set_meter_value",
   "send_meter_value",
   "heartbeat",

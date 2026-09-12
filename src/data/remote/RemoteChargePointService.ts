@@ -16,6 +16,12 @@ import type {
   OCPPStatus,
   StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
+import type {
+  MeterReadingContext,
+  StartTransactionCommandOptions,
+  StopTransactionCommandOptions,
+  TransactionUpdateOptions,
+} from "../../cp/domain/connector/Transaction";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
@@ -774,15 +780,50 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     tagId: string,
+    options?: StartTransactionCommandOptions,
   ): Promise<void> {
     await this.runCpRpc(id, "start_transaction", {
       connector: connectorId,
       tagId,
+      ...(options?.triggerReason
+        ? { triggerReason: options.triggerReason }
+        : {}),
+      ...(options?.chargingState
+        ? { chargingState: options.chargingState }
+        : {}),
     });
   }
 
-  async stopTransaction(id: string, connectorId: number): Promise<void> {
-    await this.runCpRpc(id, "stop_transaction", { connector: connectorId });
+  async stopTransaction(
+    id: string,
+    connectorId: number,
+    options?: StopTransactionCommandOptions,
+  ): Promise<void> {
+    await this.runCpRpc(id, "stop_transaction", {
+      connector: connectorId,
+      ...(options?.reason ? { reason: options.reason } : {}),
+      ...(options?.triggerReason
+        ? { triggerReason: options.triggerReason }
+        : {}),
+    });
+  }
+
+  async sendTransactionUpdate(
+    id: string,
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): Promise<void> {
+    await this.runCpRpc(id, "transaction_event", {
+      connector: connectorId,
+      triggerReason: options.triggerReason,
+      ...(options.chargingState
+        ? { chargingState: options.chargingState }
+        : {}),
+      ...(options.meterValues !== undefined
+        ? { meterValues: options.meterValues }
+        : {}),
+      ...(options.context ? { context: options.context } : {}),
+    });
   }
 
   async sendStatusNotification(
@@ -854,8 +895,15 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
-  async sendMeterValue(id: string, connectorId: number): Promise<void> {
-    await this.runCpRpc(id, "send_meter_value", { connector: connectorId });
+  async sendMeterValue(
+    id: string,
+    connectorId: number,
+    context?: MeterReadingContext,
+  ): Promise<void> {
+    await this.runCpRpc(id, "send_meter_value", {
+      connector: connectorId,
+      ...(context ? { context } : {}),
+    });
   }
 
   async removeConnector(id: string, connectorId: number): Promise<void> {

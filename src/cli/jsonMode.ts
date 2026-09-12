@@ -16,6 +16,12 @@ import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurv
 import type { AutoTrafficConfig } from "../cp/domain/connector/AutoTraffic";
 import type { HistoryOptions } from "../cp/application/services/types/StateSnapshot";
 import {
+  METER_READING_CONTEXTS,
+  STOP_REASONS,
+  TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "../cp/domain/connector/Transaction";
+import {
   cleanupSingleCpTarget,
   getSingleCpCommandOps,
   getSingleCpEventSource,
@@ -107,13 +113,50 @@ export async function handleJsonCommand(
     case "start_transaction": {
       const connectorId = requirePositiveInt(params, "connector");
       const tagId = requireString(params, "tagId");
-      await ops.startTransaction(connectorId, tagId);
+      await ops.startTransaction(connectorId, tagId, {
+        triggerReason: optionalEnum(
+          params,
+          "triggerReason",
+          TRANSACTION_EVENT_TRIGGER_REASONS,
+        ),
+        chargingState: optionalEnum(
+          params,
+          "chargingState",
+          TRANSACTION_CHARGING_STATES,
+        ),
+      });
       return undefined;
     }
 
     case "stop_transaction": {
       const connectorId = requirePositiveInt(params, "connector");
-      await ops.stopTransaction(connectorId);
+      await ops.stopTransaction(connectorId, {
+        reason: optionalEnum(params, "reason", STOP_REASONS),
+        triggerReason: optionalEnum(
+          params,
+          "triggerReason",
+          TRANSACTION_EVENT_TRIGGER_REASONS,
+        ),
+      });
+      return undefined;
+    }
+
+    case "transaction_event": {
+      const connectorId = requirePositiveInt(params, "connector");
+      await ops.sendTransactionUpdate(connectorId, {
+        triggerReason: requireEnum(
+          params,
+          "triggerReason",
+          TRANSACTION_EVENT_TRIGGER_REASONS,
+        ),
+        chargingState: optionalEnum(
+          params,
+          "chargingState",
+          TRANSACTION_CHARGING_STATES,
+        ),
+        meterValues: optionalBoolean(params, "meterValues"),
+        context: optionalEnum(params, "context", METER_READING_CONTEXTS),
+      });
       return undefined;
     }
 
@@ -129,7 +172,10 @@ export async function handleJsonCommand(
 
     case "send_meter_value": {
       const connectorId = requirePositiveInt(params, "connector");
-      await ops.sendMeterValue(connectorId);
+      await ops.sendMeterValue(
+        connectorId,
+        optionalEnum(params, "context", METER_READING_CONTEXTS),
+      );
       return undefined;
     }
 
@@ -484,6 +530,55 @@ export function requireString(
   const val = params[key];
   if (typeof val !== "string" || val.length === 0) {
     throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
+  }
+  return val;
+}
+
+/**
+ * A string parameter that must be one of `allowed` when present. The error
+ * names the vocabulary so a caller who misspelt an OCPP enum value sees the
+ * spelling that would have worked (#335).
+ */
+export function optionalEnum<T extends string>(
+  params: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+): T | undefined {
+  const val = params[key];
+  if (val === undefined || val === null) return undefined;
+  if (
+    typeof val !== "string" ||
+    !(allowed as readonly string[]).includes(val)
+  ) {
+    throw new Error(
+      `Invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
+    );
+  }
+  return val as T;
+}
+
+export function requireEnum<T extends string>(
+  params: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+): T {
+  const val = optionalEnum(params, key, allowed);
+  if (val === undefined) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
+    );
+  }
+  return val;
+}
+
+export function optionalBoolean(
+  params: Record<string, unknown>,
+  key: string,
+): boolean | undefined {
+  const val = params[key];
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== "boolean") {
+    throw new Error(`Invalid parameter: ${key} (expected boolean)`);
   }
   return val;
 }

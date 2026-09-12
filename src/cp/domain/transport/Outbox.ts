@@ -41,6 +41,15 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendTransactionEvent(event);
   }
 
+  sendTransactionUpdate(
+    connectorId: Parameters<
+      IChargePointMessageHandler["sendTransactionUpdate"]
+    >[0],
+    options: Parameters<IChargePointMessageHandler["sendTransactionUpdate"]>[1],
+  ): ReturnType<IChargePointMessageHandler["sendTransactionUpdate"]> {
+    return this.handler.sendTransactionUpdate(connectorId, options);
+  }
+
   sendMeterValue(
     transactionId: Parameters<IChargePointMessageHandler["sendMeterValue"]>[0],
     connectorId: Parameters<IChargePointMessageHandler["sendMeterValue"]>[1],

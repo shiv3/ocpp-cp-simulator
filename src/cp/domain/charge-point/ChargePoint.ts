@@ -38,9 +38,13 @@ import {
 import type {
   StopTransactionReason,
   Transaction,
+  TransactionChargingState,
   TransactionStartTriggerReason,
   TransactionStopTriggerReason,
+  TransactionStoppedReason,
+  TransactionUpdateOptions,
 } from "../connector/Transaction";
+import type { ReadingContext } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
@@ -66,6 +70,8 @@ export interface AutoMeterValueSetting {
 interface StartTransactionOptions {
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
+  /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
+  chargingState?: TransactionChargingState;
 }
 
 /**
@@ -83,6 +89,9 @@ export interface StartTransactionOutcome {
 
 interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
+  /** OCPP 2.x Ended-event stoppedReason named explicitly (#335); when
+   *  absent the encoder derives it from the 1.6 `reason`. */
+  stoppedReason?: TransactionStoppedReason;
 }
 
 /**
@@ -1597,6 +1606,7 @@ export class ChargePoint {
       reservationId,
       remoteStartId: options.remoteStartId,
       startTriggerReason: options.triggerReason,
+      startChargingState: options.chargingState,
       batteryCapacityKwh,
       initialSoc,
     };
@@ -1669,6 +1679,9 @@ export class ChargePoint {
     }
     if (options.triggerReason) {
       transaction.stopTriggerReason = options.triggerReason;
+    }
+    if (options.stoppedReason) {
+      transaction.stoppedReason = options.stoppedReason;
     }
 
     this._outbox.sendTransactionEvent({
@@ -1773,7 +1786,7 @@ export class ChargePoint {
     connector.meterValue = value;
   }
 
-  sendMeterValue(connectorId: number): void {
+  sendMeterValue(connectorId: number, context?: ReadingContext): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(
@@ -1785,7 +1798,27 @@ export class ChargePoint {
     this._outbox.sendMeterValue(
       connector.transaction?.id ?? undefined,
       connectorId,
+      context,
     );
+  }
+
+  /**
+   * Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction
+   * (#335). On OCPP 1.6 the handler logs a warning and sends nothing.
+   */
+  sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    this._outbox.sendTransactionUpdate(connectorId, options);
   }
 
   getConnector(connectorId: number): Connector | undefined {

@@ -1,13 +1,69 @@
-import React from "react";
+import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { ChargePointConfig } from "@/components/ChargePointConfigModal";
+import type {
+  ChargePointConfig,
+  SoapPublicBase,
+} from "@/components/ChargePointConfigModal";
+import { isSoapVersion } from "@/cp/domain/types/OcppVersion";
 
 export interface ConfigTabProps {
   config: ChargePointConfig;
   mode: "local" | "remote";
+  /** `server.info`'s `soap` block; names the tunnel a derived URL came from. */
+  soapPublicBase?: SoapPublicBase | null;
   onEdit: () => void;
 }
+
+/**
+ * The SOAP callback URL is the one value the operator has to carry over to
+ * the CSMS by hand, so it gets a copy button. When the daemon derived it
+ * from a tunnel, say so: a free-tier ngrok URL changes between runs, and the
+ * CSMS entry has to follow it.
+ */
+const SoapCallbackUrlRow: React.FC<{
+  url: string;
+  derived: boolean;
+  soapPublicBase: SoapPublicBase | null | undefined;
+}> = ({ url, derived, soapPublicBase }) => {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (error) {
+      console.error("Failed to copy the SOAP callback URL", error);
+    }
+  };
+  const source = derived
+    ? soapPublicBase?.tunnel
+      ? `derived from the ${soapPublicBase.tunnel.provider} tunnel — the URL may change between daemon runs`
+      : "derived from the daemon's SOAP public base"
+    : null;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2">
+        <span className="break-all">{url}</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void copy()}
+          aria-label="Copy SOAP callback URL"
+        >
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      {source && (
+        <span className="font-sans text-xs text-gray-500 dark:text-gray-400">
+          {source}
+        </span>
+      )}
+    </div>
+  );
+};
 
 /**
  * Read-only view of the CP's current configuration. `config` is derived by
@@ -17,7 +73,12 @@ export interface ConfigTabProps {
  * side-effect-free renderer. Secrets (basic-auth password, TLS material,
  * authorization key) are intentionally not displayed here.
  */
-const ConfigTab: React.FC<ConfigTabProps> = ({ config, mode, onEdit }) => {
+const ConfigTab: React.FC<ConfigTabProps> = ({
+  config,
+  mode,
+  soapPublicBase,
+  onEdit,
+}) => {
   const rows: Array<[string, React.ReactNode]> = [
     ["CP ID", config.cpId],
     ["Connectors", config.connectorNumber],
@@ -34,6 +95,17 @@ const ConfigTab: React.FC<ConfigTabProps> = ({ config, mode, onEdit }) => {
   ];
   if (mode === "remote" && config.securityProfile != null) {
     rows.push(["Security profile", `SP${config.securityProfile}`]);
+  }
+  if (isSoapVersion(config.ocppVersion) && config.soapCallbackUrl) {
+    rows.push([
+      "SOAP callback URL",
+      <SoapCallbackUrlRow
+        key="soap-callback-url"
+        url={config.soapCallbackUrl}
+        derived={config.soapCallbackUrlDerived === true}
+        soapPublicBase={soapPublicBase}
+      />,
+    ]);
   }
 
   return (

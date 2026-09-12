@@ -52,6 +52,7 @@ import {
   type RpcErrorCode,
   type RpcMethod,
   type RpcRequest,
+  type ServerInfo,
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
@@ -202,6 +203,7 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     wsUrl: config.wsUrl,
     centralSystemUrl: config.centralSystemUrl,
     soapCallbackUrl: config.soapCallbackUrl,
+    soapCallbackUrlDerived: config.soapCallbackUrlDerived,
     soapPath: config.soapPath,
     ocppVersion: config.ocppVersion,
     connectors: config.connectors,
@@ -1467,6 +1469,10 @@ export class RemoteChargePointService implements ChargePointService {
   async ping(): Promise<{ ok: boolean; cps: number }> {
     const cps = await this.rpc("cp.list", {});
     return { ok: true, cps: cps.length };
+  }
+
+  async getServerInfo(): Promise<ServerInfo | null> {
+    return this.rpc("server.info", {});
   }
 
   async resetAllState(): Promise<void> {

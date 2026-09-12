@@ -850,6 +850,7 @@ export class CLIChargePointService {
         basicAuth: this._init.basicAuth,
         centralSystemUrl: this._init.centralSystemUrl,
         soapCallbackUrl: this._init.soapCallbackUrl,
+        soapCallbackUrlDerived: this._init.soapCallbackUrlDerived,
         soapPath: this._init.soapPath,
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
         securityProfile: this._init.securityProfile,

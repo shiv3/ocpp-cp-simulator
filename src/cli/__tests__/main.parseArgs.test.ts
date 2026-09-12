@@ -679,7 +679,7 @@ describe("parseArgs --ocpp-version", () => {
       );
     });
 
-    it("lets an explicit callback URL win and skips the tunnel with a warning", () => {
+    it("refuses a tunnel together with an explicit public base URL", () => {
       const result = runParseArgs([
         ...soapDaemon,
         "--soap-tunnel",
@@ -687,14 +687,23 @@ describe("parseArgs --ocpp-version", () => {
         "--soap-public-base-url",
         "https://abcd.ngrok-free.app",
       ]);
-      expect(result.status).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({
-        soapTunnel: "none",
-        soapCallbackUrl:
-          "https://abcd.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
-      });
+      expect(result.status).toBe(1);
       expect(result.stderr).toContain(
-        "Warning: --soap-public-base-url takes precedence over --soap-tunnel; the tunnel is not started",
+        "Error: --soap-tunnel cannot be combined with --soap-public-base-url",
+      );
+    });
+
+    it("refuses a tunnel together with an explicit callback URL", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--soap-callback-url",
+        "https://explicit.test/ocpp/soap/CP-1/ChargePointService",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --soap-tunnel cannot be combined with --soap-callback-url",
       );
     });
   });

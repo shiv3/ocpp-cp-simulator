@@ -6,6 +6,9 @@ sources:
   - src/ocpp/ (generated from vendor/ocpp-schemas)
   - vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
+  - src/cli/soapCallbackUrl.ts
+  - src/cli/soapTunnel.ts
+  - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
 related:
@@ -112,16 +115,26 @@ All SOAP versions share the same endpoint pattern:
 The callback URL the CP advertises to the CSMS is resolved by precedence:
 
 1. `--soap-callback-url <url>` — the full URL, used verbatim.
-2. `--soap-public-base-url <url>` — a public base the CSMS can reach (e.g. a
-   tunnel origin); the callback URL is derived as
-   `<base><soap-path>/<cp-id>/ChargePointService`. Handy when the CSMS is hosted
-   remotely and cannot reach your machine directly — point the base at your
-   tunnel and skip hand-building the full URL. An explicit `--soap-callback-url`
-   still wins.
-3. `--soap-tunnel ngrok` — the simulator opens (or attaches to) an ngrok tunnel
-   and uses its public origin as the base of step 2. Either explicit flag above
-   wins, with a warning that the tunnel was not started.
-4. None — a SOAP charge point refuses to start: the CSMS has nowhere to call.
+2. A **SOAP public base** the daemon holds — either `--soap-public-base-url
+<url>` (a public origin the CSMS can reach) or the origin of the tunnel
+   `--soap-tunnel ngrok` opens; the two are mutually exclusive, since both
+   answer the same question. Every SOAP charge point without a callback URL —
+   bootstrapped from the flags, restored from `--state-db`, or created later
+   over `cp.create` / the web console — gets one derived at instantiation as
+   `<base><soap-path>/<cp-id>/ChargePointService`, flagged
+   `soapCallbackUrlDerived` in its config. Such a URL is **not persisted**: a
+   free-tier tunnel URL changes between daemon runs, so a restored charge point
+   re-derives from whatever base the daemon has now, and a `cp.update` that
+   sends no `soapCallbackUrl` re-derives as well rather than freezing one
+   run's origin into the row. An explicit `--soap-callback-url` still wins.
+3. None — a SOAP charge point refuses to start: the CSMS has nowhere to call.
+
+Clients read the base from the `server.info` RPC
+([Control plane](control-plane.md#daemon-methods)). The web console uses it to make
+the callback URL optional in the create / edit form (the derivation is shown as
+the field's placeholder), and shows the effective URL on the charge point's
+Configuration tab with a **Copy** button — that is the value to register in the
+CSMS — noting when it came from the tunnel.
 
 ### Exposing the callback through a tunnel
 

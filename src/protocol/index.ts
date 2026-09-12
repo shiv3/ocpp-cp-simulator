@@ -20,8 +20,9 @@ export {
   blueprintSchema,
   createManyFromBlueprintSchema,
   createManyToolSchema,
+  serverInfoSchema,
 } from "./methods";
-export type { Blueprint } from "./methods";
+export type { Blueprint, ServerInfo } from "./methods";
 
 /** Every valid rpc method id. */
 export type RpcMethod = keyof typeof METHODS;

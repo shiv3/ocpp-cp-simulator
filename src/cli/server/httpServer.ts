@@ -12,6 +12,7 @@ import {
 } from "../../cp/domain/types/OcppVersion";
 import { soapFaultResponse } from "../../cp/infrastructure/transport/soap/OCPPSoapServer";
 import {
+  DEFAULT_SOAP_PATH,
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
   normalizeSoapPath,
 } from "../soapPath";
@@ -93,7 +94,7 @@ const COMMON_CORS_HEADERS: Record<string, string> = {
   "access-control-max-age": "86400",
 };
 
-export const DEFAULT_SOAP_PATH = "/ocpp/soap";
+export { DEFAULT_SOAP_PATH };
 export const MAX_SOAP_REQUEST_BODY_BYTES = 256 * 1024;
 export const MAX_MCP_REQUEST_BODY_BYTES = 1024 * 1024;
 
@@ -758,7 +759,19 @@ function isWebSocketUrl(value: string): boolean {
   }
 }
 
-export function parseCreateBody(body: unknown): ChargePointInitOptions {
+export interface ParseCreateBodyOptions {
+  /**
+   * The daemon has a SOAP public base (`--soap-public-base-url` or a
+   * `--soap-tunnel`) and the registry derives a missing callback URL from it
+   * at instantiation, so a SOAP body without one is complete (#183).
+   */
+  readonly soapCallbackUrlDerivable?: boolean;
+}
+
+export function parseCreateBody(
+  body: unknown,
+  opts: ParseCreateBodyOptions = {},
+): ChargePointInitOptions {
   if (!isRecord(body)) throw new Error("body must be an object");
   const cpId = body.cpId;
   if (typeof cpId !== "string" || cpId.length === 0) {
@@ -830,7 +843,11 @@ export function parseCreateBody(body: unknown): ChargePointInitOptions {
       throw new Error("ocppVersion must be a supported OCPP version");
     }
   }
-  if (isSoapVersion(ocppVersion) && !soapCallbackUrl) {
+  if (
+    isSoapVersion(ocppVersion) &&
+    !soapCallbackUrl &&
+    !opts.soapCallbackUrlDerivable
+  ) {
     throw new Error("soapCallbackUrl is required for OCPP SOAP versions");
   }
   // A SOAP charge point has no reconnect loop to rotate — it posts to the

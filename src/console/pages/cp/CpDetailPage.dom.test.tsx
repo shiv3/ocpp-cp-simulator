@@ -619,3 +619,160 @@ describe("CpDetailPage", () => {
     expect(container.textContent).toContain("new entry after clear");
   });
 });
+
+describe("CpDetailPage SOAP callback URL (#183)", () => {
+  let cleanup: (() => Promise<void>) | null = null;
+
+  beforeAll(() => {
+    (
+      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(async () => {
+    if (cleanup) {
+      await cleanup();
+      cleanup = null;
+    }
+  });
+
+  async function openConfigTab(container: HTMLElement): Promise<void> {
+    const trigger = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ).find((el) => el.textContent?.trim() === "Configuration");
+    expect(trigger, "expected a Configuration tab").toBeTruthy();
+    await act(async () => {
+      trigger!.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      trigger!.click();
+      await Promise.resolve();
+    });
+    await flush();
+  }
+
+  const soapCp = snapshot({
+    id: "CP-1",
+    connectors: [connector({ id: 1 })],
+    config: {
+      wsUrl: "http://csms.example.test/steve/services/CentralSystemService",
+      ocppVersion: "OCPP-1.6S",
+      connectors: 1,
+      vendor: "V",
+      model: "M",
+      basicAuth: null,
+      soapCallbackUrl:
+        "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+      soapCallbackUrlDerived: true,
+      soapPath: "/ocpp/soap",
+    },
+  });
+
+  it("shows the effective callback URL with a copy button, and says it comes from the tunnel", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const service = createFakeChargePointService({
+      snapshots: [soapCp],
+      getStateHistory: vi.fn(async () => []),
+      getServerInfo: vi.fn(async () => ({
+        version: "1.2.3",
+        soap: {
+          publicBaseUrl: "https://a1b2.ngrok-free.app",
+          path: "/ocpp/soap",
+          tunnel: { provider: "ngrok" as const, mode: "spawn" as const },
+        },
+      })),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openConfigTab(container);
+
+    expect(container.textContent).toContain(
+      "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+    );
+    expect(container.textContent).toContain("derived from the ngrok tunnel");
+
+    const copyButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Copy",
+    );
+    expect(copyButton, "expected a Copy button").toBeTruthy();
+    await act(async () => {
+      copyButton!.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+    );
+  });
+
+  it("hands the daemon's public base to the edit form so the callback URL is previewed, not sent back", async () => {
+    const service = createFakeChargePointService({
+      snapshots: [soapCp],
+      getStateHistory: vi.fn(async () => []),
+      getServerInfo: vi.fn(async () => ({
+        version: "1.2.3",
+        soap: {
+          publicBaseUrl: "https://a1b2.ngrok-free.app",
+          path: "/ocpp/soap",
+          tunnel: { provider: "ngrok" as const, mode: "spawn" as const },
+        },
+      })),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openConfigTab(container);
+
+    const editButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Edit config",
+    );
+    await act(async () => {
+      editButton!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    const input = document.getElementById(
+      "soapCallbackUrl",
+    ) as HTMLInputElement | null;
+    expect(input, "expected the SOAP callback URL field").toBeTruthy();
+    expect(input!.value).toBe("");
+    expect(input!.placeholder).toBe(
+      "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+    );
+    expect(input!.required).toBe(false);
+  });
+
+  it("shows an explicit callback URL without the tunnel note", async () => {
+    const service = createFakeChargePointService({
+      snapshots: [
+        snapshot({
+          ...soapCp,
+          config: {
+            ...soapCp.config!,
+            soapCallbackUrl:
+              "https://explicit.test/ocpp/soap/CP-1/ChargePointService",
+            soapCallbackUrlDerived: false,
+          },
+        }),
+      ],
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openConfigTab(container);
+
+    expect(container.textContent).toContain(
+      "https://explicit.test/ocpp/soap/CP-1/ChargePointService",
+    );
+    expect(container.textContent).not.toContain("derived from");
+  });
+});

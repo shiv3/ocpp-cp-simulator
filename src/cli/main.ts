@@ -699,8 +699,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   // --soap-tunnel (#183). The ngrok options only mean something with the
   // provider selected; attach mode reads an agent someone else configured,
   // so token and domain cannot apply there. The callback server is the
-  // daemon's listener, hence server mode. Precedence: an explicit callback /
-  // public base URL wins and the tunnel is simply not started.
+  // daemon's listener, hence server mode. An explicit callback / public base
+  // URL is refused alongside it: the tunnel *is* the public base.
   if (soapTunnel === "none") {
     const stray = [
       ["--ngrok-auth-token", ngrokAuthToken],
@@ -738,13 +738,13 @@ export function parseArgs(argv: string[]): CLIOptions {
         ? "--soap-public-base-url"
         : null;
     if (explicitFlag) {
+      // Two sources for the same public base is a contradiction, not a
+      // precedence: the operator either knows the origin or asks for one.
       process.stderr.write(
-        `Warning: ${explicitFlag} takes precedence over --soap-tunnel; the tunnel is not started\n`,
+        `Error: --soap-tunnel cannot be combined with ${explicitFlag} ` +
+          "(the tunnel is what provides the public base)\n",
       );
-      soapTunnel = "none";
-      ngrokAuthToken = null;
-      ngrokDomain = null;
-      ngrokApiUrl = null;
+      process.exit(1);
     }
   }
 
@@ -1180,11 +1180,14 @@ Options:
   --soap-tunnel <none|ngrok>
                            Expose the SOAP callback endpoint through a tunnel
                            and derive the callback URL from its public origin
-                           (default: none). Server mode only; an explicit
-                           --soap-callback-url or --soap-public-base-url wins.
-                           ngrok runs the ngrok binary from PATH; the public
-                           URL is logged at startup. The endpoint is then
-                           reachable from the internet — see the warning.
+                           (default: none). Server mode only; cannot be
+                           combined with --soap-callback-url or
+                           --soap-public-base-url. ngrok runs the ngrok binary
+                           from PATH; the public URL is logged at startup and
+                           reported by the server.info RPC, and every SOAP
+                           charge point created without a callback URL gets
+                           one derived from it. The endpoint is then reachable
+                           from the internet — see the warning.
   --ngrok-auth-token <token>
                            ngrok authtoken, handed to the agent through its
                            environment (never on its command line or in logs).
@@ -1266,7 +1269,10 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
     vendor: options.vendor,
     model: options.model,
     ocppVersion: options.ocppVersion,
-    soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+    // Only an explicit --soap-callback-url travels with the charge point; a
+    // --soap-public-base-url / --soap-tunnel origin is handed to the registry,
+    // which derives (and never persists) the URL at instantiation (#183).
+    soapCallbackUrl: options.soapCallbackUrlExplicit ?? undefined,
     soapPath: options.soapPath,
     basicAuth: options.basicAuth,
     extraWsHeaders: options.extraWsHeaders,
@@ -1293,6 +1299,8 @@ function createStandaloneChargePointRuntime(
   const bus = new EventBus();
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms,
+    soapPublicBaseUrl: options.soapPublicBaseUrl,
+    soapPath: options.soapPath,
   });
   const configRepository = createSocketConfigRepository(database);
   const scenarioRepository = new SqliteScenarioRepository(database);
@@ -1423,6 +1431,7 @@ async function main(): Promise<void> {
       bootstrapIdPattern: options.cpIdPattern ?? undefined,
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
+      soapPath: options.soapPath,
       soapTunnel:
         options.soapTunnel === "ngrok"
           ? {

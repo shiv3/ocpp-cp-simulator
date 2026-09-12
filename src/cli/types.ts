@@ -28,8 +28,8 @@ export interface CLIOptions {
   readonly soapPublicBaseUrl: string | null;
   /**
    * `--soap-tunnel`: expose the SOAP callback endpoint through a tunnel and
-   * derive the public base from it (#183). Reset to "none" by parseArgs when
-   * an explicit callback / public base URL takes precedence.
+   * derive the public base from it (#183). parseArgs refuses it alongside an
+   * explicit callback / public base URL.
    */
   readonly soapTunnel: "none" | "ngrok";
   /** `--ngrok-auth-token`; never logged, handed to ngrok via its environment. */
@@ -226,6 +226,14 @@ export interface ChargePointInitOptions {
   readonly centralSystemUrl?: string;
   /** For OCPP 1.5 SOAP, the CP ChargePointService callback URL in WS-A From. */
   readonly soapCallbackUrl?: string;
+  /**
+   * `soapCallbackUrl` was not given but derived by the registry from the
+   * daemon's SOAP public base (`--soap-public-base-url` or the tunnel of
+   * `--soap-tunnel`). Such a URL is never persisted: a free-tier tunnel URL
+   * changes between runs, so it is re-derived from the current base each
+   * time the charge point is instantiated (#183).
+   */
+  readonly soapCallbackUrlDerived?: boolean;
   /** Base path reserved for the later CSMS→CP SOAP callback server. */
   readonly soapPath?: string;
   readonly securityProfile?: OcppSecurityProfile;
@@ -310,6 +318,8 @@ export interface ChargePointStatus {
     } | null;
     readonly centralSystemUrl?: string;
     readonly soapCallbackUrl?: string;
+    /** See ChargePointInitOptions.soapCallbackUrlDerived. */
+    readonly soapCallbackUrlDerived?: boolean;
     readonly soapPath?: string;
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;

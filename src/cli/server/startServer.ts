@@ -28,8 +28,8 @@ import type { Database } from "../../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
+import { appVersion } from "../appVersion";
 import { expandIdPattern } from "../../protocol";
-import { resolveSoapCallbackUrl } from "../soapCallbackUrl";
 import {
   localHostForTunnel,
   soapTunnelStartupLines,
@@ -94,6 +94,8 @@ export interface ServerOptions {
    */
   readonly soapCallbackUrlExplicit?: string | null;
   readonly soapPublicBaseUrl?: string | null;
+  /** `--soap-path`; the daemon-wide default for derived callback URLs. */
+  readonly soapPath?: string;
   /**
    * `--soap-tunnel ngrok` (#183): expose the listener through ngrok and use
    * the tunnel's public origin as the SOAP public base. Only consulted when
@@ -181,7 +183,7 @@ export async function startServer(inputOpts: ServerOptions): Promise<void> {
     else process.exit(1);
   });
   const opts = soapTunnel
-    ? withSoapPublicBase(inputOpts, soapTunnel)
+    ? { ...inputOpts, soapPublicBaseUrl: soapTunnel.publicBaseUrl }
     : inputOpts;
 
   // Open the persistent state DB up front so every CP we create (boot
@@ -223,7 +225,13 @@ export async function startServer(inputOpts: ServerOptions): Promise<void> {
   const registry = new CPRegistry(
     bus,
     database,
-    { allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms },
+    {
+      allowInsecureTlsKeyPerms: opts.insecureTlsKeyPerms,
+      // Every SOAP charge point without a callback URL — bootstrapped,
+      // restored or created over RPC — derives one from this base (#183).
+      soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
+      soapPath: opts.soapPath ?? DEFAULT_SOAP_PATH,
+    },
     connectorSettingsRepository,
   );
   // Create network simulation manager and wire it to the registry BEFORE
@@ -353,6 +361,16 @@ export async function startServer(inputOpts: ServerOptions): Promise<void> {
     registry,
     bus,
     database,
+    serverInfo: () => ({
+      version: appVersion(),
+      soap: {
+        publicBaseUrl: opts.soapPublicBaseUrl ?? null,
+        path: opts.soapPath ?? DEFAULT_SOAP_PATH,
+        tunnel: soapTunnel
+          ? { provider: soapTunnel.provider, mode: soapTunnel.mode }
+          : null,
+      },
+    }),
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,
@@ -759,39 +777,15 @@ async function openSoapTunnel(
 }
 
 /**
- * Fold the tunnel's public origin in as the SOAP public base. The single-CP
- * bootstrap carries its callback URL pre-resolved (null so far, since the
- * base was unknown at parse time), so it is derived here; a fleet goes
- * through `fleetSoapCallbackUrl`, which reads `soapPublicBaseUrl`.
- */
-function withSoapPublicBase(
-  opts: ServerOptions,
-  tunnel: SoapTunnel,
-): ServerOptions {
-  const bootstrap =
-    opts.bootstrap && !opts.bootstrap.soapCallbackUrl
-      ? {
-          ...opts.bootstrap,
-          soapCallbackUrl:
-            resolveSoapCallbackUrl({
-              publicBaseUrl: tunnel.publicBaseUrl,
-              cpId: opts.bootstrap.cpId,
-              soapPath: opts.bootstrap.soapPath ?? DEFAULT_SOAP_PATH,
-            }) ?? undefined,
-        }
-      : opts.bootstrap;
-  return { ...opts, bootstrap, soapPublicBaseUrl: tunnel.publicBaseUrl };
-}
-
-/**
  * The SOAP callback address for one charge point in a fleet.
  *
  * The daemon routes inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService`
  * and advertises this URL verbatim, so a fleet sharing one address would send
- * every station's callbacks to the first station's route. `--soap-public-base-url`
- * is therefore re-derived per generated id rather than reused from the resolved
- * single-CP value, and an explicit `--soap-callback-url` carries the same `{n}`
- * placeholder as the id pattern (the CLI refuses one that does not).
+ * every station's callbacks to the first station's route. An explicit
+ * `--soap-callback-url` therefore carries the same `{n}` placeholder as the id
+ * pattern (the CLI refuses one that does not). Without one, the registry
+ * derives each station's URL from the daemon's SOAP public base at
+ * instantiation (#183), so nothing is resolved here.
  */
 function fleetSoapCallbackUrl(
   opts: ServerOptions,
@@ -812,13 +806,7 @@ function fleetSoapCallbackUrl(
     }
     return expanded;
   }
-  const resolved = resolveSoapCallbackUrl({
-    explicitCallbackUrl: null,
-    publicBaseUrl: opts.soapPublicBaseUrl ?? null,
-    cpId,
-    soapPath: opts.bootstrap?.soapPath,
-  });
-  return resolved ?? undefined;
+  return undefined;
 }
 
 /**

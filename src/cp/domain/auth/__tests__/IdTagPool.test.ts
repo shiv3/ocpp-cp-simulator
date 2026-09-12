@@ -89,6 +89,62 @@ describe("IdTagPool (#299)", () => {
   });
 });
 
+describe("IdTagPool.replaceTags (#314)", () => {
+  // A `--watch` reload is an edit to the list, not a new run: the RNG keeps
+  // its state and the round-robin cursor keeps its place, so a seeded run
+  // replays identically whether or not someone touched the file mid-run. The
+  // oracle is a pool built over the *new* list and advanced the same number of
+  // draws — in `random` mode the draw bound is the list length, so a pool over
+  // the old list cannot stand in for it.
+  const BEFORE = ["TAG-A", "TAG-B", "TAG-C", "TAG-D", "TAG-E"];
+  const AFTER = ["TAG-E", "TAG-D", "TAG-C", "TAG-B", "TAG-A", "TAG-F", "TAG-G"];
+  const DRAWN_BEFORE = 4;
+  const DRAWN_AFTER = 16;
+
+  const drawMany = (pool: IdTagPool, n: number) =>
+    Array.from({ length: n }, () => pool.next());
+
+  for (const distribution of ["round-robin", "random"] as const) {
+    it(`continues the ${distribution} draw sequence across a replace`, () => {
+      const reloaded = new IdTagPool(BEFORE, distribution, "CP1");
+      drawMany(reloaded, DRAWN_BEFORE);
+      reloaded.replaceTags(AFTER);
+      const continuation = drawMany(reloaded, DRAWN_AFTER);
+
+      // Same seed, same list, same number of draws already consumed.
+      const reference = new IdTagPool(AFTER, distribution, "CP1");
+      drawMany(reference, DRAWN_BEFORE);
+      expect(continuation).toEqual(drawMany(reference, DRAWN_AFTER));
+
+      // The failure mode this guards against: a re-seeded RNG or a reset
+      // cursor would make the continuation look like a fresh pool's start.
+      const fresh = new IdTagPool(AFTER, distribution, "CP1");
+      expect(continuation).not.toEqual(drawMany(fresh, DRAWN_AFTER));
+    });
+  }
+
+  it("takes the cursor modulo the new length, so a shorter list needs no reset", () => {
+    const pool = new IdTagPool(BEFORE, "round-robin", "CP1");
+    drawMany(pool, 4); // cursor now 4
+    pool.replaceTags(["ONE", "TWO", "THREE"]);
+    expect(drawMany(pool, 4)).toEqual(["TWO", "THREE", "ONE", "TWO"]);
+  });
+
+  it("serves connector-affinity from the new list at once", () => {
+    const pool = new IdTagPool(BEFORE, "connector-affinity", "CP1");
+    expect(pool.next(2)).toBe("TAG-B");
+    pool.replaceTags(AFTER);
+    expect(pool.next(2)).toBe("TAG-D");
+    expect(pool.list()).toEqual(AFTER);
+  });
+
+  it("refuses an empty list, as the constructor does", () => {
+    const pool = new IdTagPool(BEFORE, "round-robin", "CP1");
+    expect(() => pool.replaceTags([])).toThrow();
+    expect(pool.list()).toEqual(BEFORE);
+  });
+});
+
 describe("the scenario executor draws through a callback (#299)", () => {
   it("prefers a node's own tag, then the pool, then the default", async () => {
     // The executor has no charge point and no connector of its own, so the

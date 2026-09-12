@@ -5,6 +5,7 @@
 export const RUNTIME_FILES: readonly string[] = [
   "assertions.ts",
   "autoResponder.ts",
+  "curve.ts",
   "frames.ts",
   "index.ts",
   "interpreter.ts",

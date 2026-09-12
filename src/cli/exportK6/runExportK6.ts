@@ -13,7 +13,12 @@ import {
 } from "./emit/render";
 import type { ExportK6Args } from "./parseExportK6Args";
 
-const SUPPORTED_NODE_TYPES = new Set([
+/** Scenario node types this exporter walks. Anything else is refused by name
+ *  rather than exported and silently skipped. Exported because
+ *  `__tests__/documentedSubset.test.ts` holds it against
+ *  `schema/scenario.schema.json` and the table in
+ *  `docs/entities/cli.md#export-k6` (#329). */
+export const SUPPORTED_NODE_TYPES = new Set([
   "start",
   "end",
   "statusChange",

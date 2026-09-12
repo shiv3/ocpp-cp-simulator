@@ -645,8 +645,16 @@ in the JSON schema with no minimum, and the curve editor's time input has no
 and `(10s, 15 kWh)` read 10 kWh at session start, so ten seconds in they have
 delivered 5 kWh, not the 10 that baselining at the earliest point would claim.
 The [k6 export](../entities/cli.md#what-the-exported-runtime-models) baselines
-identically; the shape it draws _between_ the points is still its own linear
-interpolation against the simulator's bezier, which that page records.
+identically, and since #329 draws the same shape _between_ the points too: both
+runtimes evaluate one module,
+[`src/cli/exportK6/runtime/curve.ts`](../../src/cli/exportK6/runtime/curve.ts),
+which the export bundle copies verbatim. The export previously interpolated
+piecewise-linearly, so a regenerated bundle **can** send different MeterValues
+for a curve with three or more control points — it does unless the Bezier and
+the polyline coincide, which they do when the control points are evenly spaced
+on a straight line (a plain `(0,0) (10,10) (20,20)` ramp) or all carry the same
+value. Collinearity alone is not enough: `(0,0) (5,5) (20,20)` is collinear,
+unevenly spaced, and differs by 2.5 kWh at its widest.
 
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
 `min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the

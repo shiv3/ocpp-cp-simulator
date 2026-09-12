@@ -296,6 +296,7 @@ async function spawnNgrokTunnel(
       if (settled) {
         if (!closed) {
           closed = true;
+          process.off("exit", killOnExit);
           opts.onExit?.(code);
         }
         return;

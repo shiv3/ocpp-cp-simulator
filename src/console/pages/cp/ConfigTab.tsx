@@ -26,15 +26,20 @@ const SoapCallbackUrlRow: React.FC<{
   derived: boolean;
   soapPublicBase: SoapPublicBase | null | undefined;
 }> = ({ url, derived, soapPublicBase }) => {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
   const copy = async () => {
     try {
+      // Absent on plain-http origins other than localhost; the URL stays
+      // selectable as text, so say so instead of failing silently.
       await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setCopyState("copied");
     } catch (error) {
       console.error("Failed to copy the SOAP callback URL", error);
+      setCopyState("failed");
     }
+    setTimeout(() => setCopyState("idle"), 1500);
   };
   const source = derived
     ? soapPublicBase?.tunnel
@@ -53,7 +58,11 @@ const SoapCallbackUrlRow: React.FC<{
           onClick={() => void copy()}
           aria-label="Copy SOAP callback URL"
         >
-          {copied ? "Copied" : "Copy"}
+          {copyState === "copied"
+            ? "Copied"
+            : copyState === "failed"
+              ? "Copy failed"
+              : "Copy"}
         </Button>
       </div>
       {source && (

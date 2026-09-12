@@ -464,3 +464,242 @@ describe("SOAP faults are counted as answers (#298)", () => {
     }
   });
 });
+
+describe("abandoned CALLs are counted (#302)", () => {
+  it("counts a watchdog line the handler emits, keyed by the pending call's action", () => {
+    // The duration histogram only observes when an answer arrives, so a CALL
+    // the CSMS never answers is invisible to it. Without this counter a
+    // saturated CSMS reads as ">30s=0, errors=0" — the opposite of the truth.
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({
+      cpId: "CP001",
+      ocppVersion: "OCPP-1.6J",
+      logger,
+    });
+    try {
+      logger.info('Sent: [2,"m1","StartTransaction",{}]', LogType.OCPP);
+      logger.warn(
+        "CALL m1 (StartTransaction) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      expect(recorder.callTimeouts.get("StartTransaction")).toBe(1);
+      // Not also a duration: nothing answered.
+      expect(recorder.callDurations.get("StartTransaction")).toBeUndefined();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("still records a late answer, and counts the call only once", () => {
+    // The watchdog releases the serialization slot but the CSMS may still
+    // answer. That answer is a genuine over-watchdog duration worth keeping,
+    // and it must not mint a second timeout.
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({
+      cpId: "CP001",
+      ocppVersion: "OCPP-1.6J",
+      logger,
+    });
+    try {
+      logger.info('Sent: [2,"m1","Heartbeat",{}]', LogType.OCPP);
+      logger.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      logger.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      logger.info(
+        'Received: [3,"m1",{"currentTime":"2026-01-01T00:00:00Z"}]',
+        LogType.OCPP,
+      );
+      expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+      expect(recorder.callDurations.get("Heartbeat")?.count).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("scopes the pending lookup by charge point", () => {
+    // Message ids are only unique within a connection: CP-B's watchdog must
+    // not settle CP-A's pending call.
+    const recorder = new MetricsRecorder();
+    const loggerA = new Logger();
+    const loggerB = new Logger();
+    const offA = recorder.attach({ cpId: "CP-A", logger: loggerA });
+    const offB = recorder.attach({ cpId: "CP-B", logger: loggerB });
+    try {
+      loggerA.info('Sent: [2,"m1","StartTransaction",{}]', LogType.OCPP);
+      loggerB.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      // CP-B's watchdog must label its own action, not reach across into
+      // CP-A's pending StartTransaction and count that instead.
+      expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+      expect(recorder.callTimeouts.has("StartTransaction")).toBe(false);
+      // And CP-A's entry is untouched, so its own answer still times.
+      loggerA.info('Received: [3,"m1",{}]', LogType.OCPP);
+      expect(recorder.callDurations.get("StartTransaction")?.count).toBe(1);
+    } finally {
+      offA();
+      offB();
+    }
+  });
+
+  it("folds an unparseable action into the bounded label", () => {
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({ cpId: "CP001", logger });
+    try {
+      logger.warn(
+        "CALL m9 (not an action!) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      expect(recorder.callTimeouts.get("other")).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("counts a correlation-cache eviction as an eviction, never as a timeout", () => {
+    // An eviction says this recorder's cache is full, not that the transport
+    // gave up: the CSMS may answer the evicted CALL a millisecond later.
+    // Counting it as a timeout made the counter report load rather than
+    // failure, and did so worst at the fleet sizes where 4096 concurrent
+    // pending CALLs is normal.
+    const recorder = new MetricsRecorder();
+    for (let i = 0; i < 4_097; i++) {
+      recorder.observe(
+        call("Heartbeat", `m${i}`, "2026-01-01T00:00:00.000Z"),
+        "CP001",
+      );
+    }
+    expect(recorder.pendingEvictions).toBe(1);
+    expect(recorder.callTimeouts.size).toBe(0);
+  });
+
+  it("counts a CALL once when its watchdog fires after the cache evicted it", () => {
+    // The double count codex named: the eviction counted the call, and the
+    // watchdog line arriving later found no pending entry and counted it
+    // again — so one abandoned CALL reported as two.
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({ cpId: "CP001", logger });
+    try {
+      logger.info('Sent: [2,"m1","Heartbeat",{}]', LogType.OCPP);
+      // 4096 further CALLs push m1 out of the correlation cache...
+      for (let i = 0; i < 4_096; i++) {
+        recorder.observe(
+          call("StatusNotification", `x${i}`, "2026-01-01T00:00:00.000Z"),
+          "CP001",
+        );
+      }
+      expect(recorder.pendingEvictions).toBe(1);
+      // ...and only afterwards does the transport actually give up on it.
+      logger.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("does not count a call twice when the watchdog fires and it is then evicted", () => {
+    // The pending entry survives the watchdog so a late answer can still be
+    // timed. Its later eviction is a cache event and must leave the timeout
+    // count alone.
+    const recorder = new MetricsRecorder();
+    const logger = new Logger();
+    const unsubscribe = recorder.attach({ cpId: "CP001", logger });
+    try {
+      logger.info('Sent: [2,"m1","Heartbeat",{}]', LogType.OCPP);
+      logger.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+    // Push m1 out of the pending map (MAX_PENDING_CALLS = 4096) with calls
+    // under an action of their own, so only m1's eviction could touch the
+    // Heartbeat count.
+    for (let i = 0; i < 4_096; i++) {
+      recorder.observe(
+        call("StatusNotification", `x${i}`, "2026-01-01T00:00:00.000Z"),
+        "CP001",
+      );
+    }
+    expect(recorder.callTimeouts.get("Heartbeat")).toBe(1);
+    expect(recorder.pendingEvictions).toBe(1);
+  });
+
+  it("renders the counter, and renders zero as an empty series rather than a wrong number", () => {
+    // `undefined as never`: `renderMetrics` reads the live charge point list
+    // and never the bus, and this file has no bus to hand the constructor.
+    const registry = new CPRegistry(undefined as never);
+    try {
+      const recorder = new MetricsRecorder();
+      expect(renderMetrics(registry, recorder)).toContain(
+        "# TYPE ocppcp_ocpp_call_timeouts_total counter",
+      );
+
+      const logger = new Logger();
+      const unsubscribe = recorder.attach({ cpId: "CP001", logger });
+      logger.warn(
+        "CALL m1 (Heartbeat) timed out after 30000ms — releasing serialization slot",
+        LogType.OCPP,
+      );
+      unsubscribe();
+      const found = samples(
+        renderMetrics(registry, recorder),
+        "ocppcp_ocpp_call_timeouts_total",
+      );
+      expect(
+        found.get('ocppcp_ocpp_call_timeouts_total{action="Heartbeat"}'),
+      ).toBe(1);
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
+  it("renders the eviction counter separately from the timeout counter", () => {
+    // Two different facts with two different names: a reader must be able to
+    // tell "the CSMS stopped answering" from "the recorder's cache filled up".
+    const registry = new CPRegistry(undefined as never);
+    try {
+      const recorder = new MetricsRecorder();
+      const rendered = renderMetrics(registry, recorder);
+      expect(rendered).toContain(
+        "# TYPE ocppcp_ocpp_pending_calls_evicted_total counter",
+      );
+      expect(
+        samples(rendered, "ocppcp_ocpp_pending_calls_evicted_total").get(
+          "ocppcp_ocpp_pending_calls_evicted_total",
+        ),
+      ).toBe(0);
+
+      for (let i = 0; i < 4_097; i++) {
+        recorder.observe(
+          call("Heartbeat", `m${i}`, "2026-01-01T00:00:00.000Z"),
+          "CP001",
+        );
+      }
+      const after = renderMetrics(registry, recorder);
+      expect(
+        samples(after, "ocppcp_ocpp_pending_calls_evicted_total").get(
+          "ocppcp_ocpp_pending_calls_evicted_total",
+        ),
+      ).toBe(1);
+      expect(samples(after, "ocppcp_ocpp_call_timeouts_total").size).toBe(0);
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+});

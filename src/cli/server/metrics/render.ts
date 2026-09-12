@@ -119,6 +119,35 @@ export function renderMetrics(
     out.sample("ocppcp_ocpp_call_errors_total", { action }, count);
   }
 
+  // Deliberately separate from the duration histogram: a CALL that is never
+  // answered produces no duration observation at all, so a saturated CSMS
+  // would otherwise show up as "no slow calls, no errors". This counter is
+  // the only signal that says a call was given up on.
+  out.metric(
+    "ocppcp_ocpp_call_timeouts_total",
+    "CALLs the transport gave up on without an answer, by action.",
+    "counter",
+  );
+  for (const [action, count] of sorted(recorder.callTimeouts)) {
+    out.sample("ocppcp_ocpp_call_timeouts_total", { action }, count);
+  }
+
+  // Not a failure signal and emphatically not a timeout: the transport still
+  // holds the evicted CALL and the CSMS may answer it. What is lost is the
+  // duration sample, so a non-zero value here means the latency histogram
+  // below is missing that many observations — which is why it is exposed at
+  // all rather than dropped silently.
+  out.metric(
+    "ocppcp_ocpp_pending_calls_evicted_total",
+    "In-flight CALLs dropped from the latency correlation cache because it was full (a recorder capacity event, not a timeout); each one costs one duration sample.",
+    "counter",
+  );
+  out.sample(
+    "ocppcp_ocpp_pending_calls_evicted_total",
+    {},
+    recorder.pendingEvictions,
+  );
+
   out.metric(
     "ocppcp_rpc_requests_total",
     "Control-plane rpc calls, by method and outcome.",

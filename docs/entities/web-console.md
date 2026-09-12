@@ -12,7 +12,7 @@ related:
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
-updated: 2026-09-03
+updated: 2026-09-12
 ---
 
 # Web console (browser UI)
@@ -68,6 +68,11 @@ first-class routes instead of nested panels.
 - Create charge points and connectors, connect to a CSMS over OCPP-J
   (1.6J / 2.0.1 / 2.1) or — in Local mode, send-only — the SOAP versions
   (see [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md)).
+  In Remote mode, when the daemon holds a SOAP public base (`--soap-tunnel
+ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
+  create / edit form — the derived value is previewed — and the charge point's
+  Configuration tab shows the effective URL with a **Copy** button, the value
+  to register in the CSMS (#183).
 - Author, import and export scenarios in the node-graph
   [scenario format](../concepts/scenario-format.md); load the built-in
   [scenario templates](scenario-templates.md), including the `cert16-*`

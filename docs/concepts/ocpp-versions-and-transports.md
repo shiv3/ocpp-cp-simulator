@@ -6,6 +6,9 @@ sources:
   - src/ocpp/ (generated from vendor/ocpp-schemas)
   - vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
+  - src/cli/soapCallbackUrl.ts
+  - src/cli/soapTunnel.ts
+  - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
 related:
@@ -16,7 +19,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-09-04
+updated: 2026-09-12
 ---
 
 # OCPP versions and transports
@@ -59,7 +62,7 @@ charge point on.
 > Basic Auth or the network boundary, so for a remote CSMS or a tunnel use
 > `https://` on both sides (`--ws-url https://…`, an HTTPS
 > `--soap-public-base-url` / `--soap-callback-url` terminated by a proxy in
-> front of the daemon).
+> front of the daemon, or the https origin `--soap-tunnel ngrok` yields).
 
 **OCPP 1.2:**
 
@@ -112,12 +115,93 @@ All SOAP versions share the same endpoint pattern:
 The callback URL the CP advertises to the CSMS is resolved by precedence:
 
 1. `--soap-callback-url <url>` — the full URL, used verbatim.
-2. `--soap-public-base-url <url>` — a public base the CSMS can reach (e.g. a
-   tunnel origin); the callback URL is derived as
-   `<base><soap-path>/<cp-id>/ChargePointService`. Handy when the CSMS is hosted
-   remotely and cannot reach your machine directly — point the base at your
-   tunnel and skip hand-building the full URL. An explicit `--soap-callback-url`
-   still wins.
+2. A **SOAP public base** the daemon holds — either `--soap-public-base-url
+<url>` (a public origin the CSMS can reach) or the origin of the tunnel
+   `--soap-tunnel ngrok` opens; the two are mutually exclusive, since both
+   answer the same question. Every SOAP charge point without a callback URL —
+   bootstrapped from the flags, restored from `--state-db`, or created later
+   over `cp.create` / the web console — gets one derived at instantiation as
+   `<base><soap-path>/<cp-id>/ChargePointService`, flagged
+   `soapCallbackUrlDerived` in its config. Such a URL is **not persisted**: a
+   free-tier tunnel URL changes between daemon runs, so a restored charge point
+   re-derives from whatever base the daemon has now, and a `cp.update` that
+   sends no `soapCallbackUrl` re-derives as well rather than freezing one
+   run's origin into the row. An explicit `--soap-callback-url` still wins.
+3. None — a SOAP charge point refuses to start: the CSMS has nowhere to call.
+
+Clients read the base from the `server.info` RPC
+([Control plane](control-plane.md#daemon-methods)). The web console uses it to make
+the callback URL optional in the create / edit form (the derivation is shown as
+the field's placeholder), and shows the effective URL on the charge point's
+Configuration tab with a **Copy** button — that is the value to register in the
+CSMS — noting when it came from the tunnel.
+
+### Exposing the callback through a tunnel
+
+`--soap-tunnel ngrok` (#183) is for a CSMS that cannot reach your machine — a
+hosted SteVe, a staging environment, CI. The daemon brings the tunnel up before
+anything else, derives the callback URL from it, logs both, and prints an
+exposure warnings: the tunnel forwards the **whole listener** — the CSMS→CP
+command endpoint, but also the control plane, the web console and the MCP
+route — so the daemon applies the same gate as a non-loopback bind and refuses
+to start unless `--web-console-basic-auth-user/pass` is configured or
+`--unsafe-remote` is passed. Without Basic Auth the callback route is
+unauthenticated: only the charge point identity in the route and whatever
+boundary sits in front of the tunnel protect it. The per-charge-point
+`--basic-auth-*` credentials protect the outgoing CP→CSMS connection only, not
+this endpoint. With Basic Auth on, the CSMS must send those credentials on its
+callbacks. No npm dependency is involved; two modes:
+
+- **Spawn** (default) — the `ngrok` binary from `PATH` is run as
+  `ngrok http <host>:<port> --log stdout --log-format json`, the public URL is
+  read from its `started tunnel` log line, and the agent is killed on shutdown.
+  If it dies on its own the daemon stops with exit code 1 — a SOAP charge point
+  without a reachable callback cannot do its job. `--ngrok-auth-token` reaches
+  the agent through its environment (`NGROK_AUTHTOKEN`), never on its command
+  line or in a log line; omit it to use the agent's own config file
+  (`ngrok config add-authtoken …`). `--ngrok-domain` requests a reserved domain;
+  free-tier URLs change between runs, so re-register the callback in the CSMS
+  each time (or let it read `wsa:From`).
+
+  ```bash
+  ocpp-cp-sim --ocpp-version OCPP-1.6S \
+    --ws-url https://csms.example.com/steve/services/CentralSystemService \
+    --cp-id CP1 --daemon --soap-tunnel ngrok \
+    --web-console-basic-auth-user operator --web-console-basic-auth-pass secret
+  # [server] SOAP tunnel (ngrok, spawn): https://a1b2.ngrok-free.app -> http://127.0.0.1:9700
+  # [server] Warning: SOAP callback endpoint is publicly reachable through the tunnel at https://a1b2.ngrok-free.app/ocpp/soap/CP1/ChargePointService; …
+  # [server] Warning: the tunnel forwards the whole listener on port 9700 — control plane, web console and MCP routes included — …
+  ```
+
+- **Attach** (`--ngrok-api-url <url>`) — an agent someone else runs, typically
+  an `ngrok/ngrok` sidecar next to the [Docker image](../entities/docker-image.md),
+  which ships no ngrok binary. The daemon reads `GET <url>/api/tunnels` and
+  picks the https tunnel whose `addr` port matches its listener (or the only
+  https tunnel there is), and never stops that agent. `--ngrok-auth-token` and
+  `--ngrok-domain` are refused here: the agent is configured where it runs.
+
+  ```yaml
+  services:
+    simulator:
+      image: ghcr.io/shiv3/ocpp-cp-simulator
+      command: >-
+        --ocpp-version OCPP-1.6S --cp-id CP1
+        --ws-url https://csms.example.com/steve/services/CentralSystemService
+        --soap-tunnel ngrok --ngrok-api-url http://ngrok:4040
+      # The image's entrypoint pins --unsafe-remote; add
+      # --web-console-basic-auth-user/pass unless a boundary in front of the
+      # tunnel (an ngrok traffic policy, for instance) handles access.
+    ngrok:
+      image: ngrok/ngrok
+      command: http simulator:9700
+      environment:
+        NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+  ```
+
+The flag needs a listener (`--daemon`, `--http-port` or `--web-console`) and a
+SOAP `--ocpp-version`; the tunnel forwards to the API port, or to the console's
+when that is the only one. A fleet (`--cp-count`) derives one callback per
+charge point from the tunnel origin, exactly as with `--soap-public-base-url`.
 
 Pairs with [SteVe](../entities/csms-peers.md#steve) (register charge points
 with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).

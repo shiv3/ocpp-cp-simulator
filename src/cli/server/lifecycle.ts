@@ -8,7 +8,8 @@ type AnyServer = Server<unknown>;
 
 export interface Lifecycle {
   attachServer(server: AnyServer): void;
-  requestShutdown(): void;
+  /** Tears everything down and exits; `exitCode` defaults to 0. */
+  requestShutdown(exitCode?: number): void;
   installSignalHandlers(): void;
 }
 
@@ -27,7 +28,7 @@ export function createLifecycle(opts: LifecycleOptions): Lifecycle {
     fs.writeFileSync(opts.pidPath, String(process.pid), "utf-8");
   }
 
-  const requestShutdown = (): void => {
+  const requestShutdown = (exitCode = 0): void => {
     if (shuttingDown) return;
     shuttingDown = true;
 
@@ -52,7 +53,7 @@ export function createLifecycle(opts: LifecycleOptions): Lifecycle {
       }
     }
 
-    process.exit(0);
+    process.exit(exitCode);
   };
 
   return {
@@ -61,8 +62,9 @@ export function createLifecycle(opts: LifecycleOptions): Lifecycle {
     },
     requestShutdown,
     installSignalHandlers() {
-      process.on("SIGINT", requestShutdown);
-      process.on("SIGTERM", requestShutdown);
+      // Wrapped: the listener receives the signal name, not an exit code.
+      process.on("SIGINT", () => requestShutdown());
+      process.on("SIGTERM", () => requestShutdown());
     },
   };
 }

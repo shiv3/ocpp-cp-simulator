@@ -51,6 +51,7 @@ import {
   type CpListItem,
   type RpcAck,
   type RpcErrorCode,
+  type ServerInfo,
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
@@ -82,7 +83,11 @@ import { redactSensitiveText } from "../../cp/shared/redaction";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
 import { z } from "zod";
-import { SOAP_CHARGE_POINT_SERVICE_ROUTE } from "../soapPath";
+import {
+  DEFAULT_SOAP_PATH,
+  SOAP_CHARGE_POINT_SERVICE_ROUTE,
+} from "../soapPath";
+import { appVersion } from "../appVersion";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
@@ -143,6 +148,8 @@ export interface SocketIoDeps {
   readonly bus: EventBus;
   readonly database?: Database | null;
   readonly requestShutdown?: () => void;
+  /** `server.info`; absent → version only, no SOAP public base. */
+  readonly serverInfo?: ServerInfo;
   readonly webConsoleBasicAuth?: {
     readonly username: string;
     readonly password: string;
@@ -501,6 +508,8 @@ export async function dispatchRpcCore(
       return applyDefaultEVSettingsRpc(deps, rawParams);
     case "server.shutdown":
       return shutdownServer(deps);
+    case "server.info":
+      return serverInfo(deps);
     case "events.subscribe":
       throw new RpcFailure(
         "not_found",
@@ -611,7 +620,7 @@ async function createOneCp(
   deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): Promise<string> {
-  const init = parseCreateInput(rawParams);
+  const init = parseCreateInput(deps, rawParams);
   if (isSoapVersion(init.ocppVersion) && init.soapCallbackUrl) {
     const suffixWarning = soapCallbackUrlSuffixWarning(init.soapCallbackUrl);
     if (suffixWarning) {
@@ -964,7 +973,7 @@ async function updateCp(
   const cpId = stringParam(rawParams, "cpId");
   const existing = deps.registry.get(cpId);
   if (!existing) throw new RpcFailure("not_found", "");
-  const init = parseCreateInput(mergeUpdateParams(rawParams, existing));
+  const init = parseCreateInput(deps, mergeUpdateParams(rawParams, existing));
   await runFacadeOperation(() =>
     deps.chargePointService.updateChargePoint(
       init as unknown as CreateChargePointParams,
@@ -1485,6 +1494,33 @@ function shutdownServer(deps: RuntimeSocketIoDeps): { ok: true } {
     setTimeout(() => deps.requestShutdown?.(), 100);
   }
   return { ok: true };
+}
+
+/** Fixed for the daemon's lifetime, so built once by startServer. */
+export function buildServerInfo(soap: {
+  soapPublicBaseUrl: string | null;
+  soapPath: string;
+  tunnel: ServerInfo["soap"]["tunnel"];
+}): ServerInfo {
+  return {
+    version: appVersion(),
+    soap: {
+      publicBaseUrl: soap.soapPublicBaseUrl,
+      path: soap.soapPath,
+      tunnel: soap.tunnel,
+    },
+  };
+}
+
+function serverInfo(deps: RuntimeSocketIoDeps): ServerInfo {
+  return (
+    deps.serverInfo ??
+    buildServerInfo({
+      soapPublicBaseUrl: null,
+      soapPath: DEFAULT_SOAP_PATH,
+      tunnel: null,
+    })
+  );
 }
 
 export function createSocketConfigRepository(
@@ -2478,10 +2514,13 @@ function toIsoStringOrNull(value: Date | string | null): string | null {
 }
 
 function parseCreateInput(
+  deps: RuntimeSocketIoDeps,
   rawParams: unknown,
 ): ReturnType<typeof parseCreateBody> {
   try {
-    return parseCreateBody(rawParams);
+    return parseCreateBody(rawParams, {
+      soapCallbackUrlDerivable: deps.registry.canDeriveSoapCallbackUrl(),
+    });
   } catch {
     throw new RpcFailure("invalid_params", "");
   }

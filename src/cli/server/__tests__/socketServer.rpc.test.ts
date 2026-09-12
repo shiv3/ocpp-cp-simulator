@@ -216,6 +216,7 @@ describe("socket.io rpc dispatch", () => {
       get: vi.fn((cpId: string) => (cpId === "cp-write" ? existing : null)),
       has: vi.fn(() => false),
       list: vi.fn(() => []),
+      canDeriveSoapCallbackUrl: vi.fn(() => false),
     };
     const facade = {
       createChargePoint: vi.fn().mockResolvedValue(undefined),
@@ -382,6 +383,127 @@ describe("socket.io rpc dispatch", () => {
     );
     expect(JSON.stringify(listAck.result)).not.toContain("secret");
     expect(JSON.stringify(statusAck.result)).not.toContain("secret");
+  });
+
+  it("cp.create accepts a SOAP charge point without a callback URL when the daemon has a public base (#183)", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null, {
+      soapPublicBaseUrl: "https://a1b2.ngrok-free.app",
+    });
+    const facade = {
+      createChargePoint: vi.fn().mockResolvedValue(undefined),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    const ack = await socket.emitRpc({
+      method: "cp.create",
+      params: {
+        cpId: "CP-1",
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+      },
+    });
+
+    expect(ack.ok).toBe(true);
+    expect(facade.createChargePoint).toHaveBeenCalledWith(
+      expect.objectContaining({ cpId: "CP-1", ocppVersion: "OCPP-1.6S" }),
+    );
+    expect(
+      facade.createChargePoint.mock.calls[0][0].soapCallbackUrl,
+    ).toBeUndefined();
+  });
+
+  it("cp.create still refuses a SOAP charge point without a callback URL when there is no public base", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const facade = {
+      createChargePoint: vi.fn().mockResolvedValue(undefined),
+    };
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+
+    const ack = await socket.emitRpc({
+      method: "cp.create",
+      params: {
+        cpId: "CP-1",
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+      },
+    });
+
+    expect(ack.ok).toBe(false);
+    if (ack.ok) return;
+    expect(ack.error.code).toBe("invalid_params");
+    expect(facade.createChargePoint).not.toHaveBeenCalled();
+  });
+
+  it("server.info reports the SOAP public base the daemon derives callback URLs from (#183)", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, {
+      registry,
+      bus,
+      database: null,
+      serverInfo: {
+        version: "1.2.3",
+        soap: {
+          publicBaseUrl: "https://a1b2.ngrok-free.app",
+          path: "/ocpp/soap",
+          tunnel: { provider: "ngrok", mode: "spawn" },
+        },
+      },
+    });
+    io.connect(socket);
+
+    const ack = await socket.emitRpc({ method: "server.info", params: {} });
+    expect(ack.ok).toBe(true);
+    if (!ack.ok) return;
+    expect(ack.result).toEqual({
+      version: "1.2.3",
+      soap: {
+        publicBaseUrl: "https://a1b2.ngrok-free.app",
+        path: "/ocpp/soap",
+        tunnel: { provider: "ngrok", mode: "spawn" },
+      },
+    });
+  });
+
+  it("server.info answers without a public base when the daemon has none", async () => {
+    const bus = new EventBus();
+    const registry = new CPRegistry(bus, null);
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+
+    registerSocketHandlers(io as never, { registry, bus, database: null });
+    io.connect(socket);
+
+    const ack = await socket.emitRpc({ method: "server.info", params: {} });
+    expect(ack.ok).toBe(true);
+    if (!ack.ok) return;
+    expect(ack.result).toMatchObject({
+      soap: { publicBaseUrl: null, path: "/ocpp/soap", tunnel: null },
+    });
+    expect(typeof (ack.result as { version: unknown }).version).toBe("string");
   });
 
   it("cp.list tolerates a CP snapshot with no config instead of failing the whole list", async () => {

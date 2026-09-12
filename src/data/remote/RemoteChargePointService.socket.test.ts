@@ -1102,6 +1102,26 @@ describe("RemoteChargePointService socket.io rpc", () => {
     }
   });
 
+  it("getServerInfo asks the daemon for server.info (#183)", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const promise = service.getServerInfo();
+    const ack = nextAck();
+
+    expect(ack.event).toBe("rpc");
+    expect(ack.request).toEqual({ method: "server.info", params: {} });
+
+    const info = {
+      version: "1.2.3",
+      soap: {
+        publicBaseUrl: "https://a1b2.ngrok-free.app",
+        path: "/ocpp/soap",
+        tunnel: { provider: "ngrok", mode: "spawn" },
+      },
+    };
+    ack.resolve({ ok: true, result: info });
+    await expect(promise).resolves.toEqual(info);
+  });
+
   it("resolves rpc calls from an ok ack", async () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700");
     const promise = service.connect("cp-1");

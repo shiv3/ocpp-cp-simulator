@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
 import * as path from "path";
 import * as fs from "fs";
-import type { CLIOptions, ChargePointInitOptions } from "./types";
+import type {
+  CLIOptions,
+  ChargePointInitOptions,
+  SoapTunnelConfig,
+} from "./types";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
@@ -11,6 +15,7 @@ import {
   resolveSoapCallbackUrl,
   soapCallbackUrlSuffixWarning,
 } from "./soapCallbackUrl";
+import { DEFAULT_SOAP_PATH } from "./soapPath";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { hasIdPatternPlaceholder } from "../protocol";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
@@ -218,7 +223,16 @@ export function parseArgs(argv: string[]): CLIOptions {
   const extraWsSubprotocols: string[] = [];
   let soapCallbackUrl: string | null = null;
   let soapPublicBaseUrl: string | null = null;
-  let soapPath = "/ocpp/soap";
+  let soapTunnel: "none" | "ngrok" = "none";
+  const ngrok: Record<
+    "--ngrok-auth-token" | "--ngrok-domain" | "--ngrok-api-url",
+    string | null
+  > = {
+    "--ngrok-auth-token": null,
+    "--ngrok-domain": null,
+    "--ngrok-api-url": null,
+  };
+  let soapPath: string = DEFAULT_SOAP_PATH;
   let securityProfile: CLIOptions["securityProfile"];
   let authorizationKey: string | undefined;
   let tlsCaPath: string | undefined;
@@ -473,6 +487,33 @@ export function parseArgs(argv: string[]): CLIOptions {
         soapPublicBaseUrl = next;
         i++;
         break;
+      case "--soap-tunnel":
+        if (next !== "none" && next !== "ngrok") {
+          process.stderr.write(
+            "Error: --soap-tunnel must be one of: none, ngrok\n",
+          );
+          process.exit(1);
+        }
+        soapTunnel = next;
+        i++;
+        break;
+      case "--ngrok-auth-token":
+      case "--ngrok-domain":
+      case "--ngrok-api-url": {
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(`Error: ${arg} requires a value\n`);
+          process.exit(1);
+        }
+        if (arg === "--ngrok-api-url" && !isHttpUrl(next)) {
+          process.stderr.write(
+            "Error: --ngrok-api-url must be an absolute http(s) URL\n",
+          );
+          process.exit(1);
+        }
+        ngrok[arg] = next;
+        i++;
+        break;
+      }
       case "--soap-path":
         if (!next || next.startsWith("--") || !next.startsWith("/")) {
           process.stderr.write(
@@ -652,6 +693,63 @@ export function parseArgs(argv: string[]): CLIOptions {
 
   const isServerMode = daemon || httpPort != null || webConsoleEnabled;
 
+  // --soap-tunnel (#183). The ngrok options only mean something with the
+  // provider selected; attach mode reads an agent someone else configured,
+  // so token and domain cannot apply there. The callback server is the
+  // daemon's listener, hence server mode. An explicit callback / public base
+  // URL is refused alongside it: the tunnel *is* the public base.
+  const ngrokApiUrl = ngrok["--ngrok-api-url"];
+  const ngrokAuthToken = ngrok["--ngrok-auth-token"];
+  const ngrokDomain = ngrok["--ngrok-domain"];
+  let soapTunnelConfig: SoapTunnelConfig | null = null;
+  if (soapTunnel === "none") {
+    const stray = Object.entries(ngrok).find(([, value]) => value != null);
+    if (stray) {
+      process.stderr.write(`Error: ${stray[0]} requires --soap-tunnel ngrok\n`);
+      process.exit(1);
+    }
+  } else {
+    if (ngrokApiUrl && (ngrokAuthToken || ngrokDomain)) {
+      process.stderr.write(
+        "Error: --ngrok-auth-token and --ngrok-domain cannot be combined with --ngrok-api-url " +
+          "(attach mode uses the running agent as configured)\n",
+      );
+      process.exit(1);
+    }
+    if (!isSoapVersion(ocppVersion)) {
+      process.stderr.write(
+        "Error: --soap-tunnel requires a SOAP --ocpp-version (OCPP-1.2, OCPP-1.5 or OCPP-1.6S)\n",
+      );
+      process.exit(1);
+    }
+    if (!isServerMode) {
+      process.stderr.write(
+        "Error: --soap-tunnel requires server mode (--daemon, --http-port or --web-console); " +
+          "the SOAP callback endpoint is served by the daemon\n",
+      );
+      process.exit(1);
+    }
+    const explicit = [
+      ["--soap-callback-url", soapCallbackUrl],
+      ["--soap-public-base-url", soapPublicBaseUrl],
+    ].find(([, value]) => value != null);
+    if (explicit) {
+      // Two sources for the same public base is a contradiction, not a
+      // precedence: the operator either knows the origin or asks for one.
+      process.stderr.write(
+        `Error: --soap-tunnel cannot be combined with ${explicit[0]} ` +
+          "(the tunnel is what provides the public base)\n",
+      );
+      process.exit(1);
+    }
+    soapTunnelConfig = {
+      provider: "ngrok",
+      authToken: ngrokAuthToken,
+      domain: ngrokDomain,
+      apiUrl: ngrokApiUrl,
+    };
+  }
+
   if (metrics && healthPath === "/metrics") {
     // The health route is matched first, so the enabled Prometheus endpoint
     // would be unreachable while both were advertised as working.
@@ -781,6 +879,18 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
+  // A tunnel forwards the whole listener — control plane, console, MCP —
+  // to the internet, so a loopback bind behind it is a remote bind in
+  // practice and the same gate applies (#183).
+  if (soapTunnelConfig && !webConsoleBasicAuth && !unsafeRemote) {
+    process.stderr.write(
+      "Error: --soap-tunnel exposes the daemon listener publicly; configure " +
+        "--web-console-basic-auth-user and --web-console-basic-auth-pass, " +
+        "or pass --unsafe-remote to override.\n",
+    );
+    process.exit(1);
+  }
+
   // Same all-or-nothing rule for the client-side credentials.
   if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
     process.stderr.write(
@@ -818,8 +928,9 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
 
   // Resolve the SOAP callback URL by precedence: an explicit --soap-callback-url
-  // wins; otherwise --soap-public-base-url derives it. (A tunnel provider such
-  // as ngrok would slot in below the public base — see soapCallbackUrl.ts.)
+  // wins; otherwise --soap-public-base-url derives it. With --soap-tunnel the
+  // public base is only known once the tunnel is up, so main() resolves it
+  // then — see soapCallbackUrl.ts for the ladder.
   const resolvedSoapCallbackUrl = resolveSoapCallbackUrl({
     explicitCallbackUrl: soapCallbackUrl,
     publicBaseUrl: soapPublicBaseUrl,
@@ -880,6 +991,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     soapCallbackUrl: resolvedSoapCallbackUrl,
     soapCallbackUrlExplicit: soapCallbackUrl,
     soapPublicBaseUrl,
+    soapTunnel: soapTunnelConfig,
     soapPath,
     securityProfile,
     authorizationKey,
@@ -1076,6 +1188,31 @@ Options:
                            reach; the full callback URL is derived as
                            {base}{soap-path}/{cp-id}/ChargePointService. An
                            explicit --soap-callback-url takes precedence.
+  --soap-tunnel <none|ngrok>
+                           Expose the SOAP callback endpoint through a tunnel
+                           and derive the callback URL from its public origin
+                           (default: none). Server mode only; cannot be
+                           combined with --soap-callback-url or
+                           --soap-public-base-url. ngrok runs the ngrok binary
+                           from PATH; the public URL is logged at startup and
+                           reported by the server.info RPC, and every SOAP
+                           charge point created without a callback URL gets
+                           one derived from it. The whole listener is then
+                           reachable from the internet, so the tunnel requires
+                           --web-console-basic-auth-user/pass or
+                           --unsafe-remote, like a non-loopback bind.
+  --ngrok-auth-token <token>
+                           ngrok authtoken, handed to the agent through its
+                           environment (never on its command line or in logs).
+                           Without it the agent uses NGROK_AUTHTOKEN or its
+                           own config file.
+  --ngrok-domain <domain>  Reserved ngrok domain to request (ngrok http --url).
+                           Free-tier URLs change between runs.
+  --ngrok-api-url <url>    Attach to an already-running ngrok agent (e.g. a
+                           Docker sidecar: http://ngrok:4040) instead of
+                           spawning one; the https tunnel forwarding to the
+                           listener port is used. Incompatible with the two
+                           options above.
   --soap-path <path>       Base path reserved for the SOAP callback server
                            (default: /ocpp/soap).
                            OCPP-S has no per-message auth; rely on
@@ -1145,7 +1282,10 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
     vendor: options.vendor,
     model: options.model,
     ocppVersion: options.ocppVersion,
-    soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+    // Only an explicit --soap-callback-url travels with the charge point; a
+    // --soap-public-base-url / --soap-tunnel origin is handed to the registry,
+    // which derives (and never persists) the URL at instantiation (#183).
+    soapCallbackUrl: options.soapCallbackUrlExplicit ?? undefined,
     soapPath: options.soapPath,
     basicAuth: options.basicAuth,
     extraWsHeaders: options.extraWsHeaders,
@@ -1302,6 +1442,8 @@ async function main(): Promise<void> {
       bootstrapIdPattern: options.cpIdPattern ?? undefined,
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
+      soapPath: options.soapPath,
+      soapTunnel: options.soapTunnel,
       metrics: options.metrics,
       metricsNoAuth: options.metricsNoAuth,
       watch: options.watch,

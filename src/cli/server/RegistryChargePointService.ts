@@ -846,7 +846,14 @@ function toInitOptions(
     idTagFile: params.idTagFile,
     idTagDistribution: params.idTagDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
-    soapCallbackUrl: params.soapCallbackUrl ?? existing?.soapCallbackUrl,
+    // A derived URL is the registry's, not the operator's: dropping it here
+    // lets the update re-derive from the current base instead of freezing
+    // one run's tunnel origin into the row (#183).
+    soapCallbackUrl:
+      params.soapCallbackUrl ??
+      (existing?.soapCallbackUrlDerived
+        ? undefined
+        : existing?.soapCallbackUrl),
     soapPath: params.soapPath ?? existing?.soapPath,
     ocppVersion: params.ocppVersion ?? existing?.ocppVersion ?? "OCPP-1.6J",
     connectors: params.connectors ?? existing?.connectors ?? 1,
@@ -900,6 +907,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           wsUrl: status.config.wsUrl,
           centralSystemUrl: status.config.centralSystemUrl,
           soapCallbackUrl: status.config.soapCallbackUrl,
+          soapCallbackUrlDerived: status.config.soapCallbackUrlDerived,
           soapPath: status.config.soapPath,
           ocppVersion: status.config.ocppVersion,
           connectors: status.config.connectors,

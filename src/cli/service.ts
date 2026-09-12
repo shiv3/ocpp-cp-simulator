@@ -706,6 +706,10 @@ export class CLIChargePointService {
         model: options.model,
         ocppVersion: options.ocppVersion,
         soapCallbackUrl: options.soapCallbackUrl ?? undefined,
+        // parseArgs resolved it from --soap-public-base-url: same status as
+        // a registry-derived URL, so the console treats both alike.
+        soapCallbackUrlDerived:
+          !options.soapCallbackUrlExplicit && options.soapCallbackUrl != null,
         soapPath: options.soapPath,
         basicAuth: options.basicAuth,
         extraWsHeaders: options.extraWsHeaders,
@@ -850,6 +854,7 @@ export class CLIChargePointService {
         basicAuth: this._init.basicAuth,
         centralSystemUrl: this._init.centralSystemUrl,
         soapCallbackUrl: this._init.soapCallbackUrl,
+        soapCallbackUrlDerived: this._init.soapCallbackUrlDerived,
         soapPath: this._init.soapPath,
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
         securityProfile: this._init.securityProfile,

@@ -15,6 +15,7 @@ import { mockReactFlow } from "../test/setup.dom";
 import ChargePointConfigModal, {
   defaultChargePointConfig,
   type ChargePointConfig,
+  type SoapPublicBase,
 } from "./ChargePointConfigModal";
 
 // Radix Select relies on a couple of DOM APIs jsdom doesn't implement:
@@ -54,6 +55,7 @@ async function renderModal(props: {
   isNewChargePoint?: boolean;
   initialConfig?: ChargePointConfig;
   onSave?: (config: ChargePointConfig) => void;
+  soapPublicBase?: SoapPublicBase | null;
 }): Promise<{ container: HTMLElement; root: Root }> {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -67,6 +69,7 @@ async function renderModal(props: {
         initialConfig={props.initialConfig ?? baseConfig()}
         isNewChargePoint={props.isNewChargePoint ?? true}
         mode={props.mode ?? "remote"}
+        soapPublicBase={props.soapPublicBase ?? null}
       />,
     );
   });
@@ -448,6 +451,113 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     expect(document.body.textContent).toContain(
       "requires a client certificate and private key",
     );
+  });
+
+  describe("SOAP public base from the daemon (#183)", () => {
+    const tunnelBase: SoapPublicBase = {
+      publicBaseUrl: "https://a1b2.ngrok-free.app",
+      path: "/ocpp/soap",
+      tunnel: { provider: "ngrok", mode: "spawn" },
+    };
+
+    it("makes the callback URL optional and previews the derived one", async () => {
+      const onSave = vi.fn();
+      const rendered = await renderModal({
+        mode: "remote",
+        onSave,
+        initialConfig: baseConfig({ ocppVersion: "OCPP-1.6S" }),
+        soapPublicBase: tunnelBase,
+      });
+      roots.push(rendered.root);
+
+      const input = inputById("soapCallbackUrl");
+      expect(input.required).toBe(false);
+      expect(input.placeholder).toBe(
+        "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+      );
+      expect(document.body.textContent).toContain("ngrok tunnel");
+
+      await act(async () => {
+        saveButton().click();
+      });
+
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const saved = onSave.mock.calls[0][0] as ChargePointConfig;
+      // Left to the daemon, which derives it from the current base.
+      expect(saved.soapCallbackUrl).toBeUndefined();
+      expect(document.body.textContent).not.toContain(
+        "SOAP Callback URL is required",
+      );
+    });
+
+    it("previews with the charge point's own SOAP path when one is typed", async () => {
+      const rendered = await renderModal({
+        mode: "remote",
+        initialConfig: baseConfig({ ocppVersion: "OCPP-1.6S" }),
+        soapPublicBase: tunnelBase,
+      });
+      roots.push(rendered.root);
+
+      await act(async () => {
+        setValue(inputById("soapPath"), "/custom");
+      });
+
+      expect(inputById("soapCallbackUrl").placeholder).toBe(
+        "https://a1b2.ngrok-free.app/custom/CP-1/ChargePointService",
+      );
+    });
+
+    it("still requires the callback URL when the daemon has no public base", async () => {
+      const onSave = vi.fn();
+      const rendered = await renderModal({
+        mode: "remote",
+        onSave,
+        initialConfig: baseConfig({ ocppVersion: "OCPP-1.6S" }),
+        soapPublicBase: {
+          publicBaseUrl: null,
+          path: "/ocpp/soap",
+          tunnel: null,
+        },
+      });
+      roots.push(rendered.root);
+
+      await act(async () => {
+        saveButton().click();
+      });
+
+      expect(onSave).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain(
+        "SOAP Callback URL is required",
+      );
+    });
+
+    it("does not send a derived URL back as an explicit one on edit", async () => {
+      const onSave = vi.fn();
+      const rendered = await renderModal({
+        mode: "remote",
+        isNewChargePoint: false,
+        onSave,
+        initialConfig: baseConfig({
+          ocppVersion: "OCPP-1.6S",
+          soapCallbackUrl:
+            "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
+          soapCallbackUrlDerived: true,
+        }),
+        soapPublicBase: tunnelBase,
+      });
+      roots.push(rendered.root);
+
+      // The derived value is shown as the placeholder, not as a value the
+      // form would send back and freeze into the charge point.
+      expect(inputById("soapCallbackUrl").value).toBe("");
+
+      await act(async () => {
+        saveButton().click();
+      });
+
+      const saved = onSave.mock.calls[0][0] as ChargePointConfig;
+      expect(saved.soapCallbackUrl).toBeUndefined();
+    });
   });
 
   it("maps soap fields on save and omits blank soap callback URL on non-SOAP versions", async () => {

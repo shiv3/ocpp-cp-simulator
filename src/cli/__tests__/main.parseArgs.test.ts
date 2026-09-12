@@ -43,6 +43,7 @@ function runParseArgs(args: string[]) {
     "  unsafeRemote: options.unsafeRemote,",
     "  soapCallbackUrl: options.soapCallbackUrl,",
     "  soapPath: options.soapPath,",
+    "  soapTunnel: options.soapTunnel,",
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "  traceOutput: options.traceOutput,",
     "  watch: options.watch,",
@@ -524,6 +525,212 @@ describe("parseArgs --ocpp-version", () => {
     expect(result.stderr).toContain(
       "Error: --soap-public-base-url must be an absolute http(s) URL",
     );
+  });
+
+  describe("--soap-tunnel ngrok (#183)", () => {
+    const soapDaemon = [
+      "--daemon",
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:8180/steve/services/CentralSystemService",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      // The tunnel forwards the whole listener, so it is subject to the same
+      // gate as a non-loopback bind.
+      "--unsafe-remote",
+    ];
+
+    it("refuses the tunnel without Basic Auth or --unsafe-remote, like a non-loopback bind", () => {
+      const result = runParseArgs([
+        ...soapDaemon.filter((arg) => arg !== "--unsafe-remote"),
+        "--soap-tunnel",
+        "ngrok",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("--soap-tunnel");
+      expect(result.stderr).toContain("--web-console-basic-auth-user");
+      expect(result.stderr).toContain("--unsafe-remote");
+    });
+
+    it("accepts the tunnel with web-console Basic Auth", () => {
+      const result = runParseArgs([
+        ...soapDaemon.filter((arg) => arg !== "--unsafe-remote"),
+        "--soap-tunnel",
+        "ngrok",
+        "--web-console-basic-auth-user",
+        "operator",
+        "--web-console-basic-auth-pass",
+        "secret",
+      ]);
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        soapTunnel: { provider: "ngrok" },
+        hasWebConsoleBasicAuth: true,
+      });
+    });
+
+    it("defaults to no tunnel", () => {
+      const result = runParseArgs(soapDaemon);
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ soapTunnel: null });
+    });
+
+    it("accepts the ngrok provider with its options in server mode", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--ngrok-auth-token",
+        "tok-123",
+        "--ngrok-domain",
+        "cp.example.ngrok.app",
+      ]);
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        soapTunnel: {
+          provider: "ngrok",
+          authToken: "tok-123",
+          domain: "cp.example.ngrok.app",
+          apiUrl: null,
+        },
+        // Resolved later, once the tunnel is up.
+        soapCallbackUrl: null,
+      });
+      expect(result.stderr).not.toContain("tok-123");
+    });
+
+    it("accepts attach mode through --ngrok-api-url", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--ngrok-api-url",
+        "http://ngrok:4040",
+      ]);
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        soapTunnel: { provider: "ngrok", apiUrl: "http://ngrok:4040" },
+      });
+    });
+
+    it("rejects an unknown provider", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "cloudflare",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --soap-tunnel must be one of: none, ngrok",
+      );
+    });
+
+    it("rejects a non-http(s) --ngrok-api-url", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--ngrok-api-url",
+        "ngrok:4040",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --ngrok-api-url must be an absolute http(s) URL",
+      );
+    });
+
+    it("rejects --ngrok-* options without --soap-tunnel ngrok", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--ngrok-domain",
+        "cp.example.ngrok.app",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --ngrok-domain requires --soap-tunnel ngrok",
+      );
+    });
+
+    it("rejects agent options in attach mode", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--ngrok-api-url",
+        "http://ngrok:4040",
+        "--ngrok-auth-token",
+        "tok-123",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --ngrok-auth-token and --ngrok-domain cannot be combined with --ngrok-api-url",
+      );
+      expect(result.stderr).not.toContain("tok-123");
+    });
+
+    it("rejects a tunnel for a non-SOAP OCPP version", () => {
+      const result = runParseArgs([
+        "--daemon",
+        "--cp-id",
+        "CP-1",
+        "--ws-url",
+        "ws://csms.example.test/ocpp/",
+        "--ocpp-version",
+        "OCPP-1.6J",
+        "--soap-tunnel",
+        "ngrok",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --soap-tunnel requires a SOAP --ocpp-version (OCPP-1.2, OCPP-1.5 or OCPP-1.6S)",
+      );
+    });
+
+    it("rejects a tunnel outside server mode", () => {
+      const result = runParseArgs([
+        "--cp-id",
+        "CP-1",
+        "--ws-url",
+        "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        "--ocpp-version",
+        "OCPP-1.6S",
+        "--soap-tunnel",
+        "ngrok",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --soap-tunnel requires server mode (--daemon, --http-port or --web-console)",
+      );
+    });
+
+    it("refuses a tunnel together with an explicit public base URL", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--soap-public-base-url",
+        "https://abcd.ngrok-free.app",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --soap-tunnel cannot be combined with --soap-public-base-url",
+      );
+    });
+
+    it("refuses a tunnel together with an explicit callback URL", () => {
+      const result = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--soap-callback-url",
+        "https://explicit.test/ocpp/soap/CP-1/ChargePointService",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --soap-tunnel cannot be combined with --soap-callback-url",
+      );
+    });
   });
 
   it("rejects unsupported versions", () => {

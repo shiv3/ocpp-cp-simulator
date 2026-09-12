@@ -25,6 +25,12 @@ import type {
   StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import type {
+  MeterReadingContext,
+  StartTransactionCommandOptions,
+  StopTransactionCommandOptions,
+  TransactionUpdateOptions,
+} from "../../cp/domain/connector/Transaction";
+import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
@@ -238,12 +244,25 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     tagId: string,
+    options?: StartTransactionCommandOptions,
   ): Promise<void> {
-    this.requireService(id).startTransaction(connectorId, tagId);
+    this.requireService(id).startTransaction(connectorId, tagId, options);
   }
 
-  async stopTransaction(id: string, connectorId: number): Promise<void> {
-    this.requireService(id).stopTransaction(connectorId);
+  async stopTransaction(
+    id: string,
+    connectorId: number,
+    options?: StopTransactionCommandOptions,
+  ): Promise<void> {
+    this.requireService(id).stopTransaction(connectorId, options);
+  }
+
+  async sendTransactionUpdate(
+    id: string,
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): Promise<void> {
+    this.requireService(id).sendTransactionUpdate(connectorId, options);
   }
 
   async sendStatusNotification(
@@ -289,8 +308,12 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).setMeterValue(connectorId, value);
   }
 
-  async sendMeterValue(id: string, connectorId: number): Promise<void> {
-    this.requireService(id).sendMeterValue(connectorId);
+  async sendMeterValue(
+    id: string,
+    connectorId: number,
+    context?: MeterReadingContext,
+  ): Promise<void> {
+    this.requireService(id).sendMeterValue(connectorId, context);
   }
 
   async removeConnector(id: string, connectorId: number): Promise<void> {

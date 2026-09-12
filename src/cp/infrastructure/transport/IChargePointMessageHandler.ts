@@ -5,6 +5,7 @@ import type {
 } from "../../domain/types/OcppTypes";
 import type { ReadingContext } from "../../domain/connector/MeterValueBuilder";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
+import type { TransactionUpdateOptions } from "../../domain/connector/Transaction";
 import type { DataTransferHandler } from "./handlers";
 
 export interface IChargePointMessageHandler {
@@ -24,6 +25,12 @@ export interface IChargePointMessageHandler {
   ): void;
   authorize(tagId: string): void;
   sendTransactionEvent(event: TransactionLifecycleEvent): void;
+  /** A driven OCPP 2.x TransactionEvent(Updated) (#335). 1.6 handlers have
+   *  no such message and log a warning instead of sending anything. */
+  sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void;
   sendMeterValue(
     transactionId: number | undefined,
     connectorId: number,

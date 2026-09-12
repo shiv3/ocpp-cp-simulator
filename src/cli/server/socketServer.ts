@@ -15,8 +15,17 @@ import {
   requireObject,
   requirePositiveInt,
   optionalString,
+  optionalBoolean,
+  optionalEnum,
+  requireEnum,
   requireString,
 } from "../jsonMode";
+import {
+  METER_READING_CONTEXTS,
+  STOP_REASONS,
+  TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "../../cp/domain/connector/Transaction";
 import type { CLIChargePointService } from "../service";
 import {
   EXPLICIT_METHODS,
@@ -1616,6 +1625,18 @@ async function dispatchFacadeCpCommand(
           // idTag pool. Requiring it here would have rejected the call before
           // the pool could be consulted at all.
           optionalString(params, "tagId"),
+          {
+            triggerReason: optionalEnum(
+              params,
+              "triggerReason",
+              TRANSACTION_EVENT_TRIGGER_REASONS,
+            ),
+            chargingState: optionalEnum(
+              params,
+              "chargingState",
+              TRANSACTION_CHARGING_STATES,
+            ),
+          },
         ),
       );
       return handled(undefined);
@@ -1626,6 +1647,38 @@ async function dispatchFacadeCpCommand(
         chargePointService.stopTransaction(
           id,
           requirePositiveInt(params, "connector"),
+          {
+            reason: optionalEnum(params, "reason", STOP_REASONS),
+            triggerReason: optionalEnum(
+              params,
+              "triggerReason",
+              TRANSACTION_EVENT_TRIGGER_REASONS,
+            ),
+          },
+        ),
+      );
+      return handled(undefined);
+    }
+    case "transaction_event": {
+      const id = requireFacadeCpId(cpId, rawParams);
+      await runFacadeOperation(() =>
+        chargePointService.sendTransactionUpdate(
+          id,
+          requirePositiveInt(params, "connector"),
+          {
+            triggerReason: requireEnum(
+              params,
+              "triggerReason",
+              TRANSACTION_EVENT_TRIGGER_REASONS,
+            ),
+            chargingState: optionalEnum(
+              params,
+              "chargingState",
+              TRANSACTION_CHARGING_STATES,
+            ),
+            meterValues: optionalBoolean(params, "meterValues"),
+            context: optionalEnum(params, "context", METER_READING_CONTEXTS),
+          },
         ),
       );
       return handled(undefined);
@@ -1720,6 +1773,7 @@ async function dispatchFacadeCpCommand(
         chargePointService.sendMeterValue(
           id,
           requirePositiveInt(params, "connector"),
+          optionalEnum(params, "context", METER_READING_CONTEXTS),
         ),
       );
       return handled(undefined);

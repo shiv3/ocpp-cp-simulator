@@ -49,6 +49,7 @@ exports[`OCPP 2.0.1 transaction events sends TransactionEvent and MeterValues wi
         {
           "sampledValue": [
             {
+              "context": "Sample.Periodic",
               "measurand": "Energy.Active.Import.Register",
               "unitOfMeasure": {
                 "unit": "Wh",
@@ -56,6 +57,7 @@ exports[`OCPP 2.0.1 transaction events sends TransactionEvent and MeterValues wi
               "value": 0,
             },
             {
+              "context": "Sample.Periodic",
               "measurand": "Power.Active.Import",
               "unitOfMeasure": {
                 "unit": "W",

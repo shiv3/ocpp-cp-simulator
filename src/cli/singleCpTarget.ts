@@ -28,6 +28,12 @@ import type {
   OCPPStatus,
   StatusNotificationOptions,
 } from "../cp/domain/types/OcppTypes";
+import type {
+  MeterReadingContext,
+  StartTransactionCommandOptions,
+  StopTransactionCommandOptions,
+  TransactionUpdateOptions,
+} from "../cp/domain/connector/Transaction";
 
 export interface FacadeSingleCpTarget {
   readonly chargePointService: ChargePointService;
@@ -49,15 +55,29 @@ export interface SingleCpCommandOps {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   getStatus(): Promise<ChargePointStatus>;
-  startTransaction(connectorId: number, tagId: string): Promise<void>;
+  startTransaction(
+    connectorId: number,
+    tagId: string,
+    options?: StartTransactionCommandOptions,
+  ): Promise<void>;
   setAutoTrafficConfig(
     connectorId: number,
     config: AutoTrafficConfig,
   ): Promise<void>;
   getAutoTrafficConfig(connectorId: number): Promise<AutoTrafficConfig>;
-  stopTransaction(connectorId: number): Promise<void>;
+  stopTransaction(
+    connectorId: number,
+    options?: StopTransactionCommandOptions,
+  ): Promise<void>;
+  sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): Promise<void>;
   setMeterValue(connectorId: number, value: number): Promise<void>;
-  sendMeterValue(connectorId: number): Promise<void>;
+  sendMeterValue(
+    connectorId: number,
+    context?: MeterReadingContext,
+  ): Promise<void>;
   sendHeartbeat(): Promise<void>;
   startHeartbeat(intervalSeconds: number): Promise<void>;
   stopHeartbeat(): Promise<void>;
@@ -194,22 +214,25 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
       service.disconnect();
     },
     getStatus: async () => service.getStatus(),
-    startTransaction: async (connectorId, tagId) => {
-      service.startTransaction(connectorId, tagId);
+    startTransaction: async (connectorId, tagId, options) => {
+      service.startTransaction(connectorId, tagId, options);
     },
     setAutoTrafficConfig: async (connectorId, config) => {
       service.setAutoTrafficConfig(connectorId, config);
     },
     getAutoTrafficConfig: async (connectorId) =>
       service.getAutoTrafficConfig(connectorId),
-    stopTransaction: async (connectorId) => {
-      service.stopTransaction(connectorId);
+    stopTransaction: async (connectorId, options) => {
+      service.stopTransaction(connectorId, options);
+    },
+    sendTransactionUpdate: async (connectorId, options) => {
+      service.sendTransactionUpdate(connectorId, options);
     },
     setMeterValue: async (connectorId, value) => {
       service.setMeterValue(connectorId, value);
     },
-    sendMeterValue: async (connectorId) => {
-      service.sendMeterValue(connectorId);
+    sendMeterValue: async (connectorId, context) => {
+      service.sendMeterValue(connectorId, context);
     },
     sendHeartbeat: async () => {
       service.sendHeartbeat();
@@ -323,19 +346,22 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       if (!snapshot) throw new Error(`cpId not found: ${cpId}`);
       return snapshotToCliStatus(snapshot);
     },
-    startTransaction: (connectorId, tagId) =>
-      service.startTransaction(cpId, connectorId, tagId),
+    startTransaction: (connectorId, tagId, options) =>
+      service.startTransaction(cpId, connectorId, tagId, options),
     setAutoTrafficConfig: (connectorId, config) =>
       service.setAutoTrafficConfig(cpId, connectorId, config),
     getAutoTrafficConfig: async (connectorId) =>
       (await service.getAutoTrafficConfig(cpId, connectorId)) ?? {
         ...defaultAutoTrafficConfig,
       },
-    stopTransaction: (connectorId) =>
-      service.stopTransaction(cpId, connectorId),
+    stopTransaction: (connectorId, options) =>
+      service.stopTransaction(cpId, connectorId, options),
+    sendTransactionUpdate: (connectorId, options) =>
+      service.sendTransactionUpdate(cpId, connectorId, options),
     setMeterValue: (connectorId, value) =>
       service.setMeterValue(cpId, connectorId, value),
-    sendMeterValue: (connectorId) => service.sendMeterValue(cpId, connectorId),
+    sendMeterValue: (connectorId, context) =>
+      service.sendMeterValue(cpId, connectorId, context),
     sendHeartbeat: () => service.sendHeartbeat(cpId),
     startHeartbeat: (intervalSeconds) =>
       service.startHeartbeat(cpId, intervalSeconds),

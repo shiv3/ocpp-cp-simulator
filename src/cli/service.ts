@@ -15,6 +15,13 @@ import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServ
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
+import {
+  splitStopReason,
+  type MeterReadingContext,
+  type StartTransactionCommandOptions,
+  type StopTransactionCommandOptions,
+  type TransactionUpdateOptions,
+} from "../cp/domain/connector/Transaction";
 import { LogType } from "../cp/shared/Logger";
 import { AutoTrafficRunner } from "../cp/application/services/AutoTrafficRunner";
 import {
@@ -941,25 +948,51 @@ export class CLIChargePointService {
     return this._chargePoint.isSoapChargePoint();
   }
 
-  startTransaction(connectorId: number, tagId?: string): void {
+  startTransaction(
+    connectorId: number,
+    tagId?: string,
+    options: StartTransactionCommandOptions = {},
+  ): void {
     // An explicit tag always wins; the pool only fills a gap, and a charge
     // point without one keeps the historical literal so nothing changes for a
     // caller that never configured a pool.
     const resolved =
       tagId ?? this._chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
-    this._chargePoint.startTransaction(resolved, connectorId);
+    this._chargePoint.startTransaction(
+      resolved,
+      connectorId,
+      undefined,
+      undefined,
+      options,
+    );
   }
 
-  stopTransaction(connectorId: number): void {
-    this._chargePoint.stopTransaction(connectorId);
+  stopTransaction(
+    connectorId: number,
+    options: StopTransactionCommandOptions = {},
+  ): void {
+    // #335: one `reason` parameter feeds both encoders — see splitStopReason.
+    const { stopReason, stoppedReason } = splitStopReason(options.reason);
+    this._chargePoint.stopTransaction(connectorId, stopReason, {
+      triggerReason: options.triggerReason,
+      stoppedReason,
+    });
+  }
+
+  /** Drive an OCPP 2.x TransactionEvent(Updated) (#335). */
+  sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    this._chargePoint.sendTransactionUpdate(connectorId, options);
   }
 
   setMeterValue(connectorId: number, value: number): void {
     this._chargePoint.setMeterValue(connectorId, value);
   }
 
-  sendMeterValue(connectorId: number): void {
-    this._chargePoint.sendMeterValue(connectorId);
+  sendMeterValue(connectorId: number, context?: MeterReadingContext): void {
+    this._chargePoint.sendMeterValue(connectorId, context);
   }
 
   sendHeartbeat(): void {

@@ -26,6 +26,12 @@ import {
   wireSimulatorConfigSchema,
 } from "./events";
 import { subscribeResultSchema } from "./envelope";
+import {
+  METER_READING_CONTEXTS,
+  STOP_REASONS,
+  TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "../cp/domain/connector/Transaction";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
@@ -385,10 +391,73 @@ export const METHODS = {
   start_transaction: {
     // `tagId` is optional since #299: without one the charge point draws from
     // its idTag pool, and falls back to the historical literal if it has none.
-    params: z.object({ connector: CONN_POS, tagId: STR_64K.optional() }),
+    // `triggerReason` / `chargingState` (#335) shape the OCPP 2.x Started
+    // event; OCPP 1.6 ignores them.
+    params: z.object({
+      connector: CONN_POS,
+      tagId: STR_64K.optional(),
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Started) triggerReason; default Authorized",
+        ),
+      chargingState: z
+        .enum(TRANSACTION_CHARGING_STATES)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Started) chargingState; default Charging",
+        ),
+    }),
     result: ANY,
   },
-  stop_transaction: { params: z.object({ connector: CONN_POS }), result: ANY },
+  stop_transaction: {
+    // `reason` (#335) accepts both the 1.6 StopTransaction.req and the 2.0.1
+    // stoppedReason vocabularies; each encoder reads the value it can spell.
+    params: z.object({
+      connector: CONN_POS,
+      reason: z
+        .enum(STOP_REASONS)
+        .optional()
+        .describe(
+          "StopTransaction.req reason (1.6) / TransactionEvent(Ended) stoppedReason (2.x); default Local",
+        ),
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Ended) triggerReason; default StopAuthorized",
+        ),
+    }),
+    result: ANY,
+  },
+  // #335: a driven OCPP 2.x TransactionEvent(Updated). On OCPP 1.6 the charge
+  // point logs a warning and sends nothing.
+  transaction_event: {
+    params: z.object({
+      connector: CONN_POS,
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .describe("TransactionEvent(Updated) triggerReason"),
+      chargingState: z
+        .enum(TRANSACTION_CHARGING_STATES)
+        .optional()
+        .describe("transactionInfo.chargingState to report"),
+      meterValues: z
+        .boolean()
+        .optional()
+        .describe(
+          "Attach the connector's current sampled values (MeterValuesSampledData) to the event",
+        ),
+      context: z
+        .enum(METER_READING_CONTEXTS)
+        .optional()
+        .describe(
+          "sampledValue.context for attached meter values; default Sample.Periodic",
+        ),
+    }),
+    result: ANY,
+  },
   authorize: { params: z.object({ tagId: STR_64K.optional() }), result: ANY },
 
   // -- status notifications --
@@ -427,7 +496,14 @@ export const METHODS = {
     params: z.object({ connector: CONN_POS, value: z.number().int().min(0) }),
     result: ANY,
   },
-  send_meter_value: { params: z.object({ connector: CONN_POS }), result: ANY },
+  send_meter_value: {
+    params: z.object({
+      connector: CONN_POS,
+      // #335: the ReadingContext the sampled values carry; default Sample.Periodic.
+      context: z.enum(METER_READING_CONTEXTS).optional(),
+    }),
+    result: ANY,
+  },
   remove_connector: { params: z.object({ connector: CONN_POS }), result: ANY },
   set_ev_settings: {
     params: z.object({ connector: CONN_POS, settings: OBJ() }),

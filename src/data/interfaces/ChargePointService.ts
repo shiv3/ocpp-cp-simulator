@@ -31,6 +31,12 @@ import type {
   ResolvedNetworkSimConfig,
 } from "../../cp/infrastructure/transport/network-sim/config";
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
+import type {
+  MeterReadingContext,
+  StartTransactionCommandOptions,
+  StopTransactionCommandOptions,
+  TransactionUpdateOptions,
+} from "../../cp/domain/connector/Transaction";
 
 export interface ConnectorSnapshot {
   id: number;
@@ -374,8 +380,20 @@ export interface ChargePointService {
     id: string,
     connectorId: number,
     tagId: string,
+    options?: StartTransactionCommandOptions,
   ): Promise<void>;
-  stopTransaction(id: string, connectorId: number): Promise<void>;
+  stopTransaction(
+    id: string,
+    connectorId: number,
+    options?: StopTransactionCommandOptions,
+  ): Promise<void>;
+  /** Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction
+   *  (#335). No-op with a warning on OCPP 1.6. */
+  sendTransactionUpdate(
+    id: string,
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): Promise<void>;
   sendStatusNotification(
     id: string,
     connectorId: number,
@@ -391,7 +409,11 @@ export interface ChargePointService {
   ): Promise<void>;
   sendSignCertificate(id: string, csr?: string): Promise<void>;
   setMeterValue(id: string, connectorId: number, value: number): Promise<void>;
-  sendMeterValue(id: string, connectorId: number): Promise<void>;
+  sendMeterValue(
+    id: string,
+    connectorId: number,
+    context?: MeterReadingContext,
+  ): Promise<void>;
   removeConnector(id: string, connectorId: number): Promise<void>;
 
   // Connector settings

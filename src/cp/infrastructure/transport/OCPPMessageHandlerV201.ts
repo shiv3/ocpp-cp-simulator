@@ -27,10 +27,12 @@ import type {
   StopTransactionReason,
   Transaction,
   TransactionChargingState,
+  TransactionUpdateOptions,
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
   type ReadingContext,
+  type SampledValue,
 } from "../../domain/connector/MeterValueBuilder";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
@@ -424,7 +426,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
-    transaction.cpLastTransactionEventChargingState = "Charging";
+    // #335: a driven start may name the state the transaction opens in
+    // (e.g. `EVConnected` for a cable-first session); `Charging` is the
+    // historical default and stays so for every existing caller.
+    const chargingState = transaction.startChargingState ?? "Charging";
+    transaction.cpLastTransactionEventChargingState = chargingState;
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
@@ -432,7 +438,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       seqNo,
       transactionInfo: {
         transactionId,
-        chargingState: "Charging",
+        chargingState,
         ...(transaction.remoteStartId !== undefined
           ? { remoteStartId: transaction.remoteStartId }
           : {}),
@@ -514,7 +520,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       seqNo,
       transactionInfo: {
         transactionId,
-        stoppedReason: toV201StoppedReason(transaction.stopReason),
+        // #335: an explicitly named 2.0.1 reason is sent verbatim; only an
+        // unnamed one is derived from the 1.6-shaped `stopReason`.
+        stoppedReason:
+          transaction.stoppedReason ??
+          toV201StoppedReason(transaction.stopReason),
       },
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
@@ -548,6 +558,110 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     else this.sendStopTransaction(event.transaction, event.connectorId);
   }
 
+  /**
+   * A driven TransactionEvent(Updated) (#335): the caller names the
+   * `triggerReason` and optionally the `chargingState`; `meterValues: true`
+   * attaches the connector's current sampled values, which is how 2.0.1
+   * carries in-transaction metering (`MeterValuePeriodic` / `MeterValueClock`).
+   * Shares the per-transaction seqNo with the status-driven events, and a
+   * named `chargingState` becomes the value those events de-duplicate
+   * against, so a later StatusNotification to the same state stays silent.
+   */
+  public sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    const connector = this._chargePoint.getConnector(connectorId);
+    const transaction = connector?.transaction;
+    if (!connector || !transaction || transaction.stopTime !== null) {
+      this._logger.warn(
+        `[v2.0.1] transaction_event (${options.triggerReason}): no active transaction on connector ${connectorId}`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (!transaction.cpTransactionId) {
+      transaction.cpTransactionId = crypto.randomUUID();
+    }
+    const messageId = this.generateMessageId();
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
+    if (options.chargingState) {
+      transaction.cpLastTransactionEventChargingState = options.chargingState;
+    }
+    connector.markTransactionChanged();
+    const timestamp = new Date().toISOString();
+
+    let meterValue: TransactionEventRequestV201["meterValue"];
+    if (options.meterValues) {
+      const measurands =
+        this._chargePoint.configuration.meterValuesSampledData();
+      const sampledValue = this.toV201SampledValues(
+        buildSampledValues(
+          connector,
+          measurands,
+          options.context ?? "Sample.Periodic",
+        ),
+      );
+      if (sampledValue.length > 0) {
+        meterValue = [
+          {
+            timestamp,
+            sampledValue: sampledValue as [
+              V201MeterValuesSampledValue,
+              ...V201MeterValuesSampledValue[],
+            ],
+          },
+        ];
+      } else {
+        this._logger.debug(
+          `[v2.0.1] transaction_event: no sampled values for connector ${connectorId}; sending without meterValue`,
+          LogType.METER_VALUE,
+        );
+      }
+    }
+
+    const payload: TransactionEventRequestV201 = {
+      eventType: "Updated",
+      timestamp,
+      triggerReason: options.triggerReason,
+      seqNo,
+      transactionInfo: {
+        transactionId: transaction.cpTransactionId,
+        ...(options.chargingState
+          ? { chargingState: options.chargingState }
+          : {}),
+      },
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
+      evse: v201TransactionEvse(connectorId),
+      ...(meterValue ? { meterValue } : {}),
+    };
+    this.send("TransactionEvent", messageId, payload);
+  }
+
+  /** 1.6-shaped builder output → 2.0.1 SampledValueType. `context` is
+   *  carried through since #335; it used to be computed and dropped. */
+  private toV201SampledValues(
+    sampledValues: SampledValue[],
+  ): V201MeterValuesSampledValue[] {
+    return sampledValues.map((sv) => ({
+      value: Number(sv.value),
+      measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
+      unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
+      ...(sv.context
+        ? { context: sv.context as V201MeterValuesSampledValue["context"] }
+        : {}),
+      // 2.0.1/2.1 SampledValueType carries `phase` (§2.36 / §2.44) — pass the
+      // builder's L1/L2/L3 tag through rather than letting a CSMS receive
+      // four indistinguishable samples per measurand (#301).
+      ...(sv.phase
+        ? { phase: sv.phase as V201MeterValuesSampledValue["phase"] }
+        : {}),
+    }));
+  }
+
   public sendMeterValue(
     _transactionId: number | undefined,
     connectorId: number,
@@ -573,17 +687,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
-    const sampledValue = sampledValues.map((sv) => ({
-      value: Number(sv.value),
-      measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
-      unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
-      // 2.0.1/2.1 SampledValueType carries `phase` (§2.36 / §2.44) — pass the
-      // builder's L1/L2/L3 tag through rather than letting a CSMS receive
-      // four indistinguishable samples per measurand (#301).
-      ...(sv.phase
-        ? { phase: sv.phase as V201MeterValuesSampledValue["phase"] }
-        : {}),
-    })) as [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]];
+    const sampledValue = this.toV201SampledValues(sampledValues) as [
+      V201MeterValuesSampledValue,
+      ...V201MeterValuesSampledValue[],
+    ];
 
     const payload: MeterValuesRequestV201 = {
       evseId: v201MeterEvseId(connectorId),

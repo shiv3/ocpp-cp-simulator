@@ -68,7 +68,10 @@ import {
 } from "./network-sim";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
-import { Transaction } from "../../domain/connector/Transaction";
+import {
+  Transaction,
+  type TransactionUpdateOptions,
+} from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
   type ReadingContext,
@@ -412,6 +415,19 @@ export class OCPPMessageHandler {
     if (event.phase === "started")
       this.sendStartTransaction(event.transaction, event.connectorId);
     else this.sendStopTransaction(event.transaction, event.connectorId);
+  }
+
+  public sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    // OCPP 1.6 has no TransactionEvent; in-transaction state is carried by
+    // StatusNotification and MeterValues (#335). Refuse loudly rather than
+    // emit a frame the CSMS cannot parse.
+    this._logger.warn(
+      `[v1.6] transaction_event (${options.triggerReason}) on connector ${connectorId} ignored: TransactionEvent is an OCPP 2.x message`,
+      LogType.TRANSACTION,
+    );
   }
 
   public sendBootNotification(bootPayload: BootNotification): void {

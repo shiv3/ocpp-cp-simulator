@@ -1,5 +1,12 @@
 import { getDefaultStore } from "jotai";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import {
+  splitStopReason,
+  type MeterReadingContext,
+  type StartTransactionCommandOptions,
+  type StopTransactionCommandOptions,
+  type TransactionUpdateOptions,
+} from "../../cp/domain/connector/Transaction";
 import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
@@ -369,12 +376,39 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
     tagId: string,
+    options: StartTransactionCommandOptions = {},
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).startTransaction(tagId, connectorId);
+    this.getExistingChargePointOrThrow(id).startTransaction(
+      tagId,
+      connectorId,
+      undefined,
+      undefined,
+      options,
+    );
   }
 
-  async stopTransaction(id: string, connectorId: number): Promise<void> {
-    this.getExistingChargePointOrThrow(id).stopTransaction(connectorId);
+  async stopTransaction(
+    id: string,
+    connectorId: number,
+    options: StopTransactionCommandOptions = {},
+  ): Promise<void> {
+    const { stopReason, stoppedReason } = splitStopReason(options.reason);
+    this.getExistingChargePointOrThrow(id).stopTransaction(
+      connectorId,
+      stopReason,
+      { triggerReason: options.triggerReason, stoppedReason },
+    );
+  }
+
+  async sendTransactionUpdate(
+    id: string,
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendTransactionUpdate(
+      connectorId,
+      options,
+    );
   }
 
   async sendStatusNotification(
@@ -442,8 +476,12 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).setMeterValue(connectorId, value);
   }
 
-  async sendMeterValue(id: string, connectorId: number): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendMeterValue(connectorId);
+  async sendMeterValue(
+    id: string,
+    connectorId: number,
+    context?: MeterReadingContext,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendMeterValue(connectorId, context);
   }
 
   async removeConnector(id: string, connectorId: number): Promise<void> {

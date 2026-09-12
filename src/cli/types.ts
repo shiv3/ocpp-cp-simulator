@@ -26,6 +26,18 @@ export interface CLIOptions {
    */
   readonly soapCallbackUrlExplicit: string | null;
   readonly soapPublicBaseUrl: string | null;
+  /**
+   * `--soap-tunnel`: expose the SOAP callback endpoint through a tunnel and
+   * derive the public base from it (#183). Reset to "none" by parseArgs when
+   * an explicit callback / public base URL takes precedence.
+   */
+  readonly soapTunnel: "none" | "ngrok";
+  /** `--ngrok-auth-token`; never logged, handed to ngrok via its environment. */
+  readonly ngrokAuthToken: string | null;
+  /** `--ngrok-domain`: reserved domain requested from ngrok. */
+  readonly ngrokDomain: string | null;
+  /** `--ngrok-api-url`: attach to a running agent instead of spawning one. */
+  readonly ngrokApiUrl: string | null;
   /** Serve `GET /metrics` (Prometheus text exposition) in server mode. */
   readonly metrics: boolean;
   /**

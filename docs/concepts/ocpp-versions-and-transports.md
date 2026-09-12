@@ -16,7 +16,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-09-04
+updated: 2026-09-12
 ---
 
 # OCPP versions and transports
@@ -59,7 +59,7 @@ charge point on.
 > Basic Auth or the network boundary, so for a remote CSMS or a tunnel use
 > `https://` on both sides (`--ws-url https://…`, an HTTPS
 > `--soap-public-base-url` / `--soap-callback-url` terminated by a proxy in
-> front of the daemon).
+> front of the daemon, or the https origin `--soap-tunnel ngrok` yields).
 
 **OCPP 1.2:**
 
@@ -118,6 +118,65 @@ The callback URL the CP advertises to the CSMS is resolved by precedence:
    remotely and cannot reach your machine directly — point the base at your
    tunnel and skip hand-building the full URL. An explicit `--soap-callback-url`
    still wins.
+3. `--soap-tunnel ngrok` — the simulator opens (or attaches to) an ngrok tunnel
+   and uses its public origin as the base of step 2. Either explicit flag above
+   wins, with a warning that the tunnel was not started.
+4. None — a SOAP charge point refuses to start: the CSMS has nowhere to call.
+
+### Exposing the callback through a tunnel
+
+`--soap-tunnel ngrok` (#183) is for a CSMS that cannot reach your machine — a
+hosted SteVe, a staging environment, CI. The daemon brings the tunnel up before
+anything else, derives the callback URL from it, logs both, and prints an
+exposure warning: the CSMS→CP command endpoint is then reachable from the
+internet, gated only by the charge point identity in the route and the daemon's
+Basic Auth. No npm dependency is involved; two modes:
+
+- **Spawn** (default) — the `ngrok` binary from `PATH` is run as
+  `ngrok http <host>:<port> --log stdout --log-format json`, the public URL is
+  read from its `started tunnel` log line, and the agent is killed on shutdown.
+  If it dies on its own the daemon stops with exit code 1 — a SOAP charge point
+  without a reachable callback cannot do its job. `--ngrok-auth-token` reaches
+  the agent through its environment (`NGROK_AUTHTOKEN`), never on its command
+  line or in a log line; omit it to use the agent's own config file
+  (`ngrok config add-authtoken …`). `--ngrok-domain` requests a reserved domain;
+  free-tier URLs change between runs, so re-register the callback in the CSMS
+  each time (or let it read `wsa:From`).
+
+  ```bash
+  ocpp-cp-sim --ocpp-version OCPP-1.6S \
+    --ws-url https://csms.example.com/steve/services/CentralSystemService \
+    --cp-id CP1 --daemon --soap-tunnel ngrok
+  # [server] SOAP tunnel (ngrok, spawn): https://a1b2.ngrok-free.app -> http://127.0.0.1:9700
+  # [server] Warning: SOAP callback endpoint is publicly reachable through the tunnel at https://a1b2.ngrok-free.app/ocpp/soap/CP1/ChargePointService; …
+  ```
+
+- **Attach** (`--ngrok-api-url <url>`) — an agent someone else runs, typically
+  an `ngrok/ngrok` sidecar next to the [Docker image](../entities/docker-image.md),
+  which ships no ngrok binary. The daemon reads `GET <url>/api/tunnels` and
+  picks the https tunnel whose `addr` port matches its listener (or the only
+  https tunnel there is), and never stops that agent. `--ngrok-auth-token` and
+  `--ngrok-domain` are refused here: the agent is configured where it runs.
+
+  ```yaml
+  services:
+    simulator:
+      image: ghcr.io/shiv3/ocpp-cp-simulator
+      command: >-
+        --ocpp-version OCPP-1.6S --cp-id CP1
+        --ws-url https://csms.example.com/steve/services/CentralSystemService
+        --soap-tunnel ngrok --ngrok-api-url http://ngrok:4040
+    ngrok:
+      image: ngrok/ngrok
+      command: http simulator:9700
+      environment:
+        NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+  ```
+
+The flag needs a listener (`--daemon`, `--http-port` or `--web-console`) and a
+SOAP `--ocpp-version`; the tunnel forwards to the API port, or to the console's
+when that is the only one. A fleet (`--cp-count`) derives one callback per
+charge point from the tunnel origin, exactly as with `--soap-public-base-url`.
 
 Pairs with [SteVe](../entities/csms-peers.md#steve) (register charge points
 with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).

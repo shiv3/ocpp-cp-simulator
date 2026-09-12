@@ -10,7 +10,11 @@ import { CPRegistry } from "./CPRegistry";
 import { NetworkSimManager } from "./NetworkSimManager";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
-import { createHttpHandlers, type CorsPolicy } from "./httpServer";
+import {
+  DEFAULT_SOAP_PATH,
+  createHttpHandlers,
+  type CorsPolicy,
+} from "./httpServer";
 import {
   attachSocketIo,
   createSocketConfigRepository,
@@ -26,6 +30,12 @@ import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConne
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
 import { expandIdPattern } from "../../protocol";
 import { resolveSoapCallbackUrl } from "../soapCallbackUrl";
+import {
+  localHostForTunnel,
+  soapTunnelStartupLines,
+  startSoapTunnel,
+  type SoapTunnel,
+} from "../soapTunnel";
 import { soapCallbackRouteCpId } from "./socketServer";
 import {
   MetricsRecorder,
@@ -57,6 +67,13 @@ function serverLog(message: string): void {
   process.stderr.write(`[server] ${message}\n`);
 }
 
+export interface SoapTunnelConfig {
+  readonly provider: "ngrok";
+  readonly authToken?: string | null;
+  readonly domain?: string | null;
+  readonly apiUrl?: string | null;
+}
+
 export interface ServerOptions {
   readonly httpPort: number | null;
   readonly httpHost: string;
@@ -77,6 +94,14 @@ export interface ServerOptions {
    */
   readonly soapCallbackUrlExplicit?: string | null;
   readonly soapPublicBaseUrl?: string | null;
+  /**
+   * `--soap-tunnel ngrok` (#183): expose the listener through ngrok and use
+   * the tunnel's public origin as the SOAP public base. Only consulted when
+   * neither `soapCallbackUrlExplicit` nor `soapPublicBaseUrl` is set — the
+   * CLI already resets it in that case, but the precedence is enforced here
+   * too for other callers.
+   */
+  readonly soapTunnel?: SoapTunnelConfig | null;
   /** Serve `GET /metrics`. Off by default; `--metrics` turns it on. */
   readonly metrics?: boolean;
   /**
@@ -130,7 +155,7 @@ export interface ServerOptions {
   readonly watch?: boolean;
 }
 
-export async function startServer(opts: ServerOptions): Promise<void> {
+export async function startServer(inputOpts: ServerOptions): Promise<void> {
   // Refused before anything is opened. Two startup scenario flags used to be
   // silently ranked, differently by each of the three functions that read them,
   // and the disagreement showed up as restore rows held back for a scenario the
@@ -138,8 +163,26 @@ export async function startServer(opts: ServerOptions): Promise<void> {
   // same message; this is the door for every other caller, and it is here — not
   // at the first read, several hundred lines in — so a refused daemon has not
   // opened the state DB, registered metrics or restored a fleet first (#314).
-  const startupConflict = startupScenarioOptionConflict(opts.startupScenario);
+  const startupConflict = startupScenarioOptionConflict(
+    inputOpts.startupScenario,
+  );
   if (startupConflict) throw new Error(startupConflict);
+
+  // The tunnel comes up before anything else for the same reason: a missing
+  // ngrok binary or a bad token refuses the daemon with nothing to unwind.
+  // Its public origin then plays the part of --soap-public-base-url, so the
+  // single-CP bootstrap and the per-CP fleet derivation below both see it.
+  let lifecycle: ReturnType<typeof createLifecycle> | null = null;
+  const soapTunnel = await openSoapTunnel(inputOpts, (code) => {
+    serverLog(
+      `ngrok tunnel exited unexpectedly (code ${code}); SOAP callbacks are unreachable, shutting down`,
+    );
+    if (lifecycle) lifecycle.requestShutdown(1);
+    else process.exit(1);
+  });
+  const opts = soapTunnel
+    ? withSoapPublicBase(inputOpts, soapTunnel)
+    : inputOpts;
 
   // Open the persistent state DB up front so every CP we create (boot
   // bootstrap or via socket.io RPC) gets the same Database handle. Without
@@ -306,7 +349,6 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     opts.autoConnect === true,
   );
   registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
-  let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const socketIo = attachSocketIo({
     registry,
     bus,
@@ -342,6 +384,8 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     onShutdownStart: () => {
       fileReload?.close();
       void socketIo.close();
+      // Sync kill, so the agent is gone before process.exit() below.
+      soapTunnel?.close();
     },
   });
   const socketIoRoute = {
@@ -464,6 +508,21 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     serverLog(
       `MCP endpoint: POST http://${opts.httpHost}:${opts.webConsolePort}/mcp`,
     );
+  }
+
+  if (soapTunnel) {
+    // The token, when one was given, went to ngrok through its environment
+    // and is deliberately not part of these lines.
+    for (const line of soapTunnelStartupLines({
+      tunnel: soapTunnel,
+      localHost: localHostForTunnel(opts.httpHost),
+      localPort: soapTunnelLocalPort(opts),
+      soapPath: opts.bootstrap?.soapPath ?? DEFAULT_SOAP_PATH,
+      cpId:
+        (opts.bootstrapCount ?? 1) > 1 ? null : (opts.bootstrap?.cpId ?? null),
+    })) {
+      serverLog(line);
+    }
   }
 
   if (servers.length === 0) {
@@ -667,6 +726,61 @@ function expandBootstrap(
     });
   }
   return fleet;
+}
+
+/** The listener the tunnel forwards to: the API port, else the console's. */
+function soapTunnelLocalPort(opts: ServerOptions): number {
+  const port = opts.httpPort ?? opts.webConsolePort;
+  if (port == null) {
+    throw new Error(
+      "--soap-tunnel needs a listener (--http-port or --web-console)",
+    );
+  }
+  return port;
+}
+
+async function openSoapTunnel(
+  opts: ServerOptions,
+  onExit: (code: number | null) => void,
+): Promise<SoapTunnel | null> {
+  if (!opts.soapTunnel) return null;
+  if (opts.soapCallbackUrlExplicit?.trim() || opts.soapPublicBaseUrl?.trim()) {
+    return null;
+  }
+  const localPort = soapTunnelLocalPort(opts);
+  return startSoapTunnel({
+    localHost: localHostForTunnel(opts.httpHost),
+    localPort,
+    authToken: opts.soapTunnel.authToken,
+    domain: opts.soapTunnel.domain,
+    apiUrl: opts.soapTunnel.apiUrl,
+    onExit,
+  });
+}
+
+/**
+ * Fold the tunnel's public origin in as the SOAP public base. The single-CP
+ * bootstrap carries its callback URL pre-resolved (null so far, since the
+ * base was unknown at parse time), so it is derived here; a fleet goes
+ * through `fleetSoapCallbackUrl`, which reads `soapPublicBaseUrl`.
+ */
+function withSoapPublicBase(
+  opts: ServerOptions,
+  tunnel: SoapTunnel,
+): ServerOptions {
+  const bootstrap =
+    opts.bootstrap && !opts.bootstrap.soapCallbackUrl
+      ? {
+          ...opts.bootstrap,
+          soapCallbackUrl:
+            resolveSoapCallbackUrl({
+              publicBaseUrl: tunnel.publicBaseUrl,
+              cpId: opts.bootstrap.cpId,
+              soapPath: opts.bootstrap.soapPath ?? DEFAULT_SOAP_PATH,
+            }) ?? undefined,
+        }
+      : opts.bootstrap;
+  return { ...opts, bootstrap, soapPublicBaseUrl: tunnel.publicBaseUrl };
 }
 
 /**

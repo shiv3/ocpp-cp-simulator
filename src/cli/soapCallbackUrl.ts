@@ -11,12 +11,12 @@
  *
  *   1. explicit  --soap-callback-url <url>       → used verbatim
  *   2.           --soap-public-base-url <base>   → derived from the base origin
- *   3. (future)  --soap-tunnel ngrok             → provider yields a base, then (2)
+ *   3.           --soap-tunnel ngrok             → provider yields a base, then (2)
  *   4. none                                       → null (caller: local-only / error)
  *
- * Only steps 1–2 are implemented here. A tunnel provider (ngrok, Cloudflare
- * Tunnel, …) is intentionally out of scope: it will resolve to a public base
- * URL and then reuse buildSoapCallbackUrl(), keeping this precedence intact.
+ * Only steps 1–2 live here. Step 3 is `soapTunnel.ts`: the daemon brings the
+ * tunnel up, then hands its public origin in as `publicBaseUrl`, so this
+ * function and buildSoapCallbackUrl() never learn about providers.
  */
 
 import { SOAP_SERVICE_SUFFIX, normalizeSoapPath } from "./soapPath";

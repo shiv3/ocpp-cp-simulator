@@ -1065,3 +1065,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Fix: the `ui` stage copies that one file (`COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json`), with the Dockerfile comment saying why, in the same style as the `vendor/` and `schema/` build-time copies. The bench code itself is not shipped.
 - Why it slipped: `docker-publish.yml` runs on pushes to `main` and on tags, not on pull requests, so a change that breaks only the container build is first seen after merge. A PR-time `docker build --target ui` is the guard that would have caught it; not added here.
 - [Docker image](entities/docker-image.md) unchanged: the page does not enumerate the `ui` stage's copy set.
+
+## [2026-09-12] ingest | SOAP callback exposed through an ngrok tunnel (#183)
+
+- [OCPP versions & transports → Tunnels](concepts/ocpp-versions-and-transports.md#exposing-the-callback-through-a-tunnel): new section. `--soap-tunnel ngrok` is step 3 of the callback-URL precedence: the tunnel's public origin plays the part of `--soap-public-base-url`, so the single-CP and fleet derivations are unchanged. Records the design decision: **no npm dependency** — the `ngrok` binary is spawned (public URL read from its JSON log, killed on shutdown) or a running agent is attached through its local API (`--ngrok-api-url`, the Docker sidecar case), rather than the native `@ngrok/ngrok` SDK, which would have been the project's only native module and a risk for the `bun build --compile` sidecar.
+- Same page: the token goes to the agent through `NGROK_AUTHTOKEN` in its environment, never on argv (visible in `ps`) or in a log line; the startup lines are a pure function so that property is unit-tested. An agent that dies on its own stops the daemon with exit code 1 — `requestShutdown` gained an exit-code parameter for it.
+- [CLI](entities/cli.md) and [Daemon](entities/daemon.md): `--soap-tunnel`, `--ngrok-auth-token`, `--ngrok-domain`, `--ngrok-api-url` rows; fleet prose mentions the tunnel origin.
+- [GitHub issues](sources/github-issues.md): #183 row.

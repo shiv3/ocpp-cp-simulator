@@ -449,6 +449,103 @@ export interface SocketIoRoute {
   ): Response | Promise<Response>;
 }
 
+/**
+ * The CSMS→CP callback route, `<soapPath>/<cpId>/ChargePointService`. Null
+ * when the path is not one, so the caller falls through to its other routes.
+ * Shared by the main listener and by the SOAP-only listener a tunnel forwards
+ * to ({@link createSoapCallbackHandlers}), so the two cannot drift.
+ */
+export function handleSoapChargePointServiceRoute(
+  req: Request,
+  url: URL,
+  registry: CPRegistry,
+): Response | Promise<Response> | null {
+  const soapRoute = matchSoapChargePointService(url.pathname, registry);
+  if (!soapRoute) return null;
+  if (req.method !== "POST") {
+    return new Response("method not allowed", {
+      status: 405,
+      headers: { allow: "POST" },
+    });
+  }
+
+  const service = soapRoute.service;
+  if (!service) {
+    return soapFaultResponse(
+      `Unknown charge point for SOAP callback: ${soapRoute.cpId}`,
+      404,
+    );
+  }
+  if (!isRegisteredSoapService(service)) {
+    return soapFaultResponse(
+      `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
+      400,
+    );
+  }
+
+  const contentLength = declaredContentLength(req);
+  if (contentLength !== null && Number.isNaN(contentLength)) {
+    return soapFaultResponse("Invalid SOAP Content-Length header", 400);
+  }
+  if (contentLength !== null && contentLength > MAX_SOAP_REQUEST_BODY_BYTES) {
+    return soapFaultResponse("SOAP request body is too large", 413);
+  }
+
+  // OCPP SOAP has no per-message authentication field. This callback
+  // endpoint relies on the daemon's existing HTTP Basic-auth gate when
+  // enabled, or an operator-controlled trusted network boundary otherwise;
+  // do not add a non-standard shared secret to the SOAP payload.
+  return readTextWithLimit(req, MAX_SOAP_REQUEST_BODY_BYTES).then(
+    async (body) => {
+      if (body === null) {
+        return soapFaultResponse("SOAP request body is too large", 413);
+      }
+      return (
+        (await service.handleSoapChargePointServiceRequest(
+          soapRoute.cpId,
+          body,
+        )) ??
+        soapFaultResponse(
+          `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
+          400,
+        )
+      );
+    },
+  );
+}
+
+/**
+ * Handlers for the listener a SOAP tunnel forwards to (#183): the callback
+ * route and nothing else. Every other path — socket.io, the web console, MCP,
+ * health, metrics — is a 404 here, so the public tunnel exposes the CSMS→CP
+ * endpoint alone; those stay on the local listeners. No Basic Auth gate: the
+ * CSMS is this listener's only client and OCPP-S callbacks carry no
+ * credentials, the route's charge-point identity checks are the guard.
+ *
+ * `registry` is read per request: the listener is bound before the tunnel and
+ * the registry, which needs the tunnel's origin, comes after — until then the
+ * route answers 503.
+ */
+export function createSoapCallbackHandlers(deps: {
+  registry: () => CPRegistry | null;
+}): { fetch(req: Request): Response | Promise<Response> } {
+  return {
+    fetch(req) {
+      const url = new URL(req.url);
+      const registry = deps.registry();
+      if (!registry) {
+        return SOAP_CHARGE_POINT_SERVICE_ROUTE.test(url.pathname)
+          ? soapFaultResponse("daemon is starting", 503)
+          : new Response("not found", { status: 404 });
+      }
+      return (
+        handleSoapChargePointServiceRoute(req, url, registry) ??
+        new Response("not found", { status: 404 })
+      );
+    },
+  };
+}
+
 export function createHttpHandlers(deps: {
   registry: CPRegistry;
   bus: EventBus;
@@ -606,62 +703,12 @@ export function createHttpHandlers(deps: {
       });
     }
 
-    const soapRoute = matchSoapChargePointService(url.pathname, deps.registry);
-    if (soapRoute) {
-      if (req.method !== "POST") {
-        return new Response("method not allowed", {
-          status: 405,
-          headers: { allow: "POST" },
-        });
-      }
-
-      const service = soapRoute.service;
-      if (!service) {
-        return soapFaultResponse(
-          `Unknown charge point for SOAP callback: ${soapRoute.cpId}`,
-          404,
-        );
-      }
-      if (!isRegisteredSoapService(service)) {
-        return soapFaultResponse(
-          `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
-          400,
-        );
-      }
-
-      const contentLength = declaredContentLength(req);
-      if (contentLength !== null && Number.isNaN(contentLength)) {
-        return soapFaultResponse("Invalid SOAP Content-Length header", 400);
-      }
-      if (
-        contentLength !== null &&
-        contentLength > MAX_SOAP_REQUEST_BODY_BYTES
-      ) {
-        return soapFaultResponse("SOAP request body is too large", 413);
-      }
-
-      // OCPP SOAP has no per-message authentication field. This callback
-      // endpoint relies on the daemon's existing HTTP Basic-auth gate when
-      // enabled, or an operator-controlled trusted network boundary otherwise;
-      // do not add a non-standard shared secret to the SOAP payload.
-      return readTextWithLimit(req, MAX_SOAP_REQUEST_BODY_BYTES).then(
-        async (body) => {
-          if (body === null) {
-            return soapFaultResponse("SOAP request body is too large", 413);
-          }
-          return (
-            (await service.handleSoapChargePointServiceRequest(
-              soapRoute.cpId,
-              body,
-            )) ??
-            soapFaultResponse(
-              `Charge point is not configured for OCPP SOAP: ${soapRoute.cpId}`,
-              400,
-            )
-          );
-        },
-      );
-    }
+    const soapResponse = handleSoapChargePointServiceRoute(
+      req,
+      url,
+      deps.registry,
+    );
+    if (soapResponse) return soapResponse;
 
     // /mcp — MCP (Model Context Protocol) Streamable HTTP endpoint.
     // Stateless, POST-only: the spec requires 405 for GET when the server

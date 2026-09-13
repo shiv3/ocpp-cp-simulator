@@ -13,6 +13,13 @@ export interface SoapTunnelConfig {
   readonly domain: string | null;
   /** `--ngrok-api-url`: attach to a running agent instead of spawning one. */
   readonly apiUrl: string | null;
+  /**
+   * `--soap-tunnel-port`: local port of the SOAP-only listener the tunnel
+   * forwards to. 0 (the default) picks a free port, which is fine when the
+   * daemon spawns the agent; an attached agent forwards to a port configured
+   * where it runs, so attach mode requires an explicit one.
+   */
+  readonly localPort: number;
 }
 
 export interface CLIOptions {

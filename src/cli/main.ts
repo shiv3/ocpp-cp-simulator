@@ -224,6 +224,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let soapCallbackUrl: string | null = null;
   let soapPublicBaseUrl: string | null = null;
   let soapTunnel: "none" | "ngrok" = "none";
+  let soapTunnelPort: number | null = null;
   const ngrok: Record<
     "--ngrok-auth-token" | "--ngrok-domain" | "--ngrok-api-url",
     string | null
@@ -497,6 +498,18 @@ export function parseArgs(argv: string[]): CLIOptions {
         soapTunnel = next;
         i++;
         break;
+      case "--soap-tunnel-port": {
+        const port = parseInt(next ?? "", 10);
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+          process.stderr.write(
+            "Error: --soap-tunnel-port must be a port number (0 picks a free one)\n",
+          );
+          process.exit(1);
+        }
+        soapTunnelPort = port;
+        i++;
+        break;
+      }
       case "--ngrok-auth-token":
       case "--ngrok-domain":
       case "--ngrok-api-url": {
@@ -703,7 +716,10 @@ export function parseArgs(argv: string[]): CLIOptions {
   const ngrokDomain = ngrok["--ngrok-domain"];
   let soapTunnelConfig: SoapTunnelConfig | null = null;
   if (soapTunnel === "none") {
-    const stray = Object.entries(ngrok).find(([, value]) => value != null);
+    const stray = [
+      ...Object.entries(ngrok),
+      ["--soap-tunnel-port", soapTunnelPort],
+    ].find(([, value]) => value != null);
     if (stray) {
       process.stderr.write(`Error: ${stray[0]} requires --soap-tunnel ngrok\n`);
       process.exit(1);
@@ -713,6 +729,15 @@ export function parseArgs(argv: string[]): CLIOptions {
       process.stderr.write(
         "Error: --ngrok-auth-token and --ngrok-domain cannot be combined with --ngrok-api-url " +
           "(attach mode uses the running agent as configured)\n",
+      );
+      process.exit(1);
+    }
+    if (ngrokApiUrl && !soapTunnelPort) {
+      // The daemon can pick any free port for an agent it spawns; an agent
+      // someone else runs forwards to the port it was configured with.
+      process.stderr.write(
+        "Error: --ngrok-api-url requires --soap-tunnel-port <port>, the port the " +
+          "running agent forwards to\n",
       );
       process.exit(1);
     }
@@ -747,6 +772,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       authToken: ngrokAuthToken,
       domain: ngrokDomain,
       apiUrl: ngrokApiUrl,
+      localPort: soapTunnelPort ?? 0,
     };
   }
 
@@ -874,18 +900,6 @@ export function parseArgs(argv: string[]): CLIOptions {
       `Error: refusing to bind unauthenticated daemon to non-loopback host ` +
         `${httpHost}. Configure --web-console-basic-auth-user and ` +
         "--web-console-basic-auth-pass, bind to 127.0.0.1/localhost/::1, " +
-        "or pass --unsafe-remote to override.\n",
-    );
-    process.exit(1);
-  }
-
-  // A tunnel forwards the whole listener — control plane, console, MCP —
-  // to the internet, so a loopback bind behind it is a remote bind in
-  // practice and the same gate applies (#183).
-  if (soapTunnelConfig && !webConsoleBasicAuth && !unsafeRemote) {
-    process.stderr.write(
-      "Error: --soap-tunnel exposes the daemon listener publicly; configure " +
-        "--web-console-basic-auth-user and --web-console-basic-auth-pass, " +
         "or pass --unsafe-remote to override.\n",
     );
     process.exit(1);
@@ -1197,10 +1211,15 @@ Options:
                            from PATH; the public URL is logged at startup and
                            reported by the server.info RPC, and every SOAP
                            charge point created without a callback URL gets
-                           one derived from it. The whole listener is then
-                           reachable from the internet, so the tunnel requires
-                           --web-console-basic-auth-user/pass or
-                           --unsafe-remote, like a non-loopback bind.
+                           one derived from it. The tunnel forwards to a
+                           dedicated listener that serves the callback route
+                           only; socket.io, the web console and MCP stay on the
+                           local listeners.
+  --soap-tunnel-port <port>
+                           Local port of that dedicated listener (default: 0,
+                           a free port). Required with --ngrok-api-url: the
+                           running agent forwards to the port it was
+                           configured with.
   --ngrok-auth-token <token>
                            ngrok authtoken, handed to the agent through its
                            environment (never on its command line or in logs).

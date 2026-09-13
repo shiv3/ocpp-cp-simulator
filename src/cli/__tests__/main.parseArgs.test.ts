@@ -536,38 +536,58 @@ describe("parseArgs --ocpp-version", () => {
       "http://127.0.0.1:8180/steve/services/CentralSystemService",
       "--ocpp-version",
       "OCPP-1.6S",
-      // The tunnel forwards the whole listener, so it is subject to the same
-      // gate as a non-loopback bind.
-      "--unsafe-remote",
     ];
 
-    it("refuses the tunnel without Basic Auth or --unsafe-remote, like a non-loopback bind", () => {
-      const result = runParseArgs([
-        ...soapDaemon.filter((arg) => arg !== "--unsafe-remote"),
-        "--soap-tunnel",
-        "ngrok",
-      ]);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain("--soap-tunnel");
-      expect(result.stderr).toContain("--web-console-basic-auth-user");
-      expect(result.stderr).toContain("--unsafe-remote");
-    });
-
-    it("accepts the tunnel with web-console Basic Auth", () => {
-      const result = runParseArgs([
-        ...soapDaemon.filter((arg) => arg !== "--unsafe-remote"),
-        "--soap-tunnel",
-        "ngrok",
-        "--web-console-basic-auth-user",
-        "operator",
-        "--web-console-basic-auth-pass",
-        "secret",
-      ]);
+    it("does not require Basic Auth or --unsafe-remote: the tunnel publishes the callback route alone", () => {
+      const result = runParseArgs([...soapDaemon, "--soap-tunnel", "ngrok"]);
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
-        soapTunnel: { provider: "ngrok" },
-        hasWebConsoleBasicAuth: true,
+        soapTunnel: { provider: "ngrok", localPort: 0 },
+        hasWebConsoleBasicAuth: false,
+        unsafeRemote: false,
       });
+    });
+
+    it("accepts --soap-tunnel-port and requires it in attach mode", () => {
+      const withPort = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--soap-tunnel-port",
+        "9702",
+      ]);
+      expect(withPort.status).toBe(0);
+      expect(JSON.parse(withPort.stdout)).toMatchObject({
+        soapTunnel: { localPort: 9702 },
+      });
+
+      const attachWithout = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--ngrok-api-url",
+        "http://ngrok:4040",
+      ]);
+      expect(attachWithout.status).toBe(1);
+      expect(attachWithout.stderr).toContain(
+        "--ngrok-api-url requires --soap-tunnel-port",
+      );
+
+      const stray = runParseArgs([...soapDaemon, "--soap-tunnel-port", "9702"]);
+      expect(stray.status).toBe(1);
+      expect(stray.stderr).toContain(
+        "--soap-tunnel-port requires --soap-tunnel ngrok",
+      );
+
+      const bad = runParseArgs([
+        ...soapDaemon,
+        "--soap-tunnel",
+        "ngrok",
+        "--soap-tunnel-port",
+        "70000",
+      ]);
+      expect(bad.status).toBe(1);
+      expect(bad.stderr).toContain("--soap-tunnel-port must be a port number");
     });
 
     it("defaults to no tunnel", () => {
@@ -607,10 +627,16 @@ describe("parseArgs --ocpp-version", () => {
         "ngrok",
         "--ngrok-api-url",
         "http://ngrok:4040",
+        "--soap-tunnel-port",
+        "9702",
       ]);
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
-        soapTunnel: { provider: "ngrok", apiUrl: "http://ngrok:4040" },
+        soapTunnel: {
+          provider: "ngrok",
+          apiUrl: "http://ngrok:4040",
+          localPort: 9702,
+        },
       });
     });
 

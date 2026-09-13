@@ -846,14 +846,13 @@ function toInitOptions(
     idTagFile: params.idTagFile,
     idTagDistribution: params.idTagDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
-    // A derived URL is the registry's, not the operator's: dropping it here
-    // lets the update re-derive from the current base instead of freezing
-    // one run's tunnel origin into the row (#183).
-    soapCallbackUrl:
-      params.soapCallbackUrl ??
-      (existing?.soapCallbackUrlDerived
-        ? undefined
-        : existing?.soapCallbackUrl),
+    // Same rule as the URLs above: an update fully specifies the callback
+    // URL, so there is no `existing` fallback. An update without one asks the
+    // registry to derive it from the daemon's SOAP public base — a cleared
+    // field in the form, or a re-derivation of a URL the registry made up in
+    // the first place, instead of freezing one run's tunnel origin into the
+    // row (#183). Without a base the registry refuses, as `cp.create` does.
+    soapCallbackUrl: params.soapCallbackUrl,
     soapPath: params.soapPath ?? existing?.soapPath,
     ocppVersion: params.ocppVersion ?? existing?.ocppVersion ?? "OCPP-1.6J",
     connectors: params.connectors ?? existing?.connectors ?? 1,

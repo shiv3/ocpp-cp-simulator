@@ -177,8 +177,10 @@ connection only. No npm dependency is involved; two modes:
 - **Attach** (`--ngrok-api-url <url>`) — an agent someone else runs, typically
   an `ngrok/ngrok` sidecar next to the [Docker image](../entities/docker-image.md),
   which ships no ngrok binary. The daemon reads `GET <url>/api/tunnels` and
-  picks the https tunnel whose `addr` port matches its listener (or the only
-  https tunnel there is), and never stops that agent. `--ngrok-auth-token` and
+  picks the https tunnel whose `addr` port is exactly `--soap-tunnel-port` —
+  a tunnel to any other port is refused even when it is the only one, naming
+  the port it does forward to, since an agent pointed at the API port would
+  publish the control plane — and never stops that agent. `--ngrok-auth-token` and
   `--ngrok-domain` are refused here: the agent is configured where it runs. And
   since that agent forwards to a port configured where _it_ runs,
   `--soap-tunnel-port` is required, so the daemon's SOAP-only listener is where

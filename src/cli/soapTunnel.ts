@@ -346,7 +346,11 @@ interface NgrokApiTunnel {
 }
 
 type NgrokTunnelSelection =
-  { ok: true; publicUrl: string } | { ok: false; candidates: string[] };
+  | { ok: true; publicUrl: string }
+  | {
+      ok: false;
+      candidates: Array<{ publicUrl: string; port: number | null }>;
+    };
 
 function addrPort(addr: unknown): number | null {
   if (typeof addr !== "string" || !addr) return null;
@@ -363,10 +367,12 @@ function addrPort(addr: unknown): number | null {
 }
 
 /**
- * Prefer the https tunnel that forwards to our port; otherwise accept the
- * only https tunnel the agent has (a sidecar runs one tunnel, and its `addr`
- * names the simulator's container port, which may legitimately differ from
- * the port we see). Anything else is ambiguous and left to the operator.
+ * The https tunnel whose `addr` port is the SOAP-only listener's, and no
+ * other. Attach mode requires `--soap-tunnel-port` precisely so the agent's
+ * target can be checked: an agent pointed at the API port would publish the
+ * control plane through a tunnel meant for the callback route alone, so a
+ * mismatch is a configuration error, not something to settle for — even when
+ * that tunnel is the only one the agent has.
  */
 export function selectNgrokTunnel(
   tunnels: NgrokApiTunnel[],
@@ -378,11 +384,16 @@ export function selectNgrokTunnel(
       typeof t.public_url === "string" &&
       isHttpUrl(t.public_url),
   );
-  const byPort = https.find((t) => addrPort(t.config?.addr) === localPort);
-  const picked = byPort ?? (https.length === 1 ? https[0] : undefined);
+  const picked = https.find((t) => addrPort(t.config?.addr) === localPort);
   if (picked)
     return { ok: true, publicUrl: picked.public_url.replace(/\/+$/, "") };
-  return { ok: false, candidates: https.map((t) => t.public_url) };
+  return {
+    ok: false,
+    candidates: https.map((t) => ({
+      publicUrl: t.public_url,
+      port: addrPort(t.config?.addr),
+    })),
+  };
 }
 
 async function attachNgrokTunnel(
@@ -418,8 +429,13 @@ async function attachNgrokTunnel(
   const selection = selectNgrokTunnel(tunnels, localPort);
   if (!selection.ok) {
     const suffix =
-      selection.candidates.length > 1
-        ? ` (ambiguous: ${selection.candidates.join(", ")}; start the agent with a single https tunnel to port ${localPort})`
+      selection.candidates.length > 0
+        ? ` (${selection.candidates
+            .map(
+              (c) =>
+                `${c.publicUrl} forwards to ${c.port == null ? "an unknown port" : `port ${c.port}`}`,
+            )
+            .join(", ")}; point the agent at --soap-tunnel-port ${localPort})`
         : "";
     throw new Error(
       `no https tunnel forwarding to port ${localPort} found at ${base}${suffix}`,

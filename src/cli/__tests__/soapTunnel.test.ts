@@ -350,22 +350,26 @@ describe("startSoapTunnel (attach mode)", () => {
     expect(() => tunnel.close()).not.toThrow();
   });
 
-  it("falls back to the only https tunnel when none matches the port", async () => {
-    const tunnel = await startSoapTunnel({
-      localHost: "127.0.0.1",
-      localPort: 9700,
-      apiUrl: "http://127.0.0.1:4040",
-      fetch: fakeFetch(200, {
-        tunnels: [
-          {
-            public_url: "https://cp.ngrok-free.app",
-            proto: "https",
-            config: { addr: "http://host.docker.internal:9701" },
-          },
-        ],
+  it("rejects the only https tunnel when it forwards to another port: the SOAP-only listener is the target, not the API", async () => {
+    await expect(
+      startSoapTunnel({
+        localHost: "127.0.0.1",
+        localPort: 9702,
+        apiUrl: "http://127.0.0.1:4040",
+        fetch: fakeFetch(200, {
+          tunnels: [
+            {
+              public_url: "https://cp.ngrok-free.app",
+              proto: "https",
+              // A sidecar pointed at the daemon's API port by mistake.
+              config: { addr: "http://simulator:9700" },
+            },
+          ],
+        }),
       }),
-    });
-    expect(tunnel.publicBaseUrl).toBe("https://cp.ngrok-free.app");
+    ).rejects.toThrow(
+      /no https tunnel forwarding to port 9702 found at http:\/\/127\.0\.0\.1:4040 \(https:\/\/cp\.ngrok-free\.app forwards to port 9700; point the agent at --soap-tunnel-port 9702\)/,
+    );
   });
 
   it("rejects when the agent has no https tunnel", async () => {
@@ -403,7 +407,7 @@ describe("startSoapTunnel (attach mode)", () => {
         }),
       }),
     ).rejects.toThrow(
-      /ambiguous.*https:\/\/a\.ngrok-free\.app.*https:\/\/b\.ngrok-free\.app/,
+      /https:\/\/a\.ngrok-free\.app forwards to port 1, https:\/\/b\.ngrok-free\.app forwards to port 2; point the agent at --soap-tunnel-port 9700/,
     );
   });
 
@@ -451,6 +455,23 @@ describe("selectNgrokTunnel", () => {
       9700,
     );
     expect(picked).toEqual({ ok: true, publicUrl: "https://x.ngrok-free.app" });
+  });
+
+  it("never settles for a tunnel to another port, even when it is the only one", () => {
+    const picked = selectNgrokTunnel(
+      [
+        {
+          public_url: "https://x.ngrok-free.app",
+          proto: "https",
+          config: { addr: "http://simulator:9700" },
+        },
+      ],
+      9702,
+    );
+    expect(picked).toEqual({
+      ok: false,
+      candidates: [{ publicUrl: "https://x.ngrok-free.app", port: 9700 }],
+    });
   });
 });
 

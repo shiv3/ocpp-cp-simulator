@@ -588,6 +588,20 @@ describe("parseArgs --ocpp-version", () => {
       ]);
       expect(bad.status).toBe(1);
       expect(bad.stderr).toContain("--soap-tunnel-port must be a port number");
+
+      for (const value of ["9702abc", "1e3", "-1"]) {
+        const partial = runParseArgs([
+          ...soapDaemon,
+          "--soap-tunnel",
+          "ngrok",
+          "--soap-tunnel-port",
+          value,
+        ]);
+        expect(partial.status, value).toBe(1);
+        expect(partial.stderr, value).toContain(
+          "--soap-tunnel-port must be a port number",
+        );
+      }
     });
 
     it("defaults to no tunnel", () => {

@@ -499,7 +499,8 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       case "--soap-tunnel-port": {
-        const port = parseInt(next ?? "", 10);
+        // Whole value, not a prefix: "9702abc" and "1e3" are mistakes.
+        const port = /^\d+$/.test(next ?? "") ? Number(next) : NaN;
         if (!Number.isInteger(port) || port < 0 || port > 65535) {
           process.stderr.write(
             "Error: --soap-tunnel-port must be a port number (0 picks a free one)\n",
@@ -1234,8 +1235,11 @@ Options:
                            options above.
   --soap-path <path>       Base path reserved for the SOAP callback server
                            (default: /ocpp/soap).
-                           OCPP-S has no per-message auth; rely on
-                           --web-console-basic-auth-* or a trusted network.
+                           OCPP-S has no per-message auth: on the daemon's
+                           listeners rely on --web-console-basic-auth-* or a
+                           trusted network; the --soap-tunnel listener has
+                           neither, only the route's identity check, so put a
+                           boundary (ngrok traffic policy, allow-list) in front.
   -h, --help               Show this help
 
 HTTP endpoints (see docs/entities/daemon.md):

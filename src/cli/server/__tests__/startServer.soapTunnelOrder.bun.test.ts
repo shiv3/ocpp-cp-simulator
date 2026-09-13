@@ -37,12 +37,20 @@ describe("startServer with --soap-tunnel: listener before tunnel, tunnel before 
     // A CSMS that, on BootNotification, immediately calls the charge point
     // back on the address it announced, and records what it got.
     const callbacks: Array<{ status: number; body: string } | Error> = [];
+    // One callback per test: the Reset makes the charge point boot again,
+    // and a second round would only repeat the same assertion.
+    let calledBack = false;
     const csms = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       async fetch(req) {
         const parsed = parseSoapEnvelope(await req.text(), OCPP16_DIALECT);
-        if (parsed.operation === "BootNotification" && parsed.from) {
+        if (
+          parsed.operation === "BootNotification" &&
+          parsed.from &&
+          !calledBack
+        ) {
+          calledBack = true;
           const callback = fetch(parsed.from, {
             method: "POST",
             headers: { "content-type": "application/soap+xml" },
@@ -183,14 +191,11 @@ describe("startServer with --soap-tunnel: listener before tunnel, tunnel before 
     while (callbacks.length === 0 && Date.now() < deadline) {
       await Bun.sleep(20);
     }
-    // (The Reset makes the charge point boot again, so a second round may
-    // already be in; every one of them must have been served.)
-    expect(callbacks.length).toBeGreaterThanOrEqual(1);
-    for (const callback of callbacks) {
-      if (callback instanceof Error) throw callback;
-      expect(callback.status).toBe(200);
-      expect(callback.body).toContain("ResetResponse");
-    }
+    expect(callbacks).toHaveLength(1);
+    const callback = callbacks[0];
+    if (callback instanceof Error) throw callback;
+    expect(callback.status).toBe(200);
+    expect(callback.body).toContain("ResetResponse");
 
     // 4. Only the callback route is published: the daemon's other routes are
     //    absent from the tunnel listener.

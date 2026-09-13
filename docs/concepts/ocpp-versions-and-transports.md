@@ -147,11 +147,13 @@ and binds the API / console listeners — so by the time a restored charge point
 tells the CSMS its callback URL, a callback finds a bound, routed listener. The
 tunnel therefore publishes the CSMS→CP endpoint alone: socket.io, the web
 console, MCP, health and metrics stay on the local listeners and answer 404 on
-the tunnel one. That listener has no Basic Auth gate — the CSMS is its only
-client and OCPP-S callbacks carry no credentials — so the route is protected by
-the charge point identity checks and whatever boundary sits in front of the
-tunnel (an ngrok traffic policy, an allow-list); the startup lines say so. The
-per-charge-point `--basic-auth-*` credentials cover the outgoing CP→CSMS
+the tunnel one. That listener has **no authentication**: the CSMS is its only
+client and OCPP-S callbacks carry no credentials, and `--web-console-basic-auth-*`
+gates the daemon's own listeners, not this one. Its only guard is the charge
+point identity check on the route, so put a boundary in front of the tunnel
+before exposing it — an ngrok traffic policy or IP allow-list restricted to the
+CSMS — rather than relying on the URL staying unknown; the startup lines say
+so. The per-charge-point `--basic-auth-*` credentials cover the outgoing CP→CSMS
 connection only. No npm dependency is involved; two modes:
 
 - **Spawn** (default) — the `ngrok` binary from `PATH` is run as
@@ -202,9 +204,9 @@ connection only. No npm dependency is involved; two modes:
         NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
   ```
 
-The flag needs a listener (`--daemon`, `--http-port` or `--web-console`) and a
-SOAP `--ocpp-version`; the tunnel forwards to the API port, or to the console's
-when that is the only one. A fleet (`--cp-count`) derives one callback per
+The flag needs server mode (`--daemon`, `--http-port` or `--web-console`) and a
+SOAP `--ocpp-version`; the tunnel forwards to the SOAP-only listener of
+`--soap-tunnel-port` and to nothing else. A fleet (`--cp-count`) derives one callback per
 charge point from the tunnel origin, exactly as with `--soap-public-base-url`.
 
 Pairs with [SteVe](../entities/csms-peers.md#steve) (register charge points

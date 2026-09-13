@@ -732,9 +732,23 @@ function expandBootstrap(
   return fleet;
 }
 
-async function openSoapTunnel(
-  opts: ServerOptions,
+/**
+ * Open the SOAP tunnel described by `--soap-tunnel`, or nothing. Exported for
+ * tests; `start` is the tunnel provider, injectable so the wiring can be
+ * checked without an ngrok binary.
+ */
+export async function openSoapTunnel(
+  opts: Pick<
+    ServerOptions,
+    | "soapTunnel"
+    | "soapCallbackUrlExplicit"
+    | "soapPublicBaseUrl"
+    | "httpHost"
+    | "httpPort"
+    | "webConsolePort"
+  >,
   onExit: (code: number | null) => void,
+  start: typeof startSoapTunnel = startSoapTunnel,
 ): Promise<SoapTunnel | null> {
   if (!opts.soapTunnel) return null;
   if (opts.soapCallbackUrlExplicit?.trim() || opts.soapPublicBaseUrl?.trim()) {
@@ -749,7 +763,7 @@ async function openSoapTunnel(
       "--soap-tunnel needs a listener (--http-port or --web-console)",
     );
   }
-  return startSoapTunnel({
+  return start({
     localHost: localHostForTunnel(opts.httpHost),
     localPort,
     authToken: opts.soapTunnel.authToken,
@@ -768,7 +782,7 @@ async function openSoapTunnel(
  * therefore carries the same `{n}` placeholder as the id pattern (the CLI
  * refuses one that does not), and its expansion is checked against the route.
  */
-function expandExplicitSoapCallbackUrl(
+export function expandExplicitSoapCallbackUrl(
   explicit: string,
   cpId: string,
   index: number,

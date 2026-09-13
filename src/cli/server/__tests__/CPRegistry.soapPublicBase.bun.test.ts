@@ -122,6 +122,25 @@ describe("CPRegistry SOAP public base (#183)", () => {
     }
   });
 
+  it("leaves a WebSocket charge point alone even when a base is configured", () => {
+    const registry = createRegistry(null, "https://a1b2.ngrok-free.app");
+    try {
+      const svc = registry.create(
+        {
+          ...soapInit("CP-1"),
+          ocppVersion: "OCPP-1.6J",
+          wsUrl: "ws://127.0.0.1:1/ocpp",
+        },
+        { seedDefault: false },
+      );
+      const config = svc.getStatus().config;
+      expect(config?.soapCallbackUrl).toBeUndefined();
+      expect(config?.soapCallbackUrlDerived).toBeFalsy();
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
   it("honours the charge point's own soapPath over the daemon default", () => {
     const registry = createRegistry(null, "https://a1b2.ngrok-free.app");
     try {

@@ -195,6 +195,41 @@ describe("startSoapTunnel (spawn mode)", () => {
     ).rejects.toThrow(/ngrok binary not found in PATH.*--ngrok-api-url/);
   });
 
+  it("rethrows spawn failures other than a missing binary as they are", async () => {
+    const eacces = Object.assign(new Error("spawn ngrok EACCES"), {
+      code: "EACCES",
+    });
+    const fake = fakeSpawn([], { throws: eacces });
+    await expect(
+      startSoapTunnel({
+        localHost: "127.0.0.1",
+        localPort: 9700,
+        spawn: fake.spawn,
+      }),
+    ).rejects.toBe(eacces);
+  });
+
+  it("rejects and kills ngrok when its stdout breaks before the tunnel is announced", async () => {
+    const fake = fakeSpawn([]);
+    const broken: SoapTunnelSpawnFn = (argv, env) => ({
+      ...fake.spawn(argv, env),
+      stdout: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error("pipe broke"));
+        },
+      }),
+    });
+    await expect(
+      startSoapTunnel({
+        localHost: "127.0.0.1",
+        localPort: 9700,
+        spawn: broken,
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow(/pipe broke/);
+    expect(fake.kill).toHaveBeenCalled();
+  });
+
   it("kills ngrok and rejects when no tunnel is announced before the timeout", async () => {
     const fake = fakeSpawn([NOISE_LINES[0]], { holdStdout: true });
     await expect(

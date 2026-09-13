@@ -710,6 +710,38 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     );
   });
 
+  it("says so when the clipboard refuses the copy instead of failing silently", async () => {
+    const writeText = vi.fn(async () => {
+      throw new Error("clipboard denied");
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const service = createFakeChargePointService({
+      snapshots: [soapCp],
+      getStateHistory: vi.fn(async () => []),
+      getServerInfo: vi.fn(async () => null),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openConfigTab(container);
+
+    const copyButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Copy",
+    );
+    expect(copyButton, "expected a Copy button").toBeTruthy();
+    await act(async () => {
+      copyButton!.click();
+      await Promise.resolve();
+    });
+    await flush();
+    expect(copyButton!.textContent?.trim()).toBe("Copy failed");
+  });
+
   it("hands the daemon's public base to the edit form so the callback URL is previewed, not sent back", async () => {
     const service = createFakeChargePointService({
       snapshots: [soapCp],

@@ -19,6 +19,7 @@ import { getConfigBasicAuthPassword } from "@/data/configPort";
 import { useChargePointView } from "@/data/hooks/useChargePointView";
 import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
+import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useGlobalLogs } from "../lib/useGlobalLogs";
 import type { ChargePointSnapshot } from "@/data/interfaces/ChargePointService";
 import type { WireSimulatorConfig } from "@/protocol";
@@ -84,6 +85,7 @@ function buildChargePointConfig(
       basicAuthPassword: c?.basicAuth?.password ?? "",
       securityProfile: c?.securityProfile,
       soapCallbackUrl: c?.soapCallbackUrl,
+      soapCallbackUrlDerived: c?.soapCallbackUrlDerived,
       soapPath: c?.soapPath,
       cpoName: c?.cpoName,
       tlsCaPath: c?.tlsCaPath,
@@ -149,6 +151,7 @@ const CpDetailPage: React.FC = () => {
   const cpId = params.cpId ?? "";
   const { mode, chargePointService } = useDataContext();
   const { config: localConfig } = useConfig();
+  const serverInfo = useServerInfo();
   const { updateCp } = useCpConfigActions();
 
   const view = useChargePointView(cpId || null);
@@ -433,6 +436,7 @@ const CpDetailPage: React.FC = () => {
           <ConfigTab
             config={editInitialConfig}
             mode={mode}
+            soapPublicBase={serverInfo?.soap ?? null}
             onEdit={() => setIsEditOpen(true)}
           />
         </TabsContent>
@@ -549,6 +553,7 @@ const CpDetailPage: React.FC = () => {
         initialConfig={editInitialConfig}
         isNewChargePoint={false}
         mode={mode}
+        soapPublicBase={serverInfo?.soap ?? null}
       />
     </div>
   );

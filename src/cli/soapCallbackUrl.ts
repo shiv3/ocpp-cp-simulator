@@ -11,12 +11,12 @@
  *
  *   1. explicit  --soap-callback-url <url>       → used verbatim
  *   2.           --soap-public-base-url <base>   → derived from the base origin
- *   3. (future)  --soap-tunnel ngrok             → provider yields a base, then (2)
+ *   3.           --soap-tunnel ngrok             → provider yields a base, then (2)
  *   4. none                                       → null (caller: local-only / error)
  *
- * Only steps 1–2 are implemented here. A tunnel provider (ngrok, Cloudflare
- * Tunnel, …) is intentionally out of scope: it will resolve to a public base
- * URL and then reuse buildSoapCallbackUrl(), keeping this precedence intact.
+ * Only steps 1–2 live here. Step 3 is `soapTunnel.ts`: the daemon brings the
+ * tunnel up, then hands its public origin in as `publicBaseUrl`, so this
+ * function and buildSoapCallbackUrl() never learn about providers.
  */
 
 import { SOAP_SERVICE_SUFFIX, normalizeSoapPath } from "./soapPath";
@@ -63,10 +63,22 @@ export function buildSoapCallbackUrl(
       `Invalid SOAP public base URL: ${publicBaseUrl} (expected an absolute http(s) URL)`,
     );
   }
+  return joinSoapCallbackUrl(publicBaseUrl, encodeURIComponent(cpId), soapPath);
+}
+
+/**
+ * `{base}{soapPath}/{segment}/ChargePointService` with the route segment used
+ * verbatim — for callers that pass a placeholder (a fleet's `<cp-id>`) rather
+ * than a charge point id. buildSoapCallbackUrl() is the encoding front door.
+ */
+export function joinSoapCallbackUrl(
+  publicBaseUrl: string,
+  segment: string,
+  soapPath: string,
+): string {
   const base = publicBaseUrl.replace(/\/+$/, "");
   const path = normalizeSoapPath(soapPath);
   const prefix = path === "/" ? "" : path;
-  const segment = encodeURIComponent(cpId);
   return `${base}${prefix}/${segment}/${SOAP_SERVICE_SUFFIX}`;
 }
 

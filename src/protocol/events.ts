@@ -43,6 +43,7 @@ interface FullCpConfig {
   wsUrl: string;
   centralSystemUrl?: string;
   soapCallbackUrl?: string;
+  soapCallbackUrlDerived?: boolean;
   soapPath?: string;
   ocppVersion?: string;
   connectors: number;
@@ -70,6 +71,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     soapCallbackUrl: config.soapCallbackUrl
       ? redactUrl(config.soapCallbackUrl)
       : undefined,
+    soapCallbackUrlDerived: config.soapCallbackUrlDerived,
     soapPath: config.soapPath,
     ocppVersion: config.ocppVersion,
     connectors: config.connectors,
@@ -109,6 +111,7 @@ export const wireCpConfigSchema = z
     wsUrl: STR_64K,
     centralSystemUrl: STR_64K.optional(),
     soapCallbackUrl: STR_64K.optional(),
+    soapCallbackUrlDerived: z.boolean().optional(),
     soapPath: STR_64K.optional(),
     ocppVersion: STR_64K.optional(),
     connectors: z.number().int().min(0),

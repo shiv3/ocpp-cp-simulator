@@ -9,6 +9,9 @@
 /** Final path segment of a SOAP ChargePointService endpoint. */
 export const SOAP_SERVICE_SUFFIX = "ChargePointService";
 
+/** Default `<basePath>` — the daemon's `--soap-path` default. */
+export const DEFAULT_SOAP_PATH = "/ocpp/soap";
+
 /**
  * Matches "<basePath>/<cpId>/ChargePointService": group 1 = base path (may be
  * ""), group 2 = the (percent-encoded) cpId segment. No global flag, so it is

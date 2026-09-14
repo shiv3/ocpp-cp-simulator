@@ -15,6 +15,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useConfig } from "../data/hooks/useConfig";
+import { useServerInfo } from "../data/hooks/useServerInfo";
 import { useChargePoints } from "../data/hooks/useChargePoints";
 import { useDataContext } from "../data/providers/DataProvider";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
@@ -28,6 +29,7 @@ const DEFAULT_TAG_ID = "TAG001";
 const TopPage: React.FC = () => {
   const { mode, chargePointService } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
+  const serverInfo = useServerInfo();
   // Tag IDs live globally now — managed from the Settings page, not per-CP.
   // useGlobalTagIds picks the right backing store (config.Experimental in
   // local mode, a jotai atom in remote mode) and re-renders this tree when
@@ -90,6 +92,7 @@ const TopPage: React.FC = () => {
           basicAuthPassword: c?.basicAuth?.password ?? "",
           securityProfile: c?.securityProfile,
           soapCallbackUrl: c?.soapCallbackUrl,
+          soapCallbackUrlDerived: c?.soapCallbackUrlDerived,
           soapPath: c?.soapPath,
           cpoName: c?.cpoName,
           tlsCaPath: c?.tlsCaPath,
@@ -402,6 +405,7 @@ const TopPage: React.FC = () => {
             : defaultChargePointConfig
         }
         isNewChargePoint={editingIndex === null}
+        soapPublicBase={serverInfo?.soap ?? null}
       />
     </div>
   );

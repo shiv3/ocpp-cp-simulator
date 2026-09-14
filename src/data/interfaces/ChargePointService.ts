@@ -30,7 +30,11 @@ import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
 } from "../../cp/infrastructure/transport/network-sim/config";
-import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
+import type {
+  ServerInfo,
+  SimulatorConfigInput,
+  WireSimulatorConfig,
+} from "../../protocol";
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
@@ -77,6 +81,10 @@ export interface ChargePointSnapshot {
     wsUrl: string;
     centralSystemUrl?: string;
     soapCallbackUrl?: string;
+    /** The daemon derived `soapCallbackUrl` from its SOAP public base
+     *  (`--soap-public-base-url` / `--soap-tunnel`); it is not stored with
+     *  the charge point and follows the base (#183). */
+    soapCallbackUrlDerived?: boolean;
     soapPath?: string;
     ocppVersion?: string;
     connectors: number;
@@ -322,6 +330,10 @@ export interface ChargePointService {
   updateChargePoint?(params: CreateChargePointParams): Promise<void>;
   removeChargePoint?(id: string): Promise<void>;
   ping?(): Promise<{ ok: boolean; cps: number }>;
+  /** Daemon-wide facts (`server.info`): version and the SOAP public base a
+   *  charge point created without a callback URL derives one from (#183).
+   *  Remote only; local mode has no daemon and no callback endpoint. */
+  getServerInfo?(): Promise<ServerInfo | null>;
 
   /** Wipe every simulator-owned table in the backing SQLite store
    *  (scenarios, connector settings, charging profiles, configuration

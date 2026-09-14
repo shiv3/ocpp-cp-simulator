@@ -13,6 +13,9 @@ import type {
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
+import { buildSoapCallbackUrl } from "../soapCallbackUrl";
+import { DEFAULT_SOAP_PATH } from "../soapPath";
+import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { forgetWatchedChargePointFiles } from "./watchedScenarioFiles";
 
 export type RegistryMembershipChange = "added" | "removed";
@@ -60,6 +63,14 @@ interface ChargePointRow {
 
 interface CPRegistryOptions {
   readonly allowInsecureTlsKeyPerms?: boolean;
+  /**
+   * Daemon-wide SOAP public base (`--soap-public-base-url`, or the origin of
+   * the `--soap-tunnel`). A SOAP charge point instantiated without a callback
+   * URL gets one derived from it — see ChargePointInitOptions.soapCallbackUrlDerived.
+   */
+  readonly soapPublicBaseUrl?: string | null;
+  /** Default `<soapPath>` for that derivation; a charge point's own wins. */
+  readonly soapPath?: string;
 }
 
 export class CPRegistry {
@@ -93,6 +104,11 @@ export class CPRegistry {
       ): Promise<AutoTrafficConfig | null>;
     },
   ) {}
+
+  /** True when a SOAP charge point may be created without a callback URL. */
+  canDeriveSoapCallbackUrl(): boolean {
+    return Boolean(this.options.soapPublicBaseUrl);
+  }
 
   setNetworkSimManager(manager: NetworkSimManager): void {
     this.networkSimManager = manager;
@@ -514,7 +530,10 @@ export class CPRegistry {
    *  touching the DB. Used by both create() (after DB insert) and
    *  restoreFromDatabase() (DB row already exists). */
   private instantiate(init: ChargePointInitOptions): CLIChargePointService {
-    const svc = new CLIChargePointService(init, this.database);
+    const svc = new CLIChargePointService(
+      this.withDerivedSoapCallback(init),
+      this.database,
+    );
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
     const unsubSettled = svc.onSessionSettled((info) =>
       this.notifySessionSettled(init.cpId, info),
@@ -528,6 +547,30 @@ export class CPRegistry {
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();
     return svc;
+  }
+
+  /**
+   * Fill in the SOAP callback URL from the daemon's public base when the
+   * charge point has none. Done at instantiation — after create()/update()
+   * have persisted the operator's own init — so the derived value never
+   * reaches the DB row (a free-tier tunnel URL changes between runs) and a
+   * restore re-derives it from whatever base the daemon has *now*.
+   */
+  private withDerivedSoapCallback(
+    init: ChargePointInitOptions,
+  ): ChargePointInitOptions {
+    if (init.soapCallbackUrl) return init;
+    const base = this.options.soapPublicBaseUrl;
+    if (!base || !isSoapVersion(init.ocppVersion)) return init;
+    return {
+      ...init,
+      soapCallbackUrl: buildSoapCallbackUrl(
+        base,
+        init.cpId,
+        init.soapPath ?? this.options.soapPath ?? DEFAULT_SOAP_PATH,
+      ),
+      soapCallbackUrlDerived: true,
+    };
   }
 
   /**

@@ -846,7 +846,13 @@ function toInitOptions(
     idTagFile: params.idTagFile,
     idTagDistribution: params.idTagDistribution,
     centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
-    soapCallbackUrl: params.soapCallbackUrl ?? existing?.soapCallbackUrl,
+    // Same rule as the URLs above: an update fully specifies the callback
+    // URL, so there is no `existing` fallback. An update without one asks the
+    // registry to derive it from the daemon's SOAP public base — a cleared
+    // field in the form, or a re-derivation of a URL the registry made up in
+    // the first place, instead of freezing one run's tunnel origin into the
+    // row (#183). Without a base the registry refuses, as `cp.create` does.
+    soapCallbackUrl: params.soapCallbackUrl,
     soapPath: params.soapPath ?? existing?.soapPath,
     ocppVersion: params.ocppVersion ?? existing?.ocppVersion ?? "OCPP-1.6J",
     connectors: params.connectors ?? existing?.connectors ?? 1,
@@ -900,6 +906,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           wsUrl: status.config.wsUrl,
           centralSystemUrl: status.config.centralSystemUrl,
           soapCallbackUrl: status.config.soapCallbackUrl,
+          soapCallbackUrlDerived: status.config.soapCallbackUrlDerived,
           soapPath: status.config.soapPath,
           ocppVersion: status.config.ocppVersion,
           connectors: status.config.connectors,

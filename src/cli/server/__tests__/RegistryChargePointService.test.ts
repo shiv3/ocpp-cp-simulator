@@ -299,6 +299,40 @@ afterEach(() => {
 });
 
 describe("RegistryChargePointService", () => {
+  it("an update that clears an explicit SOAP callback URL switches the charge point to derivation (#183)", async () => {
+    const { service } = createFacade({
+      soapPublicBaseUrl: "https://a1b2.ngrok-free.app",
+      soapPath: "/ocpp/soap",
+    });
+    const soap = {
+      cpId: "cp-soap",
+      wsUrl: "http://csms.test/steve/services/CentralSystemService",
+      ocppVersion: "OCPP-1.6S" as const,
+      connectors: 1,
+      vendor: "V",
+      model: "M",
+    };
+    await service.createChargePoint({
+      ...soap,
+      soapCallbackUrl:
+        "https://explicit.test/ocpp/soap/cp-soap/ChargePointService",
+    });
+
+    // The form sends an empty field as "no URL": that is a request to derive,
+    // not a request to keep the URL it just erased.
+    await service.updateChargePoint(soap);
+
+    await expect(service.getChargePoint("cp-soap")).resolves.toEqual(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          soapCallbackUrl:
+            "https://a1b2.ngrok-free.app/ocpp/soap/cp-soap/ChargePointService",
+          soapCallbackUrlDerived: true,
+        }),
+      }),
+    );
+  });
+
   it("delegates registry lane methods and resets all state", async () => {
     const { registry, service } = createFacade();
 
@@ -704,13 +738,16 @@ describe("RegistryChargePointService", () => {
   });
 });
 
-function createFacade(): {
+function createFacade(registryOptions?: {
+  soapPublicBaseUrl: string;
+  soapPath: string;
+}): {
   db: MemoryFacadeDatabase;
   registry: CPRegistry;
   service: RegistryChargePointService;
 } {
   const db = new MemoryFacadeDatabase();
-  const registry = new CPRegistry(new EventBus(), null);
+  const registry = new CPRegistry(new EventBus(), null, registryOptions);
   registries.push(registry);
   const service = new RegistryChargePointService(registry, {
     database: db,

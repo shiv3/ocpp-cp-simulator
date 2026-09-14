@@ -332,6 +332,24 @@ export const blueprintSchema = z.object({
 
 export type Blueprint = z.infer<typeof blueprintSchema>;
 
+export const serverInfoSchema = z.object({
+  version: z.string(),
+  soap: z.object({
+    /** Origin the daemon derives SOAP callback URLs from; null when none. */
+    publicBaseUrl: z.string().nullable(),
+    /** The daemon's `--soap-path`. */
+    path: z.string(),
+    /** Set when the base comes from `--soap-tunnel`. */
+    tunnel: z
+      .object({
+        provider: z.literal("ngrok"),
+        mode: z.enum(["spawn", "attach"]),
+      })
+      .nullable(),
+  }),
+});
+export type ServerInfo = z.infer<typeof serverInfoSchema>;
+
 /**
  * The flattened shape for schema-driven clients (the MCP tool, `list_methods`).
  *
@@ -788,6 +806,10 @@ export const METHODS = {
     result: ANY,
   },
   "server.shutdown": { params: EMPTY, result: ANY },
+  // Daemon-wide facts a client needs before it can shape a request: the
+  // SOAP public base (`--soap-public-base-url` or the `--soap-tunnel`
+  // origin) that `cp.create` derives a missing callback URL from (#183).
+  "server.info": { params: EMPTY, result: serverInfoSchema },
   "events.subscribe": {
     params: z.object({ scope: STR_64K }),
     result: subscribeResultSchema,
@@ -823,6 +845,7 @@ export const EXPLICIT_METHODS = [
   "connector_settings.soc_meter_sync.save",
   "ev_settings.apply_default",
   "server.shutdown",
+  "server.info",
   "events.subscribe",
   "events.unsubscribe",
   "network_sim.global.get",

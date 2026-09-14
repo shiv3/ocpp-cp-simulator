@@ -82,6 +82,19 @@ describe("parseCreateBody ocppVersion", () => {
     ).toThrow("soapCallbackUrl is required for OCPP SOAP versions");
   });
 
+  it("accepts a SOAP version without a callback URL when the daemon can derive one (#183)", () => {
+    const init = parseCreateBody(
+      {
+        cpId: "CP-1",
+        wsUrl: "http://127.0.0.1:8180/steve/services/CentralSystemService",
+        ocppVersion: "OCPP-1.6S",
+      },
+      { soapCallbackUrlDerivable: true },
+    );
+    expect(init.ocppVersion).toBe("OCPP-1.6S");
+    expect(init.soapCallbackUrl).toBeUndefined();
+  });
+
   it("rejects OCPP-1.6S without a SOAP callback URL", () => {
     expect(() =>
       parseCreateBody({

@@ -8,6 +8,7 @@ import ChargePointConfigModal, {
 } from "../../components/ChargePointConfigModal";
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
+import { useServerInfo } from "../../data/hooks/useServerInfo";
 import { useDataContext } from "../../data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
@@ -20,6 +21,7 @@ const RECENT_ACTIVITY_LIMIT = 5;
 
 const DashboardPage: React.FC = () => {
   const { mode } = useDataContext();
+  const serverInfo = useServerInfo();
   const { config, isLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, { isLoading });
   const { addCp } = useCpConfigActions();
@@ -115,6 +117,7 @@ const DashboardPage: React.FC = () => {
         mode={mode}
         initialConfig={defaultChargePointConfig}
         isNewChargePoint
+        soapPublicBase={serverInfo?.soap ?? null}
       />
     </div>
   );

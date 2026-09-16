@@ -908,6 +908,9 @@ describe("socket.io rpc dispatch", () => {
         "essential-cp-behavior",
         2,
         { maxChargingPowerKw: 3 },
+        // #318: the gate is kept out of the way; the explicit start below is
+        // the run this RPC makes.
+        { autoStart: false },
       );
       expect(service.runScenario).toHaveBeenCalledWith(2, "template-scenario");
     } finally {

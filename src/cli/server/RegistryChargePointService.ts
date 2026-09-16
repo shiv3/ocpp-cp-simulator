@@ -663,10 +663,19 @@ export class RegistryChargePointService implements ChargePointService {
   ): Promise<{ scenarioId: string }> {
     const service = this.requireService(id);
     const connectorId = opts.connectorId ?? 1;
+    // Same shape as runScenarioFile above (#318): the auto-start gate is kept
+    // out of the way of the load, and the explicit start below is the one run
+    // this call makes, with the caller's options. Left on, a connect-triggered
+    // template — every cert16-* template is one — was already running by the
+    // time the load returned whenever the charge point was Available, and the
+    // start then threw "already running" for an RPC whose scenario was in fact
+    // loaded and running. `once` (#352) additionally loads the instance
+    // disabled, so the walker never re-arms it on a later reconnect.
     const scenarioId = service.loadScenarioTemplate(
       templateId,
       connectorId,
       opts.evSettings,
+      { autoStart: false, ...(opts.once ? { enabled: false } : {}) },
     );
     if (opts.strict === undefined) {
       service.runScenario(connectorId, scenarioId);

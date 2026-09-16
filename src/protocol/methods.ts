@@ -620,6 +620,9 @@ export const METHODS = {
       templateId: STR_64K,
       evSettings: OBJ().optional(),
       strict: z.boolean().optional(),
+      // #352: run once — the instance is loaded disabled, so it does not
+      // re-arm on the next reconnect. Default: re-arms on every connect.
+      once: z.boolean().optional(),
     }),
     result: ANY,
   },

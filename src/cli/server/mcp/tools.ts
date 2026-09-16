@@ -476,6 +476,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "Promote warning-severity assertions to failures (see docs/concepts/scenario-format.md#severity-conformance-vs-compatibility)",
         ),
+      once: z
+        .boolean()
+        .optional()
+        .describe(
+          "Run the template once: the instance is loaded disabled, so it does not re-arm on the next reconnect. Default: re-arms on every connect.",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -487,6 +493,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             templateId: args.templateId,
             evSettings: args.evSettings,
             strict: args.strict,
+            once: args.once,
           },
         });
         return successResult(result);

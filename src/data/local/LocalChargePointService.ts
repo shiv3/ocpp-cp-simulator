@@ -786,6 +786,9 @@ export class LocalChargePointService implements ChargePointService {
         ...opts.evSettings,
       };
     }
+    // #352: a disabled instance is never picked up by the auto-start walker,
+    // so the explicit run below is its only one.
+    if (opts.once) definition.enabled = false;
     manager.loadScenarios([definition]);
     await manager.executeScenario(definition.id);
     return { scenarioId: definition.id };

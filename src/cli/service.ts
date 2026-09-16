@@ -1241,6 +1241,16 @@ export class CLIChargePointService {
     templateId: string,
     connectorId: number,
     evSettingsOverride?: Partial<EVSettings>,
+    options: {
+      /** Forwarded to {@link loadScenario}: `false` keeps the auto-start gate
+       *  out of a "load it and start it now" caller's way (#318). */
+      readonly autoStart?: boolean;
+      /** `false` loads the instance disabled: the auto-start walker skips it
+       *  at every connect, so the only run is the explicit `run_scenario` the
+       *  caller makes — a template that runs once, not on every reconnect
+       *  (#352). */
+      readonly enabled?: boolean;
+    } = {},
   ): string {
     const template = getTemplateById(templateId);
     if (!template) {
@@ -1264,8 +1274,13 @@ export class CLIChargePointService {
     // ids embed Date.now(), so without this every boot and every re-run added
     // one more copy — the field report found three weeks-old Essential CP
     // Behavior entries stacked on one connector with nothing cleaning them up.
+    if (options.enabled === false) definition.enabled = false;
     this.removePriorTemplateInstances(templateId, connectorId);
-    return this.loadScenario(connectorId, definition);
+    return this.loadScenario(
+      connectorId,
+      definition,
+      options.autoStart === undefined ? {} : { autoStart: options.autoStart },
+    );
   }
 
   /**

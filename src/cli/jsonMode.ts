@@ -359,7 +359,14 @@ export async function handleJsonCommand(
       const connectorId = requirePositiveInt(params, "connector");
       const templateId = requireString(params, "templateId");
       const evSettings = params.evSettings as Partial<EVSettings> | undefined;
-      return ops.runScenarioTemplate(connectorId, templateId, evSettings);
+      // `strict` and `once` (#352) ride along exactly as the RPC table
+      // declares them; before, this surface silently dropped `strict`.
+      const strict = optionalBoolean(params, "strict");
+      const once = optionalBoolean(params, "once");
+      return ops.runScenarioTemplate(connectorId, templateId, evSettings, {
+        ...(strict === undefined ? {} : { strict }),
+        ...(once === undefined ? {} : { once }),
+      });
     }
 
     case "set_ev_settings": {

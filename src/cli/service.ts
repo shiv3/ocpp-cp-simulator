@@ -2859,10 +2859,20 @@ export class CLIChargePointService {
         }),
       );
       // When the CSMS confirms a StartTransaction, the connector's
-      // transactionId switches from the initial placeholder (0) to the real
-      // id. Re-emit transaction_started so remote subscribers see the
+      // transactionId switches from the initial placeholder (0) to the
+      // assigned id. Re-emit transaction_started so remote subscribers see the
       // accepted id. Also emit transaction_stopped when it clears (e.g.
       // CSMS-driven stop), so remote clients see the change.
+      //
+      // #328: the assigned id is re-emitted WHATEVER it is, zero included.
+      // OCPP 1.6 makes `transactionId` schema-valid for any integer, and the
+      // setter this listens to is reached only from the CALLRESULT handlers —
+      // the local placeholder never flows through it — so a `=== 0` guard here
+      // did not skip a duplicate, it made a CSMS that assigns 0 invisible: a
+      // subscriber could not tell "assigned 0" from "no confirmation yet".
+      // Consumers already see two transaction_started per transaction on the
+      // non-zero path (local start, then the assigned id); this is the same
+      // sequence for one more value.
       this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", ({ transactionId }) => {
           if (transactionId == null) {
@@ -2872,7 +2882,6 @@ export class CLIChargePointService {
             });
             return;
           }
-          if (transactionId === 0) return; // placeholder, already emitted on start
           const tagId = connector.transaction?.tagId ?? "";
           this.emit({
             event: "transaction_started",

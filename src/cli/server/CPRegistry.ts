@@ -223,6 +223,28 @@ export class CPRegistry {
             row.boot_notif,
           ) ?? undefined,
       };
+      // #354 follow-up: a SOAP charge point whose callback URL was derived
+      // from a base the daemon no longer has — the tunnel was not opened this
+      // run, or --soap-public-base-url was dropped — cannot be constructed:
+      // CLIChargePointService refuses a SOAP init with no callback URL. Left
+      // to throw, that one row took the whole restore down and the daemon
+      // with it, healthy WebSocket rows included. Skip the row and say why;
+      // it stays in the table, so it comes back the moment the daemon is
+      // started with a base again (or is updated with an explicit URL).
+      if (
+        isSoapVersion(init.ocppVersion) &&
+        !init.soapCallbackUrl &&
+        !this.canDeriveSoapCallbackUrl()
+      ) {
+        console.warn(
+          `[CPRegistry] Skipping restore of SOAP charge point "${row.cp_id}": ` +
+            "it has no callback URL and the daemon has no SOAP public base to " +
+            "derive one from. Start with --soap-tunnel ngrok or " +
+            "--soap-public-base-url <url> to bring it back, or give it an " +
+            "explicit soapCallbackUrl with cp.update.",
+        );
+        continue;
+      }
       // Use the internal create path WITHOUT re-inserting into the DB —
       // these rows already exist.
       const svc = this.instantiate(init);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { configAtom } from "../store/store.ts";
-import { useAtom } from "jotai/index";
+import { useAtom } from "jotai";
 import { DefaultBootNotification } from "../cp/OcppTypes.ts";
 import { useNavigate } from "react-router-dom";
 

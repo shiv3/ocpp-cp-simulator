@@ -393,17 +393,23 @@ export async function startServer(
     opts.autoConnect === true,
   );
   registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
+  // Fixed for the daemon's lifetime and answered by both transports:
+  // `server.info` over Socket.IO and over MCP `call_method` must describe
+  // the same daemon, so the one object is handed to both below (#354
+  // follow-up: the MCP path used to get none and answered the no-base
+  // fallback while a tunnel was up).
+  const serverInfo = buildServerInfo({
+    soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
+    soapPath: opts.soapPath,
+    tunnel: soapTunnel
+      ? { provider: soapTunnel.provider, mode: soapTunnel.mode }
+      : null,
+  });
   const socketIo = attachSocketIo({
     registry,
     bus,
     database,
-    serverInfo: buildServerInfo({
-      soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
-      soapPath: opts.soapPath,
-      tunnel: soapTunnel
-        ? { provider: soapTunnel.provider, mode: soapTunnel.mode }
-        : null,
-    }),
+    serverInfo,
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,
@@ -451,6 +457,7 @@ export async function startServer(
     registry,
     bus,
     database,
+    serverInfo,
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,

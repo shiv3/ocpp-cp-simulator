@@ -19,7 +19,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-09-12
+updated: 2026-09-17
 ---
 
 # OCPP versions and transports
@@ -126,8 +126,22 @@ The callback URL the CP advertises to the CSMS is resolved by precedence:
    free-tier tunnel URL changes between daemon runs, so a restored charge point
    re-derives from whatever base the daemon has now, and a `cp.update` that
    sends no `soapCallbackUrl` re-derives as well rather than freezing one
-   run's origin into the row. An explicit `--soap-callback-url` still wins.
+   run's origin into the row. An explicit `--soap-callback-url` still wins —
+   and so does a URL that was _persisted_ as explicit: charge points created
+   before the derivation existed (images before `0.7.13`) had the URL derived
+   from `--soap-public-base-url` written to their row, so they keep that
+   origin across a base change or a switch to the tunnel until a `cp.update`
+   sends them without a `soapCallbackUrl` (which clears the row and
+   re-derives).
 3. None — a SOAP charge point refuses to start: the CSMS has nowhere to call.
+   On `cp.create` / the console that is an `invalid_params` error; from the
+   flags it is a fatal startup error. On **restore** it is neither: a
+   persisted SOAP charge point with no callback URL and no base to derive one
+   from is **skipped with a warning** naming `--soap-tunnel` and
+   `--soap-public-base-url`, its row is kept, and the remaining charge points
+   restore normally — a daemon that ran once with the tunnel and once without
+   must still start (#354 follow-up). Start it again with a base, or give the
+   charge point an explicit URL with `cp.update`, and it comes back.
 
 Clients read the base from the `server.info` RPC
 ([Control plane](control-plane.md#daemon-methods)). The web console uses it to make

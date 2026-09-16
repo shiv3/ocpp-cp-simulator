@@ -1,5 +1,5 @@
 // Runs under `bun test` because it uses the `bun:sqlite` built-in.
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
@@ -102,6 +102,64 @@ describe("CPRegistry SOAP public base (#183)", () => {
     } finally {
       registry.shutdownAll();
       restored?.shutdownAll();
+      db.close();
+    }
+  });
+
+  it("skips a SOAP charge point it cannot derive a callback for when the base is gone, and restores the rest (#354 follow-up)", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    const registry = createRegistry(db, "https://run-one.ngrok-free.app");
+    let restored: CPRegistry | null = null;
+    let again: CPRegistry | null = null;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      registry.create(soapInit("CP-soap"), { seedDefault: false });
+      registry.create(
+        {
+          ...soapInit("CP-ws"),
+          ocppVersion: "OCPP-1.6J",
+          wsUrl: "ws://127.0.0.1:1/ocpp",
+        },
+        { seedDefault: false },
+      );
+      registry.shutdownAll();
+
+      // The next run has no tunnel and no --soap-public-base-url. Before the
+      // fix the SOAP row threw out of the service constructor and the whole
+      // restore — the healthy WebSocket row included — never happened.
+      restored = createRegistry(db, null);
+      expect(restored.restoreFromDatabase({ connect: false })).toEqual([
+        "CP-ws",
+      ]);
+      expect(restored.get("CP-soap")).toBeUndefined();
+      expect(restored.get("CP-ws")).toBeDefined();
+      const line = warn.mock.calls
+        .map((call) => call.map(String).join(" "))
+        .find((text) => text.includes('"CP-soap"'));
+      expect(line).toContain("--soap-tunnel");
+      expect(line).toContain("--soap-public-base-url");
+
+      // The row was skipped, not deleted: a run with a base brings it back.
+      expect(
+        db.get<{ n: number }>(
+          "SELECT COUNT(*) AS n FROM charge_points WHERE cp_id = ?",
+          ["CP-soap"],
+        )?.n,
+      ).toBe(1);
+      restored.shutdownAll();
+      again = createRegistry(db, "https://run-two.ngrok-free.app");
+      expect(again.restoreFromDatabase({ connect: false }).sort()).toEqual([
+        "CP-soap",
+        "CP-ws",
+      ]);
+      expect(again.get("CP-soap")?.getStatus().config?.soapCallbackUrl).toBe(
+        "https://run-two.ngrok-free.app/ocpp/soap/CP-soap/ChargePointService",
+      );
+    } finally {
+      warn.mockRestore();
+      registry.shutdownAll();
+      restored?.shutdownAll();
+      again?.shutdownAll();
       db.close();
     }
   });

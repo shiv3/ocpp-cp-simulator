@@ -212,6 +212,55 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
 );
 `;
 
+/**
+ * One row per table `SCHEMA_SQL` creates, and how the two cleanup paths treat
+ * it (#326). This is the single source of truth those paths iterate:
+ *
+ * - `resetOnStateReset` — `state.reset` (`resetSimulatorState`) truncates the
+ *   table. Only `schema_meta` is kept, so the next boot does not re-run the
+ *   migrations against an empty slate.
+ * - `perCp` — the table is keyed by `cp_id`, and deleting a charge point
+ *   (`CPRegistry.persistRemove`) removes its rows here. Rows that survived a
+ *   delete used to come back when the same id was re-created.
+ *
+ * A `CREATE TABLE` added to `SCHEMA_SQL` without a row here fails
+ * `tables.bun.test.ts`, which is the point: "a new table is missing from a
+ * cleanup path" is a failing test, not a review finding.
+ */
+export interface TableSpec {
+  readonly name: string;
+  /** Keyed by a `cp_id` column; deleted with the charge point. */
+  readonly perCp: boolean;
+  /** Truncated by `state.reset`. */
+  readonly resetOnStateReset: boolean;
+}
+
+export const TABLES: readonly TableSpec[] = [
+  { name: "schema_meta", perCp: false, resetOnStateReset: false },
+  { name: "watched_scenario_files", perCp: true, resetOnStateReset: true },
+  { name: "scenarios", perCp: true, resetOnStateReset: true },
+  { name: "connector_settings", perCp: true, resetOnStateReset: true },
+  { name: "charging_profiles", perCp: true, resetOnStateReset: true },
+  { name: "configuration", perCp: true, resetOnStateReset: true },
+  { name: "pending_messages", perCp: true, resetOnStateReset: true },
+  { name: "kv", perCp: false, resetOnStateReset: true },
+  { name: "logs", perCp: true, resetOnStateReset: true },
+  { name: "charge_points", perCp: true, resetOnStateReset: true },
+  { name: "blueprints", perCp: false, resetOnStateReset: true },
+  { name: "charge_point_state", perCp: true, resetOnStateReset: true },
+  { name: "connector_runtime", perCp: true, resetOnStateReset: true },
+];
+
+/** Names of the tables `state.reset` truncates, in `TABLES` order. */
+export function tablesResetOnStateReset(): readonly string[] {
+  return TABLES.filter((t) => t.resetOnStateReset).map((t) => t.name);
+}
+
+/** Names of the `cp_id`-keyed tables a charge point delete cascades to. */
+export function perChargePointTables(): readonly string[] {
+  return TABLES.filter((t) => t.perCp).map((t) => t.name);
+}
+
 import type { Database } from "./Database";
 
 /**

@@ -71,7 +71,16 @@ await rpc({ method: "state.reset", params: {} });
 ```
 
 `state.reset` truncates every simulator-owned table (schema preserved) and
-disconnects / forgets every in-memory CP. Both paths drop the in-memory CPs
+disconnects / forgets every in-memory CP. "Every" is enforced, not
+remembered (#326): the table set is one list, `TABLES` in
+`src/cp/domain/persistence/schema.ts`, with a flag per table for the two
+cleanup paths — `state.reset` truncates every table flagged for it (all but
+`schema_meta`), and `cp.delete` removes the charge point's rows from every
+`cp_id`-keyed table (`charge_points`, `charge_point_state`, `connector_runtime`,
+`connector_settings`, `charging_profiles`, `configuration`, `pending_messages`,
+`scenarios`, `watched_scenario_files` and its stored `logs`), so re-creating
+the same id starts clean. A `CREATE TABLE` added to the schema without a
+`TABLES` row fails `tables.bun.test.ts`. Both paths drop the in-memory CPs
 first so live WebSockets do not keep writing to the about-to-be-empty DB.
 The MCP `call_method` tool flags `state.reset` (and `server.shutdown`) as
 destructive.

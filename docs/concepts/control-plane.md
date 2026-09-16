@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-12
+updated: 2026-09-17
 ---
 
 # Socket.IO control plane
@@ -462,7 +462,7 @@ Guarantees a conformance driver can rely on:
 | `cp.create_many`                                               | See [cp.create_many](#cpcreate_many--the-batch-fields) below                                        | Create N CPs sharing every parameter but the generated id. Partial success is a normal result.                                                                                                                   |
 | `blueprint.list` / `.save` / `.delete`                         | See [Blueprints](#blueprints) below                                                                 | Named, reusable CP hardware descriptions; instantiate with `cp.create_many { blueprintId }`.                                                                                                                     |
 | `cp.update`                                                    | Same as `cp.create`                                                                                 | Replace an existing CP config; `autoConnect: true` reconnects it after update.                                                                                                                                   |
-| `cp.delete`                                                    | `{ "cpId": string }`                                                                                | Remove a CP from the registry.                                                                                                                                                                                   |
+| `cp.delete`                                                    | `{ "cpId": string }`                                                                                | Remove a CP from the registry and delete its rows from every `cp_id`-keyed table, stored logs included ([State persistence](state-persistence.md)).                                                              |
 | `logs.get`                                                     | `{ "cpId": string, "limit"?: number, "offset"?: number, "order"?: "asc" \| "desc" }`                | Return persisted logs, or the in-memory log buffer when no state DB is configured. `limit` takes the **most recent** N; see [Log format → Log windowing](log-format.md#log-windowing).                           |
 | `logs.clear`                                                   | `{ "cpId": string }`                                                                                | Delete persisted logs for the CP.                                                                                                                                                                                |
 | `state.reset`                                                  | `{}`                                                                                                | Drop in-memory CPs and clear simulator-owned state DB tables while preserving schema ([State persistence → Reset](state-persistence.md#reset)).                                                                  |

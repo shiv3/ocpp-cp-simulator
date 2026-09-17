@@ -842,3 +842,77 @@ test(
   },
   TEST_TIMEOUT_MS,
 );
+
+// #349: the scenario mechanisms for negative testing, on a 2.0.1 station,
+// against a real CSMS. Armed through the domain API here — the scenario nodes
+// call exactly these — and spelled in the 1.6 vocabulary on purpose.
+test(
+  "a responseOverride armed as RemoteStartTransaction answers RequestStartTransaction with the canned status, once",
+  async () => {
+    const cpId = "cp201-override";
+    const cp = makeChargePoint(cpId);
+
+    try {
+      await connectBootReady(cp, cpId);
+      cp.armResponseOverride("RemoteStartTransaction", "Rejected");
+
+      const rejected = assertCommandResult(
+        await csms.command({
+          cpId,
+          action: "RequestStartTransaction",
+          idToken: { idToken: "REMOTE-TAG", type: "ISO14443" },
+          evseId: 1,
+        }),
+      );
+      expect(rejected).toMatchObject({ status: "Rejected" });
+
+      const sinceSeq = lastSeq(cpId);
+      const accepted = assertCommandResult(
+        await csms.command({
+          cpId,
+          action: "RequestStartTransaction",
+          idToken: { idToken: "REMOTE-TAG", type: "ISO14443" },
+          evseId: 1,
+        }),
+      );
+      expect(accepted).toMatchObject({ status: "Accepted" });
+      await waitForTransactionEvent(cpId, "Started", sinceSeq);
+    } finally {
+      await cp.disconnect();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "an inboundPolicy of kind callerror makes the CSMS see a CALLERROR for Reset",
+  async () => {
+    const cpId = "cp201-policy";
+    const cp = makeChargePoint(cpId);
+
+    try {
+      await connectBootReady(cp, cpId);
+      cp.setInboundCallPolicy("Reset", {
+        kind: "callerror",
+        errorCode: "NotSupported",
+        errorDescription: "policy under test",
+      });
+      const refused = await csms.command({
+        cpId,
+        action: "Reset",
+        type: "Immediate",
+      });
+      expect(refused.ok).toBe(false);
+      expect(String(refused.error)).toMatch(/NotSupported|policy under test/);
+
+      cp.clearInboundCallPolicy("Reset");
+      const answered = assertCommandResult(
+        await csms.command({ cpId, action: "Reset", type: "Immediate" }),
+      );
+      expect(answered).toMatchObject({ status: "Accepted" });
+    } finally {
+      await cp.disconnect();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);

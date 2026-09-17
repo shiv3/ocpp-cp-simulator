@@ -162,7 +162,11 @@ once (#352). A status oscillation on a still-connected charge point does
 
 ### `responseOverride` notes
 
-Which `status` values are valid depends on `action` (e.g. `action:
+`action` may be spelled in the 1.6 or the 2.0.1 vocabulary; on a 2.0.1
+station the 1.6 name is translated (`RemoteStartTransaction` answers a
+`RequestStartTransaction`) — see the
+[action-name table](ocpp-versions-and-transports.md#version-agnostic-scenarios)
+(#349). Which `status` values are valid depends on `action` (e.g. `action:
 "RemoteStartTransaction"` only accepts `status: "Accepted" | "Rejected"`; see
 `RESPONSE_OVERRIDE_STATUSES` in
 [`ScenarioTypes.ts`](../../src/cp/application/scenario/ScenarioTypes.ts)). The
@@ -175,10 +179,13 @@ the schema itself.
 ### `inboundPolicy` and certificate quirks notes
 
 **Issue #247**: `inboundPolicy` sets a persistent policy for CSMS→CP calls
-(`policy: "callerror"` sends a CALLRESULT with the given error code, `"ignore"`
+(`policy: "callerror"` sends a CALLERROR with the given error code, `"ignore"`
 sends no response, `"answer"` clears any prior policy). Policies survive
 reconnects and are only cleared at the end of the scenario run or via another
-`inboundPolicy` node with `policy: "answer"`.
+`inboundPolicy` node with `policy: "answer"`. `action` may be spelled in
+either version's vocabulary (#349); on 2.0.1 the policy is consulted before
+payload validation, so it also covers a call the station would otherwise
+refuse as malformed.
 
 **Issue #247 Phase 3**: `certQuirks` (mode `"set"` or `"clear"`) arms
 ChargePoint domain-specific certificate behaviors. Mode `"set"` supports an
@@ -191,6 +198,10 @@ quirks let you emulate certification-tool strictness to verify a CP's
 conformance.
 
 ### `csmsCallTrigger` payload condition
+
+`action` may be spelled in the 1.6 or the 2.0.1 vocabulary: a node waiting for
+`RemoteStartTransaction` releases on a 2.0.1 `RequestStartTransaction` (#349;
+[table](ocpp-versions-and-transports.md#version-agnostic-scenarios)).
 
 **Issue #240**: `csmsCallTrigger` accepts an optional `payload` object — a
 deep-partial subset the incoming CALL's payload must match (see

@@ -216,7 +216,9 @@ export interface RemoteStopTriggerNodeData extends BaseNodeData {
  * this node only synchronizes the scenario with the arrival. Issue #110.
  */
 export interface CsmsCallTriggerNodeData extends BaseNodeData {
-  /** OCPP 1.6 action name of the incoming CSMS call to wait for. */
+  /** Action name of the incoming CSMS call to wait for, in the 1.6 or the
+   *  2.0.1 spelling — a 2.0.1 station matches `RequestStartTransaction`
+   *  against `RemoteStartTransaction` too (#349). */
   action: string;
   /** Optional timeout in seconds. 0 (default) = wait forever. */
   timeout?: number;
@@ -318,7 +320,8 @@ export interface UnlockOutcomeNodeData extends BaseNodeData {
  * scenarios rather than multi-connector charge points.
  */
 export interface ResponseOverrideNodeData extends BaseNodeData {
-  /** OCPP 1.6 action whose next incoming call gets the canned response. */
+  /** Action whose next incoming call gets the canned response, in the 1.6
+   *  or the 2.0.1 spelling (#349). */
   action: string;
   /** Status string returned as `{ status }` for that call. */
   status: string;
@@ -335,7 +338,7 @@ export interface ResponseOverrideNodeData extends BaseNodeData {
  * - "ignore": send no response (caller's timeout fires).
  */
 export interface InboundPolicyNodeData extends BaseNodeData {
-  /** OCPP 1.6 action to arm a policy for. */
+  /** Action to arm a policy for, in the 1.6 or the 2.0.1 spelling (#349). */
   action: string;
   /** Policy mode: "answer" to clear, "callerror" to reject, "ignore" to silence. */
   policy: "answer" | "callerror" | "ignore";

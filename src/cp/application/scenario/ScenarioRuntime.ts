@@ -1,3 +1,4 @@
+import { csmsActionMatches } from "../../domain/types/csmsActionNames";
 import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Connector } from "../../domain/connector/Connector";
 import { OCPPStatus, ReservationStatus } from "../../domain/types/OcppTypes";
@@ -380,7 +381,8 @@ const waitForCsmsCall = (
       cleanupFn = cleanup;
 
       const handler = (data: { action: string; payload: unknown }) => {
-        if (data.action !== action) return;
+        // #349: the node may spell the action in either version's vocabulary.
+        if (!csmsActionMatches(action, data.action)) return;
         // #240: a right-action frame whose payload doesn't match the
         // condition is NOT consumed — keep listening.
         if (payload && !deepPartialMatch(payload, data.payload)) return;

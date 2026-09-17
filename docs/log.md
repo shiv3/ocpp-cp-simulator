@@ -1133,3 +1133,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - 1.6 unchanged on the wire: `requestId` is dropped from plain `FirmwareStatusNotification` (the request has no such field); the auto-walked `UpdateFirmware` simulation stays.
 - [GitHub issues](sources/github-issues.md): #345 row.
 - Tests: `v201FirmwareLogStatus.bun.test.ts` against the mock CSMS (UpdateFirmware accepted and its requestId stamped, explicit id wins; Signed variant → FirmwareStatusNotification; GetLog accepted with filename and its id stamped; PublishFirmware refused with reason), `jsonMode.firmwareLogStatus.test.ts`, drift list in `methods.test.ts`.
+
+## [2026-09-17] ingest | negative and wait-for-call scenarios work on 2.0.1 (#349)
+
+- [OCPP versions → version-agnostic scenarios](concepts/ocpp-versions-and-transports.md#version-agnostic-scenarios): the rule now covers the nodes that name a CSMS→CP action, with the table of the seven 1.6↔2.0.1 pairs whose spelling differs (`csmsActionNames.ts`) and the one caveat — a `responseOverride` on `ChangeConfiguration` / `GetConfiguration` cannot fit `SetVariables` / `GetVariables`, whose answers are not `{ status }`.
+- [Scenario format](concepts/scenario-format.md): the three notes say the action may be spelled in either vocabulary; the `inboundPolicy` note corrects "CALLRESULT with the given error code" to CALLERROR and records that on 2.0.1 the policy runs before payload validation.
+- Mechanism: `OCPPMessageHandlerV201`'s CALL branch surfaces every incoming CALL to the scenario layer (`csmsCallTrigger` had nothing to wait on), then consults the inbound policy and the one-shot override under the wire name and its 1.6 alias, at the same point the 1.6 handler does. `waitForCsmsCall` matches either spelling.
+- Not done: e2e rows for the three on `e2e/ocpp201.gocpp.e2e.ts` are added for `responseOverride` and `inboundPolicy`; `csmsCallTrigger` is pinned at the executor level with a 2.0.1 station instead (the e2e fixture drives the CSMS side, the trigger is observed on the station side).
+- [GitHub issues](sources/github-issues.md): #349 row.
+- Tests: `csmsActionNames.test.ts`, `v201InboundPolicyOverride.bun.test.ts` (override answers once under the 1.6 name; callerror policy is sticky and clearable; ignore answers nothing; the event carries the wire name), a 2.0.1 row in `csmsCallTrigger.test.ts`.

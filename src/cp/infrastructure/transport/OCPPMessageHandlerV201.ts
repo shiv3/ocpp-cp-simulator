@@ -2,6 +2,7 @@ import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import { csmsActionAliases } from "../../domain/types/csmsActionNames";
 import type {
   BootNotificationRequestV201,
   HeartbeatRequestV201,
@@ -256,6 +257,66 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: unknown,
   ): void {
     if (messageType === OCPPMessageType.CALL) {
+      // #349: the three scenario mechanisms the 1.6 handler consults at this
+      // point — the csmsCallTrigger event, inbound policies and one-shot
+      // response overrides — were never consulted here, so no negative or
+      // wait-for-call scenario was expressible on 2.0.1. Scenarios spell
+      // actions in either version's vocabulary; a 2.0.1 CALL is looked up
+      // under its own name and its 1.6 alias (RequestStartTransaction ←
+      // RemoteStartTransaction, …).
+      this._chargePoint.notifyIncomingCall(action, payload);
+      const aliases = csmsActionAliases(action);
+      const policyName = aliases.find(
+        (name) => this._chargePoint.getInboundCallPolicy(name) !== undefined,
+      );
+      const inboundPolicy =
+        policyName === undefined
+          ? undefined
+          : this._chargePoint.getInboundCallPolicy(policyName);
+      if (inboundPolicy) {
+        const gen = this._webSocket.currentGeneration();
+        if (inboundPolicy.kind === "callerror") {
+          this._logger.warn(
+            `[v2.0.1] Inbound policy: replied CallError(${inboundPolicy.errorCode}) to ${action}`,
+            LogType.OCPP,
+          );
+          this._webSocket.sendError(
+            messageId,
+            {
+              errorCode: inboundPolicy.errorCode as OCPPErrorCode,
+              errorDescription: inboundPolicy.errorDescription,
+              errorDetails: {},
+            },
+            gen,
+          );
+          return;
+        }
+        this._logger.warn(
+          `[v2.0.1] Inbound policy: ignored ${action} (no response)`,
+          LogType.OCPP,
+        );
+        return;
+      }
+      for (const name of aliases) {
+        const overrideStatus = this._chargePoint.consumeResponseOverride(name);
+        if (overrideStatus === null) continue;
+        this._logger.info(
+          `[v2.0.1] Response override: ${action} → { status: "${overrideStatus}" }`,
+          LogType.OCPP,
+        );
+        // Same one call site as the 1.6 handler: the caller chose the status,
+        // and it is schema-valid for every action the responseOverride node
+        // lists — their 2.0.1 responses are `{ status }` too, except the
+        // ChangeConfiguration/GetConfiguration pair, whose SetVariables /
+        // GetVariables answers are shaped differently (documented).
+        this._webSocket.sendResult(
+          messageId,
+          { status: overrideStatus },
+          this._webSocket.currentGeneration(),
+        );
+        return;
+      }
+
       const entry = this._inbound.get(action);
       if (entry) {
         if (!entry.validate(payload)) {

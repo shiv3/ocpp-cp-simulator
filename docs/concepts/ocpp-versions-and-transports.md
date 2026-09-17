@@ -46,6 +46,30 @@ on 1.6 and `RequestStartTransaction` on 2.x). `docs/examples/scenarios/all-cases
 is the node-type catalogue exercised across all three versions by
 `e2e/comprehensive.gocpp.e2e.ts` ([Example scenarios](../sources/example-scenarios.md)).
 
+The same rule covers the nodes that **name a CSMS→CP action** —
+`csmsCallTrigger`, `responseOverride`, `inboundPolicy` (#349). A scenario may
+spell the action in either version's vocabulary; a 2.0.1 station looks an
+incoming CALL up under its own name and its 1.6 alias, and a trigger spelled
+`RemoteStartTransaction` releases on `RequestStartTransaction`. The pairs
+whose spelling differs (`src/cp/domain/types/csmsActionNames.ts`; every other
+action is spelled identically in both versions):
+
+| OCPP 1.6                 | OCPP 2.0.1                | Note                                                                                                                                                        |
+| ------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RemoteStartTransaction` | `RequestStartTransaction` | `responseOverride` `{ status }` is schema-valid on both.                                                                                                    |
+| `RemoteStopTransaction`  | `RequestStopTransaction`  | Same.                                                                                                                                                       |
+| `ChangeConfiguration`    | `SetVariables`            | `inboundPolicy` and `csmsCallTrigger` translate; a `responseOverride` does **not** fit — `SetVariablesResponse` is `setVariableResult[]`, not `{ status }`. |
+| `GetConfiguration`       | `GetVariables`            | Same caveat as `SetVariables`.                                                                                                                              |
+| `GetDiagnostics`         | `GetLog`                  |                                                                                                                                                             |
+| `SignedUpdateFirmware`   | `UpdateFirmware`          | 1.6 Security Whitepaper name; both fold into the one 2.0.1 message.                                                                                         |
+| `ExtendedTriggerMessage` | `TriggerMessage`          | Same.                                                                                                                                                       |
+
+Until #349 the 2.0.1 inbound dispatch consulted none of the three mechanisms,
+so no negative (refuse / ignore a CSMS call) or wait-for-call scenario was
+expressible on 2.0.1 at all; it now consults them at the same point the 1.6
+handler does, before payload validation and handler lookup, so policies are
+sticky across reconnects the same way and an override answers once.
+
 ## SOAP versions (1.2, 1.5, 1.6S)
 
 OCPP 1.2, 1.5, and 1.6 (SOAP) all use SOAP 1.2 / WS-Addressing over HTTP

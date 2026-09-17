@@ -26,7 +26,10 @@ async function waitUntil(predicate: () => boolean, ms = 500): Promise<void> {
   }
 }
 
-function newChargePoint(id: string): ChargePoint {
+function newChargePoint(
+  id: string,
+  version: "OCPP-1.6J" | "OCPP-2.0.1" = "OCPP-1.6J",
+): ChargePoint {
   const cp = new ChargePoint(
     id,
     DefaultBootNotification,
@@ -37,7 +40,7 @@ function newChargePoint(id: string): ChargePoint {
     null,
     {},
     [],
-    "OCPP-1.6J",
+    version,
     {},
   );
   cp.events.on("error", () => undefined);
@@ -238,5 +241,38 @@ describe("csmsCallTrigger payload condition (issue #240)", () => {
         /payload condition must be a JSON object/.test(e.message),
       ),
     ).toBe(true);
+  });
+
+  it("#349: a node spelled in 1.6 releases on the 2.0.1 CALL of the same action", async () => {
+    const cp = newChargePoint("CP-TRIG-201", "OCPP-2.0.1");
+    const connector = cp.getConnector(1)!;
+    const executor = new ScenarioExecutor(
+      triggerScenario("RemoteStartTransaction"),
+      createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
+    );
+    const execution = executor.start();
+
+    try {
+      await waitUntil(
+        () => cp.events.listenerCount("incomingCallReceived") > 0,
+      );
+      // A different action, in the 2.0.1 spelling, leaves the node parked.
+      cp.notifyIncomingCall("RequestStopTransaction", { transactionId: "t" });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      let done = false;
+      void execution.then(() => (done = true));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(done).toBe(false);
+
+      // The 2.0.1 wire name of the awaited 1.6 action releases it.
+      cp.notifyIncomingCall("RequestStartTransaction", { evseId: 1 });
+      await timeout(execution, 1000);
+    } finally {
+      executor.stop();
+      await timeout(
+        execution.catch(() => undefined),
+        500,
+      ).catch(() => undefined);
+    }
   });
 });

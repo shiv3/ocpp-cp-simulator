@@ -1252,7 +1252,12 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
 
       try {
         // 1.6S: DataTransfer should actually send (not stub)
-        handler.sendDataTransfer("VendorX", "msg-001", "data-payload");
+        // #348: the call now resolves with the CSMS's answer; this test only
+        // checks the request shape, so the answer (or its timeout) is not
+        // awaited but must not surface as an unhandled rejection either.
+        void handler
+          .sendDataTransfer("VendorX", "msg-001", "data-payload")
+          .catch(() => undefined);
 
         const request = await waitForOperationCount(
           csms.received,

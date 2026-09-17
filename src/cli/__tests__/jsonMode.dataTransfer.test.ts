@@ -41,4 +41,24 @@ describe("JSON-Lines data_transfer (#348)", () => {
     ).rejects.toThrow(/vendorId/);
     expect(sendDataTransfer).not.toHaveBeenCalled();
   });
+
+  it("refuses data that is neither a string nor an object, and treats null as absent", async () => {
+    const sendDataTransfer = vi.fn().mockResolvedValue({ status: "Accepted" });
+    await expect(
+      handleJsonCommand(facadeTarget({ sendDataTransfer }), {
+        command: "data_transfer",
+        params: { vendorId: "VendorX", data: 42 },
+      }),
+    ).rejects.toThrow(/data/);
+    await handleJsonCommand(facadeTarget({ sendDataTransfer }), {
+      command: "data_transfer",
+      params: { vendorId: "VendorX", data: null },
+    });
+    expect(sendDataTransfer).toHaveBeenCalledWith(
+      CP_ID,
+      "VendorX",
+      undefined,
+      undefined,
+    );
+  });
 });

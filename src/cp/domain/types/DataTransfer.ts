@@ -21,5 +21,8 @@ export interface DataTransferResult {
 
 /** How long a control-plane `data_transfer` waits for the CSMS's answer
  *  before its promise rejects. The CALL itself is not withdrawn: a late
- *  CALLRESULT is still logged by the ordinary result handler. */
-export const DATA_TRANSFER_RESPONSE_TIMEOUT_MS = 30_000;
+ *  CALLRESULT is still logged by the ordinary result handler. Kept under the
+ *  Socket.IO client's own RPC timeout (`RPC_TIMEOUT_MS`, 30 s, whose clock
+ *  starts earlier, at the emit) so a remote caller sees this message rather
+ *  than the client's generic timeout. */
+export const DATA_TRANSFER_RESPONSE_TIMEOUT_MS = 25_000;

@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
 
 import type {
   ChargePointEvent,
@@ -776,6 +777,20 @@ export class RemoteChargePointService implements ChargePointService {
 
   async authorize(id: string, tagId: string): Promise<void> {
     await this.runCpRpc(id, "authorize", { tagId });
+  }
+
+  async sendDataTransfer(
+    id: string,
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult> {
+    const result = await this.runCpRpc(id, "data_transfer", {
+      vendorId,
+      ...(messageId !== undefined ? { messageId } : {}),
+      ...(data !== undefined ? { data } : {}),
+    });
+    return result as DataTransferResult;
   }
 
   async startTransaction(

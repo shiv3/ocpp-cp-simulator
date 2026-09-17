@@ -794,7 +794,13 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.configuration.applyChange(key, value);
     },
     onSendDataTransfer: (vendorId, messageId, data) => {
-      chargePoint.sendDataTransfer(vendorId, messageId, data);
+      // The node is fire-and-forget by design: the transport logs the answer
+      // (or the failure), and a scenario that needs to react to it would be
+      // a different node. Swallow the rejection so it cannot surface as an
+      // unhandled promise from inside a scenario step (#348).
+      void chargePoint
+        .sendDataTransfer(vendorId, messageId, data)
+        .catch(() => undefined);
     },
   };
 

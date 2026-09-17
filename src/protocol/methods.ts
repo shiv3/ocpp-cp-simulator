@@ -477,6 +477,18 @@ export const METHODS = {
     result: ANY,
   },
   authorize: { params: z.object({ tagId: STR_64K.optional() }), result: ANY },
+  // #348: station-initiated DataTransfer.req. The result is the CSMS's
+  // answer, `{ status, data? }`. `data` is a string or an object: a string
+  // goes on the wire as-is on every version; an object is passed through on
+  // 2.0.1 and JSON-encoded on 1.6 (whose `data` is a string).
+  data_transfer: {
+    params: z.object({
+      vendorId: STR_64K,
+      messageId: STR_64K.optional(),
+      data: z.union([STR_64K, OBJ()]).optional(),
+    }),
+    result: ANY,
+  },
 
   // -- status notifications --
   diagnostics_status_notification: {

@@ -27,6 +27,7 @@ const JSONMODE_COMMAND_IDS = [
   "start_heartbeat",
   "stop_heartbeat",
   "authorize",
+  "data_transfer",
   "update_connector_status",
   "list_scenario_templates",
   "load_scenario_template",

@@ -74,7 +74,7 @@ bun src/cli/main.ts \
   --json
 ```
 
-OCPP 1.2 has a narrower message surface: no DataTransfer, GetConfiguration,
+OCPP 1.2 has a narrower message surface: no DataTransfer (a `data_transfer` command is refused there, #348), GetConfiguration,
 LocalAuthList, or Reservation messages; status values are limited to a 4-value set.
 
 **OCPP 1.5:**

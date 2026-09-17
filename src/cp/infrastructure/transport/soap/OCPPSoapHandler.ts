@@ -1,3 +1,7 @@
+import {
+  DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+  type DataTransferResult,
+} from "../../../domain/types/DataTransfer";
 import type {
   AuthorizeRequestV16,
   AuthorizeResponseV16,
@@ -851,33 +855,67 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   public sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: string,
-  ): void {
+    data?: unknown,
+  ): Promise<DataTransferResult> {
+    // SOAP 1.6: `data` is a string; a non-string is JSON-encoded (#348).
+    const wireData =
+      data === undefined
+        ? undefined
+        : typeof data === "string"
+          ? data
+          : JSON.stringify(data);
     const payload: DataTransferRequestV16 = {
       vendorId,
       ...(messageId ? { messageId } : {}),
-      ...(data !== undefined ? { data } : {}),
+      ...(wireData !== undefined ? { data: wireData } : {}),
     };
     if (this._dialect.version === OCPP_1_2) {
-      this._logger.warn(
-        `OCPP 1.2 has no DataTransfer operation; ignoring: ${JSON.stringify(payload)}`,
-        LogType.OCPP,
+      const message = `OCPP 1.2 has no DataTransfer operation; ignoring: ${JSON.stringify(payload)}`;
+      this._logger.warn(message, LogType.OCPP);
+      return Promise.reject(new Error(message));
+    }
+    if (this._dialect.version !== OCPP_1_6_SOAP) {
+      const message = `${this._dialect.version} SOAP does not support DataTransfer: ${JSON.stringify(payload)}`;
+      this._logger.warn(message, LogType.OCPP);
+      return Promise.reject(new Error(message));
+    }
+    const action = OPERATION_ACTION.DataTransfer;
+    if (action && !this.isCallAllowed(action)) {
+      // enqueueRequest would suppress it with a warning and no callback.
+      return Promise.reject(
+        new Error(
+          "DataTransfer blocked by the boot gate — BootNotification not yet Accepted",
+        ),
       );
-    } else if (this._dialect.version === OCPP_1_6_SOAP) {
-      // For 1.6S, actually send the DataTransfer request (CP→CS direction, service:"cs")
+    }
+    return new Promise<DataTransferResult>((resolve, reject) => {
+      // A failed POST is logged by the request chain and never reaches the
+      // response callback, so the caller's wait is bounded here.
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `DataTransfer: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
+            ),
+          ),
+        DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+      );
       this.enqueueRequest("DataTransfer", soapPayload(payload), (env) => {
-        // Log the response; reuse existing DataTransfer result handler if available
+        clearTimeout(timer);
         this._logger.info(
           `DataTransfer response: ${JSON.stringify(env.payload)}`,
           LogType.OCPP,
         );
+        const answer = env.payload as {
+          status?: DataTransferResult["status"];
+          data?: unknown;
+        };
+        resolve({
+          status: answer.status ?? "Rejected",
+          ...(answer.data !== undefined ? { data: answer.data } : {}),
+        });
       });
-    } else {
-      this._logger.warn(
-        `${this._dialect.version} SOAP does not support DataTransfer: ${JSON.stringify(payload)}`,
-        LogType.OCPP,
-      );
-    }
+    });
   }
 
   public sendDiagnosticsStatusNotification(status: string): void {

@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
 
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -238,6 +239,15 @@ export class RegistryChargePointService implements ChargePointService {
 
   async authorize(id: string, tagId: string): Promise<void> {
     this.requireService(id).authorize(tagId);
+  }
+
+  async sendDataTransfer(
+    id: string,
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult> {
+    return this.requireService(id).sendDataTransfer(vendorId, messageId, data);
   }
 
   async startTransaction(

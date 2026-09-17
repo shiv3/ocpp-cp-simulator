@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import type { DataTransferResult } from "../cp/domain/types/DataTransfer";
 
 import type { CLIChargePointService } from "./service";
 import {
@@ -82,6 +83,11 @@ export interface SingleCpCommandOps {
   startHeartbeat(intervalSeconds: number): Promise<void>;
   stopHeartbeat(): Promise<void>;
   authorize(tagId: string): Promise<void>;
+  sendDataTransfer(
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult>;
   updateConnectorStatus(
     connectorId: number,
     status: OCPPStatus,
@@ -247,6 +253,8 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     authorize: async (tagId) => {
       service.authorize(tagId);
     },
+    sendDataTransfer: (vendorId, messageId, data) =>
+      service.sendDataTransfer(vendorId, messageId, data),
     updateConnectorStatus: async (connectorId, status, opts) => {
       service.updateConnectorStatus(connectorId, status, opts);
     },
@@ -382,6 +390,8 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.startHeartbeat(cpId, intervalSeconds),
     stopHeartbeat: () => service.stopHeartbeat(cpId),
     authorize: (tagId) => service.authorize(cpId, tagId),
+    sendDataTransfer: (vendorId, messageId, data) =>
+      service.sendDataTransfer(cpId, vendorId, messageId, data),
     updateConnectorStatus: (connectorId, status, opts) =>
       service.sendStatusNotification(cpId, connectorId, status, opts),
     sendDiagnosticsStatusNotification: (status) =>

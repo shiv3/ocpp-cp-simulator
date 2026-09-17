@@ -1117,3 +1117,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Not added: #352's options 2 (`load_scenario_template { enabled: false }`) and 3 (`get_scenario_template`); option 1 is the one-call form the issue prefers and closes #318 by construction.
 - [GitHub issues](sources/github-issues.md): #318 and #352 rows.
 - Tests: `runScenarioTemplate.once.bun.test.ts` (control row proving the gate would have started the template; success; re-arm by default; no re-arm with `once`), `jsonMode.runScenarioTemplate.test.ts`, and the Socket.IO RPC test's expectation.
+
+## [2026-09-17] ingest | `data_transfer` command returns the CSMS's answer (#348)
+
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): new `data_transfer { vendorId, messageId?, data? }` row. A station-initiated `DataTransfer.req` could be produced only by a scenario node; now it is a command on all three surfaces (RPC table, Socket.IO, JSON-Lines; MCP via `call_method`) and, unlike `authorize`, **its result is the CSMS's answer** `{ status, data? }` — the point of the message. Failure modes (CALLERROR, dropped CALL, no answer in 30 s) are rejections.
+- `data` is a string or an object: passed through on 2.0.1 (any JSON), JSON-encoded on 1.6 / 1.6S. [OCPP versions & transports](concepts/ocpp-versions-and-transports.md): 1.2 refuses it.
+- Mechanism: each JSON handler keeps a map of waiting callers keyed by CALL id, settled from the CALLRESULT / CALLERROR paths and from the drop paths (1.6 boot gate and informational discard on socket close; 2.0.1 `send` drop outcomes); the SOAP handler resolves from its response callback. The scenario `dataTransfer` node stays fire-and-forget.
+- [GitHub issues](sources/github-issues.md): #348 row.
+- Tests: `dataTransfer.bun.test.ts` (2.0.1 object passthrough and answer, CALLERROR rejection; 1.6 string as-is, object JSON-encoded, answer without data), `jsonMode.dataTransfer.test.ts`, drift list in `methods.test.ts`.

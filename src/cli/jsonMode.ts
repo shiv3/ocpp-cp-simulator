@@ -233,6 +233,15 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "data_transfer": {
+      // #348: station-initiated DataTransfer.req; the CSMS's answer is the
+      // result line. `data` is a string or an object (validated by the RPC
+      // table's schema on the daemon; here it rides through as given).
+      const vendorId = requireString(params, "vendorId");
+      const messageId = optionalString(params, "messageId");
+      return ops.sendDataTransfer(vendorId, messageId, params.data);
+    }
+
     case "update_connector_status": {
       // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
       // any non-negative integer here, not just positive ones.

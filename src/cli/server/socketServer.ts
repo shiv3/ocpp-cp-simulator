@@ -1726,6 +1726,20 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "data_transfer": {
+      // #348: the answer is the point of the message, so it is the result.
+      const id = requireFacadeCpId(cpId, rawParams);
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.sendDataTransfer(
+            id,
+            requireString(params, "vendorId"),
+            optionalString(params, "messageId"),
+            params.data,
+          ),
+        ),
+      );
+    }
     case "diagnostics_status_notification": {
       const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>

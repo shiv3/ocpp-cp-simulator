@@ -1,3 +1,4 @@
+import type { DataTransferResult } from "../../domain/types/DataTransfer";
 import type {
   BootNotification,
   ChargePointErrorCode,
@@ -36,7 +37,17 @@ export interface IChargePointMessageHandler {
     connectorId: number,
     context?: ReadingContext,
   ): void;
-  sendDataTransfer(vendorId: string, messageId?: string, data?: string): void;
+  /**
+   * Station-initiated DataTransfer.req (#348). Resolves with the CSMS's
+   * answer, rejects on CALLERROR, on a drop (boot gate, socket closed) or
+   * after {@link DATA_TRANSFER_RESPONSE_TIMEOUT_MS}. `data` is sent as-is on
+   * 2.0.1 and as a string on 1.6 (a non-string is JSON-encoded).
+   */
+  sendDataTransfer(
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult>;
   sendSecurityEventNotification(type: string, techInfo?: string): void;
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: string): void;

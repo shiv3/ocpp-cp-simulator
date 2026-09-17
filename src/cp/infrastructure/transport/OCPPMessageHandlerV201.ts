@@ -1,9 +1,14 @@
+import {
+  DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+  type DataTransferResult,
+} from "../../domain/types/DataTransfer";
 import type {
   BootNotificationRequestV201,
   HeartbeatRequestV201,
   HeartbeatResponseV201,
   BootNotificationResponseV201,
   DataTransferRequestV201,
+  DataTransferResponseV201,
   StatusNotificationRequestV201,
   StatusNotificationResponseV201,
   TransactionEventRequestV201,
@@ -141,6 +146,16 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     string,
     { action: V201Action; payload: V201RequestPayload }
   >();
+  /** Control-plane `data_transfer` callers waiting for the CSMS's answer
+   *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
+  private readonly _dataTransferWaiters = new Map<
+    string,
+    {
+      resolve: (result: DataTransferResult) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
   private _bootStatus:
@@ -188,12 +203,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     action: V201Action,
     messageId: string,
     payload: V201RequestPayload,
+    /** Told when the CALL never reached the wire (#348 waiters). */
+    onDropped?: (reason: string) => void,
   ): void {
     if (!this._webSocket.isConnected()) {
       this._logger.warn(
         `[v2.0.1] Not connected, dropping ${action}`,
         LogType.WEBSOCKET,
       );
+      onDropped?.("not_connected");
       return;
     }
     const warning = this._codec?.outgoingWarning(action, payload);
@@ -210,12 +228,16 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         if (settlement.outcome === "written") {
           this._pendingRequests.set(messageId, { action, payload });
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
+        } else {
+          // On drop outcomes (socket_closed, disposed, write_failed,
+          // queue_overflow): no retry — a 2.x drop is unrecovered wire loss
+          // per spec. A caller waiting for an answer is told.
+          onDropped?.(settlement.outcome);
         }
-        // On drop outcomes (socket_closed, disposed, write_failed, queue_overflow):
-        // do NOTHING. A 2.x drop is unrecovered wire loss per spec; no retries.
       },
     );
     if (!accepted) {
+      onDropped?.("not_accepted");
       // send-false: the CALL was never accepted; preserve current behavior
       // (likely just a warn/log already in place from isConnected check above)
       this._logger.debug(
@@ -284,6 +306,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const pending = this._pendingRequests.get(messageId);
       this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
+      if (pending?.action === "DataTransfer") {
+        const error = payload as {
+          errorCode?: string;
+          errorDescription?: string;
+        };
+        this.settleDataTransferWaiter(messageId, {
+          error: new Error(
+            `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode ?? "?"}: ${error.errorDescription ?? ""}`,
+          ),
+        });
+      }
 
       // Issue #181: a CALLERROR answering Authorize.req is a definite
       // protocol failure (unlike the authorizeAndWait timeout/disconnect
@@ -309,6 +342,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   ): void {
     const pending = this._pendingRequests.get(messageId);
     this._pendingRequests.delete(messageId);
+
+    if (pending?.action === "DataTransfer") {
+      const answer = payload as DataTransferResponseV201;
+      this._logger.info(
+        `[v2.0.1] DataTransfer response: ${JSON.stringify(answer)}`,
+        LogType.OCPP,
+      );
+      this.settleDataTransferWaiter(messageId, {
+        result: {
+          status: answer.status,
+          ...(answer.data !== undefined ? { data: answer.data } : {}),
+        },
+      });
+      return;
+    }
 
     // Issue #181: correlate Authorize.conf back to the idToken from the
     // original Authorize.req (AuthorizeResponseV201 itself carries none)
@@ -707,15 +755,44 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: string,
-  ): void {
+    data?: unknown,
+  ): Promise<DataTransferResult> {
     const id = this.generateMessageId();
+    // 2.0.1: `data` is any JSON — passed through as the caller gave it.
     const payload = {
       vendorId,
       ...(messageId !== undefined ? { messageId } : {}),
       ...(data !== undefined ? { data } : {}),
     } as unknown as DataTransferRequestV201;
-    this.send("DataTransfer", id, payload);
+    const answer = new Promise<DataTransferResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this._dataTransferWaiters.delete(id);
+        reject(
+          new Error(
+            `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, DATA_TRANSFER_RESPONSE_TIMEOUT_MS);
+      this._dataTransferWaiters.set(id, { resolve, reject, timer });
+    });
+    this.send("DataTransfer", id, payload, (reason) =>
+      this.settleDataTransferWaiter(id, {
+        error: new Error(`DataTransfer ${id} dropped (${reason})`),
+      }),
+    );
+    return answer;
+  }
+
+  private settleDataTransferWaiter(
+    messageId: string,
+    outcome: { result: DataTransferResult } | { error: Error },
+  ): void {
+    const waiter = this._dataTransferWaiters.get(messageId);
+    if (!waiter) return;
+    this._dataTransferWaiters.delete(messageId);
+    clearTimeout(waiter.timer);
+    if ("result" in outcome) waiter.resolve(outcome.result);
+    else waiter.reject(outcome.error);
   }
 
   public sendSecurityEventNotification(

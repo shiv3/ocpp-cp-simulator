@@ -16,7 +16,7 @@ import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
 import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
-import { forgetWatchedChargePointFiles } from "./watchedScenarioFiles";
+import { perChargePointTables } from "../../cp/domain/persistence/schema";
 
 export type RegistryMembershipChange = "added" | "removed";
 
@@ -769,15 +769,24 @@ export class CPRegistry {
 
   private persistRemove(cpId: string): void {
     if (!this.database) return;
-    this.database.run("DELETE FROM charge_points WHERE cp_id = ?", [cpId]);
-    // Cascade: orphan rows in dependent tables would survive a CP delete
-    // and reappear if the same cpId is re-created. There's no FK in the
-    // schema, so the cleanup is explicit.
-    this.database.run("DELETE FROM scenarios WHERE cp_id = ?", [cpId]);
-    this.database.run("DELETE FROM connector_runtime WHERE cp_id = ?", [cpId]);
-    // #314: the watch rows are stored state like the rest, so they go with the
-    // charge point whether or not this daemon was started with `--watch`.
-    forgetWatchedChargePointFiles(this.database, cpId);
+    // Cascade to every `cp_id`-keyed table. There is no FK in the schema, so
+    // the cleanup is explicit — and the list is the schema's own (#326):
+    // hand-maintained here it covered three of the eight, and the rows left
+    // behind (settings, profiles, configuration, queued CALLs, logs, the
+    // desired-connected flag) came back when the same cpId was re-created.
+    // #314's watch rows ride the same list, whether or not this daemon runs
+    // with `--watch`.
+    for (const table of perChargePointTables()) {
+      try {
+        this.database.run(`DELETE FROM ${table} WHERE cp_id = ?`, [cpId]);
+      } catch (err) {
+        // A DB from before a table existed: keep deleting the rest.
+        console.warn(
+          `[CPRegistry] could not delete ${cpId} rows from ${table}:`,
+          err,
+        );
+      }
+    }
   }
 
   remove(cpId: string, opts: { notify?: boolean } = {}): boolean {

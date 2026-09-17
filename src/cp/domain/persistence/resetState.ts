@@ -1,4 +1,5 @@
 import type { Database } from "./Database";
+import { tablesResetOnStateReset } from "./schema";
 
 /**
  * Truncate every simulator-owned table in the given database. The schema
@@ -11,24 +12,10 @@ import type { Database } from "./Database";
  * notifications) afterwards — easiest path is a UI reload.
  */
 export function resetSimulatorState(db: Database): void {
-  // Order doesn't matter (no FKs declared), but keep it stable for the
-  // log line and ease of diffing.
-  const tables = [
-    "scenarios",
-    // #314: daemon-only, but simulator-owned all the same. Left out, a reset
-    // cleared every scenario and left the rows saying where they came from, so
-    // a later watched restart reattached files for scenarios that no longer
-    // exist. `state.reset` promises to truncate every simulator-owned table.
-    "watched_scenario_files",
-    "connector_settings",
-    "charging_profiles",
-    "configuration",
-    "pending_messages",
-    "logs",
-    "charge_points",
-    "charge_point_state",
-    "kv",
-  ];
+  // The list is the schema's own (#326): a table added to SCHEMA_SQL without a
+  // TABLES row fails tables.bun.test.ts, so this path cannot silently fall
+  // behind again the way it did for `blueprints`.
+  const tables = tablesResetOnStateReset();
   for (const table of tables) {
     try {
       db.run(`DELETE FROM ${table}`);

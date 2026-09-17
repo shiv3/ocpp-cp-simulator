@@ -1099,3 +1099,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `e2e/support/buildCsms.ts`: a missing `go` binary is reported as such rather than as an ENOENT stack.
 - Not done here: a CI job for the suite. With the sibling gone it is a `setup-go` step away; left for a decision on runtime and flakiness budget.
 - [GitHub issues](sources/github-issues.md): #322 row.
+
+## [2026-09-17] ingest | the table set has one source of truth: `state.reset` and `cp.delete` iterate it (#326)
+
+- [State persistence](concepts/state-persistence.md): the "truncates every simulator-owned table" sentence is true again and says how — `TABLES` in `schema.ts` carries a per-table flag for each cleanup path. `blueprints` survived `state.reset`; `cp.delete` cascaded to three of the eight `cp_id`-keyed tables, so settings, profiles, configuration, queued CALLs, logs and the desired-connected flag came back when the same id was re-created.
+- [Control plane → cp.delete](concepts/control-plane.md#daemon-methods): the row says the delete cascades, stored logs included.
+- [GitHub issues](sources/github-issues.md): #326 row.
+- Test: `src/cp/domain/persistence/__tests__/tables.bun.test.ts` — every `CREATE TABLE` in `SCHEMA_SQL` has a registry row and vice versa, `perCp` matches the presence of a `cp_id` column, and both cleanup paths are exercised against a populated in-memory DB. The column half of the issue (behavioural round-trip of connector snapshots) is left open, as the issue's own comment argues it is a different kind of check.

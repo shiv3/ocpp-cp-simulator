@@ -786,8 +786,12 @@ export class LocalChargePointService implements ChargePointService {
         ...opts.evSettings,
       };
     }
-    // #352: a disabled instance is never picked up by the auto-start walker,
-    // so the explicit run below is its only one.
+    // #352: `once` loads the instance disabled so the connect-triggered
+    // walker never re-arms it. Note the browser never had #318's race — the
+    // ScenarioManager does not auto-start on load, and Connector.tsx's
+    // connect gate reads the persisted store, which this ephemeral instance
+    // never enters — so here the flag only keeps the instance's shape the
+    // same as the daemon's.
     if (opts.once) definition.enabled = false;
     manager.loadScenarios([definition]);
     await manager.executeScenario(definition.id);

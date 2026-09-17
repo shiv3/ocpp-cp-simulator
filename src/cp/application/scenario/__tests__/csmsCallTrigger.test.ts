@@ -275,4 +275,39 @@ describe("csmsCallTrigger payload condition (issue #240)", () => {
       ).catch(() => undefined);
     }
   });
+
+  it("#349: on a 1.6 station a folded pair stays two distinct messages", async () => {
+    const cp = newChargePoint("CP-TRIG-16-FOLD");
+    const connector = cp.getConnector(1)!;
+    const executor = new ScenarioExecutor(
+      triggerScenario("TriggerMessage"),
+      createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
+    );
+    const execution = executor.start();
+    try {
+      await waitUntil(
+        () => cp.events.listenerCount("incomingCallReceived") > 0,
+      );
+      // ExtendedTriggerMessage is its own 1.6 Whitepaper message; the node
+      // named TriggerMessage must not release on it.
+      cp.notifyIncomingCall("ExtendedTriggerMessage", {
+        requestedMessage: "Heartbeat",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      let done = false;
+      void execution.then(() => (done = true));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(done).toBe(false);
+      cp.notifyIncomingCall("TriggerMessage", {
+        requestedMessage: "Heartbeat",
+      });
+      await timeout(execution, 1000);
+    } finally {
+      executor.stop();
+      await timeout(
+        execution.catch(() => undefined),
+        500,
+      ).catch(() => undefined);
+    }
+  });
 });

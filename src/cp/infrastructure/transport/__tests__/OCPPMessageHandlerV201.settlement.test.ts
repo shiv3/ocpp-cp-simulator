@@ -142,6 +142,8 @@ const createMockChargePoint = (): ChargePoint => {
     consumeResponseOverride: vi.fn(() => null),
     // #349: the 2.0.1 dispatch consults inbound policies too.
     getInboundCallPolicy: vi.fn(() => undefined),
+    hasResponseOverride: vi.fn(() => false),
+    clearResponseOverride: vi.fn(),
   } as unknown as ChargePoint;
 };
 

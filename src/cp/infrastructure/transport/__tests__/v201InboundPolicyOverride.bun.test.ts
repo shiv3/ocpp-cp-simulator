@@ -136,4 +136,60 @@ describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)
       await csms.stop();
     }
   });
+
+  it("an override armed as ChangeConfiguration is not honoured for SetVariables — the handler answers", async () => {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP201-OVERRIDE-SETVARS");
+    try {
+      cp.armResponseOverride("ChangeConfiguration", "Rejected");
+      csms.send([
+        2,
+        "sv-1",
+        "SetVariables",
+        {
+          setVariableData: [
+            {
+              attributeValue: "60",
+              component: { name: "OCPPCommCtrlr" },
+              variable: { name: "HeartbeatInterval" },
+            },
+          ],
+        },
+      ]);
+      const answer = await csms.waitForFrame(answerTo("sv-1"));
+      expect(answer[0]).toBe(3);
+      expect(answer[2]).not.toEqual({ status: "Rejected" });
+      expect(
+        (answer[2] as { setVariableResult?: unknown[] }).setVariableResult,
+      ).toBeDefined();
+      // Consumed all the same: it does not linger for a later call.
+      expect(cp.hasResponseOverride("ChangeConfiguration")).toBe(false);
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("an override armed under both spellings is consumed once, under both", async () => {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP201-OVERRIDE-BOTH");
+    try {
+      cp.armResponseOverride("RemoteStartTransaction", "Rejected");
+      cp.armResponseOverride("RequestStartTransaction", "Rejected");
+      csms.send([2, "rs-1", "RequestStartTransaction", REQUEST_START]);
+      expect((await csms.waitForFrame(answerTo("rs-1")))[2]).toEqual({
+        status: "Rejected",
+      });
+      expect(cp.hasResponseOverride("RemoteStartTransaction")).toBe(false);
+      expect(cp.hasResponseOverride("RequestStartTransaction")).toBe(false);
+      csms.send([2, "rs-2", "RequestStartTransaction", REQUEST_START]);
+      expect(
+        ((await csms.waitForFrame(answerTo("rs-2")))[2] as { status: string })
+          .status,
+      ).toBe("Accepted");
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
 });

@@ -382,7 +382,9 @@ const waitForCsmsCall = (
 
       const handler = (data: { action: string; payload: unknown }) => {
         // #349: the node may spell the action in either version's vocabulary.
-        if (!csmsActionMatches(action, data.action)) return;
+        if (!csmsActionMatches(action, data.action, chargePoint.ocppVersion)) {
+          return;
+        }
         // #240: a right-action frame whose payload doesn't match the
         // condition is NOT consumed — keep listening.
         if (payload && !deepPartialMatch(payload, data.payload)) return;

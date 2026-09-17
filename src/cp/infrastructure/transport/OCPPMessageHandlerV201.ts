@@ -2,7 +2,10 @@ import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
-import { csmsActionAliases } from "../../domain/types/csmsActionNames";
+import {
+  csmsActionAliases,
+  V201_ACTIONS_WITHOUT_STATUS_RESPONSE,
+} from "../../domain/types/csmsActionNames";
 import type {
   BootNotificationRequestV201,
   HeartbeatRequestV201,
@@ -297,24 +300,40 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         );
         return;
       }
-      for (const name of aliases) {
-        const overrideStatus = this._chargePoint.consumeResponseOverride(name);
-        if (overrideStatus === null) continue;
-        this._logger.info(
-          `[v2.0.1] Response override: ${action} → { status: "${overrideStatus}" }`,
-          LogType.OCPP,
-        );
-        // Same one call site as the 1.6 handler: the caller chose the status,
-        // and it is schema-valid for every action the responseOverride node
-        // lists — their 2.0.1 responses are `{ status }` too, except the
-        // ChangeConfiguration/GetConfiguration pair, whose SetVariables /
-        // GetVariables answers are shaped differently (documented).
-        this._webSocket.sendResult(
-          messageId,
-          { status: overrideStatus },
-          this._webSocket.currentGeneration(),
-        );
-        return;
+      const armedUnder = aliases.find((name) =>
+        this._chargePoint.hasResponseOverride(name),
+      );
+      if (armedUnder !== undefined) {
+        // One CALL consumes the one-shot under every spelling it was armed
+        // with, so a copy left under the other name cannot fire on a later,
+        // unrelated call.
+        const overrideStatus =
+          this._chargePoint.consumeResponseOverride(armedUnder);
+        for (const name of aliases)
+          this._chargePoint.clearResponseOverride(name);
+        if (V201_ACTIONS_WITHOUT_STATUS_RESPONSE.has(action)) {
+          // SetVariablesResponse / GetVariablesResponse are not `{ status }`;
+          // a canned status would be a schema-invalid answer. Documented
+          // caveat, enforced here: the real handler answers instead.
+          this._logger.warn(
+            `[v2.0.1] Response override armed as ${armedUnder} cannot be honoured for ${action} (its response is not { status }); answering normally`,
+            LogType.OCPP,
+          );
+        } else if (overrideStatus !== null) {
+          this._logger.info(
+            `[v2.0.1] Response override: ${action} → { status: "${overrideStatus}" }`,
+            LogType.OCPP,
+          );
+          // Same one call site as the 1.6 handler: the caller chose the
+          // status, and every other action the responseOverride node lists
+          // answers `{ status }` on 2.0.1 too.
+          this._webSocket.sendResult(
+            messageId,
+            { status: overrideStatus },
+            this._webSocket.currentGeneration(),
+          );
+          return;
+        }
       }
 
       const entry = this._inbound.get(action);

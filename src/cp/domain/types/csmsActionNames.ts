@@ -45,8 +45,33 @@ export function csmsActionAliases(action: string): readonly string[] {
   return out;
 }
 
-/** Does `expected` (as a scenario spells it) name the action `actual` (as the
- *  wire spelled it), in either version's vocabulary? */
-export function csmsActionMatches(expected: string, actual: string): boolean {
+/**
+ * Does `expected` (as a scenario spells it) name the action `actual` (as the
+ * wire spelled it)? Translation applies only on a 2.x station: on 1.6 the
+ * "folded" pairs — `GetDiagnostics` / `GetLog`, `TriggerMessage` /
+ * `ExtendedTriggerMessage`, `UpdateFirmware` / `SignedUpdateFirmware` — are
+ * distinct messages on the same wire, so a 1.6 node must keep matching
+ * exactly what it names.
+ */
+export function csmsActionMatches(
+  expected: string,
+  actual: string,
+  ocppVersion: string,
+): boolean {
+  if (!translatesCsmsActionNames(ocppVersion)) return expected === actual;
   return csmsActionAliases(actual).includes(expected);
 }
+
+/** OCPP 2.x JSON stations translate; 1.x (JSON and SOAP) spell 1.6. */
+export function translatesCsmsActionNames(ocppVersion: string): boolean {
+  return ocppVersion.startsWith("OCPP-2.");
+}
+
+/**
+ * 2.0.1 actions whose CALLRESULT is not `{ status }`, so a `responseOverride`
+ * armed under their 1.6 alias (`ChangeConfiguration` / `GetConfiguration`)
+ * cannot be honoured: the handler ignores it with a warning instead of
+ * sending a schema-invalid answer.
+ */
+export const V201_ACTIONS_WITHOUT_STATUS_RESPONSE: ReadonlySet<string> =
+  new Set(["SetVariables", "GetVariables"]);
